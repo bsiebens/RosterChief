@@ -1,0 +1,42 @@
+[project]
+name = "clubmanager"
+version = "0.1.0"
+requires-python = ">=3.14"
+dependencies = [
+    "django>=6.0.6",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.15.17",
+]
+
+[tool.ruff]
+line-length = 250
+target-version = "py314"
+# Auto-generated migrations are not hand-maintained code.
+extend-exclude = ["**/migrations/*"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "C4",   # flake8-comprehensions
+    "DJ",   # flake8-django
+    "RUF",  # ruff-specific rules
+]
+ignore = [
+    "RUF012",  # Django/Wagtail model attrs (panels, Meta.ordering, ...) are framework conventions, not mutable defaults to guard.
+    "RUF005",  # Wagtail's `Page.content_panels + [...]` concatenation is the documented idiom.
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Settings legitimately use star imports and long generated values.
+"clubmanager/settings/*" = ["F403", "F405", "E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["accounts", "club", "members", "teams", "events", "news", "pages", "home", "search", "clubmanager"]
