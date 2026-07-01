@@ -59,7 +59,12 @@ class Family(models.Model):
 
 
 class Member(models.Model):
-    """A person in the club. May or may not have a login (:attr:`user`)."""
+    """A person in the club. May or may not have a login (:attr:`user`).
+
+    Family relationships are modelled by membership in a :class:`Family`:
+    guardians (``is_guardian=True``) look after the other members of the same
+    family (the dependents).
+    """
 
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
@@ -72,6 +77,7 @@ class Member(models.Model):
     first_name = models.CharField(max_length=150)
     last_name = models.CharField(max_length=150)
     # Contact email — optional. Children may have none; a login email lives on User.
+    # Use `contact_email` to read it with a fallback to the linked user's login email.
     email = models.EmailField(blank=True)
     phone = PhoneNumberField(blank=True)
     emergency_phone = PhoneNumberField(blank=True)
@@ -85,12 +91,9 @@ class Member(models.Model):
         blank=True,
         related_name="members",
     )
-    guardians = models.ManyToManyField(
-        "self",
-        through="Guardianship",
-        through_fields=("child", "guardian"),
-        symmetrical=False,
-        related_name="dependents",
+    is_guardian = models.BooleanField(
+        default=False,
+        help_text="Whether this member is a parent/guardian in their family.",
     )
 
     class Meta:
@@ -99,42 +102,21 @@ class Member(models.Model):
     def __str__(self):
         return f"{self.first_name} {self.last_name}"
 
+    @property
+    def contact_email(self):
+        """Best email to reach this member: own contact email, else login email."""
+        return self.email or (self.user.email if self.user_id else "")
 
-class Guardianship(models.Model):
-    """Directional guardian -> child relationship between two members."""
+    @property
+    def guardians(self):
+        """Members of my family who look after me (only if I'm a dependent)."""
+        if self.is_guardian or self.family_id is None:
+            return Member.objects.none()
+        return self.family.members.filter(is_guardian=True)
 
-    class Relationship(models.TextChoices):
-        PARENT = "parent", "Parent"
-        GUARDIAN = "guardian", "Guardian"
-        OTHER = "other", "Other"
-
-    guardian = models.ForeignKey(
-        Member,
-        on_delete=models.CASCADE,
-        related_name="guardian_links",
-    )
-    child = models.ForeignKey(
-        Member,
-        on_delete=models.CASCADE,
-        related_name="child_links",
-    )
-    relationship = models.CharField(
-        max_length=20,
-        choices=Relationship.choices,
-        default=Relationship.PARENT,
-    )
-
-    class Meta:
-        constraints = [
-            models.UniqueConstraint(
-                fields=["guardian", "child"],
-                name="unique_guardianship",
-            ),
-            models.CheckConstraint(
-                condition=~models.Q(guardian=models.F("child")),
-                name="guardian_not_self",
-            ),
-        ]
-
-    def __str__(self):
-        return f"{self.guardian} → {self.child} ({self.get_relationship_display()})"
+    @property
+    def dependents(self):
+        """Members of my family I look after (only if I'm a guardian)."""
+        if not self.is_guardian or self.family_id is None:
+            return Member.objects.none()
+        return self.family.members.filter(is_guardian=False)

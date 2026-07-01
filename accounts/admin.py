@@ -2,7 +2,7 @@ from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 
 from .forms import UserChangeForm, UserCreationForm
-from .models import Family, Guardianship, Member, User
+from .models import Family, Member, User
 
 
 @admin.register(User)
@@ -29,29 +29,19 @@ class UserAdmin(BaseUserAdmin):
     )
 
 
-class GuardianshipInline(admin.TabularInline):
-    """Guardians of a member (edit from the child's page)."""
-
-    model = Guardianship
-    fk_name = "child"
-    extra = 0
-    autocomplete_fields = ("guardian",)
-
-
 class MemberInline(admin.TabularInline):
     model = Member
     extra = 0
-    fields = ("first_name", "last_name", "date_of_birth", "license_number")
+    fields = ("first_name", "last_name", "date_of_birth", "is_guardian", "license_number")
     show_change_link = True
 
 
 @admin.register(Member)
 class MemberAdmin(admin.ModelAdmin):
-    list_display = ("last_name", "first_name", "date_of_birth", "license_number", "family", "user")
-    list_filter = ("family",)
+    list_display = ("last_name", "first_name", "date_of_birth", "is_guardian", "license_number", "family", "user")
+    list_filter = ("is_guardian", "family")
     search_fields = ("first_name", "last_name", "email", "license_number")
     autocomplete_fields = ("user", "family")
-    inlines = (GuardianshipInline,)
 
 
 @admin.register(Family)
