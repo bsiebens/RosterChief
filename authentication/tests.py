@@ -101,6 +101,20 @@ class MemberModelTests(TestCase):
         member = Member.objects.create(first_name="Cher", last_name="")
         self.assertEqual(member.get_full_name(), "Cher")
 
+    def test_contact_email_prefers_own_email(self):
+        user = User.objects.create_user(email="login@example.com", password="x")
+        member = Member.objects.create(user=user, first_name="Own", last_name="Email", email="own@example.com")
+        self.assertEqual(member.contact_email, "own@example.com")
+
+    def test_contact_email_falls_back_to_login_email(self):
+        user = User.objects.create_user(email="login@example.com", password="x")
+        member = Member.objects.create(user=user, first_name="No", last_name="Email")
+        self.assertEqual(member.contact_email, "login@example.com")
+
+    def test_contact_email_empty_without_email_or_user(self):
+        member = Member.objects.create(first_name="Zero", last_name="Contact")
+        self.assertEqual(member.contact_email, "")
+
     def test_member_can_exist_without_user(self):
         member = Member.objects.create(first_name="No", last_name="Login")
         self.assertIsNone(member.user)
@@ -124,6 +138,29 @@ class MemberModelTests(TestCase):
 
         with self.assertRaises(IntegrityError):
             Member.objects.create(user=user, first_name="Second", last_name="Member")
+
+
+class FamilyNameOptionalTests(TestCase):
+    def test_family_can_be_created_without_a_name(self):
+        family = Family.objects.create()
+        self.assertEqual(family.name, "")
+
+    def test_str_uses_name_when_present(self):
+        self.assertEqual(str(Family.objects.create(name="The Smiths")), "The Smiths")
+
+    def test_str_falls_back_to_member_surnames(self):
+        family = Family.objects.create()
+        smith = Member.objects.create(first_name="Pat", last_name="Smith")
+        jones = Member.objects.create(first_name="Kim", last_name="Jones")
+        FamilyMembership.objects.create(family=family, member=smith, role=FamilyMembership.FamilyRole.PARENT)
+        FamilyMembership.objects.create(family=family, member=jones, role=FamilyMembership.FamilyRole.CHILD)
+
+        # Distinct surnames, alphabetically ordered.
+        self.assertEqual(str(family), "Jones / Smith family")
+
+    def test_str_falls_back_to_short_id_when_empty(self):
+        family = Family.objects.create()
+        self.assertEqual(str(family), f"Family {str(family.pk)[:8]}")
 
 
 class FamilyModelTests(TestCase):
@@ -232,3 +269,66 @@ class FamilyMembershipModelTests(TestCase):
         self.assertFalse(FamilyMembership.objects.exists())
         # The member itself survives; only the membership is removed.
         self.assertTrue(Member.objects.filter(pk=member.pk).exists())
+
+
+class AdminSmokeTests(TestCase):
+    """Exercise the admin config end-to-end to catch misregistration
+    (bad search_fields, autocomplete targets, fieldsets, custom forms)."""
+
+    def setUp(self):
+        self.admin = User.objects.create_superuser(email="root@example.com", password="pw-secret-123")
+        self.client.force_login(self.admin)
+
+    def test_changelists_load(self):
+        for model in ("user", "member", "family", "familymembership"):
+            with self.subTest(model=model):
+                response = self.client.get(f"/admin/authentication/{model}/")
+                self.assertEqual(response.status_code, 200)
+
+    def test_user_add_page_loads(self):
+        response = self.client.get("/admin/authentication/user/add/")
+        self.assertEqual(response.status_code, 200)
+
+    def test_member_changelist_shows_grouped_numbers_and_fallback_email(self):
+        user = User.objects.create_user(email="fallback@example.com", password="pw")
+        Member.objects.create(
+            user=user,
+            first_name="Grouped",
+            last_name="Numbers",
+            phone="+32470123456",
+            emergency_phone="+3221234567",
+        )
+        response = self.client.get("/admin/authentication/member/")
+        content = response.content.decode()
+
+        # Numbers rendered in grouped international format, not raw E.164.
+        self.assertIn("+32 470 12 34 56", content)
+        self.assertIn("+32 2 123 45 67", content)
+        # Email column falls back to the linked login email.
+        self.assertIn("fallback@example.com", content)
+
+    def test_create_user_through_admin_hashes_password(self):
+        response = self.client.post(
+            "/admin/authentication/user/add/",
+            {
+                "email": "new@example.com",
+                "password1": "a-good-password-42",
+                "password2": "a-good-password-42",
+                # Empty MemberInline management form — no profile created.
+                "member-TOTAL_FORMS": "0",
+                "member-INITIAL_FORMS": "0",
+                "member-MIN_NUM_FORMS": "0",
+                "member-MAX_NUM_FORMS": "1",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        created = User.objects.get(email="new@example.com")
+        self.assertTrue(created.check_password("a-good-password-42"))
+
+    def test_autocomplete_endpoints_respond(self):
+        # Member.user autocomplete resolves against UserAdmin.search_fields.
+        response = self.client.get(
+            "/admin/autocomplete/",
+            {"app_label": "authentication", "model_name": "member", "field_name": "user", "term": "root"},
+        )
+        self.assertEqual(response.status_code, 200)

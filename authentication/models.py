@@ -46,7 +46,7 @@ class User(AbstractBaseUser, PermissionsMixin):
 
 
 class Family(UUIDModel):
-    name = models.CharField(max_length=255)
+    name = models.CharField(max_length=255, blank=True)
 
     class Meta:
         verbose_name = _("family")
@@ -54,7 +54,12 @@ class Family(UUIDModel):
         ordering = ["name"]
 
     def __str__(self):
-        return self.name
+        if self.name:
+            return self.name
+        surnames = sorted({last_name for last_name in self.memberships.values_list("member__last_name", flat=True) if last_name})
+        if surnames:
+            return _("%(surnames)s family") % {"surnames": " / ".join(surnames)}
+        return _("Family %(id)s") % {"id": str(self.pk)[:8]}
 
     @property
     def guardians(self):
@@ -97,6 +102,11 @@ class Member(UUIDModel):
 
     def get_short_name(self):
         return self.first_name
+
+    @property
+    def contact_email(self):
+        """Best email to reach this member: own contact email, else login email."""
+        return self.email or (self.user.email if self.user_id else "")
 
     @property
     def guardians(self):
