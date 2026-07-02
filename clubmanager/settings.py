@@ -44,10 +44,9 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "phonenumber_field",
-    "accounts",
+    "club.apps.ClubConfig",
+    "authentication.apps.AuthenticationConfig",
 ]
-
-AUTH_USER_MODEL = "accounts.User"
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
@@ -60,6 +59,8 @@ MIDDLEWARE = [
 ]
 
 ROOT_URLCONF = "clubmanager.urls"
+
+AUTH_USER_MODEL = "authentication.User"
 
 TEMPLATES = [
     {
