@@ -1,11 +1,18 @@
+import tempfile
 import uuid
+from datetime import date
+from io import StringIO
+from pathlib import Path
 
 from django.contrib.auth import get_user_model
+from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.db import IntegrityError
 from django.db.models import SET_NULL
 from django.test import TestCase
 
 from authentication.models import Family, FamilyMembership, Member
+from club.models import Club, ClubMembership
 
 User = get_user_model()
 
@@ -332,3 +339,233 @@ class AdminSmokeTests(TestCase):
             {"app_label": "authentication", "model_name": "member", "field_name": "user", "term": "root"},
         )
         self.assertEqual(response.status_code, 200)
+
+
+class ImportMembersCsvCommandTests(TestCase):
+    def write_csv(self, content):
+        temp_file = tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False, encoding="utf-8")
+        temp_file.write(content)
+        temp_file.close()
+        self.addCleanup(lambda: Path(temp_file.name).unlink(missing_ok=True))
+        return temp_file.name
+
+    def call_import_command(self, csv_path, **options):
+        stdout = StringIO()
+        stderr = StringIO()
+
+        call_command(
+            "import_members_csv",
+            csv_path,
+            stdout=stdout,
+            stderr=stderr,
+            **options,
+        )
+
+        return stdout.getvalue(), stderr.getvalue()
+
+    def test_import_creates_member_club_membership_and_user_when_requested(self):
+        csv_path = self.write_csv(
+            "\n".join(
+                [
+                    "first_name,last_name,email,date_of_birth,create_account,club_name,license_number",
+                    "Jane,Doe,jane@example.com,2010-04-12,true,City Swim Club,LIC-001",
+                ]
+            )
+        )
+
+        stdout, stderr = self.call_import_command(csv_path)
+
+        self.assertEqual(stderr, "")
+        self.assertIn("Import complete.", stdout)
+        self.assertIn("Members created: 1.", stdout)
+        self.assertIn("Users created: 1.", stdout)
+        self.assertIn("Clubs created: 1.", stdout)
+        self.assertIn("Memberships created: 1.", stdout)
+        self.assertIn("Rows skipped: 0.", stdout)
+
+        member = Member.objects.get(email="jane@example.com")
+        self.assertEqual(member.first_name, "Jane")
+        self.assertEqual(member.last_name, "Doe")
+        self.assertEqual(member.date_of_birth, date(2010, 4, 12))
+        self.assertIsNotNone(member.user)
+        self.assertEqual(member.user.email, "jane@example.com")
+        self.assertFalse(member.user.has_usable_password())
+
+        club = Club.objects.get(name="City Swim Club")
+        membership = ClubMembership.objects.get(club=club, member=member)
+        self.assertEqual(membership.license, "LIC-001")
+
+    def test_import_creates_member_without_user_when_create_account_is_false(self):
+        csv_path = self.write_csv(
+            "\n".join(
+                [
+                    "first_name,last_name,email,date_of_birth,create_account,club_name,license_number",
+                    "John,Smith,john@example.com,2009-11-03,false,City Swim Club,LIC-002",
+                ]
+            )
+        )
+
+        stdout, stderr = self.call_import_command(csv_path)
+
+        self.assertEqual(stderr, "")
+        self.assertIn("Members created: 1.", stdout)
+        self.assertIn("Users created: 0.", stdout)
+
+        member = Member.objects.get(email="john@example.com")
+        self.assertIsNone(member.user)
+        self.assertFalse(User.objects.filter(email="john@example.com").exists())
+
+    def test_import_updates_existing_member_and_membership(self):
+        club = Club.objects.create(name="City Swim Club")
+        member = Member.objects.create(
+            first_name="Old",
+            last_name="Name",
+            email="jane@example.com",
+            date_of_birth=date(2010, 1, 1),
+        )
+        ClubMembership.objects.create(
+            club=club,
+            member=member,
+            license="OLD-LIC",
+        )
+
+        csv_path = self.write_csv(
+            "\n".join(
+                [
+                    "first_name,last_name,email,date_of_birth,create_account,club_name,license_number",
+                    "Jane,Doe,jane@example.com,2010-04-12,false,City Swim Club,LIC-NEW",
+                ]
+            )
+        )
+
+        stdout, stderr = self.call_import_command(csv_path)
+
+        self.assertEqual(stderr, "")
+        self.assertIn("Members created: 0.", stdout)
+        self.assertIn("Members updated: 1.", stdout)
+        self.assertIn("Memberships created: 0.", stdout)
+        self.assertIn("Memberships updated: 1.", stdout)
+
+        member.refresh_from_db()
+        self.assertEqual(member.first_name, "Jane")
+        self.assertEqual(member.last_name, "Doe")
+        self.assertEqual(member.date_of_birth, date(2010, 4, 12))
+
+        membership = ClubMembership.objects.get(club=club, member=member)
+        self.assertEqual(membership.license, "LIC-NEW")
+
+    def test_import_links_existing_user_when_create_account_is_true(self):
+        user = User.objects.create_user(email="jane@example.com", password="secret123")
+
+        csv_path = self.write_csv(
+            "\n".join(
+                [
+                    "first_name,last_name,email,date_of_birth,create_account,club_name,license_number",
+                    "Jane,Doe,jane@example.com,2010-04-12,true,City Swim Club,LIC-001",
+                ]
+            )
+        )
+
+        stdout, stderr = self.call_import_command(csv_path)
+
+        self.assertEqual(stderr, "")
+        self.assertIn("Users created: 0.", stdout)
+
+        member = Member.objects.get(email="jane@example.com")
+        self.assertEqual(member.user, user)
+        self.assertTrue(user.check_password("secret123"))
+
+    def test_import_supports_custom_date_format(self):
+        csv_path = self.write_csv(
+            "\n".join(
+                [
+                    "first_name,last_name,email,date_of_birth,create_account,club_name,license_number",
+                    "Jane,Doe,jane@example.com,12/04/2010,false,City Swim Club,LIC-001",
+                ]
+            )
+        )
+
+        stdout, stderr = self.call_import_command(csv_path, date_format="%d/%m/%Y")
+
+        self.assertEqual(stderr, "")
+        self.assertIn("Members created: 1.", stdout)
+
+        member = Member.objects.get(email="jane@example.com")
+        self.assertEqual(member.date_of_birth, date(2010, 4, 12))
+
+    def test_import_skips_invalid_row_and_imports_valid_rows(self):
+        csv_path = self.write_csv(
+            "\n".join(
+                [
+                    "first_name,last_name,email,date_of_birth,create_account,club_name,license_number",
+                    "Jane,Doe,jane@example.com,2010-04-12,false,City Swim Club,LIC-001",
+                    "Broken,Date,broken@example.com,not-a-date,false,City Swim Club,LIC-002",
+                ]
+            )
+        )
+
+        stdout, stderr = self.call_import_command(csv_path)
+
+        self.assertIn("Row 3 skipped:", stderr)
+        self.assertIn("Invalid date_of_birth 'not-a-date'.", stderr)
+        self.assertIn("Members created: 1.", stdout)
+        self.assertIn("Rows skipped: 1.", stdout)
+
+        self.assertTrue(Member.objects.filter(email="jane@example.com").exists())
+        self.assertFalse(Member.objects.filter(email="broken@example.com").exists())
+
+    def test_import_fails_for_missing_file(self):
+        stdout = StringIO()
+        stderr = StringIO()
+
+        with self.assertRaises(CommandError) as context:
+            call_command(
+                "import_members_csv",
+                "does-not-exist.csv",
+                stdout=stdout,
+                stderr=stderr,
+            )
+
+        self.assertIn("CSV file does not exist", str(context.exception))
+
+    def test_import_fails_for_missing_required_columns(self):
+        csv_path = self.write_csv(
+            "\n".join(
+                [
+                    "first_name,last_name,email",
+                    "Jane,Doe,jane@example.com",
+                ]
+            )
+        )
+
+        stdout = StringIO()
+        stderr = StringIO()
+
+        with self.assertRaises(CommandError) as context:
+            call_command(
+                "import_members_csv",
+                csv_path,
+                stdout=stdout,
+                stderr=stderr,
+            )
+
+        self.assertIn("CSV file is missing required columns:", str(context.exception))
+        self.assertIn("club_name", str(context.exception))
+        self.assertIn("date_of_birth", str(context.exception))
+        self.assertIn("license_number", str(context.exception))
+
+    def test_import_fails_for_empty_csv_file(self):
+        csv_path = self.write_csv("")
+
+        stdout = StringIO()
+        stderr = StringIO()
+
+        with self.assertRaises(CommandError) as context:
+            call_command(
+                "import_members_csv",
+                csv_path,
+                stdout=stdout,
+                stderr=stderr,
+            )
+
+        self.assertIn("CSV file is empty or missing a header row.", str(context.exception))
