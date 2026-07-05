@@ -14,10 +14,10 @@ from .managers import UserManager
 
 class User(AbstractBaseUser, PermissionsMixin):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    email = models.EmailField(unique=True, db_index=True)
+    email = models.EmailField(_("email"), unique=True, db_index=True)
 
-    is_staff = models.BooleanField(default=False)
-    is_active = models.BooleanField(default=True)
+    is_staff = models.BooleanField(_("is staff?"), default=False)
+    is_active = models.BooleanField(_("is active?"), default=True)
 
     objects = UserManager()
 
@@ -46,7 +46,7 @@ class User(AbstractBaseUser, PermissionsMixin):
 
 
 class Family(UUIDModel):
-    name = models.CharField(max_length=255, blank=True)
+    name = models.CharField(_("name"), max_length=255, blank=True)
 
     class Meta:
         verbose_name = _("family")
@@ -77,16 +77,16 @@ class Family(UUIDModel):
 
 
 class Member(UUIDModel):
-    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, related_name="member", null=True, blank=True)
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, related_name="member", null=True, blank=True, verbose_name=_("user"))
 
-    first_name = models.CharField(max_length=150)
-    last_name = models.CharField(max_length=150)
+    first_name = models.CharField(_("first name"), max_length=150)
+    last_name = models.CharField(_("last name"), max_length=150)
 
-    date_of_birth = models.DateField(null=True, blank=True)
+    date_of_birth = models.DateField(_("date of birth"), null=True, blank=True)
 
-    email = models.EmailField(blank=True)
-    phone = PhoneNumberField(null=True, blank=True)
-    emergency_phone = PhoneNumberField(null=True, blank=True)
+    email = models.EmailField(_("email"), blank=True)
+    phone = PhoneNumberField(_("phone number"), null=True, blank=True)
+    emergency_phone = PhoneNumberField(_("emergency phone number"), null=True, blank=True)
 
     class Meta:
         verbose_name = _("member")
@@ -124,9 +124,9 @@ class FamilyMembership(models.Model):
         GUARDIAN = "guardian", _("guardian")
         OTHER = "other", _("other")
 
-    family = models.ForeignKey(Family, on_delete=models.CASCADE, related_name="memberships")
-    member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="family_memberships")
-    role = models.CharField(max_length=255, choices=FamilyRole.choices, default=FamilyRole.PARENT)
+    family = models.ForeignKey(Family, on_delete=models.CASCADE, related_name="memberships", verbose_name=_("family"))
+    member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="family_memberships", verbose_name=_("member"))
+    role = models.CharField(_("role"), max_length=255, choices=FamilyRole.choices, default=FamilyRole.PARENT)
 
     class Meta:
         verbose_name = _("family membership")
