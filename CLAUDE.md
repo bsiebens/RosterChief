@@ -4,9 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-ClubManager is a **single-club** sport club management app + public website, built on **Django 6.0** (Python 3.14+). It is deliberately *not* multi-tenant — there is no `club_id` tenancy; the app manages one club.
+ClubManager is a sport club management app + public website, built on **Django 6.0** (Python 3.14+). As of **2026-07-11 it is designed as a multi-tenant platform** (row-based / shared-schema): one deployment serves many clubs, with `Club` as the tenant root. Every club-owned model carries a `club` FK (via `ClubScopedModel`); `User` is the only global model. This **reverses** the project's earlier single-club stance — treat older "single-club / no `club_id` tenancy" notes (in git history or memory) as obsolete.
 
-The repo is currently an early **skeleton**: a stock `django-admin startproject` layout with only Django's built-in apps installed. None of the domain apps exist yet — see "Planned architecture" below for the intended shape (encoded in `pyproject.toml`, not yet on disk). Verify against the actual tree before assuming a module exists.
+**`ARCHITECTURE.md` at the repo root is the authoritative model & domain design** — the tenancy mechanics, the RBAC design, and per-app model sketches all live there. Consult and update it when adding domain models.
+
+The repo is an early build: `authentication` and `club` apps exist (`User`, `Member`, `Family`, `FamilyMembership`, `Club`, `ClubMembership`); the remaining domain apps and the tenancy plumbing (`clubmanager/tenancy.py`, tenant middleware, `ClubScopedModel` upgrade) are **planned, not yet on disk**. Verify against the actual tree before assuming a module exists.
 
 ## Commands
 
@@ -38,13 +40,14 @@ The database is configured through a single `DJANGO_DATABASE_URL` (parsed by **d
 
 ## Planned architecture
 
-`pyproject.toml`'s isort `known-first-party` list is the intended app decomposition — treat it as the roadmap when adding domain code:
-`accounts`, `club`, `members`, `teams`, `events`, `news`, `pages`, `home`, `search`.
+**`ARCHITECTURE.md` is the source of truth for the model design; this is a summary.** The app decomposition (`authentication`, `members`, `club`, `teams`, `events`, `news`, `pages`, `home`, `formbuilder`, `shop`, `search`) has grown past the original `pyproject.toml` isort `known-first-party` list — add new labels there as apps land. Note the `accounts` app was split into `authentication` (global login) + `club`, and people models (`Member`, `Family`) are being moved into a dedicated `members` app.
 
 Domain notes (drive modeling decisions):
-- **Season** is the central organizing concept. Team rosters, events, and attendance are season-scoped — model them with a FK to a season, not as global state.
-- A **Member** can play on one or more **Teams**, each with a position + jersey number, always tied to a specific season.
-- Three access tiers, implemented via Django groups/permissions: public site / members + parents / coaches + team managers.
+- **Multi-tenancy is the cross-cutting rule.** `Club` is the tenant root; club-owned models inherit `ClubScopedModel` (a `club` FK). Scope every query to the current tenant (`.for_club()` / `.current()`); previously-global uniqueness (slugs, season names, invoice numbers) becomes **unique per club**. Only `User` is global. See `ARCHITECTURE.md` §2.4.
+- **Season** is the central organizing concept, **per club**. Team rosters, events, and attendance are season-scoped — model them with a FK to a season, not as global state.
+- A **Member** (a person *within one club*) can play on one or more **Teams**, each with a position + jersey number (unique within a team), always tied to a specific season.
+- **RBAC is per-club and service-layer** (not `django-guardian`, not global Django groups): `ClubRole` rows (`MEMBER` / `EDITOR` / `TREASURER` / `BOARD`) plus object-scoped roles (coach via `StaffAssignment`, parent via `FamilyMembership`), all decisions routed through an access service. Django's own permissions are used only for the platform-admin layer.
+- Later modules: `formbuilder` (admin-defined dynamic forms → normalized answers → reporting) and `shop` (cart → order → payment → HTML→PDF invoices via WeasyPrint), with season-scoped `ClubMembership` tracking sign-up + fee status per season.
 
 ## Conventions
 
