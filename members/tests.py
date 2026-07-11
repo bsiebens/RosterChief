@@ -3,6 +3,7 @@ from datetime import date
 from io import StringIO
 from pathlib import Path
 
+from django.contrib.admin.sites import AdminSite
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db import IntegrityError
@@ -11,7 +12,9 @@ from django.test import TestCase
 
 from authentication.models import User
 from club.models import Club, ClubMembership
+from members.admin import FamilyAdmin
 from members.models import Family, FamilyMembership, Member
+from members.services import MemberImportResult
 
 
 # Create your tests here.
@@ -167,6 +170,13 @@ class FamilyMembershipModelTests(TestCase):
 
         self.assertEqual(membership.role, FamilyMembership.FamilyRole.PARENT)
 
+    def test_str_includes_family_member_and_role(self):
+        family = Family.objects.create(name="The Smiths")
+        member = Member.objects.create(first_name="Pat", last_name="Smith")
+        membership = FamilyMembership.objects.create(family=family, member=member, role=FamilyMembership.FamilyRole.GUARDIAN)
+
+        self.assertEqual(str(membership), "The Smiths - Pat Smith (guardian)")
+
     def test_member_unique_per_family(self):
         family = Family.objects.create(name="Fam")
         member = Member.objects.create(first_name="Solo", last_name="Once")
@@ -195,6 +205,22 @@ class FamilyMembershipModelTests(TestCase):
         self.assertFalse(FamilyMembership.objects.exists())
         # The member itself survives; only the membership is removed.
         self.assertTrue(Member.objects.filter(pk=member.pk).exists())
+
+
+class FamilyAdminTests(TestCase):
+    def test_member_count_reflects_memberships(self):
+        family = Family.objects.create(name="The Smiths")
+        for i in range(3):
+            member = Member.objects.create(first_name=f"Kid{i}", last_name="Smith")
+            FamilyMembership.objects.create(family=family, member=member, role=FamilyMembership.FamilyRole.CHILD)
+
+        admin_instance = FamilyAdmin(Family, AdminSite())
+        self.assertEqual(admin_instance.member_count(family), 3)
+
+    def test_member_count_is_zero_without_members(self):
+        family = Family.objects.create(name="Empty")
+        admin_instance = FamilyAdmin(Family, AdminSite())
+        self.assertEqual(admin_instance.member_count(family), 0)
 
 
 class AdminSmokeTests(TestCase):
@@ -493,3 +519,28 @@ class ImportMembersCsvCommandTests(TestCase):
             )
 
         self.assertIn("CSV file is empty or missing a header row.", str(context.exception))
+
+    def test_import_skips_row_with_empty_required_field(self):
+        csv_path = self.write_csv(
+            "\n".join(
+                [
+                    "first_name,last_name,email,date_of_birth,create_account,club_name,license_number",
+                    "Jane,Doe,jane@example.com,2010-04-12,false,City Swim Club,LIC-001",
+                    ",Missing,nofirst@example.com,2011-05-13,false,City Swim Club,LIC-002",
+                ]
+            )
+        )
+
+        stdout, stderr = self.call_import_command(csv_path)
+
+        self.assertIn("Row 3 skipped:", stderr)
+        self.assertIn("first_name is required.", stderr)
+        self.assertIn("Members created: 1.", stdout)
+        self.assertIn("Rows skipped: 1.", stdout)
+        self.assertFalse(Member.objects.filter(email="nofirst@example.com").exists())
+
+
+class MemberImportResultTests(TestCase):
+    def test_successful_rows_sums_created_and_updated(self):
+        result = MemberImportResult(created_members=2, updated_members=3)
+        self.assertEqual(result.successful_rows, 5)
