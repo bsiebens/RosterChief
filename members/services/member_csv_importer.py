@@ -127,10 +127,6 @@ class MemberCsvImporter:
             },
         )
 
-        if create_account and member.user_id is None:
-            member.user = user
-            member.save(update_fields=["user"])
-
         club, club_created = Club.objects.get_or_create(name=club_name)
 
         _, membership_created = ClubMembership.objects.update_or_create(
