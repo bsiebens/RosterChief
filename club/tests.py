@@ -3,7 +3,7 @@ import uuid
 from django.db import IntegrityError
 from django.test import TestCase
 
-from authentication.models import Member
+from members.models import Member
 
 from .models import Club, ClubMembership
 

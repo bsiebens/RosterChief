@@ -125,6 +125,36 @@ class ClubTenantMiddleware:                        # resolves subdomain -> Club,
     ...  # request.club = club; set_current_club(club)
 ```
 
+**Considered — `django.contrib.sites` for resolution (rejected as the mechanism).**
+Django's Sites framework is the obvious "does the batteries-included answer fit?" candidate,
+so it was evaluated explicitly:
+
+*What it offers.* A `Site(domain, name)` model, `get_current_site(request)` (Host-header →
+`Site`, with a per-process `SITE_CACHE`), `CurrentSiteMiddleware` (sets `request.site`), and
+`CurrentSiteManager` (auto-filters models that hold an FK to `Site`). Ecosystem code
+(`flatpages`, `redirects`, `sitemaps`, `allauth`) is Site-aware for free.
+
+*Why it does **not** fit as our tenancy mechanism:*
+- **Wrong scoping key.** `CurrentSiteManager` filters on a `site` FK; our tenant key is the
+  `club` FK on `ClubScopedModel`. Adopting Sites' manager would mean putting a *second* FK on
+  every model, or ignoring the manager — either way it buys us nothing over `.for_club()`.
+- **A parallel identity table.** `Site` duplicates identity that already lives on `Club`
+  (`slug`, domain, name). Two tables to keep in sync, two sources of truth for "which tenant".
+- **`SITE_ID` is a single global.** The framework's happy path is *one process = one site*
+  (`SITE_ID`). Multi-tenant host resolution requires leaving `SITE_ID` unset and relying on
+  `get_current_site`'s exact-domain match — workable, but the setting is a standing foot-gun
+  (any library that reads `SITE_ID` silently binds to the wrong tenant), and shells, tasks,
+  and tests have no Host header, so they still need our contextvar (`require_current_club()`).
+- **Host-only.** Sites cannot express the path-prefix option (`/c/<slug>/`); resolution is
+  purely `domain`-based, foreclosing that alternative.
+
+*Verdict.* Keep **`Club` (with `slug` + optional `domain`) as the single tenant root** and
+resolve it in `ClubTenantMiddleware` — the resolution logic (Host → `Club`) is a few lines and
+avoids the sync/`SITE_ID` hazards. **Optional bridge:** if a Site-aware third party is later
+adopted (e.g. `allauth`, `sitemaps`), add a thin `Club.site = OneToOneField(Site)` kept in sync
+from `Club.save()`, so the ecosystem gets its `Site` while `Club` stays authoritative — do
+this only when such a dependency actually lands, not preemptively.
+
 **Scoping manager.** `ClubScopedModel` gets a tenant-aware manager so day-to-day queries
 can't accidentally cross tenants:
 
@@ -489,10 +519,16 @@ membership product writes back to the season-scoped `ClubMembership` (§5.1).
 Product(ClubScopedModel)              # -> carries `club`
   name, slug, description (blank)
   kind        CharField (TextChoices: membership | event_fee | merchandise | donation)
-  price       DecimalField(max_digits=8, decimal_places=2)
+  price       DecimalField(max_digits=8, decimal_places=2)   # list price
   season      FK Season (PROTECT, null)   # set for membership/event products
   is_active   BooleanField
+  # early-bird / prompt-payment discount (§5.7.1) — per-product toggle + deadline
+  early_bird_enabled    BooleanField (default=False)
+  early_bird_deadline   DateField (null)                  # discount valid through this date (inclusive)
+  early_bird_disc_type  CharField (TextChoices DiscountType: PERCENT | AMOUNT, blank)
+  early_bird_disc_value DecimalField(max_digits=8, decimal_places=2, null)  # 0–100 if PERCENT, else € off unit
   Meta: unique_together (club, slug)
+        CheckConstraint: early_bird_enabled ⇒ deadline, disc_type, disc_value all set
   # membership products fulfil into a ClubMembership for the chosen season + beneficiary
 
 Cart(ClubScopedModel)                 # -> carries `club`; one open cart per (club, user)
@@ -508,12 +544,17 @@ CartItem(UUIDModel)                   # club implied by cart
   unit_price  DecimalField               # snapshot of price at add-to-cart time
   Meta: unique_together (cart, product, beneficiary)
 
-Order(ClubScopedModel)                # -> carries `club`; immutable, created at checkout
+Order(ClubScopedModel)                # -> carries `club`; created `pending` at checkout,
+                                      # frozen at finalize() (§5.7.1 lifecycle)
   number      CharField                  # human ref, allocated PER CLUB, e.g. "ORD-2026-00042"
   purchaser   FK Member (PROTECT, related_name="orders")
-  status      CharField (TextChoices: pending | paid | partially_paid | cancelled | refunded)
-  total       DecimalField
+  status      CharField (TextChoices: pending | finalized | paid | partially_paid | cancelled | refunded)
+  subtotal    DecimalField               # Σ OrderLine.line_total (after per-line early-bird)
+  # order-level discounts are SELECTED from a club catalogue, not typed — see AppliedDiscount
+  # below + OrderDiscountType (§5.7.1); applied by a treasurer while status=pending.
+  total       DecimalField               # subtotal - Σ applied discounts; the amount invoiced
   created_at  DateTimeField
+  finalized_at DateTimeField (null)
   Meta: unique_together (club, number); ordering = ["-created_at"]
 
 OrderLine(UUIDModel)                  # club implied by order
@@ -521,8 +562,10 @@ OrderLine(UUIDModel)                  # club implied by order
   product     FK Product (PROTECT)
   beneficiary FK Member (PROTECT, null)
   quantity    PositiveSmallIntegerField
-  unit_price  DecimalField               # snapshot
-  line_total  DecimalField
+  list_price  DecimalField               # catalogue unit price at checkout (snapshot)
+  unit_price  DecimalField               # price actually charged after per-line early-bird (snapshot)
+  discount_label CharField (blank)        # e.g. "Early bird (−15%)" — shown on invoice; blank = none
+  line_total  DecimalField               # unit_price * quantity
   fulfilled_at DateTimeField (null)       # when this line's ClubMembership was activated
 
 Payment(UUIDModel)                    # club implied by order; an order may have several (partial)
@@ -532,6 +575,26 @@ Payment(UUIDModel)                    # club implied by order; an order may have
   status      CharField (TextChoices: pending | confirmed | failed | refunded)
   reference   CharField (blank)          # bank/gateway reference
   paid_at     DateTimeField (null)
+
+OrderDiscountType(ClubScopedModel)    # -> carries `club`; club-defined catalogue of presets
+  name        CharField                  # "Sibling discount", "Volunteer", "Hardship"
+  slug        SlugField
+  disc_type   CharField (TextChoices DiscountType: PERCENT | AMOUNT)
+  value       DecimalField(max_digits=8, decimal_places=2)   # 0–100 if PERCENT, else € off subtotal
+  description CharField (blank)          # optional note shown to the treasurer
+  is_active   BooleanField (default=True)   # soft-retire; keeps historical AppliedDiscounts valid
+  Meta: unique_together (club, slug); ordering = ["name"]
+
+AppliedDiscount(UUIDModel)            # through: Order <-> OrderDiscountType; club implied by order
+  order         FK Order (CASCADE, related_name="discounts")
+  discount_type FK OrderDiscountType (PROTECT, related_name="applications")
+  # snapshot at apply time — the preset may be edited/retired later without altering past orders
+  label       CharField                  # snapshot of name (shown on invoice)
+  disc_type   CharField (PERCENT | AMOUNT)   # snapshot
+  value       DecimalField               # snapshot (or a treasurer override, if allowed)
+  applied_by  FK User (SET_NULL, null, related_name="+")
+  applied_at  DateTimeField
+  Meta: unique_together (order, discount_type)   # a preset toggles on/off once per order
 
 Invoice(ClubScopedModel)              # -> carries `club`
   number      CharField                  # sequential PER CLUB per year, e.g. "INV-2026-00042"
@@ -565,6 +628,55 @@ Flow & design notes:
   transaction/service (e.g. a `select_for_update` sequence row), not from `count()`.
 - **Money = `DecimalField`**, never float. Snapshot prices onto cart items / order lines /
   invoices so historical records stay correct when `Product.price` changes.
+
+#### 5.7.1 Discounts
+
+Two independent discount mechanisms, applied at different layers and computed by a single
+**pricing service** (`shop/services/pricing.py`) so the rules live in one place and never
+in views/templates. A shared `DiscountType` enum (`PERCENT` / `AMOUNT`) is reused by both.
+
+**A. Early-bird / prompt-payment discount — per `Product`, automatic.**
+A club toggles `early_bird_enabled` on a product, sets an `early_bird_deadline`, and a
+`PERCENT` or `AMOUNT` value (§5.7 `Product`). Semantics: *buy in time and the unit price
+drops.*
+- **Anchor = checkout date (recommended).** The discount is evaluated **once, at checkout**,
+  comparing the order's `created_at` date against the deadline, and the result is frozen into
+  `OrderLine.unit_price` (+ a human `discount_label`, with `list_price` preserved for
+  transparency). This keeps the order/invoice total firm — an invoice can't have a
+  conditional amount. To still reward *paying* early, set the membership `Invoice.due_date`
+  to the deadline; late non-payment is a dunning concern, not a repricing one.
+- **Alternative (payment-date anchor)** — the discount only sticks if a confirmed `Payment`
+  lands by the deadline, else the line reprices to `list_price`. This makes the total mutable
+  until the deadline and complicates invoicing; it's the literal reading of "paid before
+  date" but is deferred unless a club needs it (see open question, §7).
+- Only applies when `today <= early_bird_deadline`; otherwise the line charges `list_price`.
+  A `CheckConstraint` guarantees an enabled product has a deadline + type + value.
+
+**B. Manual order-level discount — admin-applied, before finalize.**
+A `TREASURER`/`BOARD` (§3.2) applies an ad-hoc discount to a whole order — e.g. a multi-kid
+/ sibling discount — as a `PERCENT` or `AMOUNT` off the `subtotal`, with a required
+`manual_disc_reason` and audit stamp (`manual_disc_by` / `manual_disc_at`). It sits on the
+`Order`, not on a product.
+- **Lifecycle refinement.** The manual discount forces the order to be *editable before it
+  freezes*: checkout now creates the order as **`pending`**; a treasurer may set/clear the
+  manual discount while `pending`; `finalize()` then locks the order, computes the final
+  `total`, allocates the `Invoice.number`, and issues the PDF. **After `finalize` the order
+  and its discount are immutable** — a correction means a credit/refund, not an edit. The
+  access service gates this via `can_manage_shop(user, club)`.
+
+**Computation & rounding (both kinds).**
+`total = subtotal − order_discount`, where `subtotal = Σ line_total` and each `line_total`
+already reflects the early-bird price. Order of application: **line-level early-bird first,
+then the order-level manual discount** on the resulting subtotal. Percentages compute on the
+base they apply to (unit price / subtotal), round **`ROUND_HALF_UP` to 2 decimals**, and are
+**clamped to `[0, base]`** so no line or order can go negative. Every discounted document
+(order summary, invoice) shows list price, discount, and net so members see how the number
+was reached.
+
+**Extension point.** Both are deliberately field-level, not a discount-row model — enough for
+the two required cases. Coupon codes, stacked promotions, or per-member entitlements would
+warrant a first-class `Discount`/`Coupon` model + an M2M to orders; add it only when that need
+is real.
 
 ---
 
@@ -624,6 +736,13 @@ Legend: `───<` one-to-many, `>───<` many-to-many via a through model
    rows + a single access service (§3). Django's own perms only for platform admin.
 7. ✅ **`formbuilder` storage** — **normalized `Answer` is canonical**; no denormalized JSON
    snapshot (§5.6).
+8. ✅ **Tenant resolution ≠ `django.contrib.sites`** — Sites evaluated and rejected as the
+   mechanism; `Club` stays the single tenant root, resolution in `ClubTenantMiddleware`
+   (§2.4). Sites optional only as a later bridge for Site-aware third parties.
+9. ✅ **Shop discounts** — two field-level mechanisms (§5.7.1): a per-`Product` early-bird
+   discount (toggle + deadline + PERCENT/AMOUNT, frozen at checkout) and a manual order-level
+   discount a treasurer applies to a `pending` order before `finalize()`. Adds an
+   `Order.pending → finalized` step; no discount-row model yet.
 
 Infrastructure/config for the above (media storage, dependencies + exact setup) is
 specified in **§8**.
@@ -632,7 +751,9 @@ specified in **§8**.
 
 - **Tenant resolution mechanism** — subdomain (recommended) vs. path-prefix `/c/<slug>/`.
   Affects DNS/TLS, `ALLOWED_HOSTS`, cookies, and local dev (§8). Pick before building
-  `ClubTenantMiddleware`.
+  `ClubTenantMiddleware`. **`django.contrib.sites` was evaluated and rejected as the
+  mechanism** (§2.4) — `Club` stays the single tenant root; Sites is optional only as a
+  bridge for Site-aware third parties.
 - **Auto-scoping vs. explicit scoping** — should the tenant manager filter *automatically*
   from context, or stay explicit (`.for_club()` / `.current()`)? Doc currently recommends
   **explicit** (§2.4).
@@ -640,6 +761,10 @@ specified in **§8**.
   context in one session? The model allows it; confirm the UX (club switcher) is in scope.
 - **Payment gateway** — which provider (Mollie / Stripe / none-yet)? Only needed when online
   payments go live (§8).
+- **Early-bird anchor** — is the discount earned by *ordering* before the deadline
+  (checkout-date anchor, recommended, frozen total) or by *paying* before it (payment-date
+  anchor, mutable total)? Doc implements checkout-date; confirm no club needs the literal
+  "paid before date" semantics (§5.7.1).
 
 ---
 

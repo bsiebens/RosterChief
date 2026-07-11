@@ -1,9 +1,8 @@
-from django.contrib.auth.base_user import AbstractBaseUser
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 
-from authentication.models import Member
-from clubmanager.base import ClubScopedModel, UUIDModel
+from clubmanager.base import UUIDModel
+from members.models import Member
 
 
 class Club(UUIDModel):

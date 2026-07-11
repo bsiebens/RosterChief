@@ -46,6 +46,7 @@ INSTALLED_APPS = [
     "phonenumber_field",
     "club.apps.ClubConfig",
     "authentication.apps.AuthenticationConfig",
+    "members.apps.MembersConfig",
 ]
 
 MIDDLEWARE = [

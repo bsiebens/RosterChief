@@ -7,8 +7,8 @@ from typing import IO, Any
 from django.contrib.auth import get_user_model
 from django.db import transaction
 
-from authentication.models import Member
 from club.models import Club, ClubMembership
+from members.models import Member
 
 REQUIRED_COLUMNS = {"first_name", "last_name", "email", "date_of_birth", "create_account", "club_name", "license_number"}
 TRUE_VALUES = {"1", "true", "yes", "y", "on"}

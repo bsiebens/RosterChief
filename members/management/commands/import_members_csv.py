@@ -1,6 +1,6 @@
 from django.core.management.base import BaseCommand, CommandError
 
-from authentication.services.member_csv_importer import MemberCsvImporter
+from members.services import MemberCsvImporter
 
 
 class Command(BaseCommand):
