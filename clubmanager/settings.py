@@ -48,6 +48,7 @@ INSTALLED_APPS = [
     "authentication.apps.AuthenticationConfig",
     "members.apps.MembersConfig",
     "teams.apps.TeamsConfig",
+    "events.apps.EventsConfig",
 ]
 
 MIDDLEWARE = [

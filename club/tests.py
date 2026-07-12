@@ -455,7 +455,7 @@ class AdminRegistrationSmokeTests(TestCase):
 
         registered = set(django_admin.site._registry)
         # Concrete, non-auto-created models in these apps should all be registered.
-        project_apps = {"authentication", "club", "members", "teams"}
+        project_apps = {"authentication", "club", "members", "teams", "events"}
         for model in apps.get_models():
             if model._meta.app_label not in project_apps or model._meta.auto_created:
                 continue

@@ -74,6 +74,11 @@ class Season(ClubScopedModel):
 
         return cls.objects.current_club().filter(start_date__lte=date, end_date__gte=date).first()
 
+    @classmethod
+    def covering(cls, club, date: datetime.date):
+        """Return ``club``'s season covering ``date`` (no tenant context needed)."""
+        return cls.objects.filter(club=club, start_date__lte=date, end_date__gte=date).first()
+
 
 class ClubMembership(ClubScopedModel):
     class StatusChoices(models.TextChoices):
