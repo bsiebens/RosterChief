@@ -2,8 +2,12 @@ import datetime
 import uuid
 from contextlib import contextmanager
 
+from django.contrib import admin as django_admin
+from django.contrib.auth import get_user_model
 from django.db import IntegrityError
+from django.db.models import ProtectedError
 from django.test import RequestFactory, TestCase, override_settings
+from django.urls import reverse
 from django.utils import timezone
 
 from members.models import Member
@@ -54,9 +58,18 @@ class ClubModelTests(TestCase):
         self.assertEqual(Club._meta.verbose_name_plural, "clubs")
 
 
+def make_season(club, start_year=2026):
+    return Season.objects.create(
+        club=club,
+        start_date=datetime.date(start_year, 8, 1),
+        end_date=datetime.date(start_year + 1, 5, 31),
+    )
+
+
 class ClubMembershipModelTests(TestCase):
     def setUp(self):
         self.club = Club.objects.create(name="City Swim Club")
+        self.season = make_season(self.club)
         self.member = Member.objects.create(
             first_name="Jane",
             last_name="Doe",
@@ -64,98 +77,97 @@ class ClubMembershipModelTests(TestCase):
         )
 
     def test_str_returns_club_and_member(self):
-        membership = ClubMembership.objects.create(
-            club=self.club,
-            member=self.member,
-            license="LIC-001",
-        )
+        membership = ClubMembership.objects.create(club=self.club, season=self.season, member=self.member, license="LIC-001")
 
         self.assertEqual(str(membership), "City Swim Club - Jane Doe")
 
-    def test_license_is_optional(self):
-        membership = ClubMembership.objects.create(
-            club=self.club,
-            member=self.member,
-        )
+    def test_defaults_are_pending_and_unpaid(self):
+        membership = ClubMembership.objects.create(club=self.club, season=self.season, member=self.member)
 
+        self.assertEqual(membership.status, ClubMembership.StatusChoices.PENDING)
+        self.assertEqual(membership.fee_status, ClubMembership.FeeStatus.UNPAID)
         self.assertEqual(membership.license, "")
+        self.assertIsNone(membership.signed_up_at)
 
     def test_pk_is_uuid(self):
-        membership = ClubMembership.objects.create(
-            club=self.club,
-            member=self.member,
-        )
+        membership = ClubMembership.objects.create(club=self.club, season=self.season, member=self.member)
 
         self.assertIsInstance(membership.pk, uuid.UUID)
 
-    def test_same_member_can_join_different_clubs(self):
-        other_club = Club.objects.create(name="Other Swim Club")
+    def test_club_is_filled_from_active_tenant(self):
+        with with_club(self.club):
+            membership = ClubMembership.objects.create(season=self.season, member=self.member)
 
-        first_membership = ClubMembership.objects.create(
-            club=self.club,
-            member=self.member,
-            license="LIC-001",
-        )
-        second_membership = ClubMembership.objects.create(
-            club=other_club,
-            member=self.member,
-            license="LIC-002",
-        )
+        self.assertEqual(membership.club, self.club)
 
-        self.assertEqual(first_membership.member, self.member)
-        self.assertEqual(second_membership.member, self.member)
-        self.assertEqual(self.member.member_of.count(), 2)
-
-    def test_member_is_unique_per_club(self):
-        ClubMembership.objects.create(
-            club=self.club,
-            member=self.member,
-            license="LIC-001",
-        )
+    def test_member_is_unique_per_club_and_season(self):
+        ClubMembership.objects.create(club=self.club, season=self.season, member=self.member)
 
         with self.assertRaises(IntegrityError):
-            ClubMembership.objects.create(
-                club=self.club,
-                member=self.member,
-                license="LIC-002",
-            )
+            ClubMembership.objects.create(club=self.club, season=self.season, member=self.member)
 
-    def test_deleting_club_deletes_membership_but_keeps_member(self):
-        ClubMembership.objects.create(
-            club=self.club,
-            member=self.member,
-            license="LIC-001",
-        )
+    def test_same_member_can_join_consecutive_seasons(self):
+        next_season = make_season(self.club, start_year=2027)
 
+        first = ClubMembership.objects.create(club=self.club, season=self.season, member=self.member)
+        second = ClubMembership.objects.create(club=self.club, season=next_season, member=self.member)
+
+        self.assertEqual(self.member.member_of.count(), 2)
+        self.assertNotEqual(first.season, second.season)
+
+    def test_same_member_can_join_different_clubs(self):
+        other_club = Club.objects.create(name="Other Swim Club")
+        other_season = make_season(other_club)
+
+        ClubMembership.objects.create(club=self.club, season=self.season, member=self.member)
+        ClubMembership.objects.create(club=other_club, season=other_season, member=self.member)
+
+        self.assertEqual(self.member.member_of.count(), 2)
+
+    def test_deleting_club_is_blocked_while_a_season_has_memberships(self):
+        # Club -> Season is CASCADE, but ClubMembership -> Season is PROTECT, so
+        # the club can't be deleted while one of its seasons is still referenced.
+        ClubMembership.objects.create(club=self.club, season=self.season, member=self.member)
+
+        with self.assertRaises(ProtectedError):
+            self.club.delete()
+
+        self.assertTrue(ClubMembership.objects.exists())
+
+    def test_deleting_empty_club_cascades_to_its_seasons(self):
         self.club.delete()
 
-        self.assertFalse(ClubMembership.objects.exists())
-        self.assertTrue(Member.objects.filter(pk=self.member.pk).exists())
+        self.assertFalse(Club.objects.filter(pk=self.club.pk).exists())
+        self.assertFalse(Season.objects.filter(pk=self.season.pk).exists())
 
     def test_deleting_member_deletes_membership_but_keeps_club(self):
-        ClubMembership.objects.create(
-            club=self.club,
-            member=self.member,
-            license="LIC-001",
-        )
+        ClubMembership.objects.create(club=self.club, season=self.season, member=self.member)
 
         self.member.delete()
 
         self.assertFalse(ClubMembership.objects.exists())
         self.assertTrue(Club.objects.filter(pk=self.club.pk).exists())
 
+    def test_season_is_protected_while_referenced(self):
+        ClubMembership.objects.create(club=self.club, season=self.season, member=self.member)
+
+        with self.assertRaises(ProtectedError):
+            self.season.delete()
+
     def test_memberships_are_ordered_by_club_then_member_name(self):
         alpha_club = Club.objects.create(name="Alpha Club")
         zulu_club = Club.objects.create(name="Zulu Club")
+        alpha_season = make_season(alpha_club)
+        zulu_season = make_season(zulu_club)
 
         jane = Member.objects.create(first_name="Jane", last_name="Doe")
         alice = Member.objects.create(first_name="Alice", last_name="Smith")
         bob = Member.objects.create(first_name="Bob", last_name="Smith")
 
-        ClubMembership.objects.create(club=zulu_club, member=bob)
-        ClubMembership.objects.create(club=alpha_club, member=bob)
-        ClubMembership.objects.create(club=alpha_club, member=alice)
-        ClubMembership.objects.create(club=alpha_club, member=jane)
+        ClubMembership.objects.create(club=zulu_club, season=zulu_season, member=bob)
+        ClubMembership.objects.create(club=alpha_club, season=alpha_season, member=bob)
+        ClubMembership.objects.create(club=alpha_club, season=alpha_season, member=alice)
+        ClubMembership.objects.create(club=alpha_club, season=alpha_season, member=jane)
 
         self.assertEqual(
             [(membership.club.name, membership.member.last_name, membership.member.first_name) for membership in ClubMembership.objects.all()],
@@ -168,14 +180,11 @@ class ClubMembershipModelTests(TestCase):
         )
 
     def test_reverse_relations(self):
-        membership = ClubMembership.objects.create(
-            club=self.club,
-            member=self.member,
-            license="LIC-001",
-        )
+        membership = ClubMembership.objects.create(club=self.club, season=self.season, member=self.member)
 
-        self.assertEqual(list(self.club.members.all()), [membership])
+        self.assertEqual(list(self.club.clubmemberships.all()), [membership])
         self.assertEqual(list(self.member.member_of.all()), [membership])
+        self.assertEqual(list(self.season.memberships.all()), [membership])
 
     def test_verbose_names(self):
         self.assertEqual(ClubMembership._meta.verbose_name, "club membership")
@@ -430,3 +439,37 @@ class SeasonGetCurrentTests(TestCase):
     def test_requires_an_active_club(self):
         with self.assertRaises(RuntimeError):
             Season.get_current(datetime.date(2026, 12, 25))
+
+
+class AdminRegistrationSmokeTests(TestCase):
+    """Every registered model across all apps must have a working admin: load
+    each changelist and add page to catch bad list_display / search_fields /
+    fieldsets / autocomplete targets in any app's admin config."""
+
+    def setUp(self):
+        self.admin = get_user_model().objects.create_superuser(email="root@club.test", password="pw-secret-123")
+        self.client.force_login(self.admin)
+
+    def test_every_model_is_registered_in_admin(self):
+        from django.apps import apps
+
+        registered = set(django_admin.site._registry)
+        # Concrete, non-auto-created models in these apps should all be registered.
+        project_apps = {"authentication", "club", "members", "teams"}
+        for model in apps.get_models():
+            if model._meta.app_label not in project_apps or model._meta.auto_created:
+                continue
+            with self.subTest(model=model.__name__):
+                self.assertIn(model, registered, f"{model.__name__} is not registered in the admin")
+
+    def test_all_changelists_load(self):
+        for model in django_admin.site._registry:
+            url = reverse(f"admin:{model._meta.app_label}_{model._meta.model_name}_changelist")
+            with self.subTest(model=model.__name__):
+                self.assertEqual(self.client.get(url).status_code, 200)
+
+    def test_all_add_pages_load(self):
+        for model in django_admin.site._registry:
+            url = reverse(f"admin:{model._meta.app_label}_{model._meta.model_name}_add")
+            with self.subTest(model=model.__name__):
+                self.assertEqual(self.client.get(url).status_code, 200)

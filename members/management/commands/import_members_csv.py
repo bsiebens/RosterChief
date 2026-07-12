@@ -35,7 +35,6 @@ class Command(BaseCommand):
                 f"Members created: {result.created_members}. "
                 f"Members updated: {result.updated_members}. "
                 f"Users created: {result.created_users}. "
-                f"Clubs created: {result.created_clubs}. "
                 f"Memberships created: {result.created_memberships}. "
                 f"Memberships updated: {result.updated_memberships}. "
                 f"Rows skipped: {result.skipped_rows}."

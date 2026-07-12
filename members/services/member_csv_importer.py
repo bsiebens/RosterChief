@@ -7,7 +7,8 @@ from typing import IO, Any
 from django.contrib.auth import get_user_model
 from django.db import transaction
 
-from club.models import Club, ClubMembership
+from club.models import Club, ClubMembership, Season
+from club.tenancy import reset_current_club, set_current_club
 from members.models import Member
 
 REQUIRED_COLUMNS = {"first_name", "last_name", "email", "date_of_birth", "create_account", "club_name", "license_number"}
@@ -27,7 +28,6 @@ class MemberImportResult:
     created_members: int = 0
     updated_members: int = 0
     created_users: int = 0
-    created_clubs: int = 0
     created_memberships: int = 0
     updated_memberships: int = 0
     skipped_rows: int = 0
@@ -42,7 +42,6 @@ class MemberImportResult:
 class ImportedMemberRowResult:
     member_created: bool
     user_created: bool
-    club_created: bool
     membership_created: bool
 
 
@@ -91,9 +90,6 @@ class MemberCsvImporter:
             if row_result.user_created:
                 result.created_users += 1
 
-            if row_result.club_created:
-                result.created_clubs += 1
-
             if row_result.membership_created:
                 result.created_memberships += 1
             else:
@@ -127,11 +123,13 @@ class MemberCsvImporter:
             },
         )
 
-        club, club_created = Club.objects.get_or_create(name=club_name)
+        club, _ = Club.objects.get_or_create(name=club_name)
+        season = self.get_current_season(club)
 
         _, membership_created = ClubMembership.objects.update_or_create(
             club=club,
             member=member,
+            season=season,
             defaults={
                 "license": license_number,
             },
@@ -140,9 +138,22 @@ class MemberCsvImporter:
         return ImportedMemberRowResult(
             member_created=member_created,
             user_created=user_created,
-            club_created=club_created,
             membership_created=membership_created,
         )
+
+    def get_current_season(self, club) -> Season:
+        # Season.get_current() is tenant-scoped, so bind the row's club as the
+        # active tenant for the lookup.
+        token = set_current_club(club)
+        try:
+            season = Season.get_current()
+        finally:
+            reset_current_club(token)
+
+        if season is None:
+            raise ValueError(f"No current season for club '{club.name}'.")
+
+        return season
 
     def get_or_create_user(self, email) -> tuple[User, bool]:
         user, created = User.objects.get_or_create(

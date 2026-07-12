@@ -93,7 +93,9 @@ class FamilyMembership(models.Model):
         verbose_name = _("family membership")
         verbose_name_plural = _("family memberships")
         ordering = ["family", "role", "member__last_name", "member__first_name"]
-        unique_together = ("family", "member")
+        constraints = [
+            models.UniqueConstraint(fields=["family", "member"], name="unique_member_per_family"),
+        ]
 
     def __str__(self):
         return f"{self.family} - {self.member} ({self.get_role_display()})"

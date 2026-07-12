@@ -1,5 +1,5 @@
 import tempfile
-from datetime import date
+from datetime import date, timedelta
 from io import StringIO
 from pathlib import Path
 
@@ -9,9 +9,10 @@ from django.core.management.base import CommandError
 from django.db import IntegrityError
 from django.db.models import SET_NULL
 from django.test import TestCase
+from django.utils import timezone
 
 from authentication.models import User
-from club.models import Club, ClubMembership
+from club.models import Club, ClubMembership, Season
 from members.admin import FamilyAdmin
 from members.models import Family, FamilyMembership, Member
 from members.services import MemberImportResult
@@ -292,6 +293,17 @@ class AdminSmokeTests(TestCase):
 
 
 class ImportMembersCsvCommandTests(TestCase):
+    def setUp(self):
+        # Memberships are season-scoped: the importer attaches each one to the
+        # club's current season, so the target club needs one covering today.
+        self.club = Club.objects.create(name="City Swim Club")
+        today = timezone.localdate()
+        self.season = Season.objects.create(
+            club=self.club,
+            start_date=today - timedelta(days=90),
+            end_date=today + timedelta(days=275),
+        )
+
     def write_csv(self, content):
         temp_file = tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False, encoding="utf-8")
         temp_file.write(content)
@@ -329,7 +341,6 @@ class ImportMembersCsvCommandTests(TestCase):
         self.assertIn("Import complete.", stdout)
         self.assertIn("Members created: 1.", stdout)
         self.assertIn("Users created: 1.", stdout)
-        self.assertIn("Clubs created: 1.", stdout)
         self.assertIn("Memberships created: 1.", stdout)
         self.assertIn("Rows skipped: 0.", stdout)
 
@@ -341,9 +352,9 @@ class ImportMembersCsvCommandTests(TestCase):
         self.assertEqual(member.user.email, "jane@example.com")
         self.assertFalse(member.user.has_usable_password())
 
-        club = Club.objects.get(name="City Swim Club")
-        membership = ClubMembership.objects.get(club=club, member=member)
+        membership = ClubMembership.objects.get(club=self.club, member=member)
         self.assertEqual(membership.license, "LIC-001")
+        self.assertEqual(membership.season, self.season)
 
     def test_import_creates_member_without_user_when_create_account_is_false(self):
         csv_path = self.write_csv(
@@ -366,7 +377,6 @@ class ImportMembersCsvCommandTests(TestCase):
         self.assertFalse(User.objects.filter(email="john@example.com").exists())
 
     def test_import_updates_existing_member_and_membership(self):
-        club = Club.objects.create(name="City Swim Club")
         member = Member.objects.create(
             first_name="Old",
             last_name="Name",
@@ -374,7 +384,8 @@ class ImportMembersCsvCommandTests(TestCase):
             date_of_birth=date(2010, 1, 1),
         )
         ClubMembership.objects.create(
-            club=club,
+            club=self.club,
+            season=self.season,
             member=member,
             license="OLD-LIC",
         )
@@ -401,7 +412,7 @@ class ImportMembersCsvCommandTests(TestCase):
         self.assertEqual(member.last_name, "Doe")
         self.assertEqual(member.date_of_birth, date(2010, 4, 12))
 
-        membership = ClubMembership.objects.get(club=club, member=member)
+        membership = ClubMembership.objects.get(club=self.club, member=member)
         self.assertEqual(membership.license, "LIC-NEW")
 
     def test_import_links_existing_user_when_create_account_is_true(self):
@@ -538,6 +549,26 @@ class ImportMembersCsvCommandTests(TestCase):
         self.assertIn("Members created: 1.", stdout)
         self.assertIn("Rows skipped: 1.", stdout)
         self.assertFalse(Member.objects.filter(email="nofirst@example.com").exists())
+
+    def test_import_skips_row_when_club_has_no_current_season(self):
+        # "New Club" has no season, so the row is skipped and — because the row
+        # is atomic — the member and club creation roll back too.
+        csv_path = self.write_csv(
+            "\n".join(
+                [
+                    "first_name,last_name,email,date_of_birth,create_account,club_name,license_number",
+                    "Jane,Doe,jane@example.com,2010-04-12,false,New Club,LIC-001",
+                ]
+            )
+        )
+
+        stdout, stderr = self.call_import_command(csv_path)
+
+        self.assertIn("Row 2 skipped:", stderr)
+        self.assertIn("No current season for club 'New Club'.", stderr)
+        self.assertIn("Rows skipped: 1.", stdout)
+        self.assertFalse(Member.objects.filter(email="jane@example.com").exists())
+        self.assertFalse(Club.objects.filter(name="New Club").exists())
 
 
 class MemberImportResultTests(TestCase):

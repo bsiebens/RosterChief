@@ -47,22 +47,6 @@ class Club(UUIDModel):
         return slug
 
 
-class ClubMembership(UUIDModel):
-    member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="member_of", verbose_name=_("member"))
-    club = models.ForeignKey(Club, on_delete=models.CASCADE, related_name="members", verbose_name=_("club"))
-
-    license = models.CharField(_("license"), max_length=250, blank=True)
-
-    class Meta:
-        verbose_name = _("club membership")
-        verbose_name_plural = _("club memberships")
-        ordering = ["club", "member__last_name", "member__first_name"]
-        unique_together = ("club", "member")
-
-    def __str__(self):
-        return f"{self.club} - {self.member}"
-
-
 class Season(ClubScopedModel):
     start_date = models.DateField(_("start date"))
     end_date = models.DateField(_("end date"))
@@ -73,6 +57,9 @@ class Season(ClubScopedModel):
     class Meta:
         verbose_name = _("season")
         verbose_name_plural = _("seasons")
+        constraints = [
+            models.UniqueConstraint(fields=["club", "start_date", "end_date"], name="unique_season_dates_per_club"),
+        ]
 
     @property
     def name(self):
@@ -86,3 +73,38 @@ class Season(ClubScopedModel):
             date = timezone.now().date()
 
         return cls.objects.current_club().filter(start_date__lte=date, end_date__gte=date).first()
+
+
+class ClubMembership(ClubScopedModel):
+    class StatusChoices(models.TextChoices):
+        ACTIVE = "active", _("active")
+        PENDING = "pending", _("pending")
+        LAPSED = "lapsed", _("lapsed")
+        CANCELLED = "cancelled", _("cancelled")
+
+    class FeeStatus(models.TextChoices):
+        UNPAID = "unpaid", _("unpaid")
+        PAID = "paid", _("paid")
+        PARTIALLY_PAID = "partially_paid", _("partially paid")
+        WAIVED = "waived", _("waived")
+
+    member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="member_of", verbose_name=_("member"))
+    season = models.ForeignKey(Season, on_delete=models.PROTECT, related_name="memberships", verbose_name=_("season"))
+
+    license = models.CharField(_("license"), max_length=250, blank=True)
+    status = models.CharField(_("status"), max_length=250, choices=StatusChoices.choices, default=StatusChoices.PENDING)
+    fee_status = models.CharField(_("fee status"), max_length=250, choices=FeeStatus.choices, default=FeeStatus.UNPAID)
+
+    signed_up_at = models.DateField(_("signed up at"), blank=True, null=True)
+    activated_at = models.DateField(_("activated at"), blank=True, null=True)
+
+    class Meta:
+        verbose_name = _("club membership")
+        verbose_name_plural = _("club memberships")
+        ordering = ["club", "member__last_name", "member__first_name"]
+        constraints = [
+            models.UniqueConstraint(fields=["club", "member", "season"], name="unique_member_per_club_per_season"),
+        ]
+
+    def __str__(self):
+        return f"{self.club} - {self.member}"
