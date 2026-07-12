@@ -50,6 +50,7 @@ INSTALLED_APPS = [
     "teams.apps.TeamsConfig",
     "events.apps.EventsConfig",
     "formbuilder.apps.FormbuilderConfig",
+    "shop.apps.ShopConfig",
 ]
 
 MIDDLEWARE = [
