@@ -55,9 +55,15 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "club.tenancy.ClubTenantMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
+
+# Multi-tenancy: base domain whose subdomains resolve to a club, e.g.
+# "ajax-united.clubmanager.app" -> the club with slug "ajax-united". Leave
+# unset to fall back to generic "slug.example.com" (3+ label) resolution.
+CLUBMANAGER_BASE_DOMAIN = config("CLUBMANAGER_BASE_DOMAIN", default="")
 
 ROOT_URLCONF = "clubmanager.urls"
 

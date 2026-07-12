@@ -1,12 +1,27 @@
+import datetime
+
 from django.db import models
+from django.utils import timezone
+from django.utils.text import slugify
 from django.utils.translation import gettext_lazy as _
 
-from clubmanager.base import UUIDModel
+from clubmanager.base import ClubScopedModel, UUIDModel
 from members.models import Member
+
+
+class ClubManager(models.Manager):
+    def current(self):
+        """Return the club for the active tenant context, if any."""
+        from .tenancy import get_current_club
+
+        return get_current_club()
 
 
 class Club(UUIDModel):
     name = models.CharField(_("name"), max_length=255)
+    slug = models.SlugField(_("slug"), max_length=255, unique=True, blank=True, help_text=_("Drives subdomain / path resolution (e.g. ajax-united.clubmanager.app)."))
+
+    objects = ClubManager()
 
     class Meta:
         verbose_name = _("club")
@@ -15,6 +30,21 @@ class Club(UUIDModel):
 
     def __str__(self):
         return self.name
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            self.slug = self._unique_slug()
+        super().save(*args, **kwargs)
+
+    def _unique_slug(self):
+        base = slugify(self.name) or "club"
+        slug = base
+        suffix = 2
+        existing = Club.objects.exclude(pk=self.pk)
+        while existing.filter(slug=slug).exists():
+            slug = f"{base}-{suffix}"
+            suffix += 1
+        return slug
 
 
 class ClubMembership(UUIDModel):
@@ -31,3 +61,22 @@ class ClubMembership(UUIDModel):
 
     def __str__(self):
         return f"{self.club} - {self.member}"
+
+
+class Season(ClubScopedModel):
+    start_date = models.DateField(_("start date"))
+    end_date = models.DateField(_("end date"))
+
+    def __str__(self):
+        return f"{self.start_date} - {self.end_date}"
+
+    class Meta:
+        verbose_name = _("season")
+        verbose_name_plural = _("seasons")
+
+    @classmethod
+    def get_current(cls, date: datetime.date | None = None):
+        if date is None:
+            date = timezone.now().date()
+            
+        
