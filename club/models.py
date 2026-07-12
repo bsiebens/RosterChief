@@ -2,10 +2,9 @@ import datetime
 
 from django.db import models
 from django.utils import timezone
-from django.utils.text import slugify
 from django.utils.translation import gettext_lazy as _
 
-from clubmanager.base import ClubScopedModel, UUIDModel
+from clubmanager.base import ClubScopedModel, UUIDModel, unique_slugify
 from members.models import Member
 
 
@@ -33,18 +32,8 @@ class Club(UUIDModel):
 
     def save(self, *args, **kwargs):
         if not self.slug:
-            self.slug = self._unique_slug()
+            self.slug = unique_slugify(self, self.name)
         super().save(*args, **kwargs)
-
-    def _unique_slug(self):
-        base = slugify(self.name) or "club"
-        slug = base
-        suffix = 2
-        existing = Club.objects.exclude(pk=self.pk)
-        while existing.filter(slug=slug).exists():
-            slug = f"{base}-{suffix}"
-            suffix += 1
-        return slug
 
 
 class Season(ClubScopedModel):

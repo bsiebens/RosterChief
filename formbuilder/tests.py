@@ -76,6 +76,51 @@ class ModelTests(FormbuilderTestBase):
             self.name.delete()
 
 
+class FormSlugTests(FormbuilderTestBase):
+    def test_slug_auto_populated_from_title(self):
+        form = Form.objects.create(club=self.club, title="Registration Form")
+
+        self.assertEqual(form.slug, "registration-form")
+
+    def test_explicit_slug_is_preserved(self):
+        form = Form.objects.create(club=self.club, title="Registration", slug="reg")
+
+        self.assertEqual(form.slug, "reg")
+
+    def test_slug_is_unique_per_club_with_suffix(self):
+        first = Form.objects.create(club=self.club, title="Registration")
+        second = Form.objects.create(club=self.club, title="Registration")
+
+        self.assertEqual(first.slug, "registration")
+        self.assertEqual(second.slug, "registration-2")
+
+
+class FieldKeyTests(FormbuilderTestBase):
+    def test_key_auto_populated_from_label(self):
+        field = Field.objects.create(form=self.form, label="First Name", order=5)
+
+        self.assertEqual(field.key, "first-name")
+
+    def test_explicit_key_is_preserved(self):
+        field = Field.objects.create(form=self.form, key="fn", label="First Name", order=5)
+
+        self.assertEqual(field.key, "fn")
+
+    def test_key_is_unique_per_form_with_suffix(self):
+        first = Field.objects.create(form=self.form, label="First Name", order=5)
+        second = Field.objects.create(form=self.form, label="First Name", order=6)
+
+        self.assertEqual(first.key, "first-name")
+        self.assertEqual(second.key, "first-name-2")
+
+    def test_same_key_allowed_in_a_different_form(self):
+        other_form = Form.objects.create(club=self.club, title="Other", slug="other")
+        here = Field.objects.create(form=self.form, label="First Name", order=5)
+        there = Field.objects.create(form=other_form, label="First Name", order=1)
+
+        self.assertEqual(here.key, there.key)
+
+
 class FieldChoicesTests(FormbuilderTestBase):
     def test_string_options(self):
         self.assertEqual(field_choices(self.size), [("S", "S"), ("M", "M"), ("L", "L")])

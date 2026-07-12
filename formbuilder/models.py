@@ -2,14 +2,16 @@ from django.db import models
 from django.db.models import UniqueConstraint
 from django.utils.translation import gettext_lazy as _
 
-from clubmanager.base import ClubScopedModel, UUIDModel
+from clubmanager.base import ClubScopedModel, UUIDModel, unique_slugify
 from members.models import Member
 
 
 class Form(ClubScopedModel):
     title = models.CharField(_("title"), max_length=255)
-    slug = models.SlugField(_("slug"))
+    slug = models.SlugField(_("slug"), blank=True)
     description = models.TextField(_("description"), blank=True)
+
+    slug_source = "title"
 
     is_active = models.BooleanField(_("is active?"), default=True)
     login_required = models.BooleanField(_("login required?"), default=False)
@@ -43,7 +45,7 @@ class Field(UUIDModel):
         FILE = "file", _("file")
 
     form = models.ForeignKey(Form, on_delete=models.CASCADE, related_name="fields", verbose_name=_("form"))
-    key = models.SlugField(_("key"))
+    key = models.SlugField(_("key"), blank=True)
     label = models.CharField(_("label"), max_length=255)
     field_type = models.CharField(_("field type"), max_length=255, choices=FieldType.choices, default=FieldType.TEXT)
     required = models.BooleanField(_("required?"), default=True)
@@ -59,6 +61,11 @@ class Field(UUIDModel):
         constraints = [
             UniqueConstraint(fields=["form", "key"], name="unique_field_key_per_form"),
         ]
+
+    def save(self, *args, **kwargs):
+        if not self.key:
+            self.key = unique_slugify(self, self.label, slug_field="key", scope={"form": self.form})
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return self.label
