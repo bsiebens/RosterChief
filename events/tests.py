@@ -1,5 +1,7 @@
 from datetime import timedelta
+from io import StringIO
 
+from django.core.management import call_command
 from django.db import IntegrityError
 from django.test import TestCase
 from django.utils import timezone
@@ -8,8 +10,15 @@ from club.models import Club, Season
 from members.models import Member
 from teams.models import Position, Team, TeamMembership
 
-from .models import Attendance, Event, Location, Opponent
-from .services import effective_members
+from .models import Attendance, Event, EventSeries, Location, Opponent
+from .services import (
+    cancel_occurrence,
+    detach_occurrence,
+    effective_members,
+    generate_occurrences,
+    occurrence_datetimes,
+    propagate_series,
+)
 
 
 class EventsTestBase(TestCase):
@@ -159,3 +168,143 @@ class RosterChangeSyncTests(EventsTestBase):
         TeamMembership.objects.get(team=self.team, member=self.alice).delete()
 
         self.assertTrue(past.attendances.filter(member=self.alice).exists())
+
+
+class RecurrenceTestBase(EventsTestBase):
+    def setUp(self):
+        super().setUp()
+        self.anchor = (timezone.now() + timedelta(days=1)).replace(microsecond=0)
+
+    def make_series(self, **kwargs):
+        kwargs.setdefault("club", self.club)
+        kwargs.setdefault("title", "Weekly Training")
+        kwargs.setdefault("kind", Event.EventKind.TRAINING)
+        kwargs.setdefault("rrule", "FREQ=WEEKLY;COUNT=4")
+        kwargs.setdefault("dtstart", self.anchor)
+        kwargs.setdefault("duration", timedelta(hours=2))
+        series = EventSeries.objects.create(**kwargs)
+        series.teams.set([self.team])
+        return series
+
+
+class OccurrenceExpansionTests(RecurrenceTestBase):
+    def test_str(self):
+        self.assertEqual(str(self.make_series()), "Weekly Training")
+
+    def test_weekly_expansion(self):
+        series = self.make_series()
+
+        dts = occurrence_datetimes(series, self.anchor + timedelta(days=30))
+
+        self.assertEqual(dts[0], self.anchor)
+        self.assertEqual(dts[1], self.anchor + timedelta(weeks=1))
+        self.assertEqual(len(dts), 4)
+
+    def test_until_bounds_expansion(self):
+        series = self.make_series()
+
+        dts = occurrence_datetimes(series, self.anchor + timedelta(days=10))
+
+        self.assertEqual(len(dts), 2)
+
+    def test_excluded_dates_are_skipped(self):
+        series = self.make_series()
+        skipped = self.anchor + timedelta(weeks=1)
+        series.excluded_dates = [skipped.isoformat()]
+        series.save()
+
+        dts = occurrence_datetimes(series, self.anchor + timedelta(days=30))
+
+        self.assertNotIn(skipped, dts)
+        self.assertEqual(len(dts), 3)
+
+
+class GenerateOccurrencesTests(RecurrenceTestBase):
+    def test_materialises_occurrences_with_template_and_attendance(self):
+        series = self.make_series()
+
+        created = generate_occurrences(series, self.anchor + timedelta(days=30))
+
+        self.assertEqual(len(created), 4)
+        first = series.occurrences.order_by("start").first()
+        self.assertEqual(first.start, self.anchor)
+        self.assertEqual(first.end, self.anchor + timedelta(hours=2))
+        self.assertEqual(first.title, "Weekly Training")
+        self.assertEqual(first.kind, Event.EventKind.TRAINING)
+        # Audience copied from the series, so attendance follows the roster.
+        self.assertEqual(set(first.attendances.values_list("member_id", flat=True)), {self.alice.id, self.bob.id})
+        series.refresh_from_db()
+        self.assertIsNotNone(series.generated_until)
+
+    def test_generation_is_idempotent(self):
+        series = self.make_series()
+        until = self.anchor + timedelta(days=30)
+
+        generate_occurrences(series, until)
+        generate_occurrences(series, until)
+
+        self.assertEqual(series.occurrences.count(), 4)
+
+
+class SingleOccurrenceTests(RecurrenceTestBase):
+    def test_cancel_deletes_and_prevents_regeneration(self):
+        series = self.make_series()
+        until = self.anchor + timedelta(days=30)
+        generate_occurrences(series, until)
+        target = series.occurrences.order_by("start")[1]
+        target_start = target.start
+
+        cancel_occurrence(target)
+        self.assertFalse(series.occurrences.filter(start=target_start).exists())
+
+        generate_occurrences(series, until)
+        self.assertFalse(series.occurrences.filter(start=target_start).exists())
+        self.assertEqual(series.occurrences.count(), 3)
+
+    def test_cancel_soft_marks_cancelled(self):
+        series = self.make_series()
+        generate_occurrences(series, self.anchor + timedelta(days=30))
+        target = series.occurrences.order_by("start").first()
+
+        cancel_occurrence(target, hard_delete=False)
+
+        target.refresh_from_db()
+        self.assertTrue(target.cancelled)
+        self.assertIn(target.start.isoformat(), series.excluded_dates)
+
+    def test_detached_occurrence_is_left_untouched_by_propagation(self):
+        series = self.make_series()
+        generate_occurrences(series, self.anchor + timedelta(days=30))
+        detached = series.occurrences.order_by("start").first()
+        detach_occurrence(detached)
+
+        series.title = "Renamed"
+        series.save()
+        propagate_series(series)
+
+        detached.refresh_from_db()
+        self.assertEqual(detached.title, "Weekly Training")
+        other = series.occurrences.exclude(pk=detached.pk).order_by("start").first()
+        self.assertEqual(other.title, "Renamed")
+
+    def test_propagation_updates_audience_and_attendance(self):
+        series = self.make_series()
+        generate_occurrences(series, self.anchor + timedelta(days=30))
+        carol = Member.objects.create(first_name="Carol", last_name="Cedar")
+        series.invited_members.set([carol])
+
+        propagate_series(series)
+
+        event = series.occurrences.order_by("start").first()
+        self.assertIn(carol.id, set(event.attendances.values_list("member_id", flat=True)))
+
+
+class ExtendSeriesCommandTests(RecurrenceTestBase):
+    def test_command_generates_occurrences(self):
+        series = self.make_series()
+        out = StringIO()
+
+        call_command("extend_event_series", stdout=out)
+
+        self.assertEqual(series.occurrences.count(), 4)
+        self.assertIn("Done.", out.getvalue())

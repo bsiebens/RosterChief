@@ -45,6 +45,10 @@ class Event(ClubScopedModel):
         SOCIAL = "social", _("social")
         OTHER = "other", _("other")
 
+    series = models.ForeignKey("EventSeries", on_delete=models.CASCADE, related_name="occurrences", null=True, blank=True, verbose_name=_("series"), help_text=_("The recurring series this occurrence belongs to; blank for one-off events."))
+    detached = models.BooleanField(_("detached"), default=False, help_text=_("Edited independently; excluded from series-wide updates and regeneration."))
+    cancelled = models.BooleanField(_("cancelled"), default=False)
+
     teams = models.ManyToManyField(Team, related_name="scheduled_events", blank=True, verbose_name=_("teams"))
     invited_members = models.ManyToManyField(Member, related_name="invited_to_events", blank=True, verbose_name=_("invited members"))
     excluded_members = models.ManyToManyField(Member, related_name="excluded_from_events", blank=True, verbose_name=_("excluded members"))
@@ -65,6 +69,33 @@ class Event(ClubScopedModel):
         verbose_name = _("event")
         verbose_name_plural = _("events")
         ordering = ["-start"]
+
+    def __str__(self):
+        return self.title
+
+
+class EventSeries(ClubScopedModel):
+    """A recurring event definition that materialises concrete Event rows."""
+
+    rrule = models.CharField(_("recurrence rule"), max_length=255, help_text=_("RFC 5545 RRULE, e.g. FREQ=WEEKLY;BYDAY=MO,WE."))
+    dtstart = models.DateTimeField(_("first occurrence"))
+    duration = models.DurationField(_("duration"), null=True, blank=True, help_text=_("Length of each occurrence; sets each event's end."))
+    excluded_dates = models.JSONField(_("excluded dates"), default=list, blank=True, help_text=_("ISO start datetimes of occurrences removed from the series (EXDATEs)."))
+    generated_until = models.DateTimeField(_("generated until"), null=True, blank=True, help_text=_("Occurrences have been materialised up to this point."))
+
+    # Template copied onto each generated occurrence.
+    kind = models.CharField(_("kind"), max_length=10, choices=Event.EventKind.choices, default=Event.EventKind.OTHER)
+    title = models.CharField(_("title"), max_length=255)
+    location = models.ForeignKey(Location, on_delete=models.SET_NULL, related_name="event_series", null=True, blank=True, verbose_name=_("location"))
+    opponent = models.ForeignKey(Opponent, on_delete=models.SET_NULL, related_name="event_series", null=True, blank=True, verbose_name=_("opponent"))
+    teams = models.ManyToManyField(Team, related_name="event_series", blank=True, verbose_name=_("teams"))
+    invited_members = models.ManyToManyField(Member, related_name="invited_to_event_series", blank=True, verbose_name=_("invited members"))
+    excluded_members = models.ManyToManyField(Member, related_name="excluded_from_event_series", blank=True, verbose_name=_("excluded members"))
+
+    class Meta:
+        verbose_name = _("event series")
+        verbose_name_plural = _("event series")
+        ordering = ["title"]
 
     def __str__(self):
         return self.title
