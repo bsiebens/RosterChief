@@ -1,11 +1,30 @@
+import datetime
 import uuid
+from contextlib import contextmanager
 
 from django.db import IntegrityError
-from django.test import TestCase
+from django.test import RequestFactory, TestCase, override_settings
 
 from members.models import Member
 
-from .models import Club, ClubMembership
+from .models import Club, ClubMembership, Season
+from .tenancy import (
+    ClubTenantMiddleware,
+    get_current_club,
+    require_current_club,
+    reset_current_club,
+    set_current_club,
+)
+
+
+@contextmanager
+def with_club(club):
+    """Bind ``club`` as the active tenant for the duration of the block."""
+    token = set_current_club(club)
+    try:
+        yield club
+    finally:
+        reset_current_club(token)
 
 
 class ClubModelTests(TestCase):
@@ -162,4 +181,183 @@ class ClubMembershipModelTests(TestCase):
         self.assertEqual(ClubMembership._meta.verbose_name_plural, "club memberships")
 
 
-# Create your tests here.
+class ClubSlugTests(TestCase):
+    def test_slug_is_derived_from_name(self):
+        club = Club.objects.create(name="City Swim Club")
+
+        self.assertEqual(club.slug, "city-swim-club")
+
+    def test_explicit_slug_is_kept(self):
+        club = Club.objects.create(name="City Swim Club", slug="ajax-united")
+
+        self.assertEqual(club.slug, "ajax-united")
+
+    def test_derived_slugs_are_made_unique(self):
+        first = Club.objects.create(name="City Swim Club")
+        second = Club.objects.create(name="City Swim Club")
+
+        self.assertEqual(first.slug, "city-swim-club")
+        self.assertEqual(second.slug, "city-swim-club-2")
+
+    def test_slug_is_unique(self):
+        Club.objects.create(name="First", slug="shared")
+
+        with self.assertRaises(IntegrityError):
+            Club.objects.create(name="Second", slug="shared")
+
+
+@override_settings(
+    CLUBMANAGER_BASE_DOMAIN="clubmanager.app",
+    ALLOWED_HOSTS=[".clubmanager.app", ".example.com", ".example.org"],
+)
+class ClubTenantMiddlewareTests(TestCase):
+    def setUp(self):
+        self.factory = RequestFactory()
+        self.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        self.captured = {}
+        self.middleware = ClubTenantMiddleware(self._capture)
+
+    def _capture(self, request):
+        # Runs inside the middleware, while the context var is set.
+        self.captured["context_club"] = get_current_club()
+        return "response"
+
+    def _run(self, host):
+        request = self.factory.get("/", HTTP_HOST=host)
+        response = self.middleware(request)
+        return request, response
+
+    def test_subdomain_resolves_to_club(self):
+        request, response = self._run("ajax-united.clubmanager.app")
+
+        self.assertEqual(response, "response")
+        self.assertEqual(request.club, self.club)
+        self.assertEqual(self.captured["context_club"], self.club)
+
+    def test_subdomain_resolution_ignores_port(self):
+        request, _ = self._run("ajax-united.clubmanager.app:8000")
+
+        self.assertEqual(request.club, self.club)
+
+    def test_unknown_subdomain_sets_none(self):
+        request, _ = self._run("unknown-club.clubmanager.app")
+
+        self.assertIsNone(request.club)
+
+    def test_bare_base_domain_has_no_club(self):
+        request, _ = self._run("clubmanager.app")
+
+        self.assertIsNone(request.club)
+
+    def test_www_is_treated_as_no_club(self):
+        request, _ = self._run("www.clubmanager.app")
+
+        self.assertIsNone(request.club)
+
+    def test_foreign_domain_has_no_club(self):
+        request, _ = self._run("ajax-united.example.org")
+
+        self.assertIsNone(request.club)
+
+    def test_context_var_is_reset_after_request(self):
+        self._run("ajax-united.clubmanager.app")
+
+        self.assertIsNone(get_current_club())
+
+    @override_settings(CLUBMANAGER_BASE_DOMAIN="")
+    def test_generic_host_resolution_without_base_domain(self):
+        request, _ = self._run("ajax-united.example.com")
+
+        self.assertEqual(request.club, self.club)
+
+    @override_settings(CLUBMANAGER_BASE_DOMAIN="")
+    def test_two_label_host_has_no_club_without_base_domain(self):
+        request, _ = self._run("example.com")
+
+        self.assertIsNone(request.club)
+
+
+class _FakeRequest:
+    def __init__(self, host):
+        self._host = host
+
+    def get_host(self):
+        return self._host
+
+
+@override_settings(CLUBMANAGER_BASE_DOMAIN="clubmanager.app")
+class GetSubdomainTests(TestCase):
+    def subdomain(self, host):
+        return ClubTenantMiddleware.get_subdomain(_FakeRequest(host))
+
+    def test_empty_host_returns_none(self):
+        self.assertIsNone(self.subdomain(""))
+
+    def test_trailing_dot_is_stripped(self):
+        self.assertEqual(self.subdomain("ajax-united.clubmanager.app."), "ajax-united")
+
+    def test_nested_subdomain_uses_leftmost_label(self):
+        self.assertEqual(self.subdomain("a.b.clubmanager.app"), "a")
+
+
+class TenantContextTests(TestCase):
+    def setUp(self):
+        self.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+
+    def test_require_current_club_returns_active_club(self):
+        with with_club(self.club):
+            self.assertEqual(require_current_club(), self.club)
+
+    def test_require_current_club_raises_without_context(self):
+        with self.assertRaises(RuntimeError):
+            require_current_club()
+
+    def test_club_manager_current_returns_active_club(self):
+        with with_club(self.club):
+            self.assertEqual(Club.objects.current(), self.club)
+
+    def test_club_manager_current_is_none_without_context(self):
+        self.assertIsNone(Club.objects.current())
+
+
+class TenantScopedModelTests(TestCase):
+    def setUp(self):
+        self.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        self.other = Club.objects.create(name="Rival FC", slug="rival-fc")
+        self.dates = {
+            "start_date": datetime.date(2026, 8, 1),
+            "end_date": datetime.date(2027, 5, 31),
+        }
+
+    def test_save_keeps_explicit_club(self):
+        season = Season.objects.create(club=self.club, **self.dates)
+
+        self.assertEqual(season.club, self.club)
+
+    def test_save_fills_club_from_context(self):
+        with with_club(self.club):
+            season = Season.objects.create(**self.dates)
+
+        self.assertEqual(season.club, self.club)
+
+    def test_save_without_club_or_context_raises(self):
+        with self.assertRaises(RuntimeError):
+            Season.objects.create(**self.dates)
+
+    def test_for_club_filters_by_club(self):
+        mine = Season.objects.create(club=self.club, **self.dates)
+        Season.objects.create(club=self.other, **self.dates)
+
+        self.assertEqual(list(Season.objects.for_club(self.club)), [mine])
+
+    def test_current_filters_by_active_club(self):
+        mine = Season.objects.create(club=self.club, **self.dates)
+        Season.objects.create(club=self.other, **self.dates)
+
+        with with_club(self.club):
+            self.assertEqual(list(Season.objects.current()), [mine])
+
+    def test_str_shows_date_range(self):
+        season = Season.objects.create(club=self.club, **self.dates)
+
+        self.assertEqual(str(season), "2026-08-01 - 2027-05-31")
