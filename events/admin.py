@@ -26,13 +26,13 @@ class AttendanceInline(admin.TabularInline):
 
 @admin.register(EventSeries)
 class EventSeriesAdmin(admin.ModelAdmin):
-    list_display = ["title", "kind", "rrule", "dtstart", "generated_until", "club"]
+    list_display = ["title", "kind", "rrule", "dtstart", "until", "generated_until", "club"]
     list_filter = ["kind", "club"]
     search_fields = ["title"]
     autocomplete_fields = ["location", "opponent", "teams", "invited_members", "excluded_members"]
     fieldsets = [
         [None, {"fields": ["title", "kind"]}],
-        [_("Recurrence"), {"fields": ["rrule", "dtstart", "excluded_dates", "generated_until"]}],
+        [_("Recurrence"), {"fields": ["rrule", "dtstart", "until", "excluded_dates", "generated_until"]}],
         [_("Timing"), {"fields": ["duration", "gathering_offset", "deadline_offset"]}],
         [_("Audience"), {"fields": ["teams", "invited_members", "excluded_members"]}],
         [_("Where"), {"fields": ["location", "opponent"]}],

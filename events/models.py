@@ -79,6 +79,7 @@ class EventSeries(ClubScopedModel):
 
     rrule = models.CharField(_("recurrence rule"), max_length=255, help_text=_("RFC 5545 RRULE, e.g. FREQ=WEEKLY;BYDAY=MO,WE."))
     dtstart = models.DateTimeField(_("first occurrence"))
+    until = models.DateTimeField(_("until"), null=True, blank=True, help_text=_("Series end: no occurrences are generated after this. Leave blank for open-ended (bounded by the rule's own COUNT/UNTIL, if any)."))
     duration = models.DurationField(_("duration"), null=True, blank=True, help_text=_("Length of each occurrence; sets each event's end."))
     gathering_offset = models.DurationField(_("gathering offset"), null=True, blank=True, help_text=_("How long before the start each occurrence's gathering time is."))
     deadline_offset = models.DurationField(_("deadline offset"), null=True, blank=True, help_text=_("How long before the start each occurrence's sign-up deadline is."))

@@ -22,7 +22,14 @@ def horizon():
 
 
 def occurrence_datetimes(series, until):
-    """Expand the series' RRULE from its anchor up to ``until``, minus EXDATEs."""
+    """Expand the series' RRULE from its anchor up to ``until``, minus EXDATEs.
+
+    ``until`` is the generation horizon; the series' own ``until`` (its formal
+    end) further caps it, whichever comes first.
+    """
+    if series.until is not None and series.until < until:
+        until = series.until
+
     rule = rrulestr(series.rrule, dtstart=series.dtstart)
     excluded = set(series.excluded_dates)
 

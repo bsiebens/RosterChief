@@ -218,6 +218,15 @@ class OccurrenceExpansionTests(RecurrenceTestBase):
         self.assertNotIn(skipped, dts)
         self.assertEqual(len(dts), 3)
 
+    def test_series_until_caps_expansion(self):
+        series = self.make_series(rrule="FREQ=WEEKLY", until=self.anchor + timedelta(days=10))
+
+        dts = occurrence_datetimes(series, self.anchor + timedelta(days=90))
+
+        # Only the anchor and the first weekly repeat fall on/before `until`.
+        self.assertEqual(dts, [self.anchor, self.anchor + timedelta(weeks=1)])
+        self.assertTrue(all(dt <= series.until for dt in dts))
+
 
 class GenerateOccurrencesTests(RecurrenceTestBase):
     def test_materialises_occurrences_with_template_and_attendance(self):
@@ -244,6 +253,13 @@ class GenerateOccurrencesTests(RecurrenceTestBase):
         generate_occurrences(series, until)
 
         self.assertEqual(series.occurrences.count(), 4)
+
+    def test_generation_stops_at_series_until(self):
+        series = self.make_series(rrule="FREQ=WEEKLY", until=self.anchor + timedelta(days=10))
+
+        generate_occurrences(series)
+
+        self.assertEqual(series.occurrences.count(), 2)
 
     def test_gathering_and_deadline_come_from_offsets(self):
         series = self.make_series(gathering_offset=timedelta(minutes=30), deadline_offset=timedelta(days=1))
