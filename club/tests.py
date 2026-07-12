@@ -4,6 +4,7 @@ from contextlib import contextmanager
 
 from django.db import IntegrityError
 from django.test import RequestFactory, TestCase, override_settings
+from django.utils import timezone
 
 from members.models import Member
 
@@ -350,14 +351,82 @@ class TenantScopedModelTests(TestCase):
 
         self.assertEqual(list(Season.objects.for_club(self.club)), [mine])
 
-    def test_current_filters_by_active_club(self):
+    def test_current_club_filters_by_active_club(self):
         mine = Season.objects.create(club=self.club, **self.dates)
         Season.objects.create(club=self.other, **self.dates)
 
         with with_club(self.club):
-            self.assertEqual(list(Season.objects.current()), [mine])
+            self.assertEqual(list(Season.objects.current_club()), [mine])
 
-    def test_str_shows_date_range(self):
+    def test_name_is_two_digit_year_range(self):
         season = Season.objects.create(club=self.club, **self.dates)
 
-        self.assertEqual(str(season), "2026-08-01 - 2027-05-31")
+        self.assertEqual(season.name, "26-27")
+
+    def test_name_zero_pads_years(self):
+        season = Season.objects.create(
+            club=self.club,
+            start_date=datetime.date(2008, 8, 1),
+            end_date=datetime.date(2009, 5, 31),
+        )
+
+        self.assertEqual(season.name, "08-09")
+
+    def test_str_is_the_name(self):
+        season = Season.objects.create(club=self.club, **self.dates)
+
+        self.assertEqual(str(season), "26-27")
+
+
+class SeasonGetCurrentTests(TestCase):
+    def setUp(self):
+        self.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        self.other = Club.objects.create(name="Rival FC", slug="rival-fc")
+        self.season = Season.objects.create(
+            club=self.club,
+            start_date=datetime.date(2026, 8, 1),
+            end_date=datetime.date(2027, 5, 31),
+        )
+
+    def test_returns_season_covering_the_given_date(self):
+        with with_club(self.club):
+            found = Season.get_current(datetime.date(2026, 12, 25))
+
+        self.assertEqual(found, self.season)
+
+    def test_includes_boundary_dates(self):
+        with with_club(self.club):
+            self.assertEqual(Season.get_current(datetime.date(2026, 8, 1)), self.season)
+            self.assertEqual(Season.get_current(datetime.date(2027, 5, 31)), self.season)
+
+    def test_returns_none_when_no_season_covers_the_date(self):
+        with with_club(self.club):
+            self.assertIsNone(Season.get_current(datetime.date(2027, 7, 1)))
+
+    def test_is_scoped_to_the_active_club(self):
+        # The other club's season covers the same date but must not leak.
+        Season.objects.create(
+            club=self.other,
+            start_date=datetime.date(2026, 8, 1),
+            end_date=datetime.date(2027, 5, 31),
+        )
+
+        with with_club(self.other):
+            found = Season.get_current(datetime.date(2026, 12, 25))
+
+        self.assertEqual(found.club, self.other)
+
+    def test_defaults_to_today(self):
+        today = timezone.now().date()
+        current = Season.objects.create(
+            club=self.club,
+            start_date=today - datetime.timedelta(days=10),
+            end_date=today + datetime.timedelta(days=10),
+        )
+
+        with with_club(self.club):
+            self.assertEqual(Season.get_current(), current)
+
+    def test_requires_an_active_club(self):
+        with self.assertRaises(RuntimeError):
+            Season.get_current(datetime.date(2026, 12, 25))

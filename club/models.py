@@ -68,15 +68,21 @@ class Season(ClubScopedModel):
     end_date = models.DateField(_("end date"))
 
     def __str__(self):
-        return f"{self.start_date} - {self.end_date}"
+        return self.name
 
     class Meta:
         verbose_name = _("season")
         verbose_name_plural = _("seasons")
 
+    @property
+    def name(self):
+        """Short label built from the start/end years, e.g. "25-26"."""
+        return f"{self.start_date:%y}-{self.end_date:%y}"
+
     @classmethod
     def get_current(cls, date: datetime.date | None = None):
+        """Return the current club's season covering ``date`` (today by default)."""
         if date is None:
             date = timezone.now().date()
-            
-        
+
+        return cls.objects.current_club().filter(start_date__lte=date, end_date__gte=date).first()

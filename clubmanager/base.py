@@ -13,7 +13,7 @@ class TenantQuerySet(models.QuerySet):
     def for_club(self, club: Club):
         return self.filter(club=club)
 
-    def current(self):
+    def current_club(self):
         return self.filter(club=require_current_club())
 
 
