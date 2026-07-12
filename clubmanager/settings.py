@@ -47,6 +47,7 @@ INSTALLED_APPS = [
     "club.apps.ClubConfig",
     "authentication.apps.AuthenticationConfig",
     "members.apps.MembersConfig",
+    "teams.apps.TeamsConfig",
 ]
 
 MIDDLEWARE = [
