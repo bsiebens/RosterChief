@@ -652,31 +652,44 @@ drops.*
 - Only applies when `today <= early_bird_deadline`; otherwise the line charges `list_price`.
   A `CheckConstraint` guarantees an enabled product has a deadline + type + value.
 
-**B. Manual order-level discount — admin-applied, before finalize.**
-A `TREASURER`/`BOARD` (§3.2) applies an ad-hoc discount to a whole order — e.g. a multi-kid
-/ sibling discount — as a `PERCENT` or `AMOUNT` off the `subtotal`, with a required
-`manual_disc_reason` and audit stamp (`manual_disc_by` / `manual_disc_at`). It sits on the
-`Order`, not on a product.
-- **Lifecycle refinement.** The manual discount forces the order to be *editable before it
-  freezes*: checkout now creates the order as **`pending`**; a treasurer may set/clear the
-  manual discount while `pending`; `finalize()` then locks the order, computes the final
-  `total`, allocates the `Invoice.number`, and issues the PDF. **After `finalize` the order
-  and its discount are immutable** — a correction means a credit/refund, not an edit. The
-  access service gates this via `can_manage_shop(user, club)`.
+**B. Order-level discount — selected from a club catalogue of presets.**
+Rather than typing a type + value + reason per order, each club **defines named presets once**
+as `OrderDiscountType` rows (e.g. *Sibling discount −15%*, *Volunteer −€25*, *Hardship*),
+managed under the club's shop settings. On a `pending` order a `TREASURER`/`BOARD` (§3.2)
+simply **toggles the applicable presets on** — each toggle creates an `AppliedDiscount` row.
+No arithmetic is entered at order time; the treasurer picks from a list.
+- **Snapshot, like prices.** `AppliedDiscount` copies the preset's `label` / `disc_type` /
+  `value` at apply time. Editing or retiring (`is_active=False`) an `OrderDiscountType` later
+  never rewrites past orders — historical totals stay correct. `PROTECT` on the FK means a
+  used preset can't be hard-deleted; retire it instead.
+- **Multiple discounts stack** — several presets can apply to one order (a preset toggles on
+  at most once, via `unique_together (order, discount_type)`). See stacking rule below.
+- **Optional override.** The default flow enters *zero* numbers. If a club needs a one-off
+  amount (e.g. a bespoke hardship figure), allow the treasurer to override the snapshot
+  `value` on that `AppliedDiscount` — an opt-in escape hatch, not the primary path. A pure
+  ad-hoc discount is then just a generic "Custom" preset with an overridden value.
+- **Lifecycle refinement.** Discounts force the order to be *editable before it freezes*:
+  checkout creates the order as **`pending`**; a treasurer toggles presets on/off while
+  `pending`; `finalize()` then locks the order + its `AppliedDiscount`s, computes the final
+  `total`, allocates the `Invoice.number`, and issues the PDF. **After `finalize` everything
+  is immutable** — a correction means a credit/refund, not an edit. Gated by
+  `can_manage_shop(user, club)`.
 
 **Computation & rounding (both kinds).**
-`total = subtotal − order_discount`, where `subtotal = Σ line_total` and each `line_total`
-already reflects the early-bird price. Order of application: **line-level early-bird first,
-then the order-level manual discount** on the resulting subtotal. Percentages compute on the
-base they apply to (unit price / subtotal), round **`ROUND_HALF_UP` to 2 decimals**, and are
-**clamped to `[0, base]`** so no line or order can go negative. Every discounted document
-(order summary, invoice) shows list price, discount, and net so members see how the number
-was reached.
+`total = subtotal − Σ applied_discounts`, where `subtotal = Σ line_total` and each
+`line_total` already reflects the early-bird price. Order of application: **line-level
+early-bird first, then all order-level presets**, each computed against the **same
+`subtotal` base** (percentages don't compound on each other — predictable and order-
+independent) and summed. Percentages compute on their base, round **`ROUND_HALF_UP` to 2
+decimals**; the **summed** order discount is **clamped to `[0, subtotal]`** so an order can
+never go negative. Every discounted document (order summary, invoice) itemises each applied
+discount by `label` plus the net so members see how the number was reached.
 
-**Extension point.** Both are deliberately field-level, not a discount-row model — enough for
-the two required cases. Coupon codes, stacked promotions, or per-member entitlements would
-warrant a first-class `Discount`/`Coupon` model + an M2M to orders; add it only when that need
-is real.
+**Extension point.** `OrderDiscountType` is the reusable catalogue for the two required cases.
+Coupon *codes* (member-entered), auto-applied promotions (rule-based, e.g. "3+ siblings"), or
+per-member entitlements would extend this — add an eligibility rule / code field or an
+auto-apply service on top of the same model when that need is real, rather than a parallel
+mechanism.
 
 ---
 
@@ -703,6 +716,7 @@ User 1───<  Member  (FK, unique per club)      # User is GLOBAL — no clu
               └── (purchaser) ──< Order ───< OrderLine >── Product ──> Season
                                   │            └──> Member (beneficiary)
                                   ├──< Payment
+                                  ├──< AppliedDiscount >── OrderDiscountType (club preset)
                                   └─1:1─ Invoice   (Cart ──< CartItem >── Product)
 
 Season ──< Team, Event, ClubMembership, (membership/event) Product   # all within one club
@@ -739,10 +753,12 @@ Legend: `───<` one-to-many, `>───<` many-to-many via a through model
 8. ✅ **Tenant resolution ≠ `django.contrib.sites`** — Sites evaluated and rejected as the
    mechanism; `Club` stays the single tenant root, resolution in `ClubTenantMiddleware`
    (§2.4). Sites optional only as a later bridge for Site-aware third parties.
-9. ✅ **Shop discounts** — two field-level mechanisms (§5.7.1): a per-`Product` early-bird
-   discount (toggle + deadline + PERCENT/AMOUNT, frozen at checkout) and a manual order-level
-   discount a treasurer applies to a `pending` order before `finalize()`. Adds an
-   `Order.pending → finalized` step; no discount-row model yet.
+9. ✅ **Shop discounts** — two mechanisms (§5.7.1): a per-`Product` early-bird discount
+   (toggle + deadline + PERCENT/AMOUNT, frozen at checkout) and **order-level discounts
+   selected from a club catalogue of `OrderDiscountType` presets** — a treasurer toggles
+   presets on a `pending` order (each = a snapshotting `AppliedDiscount` row) before
+   `finalize()`, rather than typing values. Presets stack against the same subtotal base;
+   optional per-row value override for one-offs. Adds an `Order.pending → finalized` step.
 
 Infrastructure/config for the above (media storage, dependencies + exact setup) is
 specified in **§8**.
