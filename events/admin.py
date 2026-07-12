@@ -32,7 +32,8 @@ class EventSeriesAdmin(admin.ModelAdmin):
     autocomplete_fields = ["location", "opponent", "teams", "invited_members", "excluded_members"]
     fieldsets = [
         [None, {"fields": ["title", "kind"]}],
-        [_("Recurrence"), {"fields": ["rrule", "dtstart", "duration", "excluded_dates", "generated_until"]}],
+        [_("Recurrence"), {"fields": ["rrule", "dtstart", "excluded_dates", "generated_until"]}],
+        [_("Timing"), {"fields": ["duration", "gathering_offset", "deadline_offset"]}],
         [_("Audience"), {"fields": ["teams", "invited_members", "excluded_members"]}],
         [_("Where"), {"fields": ["location", "opponent"]}],
     ]

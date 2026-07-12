@@ -80,6 +80,8 @@ class EventSeries(ClubScopedModel):
     rrule = models.CharField(_("recurrence rule"), max_length=255, help_text=_("RFC 5545 RRULE, e.g. FREQ=WEEKLY;BYDAY=MO,WE."))
     dtstart = models.DateTimeField(_("first occurrence"))
     duration = models.DurationField(_("duration"), null=True, blank=True, help_text=_("Length of each occurrence; sets each event's end."))
+    gathering_offset = models.DurationField(_("gathering offset"), null=True, blank=True, help_text=_("How long before the start each occurrence's gathering time is."))
+    deadline_offset = models.DurationField(_("deadline offset"), null=True, blank=True, help_text=_("How long before the start each occurrence's sign-up deadline is."))
     excluded_dates = models.JSONField(_("excluded dates"), default=list, blank=True, help_text=_("ISO start datetimes of occurrences removed from the series (EXDATEs)."))
     generated_until = models.DateTimeField(_("generated until"), null=True, blank=True, help_text=_("Occurrences have been materialised up to this point."))
 

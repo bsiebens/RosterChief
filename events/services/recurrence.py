@@ -45,8 +45,9 @@ def apply_template(series, event):
     event.title = series.title
     event.location = series.location
     event.opponent = series.opponent
-    if series.duration is not None:
-        event.end = event.start + series.duration
+    event.end = event.start + series.duration if series.duration is not None else None
+    event.gathering = event.start - series.gathering_offset if series.gathering_offset is not None else None
+    event.deadline = event.start - series.deadline_offset if series.deadline_offset is not None else None
     event.save()
 
     event.teams.set(series.teams.all())

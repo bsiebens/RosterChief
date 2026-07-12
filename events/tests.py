@@ -245,6 +245,24 @@ class GenerateOccurrencesTests(RecurrenceTestBase):
 
         self.assertEqual(series.occurrences.count(), 4)
 
+    def test_gathering_and_deadline_come_from_offsets(self):
+        series = self.make_series(gathering_offset=timedelta(minutes=30), deadline_offset=timedelta(days=1))
+
+        generate_occurrences(series, self.anchor + timedelta(days=30))
+
+        first = series.occurrences.order_by("start").first()
+        self.assertEqual(first.gathering, self.anchor - timedelta(minutes=30))
+        self.assertEqual(first.deadline, self.anchor - timedelta(days=1))
+
+    def test_without_offsets_gathering_and_deadline_are_blank(self):
+        series = self.make_series()
+
+        generate_occurrences(series, self.anchor + timedelta(days=30))
+
+        first = series.occurrences.order_by("start").first()
+        self.assertIsNone(first.gathering)
+        self.assertIsNone(first.deadline)
+
 
 class SingleOccurrenceTests(RecurrenceTestBase):
     def test_cancel_deletes_and_prevents_regeneration(self):
@@ -297,6 +315,17 @@ class SingleOccurrenceTests(RecurrenceTestBase):
 
         event = series.occurrences.order_by("start").first()
         self.assertIn(carol.id, set(event.attendances.values_list("member_id", flat=True)))
+
+    def test_propagation_updates_timing_offsets(self):
+        series = self.make_series()
+        generate_occurrences(series, self.anchor + timedelta(days=30))
+        series.gathering_offset = timedelta(minutes=45)
+        series.save()
+
+        propagate_series(series)
+
+        first = series.occurrences.order_by("start").first()
+        self.assertEqual(first.gathering, self.anchor - timedelta(minutes=45))
 
 
 class ExtendSeriesCommandTests(RecurrenceTestBase):
