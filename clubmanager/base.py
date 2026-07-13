@@ -1,13 +1,39 @@
 import uuid
 from typing import TYPE_CHECKING
 
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils.text import slugify
+from django.utils.translation import gettext_lazy as _
 
 from club.tenancy import require_current_club
 
 if TYPE_CHECKING:
     from club.models import Club
+
+
+def validate_club_scope(instance, owning_club_id, *, same_club_fields=(), member_fields=()):
+    """Reject FKs that leak across clubs.
+
+    ``same_club_fields`` are FKs to club-scoped models that must share
+    ``owning_club_id``; ``member_fields`` are Member FKs whose target must have
+    a ClubMembership in that club. Unset (None) FKs are skipped. Call from a
+    model's ``clean()``.
+    """
+    errors = {}
+    for field in same_club_fields:
+        if getattr(instance, f"{field}_id") is not None and getattr(instance, field).club_id != owning_club_id:
+            errors[field] = _("Must belong to the same club.")
+
+    if member_fields:
+        from club.models import ClubMembership
+
+        for field in member_fields:
+            if getattr(instance, f"{field}_id") is not None and not ClubMembership.objects.filter(club_id=owning_club_id, member=getattr(instance, field)).exists():
+                errors[field] = _("Must be a member of this club.")
+
+    if errors:
+        raise ValidationError(errors)
 
 
 def unique_slugify(instance, value, *, slug_field="slug", scope=None):
