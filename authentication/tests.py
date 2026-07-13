@@ -335,3 +335,30 @@ class MfaPageTests(TestCase):
         enrol_mfa(self.user)
 
         self.assertContains(self.client.get(reverse("mfa_reauthenticate")), "otp otp-lg")
+
+
+class ActionBarTests(TestCase):
+    """A form's action bar is drawn when the actions slot has content.
+
+    Regression: it was keyed on `no_visible_fields`, which allauth sets to say a form has
+    no visible *fields* — logout and TOTP deactivate are a bare csrf token plus a button.
+    Keying the bar on it hid the button on exactly the pages that are nothing but a button.
+    """
+
+    def setUp(self):
+        self.user = User.objects.create_user(email="mfa@example.com", password="pw-secret-123")
+        self.client.post(reverse("account_login"), {"login": "mfa@example.com", "password": "pw-secret-123"}, follow=True)
+
+    def test_the_sign_out_page_has_its_button(self):
+        response = self.client.get(reverse("account_logout"))
+
+        self.assertContains(response, "Sign Out")
+        self.assertContains(response, 'type="submit"')
+
+    def test_the_totp_deactivate_page_has_its_button(self):
+        enrol_mfa(self.user)
+
+        response = self.client.get(reverse("mfa_deactivate_totp"))
+
+        self.assertContains(response, "btn-error")
+        self.assertContains(response, 'type="submit"')

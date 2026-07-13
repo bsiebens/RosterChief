@@ -4,13 +4,18 @@
     `id` is not decorative: allauth renders out-of-band forms (webauthn, logout-from-stage)
     and points buttons at them with the HTML `form` attribute. Drop the id and those
     buttons submit nothing.
+
+    The action bar is drawn when the actions slot has something in it — NOT keyed on
+    `no_visible_fields`, which means the form has no visible *fields* (logout is a bare
+    csrf token, and so is TOTP deactivate) and says nothing about its buttons. Keying the
+    bar on it hides the Sign Out button on the very page whose only purpose is that button.
 {% endcomment %}
 <form method="{{ attrs.method }}"
       {% if attrs.id %}id="{{ attrs.id }}"{% endif %}
       {% if attrs.action %}action="{{ attrs.action }}"{% endif %}
       class="space-y-2">
     {% slot body %}{% endslot %}
-    {% if not attrs.no_visible_fields %}
+    {% if slots.actions %}
         <div class="card-actions justify-end pt-3">
             {% slot actions %}{% endslot %}
         </div>
