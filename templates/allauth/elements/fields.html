@@ -1,4 +1,16 @@
-{% load ui %}
+{% load lucide ui %}
+
+{% comment %}
+    allauth passes `unlabeled=True` on the entrance forms (login, signup, reset) and
+    already sets a placeholder on each of their fields ("Email address", "Password"),
+    so dropping the visible label loses nothing on screen. The label is still emitted
+    sr-only inside the wrapper: a placeholder is not a label, and it disappears the
+    moment you start typing.
+
+    Fields with an icon use daisyUI's icon-in-field layout, where the `input` class
+    goes on the *wrapping label* and the input itself carries only `grow`. Putting
+    `input` on both draws a box inside a box.
+{% endcomment %}
 {% for field in attrs.form.hidden_fields %}{{ field }}{% endfor %}
 {% for error in attrs.form.non_field_errors %}
     <div class="alert alert-error my-2">
@@ -13,12 +25,30 @@
                 <span class="label-text">{{ field.label }}</span>
             </label>
         {% else %}
-            <label class="label" for="{{ field.id_for_label }}">
-                <span class="label-text">{{ field.label }}</span>
-            </label>
-            {{ field|daisy }}
+            {% if not attrs.unlabeled %}
+                <label class="label" for="{{ field.id_for_label }}">
+                    <span class="label-text">{{ field.label }}</span>
+                </label>
+            {% endif %}
+            {% with icon=field|field_icon %}
+                {% if icon %}
+                    <label class="input flex w-full items-center gap-2 {% if field.errors %}input-error{% endif %}" for="{{ field.id_for_label }}">
+                        <span class="opacity-50">{% lucide icon size=16 %}</span>
+                        {% if attrs.unlabeled %}<span class="sr-only">{{ field.label }}</span>{% endif %}
+                        {{ field|daisy:"grow" }}
+                    </label>
+                {% else %}
+                    {{ field|daisy }}
+                {% endif %}
+            {% endwith %}
         {% endif %}
-        {% if field.help_text %}<span class="label-text-alt mt-1 text-base-content/70">{{ field.help_text }}</span>{% endif %}
+        {% comment %}
+            The password field's help_text is allauth's "Forgot your password?" link, so it
+            gets room to breathe. The id is not decorative: Django points the input's
+            aria-describedby at `<auto_id>_helptext`, and without it that reference dangles
+            and the link is never announced.
+        {% endcomment %}
+        {% if field.help_text %}<span id="{{ field.auto_id }}_helptext" class="label-text-alt mt-3 block text-base-content/70">{{ field.help_text }}</span>{% endif %}
         {% for error in field.errors %}<span class="label-text-alt mt-1 text-error">{{ error }}</span>{% endfor %}
     </div>
 {% endfor %}

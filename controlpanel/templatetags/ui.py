@@ -46,16 +46,40 @@ def as_alert(message):
     return {"icon": icon, "title": message.extra_tags or title, "body": message.message, "css": css}
 
 
-@register.filter
-def daisy(field):
-    """Render a bound form field with the right daisyUI classes."""
-    widget = field.field.widget
-    css = next((css for widget_type, css in WIDGET_CLASSES if isinstance(widget, widget_type)), DEFAULT_WIDGET_CLASS)
+#: Icon shown inside the field, by form field name. Anything unlisted gets none.
+FIELD_ICONS = {
+    "login": "mail",
+    "email": "mail",
+    "email2": "mail",
+    "oldpassword": "lock-keyhole",
+    "password": "lock-keyhole",
+    "password1": "lock-keyhole",
+    "password2": "lock-keyhole",
+    "code": "shield-check",
+}
 
-    classes = [widget.attrs.get("class", ""), css]
-    if field.errors:
-        classes.append(f"{css.split()[0]}-error")
+
+@register.filter
+def field_icon(field):
+    return FIELD_ICONS.get(field.name, "")
+
+
+@register.filter
+def daisy(field, css=None):
+    """Render a bound form field with the right daisyUI classes.
+
+    Pass ``css`` to override them — the icon-in-field layout wraps the input in a
+    ``label.input``, and there the input itself must NOT carry the ``input`` class
+    (daisyUI styles the wrapper instead), so it is rendered with ``grow``. The error
+    state then belongs on the wrapper too, which is why an override skips it here.
+    """
+    widget = field.field.widget
+
+    if css is None:
+        css = next((css for widget_type, css in WIDGET_CLASSES if isinstance(widget, widget_type)), DEFAULT_WIDGET_CLASS)
+        if field.errors:
+            css = f"{css} {css.split()[0]}-error"
 
     attrs = dict(widget.attrs)
-    attrs["class"] = " ".join(part for part in classes if part)
+    attrs["class"] = " ".join(part for part in [widget.attrs.get("class", ""), css] if part)
     return field.as_widget(attrs=attrs)

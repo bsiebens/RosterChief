@@ -19,7 +19,7 @@ from teams.models import Position, Team, TeamMembership
 from .services.admins import grant_club_admin
 from .services.platform_admins import PlatformAdminError, is_last_superuser, set_platform_access
 from .services.statistics import club_statistics, clubs_with_totals, platform_totals
-from .templatetags.ui import as_alert, daisy
+from .templatetags.ui import as_alert, daisy, field_icon
 
 User = get_user_model()
 Flag = get_waffle_flag_model()
@@ -455,3 +455,61 @@ class MessageRenderingTests(ControlPanelTestBase):
         self.assertContains(response, "alert alert-soft alert-warning")
         self.assertContains(response, '<div class="font-bold">Careful</div>', html=False)
         self.assertContains(response, "<svg")  # the lucide icon
+
+
+class FieldRenderingTests(TestCase):
+    def field(self, form_field, name="email", errors=False):
+        class Form(forms.Form):
+            pass
+
+        Form.base_fields[name] = form_field
+        form = Form(data={} if errors else None)
+        if errors:
+            form.full_clean()
+        return form[name]
+
+    def test_known_fields_get_an_icon_and_others_do_not(self):
+        self.assertEqual(field_icon(self.field(forms.EmailField(), "email")), "mail")
+        self.assertEqual(field_icon(self.field(forms.CharField(), "password")), "lock-keyhole")
+        self.assertEqual(field_icon(self.field(forms.CharField(), "note")), "")
+
+    def test_the_default_rendering_styles_the_input_itself(self):
+        self.assertIn('class="input input-bordered w-full"', str(daisy(self.field(forms.CharField()))))
+
+    def test_an_override_replaces_the_daisy_classes(self):
+        # The icon layout puts `input` on the wrapping label, so the input must not
+        # carry it too — that would draw a box inside a box.
+        rendered = str(daisy(self.field(forms.CharField()), "grow"))
+
+        self.assertIn('class="grow"', rendered)
+        self.assertNotIn("input-bordered", rendered)
+
+    def test_an_override_leaves_the_error_state_to_the_wrapper(self):
+        rendered = str(daisy(self.field(forms.CharField(required=True), errors=True), "grow"))
+
+        self.assertNotIn("grow-error", rendered)
+
+    def test_the_default_rendering_marks_errors_on_the_input(self):
+        rendered = str(daisy(self.field(forms.CharField(required=True), errors=True)))
+
+        self.assertIn("input-error", rendered)
+
+
+class LoginFormRenderingTests(TestCase):
+    def setUp(self):
+        self.response = self.client.get(reverse("account_login"))
+
+    def test_the_fields_carry_an_icon_and_no_visible_label(self):
+        self.assertContains(self.response, 'class="sr-only">Email</span>')
+        self.assertContains(self.response, 'class="sr-only">Password</span>')
+        self.assertNotContains(self.response, '<span class="label-text">Email</span>')
+        self.assertContains(self.response, 'placeholder="Email address"')
+
+    def test_the_checkbox_keeps_its_visible_label(self):
+        self.assertContains(self.response, '<span class="label-text">Remember Me</span>')
+
+    def test_the_password_reset_link_is_spaced_and_addressable(self):
+        # The input's aria-describedby points here; without the id it dangles.
+        self.assertContains(self.response, 'id="id_password_helptext"')
+        self.assertContains(self.response, "mt-3")
+        self.assertContains(self.response, "Forgot your password?")
