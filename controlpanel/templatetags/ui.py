@@ -69,6 +69,21 @@ def is_otp(field):
 
 
 @register.filter
+def as_otp(field):
+    """Render the code input for the boxed otp layout.
+
+    No daisy classes — the wrapping div carries them — and no placeholder: allauth sets
+    one ("Code"), and grey text sitting inside the boxes reads as an already-typed code.
+    The label lives outside the box as an sr-only element, so nothing is lost.
+
+    False, not a pop: as_widget() merges the widget's own attrs back in, so deleting the
+    placeholder from a copy achieves nothing. Django's attribute template omits any attr
+    whose value is False, which is the only way to actually suppress one.
+    """
+    return field.as_widget(attrs={"class": "", "placeholder": False})
+
+
+@register.filter
 def field_icon(field):
     return FIELD_ICONS.get(field.name, "")
 

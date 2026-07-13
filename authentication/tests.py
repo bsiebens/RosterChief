@@ -265,6 +265,10 @@ class TwoFactorPageTests(TestCase):
         self.assertContains(self.response, 'name="code"')
         self.assertContains(self.response, "otp otp-lg")
 
+    def test_the_otp_field_has_no_placeholder(self):
+        # allauth sets placeholder="Code"; inside the boxes it reads as a typed-in code.
+        self.assertNotContains(self.response, 'placeholder="Code"')
+
     def test_cancel_sits_beside_sign_in_and_is_not_primary(self):
         self.assertContains(self.response, '<button class="btn gap-2" type="submit" form="logout-from-stage">')
         self.assertContains(self.response, '<button class="btn btn-primary gap-2" type="submit">')
