@@ -15,4 +15,5 @@ urlpatterns = [
     path("admin/login/", RedirectView.as_view(pattern_name="account_login", query_string=True), name="admin_login_redirect"),
     path("admin/", admin.site.urls),
     path("accounts/", include("allauth.urls")),
+    path("controlpanel/", include("controlpanel.urls")),
 ]

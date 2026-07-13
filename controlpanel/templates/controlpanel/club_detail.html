@@ -1,0 +1,89 @@
+{% extends "controlpanel/base.html" %}
+
+{% block heading %}{{ club.name }}{% endblock heading %}
+
+{% block subheading %}
+    <p class="text-sm opacity-70">
+        {{ club.slug }}
+        {% if club.is_archived %}
+            <span class="badge badge-warning badge-sm ml-2">Archived</span>
+        {% endif %}
+    </p>
+{% endblock subheading %}
+
+{% block actions %}
+    <a class="btn btn-ghost" href="{% url 'controlpanel:club_update' club.pk %}">Edit</a>
+    {% if club.is_archived %}
+        <form method="post" action="{% url 'controlpanel:club_restore' club.pk %}">
+            {% csrf_token %}
+            <button class="btn btn-success" type="submit">Restore</button>
+        </form>
+    {% else %}
+        <form method="post" action="{% url 'controlpanel:club_archive' club.pk %}">
+            {% csrf_token %}
+            <button class="btn btn-warning" type="submit">Archive</button>
+        </form>
+    {% endif %}
+{% endblock actions %}
+
+{% block panel %}
+    {% if club.is_archived %}
+        <div class="alert alert-warning mb-6">
+            <span>This club is archived: its subdomain no longer resolves. Nothing has been deleted — restore it to bring it back.</span>
+        </div>
+    {% endif %}
+    <div class="mb-6 grid gap-4 md:grid-cols-2">
+        {% for group in groups %}
+            <div class="card bg-base-100 shadow">
+                <div class="card-body">
+                    <h2 class="card-title text-base">{{ group.title }}</h2>
+                    <dl class="divide-y divide-base-200">
+                        {% for label, value in group.stats %}
+                            <div class="flex items-center justify-between py-2">
+                                <dt class="text-sm opacity-70">{{ label }}</dt>
+                                <dd class="font-semibold tabular-nums">{{ value }}</dd>
+                            </div>
+                        {% endfor %}
+                    </dl>
+                </div>
+            </div>
+        {% endfor %}
+    </div>
+    <div class="card bg-base-100 shadow">
+        <div class="card-body">
+            <div class="flex items-center justify-between">
+                <h2 class="card-title text-base">Club admins</h2>
+                <a class="btn btn-primary btn-sm" href="{% url 'controlpanel:club_admin_add' club.pk %}">Add admin</a>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Email</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for role in admins %}
+                            <tr>
+                                <td>{{ role.member }}</td>
+                                <td>{{ role.member.user.email|default:"—" }}</td>
+                                <td class="text-right">
+                                    <form method="post" action="{% url 'controlpanel:club_admin_remove' club.pk role.pk %}">
+                                        {% csrf_token %}
+                                        <button class="btn btn-ghost btn-xs text-error" type="submit">Remove</button>
+                                    </form>
+                                </td>
+                            </tr>
+                        {% empty %}
+                            <tr>
+                                <td colspan="3" class="text-center opacity-60">No admins yet.</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+{% endblock panel %}

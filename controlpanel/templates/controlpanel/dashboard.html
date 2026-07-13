@@ -1,0 +1,64 @@
+{% extends "controlpanel/base.html" %}
+
+{% block heading %}Platform overview{% endblock heading %}
+
+{% block actions %}
+    <a class="btn btn-primary" href="{% url 'controlpanel:club_create' %}">New club</a>
+{% endblock actions %}
+
+{% block panel %}
+    <div class="stats mb-6 w-full bg-base-100 shadow">
+        <div class="stat">
+            <div class="stat-title">Active clubs</div>
+            <div class="stat-value">{{ totals.clubs }}</div>
+        </div>
+        <div class="stat">
+            <div class="stat-title">Archived</div>
+            <div class="stat-value">{{ totals.archived_clubs }}</div>
+        </div>
+        <div class="stat">
+            <div class="stat-title">Members</div>
+            <div class="stat-value">{{ totals.members }}</div>
+        </div>
+        <div class="stat">
+            <div class="stat-title">Club admins</div>
+            <div class="stat-value">{{ totals.admins }}</div>
+        </div>
+    </div>
+    <div class="card bg-base-100 shadow">
+        <div class="card-body">
+            <h2 class="card-title">Clubs</h2>
+            <div class="overflow-x-auto">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Club</th>
+                            <th>Members</th>
+                            <th>Teams</th>
+                            <th>Events</th>
+                            <th>Admins</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for club in clubs %}
+                            <tr>
+                                <td>
+                                    <a class="link link-hover font-medium" href="{% url 'controlpanel:club_detail' club.pk %}">{{ club.name }}</a>
+                                    <div class="text-xs opacity-60">{{ club.slug }}</div>
+                                </td>
+                                <td>{{ club.member_count }}</td>
+                                <td>{{ club.team_count }}</td>
+                                <td>{{ club.event_count }}</td>
+                                <td>{{ club.admin_count }}</td>
+                            </tr>
+                        {% empty %}
+                            <tr>
+                                <td colspan="5" class="text-center opacity-60">No clubs yet.</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+{% endblock panel %}

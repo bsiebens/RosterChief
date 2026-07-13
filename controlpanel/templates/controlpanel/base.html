@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+
+{% block title %}
+    {% block panel_title %}Control panel{% endblock panel_title %} · ClubManager
+{% endblock title %}
+
+{% block main %}
+    <div class="mb-6 flex flex-wrap items-center justify-between gap-3">
+        <div>
+            <h1 class="text-2xl font-bold">
+                {% block heading %}Control panel{% endblock heading %}
+            </h1>
+            {% block subheading %}{% endblock subheading %}
+        </div>
+        <div class="flex gap-2">
+            {% block actions %}{% endblock actions %}
+        </div>
+    </div>
+    <div role="tablist" class="tabs-boxed tabs mb-6 w-fit">
+        <a role="tab" href="{% url 'controlpanel:dashboard' %}" class="tab {% if nav == 'dashboard' %}tab-active{% endif %}">Dashboard</a>
+        <a role="tab" href="{% url 'controlpanel:club_list' %}" class="tab {% if nav == 'clubs' %}tab-active{% endif %}">Clubs</a>
+    </div>
+    {% block panel %}{% endblock panel %}
+{% endblock main %}

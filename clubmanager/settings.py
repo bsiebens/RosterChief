@@ -57,6 +57,7 @@ INSTALLED_APPS = [
     "events.apps.EventsConfig",
     "formbuilder.apps.FormbuilderConfig",
     "shop.apps.ShopConfig",
+    "controlpanel.apps.ControlpanelConfig",
 ]
 
 MIDDLEWARE = [
