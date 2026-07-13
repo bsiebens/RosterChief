@@ -40,7 +40,7 @@
         <div class="card bg-base-100 shadow {% if attention.outstanding %}border-l-4 border-error{% endif %}">
             <div class="card-body p-4">
                 <div class="flex items-center gap-2 text-sm opacity-70">{% lucide "banknote" size=16 %} Outstanding</div>
-                <div class="text-3xl font-bold tabular-nums">€{{ attention.outstanding }}</div>
+                <div class="text-3xl font-bold tabular-nums">€{{ attention.outstanding|floatformat:2 }}</div>
                 <div class="text-xs opacity-60">Unpaid across every club</div>
             </div>
         </div>
@@ -50,8 +50,6 @@
         <div class="card bg-base-100 shadow">
             <div class="card-body">
                 <h2 class="card-title text-base">{% lucide "user-plus" size=18 %} Signups per month</h2>
-                {# The wrapper's height is what bounds the canvas: with maintainAspectRatio off,
-                   Chart.js sizes to its parent, and a parent with no height grows without end. #}
                 <div class="h-56">
                     <canvas id="signups-chart"></canvas>
                 </div>
@@ -199,31 +197,31 @@
                 // Locale-aware, so 1234.5 reads as "€ 1.234,50" rather than "€1,234.5". Two of
                 // them: the axis is rounded to keep the labels short, but the tooltip keeps the
                 // cents — rounding a euro amount someone is reading off a chart is a lie.
-                const axisEuros = new Intl.NumberFormat("nl-BE", { style: "currency", currency: "EUR", maximumFractionDigits: 0 });
-                const exactEuros = new Intl.NumberFormat("nl-BE", { style: "currency", currency: "EUR", minimumFractionDigits: 2 });
+                const axisEuros = new Intl.NumberFormat("nl-BE", {style: "currency", currency: "EUR", maximumFractionDigits: 0});
+                const exactEuros = new Intl.NumberFormat("nl-BE", {style: "currency", currency: "EUR", minimumFractionDigits: 2});
 
                 const build = (id, label, series, colour, type, money) =>
                     new Chart(document.getElementById(id), {
                         type,
                         data: {
                             labels: series.map((point) => point.month),
-                            datasets: [{ label, data: series.map((point) => point.value), borderColor: colour, backgroundColor: colour, tension: 0.3 }],
+                            datasets: [{label, data: series.map((point) => point.value), borderColor: colour, backgroundColor: colour, tension: 0.3}],
                         },
                         options: {
                             responsive: true,
                             maintainAspectRatio: false,
                             plugins: {
-                                legend: { display: false },
+                                legend: {display: false},
                                 // The tooltip carries the unit too: an axis in euros and a bare
                                 // number on hover reads as two different quantities.
-                                tooltip: money ? { callbacks: { label: (item) => exactEuros.format(item.parsed.y) } } : {},
+                                tooltip: money ? {callbacks: {label: (item) => exactEuros.format(item.parsed.y)}} : {},
                             },
                             scales: {
-                                x: { ticks: { color: ink }, grid: { color: grid } },
+                                x: {ticks: {color: ink}, grid: {color: grid}},
                                 y: {
                                     beginAtZero: true,
-                                    grid: { color: grid },
-                                    ticks: { color: ink, precision: 0, callback: money ? (value) => axisEuros.format(value) : undefined },
+                                    grid: {color: grid},
+                                    ticks: {color: ink, precision: 0, callback: money ? (value) => axisEuros.format(value) : undefined},
                                 },
                             },
                         },
@@ -242,7 +240,7 @@
             new MutationObserver(() => {
                 charts.forEach((chart) => chart.destroy());
                 charts = render();
-            }).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+            }).observe(document.documentElement, {attributes: true, attributeFilter: ["data-theme"]});
         })();
     </script>
 {% endblock extra_body %}

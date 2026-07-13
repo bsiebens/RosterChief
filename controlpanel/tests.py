@@ -13,14 +13,31 @@ from django.utils import timezone
 from waffle import get_waffle_flag_model, get_waffle_switch_model
 
 from club.models import Club, ClubMembership, ClubRole, Season
-from events.models import Event
+from events.models import Attendance, Event
 from members.models import Member
 from shop.models import Order
-from teams.models import Position, Team, TeamMembership
+from teams.models import Position, StaffAssignment, Team, TeamMembership
 
 from .services.admins import grant_club_admin
 from .services.platform_admins import PlatformAdminError, is_last_superuser, set_platform_access
-from .services.statistics import admins_pending_mfa, club_statistics, clubs_with_totals, clubs_without_a_season, dormant_clubs, flag_adoption, onboarding_funnel, platform_attention, platform_charts, platform_totals
+from .services.statistics import (
+    admins_pending_mfa,
+    attendance_rates,
+    club_attention,
+    club_statistics,
+    clubs_with_totals,
+    clubs_without_a_season,
+    dormant_clubs,
+    fee_aging,
+    flag_adoption,
+    onboarding_funnel,
+    platform_attention,
+    platform_charts,
+    platform_totals,
+    renewal_rate,
+    teams_without_a_manager,
+    unrostered_members,
+)
 from .templatetags.ui import as_alert, daisy, excluded, field_icon
 
 User = get_user_model()
@@ -716,3 +733,136 @@ class DashboardMetricsTests(ControlPanelTestBase):
         self.assertContains(response, 'id="revenue-chart"')
         self.assertContains(response, "js/chart.js")
         self.assertIn("signups", response.context["charts"])
+
+
+class ClubAttentionTests(TestCase):
+    def setUp(self):
+        self.club = Club.objects.create(name="Ajax United")
+        self.today = timezone.localdate()
+        self.season = Season.objects.create(club=self.club, start_date=self.today - datetime.timedelta(days=30), end_date=self.today + datetime.timedelta(days=300))
+        self.member = Member.objects.create(first_name="Ada", last_name="Lovelace")
+
+    def membership(self, member=None, season=None, **kwargs):
+        return ClubMembership.objects.create(club=self.club, season=season or self.season, member=member or self.member, **kwargs)
+
+    def test_a_team_with_no_manager_is_flagged(self):
+        team = Team.objects.create(club=self.club, name="U15")
+
+        self.assertIn(team, teams_without_a_manager(self.club, self.season))
+
+        coach = Position.objects.create(club=self.club, name="Coach", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=team, member=self.member, season=self.season, position=coach)
+
+        self.assertNotIn(team, teams_without_a_manager(self.club, self.season))
+
+    def test_a_non_management_staffer_does_not_count_as_a_coach(self):
+        # Somebody has to be able to pick the squad; a physio cannot.
+        team = Team.objects.create(club=self.club, name="U15")
+        physio = Position.objects.create(club=self.club, name="Physio", staff_position=True, management_position=False)
+        StaffAssignment.objects.create(team=team, member=self.member, season=self.season, position=physio)
+
+        self.assertIn(team, teams_without_a_manager(self.club, self.season))
+
+    def test_a_coach_from_a_previous_season_does_not_count(self):
+        old = Season.objects.create(club=self.club, start_date=self.today - datetime.timedelta(days=400), end_date=self.today - datetime.timedelta(days=40))
+        team = Team.objects.create(club=self.club, name="U15")
+        coach = Position.objects.create(club=self.club, name="Coach", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=team, member=self.member, season=old, position=coach)
+
+        self.assertIn(team, teams_without_a_manager(self.club, self.season))
+
+    def test_an_active_member_on_no_team_is_unrostered(self):
+        self.membership(status=ClubMembership.StatusChoices.ACTIVE)
+
+        self.assertIn(self.member, unrostered_members(self.club, self.season))
+
+        team = Team.objects.create(club=self.club, name="U15")
+        position = Position.objects.create(club=self.club, name="Forward")
+        TeamMembership.objects.create(team=team, member=self.member, season=self.season, position=position, jersey_number=9)
+
+        self.assertNotIn(self.member, unrostered_members(self.club, self.season))
+
+    def test_a_pending_member_is_not_counted_as_unrostered(self):
+        # They have not been let in yet, so having no team is expected.
+        self.membership(status=ClubMembership.StatusChoices.PENDING)
+
+        self.assertNotIn(self.member, unrostered_members(self.club, self.season))
+
+    def test_renewal_compares_against_the_previous_season(self):
+        previous = Season.objects.create(club=self.club, start_date=self.today - datetime.timedelta(days=400), end_date=self.today - datetime.timedelta(days=40))
+        stayed = self.member
+        left = Member.objects.create(first_name="Bob", last_name="Bobson")
+        self.membership(member=stayed, season=previous, status=ClubMembership.StatusChoices.ACTIVE)
+        self.membership(member=left, season=previous, status=ClubMembership.StatusChoices.ACTIVE)
+        self.membership(member=stayed, season=self.season)
+
+        self.assertEqual(renewal_rate(self.club, self.season), 50)
+
+    def test_a_previous_season_with_nobody_active_yields_no_rate(self):
+        # There is a season to compare against but nobody to renew — dividing by that
+        # would blow up, and calling it 0% would be a lie.
+        previous = Season.objects.create(club=self.club, start_date=self.today - datetime.timedelta(days=400), end_date=self.today - datetime.timedelta(days=40))
+        self.membership(season=previous, status=ClubMembership.StatusChoices.LAPSED)
+
+        self.assertIsNone(renewal_rate(self.club, self.season))
+
+    def test_a_first_season_club_has_no_renewal_rate(self):
+        # It has not failed to renew anyone; rendering that as 0% would libel it.
+        self.membership(status=ClubMembership.StatusChoices.ACTIVE)
+
+        self.assertIsNone(renewal_rate(self.club, self.season))
+
+    def test_unpaid_orders_are_bucketed_by_age(self):
+        old = Order.objects.create(club=self.club, purchaser=self.member, total=Decimal("100.00"), status=Order.OrderStatus.PENDING)
+        Order.objects.filter(pk=old.pk).update(created=timezone.now() - datetime.timedelta(days=90))
+        Order.objects.create(club=self.club, purchaser=self.member, total=Decimal("40.00"), status=Order.OrderStatus.PENDING)
+        Order.objects.create(club=self.club, purchaser=self.member, total=Decimal("999.00"), status=Order.OrderStatus.PAID)
+
+        buckets = {bucket["label"]: bucket["total"] for bucket in fee_aging(self.club)}
+
+        self.assertEqual(buckets["0-30 days"], Decimal("40.00"))
+        self.assertEqual(buckets["60+ days"], Decimal("100.00"))  # paid orders are not owed
+
+    def test_attendance_is_turnout_of_those_who_answered(self):
+        event = Event.objects.create(club=self.club, season=self.season, title="Match", start=timezone.now() - datetime.timedelta(days=1))
+        bob = Member.objects.create(first_name="Bob", last_name="Bobson")
+        carol = Member.objects.create(first_name="Carol", last_name="Carolson")
+        Attendance.objects.create(event=event, member=self.member, status=Attendance.AttendanceStatus.PRESENT)
+        Attendance.objects.create(event=event, member=bob, status=Attendance.AttendanceStatus.ABSENT)
+        Attendance.objects.create(event=event, member=carol, status=Attendance.AttendanceStatus.NO_RESPONSE)
+
+        rates = attendance_rates(self.club, self.season)
+
+        self.assertEqual(rates["turnout"], 50)  # 1 present of 2 who answered — silence is not an absence
+        self.assertEqual(rates["no_response"], 33)  # 1 of 3 never answered
+
+    def test_a_future_event_does_not_drag_turnout_down(self):
+        event = Event.objects.create(club=self.club, season=self.season, title="Next week", start=timezone.now() + datetime.timedelta(days=7))
+        Attendance.objects.create(event=event, member=self.member, status=Attendance.AttendanceStatus.NO_RESPONSE)
+
+        self.assertIsNone(attendance_rates(self.club, self.season)["turnout"])
+
+    def test_a_club_with_no_season_reports_no_rates(self):
+        Season.objects.all().delete()
+
+        attention = club_attention(self.club)
+
+        self.assertTrue(attention["no_season"])
+        self.assertEqual(attention["teams_without_manager"], 0)
+        self.assertIsNone(attention["renewal_rate"])
+
+
+class ClubDetailMetricsTests(ControlPanelTestBase):
+    def test_the_club_page_renders_its_metrics_and_charts(self):
+        response = self.client.get(reverse("controlpanel:club_detail", args=[self.club.pk]))
+
+        self.assertContains(response, "No coach")
+        self.assertContains(response, "Unrostered")
+        self.assertContains(response, "Unpaid, by age")
+        self.assertContains(response, 'id="fees-chart"')
+        self.assertIn("fees", response.context["charts"])
+
+    def test_a_club_without_a_season_is_told_it_is_inert(self):
+        response = self.client.get(reverse("controlpanel:club_detail", args=[self.club.pk]))
+
+        self.assertContains(response, "cannot take a signup")

@@ -17,7 +17,7 @@ from waffle import get_waffle_flag_model
 
 from authentication.middleware import ELEVATED_ROLES
 from club.models import Club, ClubMembership, ClubRole, Season
-from events.models import Event
+from events.models import Attendance, Event
 from members.models import Member
 from shop.models import Cart, Order
 from teams.models import StaffAssignment, Team, TeamMembership
@@ -148,6 +148,138 @@ def platform_charts():
 
 def _money(queryset):
     return queryset.aggregate(total=Sum("total"))["total"] or ZERO
+
+
+def previous_season(club, season):
+    """The season immediately before ``season``. Seasons are ordered by name (which is
+    derived from the years), so go by the date instead — a club may skip a year."""
+    if season is None:
+        return None
+
+    return Season.objects.filter(club=club, end_date__lt=season.start_date).order_by("-end_date").first()
+
+
+def renewal_rate(club, season):
+    """Share of last season's active members who signed up again.
+
+    The single best health signal a club has, and it is exactly computable here because
+    memberships are season-scoped. Returns None when there is no season to compare
+    against — a first-season club has not failed to renew anyone, and rendering that as
+    0% would libel it.
+    """
+    previous = previous_season(club, season)
+    if previous is None:
+        return None
+
+    was_active = ClubMembership.objects.filter(club=club, season=previous, status=ClubMembership.StatusChoices.ACTIVE)
+    total = was_active.count()
+    if not total:
+        return None
+
+    returned = ClubMembership.objects.filter(club=club, season=season, member__in=was_active.values("member")).count()
+
+    return round(100 * returned / total)
+
+
+def teams_without_a_manager(club, season):
+    """Teams with nobody in a management position this season.
+
+    A defect in the club's own setup, not a statistic: without a coach or manager the
+    access service grants nobody authority over that team, so nobody can pick the squad.
+    """
+    if season is None:
+        return Team.objects.none()
+
+    return Team.objects.filter(club=club).exclude(staff_assignments__season=season, staff_assignments__position__management_position=True)
+
+
+def unrostered_members(club, season):
+    """Active members who are on no team this season — people who paid and play nowhere."""
+    if season is None:
+        return Member.objects.none()
+
+    rostered = TeamMembership.objects.filter(team__club=club, season=season).values("member")
+
+    return Member.objects.filter(member_of__club=club, member_of__season=season, member_of__status=ClubMembership.StatusChoices.ACTIVE).exclude(pk__in=rostered).distinct()
+
+
+def fee_aging(club):
+    """Unpaid orders bucketed by age. "€2,400 overdue past 60 days" drives a phone call;
+    "€2,400 outstanding" does not."""
+    now = timezone.now()
+    owed = Order.objects.filter(club=club, status__in=OWED_STATUSES)
+
+    buckets = []
+    for label, older_than, newer_than in (("0-30 days", 0, 30), ("30-60 days", 30, 60), ("60+ days", 60, None)):
+        rows = owed.filter(created__lte=now - timedelta(days=older_than))
+        if newer_than is not None:
+            rows = rows.filter(created__gt=now - timedelta(days=newer_than))
+        buckets.append({"label": label, "total": _money(rows), "count": rows.count(), "overdue": newer_than is None})
+
+    return buckets
+
+
+def attendance_rates(club, season):
+    """Turnout, and how many never answered.
+
+    The no-response share is the leading indicator: it measures whether members are using
+    the app at all, which every other number here depends on.
+    """
+    if season is None:
+        return {"turnout": None, "no_response": None, "responses": 0}
+
+    counts = Attendance.objects.filter(event__club=club, event__season=season, event__start__lt=timezone.now()).aggregate(
+        present=Count("id", filter=Q(status=Attendance.AttendanceStatus.PRESENT)),
+        absent=Count("id", filter=Q(status=Attendance.AttendanceStatus.ABSENT)),
+        silent=Count("id", filter=Q(status=Attendance.AttendanceStatus.NO_RESPONSE)),
+        total=Count("id"),
+    )
+
+    answered = counts["present"] + counts["absent"]
+
+    return {
+        "turnout": round(100 * counts["present"] / answered) if answered else None,
+        "no_response": round(100 * counts["silent"] / counts["total"]) if counts["total"] else None,
+        "responses": counts["total"],
+    }
+
+
+def club_attention(club):
+    """A club's own numbers that are supposed to be zero."""
+    season = Season.covering(club, timezone.localdate())
+    memberships = ClubMembership.objects.filter(club=club)
+
+    return {
+        "season": season,
+        "no_season": season is None,
+        "outstanding": _money(Order.objects.filter(club=club, status__in=OWED_STATUSES)),
+        "aging": fee_aging(club),
+        "unpaid_members": memberships.filter(season=season, fee_status=ClubMembership.FeeStatus.UNPAID).count() if season else 0,
+        "pending_approvals": memberships.filter(status=ClubMembership.StatusChoices.PENDING).count(),
+        "teams_without_manager": teams_without_a_manager(club, season).count(),
+        "unrostered": unrostered_members(club, season).count(),
+        "renewal_rate": renewal_rate(club, season),
+        "attendance": attendance_rates(club, season),
+    }
+
+
+def club_charts(club):
+    season = Season.covering(club, timezone.localdate())
+    memberships = ClubMembership.objects.filter(club=club, season=season) if season else ClubMembership.objects.none()
+
+    return {
+        "signups": _monthly(ClubMembership.objects.filter(club=club, signed_up_at__isnull=False), "signed_up_at", Count("id")),
+        # Fee status this season, in the order a treasurer cares about.
+        "fees": [
+            {"label": label, "value": memberships.filter(fee_status=status).count()}
+            for status, label in (
+                (ClubMembership.FeeStatus.PAID, "Paid"),
+                (ClubMembership.FeeStatus.PARTIALLY_PAID, "Partial"),
+                (ClubMembership.FeeStatus.UNPAID, "Unpaid"),
+                (ClubMembership.FeeStatus.WAIVED, "Waived"),
+            )
+        ],
+    }
 
 
 def club_statistics(club):

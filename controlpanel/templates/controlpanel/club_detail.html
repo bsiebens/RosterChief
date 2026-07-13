@@ -1,5 +1,5 @@
 {% extends "controlpanel/base.html" %}
-{% load lucide %}
+{% load static lucide %}
 
 {% block heading %}{{ club.name }}{% endblock heading %}
 
@@ -33,6 +33,120 @@
             <span>This club is archived: its subdomain no longer resolves. Nothing has been deleted — restore it to bring it back.</span>
         </div>
     {% endif %}
+    {% if attention.no_season %}
+        <div class="alert alert-warning mb-6">
+            {% lucide "calendar-x" size=20 %}
+            <span>
+                No season covers today, so this club cannot take a signup or schedule a match. Nothing errors — it is simply inert.
+            </span>
+        </div>
+    {% endif %}
+
+    {% comment %}
+        The club's own numbers that should be zero. Teams without a manager is a defect in
+        the club's setup, not a statistic: with nobody in a management position the access
+        service grants no authority over that team, so nobody can pick the squad.
+    {% endcomment %}
+    <div class="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div class="card bg-base-100 shadow {% if attention.outstanding %}border-l-4 border-error{% endif %}">
+            <div class="card-body p-4">
+                <div class="flex items-center gap-2 text-sm opacity-70">{% lucide "banknote" size=16 %} Outstanding</div>
+                <div class="text-3xl font-bold tabular-nums">€{{ attention.outstanding|floatformat:2 }}</div>
+                <div class="text-xs opacity-60">{{ attention.unpaid_members }} member{{ attention.unpaid_members|pluralize }} unpaid this season</div>
+            </div>
+        </div>
+        <div class="card bg-base-100 shadow {% if attention.teams_without_manager %}border-l-4 border-error{% endif %}">
+            <div class="card-body p-4">
+                <div class="flex items-center gap-2 text-sm opacity-70">{% lucide "user-x" size=16 %} No coach</div>
+                <div class="text-3xl font-bold tabular-nums">{{ attention.teams_without_manager }}</div>
+                <div class="text-xs opacity-60">Teams nobody can pick a squad for</div>
+            </div>
+        </div>
+        <div class="card bg-base-100 shadow {% if attention.unrostered %}border-l-4 border-warning{% endif %}">
+            <div class="card-body p-4">
+                <div class="flex items-center gap-2 text-sm opacity-70">{% lucide "user-minus" size=16 %} Unrostered</div>
+                <div class="text-3xl font-bold tabular-nums">{{ attention.unrostered }}</div>
+                <div class="text-xs opacity-60">Active members on no team</div>
+            </div>
+        </div>
+        <div class="card bg-base-100 shadow {% if attention.pending_approvals %}border-l-4 border-warning{% endif %}">
+            <div class="card-body p-4">
+                <div class="flex items-center gap-2 text-sm opacity-70">{% lucide "clock" size=16 %} Pending</div>
+                <div class="text-3xl font-bold tabular-nums">{{ attention.pending_approvals }}</div>
+                <div class="text-xs opacity-60">Memberships awaiting approval</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="mb-6 grid gap-4 lg:grid-cols-3">
+        <div class="card bg-base-100 shadow">
+            <div class="card-body">
+                <h2 class="card-title text-base">{% lucide "repeat" size=18 %} Renewal</h2>
+                {% if attention.renewal_rate is None %}
+                    {# No prior season to compare against: a first-season club has not failed to renew anyone. #}
+                    <p class="text-sm opacity-60">No previous season to compare against yet.</p>
+                {% else %}
+                    <div class="text-4xl font-bold tabular-nums">{{ attention.renewal_rate }}%</div>
+                    <p class="text-sm opacity-70">of last season's active members signed up again</p>
+                    <progress class="progress progress-primary w-full" value="{{ attention.renewal_rate }}" max="100"></progress>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="card bg-base-100 shadow">
+            <div class="card-body">
+                <h2 class="card-title text-base">{% lucide "user-check" size=18 %} Attendance</h2>
+                {% if attention.attendance.turnout is None %}
+                    <p class="text-sm opacity-60">No past events with responses this season.</p>
+                {% else %}
+                    <div class="text-4xl font-bold tabular-nums">{{ attention.attendance.turnout }}%</div>
+                    <p class="text-sm opacity-70">turnout of those who answered</p>
+                    <p class="mt-2 text-sm">
+                        {# The leading indicator: it measures whether members use the app at all. #}
+                        <span class="font-semibold {% if attention.attendance.no_response > 30 %}text-warning{% endif %}">{{ attention.attendance.no_response }}%</span>
+                        <span class="opacity-70">never responded</span>
+                    </p>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="card bg-base-100 shadow">
+            <div class="card-body">
+                <h2 class="card-title text-base">{% lucide "hourglass" size=18 %} Unpaid, by age</h2>
+                <table class="table table-sm">
+                    <tbody>
+                        {% for bucket in attention.aging %}
+                            <tr>
+                                <td class="{% if bucket.overdue and bucket.total %}font-semibold text-error{% endif %}">{{ bucket.label }}</td>
+                                <td class="text-right tabular-nums">€{{ bucket.total|floatformat:2 }}</td>
+                                <td class="text-right opacity-60">{{ bucket.count }} order{{ bucket.count|pluralize }}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="mb-6 grid gap-4 lg:grid-cols-2">
+        <div class="card bg-base-100 shadow">
+            <div class="card-body">
+                <h2 class="card-title text-base">{% lucide "user-plus" size=18 %} Signups per month</h2>
+                <div class="h-56">
+                    <canvas id="signups-chart"></canvas>
+                </div>
+            </div>
+        </div>
+        <div class="card bg-base-100 shadow">
+            <div class="card-body">
+                <h2 class="card-title text-base">{% lucide "wallet" size=18 %} Fee status this season</h2>
+                <div class="h-56">
+                    <canvas id="fees-chart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div class="mb-6 grid gap-4 md:grid-cols-2">
         {% for group in groups %}
             <div class="card bg-base-100 shadow">
@@ -127,3 +241,66 @@
         </div>
     </div>
 {% endblock panel %}
+
+{% block extra_body %}
+    {{ charts|json_script:"chart-data" }}
+    <script src="{% static 'js/chart.js' %}"></script>
+    <script>
+        (() => {
+            const data = JSON.parse(document.getElementById("chart-data").textContent);
+            const css = (name, fallback) => getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+
+            const render = () => {
+                const ink = css("--color-base-content", "#333");
+                const grid = "color-mix(in oklab, " + ink + " 15%, transparent)";
+
+                const signups = new Chart(document.getElementById("signups-chart"), {
+                    type: "bar",
+                    data: {
+                        labels: data.signups.map((point) => point.month),
+                        datasets: [{ label: "Signups", data: data.signups.map((point) => point.value), backgroundColor: css("--color-primary", "#4f46e5") }],
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: { legend: { display: false } },
+                        scales: {
+                            x: { ticks: { color: ink }, grid: { color: grid } },
+                            y: { beginAtZero: true, ticks: { color: ink, precision: 0 }, grid: { color: grid } },
+                        },
+                    },
+                });
+
+                // Colour carries the meaning here — unpaid must read as a problem, waived must
+                // not — so the slices are pinned to the semantic theme colours, in order.
+                const fees = new Chart(document.getElementById("fees-chart"), {
+                    type: "doughnut",
+                    data: {
+                        labels: data.fees.map((slice) => slice.label),
+                        datasets: [
+                            {
+                                data: data.fees.map((slice) => slice.value),
+                                backgroundColor: [css("--color-success", "#16a34a"), css("--color-warning", "#f59e0b"), css("--color-error", "#dc2626"), css("--color-neutral", "#6b7280")],
+                            },
+                        ],
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: { legend: { position: "right", labels: { color: ink } } },
+                    },
+                });
+
+                return [signups, fees];
+            };
+
+            let charts = render();
+
+            // "auto" removes data-theme entirely, so watch the attribute rather than a click.
+            new MutationObserver(() => {
+                charts.forEach((chart) => chart.destroy());
+                charts = render();
+            }).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+        })();
+    </script>
+{% endblock extra_body %}

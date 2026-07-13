@@ -17,7 +17,7 @@ from .services.platform_admins import (
     revoke_platform_access,
     set_platform_access,
 )
-from .services.statistics import club_statistics, clubs_with_totals, flag_adoption, onboarding_funnel, platform_attention, platform_charts, platform_totals
+from .services.statistics import club_attention, club_charts, club_statistics, clubs_with_totals, flag_adoption, onboarding_funnel, platform_attention, platform_charts, platform_totals
 
 Flag = get_waffle_flag_model()
 Switch = get_waffle_switch_model()
@@ -95,6 +95,8 @@ class ClubDetailView(PlatformStaffRequiredMixin, DetailView):
         return super().get_context_data(
             nav="clubs",
             groups=club_statistics(self.object),
+            attention=club_attention(self.object),
+            charts=club_charts(self.object),
             admins=ClubRole.objects.filter(club=self.object, role=ClubRole.Roles.ADMIN).select_related("member", "member__user"),
             flags=flags_for_club(self.object),
             **kwargs,
