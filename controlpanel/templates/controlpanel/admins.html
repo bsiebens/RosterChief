@@ -1,0 +1,73 @@
+{% extends "controlpanel/base.html" %}
+{% load lucide %}
+
+{% block heading %}Platform admins{% endblock heading %}
+
+{% block subheading %}
+    <p class="text-sm opacity-70">Staff run the panel. Superusers additionally manage this list.</p>
+{% endblock subheading %}
+
+{% block actions %}
+    <a class="btn btn-primary gap-2" href="{% url 'controlpanel:admin_add' %}">{% lucide "user-plus" size=16 %} Grant access</a>
+{% endblock actions %}
+
+{% block panel %}
+    <div class="card bg-base-100 shadow">
+        <div class="card-body">
+            <div class="overflow-x-auto">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>User</th>
+                            <th>Staff</th>
+                            <th>Superuser</th>
+                            <th>Last login</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for admin in admins %}
+                            <tr>
+                                <td>
+                                    <div class="font-medium">{{ admin.email }}</div>
+                                    {% if admin.pk == user.pk %}<div class="text-xs opacity-60">That's you</div>{% endif %}
+                                </td>
+                                <td>
+                                    <form method="post" action="{% url 'controlpanel:admin_update' admin.pk %}">
+                                        {% csrf_token %}
+                                        <input type="hidden" name="is_staff" value="{% if admin.is_staff %}0{% else %}1{% endif %}">
+                                        <input type="hidden" name="is_superuser" value="{% if admin.is_superuser %}1{% else %}0{% endif %}">
+                                        <button class="btn btn-xs gap-1 {% if admin.is_staff %}btn-success{% else %}btn-ghost{% endif %}" type="submit">
+                                            {% if admin.is_staff %}{% lucide "check" size=14 %} Yes{% else %}No{% endif %}
+                                        </button>
+                                    </form>
+                                </td>
+                                <td>
+                                    <form method="post" action="{% url 'controlpanel:admin_update' admin.pk %}">
+                                        {% csrf_token %}
+                                        <input type="hidden" name="is_staff" value="{% if admin.is_staff %}1{% else %}0{% endif %}">
+                                        <input type="hidden" name="is_superuser" value="{% if admin.is_superuser %}0{% else %}1{% endif %}">
+                                        <button class="btn btn-xs gap-1 {% if admin.is_superuser %}btn-warning{% else %}btn-ghost{% endif %}" type="submit">
+                                            {% if admin.is_superuser %}{% lucide "shield" size=14 %} Yes{% else %}No{% endif %}
+                                        </button>
+                                    </form>
+                                </td>
+                                <td class="opacity-70">{{ admin.last_login|date:"j M Y"|default:"Never" }}</td>
+                                <td class="text-right">
+                                    <form method="post" action="{% url 'controlpanel:admin_revoke' admin.pk %}">
+                                        {% csrf_token %}
+                                        <button class="btn btn-ghost btn-xs gap-1 text-error" type="submit">{% lucide "user-minus" size=14 %} Revoke</button>
+                                    </form>
+                                </td>
+                            </tr>
+                        {% empty %}
+                            <tr>
+                                <td colspan="5" class="text-center opacity-60">No platform admins.</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+{% endblock panel %}

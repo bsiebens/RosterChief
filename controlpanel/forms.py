@@ -1,5 +1,6 @@
 from django import forms
 from django.utils.translation import gettext_lazy as _
+from waffle import get_waffle_flag_model
 
 from club.models import Club
 
@@ -35,3 +36,19 @@ class ClubAdminForm(forms.Form):
                     self.add_error(field, _("Required: this email has no account yet."))
 
         return cleaned
+
+
+class PlatformAdminForm(forms.Form):
+    """Grant platform access to an email address, creating the account if new."""
+
+    email = forms.EmailField(label=_("Email address"), help_text=_("If this email has no account yet, one is created and they set a password via the reset link."))
+    is_superuser = forms.BooleanField(label=_("Superuser"), required=False, help_text=_("Superusers can manage platform admins. Everyone granted access is staff."))
+
+
+class FlagForm(forms.ModelForm):
+    class Meta:
+        model = get_waffle_flag_model()
+        fields = ["name", "note", "everyone", "superusers", "staff", "percent"]
+        help_texts = {
+            "everyone": _("Yes = on for all clubs, No = off everywhere (overrides club targeting). Leave unknown to target clubs."),
+        }

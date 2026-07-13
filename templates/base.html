@@ -7,14 +7,16 @@
         <title>
             {% block title %}RosterChief{% endblock title %}
         </title>
-        {# Apply the stored theme before first paint, otherwise the page flashes
-           the wrong colours. With no stored preference we set nothing, so
-           daisyUI's `dark --prefersdark` follows the OS. #}
+        {% comment %}
+            Apply the stored theme before first paint, otherwise the page flashes the wrong
+            colours. With no stored preference we set nothing, so daisyUI's `dark --prefersdark`
+            follows the OS.
+        {% endcomment %}
         <script>
-      (() => {
-        const stored = localStorage.getItem("theme");
-        if (stored) document.documentElement.setAttribute("data-theme", stored);
-      })();
+            (() => {
+                const stored = localStorage.getItem("theme");
+                if (stored) document.documentElement.setAttribute("data-theme", stored);
+            })();
         </script>
         <link rel="stylesheet" href="{% static 'css/app.css' %}">
         {% block extra_head %}{% endblock extra_head %}
@@ -88,28 +90,28 @@
             {% block main %}{% endblock main %}
         </main>
         <script>
-      // No stored preference means "follow the OS", so the effective theme has to
-      // be read from the OS whenever nothing is set.
-      const effectiveTheme = () =>
-        document.documentElement.getAttribute("data-theme") ||
-        (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+            // No stored preference means "follow the OS", so the effective theme has to
+            // be read from the OS whenever nothing is set.
+            const effectiveTheme = () =>
+                document.documentElement.getAttribute("data-theme") ||
+                (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
 
-      const showThemeIcon = () => {
-        const dark = effectiveTheme() === "dark";
-        document.querySelectorAll('[data-theme-icon="dark"]').forEach((i) => i.classList.toggle("hidden", !dark));
-        document.querySelectorAll('[data-theme-icon="light"]').forEach((i) => i.classList.toggle("hidden", dark));
-      };
+            const showThemeIcon = () => {
+                const dark = effectiveTheme() === "dark";
+                document.querySelectorAll('[data-theme-icon="dark"]').forEach((i) => i.classList.toggle("hidden", !dark));
+                document.querySelectorAll('[data-theme-icon="light"]').forEach((i) => i.classList.toggle("hidden", dark));
+            };
 
-      document.querySelectorAll("[data-theme-toggle]").forEach((button) => {
-        button.addEventListener("click", () => {
-          const next = effectiveTheme() === "dark" ? "light" : "dark";
-          document.documentElement.setAttribute("data-theme", next);
-          localStorage.setItem("theme", next);
-          showThemeIcon();
-        });
-      });
+            document.querySelectorAll("[data-theme-toggle]").forEach((button) => {
+                button.addEventListener("click", () => {
+                    const next = effectiveTheme() === "dark" ? "light" : "dark";
+                    document.documentElement.setAttribute("data-theme", next);
+                    localStorage.setItem("theme", next);
+                    showThemeIcon();
+                });
+            });
 
-      showThemeIcon();
+            showThemeIcon();
         </script>
     </body>
 </html>

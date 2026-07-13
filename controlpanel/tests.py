@@ -3,9 +3,11 @@ from decimal import Decimal
 from allauth.mfa.models import Authenticator
 from django import forms
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
+from waffle import get_waffle_flag_model, get_waffle_switch_model
 
 from club.models import Club, ClubMembership, ClubRole, Season
 from members.models import Member
@@ -13,10 +15,13 @@ from shop.models import Order
 from teams.models import Position, Team, TeamMembership
 
 from .services.admins import grant_club_admin
+from .services.platform_admins import PlatformAdminError, is_last_superuser, set_platform_access
 from .services.statistics import club_statistics, clubs_with_totals, platform_totals
 from .templatetags.ui import daisy
 
 User = get_user_model()
+Flag = get_waffle_flag_model()
+Switch = get_waffle_switch_model()
 
 
 def enrol_mfa(user):
@@ -253,3 +258,168 @@ class DaisyFilterTests(TestCase):
 
     def test_invalid_fields_get_an_error_class(self):
         self.assertIn("input-error", self.rendered("text", data={}))
+
+
+class PlatformAdminAccessTests(ControlPanelTestBase):
+    """Managing platform admins is superuser-only: the panel is gated on
+    is_staff OR is_superuser, so letting staff grant superuser would collapse
+    the two into one privilege level."""
+
+    def test_staff_cannot_reach_the_admins_section(self):
+        self.assertEqual(self.client.get(reverse("controlpanel:admins")).status_code, 403)
+
+    def test_staff_cannot_grant_platform_access(self):
+        self.assertEqual(self.client.get(reverse("controlpanel:admin_add")).status_code, 403)
+
+    def test_the_admins_tab_is_hidden_from_staff(self):
+        self.assertNotContains(self.client.get(reverse("controlpanel:dashboard")), reverse("controlpanel:admins"))
+
+
+class PlatformAdminTests(TestCase):
+    def setUp(self):
+        self.root = User.objects.create_superuser(email="root@example.com", password="pw-secret-123")
+        enrol_mfa(self.root)
+        self.client.force_login(self.root)
+
+    def test_superuser_sees_the_admins_section(self):
+        self.assertEqual(self.client.get(reverse("controlpanel:admins")).status_code, 200)
+
+    def test_the_grant_form_renders(self):
+        self.assertEqual(self.client.get(reverse("controlpanel:admin_add")).status_code, 200)
+
+    def test_grant_access_to_a_new_email_creates_a_staff_account(self):
+        self.client.post(reverse("controlpanel:admin_add"), {"email": "New.Admin@Example.com"})
+
+        user = User.objects.get(email="new.admin@example.com")
+        self.assertTrue(user.is_staff)
+        self.assertFalse(user.is_superuser)
+        self.assertFalse(user.has_usable_password())  # set via password reset
+
+    def test_grant_superuser(self):
+        self.client.post(reverse("controlpanel:admin_add"), {"email": "boss@example.com", "is_superuser": "1"})
+
+        user = User.objects.get(email="boss@example.com")
+        self.assertTrue(user.is_superuser)
+        self.assertTrue(user.is_staff)  # superuser implies staff, else they can't reach the panel
+
+    def test_promote_and_demote_another_admin(self):
+        other = User.objects.create_user(email="other@example.com", password="pw-secret-123", is_staff=True)
+
+        self.client.post(reverse("controlpanel:admin_update", args=[other.pk]), {"is_staff": "1", "is_superuser": "1"})
+        other.refresh_from_db()
+        self.assertTrue(other.is_superuser)
+
+        self.client.post(reverse("controlpanel:admin_update", args=[other.pk]), {"is_staff": "1", "is_superuser": "0"})
+        other.refresh_from_db()
+        self.assertFalse(other.is_superuser)
+
+    def test_revoke_another_admins_access(self):
+        other = User.objects.create_user(email="other@example.com", password="pw-secret-123", is_staff=True)
+
+        self.client.post(reverse("controlpanel:admin_revoke", args=[other.pk]))
+
+        other.refresh_from_db()
+        self.assertFalse(other.is_staff)
+        self.assertFalse(other.is_superuser)
+
+    # --- guardrails: it must be impossible to lock the platform out of itself ---
+    def test_cannot_revoke_your_own_access(self):
+        response = self.client.post(reverse("controlpanel:admin_revoke", args=[self.root.pk]), follow=True)
+
+        self.root.refresh_from_db()
+        self.assertTrue(self.root.is_superuser)
+        self.assertContains(response, "cannot remove your own platform access")
+
+    def test_cannot_remove_your_own_superuser_rights(self):
+        # Keep another superuser around so this is blocked by the self-rule, not
+        # by the last-superuser rule.
+        User.objects.create_superuser(email="spare@example.com", password="pw-secret-123")
+
+        response = self.client.post(reverse("controlpanel:admin_update", args=[self.root.pk]), {"is_staff": "1", "is_superuser": "0"}, follow=True)
+
+        self.root.refresh_from_db()
+        self.assertTrue(self.root.is_superuser)
+        self.assertContains(response, "cannot remove your own superuser rights")
+
+    def test_the_last_superuser_cannot_be_demoted(self):
+        other = User.objects.create_superuser(email="other@example.com", password="pw-secret-123")
+        # Now demote self is blocked by the self-rule; demote `other` is fine...
+        self.client.post(reverse("controlpanel:admin_update", args=[other.pk]), {"is_staff": "1", "is_superuser": "0"})
+        other.refresh_from_db()
+        self.assertFalse(other.is_superuser)
+
+        # ...leaving root as the last superuser, who now cannot be demoted by anyone.
+        self.assertTrue(is_last_superuser(self.root))
+        with self.assertRaises(PlatformAdminError):
+            set_platform_access(other, self.root, is_staff=True, is_superuser=False)
+
+    def test_last_superuser_rule_is_enforced_for_other_actors_too(self):
+        response = self.client.post(reverse("controlpanel:admin_revoke", args=[self.root.pk]), follow=True)
+
+        self.root.refresh_from_db()
+        self.assertTrue(self.root.is_superuser)
+        self.assertContains(response, "cannot remove your own platform access")
+
+
+class FeatureViewTests(ControlPanelTestBase):
+    def setUp(self):
+        super().setUp()
+        cache.clear()
+        self.addCleanup(cache.clear)
+        self.flag = Flag.objects.create(name="shop")
+
+    def test_features_page_lists_flags_and_switches(self):
+        Switch.objects.create(name="maintenance", active=False)
+
+        response = self.client.get(reverse("controlpanel:features"))
+
+        self.assertContains(response, "shop")
+        self.assertContains(response, "maintenance")
+
+    def test_the_flag_forms_render(self):
+        self.assertEqual(self.client.get(reverse("controlpanel:flag_create")).status_code, 200)
+        self.assertEqual(self.client.get(reverse("controlpanel:flag_update", args=[self.flag.pk])).status_code, 200)
+
+    def test_create_a_flag(self):
+        self.client.post(reverse("controlpanel:flag_create"), {"name": "news", "note": "News module", "percent": "", "everyone": ""})
+
+        self.assertTrue(Flag.objects.filter(name="news").exists())
+
+    def test_edit_a_flag(self):
+        self.client.post(reverse("controlpanel:flag_update", args=[self.flag.pk]), {"name": "shop", "note": "Webshop", "percent": "", "everyone": ""})
+
+        self.flag.refresh_from_db()
+        self.assertEqual(self.flag.note, "Webshop")
+
+    def test_toggle_a_feature_on_and_off_for_a_club(self):
+        url = reverse("controlpanel:club_feature_toggle", args=[self.club.pk, self.flag.pk])
+
+        self.client.post(url)
+        self.assertTrue(self.flag.clubs.filter(pk=self.club.pk).exists())
+
+        self.client.post(url)
+        self.assertFalse(self.flag.clubs.filter(pk=self.club.pk).exists())
+
+    def test_toggle_a_switch(self):
+        switch = Switch.objects.create(name="maintenance", active=False)
+
+        self.client.post(reverse("controlpanel:switch_toggle", args=[switch.pk]))
+
+        switch.refresh_from_db()
+        self.assertTrue(switch.active)
+
+    def test_club_detail_offers_a_toggle_per_feature(self):
+        response = self.client.get(reverse("controlpanel:club_detail", args=[self.club.pk]))
+
+        self.assertContains(response, "shop")
+        self.assertContains(response, reverse("controlpanel:club_feature_toggle", args=[self.club.pk, self.flag.pk]))
+
+    def test_an_everyone_flag_shows_a_badge_instead_of_a_club_toggle(self):
+        # `everyone` overrides club targeting, so offering a per-club toggle would lie.
+        self.flag.everyone = True
+        self.flag.save()
+
+        response = self.client.get(reverse("controlpanel:club_detail", args=[self.club.pk]))
+
+        self.assertContains(response, "On for all clubs")
+        self.assertNotContains(response, reverse("controlpanel:club_feature_toggle", args=[self.club.pk, self.flag.pk]))

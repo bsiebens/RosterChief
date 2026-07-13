@@ -50,6 +50,45 @@
             </div>
         {% endfor %}
     </div>
+    <div class="card mb-6 bg-base-100 shadow">
+        <div class="card-body">
+            <div class="flex items-center justify-between">
+                <h2 class="card-title text-base">{% lucide "toggle-right" size=18 %} Features</h2>
+                <a class="btn btn-ghost btn-xs" href="{% url 'controlpanel:features' %}">Manage features</a>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="table">
+                    <tbody>
+                        {% for entry in flags %}
+                            <tr>
+                                <td class="font-mono font-medium">{{ entry.flag.name }}</td>
+                                <td class="opacity-70">{{ entry.flag.note|default:"—" }}</td>
+                                <td class="text-right">
+                                    {% if entry.overridden %}
+                                        {# `everyone` overrides club targeting, so a per-club toggle would be a lie. #}
+                                        <span class="badge {% if entry.flag.everyone %}badge-success{% else %}badge-error{% endif %}">
+                                            {% if entry.flag.everyone %}On for all clubs{% else %}Off everywhere{% endif %}
+                                        </span>
+                                    {% else %}
+                                        <form method="post" action="{% url 'controlpanel:club_feature_toggle' club.pk entry.flag.pk %}">
+                                            {% csrf_token %}
+                                            <button class="btn btn-sm gap-1 {% if entry.enabled %}btn-success{% else %}btn-ghost{% endif %}" type="submit">
+                                                {% if entry.enabled %}{% lucide "toggle-right" size=16 %} On{% else %}{% lucide "toggle-left" size=16 %} Off{% endif %}
+                                            </button>
+                                        </form>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                        {% empty %}
+                            <tr>
+                                <td class="text-center opacity-60">No features defined yet.</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
     <div class="card bg-base-100 shadow">
         <div class="card-body">
             <div class="flex items-center justify-between">

@@ -1,0 +1,87 @@
+{% extends "controlpanel/base.html" %}
+{% load lucide %}
+
+{% block heading %}Features{% endblock heading %}
+
+{% block actions %}
+    <a class="btn btn-primary gap-2" href="{% url 'controlpanel:flag_create' %}">{% lucide "plus" size=16 %} New feature</a>
+{% endblock actions %}
+
+{% block panel %}
+    <div class="card mb-6 bg-base-100 shadow">
+        <div class="card-body">
+            <h2 class="card-title text-base">{% lucide "flag" size=18 %} Flags</h2>
+            <p class="text-sm opacity-70">
+                Flags are turned on per club. Setting <em>Everyone</em> to Yes or No overrides club targeting entirely.
+            </p>
+            <div class="overflow-x-auto">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Everyone</th>
+                            <th>Clubs</th>
+                            <th>Note</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for flag in flags %}
+                            <tr>
+                                <td class="font-mono font-medium">{{ flag.name }}</td>
+                                <td>
+                                    {% if flag.everyone is True %}
+                                        <span class="badge badge-success">On for all</span>
+                                    {% elif flag.everyone is False %}
+                                        <span class="badge badge-error">Off everywhere</span>
+                                    {% else %}
+                                        <span class="badge badge-ghost">Per club</span>
+                                    {% endif %}
+                                </td>
+                                <td>{{ flag.clubs.count }}</td>
+                                <td class="max-w-xs truncate opacity-70">{{ flag.note|default:"—" }}</td>
+                                <td class="text-right">
+                                    <a class="btn btn-ghost btn-xs gap-1" href="{% url 'controlpanel:flag_update' flag.pk %}">{% lucide "pencil" size=14 %} Edit</a>
+                                </td>
+                            </tr>
+                        {% empty %}
+                            <tr>
+                                <td colspan="5" class="text-center opacity-60">No features yet.</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    <div class="card bg-base-100 shadow">
+        <div class="card-body">
+            <h2 class="card-title text-base">{% lucide "power" size=18 %} Switches</h2>
+            <p class="text-sm opacity-70">Global on/off for the whole platform — kill-switches, maintenance, infra rollouts.</p>
+            <div class="overflow-x-auto">
+                <table class="table">
+                    <tbody>
+                        {% for switch in switches %}
+                            <tr>
+                                <td class="font-mono font-medium">{{ switch.name }}</td>
+                                <td class="opacity-70">{{ switch.note|default:"—" }}</td>
+                                <td class="text-right">
+                                    <form method="post" action="{% url 'controlpanel:switch_toggle' switch.pk %}">
+                                        {% csrf_token %}
+                                        <button class="btn btn-sm gap-1 {% if switch.active %}btn-success{% else %}btn-ghost{% endif %}" type="submit">
+                                            {% if switch.active %}{% lucide "toggle-right" size=16 %} On{% else %}{% lucide "toggle-left" size=16 %} Off{% endif %}
+                                        </button>
+                                    </form>
+                                </td>
+                            </tr>
+                        {% empty %}
+                            <tr>
+                                <td class="text-center opacity-60">No switches yet — add one in the Django admin.</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+{% endblock panel %}
