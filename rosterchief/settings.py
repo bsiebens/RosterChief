@@ -58,8 +58,15 @@ INSTALLED_APPS = [
     "events.apps.EventsConfig",
     "formbuilder.apps.FormbuilderConfig",
     "shop.apps.ShopConfig",
+    "waffle",
+    "features.apps.FeaturesConfig",
     "controlpanel.apps.ControlpanelConfig",
 ]
+
+# Feature flags (django-waffle). The Flag model is swappable, like AUTH_USER_MODEL:
+# ours adds a `clubs` M2M so a feature can be turned on per tenant. Because the
+# tenant middleware sets request.club, `flag_is_active(request, "x")` just works.
+WAFFLE_FLAG_MODEL = "features.Flag"
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
