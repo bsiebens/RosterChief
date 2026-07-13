@@ -1,4 +1,4 @@
-{% load lucide static %}
+{% load lucide static ui %}
 
 {% comment %}
     The page skeleton, with no branding of its own. `_platform_base.html` dresses it
@@ -68,9 +68,15 @@
         {% if messages %}
             <div class="mx-auto mt-4 w-full space-y-2 px-4">
                 {% for message in messages %}
-                    <div class="alert {% if message.tags == 'error' %}alert-error{% elif message.tags == 'warning' %}alert-warning{% elif message.tags == 'success' %}alert-success{% else %}alert-info{% endif %}">
-                        <span>{{ message }}</span>
-                    </div>
+                    {% with alert=message|as_alert %}
+                        <div class="alert alert-soft {{ alert.css }}" role="alert">
+                            {% lucide alert.icon size=20 %}
+                            <div>
+                                <div class="font-bold">{{ alert.title }}</div>
+                                <div class="text-sm">{{ alert.body }}</div>
+                            </div>
+                        </div>
+                    {% endwith %}
                 {% endfor %}
             </div>
         {% endif %}

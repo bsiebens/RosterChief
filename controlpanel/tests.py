@@ -2,7 +2,9 @@ from decimal import Decimal
 
 from allauth.mfa.models import Authenticator
 from django import forms
+from django.contrib import messages
 from django.contrib.auth import get_user_model
+from django.contrib.messages.storage.base import Message
 from django.core.cache import cache
 from django.test import TestCase, override_settings
 from django.urls import reverse
@@ -17,7 +19,7 @@ from teams.models import Position, Team, TeamMembership
 from .services.admins import grant_club_admin
 from .services.platform_admins import PlatformAdminError, is_last_superuser, set_platform_access
 from .services.statistics import club_statistics, clubs_with_totals, platform_totals
-from .templatetags.ui import daisy
+from .templatetags.ui import as_alert, daisy
 
 User = get_user_model()
 Flag = get_waffle_flag_model()
@@ -423,3 +425,33 @@ class FeatureViewTests(ControlPanelTestBase):
 
         self.assertContains(response, "On for all clubs")
         self.assertNotContains(response, reverse("controlpanel:club_feature_toggle", args=[self.club.pk, self.flag.pk]))
+
+
+class MessageAlertTests(TestCase):
+    def alert(self, level, text, extra_tags=None):
+        return as_alert(Message(level, text, extra_tags=extra_tags))
+
+    def test_each_level_gets_its_own_icon_title_and_colour(self):
+        self.assertEqual(self.alert(messages.SUCCESS, "Saved.")["icon"], "circle-check")
+        self.assertEqual(self.alert(messages.WARNING, "Careful.")["css"], "alert-warning")
+        self.assertEqual(self.alert(messages.ERROR, "Boom.")["title"], "Something went wrong")
+        self.assertEqual(self.alert(messages.INFO, "FYI.")["css"], "alert-info")
+
+    def test_extra_tags_override_the_title(self):
+        alert = self.alert(messages.SUCCESS, "Ajax United is live.", extra_tags="Club created")
+
+        self.assertEqual(alert["title"], "Club created")
+        self.assertEqual(alert["body"], "Ajax United is live.")
+        self.assertEqual(alert["css"], "alert-success")  # a custom title must not change the level
+
+    def test_an_unknown_level_falls_back_to_info(self):
+        self.assertEqual(self.alert(999, "Odd.")["css"], "alert-info")
+
+
+class MessageRenderingTests(ControlPanelTestBase):
+    def test_a_message_renders_as_a_soft_alert_with_icon_and_title(self):
+        response = self.client.post(reverse("controlpanel:club_archive", args=[self.club.pk]), follow=True)
+
+        self.assertContains(response, "alert alert-soft alert-warning")
+        self.assertContains(response, '<div class="font-bold">Careful</div>', html=False)
+        self.assertContains(response, "<svg")  # the lucide icon
