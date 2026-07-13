@@ -5,6 +5,7 @@ means adding an entry here and nothing else. ``clubs_with_totals`` annotates in
 a single query — the club list must not fan out into N+1.
 """
 
+from collections import defaultdict
 from datetime import timedelta
 from decimal import Decimal
 
@@ -181,6 +182,49 @@ def renewal_rate(club, season):
     return round(100 * returned / total)
 
 
+def new_members(club, season):
+    """Members whose first-ever season at this club is ``season``.
+
+    Keyed on "has no membership in an earlier season", not on "signed up recently" — a
+    member who lapsed for a year and came back is a renewal, not a new member, and
+    counting them as new would flatter every recovery into growth.
+    """
+    if season is None:
+        return Member.objects.none()
+
+    seen_before = ClubMembership.objects.filter(club=club, season__start_date__lt=season.start_date).values("member")
+
+    return Member.objects.filter(member_of__club=club, member_of__season=season).exclude(pk__in=seen_before).distinct()
+
+
+def signup_split(club, months=MONTHS_OF_HISTORY):
+    """Signups per month, split into first-timers and returners.
+
+    Which season a signup belongs to decides the split, so the member's earliest season at
+    this club is looked up once for everyone rather than per row — the same question asked
+    inside a loop is a query per membership.
+    """
+    start = (timezone.now() - timedelta(days=30 * months)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+    first_season = {}
+    for member_id, season_start in ClubMembership.objects.filter(club=club).values_list("member_id", "season__start_date"):
+        if member_id not in first_season or season_start < first_season[member_id]:
+            first_season[member_id] = season_start
+
+    counts = defaultdict(lambda: {"new": 0, "returning": 0})
+    for member_id, season_start, signed_up_at in ClubMembership.objects.filter(club=club, signed_up_at__isnull=False, signed_up_at__gte=start).values_list("member_id", "season__start_date", "signed_up_at"):
+        kind = "new" if season_start == first_season[member_id] else "returning"
+        counts[signed_up_at.strftime("%Y-%m")][kind] += 1
+
+    series, cursor = [], start
+    while cursor <= timezone.now():
+        month = counts[cursor.strftime("%Y-%m")]
+        series.append({"month": cursor.strftime("%b %Y"), "new": month["new"], "returning": month["returning"]})
+        cursor = (cursor + timedelta(days=32)).replace(day=1)
+
+    return series
+
+
 def teams_without_a_manager(club, season):
     """Teams with nobody in a management position this season.
 
@@ -258,6 +302,7 @@ def club_attention(club):
         "pending_approvals": memberships.filter(status=ClubMembership.StatusChoices.PENDING).count(),
         "teams_without_manager": teams_without_a_manager(club, season).count(),
         "unrostered": unrostered_members(club, season).count(),
+        "new_members": new_members(club, season).count(),
         "renewal_rate": renewal_rate(club, season),
         "attendance": attendance_rates(club, season),
     }
@@ -268,7 +313,7 @@ def club_charts(club):
     memberships = ClubMembership.objects.filter(club=club, season=season) if season else ClubMembership.objects.none()
 
     return {
-        "signups": _monthly(ClubMembership.objects.filter(club=club, signed_up_at__isnull=False), "signed_up_at", Count("id")),
+        "signups": signup_split(club),
         # Fee status this season, in the order a treasurer cares about.
         "fees": [
             {"label": label, "value": memberships.filter(fee_status=status).count()}

@@ -78,7 +78,16 @@
         </div>
     </div>
 
-    <div class="mb-6 grid gap-4 lg:grid-cols-3">
+    <div class="mb-6 grid gap-4 lg:grid-cols-4">
+        <div class="card bg-base-100 shadow">
+            <div class="card-body">
+                <h2 class="card-title text-base">{% lucide "sparkles" size=18 %} New members</h2>
+                <div class="text-4xl font-bold tabular-nums">{{ attention.new_members }}</div>
+                {# First season at this club — someone returning after a year away is a renewal. #}
+                <p class="text-sm opacity-70">first season at this club</p>
+            </div>
+        </div>
+
         <div class="card bg-base-100 shadow">
             <div class="card-body">
                 <h2 class="card-title text-base">{% lucide "repeat" size=18 %} Renewal</h2>
@@ -132,6 +141,7 @@
         <div class="card bg-base-100 shadow">
             <div class="card-body">
                 <h2 class="card-title text-base">{% lucide "user-plus" size=18 %} Signups per month</h2>
+                <p class="text-sm opacity-70">New members against returning ones.</p>
                 <div class="h-56">
                     <canvas id="signups-chart"></canvas>
                 </div>
@@ -254,19 +264,24 @@
                 const ink = css("--color-base-content", "#333");
                 const grid = "color-mix(in oklab, " + ink + " 15%, transparent)";
 
+                // Stacked: the bar height stays "signups this month" while the split shows where
+                // they came from. Side-by-side bars would answer a different question.
                 const signups = new Chart(document.getElementById("signups-chart"), {
                     type: "bar",
                     data: {
                         labels: data.signups.map((point) => point.month),
-                        datasets: [{ label: "Signups", data: data.signups.map((point) => point.value), backgroundColor: css("--color-primary", "#4f46e5") }],
+                        datasets: [
+                            { label: "New", data: data.signups.map((point) => point.new), backgroundColor: css("--color-primary", "#4f46e5") },
+                            { label: "Returning", data: data.signups.map((point) => point.returning), backgroundColor: css("--color-accent", "#0ea5e9") },
+                        ],
                     },
                     options: {
                         responsive: true,
                         maintainAspectRatio: false,
-                        plugins: { legend: { display: false } },
+                        plugins: { legend: { position: "bottom", labels: { color: ink } } },
                         scales: {
-                            x: { ticks: { color: ink }, grid: { color: grid } },
-                            y: { beginAtZero: true, ticks: { color: ink, precision: 0 }, grid: { color: grid } },
+                            x: { stacked: true, ticks: { color: ink }, grid: { color: grid } },
+                            y: { stacked: true, beginAtZero: true, ticks: { color: ink, precision: 0 }, grid: { color: grid } },
                         },
                     },
                 });

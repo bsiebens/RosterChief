@@ -30,11 +30,13 @@ from .services.statistics import (
     dormant_clubs,
     fee_aging,
     flag_adoption,
+    new_members,
     onboarding_funnel,
     platform_attention,
     platform_charts,
     platform_totals,
     renewal_rate,
+    signup_split,
     teams_without_a_manager,
     unrostered_members,
 )
@@ -866,3 +868,65 @@ class ClubDetailMetricsTests(ControlPanelTestBase):
         response = self.client.get(reverse("controlpanel:club_detail", args=[self.club.pk]))
 
         self.assertContains(response, "cannot take a signup")
+
+
+class NewMemberTests(TestCase):
+    def setUp(self):
+        self.club = Club.objects.create(name="Ajax United")
+        self.today = timezone.localdate()
+        self.previous = Season.objects.create(club=self.club, start_date=self.today - datetime.timedelta(days=400), end_date=self.today - datetime.timedelta(days=40))
+        self.season = Season.objects.create(club=self.club, start_date=self.today - datetime.timedelta(days=30), end_date=self.today + datetime.timedelta(days=300))
+        self.veteran = Member.objects.create(first_name="Ada", last_name="Lovelace")
+        self.rookie = Member.objects.create(first_name="Bob", last_name="Bobson")
+
+    def membership(self, member, season, signed_up_at=None):
+        return ClubMembership.objects.create(club=self.club, season=season, member=member, status=ClubMembership.StatusChoices.ACTIVE, signed_up_at=signed_up_at)
+
+    def test_only_first_timers_count_as_new(self):
+        self.membership(self.veteran, self.previous)
+        self.membership(self.veteran, self.season)
+        self.membership(self.rookie, self.season)
+
+        new = new_members(self.club, self.season)
+
+        self.assertIn(self.rookie, new)
+        self.assertNotIn(self.veteran, new)
+
+    def test_a_member_returning_after_a_gap_is_not_new(self):
+        # They skipped a season and came back. Counting that as growth would flatter every
+        # recovery; they are a renewal.
+        self.membership(self.veteran, self.previous)
+        gap = Season.objects.create(club=self.club, start_date=self.today - datetime.timedelta(days=39), end_date=self.today - datetime.timedelta(days=31))  # noqa: F841
+        self.membership(self.veteran, self.season)
+
+        self.assertNotIn(self.veteran, new_members(self.club, self.season))
+
+    def test_a_member_of_another_club_is_new_here(self):
+        # "New" is per club, not per platform.
+        other = Club.objects.create(name="Feyenoord")
+        other_season = Season.objects.create(club=other, start_date=self.today - datetime.timedelta(days=400), end_date=self.today - datetime.timedelta(days=40))
+        ClubMembership.objects.create(club=other, season=other_season, member=self.rookie)
+        self.membership(self.rookie, self.season)
+
+        self.assertIn(self.rookie, new_members(self.club, self.season))
+
+    def test_a_club_with_no_season_has_no_new_members(self):
+        self.assertEqual(new_members(self.club, None).count(), 0)
+
+    def test_signups_are_split_by_month_into_new_and_returning(self):
+        self.membership(self.veteran, self.previous, signed_up_at=self.today - datetime.timedelta(days=200))
+        self.membership(self.veteran, self.season, signed_up_at=self.today)
+        self.membership(self.rookie, self.season, signed_up_at=self.today)
+
+        this_month = signup_split(self.club)[-1]
+
+        self.assertEqual(this_month["new"], 1)  # the rookie
+        self.assertEqual(this_month["returning"], 1)  # the veteran renewing
+
+    def test_a_first_ever_signup_counts_as_new_in_its_own_month(self):
+        self.membership(self.veteran, self.previous, signed_up_at=self.today - datetime.timedelta(days=200))
+
+        series = signup_split(self.club)
+
+        self.assertEqual(sum(month["new"] for month in series), 1)
+        self.assertEqual(sum(month["returning"] for month in series), 0)
