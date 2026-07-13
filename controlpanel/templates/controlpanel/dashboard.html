@@ -143,55 +143,7 @@
     <div class="card bg-base-100 shadow">
         <div class="card-body">
             <h2 class="card-title">Clubs</h2>
-            {% comment %}
-                Health, not vanity: a club's member count says nothing you can act on, while
-                "no coach", "nothing scheduled" and "€ owed" each name a thing somebody has to
-                go and fix. Every column here is annotated in the same single query.
-            {% endcomment %}
-            <div class="overflow-x-auto">
-                <table class="table">
-                    <thead>
-                        <tr>
-                            <th>Club</th>
-                            <th class="text-right">Members</th>
-                            <th class="text-right">Unpaid</th>
-                            <th class="text-right">Owed</th>
-                            <th class="text-right">Teams</th>
-                            <th class="text-right">Upcoming</th>
-                            <th class="text-right">Admins</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for club in clubs %}
-                            <tr>
-                                <td>
-                                    <a class="link link-hover font-medium" href="{% url 'controlpanel:club_detail' club.pk %}">{{ club.name }}</a>
-                                    <div class="mt-1 flex flex-wrap items-center gap-1">
-                                        <span class="text-xs opacity-60">{{ club.slug }}</span>
-                                        {% if not club.has_season %}<span class="badge badge-warning badge-xs gap-1">{% lucide "calendar-x" size=10 %} No season</span>{% endif %}
-                                        {% if not club.upcoming_events %}<span class="badge badge-ghost badge-xs gap-1">{% lucide "moon-star" size=10 %} Dormant</span>{% endif %}
-                                    </div>
-                                </td>
-                                <td class="text-right tabular-nums">{{ club.active_members }}</td>
-                                <td class="text-right tabular-nums {% if club.unpaid_members %}text-warning{% endif %}">{{ club.unpaid_members }}</td>
-                                <td class="text-right tabular-nums {% if club.outstanding %}font-semibold text-error{% endif %}">€{{ club.outstanding|floatformat:2 }}</td>
-                                <td class="text-right tabular-nums">
-                                    {{ club.team_count }}
-                                    {% if club.teams_without_coach %}
-                                        <span class="badge badge-error badge-xs ml-1" title="Teams with nobody able to pick the squad">{{ club.teams_without_coach }} no coach</span>
-                                    {% endif %}
-                                </td>
-                                <td class="text-right tabular-nums">{{ club.upcoming_events }}</td>
-                                <td class="text-right tabular-nums {% if not club.admin_count %}text-error{% endif %}">{{ club.admin_count }}</td>
-                            </tr>
-                        {% empty %}
-                            <tr>
-                                <td colspan="7" class="text-center opacity-60">No clubs yet.</td>
-                            </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
+            {% include "controlpanel/_club_health_table.html" %}
         </div>
     </div>
 {% endblock panel %}

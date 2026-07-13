@@ -24,39 +24,11 @@
     </form>
     <div class="card bg-base-100 shadow">
         <div class="card-body">
-            <div class="overflow-x-auto">
-                <table class="table">
-                    <thead>
-                        <tr>
-                            <th>Club</th>
-                            <th>Members</th>
-                            <th>Teams</th>
-                            <th>Events</th>
-                            <th>Admins</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for club in clubs %}
-                            <tr>
-                                <td>
-                                    <a class="link link-hover font-medium" href="{% url 'controlpanel:club_detail' club.pk %}">{{ club.name }}</a>
-                                    <div class="text-xs opacity-60">{{ club.slug }}</div>
-                                </td>
-                                <td>{{ club.member_count }}</td>
-                                <td>{{ club.team_count }}</td>
-                                <td>{{ club.event_count }}</td>
-                                <td>{{ club.admin_count }}</td>
-                            </tr>
-                        {% empty %}
-                            <tr>
-                                <td colspan="5" class="text-center opacity-60">
-                                    {% if show_archived %}No archived clubs.{% else %}No clubs yet.{% endif %}
-                                </td>
-                            </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
+            {% if show_archived %}
+                {% include "controlpanel/_club_health_table.html" with empty_message="No archived clubs." %}
+            {% else %}
+                {% include "controlpanel/_club_health_table.html" %}
+            {% endif %}
         </div>
     </div>
 {% endblock panel %}

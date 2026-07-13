@@ -17,7 +17,7 @@ from .services.platform_admins import (
     revoke_platform_access,
     set_platform_access,
 )
-from .services.statistics import club_attention, club_charts, club_statistics, clubs_with_health, clubs_with_totals, flag_adoption, onboarding_funnel, platform_attention, platform_charts, platform_totals
+from .services.statistics import club_attention, club_charts, club_statistics, clubs_with_health, flag_adoption, onboarding_funnel, platform_attention, platform_charts, platform_totals
 
 Flag = get_waffle_flag_model()
 Switch = get_waffle_switch_model()
@@ -52,7 +52,7 @@ class ClubListView(PlatformStaffRequiredMixin, ListView):
         search = self.request.GET.get("q", "").strip()
         if search:
             clubs = clubs.filter(name__icontains=search)
-        return clubs_with_totals(clubs)
+        return clubs_with_health(clubs)
 
     def get_context_data(self, **kwargs):
         return super().get_context_data(nav="clubs", show_archived=self.show_archived, search=self.request.GET.get("q", ""), **kwargs)
