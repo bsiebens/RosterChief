@@ -1,8 +1,9 @@
 from django.db import models
+from django.db.models import Q
 from django.utils.translation import gettext_lazy as _
 
 from club.models import Season
-from clubmanager.base import ClubScopedModel, UUIDModel
+from clubmanager.base import ClubScopedModel, UUIDModel, validate_club_scope
 from members.models import Member
 
 
@@ -27,12 +28,15 @@ class Position(ClubScopedModel):
     ordering = models.PositiveSmallIntegerField(_("ordering"), default=0)
 
     staff_position = models.BooleanField(_("staff position"), default=False)
+    management_position = models.BooleanField(_("management position"), default=False)
 
     class Meta:
         verbose_name = _("position")
         verbose_name_plural = _("positions")
         constraints = [
             models.UniqueConstraint(fields=["club", "name"], name="unique_position_name_per_club"),
+            # A management position is always a staff position.
+            models.CheckConstraint(condition=Q(management_position=False) | Q(staff_position=True), name="management_position_implies_staff_position"),
         ]
         ordering = ["ordering", "name"]
 
@@ -62,6 +66,10 @@ class TeamMembership(UUIDModel):
     def __str__(self):
         return f"{self.team} - {self.member}"
 
+    def clean(self):
+        club_id = self.team.club_id if self.team_id else None
+        validate_club_scope(self, club_id, same_club_fields=("season", "position"))
+
 
 class StaffAssignment(UUIDModel):
     team = models.ForeignKey(Team, on_delete=models.CASCADE, related_name="staff_assignments", verbose_name=_("team"))
@@ -79,3 +87,7 @@ class StaffAssignment(UUIDModel):
 
     def __str__(self):
         return f"{self.team} - {self.member}"
+
+    def clean(self):
+        club_id = self.team.club_id if self.team_id else None
+        validate_club_scope(self, club_id, same_club_fields=("season", "position"))

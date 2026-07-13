@@ -1,5 +1,6 @@
 import datetime
 
+from django.core.exceptions import ValidationError
 from django.db import IntegrityError
 from django.db.models import ProtectedError
 from django.test import TestCase
@@ -59,6 +60,15 @@ class PositionModelTests(TeamsTestCase):
         with self.assertRaises(IntegrityError):
             Position.objects.create(club=self.club, name="Forward", short_name="dup")
 
+    def test_management_position_must_also_be_a_staff_position(self):
+        with self.assertRaises(IntegrityError):
+            Position.objects.create(club=self.club, name="Bogus", short_name="BG", staff_position=False, management_position=True)
+
+    def test_management_staff_position_is_allowed(self):
+        position = Position.objects.create(club=self.club, name="Manager", short_name="MG", staff_position=True, management_position=True)
+
+        self.assertTrue(position.management_position)
+
 
 class TeamMembershipModelTests(TeamsTestCase):
     def test_can_create_roster_entry(self):
@@ -110,3 +120,36 @@ class StaffAssignmentModelTests(TeamsTestCase):
 
         self.assertEqual(self.forward.team_memberships.count(), 1)
         self.assertEqual(self.coach.staff_assignments.count(), 1)
+
+
+class RosterCleanTests(TeamsTestCase):
+    def setUp(self):
+        super().setUp()
+        self.other = Club.objects.create(name="Rival FC", slug="rival-fc")
+        self.other_season = Season.objects.create(club=self.other, start_date=datetime.date(2026, 8, 1), end_date=datetime.date(2027, 5, 31))
+        self.other_position = Position.objects.create(club=self.other, name="Forward", short_name="FW")
+        self.other_coach = Position.objects.create(club=self.other, name="Coach", short_name="C", staff_position=True)
+
+    def test_teammembership_rejects_cross_club_season(self):
+        entry = TeamMembership(team=self.team, member=self.member, season=self.other_season, position=self.forward)
+        with self.assertRaises(ValidationError) as ctx:
+            entry.full_clean()
+        self.assertIn("season", ctx.exception.error_dict)
+
+    def test_teammembership_rejects_cross_club_position(self):
+        entry = TeamMembership(team=self.team, member=self.member, season=self.season, position=self.other_position)
+        with self.assertRaises(ValidationError) as ctx:
+            entry.full_clean()
+        self.assertIn("position", ctx.exception.error_dict)
+
+    def test_teammembership_accepts_same_club(self):
+        TeamMembership(team=self.team, member=self.member, season=self.season, position=self.forward).full_clean()
+
+    def test_staffassignment_rejects_cross_club_season(self):
+        assignment = StaffAssignment(team=self.team, member=self.member, season=self.other_season, position=self.coach)
+        with self.assertRaises(ValidationError) as ctx:
+            assignment.full_clean()
+        self.assertIn("season", ctx.exception.error_dict)
+
+    def test_staffassignment_accepts_same_club(self):
+        StaffAssignment(team=self.team, member=self.member, season=self.season, position=self.coach).full_clean()
