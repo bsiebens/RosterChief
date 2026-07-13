@@ -59,6 +59,15 @@ FIELD_ICONS = {
 }
 
 
+#: Fields rendered as a boxed one-time-code input rather than a plain text field.
+OTP_FIELDS = {"code"}
+
+
+@register.filter
+def is_otp(field):
+    return field.name in OTP_FIELDS
+
+
 @register.filter
 def field_icon(field):
     return FIELD_ICONS.get(field.name, "")

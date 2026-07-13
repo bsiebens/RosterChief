@@ -43,6 +43,9 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    # Required by allauth's security-key list template ({% load humanize %}); without it
+    # that page raises TemplateSyntaxError.
+    "django.contrib.humanize",
     "phonenumber_field",
     "lucide",
     # Auth: allauth deliberately WITHOUT django.contrib.sites — it is optional in

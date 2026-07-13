@@ -41,7 +41,25 @@
                 </label>
             {% endif %}
             {% with icon=field|field_icon %}
-                {% if icon %}
+                {% if field|is_otp %}
+                    {% comment %}
+                        daisyUI's otp is one input overlaid on the boxes, and it sizes itself from
+                        its `span` children — so the sr-only label goes OUTSIDE the container, or it
+                        would count as a seventh box and throw the width off.
+                    {% endcomment %}
+                    {% if attrs.unlabeled %}<label class="sr-only" for="{{ field.id_for_label }}">{{ field.label }}</label>{% endif %}
+                    <div class="flex justify-center">
+                        <div class="otp otp-lg" data-otp>
+                            {{ field|daisy:"" }}
+                            <span></span>
+                            <span></span>
+                            <span></span>
+                            <span></span>
+                            <span></span>
+                            <span></span>
+                        </div>
+                    </div>
+                {% elif icon %}
                     <label class="input flex w-full items-center gap-2 {% if field.errors %}input-error{% endif %}" for="{{ field.id_for_label }}">
                         <span class="opacity-50">{% lucide icon size=16 %}</span>
                         {% if attrs.unlabeled %}<span class="sr-only">{{ field.label }}</span>{% endif %}

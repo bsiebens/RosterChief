@@ -278,3 +278,47 @@ class TwoFactorPageTests(TestCase):
         # The id lives on the form element — without it the button submits nothing.
         self.assertContains(self.response, 'id="webauthn_form"')
         self.assertContains(self.response, "allauth.webauthn.forms.authenticateForm")
+
+
+class MfaPageTests(TestCase):
+    """Every MFA screen must render. They are built from allauth's `element` primitives,
+    so styling lives in the element overrides rather than in eight page templates."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(email="mfa@example.com", password="pw-secret-123")
+        # A real password login (not force_login) so allauth counts it as a recent
+        # authentication and doesn't bounce the sensitive pages to reauthenticate.
+        self.client.post(reverse("account_login"), {"login": "mfa@example.com", "password": "pw-secret-123"}, follow=True)
+
+    def test_the_manage_page_renders_a_panel_per_authenticator(self):
+        response = self.client.get(reverse("mfa_index"))
+
+        self.assertContains(response, "Authenticator App")
+        self.assertContains(response, "card border")
+
+    def test_the_security_key_list_renders(self):
+        # Regression: allauth's template does {% load humanize %}, which raised
+        # TemplateSyntaxError until django.contrib.humanize was installed.
+        self.assertEqual(self.client.get(reverse("mfa_list_webauthn")).status_code, 200)
+
+    def test_the_totp_activate_page_boxes_the_code_and_plates_the_qr(self):
+        response = self.client.get(reverse("mfa_activate_totp"))
+
+        self.assertContains(response, "otp otp-lg")
+        # The QR is dark-on-transparent: without a white plate it is unscannable on the
+        # dark theme.
+        self.assertContains(response, "bg-white p-3")
+        self.assertContains(response, "font-mono")  # the secret, to be copied by hand
+
+    def test_the_deactivate_button_is_destructive(self):
+        enrol_mfa(self.user)
+
+        response = self.client.get(reverse("mfa_index"))
+
+        # allauth tags it "danger" — it must not look like the safe action.
+        self.assertContains(response, "btn-error")
+
+    def test_reauthenticating_with_a_code_boxes_the_input(self):
+        enrol_mfa(self.user)
+
+        self.assertContains(self.client.get(reverse("mfa_reauthenticate")), "otp otp-lg")

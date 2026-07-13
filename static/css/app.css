@@ -7,6 +7,7 @@
     --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
     --color-sky-500: oklch(68.5% 0.169 237.323);
     --color-black: #000;
+    --color-white: #fff;
     --spacing: 0.25rem;
     --container-xs: 20rem;
     --container-xl: 36rem;
@@ -3089,6 +3090,9 @@
   .bg-primary {
     background-color: var(--color-primary);
   }
+  .bg-white {
+    background-color: var(--color-white);
+  }
   .btn-link {
     @layer daisyui {
       text-decoration-line: underline;
@@ -3119,6 +3123,17 @@
       background-image: none;
     }
   }
+  .btn-outline {
+    @layer daisyui.l1.l2.l3 {
+      --btn-bg: #0000;
+      color: var(--btn-rest-fg, var(--btn-color, var(--color-base-content)));
+      --btn-border: var(--btn-color, var(--color-base-content));
+      --btn-border-style: solid;
+      background-image: none;
+      --btn-inset: 0 0 0 0 oklch(0% 0 0/0);
+      --btn-shadow: 0 0 0 0 oklch(0% 0 0/0);
+    }
+  }
   .btn-ghost {
     @layer daisyui.l1.l2.l3 {
       --btn-bg: #0000;
@@ -3134,6 +3149,9 @@
   }
   .p-2 {
     padding: calc(var(--spacing) * 2);
+  }
+  .p-3 {
+    padding: calc(var(--spacing) * 3);
   }
   .p-4 {
     padding: calc(var(--spacing) * 4);
@@ -3350,6 +3368,14 @@
         --top-mul: 6;
         --font-size: 1.125rem;
       }
+    }
+  }
+  .btn-neutral {
+    @layer daisyui.l1.l2 {
+      --btn-color: var(--color-neutral);
+      --btn-fg: var(--color-neutral-content);
+      --btn-soft-bg: var(--color-neutral-content) 80%;
+      --btn-rest-fg: initial;
     }
   }
   .btn-accent {

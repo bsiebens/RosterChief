@@ -122,6 +122,29 @@
             applyMode(currentMode());
         </script>
 
+        <script>
+            // A TOTP code is 6 characters, a recovery code 8, and allauth accepts either in
+            // the same field. The boxed otp layout only fits six, so past that we fall back
+            // to a plain input rather than letting the text spill out of the boxes. Boxing
+            // the field to six and calling it done would lock recovery codes out entirely.
+            document.querySelectorAll("[data-otp]").forEach((otp) => {
+                const input = otp.querySelector("input");
+                if (!input) return;
+
+                const fit = () => {
+                    const boxed = input.value.length <= 6;
+                    otp.classList.toggle("otp", boxed);
+                    otp.classList.toggle("otp-lg", boxed);
+                    otp.querySelectorAll("span").forEach((box) => box.classList.toggle("hidden", !boxed));
+                    input.classList.toggle("input", !boxed);
+                    input.classList.toggle("input-lg", !boxed);
+                };
+
+                input.addEventListener("input", fit);
+                fit();
+            });
+        </script>
+
         {% comment %}
             allauth puts page-level scripts and out-of-form markup here — notably the
             hidden `mfa_login` form the passkey button submits. Without this block that

@@ -1,0 +1,42 @@
+{% load allauth %}
+
+{% comment %}
+    A standalone field that isn't part of a Django form — allauth uses it for the TOTP
+    secret and the recovery-code list. Mono, because both are strings people copy
+    character by character and must not misread.
+{% endcomment %}
+{{ attrs.errors }}
+<div class="form-control my-3 w-full">
+    {% if slots.label %}
+        <label class="label" for="{{ attrs.id }}">
+            <span class="label-text">{% slot label %}{% endslot %}</span>
+        </label>
+    {% endif %}
+
+    {% if attrs.type == "textarea" %}
+        <textarea class="textarea textarea-bordered w-full font-mono"
+                  {% if attrs.required %}required{% endif %}
+                  {% if attrs.rows %}rows="{{ attrs.rows }}"{% endif %}
+                  {% if attrs.disabled %}disabled{% endif %}
+                  {% if attrs.readonly %}readonly{% endif %}
+                  {% if attrs.name %}name="{{ attrs.name }}"{% endif %}
+                  {% if attrs.id %}id="{{ attrs.id }}"{% endif %}
+                  {% if attrs.placeholder %}placeholder="{{ attrs.placeholder }}"{% endif %}>{% slot value %}{% endslot %}</textarea>
+    {% else %}
+        <input class="input input-bordered w-full font-mono"
+               {% if attrs.required %}required{% endif %}
+               {% if attrs.disabled %}disabled{% endif %}
+               {% if attrs.readonly %}readonly{% endif %}
+               {% if attrs.checked %}checked{% endif %}
+               {% if attrs.name %}name="{{ attrs.name }}"{% endif %}
+               {% if attrs.id %}id="{{ attrs.id }}"{% endif %}
+               {% if attrs.placeholder %}placeholder="{{ attrs.placeholder }}"{% endif %}
+               {% if attrs.autocomplete %}autocomplete="{{ attrs.autocomplete }}"{% endif %}
+               {% if attrs.value is not None %}value="{{ attrs.value }}"{% endif %}
+               type="{{ attrs.type }}">
+    {% endif %}
+
+    {% if slots.help_text %}
+        <span class="label-text-alt mt-1 block text-base-content/70">{% slot help_text %}{% endslot %}</span>
+    {% endif %}
+</div>

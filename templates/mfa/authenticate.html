@@ -1,13 +1,15 @@
 {% extends "mfa/base_entrance.html" %}
-{% load allauth i18n lucide ui %}
+{% load allauth i18n lucide %}
 
 {% comment %}
-    Overridden for layout: the code is a daisyUI otp field, Cancel sits beside Sign In,
-    and "Use a security key" is an accent button under Alternative options.
+    Overridden for layout only: Cancel sits beside Sign In, and "Use a security key" is an
+    accent button under Alternative options. The code field itself is styled by the `fields`
+    element (it renders a `code` field as a daisyUI otp), so the reauthenticate and TOTP
+    activate pages get the same input without a template of their own.
 
-    Cancel and the security key both submit *other* forms (`logout-from-stage`,
-    `webauthn_form`) through the HTML `form` attribute — forms cannot nest, so those live
-    at the end of the page and the buttons point at them by id.
+    Cancel and the security key submit *other* forms (`logout-from-stage`, `webauthn_form`)
+    through the HTML `form` attribute — forms cannot nest, so those sit at the end of the
+    page and the buttons point at them by id.
 {% endcomment %}
 
 {% block head_title %}
@@ -25,24 +27,9 @@
     <form class="mt-8" method="post" action="{% url 'mfa_authenticate' %}">
         {% csrf_token %}
 
-        <div class="mb-10 flex flex-col items-center gap-2">
-            {% comment %}
-                daisyUI's otp is one input overlaid on the boxes. Six of them, for a TOTP
-                code — but this same field also accepts an 8-character recovery code, so the
-                boxes step aside once what's typed no longer fits them (see the script
-                below). Boxing it to six and calling it done would lock out recovery codes.
-            {% endcomment %}
-            <div class="otp otp-lg" data-otp>
-                {{ form.code|daisy:"" }}
-                <span></span>
-                <span></span>
-                <span></span>
-                <span></span>
-                <span></span>
-                <span></span>
-            </div>
-            {% for error in form.code.errors %}<span class="label-text-alt text-error">{{ error }}</span>{% endfor %}
-            {% for error in form.non_field_errors %}<span class="label-text-alt text-error">{{ error }}</span>{% endfor %}
+        <div class="mb-10">
+            {% element fields form=form unlabeled=True %}
+            {% endelement %}
         </div>
 
         <div class="flex flex-wrap items-center justify-end gap-2">
@@ -83,27 +70,4 @@
         <input type="hidden" name="next" value="{% url 'account_login' %}">
         {% csrf_token %}
     </form>
-
-    <script>
-        // A TOTP code is 6 characters and a recovery code is 8, and allauth accepts either
-        // here. The boxed otp layout only fits six, so past that we drop back to a plain
-        // input instead of letting the text overflow the boxes.
-        (() => {
-            const otp = document.querySelector("[data-otp]");
-            const input = otp?.querySelector("input");
-            if (!input) return;
-
-            const fit = () => {
-                const boxed = input.value.length <= 6;
-                otp.classList.toggle("otp", boxed);
-                otp.classList.toggle("otp-lg", boxed);
-                otp.querySelectorAll("span").forEach((box) => box.classList.toggle("hidden", !boxed));
-                input.classList.toggle("input", !boxed);
-                input.classList.toggle("input-lg", !boxed);
-            };
-
-            input.addEventListener("input", fit);
-            fit();
-        })();
-    </script>
 {% endblock content %}
