@@ -19,7 +19,7 @@ from teams.models import Position, Team, TeamMembership
 from .services.admins import grant_club_admin
 from .services.platform_admins import PlatformAdminError, is_last_superuser, set_platform_access
 from .services.statistics import club_statistics, clubs_with_totals, platform_totals
-from .templatetags.ui import as_alert, daisy, field_icon
+from .templatetags.ui import as_alert, daisy, excluded, field_icon
 
 User = get_user_model()
 Flag = get_waffle_flag_model()
@@ -513,3 +513,43 @@ class LoginFormRenderingTests(TestCase):
         self.assertContains(self.response, 'id="id_password_helptext"')
         self.assertContains(self.response, "mt-3")
         self.assertContains(self.response, "Forgot your password?")
+
+
+class LoginLayoutTests(TestCase):
+    def setUp(self):
+        self.response = self.client.get(reverse("account_login"))
+
+    def test_remember_me_is_laid_out_by_the_page_not_the_fields_element(self):
+        # It sits on the button row, so the fields element must not also render it.
+        self.assertEqual(self.response.content.count(b'name="remember"'), 1)
+        self.assertContains(self.response, '<span class="label-text">Remember Me</span>')
+
+    def test_the_passkey_button_sits_beside_sign_in(self):
+        self.assertContains(self.response, "btn btn-accent")
+        self.assertContains(self.response, "Sign in with a passkey")
+
+    def test_the_passkey_button_has_a_form_to_submit(self):
+        # The button posts to the hidden `mfa_login` form via its `form` attribute. That
+        # form comes from allauth's extra_body block — without it the button is dead.
+        self.assertContains(self.response, 'form="mfa_login"')
+        self.assertContains(self.response, 'id="mfa_login"')
+        self.assertContains(self.response, "allauth.webauthn.forms.loginForm")
+
+
+class ExcludedFilterTests(TestCase):
+    def field(self, name):
+        class Form(forms.Form):
+            pass
+
+        Form.base_fields[name] = forms.CharField()
+        return Form()[name]
+
+    def test_a_field_is_excluded_by_exact_name(self):
+        self.assertTrue(excluded(self.field("remember"), "remember"))
+
+    def test_a_name_that_merely_contains_another_is_not_excluded(self):
+        # A substring test would drop "password" when excluding "password2".
+        self.assertFalse(excluded(self.field("password"), "password2,remember"))
+
+    def test_nothing_is_excluded_without_a_list(self):
+        self.assertFalse(excluded(self.field("remember"), None))

@@ -121,5 +121,12 @@
 
             applyMode(currentMode());
         </script>
+
+        {% comment %}
+            allauth puts page-level scripts and out-of-form markup here — notably the
+            hidden `mfa_login` form the passkey button submits. Without this block that
+            form is never rendered and "Sign in with a passkey" is a dead button.
+        {% endcomment %}
+        {% block extra_body %}{% endblock extra_body %}
     </body>
 </html>

@@ -18,6 +18,8 @@
     </div>
 {% endfor %}
 {% for field in attrs.form.visible_fields %}
+    {# `exclude` lets a page lay a field out itself — the login page puts "remember" on the button row. #}
+    {% if not field|excluded:attrs.exclude %}
     <div class="form-control my-3 w-full">
         {% if field.field.widget.input_type == "checkbox" %}
             <label class="label cursor-pointer justify-start gap-3" for="{{ field.id_for_label }}">
@@ -51,4 +53,5 @@
         {% if field.help_text %}<span id="{{ field.auto_id }}_helptext" class="label-text-alt mt-3 block text-base-content/70">{{ field.help_text }}</span>{% endif %}
         {% for error in field.errors %}<span class="label-text-alt mt-1 text-error">{{ error }}</span>{% endfor %}
     </div>
+    {% endif %}
 {% endfor %}

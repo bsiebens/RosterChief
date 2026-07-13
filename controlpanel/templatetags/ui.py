@@ -65,6 +65,17 @@ def field_icon(field):
 
 
 @register.filter
+def excluded(field, names):
+    """Is this field in a comma-separated exclude list?
+
+    Split rather than a substring test: ``"password" in "password2"`` is true, and the
+    login page excluding "remember" must not silently drop a field whose name happens
+    to contain it.
+    """
+    return field.name in (names or "").split(",")
+
+
+@register.filter
 def daisy(field, css=None):
     """Render a bound form field with the right daisyUI classes.
 
