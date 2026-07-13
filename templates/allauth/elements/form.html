@@ -1,9 +1,18 @@
 {% load allauth %}
+
+{% comment %}
+    `id` is not decorative: allauth renders out-of-band forms (webauthn, logout-from-stage)
+    and points buttons at them with the HTML `form` attribute. Drop the id and those
+    buttons submit nothing.
+{% endcomment %}
 <form method="{{ attrs.method }}"
+      {% if attrs.id %}id="{{ attrs.id }}"{% endif %}
       {% if attrs.action %}action="{{ attrs.action }}"{% endif %}
       class="space-y-2">
     {% slot body %}{% endslot %}
-    <div class="card-actions justify-end pt-3">
-        {% slot actions %}{% endslot %}
-    </div>
+    {% if not attrs.no_visible_fields %}
+        <div class="card-actions justify-end pt-3">
+            {% slot actions %}{% endslot %}
+        </div>
+    {% endif %}
 </form>

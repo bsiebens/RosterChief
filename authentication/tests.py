@@ -232,3 +232,49 @@ class AdminLoginRoutingTests(TestCase):
 
     def test_allauth_login_page_loads(self):
         self.assertEqual(self.client.get(reverse("account_login")).status_code, 200)
+
+
+class AuthFormRenderingTests(TestCase):
+    """Every allauth form must actually render its fields.
+
+    Regression: the `fields` element passed `attrs.exclude` straight into a filter.
+    On a page that never sets it, resolving a filter *argument* raises
+    VariableDoesNotExist — which Django swallows inside {% if %} and reads as false —
+    so every field was silently dropped from every form except the login page (the one
+    page that does pass `exclude`).
+    """
+
+    def test_the_login_form_renders_its_fields(self):
+        self.assertContains(self.client.get(reverse("account_login")), 'name="login"')
+
+    def test_the_password_reset_form_renders_its_fields(self):
+        self.assertContains(self.client.get(reverse("account_reset_password")), 'name="email"')
+
+    def test_the_signup_form_renders_its_fields(self):
+        self.assertContains(self.client.get(reverse("account_signup")), 'name="password1"')
+
+
+class TwoFactorPageTests(TestCase):
+    def setUp(self):
+        user = User.objects.create_user(email="mfa@example.com", password="pw-secret-123")
+        enrol_mfa(user)
+        # Password accepted, second factor still owed: this is the 2FA challenge page.
+        self.response = self.client.post(reverse("account_login"), {"login": "mfa@example.com", "password": "pw-secret-123"}, follow=True)
+
+    def test_the_code_field_renders_as_an_otp_input(self):
+        self.assertContains(self.response, 'name="code"')
+        self.assertContains(self.response, "otp otp-lg")
+
+    def test_cancel_sits_beside_sign_in_and_is_not_primary(self):
+        self.assertContains(self.response, '<button class="btn gap-2" type="submit" form="logout-from-stage">')
+        self.assertContains(self.response, '<button class="btn btn-primary gap-2" type="submit">')
+
+    def test_cancel_has_a_form_to_submit(self):
+        self.assertContains(self.response, 'id="logout-from-stage"')
+
+    def test_the_security_key_button_is_an_accent_button_with_a_working_form(self):
+        self.assertContains(self.response, "btn btn-accent")
+        self.assertContains(self.response, 'form="webauthn_form"')
+        # The id lives on the form element — without it the button submits nothing.
+        self.assertContains(self.response, 'id="webauthn_form"')
+        self.assertContains(self.response, "allauth.webauthn.forms.authenticateForm")

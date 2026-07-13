@@ -17,9 +17,17 @@
         <span>{{ error }}</span>
     </div>
 {% endfor %}
+{% comment %}
+    `exclude` lets a page lay a field out itself — the login page puts "remember" on the
+    button row. It is pinned to a real variable first, and that is not cosmetic: passing
+    `attrs.exclude` straight into a filter on a page that never set it raises
+    VariableDoesNotExist, which Django catches for the *main* variable of an expression
+    but not for a filter *argument*. {% if %} then swallows it and reads the condition as
+    false — silently dropping every field on every form that doesn't pass `exclude`.
+{% endcomment %}
+{% with exclude=attrs.exclude|default:"" %}
 {% for field in attrs.form.visible_fields %}
-    {# `exclude` lets a page lay a field out itself — the login page puts "remember" on the button row. #}
-    {% if not field|excluded:attrs.exclude %}
+    {% if not field|excluded:exclude %}
     <div class="form-control my-3 w-full">
         {% if field.field.widget.input_type == "checkbox" %}
             <label class="label cursor-pointer justify-start gap-3" for="{{ field.id_for_label }}">
@@ -55,3 +63,4 @@
     </div>
     {% endif %}
 {% endfor %}
+{% endwith %}
