@@ -1,5 +1,5 @@
 {% extends "controlpanel/base.html" %}
-{% load ui %}
+{% load lucide ui %}
 
 {% block heading %}{% if object %}Edit {{ object }}{% else %}New club{% endif %}{% endblock heading %}
 
@@ -24,7 +24,7 @@
                     </div>
                 {% endfor %}
                 <div class="card-actions justify-end pt-2">
-                    <a class="btn btn-ghost" href="{% url 'controlpanel:club_list' %}">Cancel</a>
+                    <a class="btn btn-outline gap-2" href="{% url 'controlpanel:club_list' %}">{% lucide "arrow-left" size=16 %} Cancel</a>
                     <button class="btn btn-primary" type="submit">Save</button>
                 </div>
             </form>

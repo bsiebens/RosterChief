@@ -1,5 +1,5 @@
 {% extends "controlpanel/base.html" %}
-{% load ui %}
+{% load lucide ui %}
 
 {% block heading %}Add an admin to {{ club }}{% endblock heading %}
 
@@ -27,7 +27,7 @@
                     </div>
                 {% endfor %}
                 <div class="card-actions justify-end pt-2">
-                    <a class="btn btn-ghost" href="{% url 'controlpanel:club_detail' club.pk %}">Cancel</a>
+                    <a class="btn btn-outline gap-2" href="{% url 'controlpanel:club_detail' club.pk %}">{% lucide "arrow-left" size=16 %} Cancel</a>
                     <button class="btn btn-primary" type="submit">Grant admin</button>
                 </div>
             </form>
