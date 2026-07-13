@@ -44,6 +44,12 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "phonenumber_field",
+    # Auth: allauth deliberately WITHOUT django.contrib.sites — it is optional in
+    # allauth 65+, and ARCHITECTURE.md §2.4 rejects the Sites framework (Club is
+    # the tenant root, not Site).
+    "allauth",
+    "allauth.account",
+    "allauth.mfa",
     "club.apps.ClubConfig",
     "authentication.apps.AuthenticationConfig",
     "members.apps.MembersConfig",
@@ -59,9 +65,16 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "allauth.account.middleware.AccountMiddleware",
+    "authentication.middleware.RequireMFAMiddleware",
     "club.tenancy.ClubTenantMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+]
+
+AUTHENTICATION_BACKENDS = [
+    "django.contrib.auth.backends.ModelBackend",
+    "allauth.account.auth_backends.AuthenticationBackend",
 ]
 
 # Multi-tenancy: base domain whose subdomains resolve to a club, e.g.
@@ -72,6 +85,50 @@ CLUBMANAGER_BASE_DOMAIN = config("CLUBMANAGER_BASE_DOMAIN", default="")
 ROOT_URLCONF = "clubmanager.urls"
 
 AUTH_USER_MODEL = "authentication.User"
+
+
+# Authentication (django-allauth)
+
+LOGIN_URL = "account_login"
+LOGIN_REDIRECT_URL = "/"
+
+# The User model logs in by email and has no username field.
+ACCOUNT_USER_MODEL_USERNAME_FIELD = None
+ACCOUNT_LOGIN_METHODS = {"email"}
+ACCOUNT_SIGNUP_FIELDS = ["email*", "password1*", "password2*"]
+ACCOUNT_EMAIL_VERIFICATION = "none"
+
+
+# Two-factor authentication (allauth.mfa)
+
+MFA_SUPPORTED_TYPES = ["totp", "webauthn", "recovery_codes"]
+
+# Passkeys are a first factor: sign in with Touch ID / a security key alone.
+MFA_PASSKEY_LOGIN_ENABLED = True
+MFA_PASSKEY_SIGNUP_ENABLED = False
+
+# WebAuthn needs a secure context. Browsers treat *.localhost as secure, but the
+# dev server is plain HTTP, so allow the insecure origin while DEBUG.
+MFA_WEBAUTHN_ALLOW_INSECURE_ORIGIN = DEBUG
+
+# A passkey is bound to a Relying Party ID (a domain). Our adapter pins it to
+# CLUBMANAGER_BASE_DOMAIN so that ONE passkey works across every club subdomain
+# — allauth's default (the request host) would bind it to a single club.
+MFA_ADAPTER = "authentication.adapters.ClubManagerMFAAdapter"
+MFA_WEBAUTHN_RP_NAME = config("CLUBMANAGER_RP_NAME", default="ClubManager")
+
+# Where RequireMFAMiddleware sends privileged users who haven't enrolled yet.
+MFA_ENROLMENT_URL_NAME = "mfa_index"
+
+
+# Sessions are shared across club subdomains: log in once and you're authenticated
+# on every club (matching the one-passkey-everywhere model). Tenancy still scopes
+# what you can *see* — that is the access service's job, not the cookie's.
+# Browsers reject a Domain attribute on localhost, so it stays host-only in dev.
+SHARED_COOKIE_DOMAIN = f".{CLUBMANAGER_BASE_DOMAIN}" if CLUBMANAGER_BASE_DOMAIN and CLUBMANAGER_BASE_DOMAIN != "localhost" else None
+
+SESSION_COOKIE_DOMAIN = config("DJANGO_SESSION_COOKIE_DOMAIN", default=SHARED_COOKIE_DOMAIN)
+CSRF_COOKIE_DOMAIN = config("DJANGO_CSRF_COOKIE_DOMAIN", default=SHARED_COOKIE_DOMAIN)
 
 TEMPLATES = [
     {

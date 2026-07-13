@@ -1,12 +1,27 @@
 import uuid
+from urllib.parse import parse_qs, urlparse
 
+from allauth.core import context
+from allauth.mfa.models import Authenticator
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import AnonymousUser
 from django.db import IntegrityError
-from django.test import TestCase
+from django.http import HttpResponse
+from django.test import RequestFactory, TestCase, override_settings
+from django.urls import reverse
 
+from club.models import Club, ClubRole
 from members.models import Member
 
+from .adapters import ClubManagerMFAAdapter, webauthn_rp_id
+from .middleware import RequireMFAMiddleware, mfa_required_for
+
 User = get_user_model()
+
+
+def enrol_mfa(user):
+    """Give ``user`` a second factor (enough for is_mfa_enabled)."""
+    return Authenticator.objects.create(user=user, type=Authenticator.Type.TOTP, data={"secret": "JBSWY3DPEHPK3PXP"})
 
 
 class UserManagerTests(TestCase):
@@ -86,3 +101,134 @@ class UserModelTests(TestCase):
         self.assertEqual(str(user), "Jane Doe")
         self.assertEqual(user.get_full_name(), "Jane Doe")
         self.assertEqual(user.get_short_name(), "Jane")
+
+
+@override_settings(
+    CLUBMANAGER_BASE_DOMAIN="clubmanager.app",
+    MFA_WEBAUTHN_RP_NAME="ClubManager",
+    ALLOWED_HOSTS=[".clubmanager.app", "example.test"],
+)
+class WebAuthnRelyingPartyTests(TestCase):
+    """A passkey is bound to a Relying Party ID (a domain).
+
+    allauth's default RP ID is the request host, which under our subdomain
+    tenancy would bind a passkey to a single club. We pin it to the registrable
+    parent domain so ONE passkey works across every club.
+    """
+
+    def rp_entity(self, host):
+        request = RequestFactory().get("/", HTTP_HOST=host)
+        with context.request_context(request):
+            return ClubManagerMFAAdapter().get_public_key_credential_rp_entity()
+
+    def test_rp_id_is_the_parent_domain_not_the_club_subdomain(self):
+        self.assertEqual(self.rp_entity("ajax-united.clubmanager.app")["id"], "clubmanager.app")
+
+    def test_rp_id_is_identical_across_clubs(self):
+        # The whole point: a passkey registered at one club works at the others.
+        here = self.rp_entity("ajax-united.clubmanager.app")
+        there = self.rp_entity("rival-fc.clubmanager.app")
+
+        self.assertEqual(here["id"], there["id"])
+
+    def test_rp_name_comes_from_settings(self):
+        self.assertEqual(self.rp_entity("ajax-united.clubmanager.app")["name"], "ClubManager")
+
+    @override_settings(CLUBMANAGER_BASE_DOMAIN="")
+    def test_falls_back_to_the_request_host_without_a_base_domain(self):
+        request = RequestFactory().get("/", HTTP_HOST="example.test:8000")
+
+        with context.request_context(request):
+            self.assertEqual(webauthn_rp_id(), "example.test")
+
+
+class MFARequirementTests(TestCase):
+    def setUp(self):
+        self.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+
+    def make_user(self, email, **kwargs):
+        return User.objects.create_user(email=email, password="pw-secret-123", **kwargs)
+
+    def with_role(self, user, role):
+        member = Member.objects.create(user=user, first_name="Ada", last_name="Min")
+        ClubRole.objects.create(club=self.club, member=member, role=role)
+        return user
+
+    def test_staff_must_have_mfa(self):
+        self.assertTrue(mfa_required_for(self.make_user("staff@example.com", is_staff=True)))
+
+    def test_superuser_must_have_mfa(self):
+        self.assertTrue(mfa_required_for(User.objects.create_superuser(email="root@example.com", password="pw-secret-123")))
+
+    def test_club_admin_must_have_mfa(self):
+        user = self.with_role(self.make_user("admin@example.com"), ClubRole.Roles.ADMIN)
+
+        self.assertTrue(mfa_required_for(user))
+
+    def test_editor_must_have_mfa(self):
+        user = self.with_role(self.make_user("editor@example.com"), ClubRole.Roles.EDITOR)
+
+        self.assertTrue(mfa_required_for(user))
+
+    def test_plain_member_does_not_need_mfa(self):
+        user = self.with_role(self.make_user("member@example.com"), ClubRole.Roles.MEMBER)
+
+        self.assertFalse(mfa_required_for(user))
+
+    def test_user_without_any_role_does_not_need_mfa(self):
+        self.assertFalse(mfa_required_for(self.make_user("nobody@example.com")))
+
+
+class RequireMFAMiddlewareTests(TestCase):
+    def setUp(self):
+        self.factory = RequestFactory()
+        self.middleware = RequireMFAMiddleware(lambda request: HttpResponse("ok"))
+
+    def dispatch(self, user, path="/"):
+        request = self.factory.get(path)
+        request.user = user
+        return self.middleware(request)
+
+    def make_staff(self):
+        return User.objects.create_user(email="staff@example.com", password="pw-secret-123", is_staff=True)
+
+    def test_anonymous_passes_through(self):
+        self.assertEqual(self.dispatch(AnonymousUser()).content, b"ok")
+
+    def test_unprivileged_user_passes_through(self):
+        user = User.objects.create_user(email="plain@example.com", password="pw-secret-123")
+
+        self.assertEqual(self.dispatch(user).content, b"ok")
+
+    def test_privileged_user_without_mfa_is_sent_to_enrolment(self):
+        response = self.dispatch(self.make_staff())
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse("mfa_index"))
+
+    def test_privileged_user_can_still_reach_the_enrolment_pages(self):
+        # Otherwise they'd be redirected in a loop and could never enrol.
+        response = self.dispatch(self.make_staff(), path="/accounts/2fa/totp/activate/")
+
+        self.assertEqual(response.content, b"ok")
+
+    def test_enrolled_privileged_user_passes_through(self):
+        staff = self.make_staff()
+        enrol_mfa(staff)
+
+        self.assertEqual(self.dispatch(staff).content, b"ok")
+
+
+class AdminLoginRoutingTests(TestCase):
+    def test_admin_login_is_routed_through_allauth(self):
+        # Django's own admin login knows nothing about second factors.
+        response = self.client.get("/admin/login/", {"next": "/admin/"})
+
+        self.assertEqual(response.status_code, 302)
+        redirect = urlparse(response.url)
+        self.assertEqual(redirect.path, reverse("account_login"))
+        # The original destination survives the hop (percent-encoded).
+        self.assertEqual(parse_qs(redirect.query)["next"], ["/admin/"])
+
+    def test_allauth_login_page_loads(self):
+        self.assertEqual(self.client.get(reverse("account_login")).status_code, 200)

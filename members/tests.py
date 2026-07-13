@@ -3,6 +3,7 @@ from datetime import date, timedelta
 from io import StringIO
 from pathlib import Path
 
+from allauth.mfa.models import Authenticator
 from django.contrib.admin.sites import AdminSite
 from django.core.management import call_command
 from django.core.management.base import CommandError
@@ -230,6 +231,8 @@ class AdminSmokeTests(TestCase):
 
     def setUp(self):
         self.admin = User.objects.create_superuser(email="root@example.com", password="pw-secret-123")
+        # Staff must hold a second factor (RequireMFAMiddleware).
+        Authenticator.objects.create(user=self.admin, type=Authenticator.Type.TOTP, data={"secret": "JBSWY3DPEHPK3PXP"})
         self.client.force_login(self.admin)
 
     def test_changelists_load(self):

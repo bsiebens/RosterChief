@@ -2,6 +2,7 @@ import datetime
 import uuid
 from contextlib import contextmanager
 
+from allauth.mfa.models import Authenticator
 from django.contrib import admin as django_admin
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
@@ -461,6 +462,9 @@ class AdminRegistrationSmokeTests(TestCase):
 
     def setUp(self):
         self.admin = get_user_model().objects.create_superuser(email="root@club.test", password="pw-secret-123")
+        # Staff must hold a second factor (RequireMFAMiddleware), else they are
+        # redirected to enrolment instead of reaching the admin.
+        Authenticator.objects.create(user=self.admin, type=Authenticator.Type.TOTP, data={"secret": "JBSWY3DPEHPK3PXP"})
         self.client.force_login(self.admin)
 
     def test_every_model_is_registered_in_admin(self):
