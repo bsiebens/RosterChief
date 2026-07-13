@@ -17,7 +17,9 @@ from django.urls import reverse
 from club.models import ClubRole
 
 #: Paths a not-yet-enrolled user must still reach (to enrol, or to log out).
-EXEMPT_PREFIXES = ("/accounts/", "/static/", "/media/")
+#: ``/__reload__/`` is django-browser-reload's event stream, which only exists
+#: under DEBUG — without it, live reload dies on the enrolment page itself.
+EXEMPT_PREFIXES = ("/accounts/", "/static/", "/media/", "/__reload__/")
 
 ELEVATED_ROLES = (ClubRole.Roles.ADMIN, ClubRole.Roles.EDITOR)
 

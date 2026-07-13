@@ -17,6 +17,7 @@ dependencies = [
 [dependency-groups]
 dev = [
     "coverage>=7.15.0",
+    "django-browser-reload>=1.21.0",
     "ruff>=0.15.17",
 ]
 

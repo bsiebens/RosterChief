@@ -8,5 +8,13 @@
 /* daisyUI: light is the default, dark applies automatically when the OS asks
    for it. An explicit data-theme on <html> (set by the toggle) overrides both. */
 @plugin "daisyui" {
-  themes: light --default, dark --prefersdark;
+    themes: light --default, dark --prefersdark;
+}
+
+[data-theme="light"] .logo {
+    content: var(--logo-dark);
+}
+
+[data-theme="dark"] .logo {
+    content: var(--logo-light);
 }
