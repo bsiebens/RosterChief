@@ -4,15 +4,28 @@ from contextlib import contextmanager
 
 from django.contrib import admin as django_admin
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
 from django.db import IntegrityError
 from django.db.models import ProtectedError
 from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
-from members.models import Member
+from events.models import Event
+from members.models import Family, FamilyMembership, Member
+from teams.models import Position, StaffAssignment, Team, TeamMembership
 
-from .models import Club, ClubMembership, Season
+from .models import Club, ClubMembership, ClubRole, Season
+from .services.access import (
+    COACH_MANAGER,
+    can_edit_event,
+    can_manage_shop,
+    has_club_role,
+    members_visible_to,
+    roles_in_club,
+    teams_managed_by,
+    teams_staffed_by,
+)
 from .tenancy import (
     ClubTenantMiddleware,
     get_current_club,
@@ -455,7 +468,7 @@ class AdminRegistrationSmokeTests(TestCase):
 
         registered = set(django_admin.site._registry)
         # Concrete, non-auto-created models in these apps should all be registered.
-        project_apps = {"authentication", "club", "members", "teams", "events", "formbuilder"}
+        project_apps = {"authentication", "club", "members", "teams", "events", "formbuilder", "shop"}
         for model in apps.get_models():
             if model._meta.app_label not in project_apps or model._meta.auto_created:
                 continue
@@ -473,3 +486,399 @@ class AdminRegistrationSmokeTests(TestCase):
             url = reverse(f"admin:{model._meta.app_label}_{model._meta.model_name}_add")
             with self.subTest(model=model.__name__):
                 self.assertEqual(self.client.get(url).status_code, 200)
+
+
+class ClubRoleTests(TestCase):
+    def test_str(self):
+        club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        member = Member.objects.create(first_name="Jane", last_name="Doe")
+        role = ClubRole.objects.create(club=club, member=member)
+
+        self.assertEqual(str(role), f"{club} - {member}")
+
+
+class ClubMembershipCleanTests(TestCase):
+    def setUp(self):
+        self.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        self.other = Club.objects.create(name="Rival FC", slug="rival-fc")
+        today = timezone.localdate()
+        self.season = Season.objects.create(club=self.club, start_date=today, end_date=today + datetime.timedelta(days=300))
+        self.other_season = Season.objects.create(club=self.other, start_date=today, end_date=today + datetime.timedelta(days=300))
+        self.member = Member.objects.create(first_name="Jane", last_name="Doe")
+
+    def test_rejects_cross_club_season(self):
+        membership = ClubMembership(club=self.club, member=self.member, season=self.other_season)
+        with self.assertRaises(ValidationError) as ctx:
+            membership.full_clean()
+        self.assertIn("season", ctx.exception.error_dict)
+
+    def test_accepts_same_club_season(self):
+        ClubMembership(club=self.club, member=self.member, season=self.season).full_clean()
+
+
+class AccessServiceTests(TestCase):
+    def setUp(self):
+        self.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        self.other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
+        today = timezone.localdate()
+        self.season = Season.objects.create(club=self.club, start_date=today, end_date=today + datetime.timedelta(days=300))
+        self.team = Team.objects.create(club=self.club, name="First Team", short_name="1st")
+        self.second_team = Team.objects.create(club=self.club, name="Second Team", short_name="2nd")
+        self.forward = Position.objects.create(club=self.club, name="Forward", short_name="FW")
+        # Management staff (coach / team manager) vs. non-management staff (e.g. physio).
+        self.coach_position = Position.objects.create(club=self.club, name="Head Coach", short_name="HC", staff_position=True, management_position=True)
+        self.physio_position = Position.objects.create(club=self.club, name="Physio", short_name="PH", staff_position=True, management_position=False)
+
+    def make_user_member(self, email):
+        user = get_user_model().objects.create_user(email=email, password="pw")
+        member = Member.objects.create(user=user, first_name=email.split("@")[0].title(), last_name="Doe")
+        return user, member
+
+    def grant(self, member, role):
+        return ClubRole.objects.create(club=self.club, member=member, role=role)
+
+    def make_coach(self, member, team=None):
+        return StaffAssignment.objects.create(team=team or self.team, member=member, season=self.season, position=self.coach_position)
+
+    def make_support_staff(self, member, team=None):
+        """Staff on the team, but in a non-management position."""
+        return StaffAssignment.objects.create(team=team or self.team, member=member, season=self.season, position=self.physio_position)
+
+    def make_event(self, **kwargs):
+        kwargs.setdefault("club", self.club)
+        kwargs.setdefault("title", "Match")
+        kwargs.setdefault("start", timezone.now() + datetime.timedelta(days=1))
+        return Event.objects.create(**kwargs)
+
+    # --- has_club_role / roles_in_club ---
+    def test_has_club_role_is_scoped_to_role_and_club(self):
+        user, member = self.make_user_member("admin@example.com")
+        self.grant(member, ClubRole.Roles.ADMIN)
+
+        self.assertTrue(has_club_role(user, self.club, ClubRole.Roles.ADMIN))
+        self.assertFalse(has_club_role(user, self.club, ClubRole.Roles.EDITOR))
+        self.assertFalse(has_club_role(user, self.other_club, ClubRole.Roles.ADMIN))
+
+    def test_roles_in_club_includes_derived_coach_manager(self):
+        user, member = self.make_user_member("editor@example.com")
+        self.grant(member, ClubRole.Roles.EDITOR)
+        self.make_coach(member)
+
+        self.assertEqual(roles_in_club(user, self.club), {ClubRole.Roles.EDITOR, COACH_MANAGER})
+
+    def test_non_management_staff_gets_no_derived_role(self):
+        user, member = self.make_user_member("physio@example.com")
+        self.make_support_staff(member)
+
+        self.assertEqual(roles_in_club(user, self.club), set())
+
+    def test_roles_in_club_is_empty_for_outsider(self):
+        user, _ = self.make_user_member("nobody@example.com")
+
+        self.assertEqual(roles_in_club(user, self.club), set())
+
+    # --- teams_managed_by ---
+    def test_admin_manages_every_team(self):
+        user, member = self.make_user_member("admin@example.com")
+        self.grant(member, ClubRole.Roles.ADMIN)
+
+        self.assertEqual(set(teams_managed_by(user, self.club)), {self.team, self.second_team})
+
+    def test_coach_manages_only_their_team(self):
+        user, member = self.make_user_member("coach@example.com")
+        self.make_coach(member)
+
+        self.assertEqual(list(teams_managed_by(user, self.club)), [self.team])
+
+    def test_plain_member_manages_no_teams(self):
+        user, _ = self.make_user_member("plain@example.com")
+
+        self.assertEqual(list(teams_managed_by(user, self.club)), [])
+
+    def test_non_management_staff_manages_no_teams(self):
+        user, member = self.make_user_member("physio@example.com")
+        self.make_support_staff(member)
+
+        self.assertEqual(list(teams_managed_by(user, self.club)), [])
+
+    def test_non_management_staff_does_not_inherit_a_managers_team(self):
+        # The team has BOTH a manager and a non-management staffer. The staffer
+        # must not pick up the team just because *someone else* manages it.
+        _, manager = self.make_user_member("coach@example.com")
+        self.make_coach(manager)
+        physio_user, physio = self.make_user_member("physio@example.com")
+        self.make_support_staff(physio)
+
+        self.assertEqual(list(teams_managed_by(physio_user, self.club)), [])
+
+    def make_past_season(self):
+        return Season.objects.create(
+            club=self.club,
+            start_date=self.season.start_date - datetime.timedelta(days=400),
+            end_date=self.season.start_date - datetime.timedelta(days=1),
+        )
+
+    def test_a_former_seasons_coach_no_longer_manages_the_team(self):
+        # StaffAssignment is per-season: authority expires with it.
+        user, member = self.make_user_member("coach@example.com")
+        StaffAssignment.objects.create(team=self.team, member=member, season=self.make_past_season(), position=self.coach_position)
+
+        self.assertEqual(list(teams_managed_by(user, self.club)), [])
+        self.assertEqual(list(teams_staffed_by(user, self.club)), [])
+        self.assertFalse(roles_in_club(user, self.club))
+
+    def test_a_former_seasons_coach_cannot_edit_a_current_event(self):
+        user, member = self.make_user_member("coach@example.com")
+        StaffAssignment.objects.create(team=self.team, member=member, season=self.make_past_season(), position=self.coach_position)
+        event = self.make_event()
+        event.teams.add(self.team)
+
+        self.assertFalse(can_edit_event(user, event))
+
+    # --- members_visible_to ---
+    def test_admin_sees_all_club_members(self):
+        user, member = self.make_user_member("admin@example.com")
+        self.grant(member, ClubRole.Roles.ADMIN)
+        other = Member.objects.create(first_name="Other", last_name="Member")
+        ClubMembership.objects.create(club=self.club, member=member, season=self.season)
+        ClubMembership.objects.create(club=self.club, member=other, season=self.season)
+
+        self.assertEqual(set(members_visible_to(user, self.club)), {member, other})
+
+    def test_coach_sees_self_and_managed_roster(self):
+        user, member = self.make_user_member("coach@example.com")
+        self.make_coach(member)
+        player = Member.objects.create(first_name="Player", last_name="One")
+        TeamMembership.objects.create(team=self.team, member=player, season=self.season, position=self.forward)
+        unrelated = Member.objects.create(first_name="Un", last_name="Related")
+
+        visible = set(members_visible_to(user, self.club))
+
+        self.assertEqual(visible, {member, player})
+        self.assertNotIn(unrelated, visible)
+
+    def test_parent_sees_self_and_children(self):
+        user, parent = self.make_user_member("parent@example.com")
+        child = Member.objects.create(first_name="Kid", last_name="Doe")
+        family = Family.objects.create(name="Doe")
+        FamilyMembership.objects.create(family=family, member=parent, role=FamilyMembership.FamilyRole.PARENT)
+        FamilyMembership.objects.create(family=family, member=child, role=FamilyMembership.FamilyRole.CHILD)
+
+        self.assertEqual(set(members_visible_to(user, self.club)), {parent, child})
+
+    def test_user_without_a_member_sees_nobody(self):
+        user = get_user_model().objects.create_user(email="ghost@example.com", password="pw")
+
+        self.assertEqual(list(members_visible_to(user, self.club)), [])
+
+    def test_non_management_staff_sees_the_roster_but_holds_no_authority(self):
+        # A physio can see the team they work with, but manages nothing.
+        user, member = self.make_user_member("physio@example.com")
+        self.make_support_staff(member)
+        player = Member.objects.create(first_name="Player", last_name="One")
+        TeamMembership.objects.create(team=self.team, member=player, season=self.season, position=self.forward)
+
+        self.assertEqual(set(members_visible_to(user, self.club)), {member, player})
+        self.assertEqual(list(teams_managed_by(user, self.club)), [])
+        self.assertEqual(list(teams_staffed_by(user, self.club)), [self.team])
+
+    def test_manager_also_sees_the_teams_other_staff(self):
+        user, manager = self.make_user_member("coach@example.com")
+        self.make_coach(manager)
+        _, physio = self.make_user_member("physio@example.com")
+        self.make_support_staff(physio)
+
+        self.assertIn(physio, set(members_visible_to(user, self.club)))
+
+    def test_admin_sees_members_without_a_club_membership(self):
+        user, admin = self.make_user_member("admin@example.com")
+        self.grant(admin, ClubRole.Roles.ADMIN)
+        _, coach = self.make_user_member("coach@example.com")
+        self.make_coach(coach)  # staff, but no ClubMembership
+
+        visible = set(members_visible_to(user, self.club))
+
+        self.assertIn(coach, visible)
+        self.assertIn(admin, visible)  # the admin sees themselves via their ClubRole
+
+    def test_roster_visibility_is_scoped_to_the_current_season(self):
+        user, member = self.make_user_member("coach@example.com")
+        self.make_coach(member)
+        old_season = Season.objects.create(
+            club=self.club,
+            start_date=self.season.start_date - datetime.timedelta(days=400),
+            end_date=self.season.start_date - datetime.timedelta(days=1),
+        )
+        former_player = Member.objects.create(first_name="Former", last_name="Player")
+        TeamMembership.objects.create(team=self.team, member=former_player, season=old_season, position=self.forward)
+
+        self.assertNotIn(former_player, set(members_visible_to(user, self.club)))
+
+    # --- can_edit_event ---
+    def test_admin_can_edit_event(self):
+        user, member = self.make_user_member("admin@example.com")
+        self.grant(member, ClubRole.Roles.ADMIN)
+
+        self.assertTrue(can_edit_event(user, self.make_event()))
+
+    def test_editor_can_edit_event(self):
+        user, member = self.make_user_member("editor@example.com")
+        self.grant(member, ClubRole.Roles.EDITOR)
+
+        self.assertTrue(can_edit_event(user, self.make_event()))
+
+    def test_owner_can_edit_their_event(self):
+        user, member = self.make_user_member("owner@example.com")
+
+        self.assertTrue(can_edit_event(user, self.make_event(created_by=member)))
+
+    def test_coach_can_edit_their_teams_event(self):
+        user, member = self.make_user_member("coach@example.com")
+        self.make_coach(member)
+        event = self.make_event()
+        event.teams.add(self.team)
+
+        self.assertTrue(can_edit_event(user, event))
+
+    def test_coach_cannot_edit_another_teams_event(self):
+        user, member = self.make_user_member("coach@example.com")
+        self.make_coach(member)
+        event = self.make_event()
+        event.teams.add(self.second_team)
+
+        self.assertFalse(can_edit_event(user, event))
+
+    def test_plain_member_cannot_edit_event(self):
+        user, _ = self.make_user_member("plain@example.com")
+
+        self.assertFalse(can_edit_event(user, self.make_event()))
+
+    def test_non_management_staff_cannot_edit_their_teams_event(self):
+        user, member = self.make_user_member("physio@example.com")
+        self.make_support_staff(member)
+        event = self.make_event()
+        event.teams.add(self.team)
+
+        self.assertFalse(can_edit_event(user, event))
+
+    def test_non_management_staff_on_a_managed_team_cannot_edit_its_event(self):
+        # Same escalation shape as teams_managed_by: a manager exists on the team,
+        # but the physio must not inherit edit rights from them.
+        _, manager = self.make_user_member("coach@example.com")
+        self.make_coach(manager)
+        physio_user, physio = self.make_user_member("physio@example.com")
+        self.make_support_staff(physio)
+        event = self.make_event()
+        event.teams.add(self.team)
+
+        self.assertFalse(can_edit_event(physio_user, event))
+
+    # --- can_manage_shop ---
+    def test_only_admin_can_manage_shop(self):
+        admin_user, admin_member = self.make_user_member("admin@example.com")
+        self.grant(admin_member, ClubRole.Roles.ADMIN)
+        editor_user, editor_member = self.make_user_member("editor@example.com")
+        self.grant(editor_member, ClubRole.Roles.EDITOR)
+
+        self.assertTrue(can_manage_shop(admin_user, self.club))
+        self.assertFalse(can_manage_shop(editor_user, self.club))
+
+
+class ClubRoleStatusSyncTests(TestCase):
+    def setUp(self):
+        self.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        today = timezone.localdate()
+        self.season = Season.objects.create(club=self.club, start_date=today, end_date=today + datetime.timedelta(days=300))
+        self.member = Member.objects.create(first_name="Jane", last_name="Doe")
+
+    def roles(self):
+        return ClubRole.objects.filter(club=self.club, member=self.member)
+
+    def make_membership(self, status=ClubMembership.StatusChoices.ACTIVE):
+        return ClubMembership.objects.create(club=self.club, member=self.member, season=self.season, status=status)
+
+    def test_active_membership_grants_member_role(self):
+        self.make_membership()
+
+        self.assertEqual(self.roles().get().role, ClubRole.Roles.MEMBER)
+
+    def test_pending_membership_grants_no_role(self):
+        self.make_membership(status=ClubMembership.StatusChoices.PENDING)
+
+        self.assertFalse(self.roles().exists())
+
+    def test_deactivating_membership_withdraws_member_role(self):
+        membership = self.make_membership()
+        self.assertTrue(self.roles().exists())
+
+        membership.status = ClubMembership.StatusChoices.LAPSED
+        membership.save()
+
+        self.assertFalse(self.roles().exists())
+
+    def test_deleting_membership_withdraws_member_role(self):
+        membership = self.make_membership()
+
+        membership.delete()
+
+        self.assertFalse(self.roles().exists())
+
+    def test_elevated_role_is_never_downgraded_or_removed(self):
+        ClubRole.objects.create(club=self.club, member=self.member, role=ClubRole.Roles.ADMIN)
+
+        membership = self.make_membership()
+        self.assertEqual(self.roles().get().role, ClubRole.Roles.ADMIN)
+
+        membership.status = ClubMembership.StatusChoices.CANCELLED
+        membership.save()
+
+        self.assertEqual(self.roles().get().role, ClubRole.Roles.ADMIN)
+
+    def test_editor_role_survives_a_lapsed_membership(self):
+        ClubRole.objects.create(club=self.club, member=self.member, role=ClubRole.Roles.EDITOR)
+        membership = self.make_membership()
+
+        membership.status = ClubMembership.StatusChoices.LAPSED
+        membership.save()
+
+        self.assertEqual(self.roles().get().role, ClubRole.Roles.EDITOR)
+
+    def test_elevated_role_survives_membership_deletion(self):
+        ClubRole.objects.create(club=self.club, member=self.member, role=ClubRole.Roles.ADMIN)
+        membership = self.make_membership()
+
+        membership.delete()
+
+        self.assertEqual(self.roles().get().role, ClubRole.Roles.ADMIN)
+
+    def test_elevated_role_survives_a_season_rollover(self):
+        # Last season's membership lapses and the new season's is still pending:
+        # the admin must not lose their role in the gap.
+        ClubRole.objects.create(club=self.club, member=self.member, role=ClubRole.Roles.ADMIN)
+        last_season = self.make_membership()
+        next_season = Season.objects.create(
+            club=self.club,
+            start_date=self.season.end_date + datetime.timedelta(days=1),
+            end_date=self.season.end_date + datetime.timedelta(days=300),
+        )
+
+        last_season.status = ClubMembership.StatusChoices.LAPSED
+        last_season.save()
+        ClubMembership.objects.create(club=self.club, member=self.member, season=next_season, status=ClubMembership.StatusChoices.PENDING)
+
+        self.assertEqual(self.roles().get().role, ClubRole.Roles.ADMIN)
+
+    def test_elevated_access_and_login_survive_a_lapsed_membership(self):
+        # The whole point: a lapsed membership must not lock an admin out.
+        user = get_user_model().objects.create_user(email="admin@example.com", password="pw")
+        admin = Member.objects.create(user=user, first_name="Ada", last_name="Min")
+        ClubRole.objects.create(club=self.club, member=admin, role=ClubRole.Roles.ADMIN)
+        membership = ClubMembership.objects.create(club=self.club, member=admin, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+
+        membership.status = ClubMembership.StatusChoices.CANCELLED
+        membership.save()
+
+        self.assertTrue(user.is_active)  # can still log in
+        self.assertIn(ClubRole.Roles.ADMIN, roles_in_club(user, self.club))
+        self.assertTrue(has_club_role(user, self.club, ClubRole.Roles.ADMIN))
+        self.assertTrue(can_manage_shop(user, self.club))

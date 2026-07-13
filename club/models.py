@@ -4,7 +4,7 @@ from django.db import models
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
-from clubmanager.base import ClubScopedModel, UUIDModel, unique_slugify
+from clubmanager.base import ClubScopedModel, UUIDModel, unique_slugify, validate_club_scope
 from members.models import Member
 
 
@@ -98,6 +98,30 @@ class ClubMembership(ClubScopedModel):
         ordering = ["club", "member__last_name", "member__first_name"]
         constraints = [
             models.UniqueConstraint(fields=["club", "member", "season"], name="unique_member_per_club_per_season"),
+        ]
+
+    def __str__(self):
+        return f"{self.club} - {self.member}"
+
+    def clean(self):
+        validate_club_scope(self, self.club_id, same_club_fields=("season",))
+
+
+class ClubRole(ClubScopedModel):
+    class Roles(models.TextChoices):
+        ADMIN = "admin", _("admin")
+        MEMBER = "member", _("member")
+        EDITOR = "editor", _("editor")
+
+    member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="roles", verbose_name=_("member"))
+    role = models.CharField(_("role"), max_length=250, choices=Roles.choices, default=Roles.MEMBER)
+
+    class Meta:
+        verbose_name = _("club role")
+        verbose_name_plural = _("club roles")
+        ordering = ["club", "member__last_name", "member__first_name"]
+        constraints = [
+            models.UniqueConstraint(fields=["club", "member"], name="unique_member_per_club"),
         ]
 
     def __str__(self):
