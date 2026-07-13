@@ -1,8 +1,10 @@
 import datetime
+import pathlib
 from decimal import Decimal
 
 from allauth.mfa.models import Authenticator
 from django import forms
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import get_user_model
 from django.contrib.messages.storage.base import Message
@@ -1008,3 +1010,48 @@ class ClubHealthTableTests(TestCase):
         self.assertContains(response, "Owed")
         self.assertContains(response, "Upcoming")
         self.assertContains(response, "Unpaid")
+
+
+class ClubListHealthTests(ControlPanelTestBase):
+    def test_the_list_shows_the_same_health_columns_as_the_dashboard(self):
+        response = self.client.get(reverse("controlpanel:club_list"))
+
+        self.assertContains(response, "Owed")
+        self.assertContains(response, "Upcoming")
+        self.assertContains(response, "Unpaid")
+        self.assertTemplateUsed(response, "controlpanel/_club_health_table.html")
+
+    def test_an_archived_club_is_badged_archived_rather_than_dormant(self):
+        # Its subdomain does not resolve, so "nothing scheduled" is not news.
+        self.club.archive()
+
+        response = self.client.get(reverse("controlpanel:club_list"), {"archived": "1"})
+
+        self.assertContains(response, "Archived")
+        self.assertNotContains(response, "Dormant")
+
+    def test_searching_keeps_the_health_annotations(self):
+        response = self.client.get(reverse("controlpanel:club_list"), {"q": "Ajax"})
+
+        club = response.context["clubs"][0]
+
+        self.assertEqual(club.active_members, 0)
+        self.assertEqual(club.teams_without_coach, 0)
+
+    def test_the_list_does_not_fan_out_per_club(self):
+        for name in ("Feyenoord", "PSV", "Twente"):
+            Club.objects.create(name=name)
+
+        with self.assertNumQueries(1):
+            [(club.outstanding, club.upcoming_events) for club in clubs_with_health()]
+
+
+class TemplateCommentTests(TestCase):
+    def test_no_template_uses_a_multiline_hash_comment(self):
+        """Django's {# #} is single-line only — its lexer regex is not DOTALL, so a
+        multi-line one is not a comment at all: it renders to the page as text."""
+        templates = [path for path in pathlib.Path(settings.BASE_DIR).glob("**/templates/**/*.html") if ".venv" not in path.parts and "node_modules" not in path.parts]
+        offenders = [f"{path.relative_to(settings.BASE_DIR)}:{number}" for path in templates for number, line in enumerate(path.read_text().splitlines(), start=1) if "{#" in line and "#}" not in line]
+
+        self.assertTrue(templates)  # the glob must actually be finding our templates
+        self.assertEqual(offenders, [], "use {% comment %} for multi-line comments")
