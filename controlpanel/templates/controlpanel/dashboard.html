@@ -50,6 +50,7 @@
         <div class="card bg-base-100 shadow">
             <div class="card-body">
                 <h2 class="card-title text-base">{% lucide "user-plus" size=18 %} Signups per month</h2>
+                <p class="text-sm opacity-70">New members against returning ones, across every club.</p>
                 <div class="h-56">
                     <canvas id="signups-chart"></canvas>
                 </div>
@@ -142,15 +143,22 @@
     <div class="card bg-base-100 shadow">
         <div class="card-body">
             <h2 class="card-title">Clubs</h2>
+            {% comment %}
+                Health, not vanity: a club's member count says nothing you can act on, while
+                "no coach", "nothing scheduled" and "€ owed" each name a thing somebody has to
+                go and fix. Every column here is annotated in the same single query.
+            {% endcomment %}
             <div class="overflow-x-auto">
                 <table class="table">
                     <thead>
                         <tr>
                             <th>Club</th>
-                            <th>Members</th>
-                            <th>Teams</th>
-                            <th>Events</th>
-                            <th>Admins</th>
+                            <th class="text-right">Members</th>
+                            <th class="text-right">Unpaid</th>
+                            <th class="text-right">Owed</th>
+                            <th class="text-right">Teams</th>
+                            <th class="text-right">Upcoming</th>
+                            <th class="text-right">Admins</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -158,16 +166,27 @@
                             <tr>
                                 <td>
                                     <a class="link link-hover font-medium" href="{% url 'controlpanel:club_detail' club.pk %}">{{ club.name }}</a>
-                                    <div class="text-xs opacity-60">{{ club.slug }}</div>
+                                    <div class="mt-1 flex flex-wrap items-center gap-1">
+                                        <span class="text-xs opacity-60">{{ club.slug }}</span>
+                                        {% if not club.has_season %}<span class="badge badge-warning badge-xs gap-1">{% lucide "calendar-x" size=10 %} No season</span>{% endif %}
+                                        {% if not club.upcoming_events %}<span class="badge badge-ghost badge-xs gap-1">{% lucide "moon-star" size=10 %} Dormant</span>{% endif %}
+                                    </div>
                                 </td>
-                                <td>{{ club.member_count }}</td>
-                                <td>{{ club.team_count }}</td>
-                                <td>{{ club.event_count }}</td>
-                                <td>{{ club.admin_count }}</td>
+                                <td class="text-right tabular-nums">{{ club.active_members }}</td>
+                                <td class="text-right tabular-nums {% if club.unpaid_members %}text-warning{% endif %}">{{ club.unpaid_members }}</td>
+                                <td class="text-right tabular-nums {% if club.outstanding %}font-semibold text-error{% endif %}">€{{ club.outstanding|floatformat:2 }}</td>
+                                <td class="text-right tabular-nums">
+                                    {{ club.team_count }}
+                                    {% if club.teams_without_coach %}
+                                        <span class="badge badge-error badge-xs ml-1" title="Teams with nobody able to pick the squad">{{ club.teams_without_coach }} no coach</span>
+                                    {% endif %}
+                                </td>
+                                <td class="text-right tabular-nums">{{ club.upcoming_events }}</td>
+                                <td class="text-right tabular-nums {% if not club.admin_count %}text-error{% endif %}">{{ club.admin_count }}</td>
                             </tr>
                         {% empty %}
                             <tr>
-                                <td colspan="5" class="text-center opacity-60">No clubs yet.</td>
+                                <td colspan="7" class="text-center opacity-60">No clubs yet.</td>
                             </tr>
                         {% endfor %}
                     </tbody>
@@ -227,10 +246,30 @@
                         },
                     });
 
-                return [
-                    build("signups-chart", "Signups", data.signups, css("--color-primary", "#4f46e5"), "bar", false),
-                    build("revenue-chart", "Revenue", data.revenue, css("--color-accent", "#0ea5e9"), "line", true),
-                ];
+                // Stacked, so the bar height stays "signups this month" while the split shows
+                // where they came from. New is per club: joining a second club is a new
+                // membership there, even for someone who has been on the platform for years.
+                const signups = new Chart(document.getElementById("signups-chart"), {
+                    type: "bar",
+                    data: {
+                        labels: data.signups.map((point) => point.month),
+                        datasets: [
+                            { label: "New", data: data.signups.map((point) => point.new), backgroundColor: css("--color-primary", "#4f46e5") },
+                            { label: "Returning", data: data.signups.map((point) => point.returning), backgroundColor: css("--color-accent", "#0ea5e9") },
+                        ],
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: { legend: { position: "bottom", labels: { color: ink } } },
+                        scales: {
+                            x: { stacked: true, ticks: { color: ink }, grid: { color: grid } },
+                            y: { stacked: true, beginAtZero: true, ticks: { color: ink, precision: 0 }, grid: { color: grid } },
+                        },
+                    },
+                });
+
+                return [signups, build("revenue-chart", "Revenue", data.revenue, css("--color-accent", "#0ea5e9"), "line", true)];
             };
 
             let charts = render();

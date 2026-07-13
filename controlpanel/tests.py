@@ -25,6 +25,7 @@ from .services.statistics import (
     attendance_rates,
     club_attention,
     club_statistics,
+    clubs_with_health,
     clubs_with_totals,
     clubs_without_a_season,
     dormant_clubs,
@@ -708,14 +709,24 @@ class PlatformChartTests(TestCase):
         series = platform_charts()["signups"]
 
         self.assertEqual(len(series), 13)
-        self.assertTrue(all(point["value"] == 0 for point in series))
+        self.assertTrue(all(point["new"] == 0 and point["returning"] == 0 for point in series))
 
     def test_signups_land_in_the_month_they_happened(self):
         ClubMembership.objects.create(club=self.club, season=self.season, member=self.member, signed_up_at=timezone.localdate())
 
         series = platform_charts()["signups"]
 
-        self.assertEqual(series[-1]["value"], 1)
+        self.assertEqual(series[-1]["new"], 1)
+
+    def test_new_is_per_club_not_per_platform(self):
+        # A veteran of one club joining a second is new *there*. Keying "first season" on the
+        # member alone would file their very first signup at the new club as a renewal.
+        other = Club.objects.create(name="Feyenoord")
+        old_season = Season.objects.create(club=other, start_date=timezone.localdate() - datetime.timedelta(days=400), end_date=timezone.localdate() - datetime.timedelta(days=40))
+        ClubMembership.objects.create(club=other, season=old_season, member=self.member, signed_up_at=timezone.localdate() - datetime.timedelta(days=300))
+        ClubMembership.objects.create(club=self.club, season=self.season, member=self.member, signed_up_at=timezone.localdate())
+
+        self.assertEqual(platform_charts()["signups"][-1]["new"], 1)
 
     def test_only_paid_orders_count_as_revenue(self):
         Order.objects.create(club=self.club, purchaser=self.member, total=Decimal("50.00"), status=Order.OrderStatus.PAID)
@@ -930,3 +941,70 @@ class NewMemberTests(TestCase):
 
         self.assertEqual(sum(month["new"] for month in series), 1)
         self.assertEqual(sum(month["returning"] for month in series), 0)
+
+
+class ClubHealthTableTests(TestCase):
+    def setUp(self):
+        self.today = timezone.localdate()
+        self.club = Club.objects.create(name="Ajax United")
+        self.season = Season.objects.create(club=self.club, start_date=self.today - datetime.timedelta(days=30), end_date=self.today + datetime.timedelta(days=300))
+        self.member = Member.objects.create(first_name="Ada", last_name="Lovelace")
+
+    def health(self):
+        return clubs_with_health().get(pk=self.club.pk)
+
+    def test_the_whole_table_costs_one_query(self):
+        Club.objects.create(name="Feyenoord")
+
+        with self.assertNumQueries(1):
+            [(club.active_members, club.outstanding, club.teams_without_coach) for club in clubs_with_health()]
+
+    def test_money_is_not_inflated_by_other_joins(self):
+        # The reason each aggregate is its own subquery: a Sum and a Count spanning different
+        # joins multiply each other's rows, and the club's debt comes back doubled for every
+        # membership it happens to have.
+        for name in ("Bob", "Carol", "Dave"):
+            member = Member.objects.create(first_name=name, last_name="Bobson")
+            ClubMembership.objects.create(club=self.club, season=self.season, member=member, status=ClubMembership.StatusChoices.ACTIVE)
+        Order.objects.create(club=self.club, purchaser=self.member, total=Decimal("100.00"), status=Order.OrderStatus.PENDING)
+
+        health = self.health()
+
+        self.assertEqual(health.outstanding, Decimal("100.00"))  # not 300.00
+        self.assertEqual(health.active_members, 3)
+
+    def test_a_club_reports_its_missing_coaches(self):
+        Team.objects.create(club=self.club, name="U15")
+        managed = Team.objects.create(club=self.club, name="U17")
+        coach = Position.objects.create(club=self.club, name="Coach", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=managed, member=self.member, season=self.season, position=coach)
+
+        health = self.health()
+
+        self.assertEqual(health.team_count, 2)
+        self.assertEqual(health.teams_without_coach, 1)
+
+    def test_a_club_with_no_season_and_no_events_is_marked(self):
+        Season.objects.all().delete()
+
+        health = self.health()
+
+        self.assertFalse(health.has_season)
+        self.assertEqual(health.upcoming_events, 0)
+
+    def test_upcoming_events_only_count_the_next_thirty_days(self):
+        Event.objects.create(club=self.club, title="Soon", start=timezone.now() + datetime.timedelta(days=3))
+        Event.objects.create(club=self.club, title="Far", start=timezone.now() + datetime.timedelta(days=90))
+
+        self.assertEqual(self.health().upcoming_events, 1)
+
+    def test_the_dashboard_table_shows_health_not_vanity(self):
+        user = User.objects.create_user(email="root@example.com", password="pw-secret-123", is_staff=True)
+        enrol_mfa(user)
+        self.client.force_login(user)
+
+        response = self.client.get(reverse("controlpanel:dashboard"))
+
+        self.assertContains(response, "Owed")
+        self.assertContains(response, "Upcoming")
+        self.assertContains(response, "Unpaid")

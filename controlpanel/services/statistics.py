@@ -11,8 +11,8 @@ from decimal import Decimal
 
 from allauth.mfa.models import Authenticator
 from django.contrib.auth import get_user_model
-from django.db.models import Count, Q, Sum
-from django.db.models.functions import TruncMonth
+from django.db.models import Count, DecimalField, Exists, F, IntegerField, OuterRef, Q, Subquery, Sum, Value
+from django.db.models.functions import Coalesce, TruncMonth
 from django.utils import timezone
 from waffle import get_waffle_flag_model
 
@@ -41,6 +41,46 @@ def clubs_with_totals(queryset=None):
         team_count=Count("teams", distinct=True),
         event_count=Count("events", distinct=True),
         admin_count=Count("clubroles", filter=Q(clubroles__role=ClubRole.Roles.ADMIN), distinct=True),
+    )
+
+
+def _subquery(queryset, expression, output_field):
+    """One aggregate, in its own subquery.
+
+    Deliberately not a pile of annotate(Count(...), Sum(...)) on one queryset: aggregates
+    that span *different* joins multiply each other's rows, so a club's outstanding total
+    would come back doubled for every membership it happens to have. Subqueries each stand
+    alone, so nothing can inflate anything else.
+    """
+    return Coalesce(Subquery(queryset.filter(club=OuterRef("pk")).values("club").annotate(value=expression).values("value"), output_field=output_field), Value(0), output_field=output_field)
+
+
+def clubs_with_health(queryset=None, today=None, now=None):
+    """Clubs annotated with the health of each — for the dashboard table, in one query."""
+    today = today or timezone.localdate()
+    now = now or timezone.now()
+    clubs = Club.objects.active() if queryset is None else queryset
+
+    in_season = Q(season__start_date__lte=today, season__end_date__gte=today)
+    managed_this_season = Q(
+        staff_assignments__season__start_date__lte=today,
+        staff_assignments__season__end_date__gte=today,
+        staff_assignments__position__management_position=True,
+    )
+
+    return (
+        clubs.annotate(
+            has_season=Exists(Season.objects.filter(club=OuterRef("pk"), start_date__lte=today, end_date__gte=today)),
+            active_members=_subquery(ClubMembership.objects.filter(in_season, status=ClubMembership.StatusChoices.ACTIVE), Count("pk"), IntegerField()),
+            unpaid_members=_subquery(ClubMembership.objects.filter(in_season, fee_status=ClubMembership.FeeStatus.UNPAID), Count("pk"), IntegerField()),
+            outstanding=_subquery(Order.objects.filter(status__in=OWED_STATUSES), Sum("total"), DecimalField(max_digits=10, decimal_places=2)),
+            upcoming_events=_subquery(Event.objects.filter(start__gte=now, start__lte=now + timedelta(days=DORMANT_DAYS)), Count("pk"), IntegerField()),
+            team_count=_subquery(Team.objects.all(), Count("pk"), IntegerField()),
+            teams_managed=_subquery(Team.objects.filter(managed_this_season), Count("pk", distinct=True), IntegerField()),
+            admin_count=_subquery(ClubRole.objects.filter(role=ClubRole.Roles.ADMIN), Count("pk"), IntegerField()),
+        )
+        .annotate(teams_without_coach=F("team_count") - F("teams_managed"))
+        .order_by("name")
     )
 
 
@@ -142,7 +182,7 @@ def _monthly(queryset, field, value, months=MONTHS_OF_HISTORY):
 
 def platform_charts():
     return {
-        "signups": _monthly(ClubMembership.objects.filter(signed_up_at__isnull=False), "signed_up_at", Count("id")),
+        "signups": signup_split(),
         "revenue": _monthly(Order.objects.filter(status__in=PAID_STATUSES), "created", Sum("total")),
     }
 
@@ -197,23 +237,29 @@ def new_members(club, season):
     return Member.objects.filter(member_of__club=club, member_of__season=season).exclude(pk__in=seen_before).distinct()
 
 
-def signup_split(club, months=MONTHS_OF_HISTORY):
-    """Signups per month, split into first-timers and returners.
+def signup_split(club=None, months=MONTHS_OF_HISTORY):
+    """Signups per month, split into first-timers and returners. ``club=None`` is platform-wide.
 
-    Which season a signup belongs to decides the split, so the member's earliest season at
-    this club is looked up once for everyone rather than per row — the same question asked
-    inside a loop is a query per membership.
+    "First" is keyed on (club, member), never on the member alone — the same person can be
+    new at one club while renewing at another, and collapsing that would mark their second
+    club's very first signup as a renewal.
+
+    Each member's earliest season is resolved once up front rather than per row: the same
+    question asked inside a loop is one query per membership.
     """
     start = (timezone.now() - timedelta(days=30 * months)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
+    memberships = ClubMembership.objects.all() if club is None else ClubMembership.objects.filter(club=club)
+
     first_season = {}
-    for member_id, season_start in ClubMembership.objects.filter(club=club).values_list("member_id", "season__start_date"):
-        if member_id not in first_season or season_start < first_season[member_id]:
-            first_season[member_id] = season_start
+    for club_id, member_id, season_start in memberships.values_list("club_id", "member_id", "season__start_date"):
+        key = (club_id, member_id)
+        if key not in first_season or season_start < first_season[key]:
+            first_season[key] = season_start
 
     counts = defaultdict(lambda: {"new": 0, "returning": 0})
-    for member_id, season_start, signed_up_at in ClubMembership.objects.filter(club=club, signed_up_at__isnull=False, signed_up_at__gte=start).values_list("member_id", "season__start_date", "signed_up_at"):
-        kind = "new" if season_start == first_season[member_id] else "returning"
+    for club_id, member_id, season_start, signed_up_at in memberships.filter(signed_up_at__isnull=False, signed_up_at__gte=start).values_list("club_id", "member_id", "season__start_date", "signed_up_at"):
+        kind = "new" if season_start == first_season[(club_id, member_id)] else "returning"
         counts[signed_up_at.strftime("%Y-%m")][kind] += 1
 
     series, cursor = [], start
