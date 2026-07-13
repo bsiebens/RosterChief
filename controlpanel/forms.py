@@ -1,7 +1,10 @@
+from decimal import Decimal
+
 from django import forms
 from django.utils.translation import gettext_lazy as _
 from waffle import get_waffle_flag_model
 
+from billing.models import DuePayment, Subscription, Tier, TierPrice
 from club.models import Club
 
 from .services.admins import find_member_by_email
@@ -56,3 +59,47 @@ class FlagForm(forms.ModelForm):
         help_texts = {
             "everyone": _("Yes = on for all clubs, No = off everywhere (overrides club targeting). Leave unknown to target clubs."),
         }
+
+
+class TierForm(forms.ModelForm):
+    class Meta:
+        model = Tier
+        fields = ["name", "description", "is_active"]
+
+
+class TierPriceForm(forms.ModelForm):
+    class Meta:
+        model = TierPrice
+        fields = ["active_from", "amount"]
+        widgets = {"active_from": forms.DateInput(attrs={"type": "date"})}
+        help_texts = {"active_from": _("Periods opening on or after this date are billed at this amount. Existing periods keep the amount they were billed at.")}
+
+
+class SubscriptionForm(forms.ModelForm):
+    """Put a club on a tier. The first period opens when the subscription is created."""
+
+    start = forms.DateField(required=False, widget=forms.DateInput(attrs={"type": "date"}), label=_("First period starts"), help_text=_("Left blank, the period starts today."))
+
+    class Meta:
+        model = Subscription
+        fields = ["tier", "auto_archive", "notes"]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # An inactive tier still bills its existing subscriptions, but must not be picked up
+        # by a new one — which is the whole point of retiring a tier.
+        self.fields["tier"].queryset = Tier.objects.filter(is_active=True)
+
+
+class DuePaymentForm(forms.Form):
+    amount = forms.DecimalField(max_digits=10, decimal_places=2, min_value=Decimal("0.01"), label=_("Amount"))
+    method = forms.ChoiceField(choices=DuePayment.Method.choices, initial=DuePayment.Method.BANK_TRANSFER, label=_("Method"))
+    reference = forms.CharField(required=False, label=_("Reference"), help_text=_("Bank reference, transaction id — whatever lets you find this again."))
+    paid_at = forms.DateTimeField(required=False, widget=forms.DateTimeInput(attrs={"type": "datetime-local"}), label=_("Received"), help_text=_("Left blank, now."))
+    note = forms.CharField(required=False, widget=forms.Textarea(attrs={"rows": 2}), label=_("Note"))
+
+
+class OpenPeriodForm(forms.Form):
+    """Renew, or reactivate an archived club."""
+
+    start = forms.DateField(required=False, widget=forms.DateInput(attrs={"type": "date"}), label=_("Period starts"), help_text=_("Left blank, it continues from the end of the last period — so a lapsed year is still owed."))

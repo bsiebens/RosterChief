@@ -22,6 +22,7 @@
     <div role="tablist" class="tabs-boxed tabs mb-6 w-fit">
         <a role="tab" href="{% url 'controlpanel:dashboard' %}" class="tab gap-2 {% if nav == 'dashboard' %}tab-active{% endif %}">{% lucide "layout-dashboard" size=16 %} Dashboard</a>
         <a role="tab" href="{% url 'controlpanel:club_list' %}" class="tab gap-2 {% if nav == 'clubs' %}tab-active{% endif %}">{% lucide "building-2" size=16 %} Clubs</a>
+        <a role="tab" href="{% url 'controlpanel:billing' %}" class="tab gap-2 {% if nav == 'billing' %}tab-active{% endif %}">{% lucide "receipt-euro" size=16 %} Billing</a>
         <a role="tab" href="{% url 'controlpanel:features' %}" class="tab gap-2 {% if nav == 'features' %}tab-active{% endif %}">{% lucide "toggle-right" size=16 %} Features</a>
         {% if user.is_superuser %}
             <a role="tab" href="{% url 'controlpanel:admins' %}" class="tab gap-2 {% if nav == 'admins' %}tab-active{% endif %}">{% lucide "user-cog" size=16 %} Admins</a>

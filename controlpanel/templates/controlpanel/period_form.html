@@ -1,0 +1,12 @@
+{% extends "controlpanel/base.html" %}
+
+{% block heading %}{% if club.is_archived %}Reactivate{% else %}Open period{% endif %} — {{ club }}{% endblock heading %}
+
+{% block subheading %}
+    <p class="text-sm opacity-70">Next period starts {{ next_start|date:"j M Y" }} unless you say otherwise.</p>
+{% endblock subheading %}
+
+{% block panel %}
+    {% url 'controlpanel:club_detail' club.pk as club_url %}
+    {% include "controlpanel/_billing_form.html" with cancel_url=club_url submit_label="Open period" submit_icon="calendar-plus" blurb="By default the period continues from the end of the last one, so a lapsed year is still owed. Pick a start date to forgive the gap." %}
+{% endblock panel %}

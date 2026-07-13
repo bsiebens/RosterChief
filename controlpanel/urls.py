@@ -21,6 +21,16 @@ urlpatterns = [
     path("features/flags/new/", views.FlagCreateView.as_view(), name="flag_create"),
     path("features/flags/<int:pk>/edit/", views.FlagUpdateView.as_view(), name="flag_update"),
     path("features/switches/<int:pk>/toggle/", views.SwitchToggleView.as_view(), name="switch_toggle"),
+    # Billing (platform charging the clubs)
+    path("billing/", views.BillingView.as_view(), name="billing"),
+    path("billing/tiers/new/", views.TierCreateView.as_view(), name="tier_create"),
+    path("billing/tiers/<uuid:pk>/edit/", views.TierUpdateView.as_view(), name="tier_update"),
+    path("billing/tiers/<uuid:pk>/prices/new/", views.TierPriceCreateView.as_view(), name="tier_price_create"),
+    path("billing/dues/<uuid:pk>/pay/", views.RecordPaymentView.as_view(), name="due_pay"),
+    path("billing/dues/<uuid:pk>/waive/", views.WaiveDueView.as_view(), name="due_waive"),
+    path("billing/dues/<uuid:pk>/invoice.pdf", views.InvoicePdfView.as_view(), name="due_invoice"),
+    path("clubs/<uuid:pk>/subscription/", views.SubscribeClubView.as_view(), name="club_subscribe"),
+    path("clubs/<uuid:pk>/period/new/", views.OpenPeriodView.as_view(), name="club_open_period"),
     # Platform admins (superusers only)
     path("admins/", views.PlatformAdminListView.as_view(), name="admins"),
     path("admins/add/", views.PlatformAdminAddView.as_view(), name="admin_add"),

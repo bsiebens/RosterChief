@@ -1,0 +1,8 @@
+{% extends "controlpanel/base.html" %}
+
+{% block heading %}{% if object %}Edit {{ object }}{% else %}New tier{% endif %}{% endblock heading %}
+
+{% block panel %}
+    {% url 'controlpanel:billing' as billing_url %}
+    {% include "controlpanel/_billing_form.html" with cancel_url=billing_url submit_label="Save tier" submit_icon="layers" blurb="A tier has no price until you add one. A tier with no price cannot be billed." %}
+{% endblock panel %}

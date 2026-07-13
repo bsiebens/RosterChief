@@ -16,6 +16,8 @@
                 <th class="text-right">Members</th>
                 <th class="text-right">Unpaid</th>
                 <th class="text-right">Owed</th>
+                <th>Plan</th>
+                <th class="text-right">Dues</th>
                 <th class="text-right">Teams</th>
                 <th class="text-right">Upcoming</th>
                 <th class="text-right">Admins</th>
@@ -43,6 +45,25 @@
                     <td class="text-right tabular-nums">{{ club.active_members }}</td>
                     <td class="text-right tabular-nums {% if club.unpaid_members %}text-warning{% endif %}">{{ club.unpaid_members }}</td>
                     <td class="text-right tabular-nums {% if club.outstanding %}font-semibold text-error{% endif %}">€{{ club.outstanding|floatformat:2 }}</td>
+                    <td>
+                        {% if club.tier_name %}
+                            <span class="text-sm">{{ club.tier_name }}</span>
+                        {% else %}
+                            <span class="badge badge-warning badge-xs">Not billed</span>
+                        {% endif %}
+                    </td>
+                    <td class="text-right tabular-nums">
+                        {% if not club.dues_owed %}
+                            {% if club.tier_name %}<span class="badge badge-success badge-xs">Paid</span>{% endif %}
+                        {% else %}
+                            <span class="font-semibold">€{{ club.dues_owed|floatformat:2 }}</span>
+                            {% if club.dues_grace_until < today %}
+                                <span class="badge badge-error badge-xs">Overdue</span>
+                            {% elif club.dues_period_end < today %}
+                                <span class="badge badge-warning badge-xs">Grace</span>
+                            {% endif %}
+                        {% endif %}
+                    </td>
                     <td class="text-right tabular-nums">
                         {{ club.team_count }}
                         {% if club.teams_without_coach %}
@@ -54,7 +75,7 @@
                 </tr>
             {% empty %}
                 <tr>
-                    <td colspan="7" class="text-center opacity-60">{{ empty_message|default:"No clubs yet." }}</td>
+                    <td colspan="9" class="text-center opacity-60">{{ empty_message|default:"No clubs yet." }}</td>
                 </tr>
             {% endfor %}
         </tbody>

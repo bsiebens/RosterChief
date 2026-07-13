@@ -1,0 +1,8 @@
+{% extends "controlpanel/base.html" %}
+
+{% block heading %}New price for {{ tier }}{% endblock heading %}
+
+{% block panel %}
+    {% url 'controlpanel:billing' as billing_url %}
+    {% include "controlpanel/_billing_form.html" with cancel_url=billing_url submit_label="Add price" submit_icon="euro" blurb="Prices are dated, never edited: periods already opened keep the amount they were billed at, so this cannot rewrite an invoice you have already sent." %}
+{% endblock panel %}

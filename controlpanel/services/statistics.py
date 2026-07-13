@@ -17,6 +17,8 @@ from django.utils import timezone
 from waffle import get_waffle_flag_model
 
 from authentication.middleware import ELEVATED_ROLES
+from billing.models import Due, DuePayment, Subscription
+from billing.services.dues import dues_in_grace, dues_overdue
 from club.models import Club, ClubMembership, ClubRole, Season
 from events.models import Attendance, Event
 from members.models import Member
@@ -78,6 +80,10 @@ def clubs_with_health(queryset=None, today=None, now=None):
             team_count=_subquery(Team.objects.all(), Count("pk"), IntegerField()),
             teams_managed=_subquery(Team.objects.filter(managed_this_season), Count("pk", distinct=True), IntegerField()),
             admin_count=_subquery(ClubRole.objects.filter(role=ClubRole.Roles.ADMIN), Count("pk"), IntegerField()),
+            tier_name=Subquery(Subscription.objects.filter(club=OuterRef("pk")).values("tier__name")[:1]),
+            dues_owed=_subquery(Due.objects.filter(status__in=Due.OWING), Sum(F("amount") - F("amount_paid")), DecimalField(max_digits=10, decimal_places=2)),
+            dues_grace_until=Subquery(Due.objects.filter(club=OuterRef("pk"), status__in=Due.OWING).order_by("grace_until").values("grace_until")[:1]),
+            dues_period_end=Subquery(Due.objects.filter(club=OuterRef("pk"), status__in=Due.OWING).order_by("period_end").values("period_end")[:1]),
         )
         .annotate(teams_without_coach=F("team_count") - F("teams_managed"))
         .order_by("name")
@@ -160,7 +166,20 @@ def platform_attention():
         "outstanding": _money(Order.objects.filter(status__in=OWED_STATUSES)),
         "members_without_login": Member.objects.filter(user__isnull=True).count(),
         "members": members,
+        # Platform billing: what the clubs owe US. Distinct from `outstanding`, which is
+        # what members owe their clubs — that money is never ours.
+        "dues_owed": _dues_owed(),
+        "dues_in_grace": dues_in_grace().count(),
+        "dues_overdue": dues_overdue().count(),
+        "clubs_unbilled": Club.objects.active().filter(subscription__isnull=True).count(),
     }
+
+
+def _dues_owed():
+    """What clubs owe the platform right now."""
+    owed = Due.objects.filter(status__in=Due.OWING).aggregate(total=Sum(F("amount") - F("amount_paid")))["total"]
+
+    return owed or ZERO
 
 
 def _monthly(queryset, field, value, months=MONTHS_OF_HISTORY):
@@ -183,7 +202,11 @@ def _monthly(queryset, field, value, months=MONTHS_OF_HISTORY):
 def platform_charts():
     return {
         "signups": signup_split(),
-        "revenue": _monthly(Order.objects.filter(status__in=PAID_STATUSES), "created", Sum("total")),
+        # Two different pots of money: `dues` is platform income (clubs paying us), while
+        # `club_revenue` is members paying their clubs — never ours, and labelling it
+        # "revenue" on our dashboard would be a lie.
+        "dues": _monthly(DuePayment.objects.all(), "paid_at", Sum("amount")),
+        "club_revenue": _monthly(Order.objects.filter(status__in=PAID_STATUSES), "created", Sum("total")),
     }
 
 

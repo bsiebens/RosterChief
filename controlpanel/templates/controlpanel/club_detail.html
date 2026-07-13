@@ -213,6 +213,102 @@
             </div>
         </div>
     </div>
+    <div class="card mb-6 bg-base-100 shadow">
+        <div class="card-body">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+                <h2 class="card-title text-base">{% lucide "receipt-euro" size=18 %} Billing</h2>
+                <div class="flex flex-wrap gap-2">
+                    <a class="btn btn-outline btn-sm gap-2" href="{% url 'controlpanel:club_subscribe' club.pk %}">
+                        {% lucide "layers" size=14 %} {% if subscription %}Change plan{% else %}Start billing{% endif %}
+                    </a>
+                    {% if subscription %}
+                        <a class="btn btn-primary btn-sm gap-2" href="{% url 'controlpanel:club_open_period' club.pk %}">
+                            {% lucide "calendar-plus" size=14 %} {% if club.is_archived %}Reactivate{% else %}Open period{% endif %}
+                        </a>
+                    {% endif %}
+                </div>
+            </div>
+
+            {% if not subscription %}
+                <p class="text-sm opacity-70">This club is not billed for anything. Put it on a tier to start.</p>
+            {% else %}
+                <p class="text-sm opacity-70">
+                    On <strong>{{ subscription.tier.name }}</strong>.
+                    {% if subscription.auto_archive %}
+                        Archived automatically when a period goes unpaid past its grace period.
+                    {% else %}
+                        <span class="badge badge-warning badge-sm">Auto-archive off</span> — it will never be archived for non-payment.
+                    {% endif %}
+                </p>
+
+                <div class="overflow-x-auto">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Period</th>
+                                <th class="text-right">Billed</th>
+                                <th class="text-right">Paid</th>
+                                <th>Status</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for due in dues %}
+                                <tr>
+                                    <td>
+                                        {{ due.period_start|date:"j M Y" }} — {{ due.period_end|date:"j M Y" }}
+                                        <div class="text-xs opacity-60">{{ due.tier.name }} · {{ due.invoice.number }} · grace to {{ due.grace_until|date:"j M Y" }}</div>
+                                    </td>
+                                    <td class="text-right tabular-nums">€{{ due.amount|floatformat:2 }}</td>
+                                    <td class="text-right tabular-nums">€{{ due.amount_paid|floatformat:2 }}</td>
+                                    <td>
+                                        {% if due.status == "paid" %}
+                                            <span class="badge badge-success gap-1">{% lucide "check" size=12 %} Paid</span>
+                                        {% elif due.status == "waived" %}
+                                            <span class="badge badge-ghost">Waived</span>
+                                        {% elif due.grace_until < today %}
+                                            <span class="badge badge-error gap-1">{% lucide "triangle-alert" size=12 %} Overdue</span>
+                                        {% elif due.period_end < today %}
+                                            <span class="badge badge-warning gap-1">{% lucide "hourglass" size=12 %} In grace</span>
+                                        {% else %}
+                                            <span class="badge badge-ghost">{{ due.get_status_display }}</span>
+                                        {% endif %}
+                                    </td>
+                                    <td class="text-right">
+                                        {% if due.is_owing %}
+                                            <a class="btn btn-primary btn-xs gap-1" href="{% url 'controlpanel:due_pay' due.pk %}">{% lucide "banknote" size=14 %} Pay</a>
+                                            {% if not due.payments.all %}
+                                                <form class="inline" method="post" action="{% url 'controlpanel:due_waive' due.pk %}">
+                                                    {% csrf_token %}
+                                                    <button class="btn btn-ghost btn-xs gap-1" type="submit">{% lucide "ban" size=14 %} Waive</button>
+                                                </form>
+                                            {% endif %}
+                                        {% endif %}
+                                        <a class="btn btn-ghost btn-xs gap-1" href="{% url 'controlpanel:due_invoice' due.pk %}">{% lucide "file-text" size=14 %} Invoice</a>
+                                    </td>
+                                </tr>
+                                {% for payment in due.payments.all %}
+                                    <tr class="text-xs opacity-70">
+                                        <td colspan="2" class="pl-8">
+                                            {% lucide "corner-down-right" size=12 %}
+                                            {{ payment.paid_at|date:"j M Y" }} · {{ payment.get_method_display }}{% if payment.reference %} · {{ payment.reference }}{% endif %}
+                                        </td>
+                                        <td class="text-right tabular-nums">€{{ payment.amount|floatformat:2 }}</td>
+                                        <td colspan="2"></td>
+                                    </tr>
+                                {% endfor %}
+                            {% empty %}
+                                <tr>
+                                    <td colspan="5" class="text-center opacity-60">No periods billed yet.</td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+
     <div class="card bg-base-100 shadow">
         <div class="card-body">
             <div class="flex items-center justify-between">

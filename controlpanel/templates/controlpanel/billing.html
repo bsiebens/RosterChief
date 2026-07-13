@@ -1,0 +1,117 @@
+{% extends "controlpanel/base.html" %}
+{% load lucide %}
+
+{% block heading %}Billing{% endblock heading %}
+{% block subheading %}<p class="text-sm opacity-70">What the platform charges its clubs.</p>{% endblock subheading %}
+
+{% block actions %}
+    <a class="btn btn-primary gap-2" href="{% url 'controlpanel:tier_create' %}">{% lucide "plus" size=16 %} New tier</a>
+{% endblock actions %}
+
+{% block panel %}
+    <div class="card mb-6 bg-base-100 shadow">
+        <div class="card-body">
+            <h2 class="card-title text-base">{% lucide "layers" size=18 %} Tiers</h2>
+            {% comment %}
+                Prices are dated, not edited. A rate change is a new row with a future
+                active_from; every period already opened keeps the amount it was billed at,
+                so raising the price cannot rewrite an invoice you have already sent.
+            {% endcomment %}
+            <p class="text-sm opacity-70">A rate change is a new dated price. Periods already billed keep the amount they were issued at.</p>
+            <div class="overflow-x-auto">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Tier</th>
+                            <th class="text-right">Clubs</th>
+                            <th>Prices</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for tier in tiers %}
+                            <tr>
+                                <td>
+                                    <div class="font-medium">{{ tier.name }}</div>
+                                    {% if not tier.is_active %}<span class="badge badge-ghost badge-xs">Retired</span>{% endif %}
+                                    {% if tier.description %}<div class="text-xs opacity-60">{{ tier.description }}</div>{% endif %}
+                                </td>
+                                <td class="text-right tabular-nums">{{ tier.club_count }}</td>
+                                <td>
+                                    {% for price in tier.prices.all %}
+                                        <div class="text-sm tabular-nums">
+                                            €{{ price.amount|floatformat:2 }}
+                                            <span class="opacity-60">from {{ price.active_from|date:"j M Y" }}</span>
+                                            {% if price.active_from > today %}<span class="badge badge-info badge-xs">Scheduled</span>{% endif %}
+                                        </div>
+                                    {% empty %}
+                                        <span class="badge badge-error badge-sm">No price — cannot be billed</span>
+                                    {% endfor %}
+                                </td>
+                                <td class="text-right">
+                                    <a class="btn btn-ghost btn-xs gap-1" href="{% url 'controlpanel:tier_price_create' tier.pk %}">{% lucide "euro" size=14 %} New price</a>
+                                    <a class="btn btn-ghost btn-xs gap-1" href="{% url 'controlpanel:tier_update' tier.pk %}">{% lucide "pencil" size=14 %} Edit</a>
+                                </td>
+                            </tr>
+                        {% empty %}
+                            <tr>
+                                <td colspan="4" class="text-center opacity-60">No tiers yet.</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="card bg-base-100 shadow">
+        <div class="card-body">
+            <h2 class="card-title text-base">{% lucide "receipt-euro" size=18 %} Owed</h2>
+            <div class="overflow-x-auto">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Club</th>
+                            <th>Period</th>
+                            <th class="text-right">Owed</th>
+                            <th>Status</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for due in owing %}
+                            <tr>
+                                <td>
+                                    <a class="link link-hover font-medium" href="{% url 'controlpanel:club_detail' due.club.pk %}">{{ due.club.name }}</a>
+                                    <div class="text-xs opacity-60">{{ due.tier.name }}</div>
+                                </td>
+                                <td class="text-sm">
+                                    {{ due.period_start|date:"j M Y" }} — {{ due.period_end|date:"j M Y" }}
+                                    <div class="text-xs opacity-60">Grace to {{ due.grace_until|date:"j M Y" }}</div>
+                                </td>
+                                <td class="text-right font-semibold tabular-nums">€{{ due.balance|floatformat:2 }}</td>
+                                <td>
+                                    {% if due.grace_until < today %}
+                                        <span class="badge badge-error gap-1">{% lucide "triangle-alert" size=12 %} Overdue</span>
+                                    {% elif due.period_end < today %}
+                                        <span class="badge badge-warning gap-1">{% lucide "hourglass" size=12 %} In grace</span>
+                                    {% else %}
+                                        <span class="badge badge-ghost">{{ due.get_status_display }}</span>
+                                    {% endif %}
+                                </td>
+                                <td class="text-right">
+                                    <a class="btn btn-primary btn-xs gap-1" href="{% url 'controlpanel:due_pay' due.pk %}">{% lucide "banknote" size=14 %} Record payment</a>
+                                    <a class="btn btn-ghost btn-xs gap-1" href="{% url 'controlpanel:due_invoice' due.pk %}">{% lucide "file-text" size=14 %} Invoice</a>
+                                </td>
+                            </tr>
+                        {% empty %}
+                            <tr>
+                                <td colspan="5" class="text-center opacity-60">Nothing outstanding.</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+{% endblock panel %}

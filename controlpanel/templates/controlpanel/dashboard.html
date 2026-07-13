@@ -37,11 +37,18 @@
                 <div class="text-xs opacity-60">Admins locked out until they enrol</div>
             </div>
         </div>
-        <div class="card bg-base-100 shadow {% if attention.outstanding %}border-l-4 border-error{% endif %}">
+        <div class="card bg-base-100 shadow {% if attention.dues_owed %}border-l-4 border-error{% endif %}">
             <div class="card-body p-4">
-                <div class="flex items-center gap-2 text-sm opacity-70">{% lucide "banknote" size=16 %} Outstanding</div>
-                <div class="text-3xl font-bold tabular-nums">€{{ attention.outstanding|floatformat:2 }}</div>
-                <div class="text-xs opacity-60">Unpaid across every club</div>
+                {% comment %}
+                    What the CLUBS owe US. Not to be confused with the club-shop money below,
+                    which members owe their clubs and is never ours.
+                {% endcomment %}
+                <div class="flex items-center gap-2 text-sm opacity-70">{% lucide "receipt-euro" size=16 %} Dues owed</div>
+                <div class="text-3xl font-bold tabular-nums">€{{ attention.dues_owed|floatformat:2 }}</div>
+                <div class="text-xs opacity-60">
+                    {{ attention.dues_in_grace }} in grace ·
+                    <span class="{% if attention.dues_overdue %}font-semibold text-error{% endif %}">{{ attention.dues_overdue }} overdue</span>
+                </div>
             </div>
         </div>
     </div>
@@ -58,7 +65,8 @@
         </div>
         <div class="card bg-base-100 shadow">
             <div class="card-body">
-                <h2 class="card-title text-base">{% lucide "euro" size=18 %} Revenue per month</h2>
+                <h2 class="card-title text-base">{% lucide "receipt-euro" size=18 %} Platform dues per month</h2>
+                <p class="text-sm opacity-70">What clubs paid us. Club-shop money is theirs, not ours.</p>
                 <div class="h-56">
                     <canvas id="revenue-chart"></canvas>
                 </div>
@@ -137,6 +145,11 @@
         <div class="stat">
             <div class="stat-title">Club admins</div>
             <div class="stat-value">{{ totals.admins }}</div>
+        </div>
+        <div class="stat">
+            <div class="stat-title">Not billed</div>
+            <div class="stat-value {% if attention.clubs_unbilled %}text-warning{% endif %}">{{ attention.clubs_unbilled }}</div>
+            <div class="stat-desc">Clubs on no tier</div>
         </div>
     </div>
 
@@ -221,7 +234,7 @@
                     },
                 });
 
-                return [signups, build("revenue-chart", "Revenue", data.revenue, css("--color-accent", "#0ea5e9"), "line", true)];
+                return [signups, build("revenue-chart", "Dues", data.dues, css("--color-accent", "#0ea5e9"), "bar", true)];
             };
 
             let charts = render();

@@ -1,13 +1,20 @@
 from django.contrib import messages
 from django.contrib.auth import get_user_model
+from django.db.models import Count
+from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse
+from django.utils import timezone
 from django.views.generic import CreateView, DetailView, FormView, ListView, TemplateView, UpdateView, View
 from waffle import get_waffle_flag_model, get_waffle_switch_model
 
+from billing.models import Due, Tier, TierPrice
+from billing.services import BillingError
+from billing.services.dues import next_period_start, open_period, reactivate, record_payment, subscribe, waive
+from billing.services.invoices import invoice_pdf, issue_invoice
 from club.models import Club, ClubRole
 
-from .forms import ClubAdminForm, ClubForm, FlagForm, PlatformAdminForm
+from .forms import ClubAdminForm, ClubForm, DuePaymentForm, FlagForm, OpenPeriodForm, PlatformAdminForm, SubscriptionForm, TierForm, TierPriceForm
 from .mixins import PlatformStaffRequiredMixin, PlatformSuperuserRequiredMixin
 from .services.admins import grant_club_admin, revoke_club_admin
 from .services.platform_admins import (
@@ -35,6 +42,7 @@ class DashboardView(PlatformStaffRequiredMixin, TemplateView):
             flags=flag_adoption(),
             charts=platform_charts(),
             clubs=clubs_with_health(),
+            today=timezone.localdate(),
             **kwargs,
         )
 
@@ -55,7 +63,7 @@ class ClubListView(PlatformStaffRequiredMixin, ListView):
         return clubs_with_health(clubs)
 
     def get_context_data(self, **kwargs):
-        return super().get_context_data(nav="clubs", show_archived=self.show_archived, search=self.request.GET.get("q", ""), **kwargs)
+        return super().get_context_data(nav="clubs", show_archived=self.show_archived, search=self.request.GET.get("q", ""), today=timezone.localdate(), **kwargs)
 
 
 class ClubCreateView(PlatformStaffRequiredMixin, CreateView):
@@ -97,6 +105,9 @@ class ClubDetailView(PlatformStaffRequiredMixin, DetailView):
             groups=club_statistics(self.object),
             attention=club_attention(self.object),
             charts=club_charts(self.object),
+            subscription=getattr(self.object, "subscription", None),
+            dues=self.object.dues.select_related("tier", "invoice").prefetch_related("payments"),
+            today=timezone.localdate(),
             admins=ClubRole.objects.filter(club=self.object, role=ClubRole.Roles.ADMIN).select_related("member", "member__user"),
             flags=flags_for_club(self.object),
             **kwargs,
@@ -283,3 +294,198 @@ class PlatformAdminRevokeView(PlatformSuperuserRequiredMixin, View):
         else:
             messages.warning(request, f"{user.email} no longer has platform access.")
         return redirect("controlpanel:admins")
+
+
+class BillingView(PlatformStaffRequiredMixin, TemplateView):
+    """Tiers and their prices, plus every period we are owed money for."""
+
+    template_name = "controlpanel/billing.html"
+
+    def get_context_data(self, **kwargs):
+        today = timezone.localdate()
+        return super().get_context_data(
+            nav="billing",
+            tiers=Tier.objects.prefetch_related("prices").annotate(club_count=Count("subscriptions")),
+            owing=Due.objects.filter(status__in=Due.OWING).select_related("club", "tier").order_by("grace_until"),
+            today=today,
+            **kwargs,
+        )
+
+
+class TierCreateView(PlatformStaffRequiredMixin, CreateView):
+    model = Tier
+    form_class = TierForm
+    template_name = "controlpanel/tier_form.html"
+
+    def get_context_data(self, **kwargs):
+        return super().get_context_data(nav="billing", **kwargs)
+
+    def get_success_url(self):
+        messages.success(self.request, f"Tier “{self.object}” created. Give it a price before billing anyone.")
+        return reverse("controlpanel:billing")
+
+
+class TierUpdateView(PlatformStaffRequiredMixin, UpdateView):
+    model = Tier
+    form_class = TierForm
+    template_name = "controlpanel/tier_form.html"
+
+    def get_context_data(self, **kwargs):
+        return super().get_context_data(nav="billing", **kwargs)
+
+    def get_success_url(self):
+        messages.success(self.request, f"Tier “{self.object}” updated.")
+        return reverse("controlpanel:billing")
+
+
+class TierPriceCreateView(PlatformStaffRequiredMixin, CreateView):
+    """A rate change is a new dated price, never an edit of the old one — periods already
+    billed keep the amount they were billed at."""
+
+    model = TierPrice
+    form_class = TierPriceForm
+    template_name = "controlpanel/tier_price_form.html"
+
+    @property
+    def tier(self):
+        return get_object_or_404(Tier, pk=self.kwargs["pk"])
+
+    def get_context_data(self, **kwargs):
+        return super().get_context_data(nav="billing", tier=self.tier, **kwargs)
+
+    def form_valid(self, form):
+        form.instance.tier = self.tier
+        response = super().form_valid(form)
+        messages.success(self.request, f"{self.tier} is €{self.object.amount} for periods opening from {self.object.active_from}.")
+        return response
+
+    def get_success_url(self):
+        return reverse("controlpanel:billing")
+
+
+class SubscribeClubView(PlatformStaffRequiredMixin, FormView):
+    """Put a club on a tier, which opens its first period."""
+
+    form_class = SubscriptionForm
+    template_name = "controlpanel/subscription_form.html"
+
+    @property
+    def club(self):
+        return get_object_or_404(Club, pk=self.kwargs["pk"])
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        subscription = getattr(self.club, "subscription", None)
+        if subscription:
+            kwargs["instance"] = subscription
+        return kwargs
+
+    def get_context_data(self, **kwargs):
+        return super().get_context_data(nav="clubs", club=self.club, subscription=getattr(self.club, "subscription", None), **kwargs)
+
+    def form_valid(self, form):
+        club = self.club
+        existing = getattr(club, "subscription", None)
+        try:
+            if existing:
+                # Changing tier does not re-bill: the current period keeps the amount it was
+                # issued at, and the new rate applies from the next one.
+                subscription = form.save(commit=False)
+                subscription.club = club
+                subscription.save()
+                messages.success(self.request, f"{club} is now on {subscription.tier}. The current period keeps the amount it was billed at.")
+            else:
+                subscribe(club, form.cleaned_data["tier"], start=form.cleaned_data.get("start"), auto_archive=form.cleaned_data["auto_archive"])
+                messages.success(self.request, f"{club} is on {form.cleaned_data['tier']}. Its first period is open.")
+        except BillingError as error:
+            messages.error(self.request, str(error))
+
+        return redirect("controlpanel:club_detail", pk=club.pk)
+
+
+class RecordPaymentView(PlatformStaffRequiredMixin, FormView):
+    form_class = DuePaymentForm
+    template_name = "controlpanel/payment_form.html"
+
+    @property
+    def due(self):
+        return get_object_or_404(Due.objects.select_related("club", "tier"), pk=self.kwargs["pk"])
+
+    def get_initial(self):
+        return {"amount": self.due.balance}
+
+    def get_context_data(self, **kwargs):
+        return super().get_context_data(nav="clubs", due=self.due, **kwargs)
+
+    def form_valid(self, form):
+        due = self.due
+        try:
+            record_payment(
+                due,
+                form.cleaned_data["amount"],
+                method=form.cleaned_data["method"],
+                reference=form.cleaned_data["reference"],
+                paid_at=form.cleaned_data["paid_at"],
+                note=form.cleaned_data["note"],
+                user=self.request.user,
+            )
+            due.refresh_from_db()
+            messages.success(self.request, f"€{form.cleaned_data['amount']} recorded. {due.get_status_display().capitalize()} — €{due.balance} outstanding.")
+        except BillingError as error:
+            messages.error(self.request, str(error))
+
+        return redirect("controlpanel:club_detail", pk=due.club_id)
+
+
+class WaiveDueView(PlatformStaffRequiredMixin, View):
+    def post(self, request, pk):
+        due = get_object_or_404(Due, pk=pk)
+        try:
+            waive(due)
+            messages.warning(request, f"Period {due.period_start} to {due.period_end} waived. Nothing is owed and the club will not be archived for it.")
+        except BillingError as error:
+            messages.error(request, str(error))
+
+        return redirect("controlpanel:club_detail", pk=due.club_id)
+
+
+class OpenPeriodView(PlatformStaffRequiredMixin, FormView):
+    """Renew a club, or reactivate an archived one."""
+
+    form_class = OpenPeriodForm
+    template_name = "controlpanel/period_form.html"
+
+    @property
+    def club(self):
+        return get_object_or_404(Club, pk=self.kwargs["pk"])
+
+    def get_context_data(self, **kwargs):
+        club = self.club
+        return super().get_context_data(nav="clubs", club=club, next_start=next_period_start(club), **kwargs)
+
+    def form_valid(self, form):
+        club = self.club
+        start = form.cleaned_data.get("start")
+        try:
+            due = reactivate(club, start=start) if club.is_archived else open_period(club, start=start)
+            messages.success(self.request, f"Period {due.period_start} to {due.period_end} opened for €{due.amount}. Invoice {due.invoice.number}.")
+        except BillingError as error:
+            messages.error(self.request, str(error))
+
+        return redirect("controlpanel:club_detail", pk=club.pk)
+
+
+class InvoicePdfView(PlatformStaffRequiredMixin, View):
+    def get(self, request, pk):
+        due = get_object_or_404(Due.objects.select_related("club", "tier", "invoice"), pk=pk)
+        invoice = issue_invoice(due)
+        try:
+            pdf = invoice_pdf(invoice)
+        except BillingError as error:
+            # The native PDF libraries are missing: say so rather than 500.
+            messages.error(request, str(error))
+            return redirect("controlpanel:club_detail", pk=due.club_id)
+
+        response = HttpResponse(pdf, content_type="application/pdf")
+        response["Content-Disposition"] = f'attachment; filename="{invoice.number}.pdf"'
+        return response
