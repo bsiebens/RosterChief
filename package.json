@@ -1,0 +1,14 @@
+{
+  "name": "clubmanager",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tailwindcss -i ./static/src/app.css -o ./static/css/app.css --minify",
+    "watch": "tailwindcss -i ./static/src/app.css -o ./static/css/app.css --watch"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.1.0",
+    "daisyui": "^5.0.0",
+    "tailwindcss": "^4.1.0"
+  }
+}

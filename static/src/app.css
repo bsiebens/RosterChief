@@ -1,0 +1,12 @@
+@import "tailwindcss";
+
+/* Scan Django templates for utility classes (Tailwind's auto-detection doesn't
+   know about our template dirs). */
+@source "../../templates";
+@source "../../controlpanel";
+
+/* daisyUI: light is the default, dark applies automatically when the OS asks
+   for it. An explicit data-theme on <html> (set by the toggle) overrides both. */
+@plugin "daisyui" {
+  themes: light --default, dark --prefersdark;
+}
