@@ -7,6 +7,10 @@
     "watch": "tailwindcss -i ./static/src/app.css -o ./static/css/app.css --watch"
   },
   "devDependencies": {
+    "@fontsource-variable/jetbrains-mono": "^5.2.8",
+    "@fontsource-variable/roboto": "^5.2.10",
+    "@fontsource-variable/tourney": "^5.2.8",
+    "@fontsource/ubuntu": "^5.2.8",
     "@tailwindcss/cli": "^4.1.0",
     "daisyui": "^5.0.0",
     "tailwindcss": "^4.1.0"
