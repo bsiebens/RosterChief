@@ -1,0 +1,46 @@
+{% extends "_base.html" %}
+
+{% comment %}
+    A club's skin, used on its subdomain. `club` comes from the branding context
+    processor, which reads the tenant resolved by ClubTenantMiddleware.
+{% endcomment %}
+
+{% block title %}
+    {% block head_title %}{% endblock head_title %} · {{ club.name }}
+{% endblock title %}
+
+{% block extra %}
+    {% if club.primary_color %}
+        {% comment %}
+            daisyUI declares its theme variables inside `@layer base`, and unlayered styles
+            beat every layered rule regardless of specificity -- so this plain :root wins
+            without any !important or selector games. primary_content_color is computed from
+            the club's colour so a pale brand doesn't end up with white-on-yellow buttons.
+        {% endcomment %}
+        <style>
+            :root {
+                --color-primary: {{ club.primary_color }};
+                --color-primary-content: {{ club.primary_content_color }};
+            }
+        </style>
+    {% endif %}
+{% endblock extra %}
+
+{% block brand %}
+    <a class="flex flex-row items-center gap-3" href="/">
+        {% if club.logo %}
+            <img class="h-16 w-16 object-contain" src="{{ club.logo.url }}" alt="{{ club.name }}">
+        {% else %}
+            {# Never the RosterChief mark: that would pass our branding off as the club's own. #}
+            <div class="avatar avatar-placeholder">
+                <div class="w-16 rounded-full bg-primary text-primary-content">
+                    <span class="font-roboto text-xl font-bold">{{ club.initials }}</span>
+                </div>
+            </div>
+        {% endif %}
+        <div class="flex flex-col gap-1">
+            <div class="font-roboto text-2xl font-bold tracking-wider">{{ club.name }}</div>
+            <div class="font-mono text-xs font-semibold text-base-content/50">Powered by RosterChief</div>
+        </div>
+    </a>
+{% endblock brand %}

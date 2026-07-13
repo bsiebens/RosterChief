@@ -1,0 +1,18 @@
+{% extends "_club_base.html" %}
+{% load lucide %}
+
+{% block head_title %}Home{% endblock head_title %}
+
+{% block main %}
+    <div class="flex justify-center">
+        <div class="card w-full max-w-xl bg-base-100 shadow">
+            <div class="card-body">
+                <h1 class="card-title">{% lucide "party-popper" size=20 %} Welcome to {{ club.name }}</h1>
+                <p>
+                    You are signed in as <span class="font-semibold">{{ user.get_full_name|default:user.email }}</span>.
+                </p>
+                <p class="text-sm opacity-70">The club site lands here. For now this page exists so signing in has somewhere to go.</p>
+            </div>
+        </div>
+    </div>
+{% endblock main %}

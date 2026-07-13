@@ -16,7 +16,7 @@ from events.models import Event
 from members.models import Family, FamilyMembership, Member
 from teams.models import Position, StaffAssignment, Team, TeamMembership
 
-from .models import Club, ClubMembership, ClubRole, Season
+from .models import Club, ClubMembership, ClubRole, Season, club_logo_path
 from .services.access import (
     COACH_MANAGER,
     can_edit_event,
@@ -960,3 +960,111 @@ class ClubRoleStatusSyncTests(TestCase):
         self.assertIn(ClubRole.Roles.ADMIN, roles_in_club(user, self.club))
         self.assertTrue(has_club_role(user, self.club, ClubRole.Roles.ADMIN))
         self.assertTrue(can_manage_shop(user, self.club))
+
+
+@override_settings(
+    ROSTERCHIEF_BASE_DOMAIN="rosterchief.app",
+    ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"],
+)
+class BrandingTests(TestCase):
+    """The auth screens are shared; only the skin they inherit differs per tenant."""
+
+    def setUp(self):
+        self.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+
+    def login_page(self, host):
+        return self.client.get(reverse("account_login"), HTTP_HOST=host)
+
+    def test_the_base_domain_gets_the_platform_skin(self):
+        response = self.login_page("rosterchief.app")
+
+        self.assertTemplateUsed(response, "_platform_base.html")
+        self.assertTemplateNotUsed(response, "_club_base.html")
+        self.assertContains(response, "Club &amp; Team Management")
+        self.assertIsNone(response.context["club"])
+
+    def test_a_club_subdomain_gets_the_club_skin(self):
+        response = self.login_page("ajax-united.rosterchief.app")
+
+        self.assertTemplateUsed(response, "_club_base.html")
+        self.assertTemplateNotUsed(response, "_platform_base.html")
+        self.assertContains(response, "Ajax United")
+        self.assertEqual(response.context["club"], self.club)
+
+    def test_an_archived_club_falls_back_to_the_platform_skin(self):
+        # The subdomain stops resolving, so there is no club to brand with.
+        self.club.archive()
+
+        self.assertTemplateUsed(self.login_page("ajax-united.rosterchief.app"), "_platform_base.html")
+
+    def test_a_club_without_a_logo_shows_its_initials_not_our_mark(self):
+        response = self.login_page("ajax-united.rosterchief.app")
+
+        self.assertContains(response, "AU")
+        self.assertNotContains(response, "rosterchief-dark.svg")
+
+    def test_a_club_logo_is_rendered_when_set(self):
+        self.club.logo = "clubs/ajax-united/crest.png"
+        self.club.save()
+
+        self.assertContains(self.login_page("ajax-united.rosterchief.app"), "clubs/ajax-united/crest.png")
+
+    def test_a_club_colour_overrides_the_theme(self):
+        self.club.primary_color = "#1e40af"
+        self.club.save()
+
+        self.assertContains(self.login_page("ajax-united.rosterchief.app"), "--color-primary: #1e40af")
+
+    def test_no_colour_means_no_override(self):
+        self.assertNotContains(self.login_page("ajax-united.rosterchief.app"), "--color-primary")
+
+
+class ClubBrandingModelTests(TestCase):
+    def test_initials_use_the_first_two_words(self):
+        self.assertEqual(Club(name="Ajax United Football Club").initials, "AU")
+        self.assertEqual(Club(name="Ajax").initials, "A")
+
+    def test_text_on_a_pale_colour_is_black_and_on_a_dark_one_white(self):
+        # A club picking pale yellow must not get white-on-yellow buttons.
+        self.assertEqual(Club(primary_color="#fef08a").primary_content_color, "#000000")
+        self.assertEqual(Club(primary_color="#1e40af").primary_content_color, "#ffffff")
+
+    def test_no_colour_means_no_contrast_colour(self):
+        self.assertEqual(Club(primary_color="").primary_content_color, "")
+
+    def test_a_colour_must_be_a_hex_value(self):
+        club = Club(name="Ajax United", primary_color="blue")
+
+        with self.assertRaises(ValidationError):
+            club.full_clean()
+
+    def test_logos_are_stored_per_club(self):
+        self.assertEqual(club_logo_path(Club(slug="ajax-united"), "crest.png"), "clubs/ajax-united/crest.png")
+
+
+@override_settings(
+    ROSTERCHIEF_BASE_DOMAIN="rosterchief.app",
+    ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"],
+)
+class RootViewTests(TestCase):
+    def setUp(self):
+        self.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        self.user = get_user_model().objects.create_user(email="member@example.com", password="pw-secret-123")
+
+    def test_the_base_domain_hands_off_to_the_control_panel(self):
+        response = self.client.get("/", HTTP_HOST="rosterchief.app")
+
+        self.assertRedirects(response, reverse("controlpanel:dashboard"), fetch_redirect_response=False)
+
+    def test_a_club_subdomain_lands_on_the_club_home(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get("/", HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertTemplateUsed(response, "club/home.html")
+        self.assertContains(response, "Ajax United")
+
+    def test_the_club_home_requires_a_login(self):
+        response = self.client.get("/", HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertRedirects(response, f"{reverse('account_login')}?next=/", fetch_redirect_response=False)

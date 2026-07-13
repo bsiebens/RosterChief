@@ -8,6 +8,7 @@ register = template.Library()
 #: what makes every allauth and control-panel form field look right.
 WIDGET_CLASSES = (
     (forms.CheckboxInput, "checkbox"),
+    (forms.FileInput, "file-input file-input-bordered w-full"),
     (forms.RadioSelect, "radio"),
     (forms.Select, "select select-bordered w-full"),
     (forms.Textarea, "textarea textarea-bordered w-full"),

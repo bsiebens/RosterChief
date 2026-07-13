@@ -1,0 +1,119 @@
+{% load lucide static %}
+
+{% comment %}
+    The page skeleton, with no branding of its own. `_platform_base.html` dresses it
+    as RosterChief, `_club_base.html` as a club; the `branding` context processor
+    picks between them per tenant.
+{% endcomment %}
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+        <title>
+            {% block title %}RosterChief{% endblock title %}
+        </title>
+
+        {% comment %}
+            Apply the stored theme before first paint, otherwise the page flashes the wrong
+            colours. Nothing stored means "auto": we set no attribute at all, so daisyUI's
+            `dark --prefersdark` follows the OS.
+        {% endcomment %}
+        <script>
+            (() => {
+                const stored = localStorage.getItem("theme");
+                if (stored) document.documentElement.setAttribute("data-theme", stored);
+            })();
+        </script>
+
+        <link rel="stylesheet" href="{% static 'css/app.css' %}"/>
+
+        {# After the stylesheet: brand overrides (logo urls, club colours) must win. #}
+        {% block extra %}{% endblock extra %}
+    </head>
+
+    <body class="min-h-screen bg-base-200">
+        <div class="navbar mb-4 border-b border-base-300 bg-base-100 px-6 shadow-sm">
+            <div class="my-4 flex-1">
+                {% block brand %}{% endblock brand %}
+            </div>
+
+            <button class="btn btn-ghost w-24" type="button" data-theme-toggle aria-label="Theme">
+                <span data-theme-icon="light" class="hidden items-center gap-4">{% lucide "sun" size=20 %} light</span>
+                <span data-theme-icon="dark" class="hidden items-center gap-4">{% lucide "moon" size=20 %} dark</span>
+                <span data-theme-icon="auto" class="hidden items-center gap-4">{% lucide "sun-moon" size=20 %} auto</span>
+            </button>
+
+            {% if user.is_authenticated %}
+                <div class="dropdown dropdown-end">
+                    <div tabindex="0" role="button" class="btn btn-ghost gap-4">{% lucide "circle-user" %}{{ user.get_full_name }}</div>
+                    <ul tabindex="0" class="menu dropdown-content z-10 mt-2 w-60 rounded-box bg-base-100 p-2 shadow">
+                        <li>
+                            <a href="{% url 'mfa_index' %}">{% lucide "shield-check" size=16 %} Two-factor authentication</a>
+                        </li>
+                        <li>
+                            <a href="{% url 'account_change_password' %}">{% lucide "key-round" size=16 %} Change password</a>
+                        </li>
+                        <li>
+                            <a href="{% url 'account_logout' %}">{% lucide "log-out" size=16 %} Sign out</a>
+                        </li>
+                    </ul>
+                </div>
+            {% else %}
+                <a class="btn btn-ghost gap-4" href="{% url 'account_login' %}">{% lucide "log-in" size=16 %} Sign in</a>
+            {% endif %}
+        </div>
+
+        {% if messages %}
+            <div class="mx-auto mt-4 w-full space-y-2 px-4">
+                {% for message in messages %}
+                    <div class="alert {% if message.tags == 'error' %}alert-error{% elif message.tags == 'warning' %}alert-warning{% elif message.tags == 'success' %}alert-success{% else %}alert-info{% endif %}">
+                        <span>{{ message }}</span>
+                    </div>
+                {% endfor %}
+            </div>
+        {% endif %}
+
+        <main class="mx-auto w-full p-4">
+            {% block main %}{% endblock main %}
+        </main>
+
+        <script>
+            // The button cycles light -> dark -> auto. "auto" removes the attribute and the
+            // stored key rather than writing the OS's current choice: that keeps daisyUI's
+            // `dark --prefersdark` following the OS *live*, so the page flips when the OS
+            // does. Storing a snapshot would freeze it at whatever the OS was on click.
+            const MODES = ["light", "dark", "auto"];
+            const currentMode = () => localStorage.getItem("theme") || "auto";
+
+            const applyMode = (mode) => {
+                if (mode === "auto") {
+                    localStorage.removeItem("theme");
+                    document.documentElement.removeAttribute("data-theme");
+                } else {
+                    localStorage.setItem("theme", mode);
+                    document.documentElement.setAttribute("data-theme", mode);
+                }
+
+                // Show the label for the *chosen* mode, not the resulting colours -- otherwise
+                // "auto" would be indistinguishable from whichever theme it resolved to.
+                // `hidden` and `inline-flex` are both display utilities, so the visible one
+                // must carry exactly one of them: leaving both on would let stylesheet order,
+                // not class order, decide who wins.
+                document.querySelectorAll("[data-theme-icon]").forEach((label) => {
+                    const active = label.dataset.themeIcon === mode;
+                    label.classList.toggle("hidden", !active);
+                    label.classList.toggle("inline-flex", active);
+                });
+                document.querySelectorAll("[data-theme-toggle]").forEach((button) => button.setAttribute("aria-label", `Theme: ${mode}`));
+            };
+
+            document.querySelectorAll("[data-theme-toggle]").forEach((button) => {
+                button.addEventListener("click", () => applyMode(MODES[(MODES.indexOf(currentMode()) + 1) % MODES.length]));
+            });
+
+            applyMode(currentMode());
+        </script>
+    </body>
+</html>

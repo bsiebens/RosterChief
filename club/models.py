@@ -1,5 +1,6 @@
 import datetime
 
+from django.core.validators import RegexValidator
 from django.db import models
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
@@ -22,9 +23,22 @@ class ClubManager(models.Manager):
         return self.filter(archived_at__isnull=False)
 
 
+def club_logo_path(instance: Club, filename: str) -> str:
+    return f"clubs/{instance.slug}/{filename}"
+
+
 class Club(UUIDModel):
     name = models.CharField(_("name"), max_length=255)
     slug = models.SlugField(_("slug"), max_length=255, unique=True, blank=True, help_text=_("Drives subdomain / path resolution (e.g. ajax-united.rosterchief.app)."))
+
+    logo = models.ImageField(_("logo"), upload_to=club_logo_path, blank=True, help_text=_("Shown on the club's own pages. Without one, the club's initials are used."))
+    primary_color = models.CharField(
+        _("primary colour"),
+        max_length=7,
+        blank=True,
+        validators=[RegexValidator(r"^#[0-9a-fA-F]{6}$", _("Enter a colour as a hex value, e.g. #1e40af."))],
+        help_text=_("Hex colour for buttons and links on the club's pages, e.g. #1e40af."),
+    )
 
     archived_at = models.DateTimeField(_("archived at"), null=True, blank=True, help_text=_("Archived clubs stop resolving on their subdomain, but their data is retained."))
 
@@ -46,6 +60,31 @@ class Club(UUIDModel):
     @property
     def is_archived(self) -> bool:
         return self.archived_at is not None
+
+    @property
+    def initials(self) -> str:
+        """Stand-in for a missing logo. Never the RosterChief mark — that would
+        pass our branding off as the club's own."""
+        return "".join(word[0] for word in self.name.split()[:2]).upper()
+
+    @property
+    def primary_content_color(self) -> str:
+        """Readable text colour to sit *on* ``primary_color``.
+
+        A club picking a pale yellow would otherwise get white-on-yellow buttons.
+        Relative luminance per WCAG, with its 0.179 threshold for black vs white.
+        """
+        if not self.primary_color:
+            return ""
+
+        def channel(value: int) -> float:
+            fraction = value / 255
+            return fraction / 12.92 if fraction <= 0.04045 else ((fraction + 0.055) / 1.055) ** 2.4
+
+        red, green, blue = (channel(int(self.primary_color[index : index + 2], 16)) for index in (1, 3, 5))
+        luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue
+
+        return "#000000" if luminance > 0.179 else "#ffffff"
 
     def archive(self):
         """Soft-delete: the club stops resolving, but nothing is destroyed.

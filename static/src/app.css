@@ -166,10 +166,29 @@
     --font-tourney: "Tourney", ui-sans-serif, system-ui, sans-serif;
 }
 
+/* The logo is a background image, not `content:` -- content-replacement on a real
+   element (rather than ::before/::after) isn't supported in Firefox.
+
+   Default = dark-ink logo, for a light background. The media query covers "auto",
+   where the toggle deliberately sets no data-theme at all; the attribute selectors
+   are more specific, so an explicit choice always beats the OS. */
+.logo {
+    background-image: var(--logo-dark);
+    background-position: center;
+    background-repeat: no-repeat;
+    background-size: contain;
+}
+
+@media (prefers-color-scheme: dark) {
+    .logo {
+        background-image: var(--logo-light);
+    }
+}
+
 [data-theme="light"] .logo {
-    content: var(--logo-dark);
+    background-image: var(--logo-dark);
 }
 
 [data-theme="dark"] .logo {
-    content: var(--logo-light);
+    background-image: var(--logo-light);
 }
