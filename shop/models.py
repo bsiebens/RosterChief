@@ -1,17 +1,307 @@
-from django.db import models
-from django.db.models import UniqueConstraint
+from django.db import IntegrityError, models, transaction
+from django.db.models import Q, UniqueConstraint
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
-from clubmanager.base import ClubScopedModel
+from authentication.models import User
+from club.models import Season
+from club.tenancy import require_current_club
+from clubmanager.base import ClubScopedModel, UUIDModel, validate_club_scope
+from members.models import Member
+from teams.models import Position, Team
+
+
+def next_scoped_number(instance, code):
+    """Next per-club sequential number for the current year: ``<code>-<year>-<seq>``."""
+    prefix = f"{code}-{timezone.now().year}-"
+    model = type(instance)
+    sequences = [int(suffix) for number in model.objects.filter(club=instance.club, number__startswith=prefix).values_list("number", flat=True) if (suffix := number.removeprefix(prefix)).isdigit()]
+    return f"{prefix}{max(sequences, default=0) + 1:05d}"
+
+
+def save_with_number(instance, save):
+    """Assign a unique per-club number (retrying on collision) then save.
+
+    Relies on the model's ``generate_number()`` and its ``(club, number)``
+    unique constraint as the source of truth.
+    """
+    if instance.club_id is None:
+        instance.club = require_current_club()
+    if instance.number:
+        return save()
+    for attempt in range(5):
+        instance.number = instance.generate_number()
+        try:
+            with transaction.atomic():
+                return save()
+        except IntegrityError:
+            if attempt == 4:
+                raise
 
 
 class Product(ClubScopedModel):
+    class ProductType(models.TextChoices):
+        MEMBERSHIP = "membership", _("Membership")
+        EVENT_FEE = "event_fee", _("Event fee")
+        MERCHANDISE = "merchandise", _("Merchandise")
+        DONATION = "donation", _("Donation")
+
+    class DiscountType(models.TextChoices):
+        PERCENTAGE = "percentage", _("Percentage")
+        FIXED_AMOUNT = "fixed_amount", _("Fixed amount")
+
     name = models.CharField(_("name"), max_length=255)
     slug = models.SlugField(_("slug"), max_length=255, blank=True)
+
+    product_type = models.CharField(_("product type"), max_length=255, choices=ProductType.choices, default=ProductType.MEMBERSHIP)
+    season = models.ForeignKey(Season, on_delete=models.PROTECT, related_name="products", verbose_name=_("season"), blank=True, null=True)
+
+    is_active = models.BooleanField(_("is active?"), default=True)
+    is_public = models.BooleanField(_("is public?"), default=True, help_text="Non-public products are only visible to staff members for adding on to an order later on.")
+    staff_role = models.ForeignKey(Position, on_delete=models.PROTECT, related_name="staff_products", verbose_name=_("staff role"), blank=True, null=True, limit_choices_to={"staff_position": True})
+
+    early_bird_discount_enabled = models.BooleanField(_("early bird discount enabled?"), default=False)
+    early_bird_discount_deadline = models.DateField(_("early bird discount deadline"), blank=True, null=True)
+    early_bird_discount_type = models.CharField(_("early bird discount type"), max_length=255, choices=DiscountType.choices, default=DiscountType.PERCENTAGE)
+    early_bird_discount_amount = models.DecimalField(_("early bird discount amount"), max_digits=10, decimal_places=2, default=0)
 
     slug_source = "name"
 
     class Meta:
+        verbose_name = _("product")
+        verbose_name_plural = _("products")
+        ordering = ["name"]
         constraints = [
             UniqueConstraint(fields=["club", "slug"], name="unique_product_slug_per_club"),
         ]
+
+    def __str__(self):
+        return self.name
+
+    def clean(self):
+        validate_club_scope(self, self.club_id, same_club_fields=("season", "staff_role"))
+
+
+class Cart(ClubScopedModel):
+    class CartStatus(models.TextChoices):
+        OPEN = "open", _("Open")
+        CHECKED_OUT = "checked_out", _("Checked out")
+        ABANDONED = "abandoned", _("Abandoned")
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="carts", verbose_name=_("user"))
+    status = models.CharField(_("status"), max_length=255, choices=CartStatus.choices, default=CartStatus.OPEN)
+
+    class Meta:
+        verbose_name = _("cart")
+        verbose_name_plural = _("carts")
+        constraints = [
+            # At most one open cart per user per club (CartStatus.OPEN == "open").
+            UniqueConstraint(fields=["club", "user"], condition=Q(status="open"), name="unique_open_cart_per_user_per_club"),
+        ]
+
+    def __str__(self):
+        return f"{self.user} - {self.status}"
+
+
+class CartItem(UUIDModel):
+    cart = models.ForeignKey(Cart, on_delete=models.CASCADE, related_name="items", verbose_name=_("cart"))
+    product = models.ForeignKey(Product, on_delete=models.PROTECT, related_name="cart_items", verbose_name=_("product"))
+
+    quantity = models.PositiveSmallIntegerField(_("quantity"), default=1)
+    unit_price = models.DecimalField(_("unit price"), max_digits=10, decimal_places=2)
+
+    beneficiary = models.ForeignKey(Member, on_delete=models.PROTECT, related_name="cart_items", verbose_name=_("beneficiary"), blank=True, null=True)
+    team = models.ForeignKey(Team, on_delete=models.PROTECT, related_name="cart_items", verbose_name=_("team"), blank=True, null=True)
+
+    class Meta:
+        verbose_name = _("cart item")
+        verbose_name_plural = _("cart items")
+        constraints = [
+            UniqueConstraint(fields=["cart", "product", "beneficiary"], name="unique_product_per_cart_per_beneficiary"),
+        ]
+
+    def __str__(self):
+        return f"{self.product} - {self.quantity}x"
+
+    def clean(self):
+        club_id = self.cart.club_id if self.cart_id else None
+        validate_club_scope(self, club_id, same_club_fields=("product", "team"), member_fields=("beneficiary",))
+
+
+class Order(ClubScopedModel):
+    class OrderStatus(models.TextChoices):
+        PENDING = "pending", _("Pending")
+        PAID = "paid", _("Paid")
+        PARTIALLY_PAID = "partially_paid", _("Partially paid")
+        CANCELLED = "cancelled", _("Cancelled")
+        REFUNDED = "refunded", _("Refunded")
+        DELIVERED = "delivered", _("Delivered")
+
+    number = models.CharField(_("number"), max_length=255, blank=True)
+    purchaser = models.ForeignKey(Member, on_delete=models.PROTECT, related_name="orders", verbose_name=_("purchaser"))
+    status = models.CharField(_("status"), max_length=255, choices=OrderStatus.choices, default=OrderStatus.PENDING)
+    total = models.DecimalField(_("total"), max_digits=10, decimal_places=2)
+
+    created = models.DateTimeField(_("created at"), auto_now_add=True)
+    modified = models.DateTimeField(_("modified"), auto_now=True)
+
+    class Meta:
+        verbose_name = _("order")
+        verbose_name_plural = _("orders")
+        ordering = ["-created"]
+        constraints = [
+            UniqueConstraint(fields=["club", "number"], name="unique_order_number_per_club"),
+        ]
+
+    def __str__(self):
+        return self.number
+
+    def clean(self):
+        validate_club_scope(self, self.club_id, member_fields=("purchaser",))
+
+    def generate_number(self):
+        """Next per-club order number for the current year: ``ORD-<year>-<seq>``."""
+        return next_scoped_number(self, "ORD")
+
+    def save(self, *args, **kwargs):
+        return save_with_number(self, lambda: super(Order, self).save(*args, **kwargs))
+
+
+class OrderLine(UUIDModel):
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name="order_items", verbose_name=_("order"))
+    product = models.ForeignKey(Product, on_delete=models.PROTECT, related_name="order_items", verbose_name=_("product"))
+
+    quantity = models.PositiveSmallIntegerField(_("quantity"), default=1)
+    unit_price = models.DecimalField(_("unit price"), max_digits=10, decimal_places=2)
+
+    beneficiary = models.ForeignKey(Member, on_delete=models.PROTECT, related_name="order_items", verbose_name=_("beneficiary"), blank=True, null=True)
+    team = models.ForeignKey(Team, on_delete=models.PROTECT, related_name="order_items", verbose_name=_("team"), blank=True, null=True)
+    line_total = models.DecimalField(_("line total"), max_digits=10, decimal_places=2)
+
+    class Meta:
+        verbose_name = _("order line")
+        verbose_name_plural = _("order lines")
+
+    def __str__(self):
+        return f"{self.product} - {self.quantity}x"
+
+    def clean(self):
+        club_id = self.order.club_id if self.order_id else None
+        validate_club_scope(self, club_id, same_club_fields=("product", "team"), member_fields=("beneficiary",))
+
+
+class Discount(ClubScopedModel):
+    class DiscountType(models.TextChoices):
+        PERCENTAGE = "percentage", _("Percentage")
+        FIXED_AMOUNT = "fixed_amount", _("Fixed amount")
+
+    name = models.CharField(_("name"), max_length=255)
+    slug = models.SlugField(_("slug"), max_length=255, blank=True)
+    description = models.TextField(_("description"), blank=True)
+
+    discount_type = models.CharField(_("discount type"), max_length=255, choices=DiscountType.choices, default=DiscountType.PERCENTAGE)
+    discount_amount = models.DecimalField(_("discount amount"), max_digits=10, decimal_places=2, default=0)
+
+    is_active = models.BooleanField(_("is active?"), default=True)
+
+    slug_source = "name"
+
+    class Meta:
+        verbose_name = _("order discount type")
+        verbose_name_plural = _("order discount types")
+        ordering = ["name"]
+        constraints = [
+            UniqueConstraint(fields=["club", "slug"], name="unique_order_discount_type_slug_per_club"),
+        ]
+
+    def __str__(self):
+        return self.name
+
+
+class AppliedDiscount(UUIDModel):
+    class DiscountType(models.TextChoices):
+        PERCENTAGE = "percentage", _("Percentage")
+        FIXED_AMOUNT = "fixed_amount", _("Fixed amount")
+
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name="applied_discounts", verbose_name=_("order"))
+    discount = models.ForeignKey(Discount, on_delete=models.PROTECT, related_name="applied_discounts", verbose_name=_("discount"))
+
+    discount_type = models.CharField(_("discount type"), max_length=255, choices=DiscountType.choices, default=DiscountType.PERCENTAGE)
+    discount_amount = models.DecimalField(_("discount amount"), max_digits=10, decimal_places=2)
+    description = models.TextField(_("description"), blank=True)
+
+    applied_by = models.ForeignKey(Member, on_delete=models.PROTECT, related_name="applied_discounts", verbose_name=_("applied by"), blank=True, null=True)
+
+    class Meta:
+        verbose_name = _("applied discount")
+        verbose_name_plural = _("applied discounts")
+        constraints = [
+            UniqueConstraint(fields=["order", "discount"], name="unique_discount_per_order"),
+        ]
+
+    def __str__(self):
+        suffix = "%" if self.discount_type == self.DiscountType.PERCENTAGE else ""
+        return f"{self.discount} - {self.discount_amount}{suffix}"
+
+    def clean(self):
+        club_id = self.order.club_id if self.order_id else None
+        validate_club_scope(self, club_id, same_club_fields=("discount",), member_fields=("applied_by",))
+
+
+class Payment(UUIDModel):
+    class PaymentMethod(models.TextChoices):
+        CREDIT_CARD = "credit_card", _("Credit card")
+        BANK_TRANSFER = "bank_transfer", _("Bank transfer")
+        CASH = "cash", _("Cash")
+
+    class PaymentStatus(models.TextChoices):
+        PENDING = "pending", _("Pending")
+        CONFIRMED = "confirmed", _("Confirmed")
+        FAILED = "failed", _("Failed")
+        REFUNDED = "refunded", _("Refunded")
+
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name="payments", verbose_name=_("order"))
+    amount = models.DecimalField(_("amount"), max_digits=10, decimal_places=2)
+    method = models.CharField(_("method"), max_length=255, choices=PaymentMethod.choices, default=PaymentMethod.CREDIT_CARD)
+    status = models.CharField(_("status"), max_length=255, choices=PaymentStatus.choices, default=PaymentStatus.PENDING)
+    reference = models.CharField(_("reference"), max_length=255, blank=True)
+    paid_at = models.DateTimeField(_("paid at"), blank=True, null=True)
+
+    class Meta:
+        verbose_name = _("payment")
+        verbose_name_plural = _("payments")
+
+    def __str__(self):
+        return f"{self.order} - {self.status}"
+
+
+class Invoice(ClubScopedModel):
+    number = models.CharField(_("number"), max_length=255, blank=True)
+    order = models.OneToOneField(Order, on_delete=models.CASCADE, related_name="invoice", verbose_name=_("order"))
+
+    issued_at = models.DateTimeField(_("issued at"), auto_now_add=True)
+    due_date = models.DateField(_("due date"), blank=True, null=True)
+
+    billing_snapshot = models.JSONField(_("billing snapshot"), blank=True, null=True)  # Name/address information
+    pdf = models.FileField(_("PDF"), upload_to="invoices", blank=True, null=True)
+
+    class Meta:
+        verbose_name = _("invoice")
+        verbose_name_plural = _("invoices")
+        ordering = ["-issued_at"]
+        constraints = [
+            UniqueConstraint(fields=["club", "number"], name="unique_invoice_number_per_club"),
+        ]
+
+    def __str__(self):
+        return self.number
+
+    def clean(self):
+        validate_club_scope(self, self.club_id, same_club_fields=("order",))
+
+    def generate_number(self):
+        """Next per-club invoice number for the current year: ``INV-<year>-<seq>``."""
+        return next_scoped_number(self, "INV")
+
+    def save(self, *args, **kwargs):
+        return save_with_number(self, lambda: super(Invoice, self).save(*args, **kwargs))
