@@ -26,25 +26,23 @@
     false — silently dropping every field on every form that doesn't pass `exclude`.
 {% endcomment %}
 {% with exclude=attrs.exclude|default:"" %}
-{% for field in attrs.form.visible_fields %}
-    {% if not field|excluded:exclude %}
-    <div class="form-control my-3 w-full">
-        {% if field.field.widget.input_type == "checkbox" %}
-            <label class="label cursor-pointer justify-start gap-3" for="{{ field.id_for_label }}">
-                {{ field|daisy }}
-                <span class="label-text">{{ field.label }}</span>
-            </label>
-        {% else %}
-            {# An otp box never takes a visible label — the boxes say what they are, and a
-               heading above them just crowds the field. It keeps an sr-only one below. #}
-            {% if not attrs.unlabeled and not field|is_otp %}
-                <label class="label" for="{{ field.id_for_label }}">
-                    <span class="label-text">{{ field.label }}</span>
-                </label>
-            {% endif %}
-            {% with icon=field|field_icon %}
-                {% if field|is_otp %}
-                    {% comment %}
+    {% for field in attrs.form.visible_fields %}
+        {% if not field|excluded:exclude %}
+            <div class="form-control my-3 w-full">
+                {% if field.field.widget.input_type == "checkbox" %}
+                    <label class="label cursor-pointer justify-start gap-3" for="{{ field.id_for_label }}">
+                        {{ field|daisy }}
+                        <span class="label-text">{{ field.label }}</span>
+                    </label>
+                {% else %}
+                    {% if not attrs.unlabeled and not field|is_otp %}
+                        <label class="label" for="{{ field.id_for_label }}">
+                            <span class="label-text">{{ field.label }}</span>
+                        </label>
+                    {% endif %}
+                    {% with icon=field|field_icon %}
+                        {% if field|is_otp %}
+                            {% comment %}
                         daisyUI's otp is one input overlaid on the boxes. Child order is load-bearing:
                         it places each box with `nth-child`, which counts *every* child, not just the
                         spans — so the input must come LAST. Put it first and all six boxes shift one
@@ -55,38 +53,38 @@
                         For the same reason the sr-only label lives outside the container: another
                         child would throw the count off again.
                     {% endcomment %}
-                    <label class="sr-only" for="{{ field.id_for_label }}">{{ field.label }}</label>
-                    <div class="flex justify-center">
-                        <div class="otp otp-lg" data-otp>
-                            <span></span>
-                            <span></span>
-                            <span></span>
-                            <span></span>
-                            <span></span>
-                            <span></span>
-                            {{ field|as_otp }}
-                        </div>
-                    </div>
-                {% elif icon %}
-                    <label class="input flex w-full items-center gap-2 {% if field.errors %}input-error{% endif %}" for="{{ field.id_for_label }}">
-                        <span class="opacity-50">{% lucide icon size=16 %}</span>
-                        {% if attrs.unlabeled %}<span class="sr-only">{{ field.label }}</span>{% endif %}
-                        {{ field|daisy:"grow" }}
-                    </label>
-                {% else %}
-                    {{ field|daisy }}
+                            <label class="sr-only" for="{{ field.id_for_label }}">{{ field.label }}</label>
+                            <div class="flex justify-center">
+                                <div class="otp otp-lg" data-otp>
+                                    <span></span>
+                                    <span></span>
+                                    <span></span>
+                                    <span></span>
+                                    <span></span>
+                                    <span></span>
+                                    {{ field|as_otp }}
+                                </div>
+                            </div>
+                        {% elif icon %}
+                            <label class="input flex w-full items-center gap-2 {% if field.errors %}input-error{% endif %}" for="{{ field.id_for_label }}">
+                                <span class="opacity-50">{% lucide icon size=16 %}</span>
+                                {% if attrs.unlabeled %}<span class="sr-only">{{ field.label }}</span>{% endif %}
+                                {{ field|daisy:"grow" }}
+                            </label>
+                        {% else %}
+                            {{ field|daisy }}
+                        {% endif %}
+                    {% endwith %}
                 {% endif %}
-            {% endwith %}
-        {% endif %}
-        {% comment %}
+                {% comment %}
             The password field's help_text is allauth's "Forgot your password?" link, so it
             gets room to breathe. The id is not decorative: Django points the input's
             aria-describedby at `<auto_id>_helptext`, and without it that reference dangles
             and the link is never announced.
         {% endcomment %}
-        {% if field.help_text %}<span id="{{ field.auto_id }}_helptext" class="label-text-alt mt-3 block text-base-content/70">{{ field.help_text }}</span>{% endif %}
-        {% for error in field.errors %}<span class="label-text-alt mt-1 text-error">{{ error }}</span>{% endfor %}
-    </div>
-    {% endif %}
-{% endfor %}
+                {% if field.help_text %}<span id="{{ field.auto_id }}_helptext" class="label-text-alt mt-3 block text-base-content/70">{{ field.help_text }}</span>{% endif %}
+                {% for error in field.errors %}<span class="label-text-alt mt-1 text-error">{{ error }}</span>{% endfor %}
+            </div>
+        {% endif %}
+    {% endfor %}
 {% endwith %}

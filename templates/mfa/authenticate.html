@@ -46,7 +46,7 @@
         {% endelement %}
 
         <button class="btn btn-accent gap-2" type="button" form="webauthn_form" id="mfa_webauthn_authenticate">
-            {% lucide "usb" size=16 %} {% trans "Use a security key" %}
+            {% lucide "user-key" size=16 %} {% trans "Use a security key" %}
         </button>
 
         <form id="webauthn_form" method="post" action="{% url 'mfa_authenticate' %}">

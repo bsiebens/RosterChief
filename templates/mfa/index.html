@@ -41,7 +41,7 @@
                         {% translate "Deactivate" %}
                     {% endelement %}
                 {% else %}
-                    {% element button href=activate_url icon="smartphone" tags="panel" %}
+                    {% element button href=activate_url icon="qr-code" tags="panel" %}
                         {% translate "Activate" %}
                     {% endelement %}
                 {% endif %}
@@ -73,7 +73,7 @@
                     {% endelement %}
                 {% else %}
                     {% url 'mfa_add_webauthn' as webauthn_add_url %}
-                    {% element button href=webauthn_add_url icon="usb" %}
+                    {% element button href=webauthn_add_url icon="user-key" %}
                         {% translate "Add" %}
                     {% endelement %}
                 {% endif %}
@@ -90,7 +90,8 @@
                 {% slot body %}
                     {% if authenticators.recovery_codes %}
                         {% element p %}
-                            {% blocktranslate count unused_count=unused_count %}There is {{ unused_count }} out of {{ total_count }} recovery codes available.{% plural %}There are {{ unused_count }} out of {{ total_count }} recovery codes available.{% endblocktranslate %}
+                            {% blocktranslate count unused_count=unused_count %}There is {{ unused_count }} out of {{ total_count }} recovery codes available.{% plural %}There are {{ unused_count }} out of {{ total_count }} recovery codes available.
+                            {% endblocktranslate %}
                         {% endelement %}
                     {% else %}
                         {% element p %}
