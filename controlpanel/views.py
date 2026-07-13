@@ -17,7 +17,7 @@ from .services.platform_admins import (
     revoke_platform_access,
     set_platform_access,
 )
-from .services.statistics import club_statistics, clubs_with_totals, platform_totals
+from .services.statistics import club_statistics, clubs_with_totals, flag_adoption, onboarding_funnel, platform_attention, platform_charts, platform_totals
 
 Flag = get_waffle_flag_model()
 Switch = get_waffle_switch_model()
@@ -30,6 +30,10 @@ class DashboardView(PlatformStaffRequiredMixin, TemplateView):
         return super().get_context_data(
             nav="dashboard",
             totals=platform_totals(),
+            attention=platform_attention(),
+            funnel=onboarding_funnel(),
+            flags=flag_adoption(),
+            charts=platform_charts(),
             clubs=clubs_with_totals(Club.objects.active()),
             **kwargs,
         )

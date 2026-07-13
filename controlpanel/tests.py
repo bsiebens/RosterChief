@@ -1,3 +1,4 @@
+import datetime
 from decimal import Decimal
 
 from allauth.mfa.models import Authenticator
@@ -12,13 +13,14 @@ from django.utils import timezone
 from waffle import get_waffle_flag_model, get_waffle_switch_model
 
 from club.models import Club, ClubMembership, ClubRole, Season
+from events.models import Event
 from members.models import Member
 from shop.models import Order
 from teams.models import Position, Team, TeamMembership
 
 from .services.admins import grant_club_admin
 from .services.platform_admins import PlatformAdminError, is_last_superuser, set_platform_access
-from .services.statistics import club_statistics, clubs_with_totals, platform_totals
+from .services.statistics import admins_pending_mfa, club_statistics, clubs_with_totals, clubs_without_a_season, dormant_clubs, flag_adoption, onboarding_funnel, platform_attention, platform_charts, platform_totals
 from .templatetags.ui import as_alert, daisy, excluded, field_icon
 
 User = get_user_model()
@@ -553,3 +555,164 @@ class ExcludedFilterTests(TestCase):
 
     def test_nothing_is_excluded_without_a_list(self):
         self.assertFalse(excluded(self.field("remember"), None))
+
+
+class PlatformAttentionTests(TestCase):
+    """The numbers that are supposed to be zero."""
+
+    def setUp(self):
+        self.club = Club.objects.create(name="Ajax United")
+        self.today = timezone.localdate()
+
+    def season(self, club, start, end):
+        return Season.objects.create(club=club, start_date=start, end_date=end)
+
+    def test_a_club_with_no_season_covering_today_is_flagged(self):
+        self.assertIn(self.club, clubs_without_a_season())
+
+        self.season(self.club, self.today - datetime.timedelta(days=10), self.today + datetime.timedelta(days=10))
+
+        self.assertNotIn(self.club, clubs_without_a_season())
+
+    def test_a_past_season_does_not_count_as_a_current_one(self):
+        self.season(self.club, self.today - datetime.timedelta(days=400), self.today - datetime.timedelta(days=40))
+
+        self.assertIn(self.club, clubs_without_a_season())
+
+    def test_an_archived_club_is_not_chased(self):
+        self.club.archive()
+
+        self.assertNotIn(self.club, clubs_without_a_season())
+        self.assertNotIn(self.club, dormant_clubs())
+
+    def test_a_club_with_nothing_scheduled_is_dormant(self):
+        self.assertIn(self.club, dormant_clubs())
+
+        Event.objects.create(club=self.club, title="Training", start=timezone.now() + datetime.timedelta(days=3))
+
+        self.assertNotIn(self.club, dormant_clubs())
+
+    def test_an_event_beyond_the_horizon_does_not_wake_a_club(self):
+        Event.objects.create(club=self.club, title="Far off", start=timezone.now() + datetime.timedelta(days=90))
+
+        self.assertIn(self.club, dormant_clubs())
+
+    def test_a_past_event_does_not_wake_a_club(self):
+        Event.objects.create(club=self.club, title="Gone", start=timezone.now() - datetime.timedelta(days=3))
+
+        self.assertIn(self.club, dormant_clubs())
+
+
+class MfaPendingTests(TestCase):
+    def setUp(self):
+        self.club = Club.objects.create(name="Ajax United")
+
+    def test_staff_without_a_second_factor_are_pending(self):
+        user = User.objects.create_user(email="staff@example.com", password="pw-secret-123", is_staff=True)
+
+        self.assertIn(user, admins_pending_mfa())
+
+        enrol_mfa(user)
+
+        self.assertNotIn(user, admins_pending_mfa())
+
+    def test_a_club_admin_without_a_second_factor_is_pending(self):
+        # They are locked out until they enrol, so this is a support queue.
+        user = User.objects.create_user(email="admin@example.com", password="pw-secret-123")
+        member = Member.objects.create(first_name="Ada", last_name="Lovelace", user=user)
+        ClubRole.objects.create(club=self.club, member=member, role=ClubRole.Roles.ADMIN)
+
+        self.assertIn(user, admins_pending_mfa())
+
+    def test_an_ordinary_member_is_not_chased(self):
+        user = User.objects.create_user(email="member@example.com", password="pw-secret-123")
+        member = Member.objects.create(first_name="Bob", last_name="Bobson", user=user)
+        ClubRole.objects.create(club=self.club, member=member, role=ClubRole.Roles.MEMBER)
+
+        self.assertNotIn(user, admins_pending_mfa())
+
+    def test_each_pending_admin_is_counted_once(self):
+        # Two elevated roles in two clubs is still one person to chase.
+        other = Club.objects.create(name="Feyenoord")
+        user = User.objects.create_user(email="admin@example.com", password="pw-secret-123", is_staff=True)
+        member = Member.objects.create(first_name="Ada", last_name="Lovelace", user=user)
+        ClubRole.objects.create(club=self.club, member=member, role=ClubRole.Roles.ADMIN)
+        ClubRole.objects.create(club=other, member=member, role=ClubRole.Roles.EDITOR)
+
+        self.assertEqual(admins_pending_mfa().count(), 1)
+
+
+class OnboardingFunnelTests(TestCase):
+    def test_the_funnel_narrows_as_clubs_stall(self):
+        empty = Club.objects.create(name="Empty FC")  # noqa: F841 — a shell, counted only at step one
+        with_member = Club.objects.create(name="Members FC")
+        season = Season.objects.create(club=with_member, start_date=timezone.localdate(), end_date=timezone.localdate() + datetime.timedelta(days=30))
+        member = Member.objects.create(first_name="Ada", last_name="Lovelace")
+        ClubMembership.objects.create(club=with_member, season=season, member=member)
+
+        steps = {step["label"]: step["count"] for step in onboarding_funnel()}
+
+        self.assertEqual(steps["Clubs"], 2)
+        self.assertEqual(steps["With members"], 1)
+        self.assertEqual(steps["With a team"], 0)
+        self.assertEqual(steps["With events"], 0)
+
+
+class FlagAdoptionTests(TestCase):
+    def setUp(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
+        self.club = Club.objects.create(name="Ajax United")
+
+    def test_clubs_are_counted_per_flag(self):
+        flag = Flag.objects.create(name="shop")
+        flag.clubs.add(self.club)
+
+        self.assertEqual(flag_adoption(), [{"name": "shop", "clubs": 1, "everyone": None, "overridden": False}])
+
+    def test_an_everyone_flag_reports_itself_as_overridden(self):
+        # `everyone` beats club targeting, so the club count would be a lie.
+        Flag.objects.create(name="shop", everyone=True)
+
+        self.assertTrue(flag_adoption()[0]["overridden"])
+
+
+class PlatformChartTests(TestCase):
+    def setUp(self):
+        self.club = Club.objects.create(name="Ajax United")
+        self.season = Season.objects.create(club=self.club, start_date=timezone.localdate(), end_date=timezone.localdate() + datetime.timedelta(days=30))
+        self.member = Member.objects.create(first_name="Ada", last_name="Lovelace")
+
+    def test_the_series_is_dense(self):
+        # Zero-filled: a chart that skips empty months draws a smooth line over a month
+        # in which nothing happened.
+        series = platform_charts()["signups"]
+
+        self.assertEqual(len(series), 13)
+        self.assertTrue(all(point["value"] == 0 for point in series))
+
+    def test_signups_land_in_the_month_they_happened(self):
+        ClubMembership.objects.create(club=self.club, season=self.season, member=self.member, signed_up_at=timezone.localdate())
+
+        series = platform_charts()["signups"]
+
+        self.assertEqual(series[-1]["value"], 1)
+
+    def test_only_paid_orders_count_as_revenue(self):
+        Order.objects.create(club=self.club, purchaser=self.member, total=Decimal("50.00"), status=Order.OrderStatus.PAID)
+        Order.objects.create(club=self.club, purchaser=self.member, total=Decimal("30.00"), status=Order.OrderStatus.PENDING)
+
+        self.assertEqual(platform_charts()["revenue"][-1]["value"], 50.0)
+        self.assertEqual(platform_attention()["outstanding"], Decimal("30.00"))
+
+
+class DashboardMetricsTests(ControlPanelTestBase):
+    def test_the_dashboard_renders_its_metrics_and_charts(self):
+        response = self.client.get(reverse("controlpanel:dashboard"))
+
+        self.assertContains(response, "No current season")
+        self.assertContains(response, "MFA pending")
+        self.assertContains(response, 'id="signups-chart"')
+        self.assertContains(response, 'id="revenue-chart"')
+        self.assertContains(response, "js/chart.js")
+        self.assertIn("signups", response.context["charts"])

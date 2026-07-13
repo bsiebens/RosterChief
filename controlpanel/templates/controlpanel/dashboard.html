@@ -1,5 +1,5 @@
 {% extends "controlpanel/base.html" %}
-{% load lucide %}
+{% load static lucide %}
 
 {% block heading %}RosterChief Platform Dashboard{% endblock heading %}
 {% block subheading %}Welcome back {{ user.member.first_name }}!{% endblock subheading %}
@@ -9,6 +9,118 @@
 {% endblock actions %}
 
 {% block panel %}
+    {% comment %}
+        Needs attention first: these are the numbers that are supposed to be zero. A club with
+        no current season cannot take a signup or schedule a match — and it fails silently,
+        nothing errors — while an admin without a second factor is locked out of their own
+        club. Both are work queues, not statistics. The vanity totals sit further down.
+    {% endcomment %}
+    <div class="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div class="card bg-base-100 shadow {% if attention.clubs_without_season %}border-l-4 border-warning{% endif %}">
+            <div class="card-body p-4">
+                <div class="flex items-center gap-2 text-sm opacity-70">{% lucide "calendar-x" size=16 %} No current season</div>
+                <div class="text-3xl font-bold tabular-nums">{{ attention.clubs_without_season }}</div>
+                <div class="text-xs opacity-60">Clubs that cannot take signups</div>
+            </div>
+        </div>
+        <div class="card bg-base-100 shadow {% if attention.dormant_clubs %}border-l-4 border-warning{% endif %}">
+            <div class="card-body p-4">
+                <div class="flex items-center gap-2 text-sm opacity-70">{% lucide "moon-star" size=16 %} Dormant</div>
+                <div class="text-3xl font-bold tabular-nums">{{ attention.dormant_clubs }}</div>
+                <div class="text-xs opacity-60">Nothing scheduled in 30 days</div>
+            </div>
+        </div>
+        <div class="card bg-base-100 shadow {% if attention.admins_pending_mfa %}border-l-4 border-error{% endif %}">
+            <div class="card-body p-4">
+                <div class="flex items-center gap-2 text-sm opacity-70">{% lucide "shield-alert" size=16 %} MFA pending</div>
+                <div class="text-3xl font-bold tabular-nums">{{ attention.admins_pending_mfa }}</div>
+                <div class="text-xs opacity-60">Admins locked out until they enrol</div>
+            </div>
+        </div>
+        <div class="card bg-base-100 shadow {% if attention.outstanding %}border-l-4 border-error{% endif %}">
+            <div class="card-body p-4">
+                <div class="flex items-center gap-2 text-sm opacity-70">{% lucide "banknote" size=16 %} Outstanding</div>
+                <div class="text-3xl font-bold tabular-nums">€{{ attention.outstanding }}</div>
+                <div class="text-xs opacity-60">Unpaid across every club</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="mb-6 grid gap-4 lg:grid-cols-2">
+        <div class="card bg-base-100 shadow">
+            <div class="card-body">
+                <h2 class="card-title text-base">{% lucide "user-plus" size=18 %} Signups per month</h2>
+                {# The wrapper's height is what bounds the canvas: with maintainAspectRatio off,
+                   Chart.js sizes to its parent, and a parent with no height grows without end. #}
+                <div class="h-56">
+                    <canvas id="signups-chart"></canvas>
+                </div>
+            </div>
+        </div>
+        <div class="card bg-base-100 shadow">
+            <div class="card-body">
+                <h2 class="card-title text-base">{% lucide "euro" size=18 %} Revenue per month</h2>
+                <div class="h-56">
+                    <canvas id="revenue-chart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="mb-6 grid gap-4 lg:grid-cols-2">
+        <div class="card bg-base-100 shadow">
+            <div class="card-body">
+                <h2 class="card-title text-base">{% lucide "milestone" size=18 %} Onboarding</h2>
+                <p class="text-sm opacity-70">Where clubs stall. One with no team or no events is a shell.</p>
+                <div class="mt-2 space-y-3">
+                    {% for step in funnel %}
+                        <div>
+                            <div class="mb-1 flex items-center justify-between text-sm">
+                                <span class="flex items-center gap-2">{% lucide step.icon size=14 %} {{ step.label }}</span>
+                                <span class="font-semibold tabular-nums">{{ step.count }}</span>
+                            </div>
+                            <progress class="progress progress-primary w-full" value="{{ step.count }}" max="{{ funnel.0.count }}"></progress>
+                        </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+
+        <div class="card bg-base-100 shadow">
+            <div class="card-body">
+                <div class="flex items-center justify-between">
+                    <h2 class="card-title text-base">{% lucide "toggle-right" size=18 %} Feature adoption</h2>
+                    <a class="btn btn-ghost btn-xs" href="{% url 'controlpanel:features' %}">Manage</a>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="table table-sm">
+                        <tbody>
+                            {% for flag in flags %}
+                                <tr>
+                                    <td class="font-mono font-medium">{{ flag.name }}</td>
+                                    <td class="text-right">
+                                        {% if flag.overridden %}
+                                            {# `everyone` overrides club targeting, so the club count says nothing here. #}
+                                            <span class="badge badge-sm {% if flag.everyone %}badge-success{% else %}badge-error{% endif %}">
+                                                {% if flag.everyone %}On for all{% else %}Off everywhere{% endif %}
+                                            </span>
+                                        {% else %}
+                                            <span class="tabular-nums">{{ flag.clubs }} / {{ totals.clubs }} clubs</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                            {% empty %}
+                                <tr>
+                                    <td class="text-center opacity-60">No features yet.</td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div class="stats mb-6 w-full bg-base-100 shadow">
         <div class="stat">
             <div class="stat-title">Active clubs</div>
@@ -21,12 +133,14 @@
         <div class="stat">
             <div class="stat-title">Members</div>
             <div class="stat-value">{{ totals.members }}</div>
+            <div class="stat-desc">{{ attention.members_without_login }} without a login</div>
         </div>
         <div class="stat">
             <div class="stat-title">Club admins</div>
             <div class="stat-value">{{ totals.admins }}</div>
         </div>
     </div>
+
     <div class="card bg-base-100 shadow">
         <div class="card-body">
             <h2 class="card-title">Clubs</h2>
@@ -64,3 +178,56 @@
         </div>
     </div>
 {% endblock panel %}
+
+{% block extra_body %}
+    {{ charts|json_script:"chart-data" }}
+    <script src="{% static 'js/chart.js' %}"></script>
+    <script>
+        (() => {
+            const data = JSON.parse(document.getElementById("chart-data").textContent);
+
+            // Chart.js paints to a canvas, so it cannot inherit daisyUI's colours the way the
+            // rest of the page does — they are CSS variables. Read the computed values, and
+            // rebuild when the theme attribute changes, or the charts keep the light palette
+            // after a switch to dark.
+            const css = (name, fallback) => getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+
+            const render = () => {
+                const ink = css("--color-base-content", "#333");
+                const grid = "color-mix(in oklab, " + ink + " 15%, transparent)";
+
+                const build = (id, label, series, colour, type) =>
+                    new Chart(document.getElementById(id), {
+                        type,
+                        data: {
+                            labels: series.map((point) => point.month),
+                            datasets: [{ label, data: series.map((point) => point.value), borderColor: colour, backgroundColor: colour, tension: 0.3 }],
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: { legend: { display: false } },
+                            scales: {
+                                x: { ticks: { color: ink }, grid: { color: grid } },
+                                y: { beginAtZero: true, ticks: { color: ink, precision: 0 }, grid: { color: grid } },
+                            },
+                        },
+                    });
+
+                return [
+                    build("signups-chart", "Signups", data.signups, css("--color-primary", "#4f46e5"), "bar"),
+                    build("revenue-chart", "Revenue", data.revenue, css("--color-accent", "#0ea5e9"), "line"),
+                ];
+            };
+
+            let charts = render();
+
+            // The theme toggle sets data-theme on <html>; "auto" removes it entirely, so watch
+            // the attribute rather than listening for a click.
+            new MutationObserver(() => {
+                charts.forEach((chart) => chart.destroy());
+                charts = render();
+            }).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+        })();
+    </script>
+{% endblock extra_body %}
