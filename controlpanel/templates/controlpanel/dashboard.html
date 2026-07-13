@@ -196,7 +196,13 @@
                 const ink = css("--color-base-content", "#333");
                 const grid = "color-mix(in oklab, " + ink + " 15%, transparent)";
 
-                const build = (id, label, series, colour, type) =>
+                // Locale-aware, so 1234.5 reads as "€ 1.234,50" rather than "€1,234.5". Two of
+                // them: the axis is rounded to keep the labels short, but the tooltip keeps the
+                // cents — rounding a euro amount someone is reading off a chart is a lie.
+                const axisEuros = new Intl.NumberFormat("nl-BE", { style: "currency", currency: "EUR", maximumFractionDigits: 0 });
+                const exactEuros = new Intl.NumberFormat("nl-BE", { style: "currency", currency: "EUR", minimumFractionDigits: 2 });
+
+                const build = (id, label, series, colour, type, money) =>
                     new Chart(document.getElementById(id), {
                         type,
                         data: {
@@ -206,17 +212,26 @@
                         options: {
                             responsive: true,
                             maintainAspectRatio: false,
-                            plugins: { legend: { display: false } },
+                            plugins: {
+                                legend: { display: false },
+                                // The tooltip carries the unit too: an axis in euros and a bare
+                                // number on hover reads as two different quantities.
+                                tooltip: money ? { callbacks: { label: (item) => exactEuros.format(item.parsed.y) } } : {},
+                            },
                             scales: {
                                 x: { ticks: { color: ink }, grid: { color: grid } },
-                                y: { beginAtZero: true, ticks: { color: ink, precision: 0 }, grid: { color: grid } },
+                                y: {
+                                    beginAtZero: true,
+                                    grid: { color: grid },
+                                    ticks: { color: ink, precision: 0, callback: money ? (value) => axisEuros.format(value) : undefined },
+                                },
                             },
                         },
                     });
 
                 return [
-                    build("signups-chart", "Signups", data.signups, css("--color-primary", "#4f46e5"), "bar"),
-                    build("revenue-chart", "Revenue", data.revenue, css("--color-accent", "#0ea5e9"), "line"),
+                    build("signups-chart", "Signups", data.signups, css("--color-primary", "#4f46e5"), "bar", false),
+                    build("revenue-chart", "Revenue", data.revenue, css("--color-accent", "#0ea5e9"), "line", true),
                 ];
             };
 
