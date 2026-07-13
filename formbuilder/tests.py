@@ -1,6 +1,7 @@
 from datetime import timedelta
 
 from django import forms
+from django.core.exceptions import ValidationError
 from django.db import IntegrityError
 from django.db.models import ProtectedError
 from django.test import TestCase
@@ -329,3 +330,20 @@ class FormReportTests(FormbuilderTestBase):
 
         self.assertEqual(report.count, 0)
         self.assertEqual(report.rows, [])
+
+
+class AnswerCleanTests(FormbuilderTestBase):
+    def test_rejects_field_from_another_form(self):
+        other_form = Form.objects.create(club=self.club, title="Other", slug="other")
+        other_field = Field.objects.create(form=other_form, key="x", label="X", order=1)
+        submission = Submission.objects.create(form=self.form, member=self.member)
+        answer = Answer(submission=submission, field=other_field, value="v")
+
+        with self.assertRaises(ValidationError) as ctx:
+            answer.full_clean()
+        self.assertIn("field", ctx.exception.error_dict)
+
+    def test_accepts_field_from_the_submissions_form(self):
+        submission = Submission.objects.create(form=self.form, member=self.member)
+
+        Answer(submission=submission, field=self.name, value="v").full_clean()

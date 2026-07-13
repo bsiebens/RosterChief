@@ -1,3 +1,4 @@
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import UniqueConstraint
 from django.utils.translation import gettext_lazy as _
@@ -100,3 +101,7 @@ class Answer(UUIDModel):
 
     def __str__(self):
         return f"{self.submission} - {self.field}"
+
+    def clean(self):
+        if self.field_id and self.submission_id and self.field.form_id != self.submission.form_id:
+            raise ValidationError({"field": _("Must belong to the same form as the submission.")})
