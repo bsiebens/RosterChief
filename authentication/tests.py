@@ -1,8 +1,10 @@
+import re
 import uuid
 from urllib.parse import parse_qs, urlparse
 
 from allauth.core import context
 from allauth.mfa.models import Authenticator
+from allauth.mfa.recovery_codes.internal.auth import RecoveryCodes
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import AnonymousUser
 from django.db import IntegrityError
@@ -388,3 +390,81 @@ class SignOutPageTests(TestCase):
         self.client.post(reverse("account_logout"))
 
         self.assertIsNone(self.client.session.get("_auth_user_id"))
+
+
+class ChangePasswordPageTests(TestCase):
+    def setUp(self):
+        User.objects.create_user(email="mfa@example.com", password="pw-secret-123")
+        self.client.post(reverse("account_login"), {"login": "mfa@example.com", "password": "pw-secret-123"}, follow=True)
+        self.response = self.client.get(reverse("account_change_password"))
+
+    def test_the_fields_have_no_visible_labels(self):
+        # allauth gives each a placeholder, so the label would only repeat it.
+        self.assertNotContains(self.response, '<span class="label-text">Current Password</span>')
+        self.assertContains(self.response, 'name="oldpassword"')
+        self.assertContains(self.response, 'name="password1"')
+
+    def test_the_new_password_keeps_its_help_text(self):
+        self.assertContains(self.response, "id_password1_helptext")
+
+    def test_the_current_password_is_set_apart_from_the_new_one(self):
+        self.assertContains(self.response, "mt-10")
+
+    def test_forgot_password_is_an_accent_button_and_both_actions_have_icons(self):
+        html = self.response.content.decode()
+        forgot = html[html.index('class="btn btn-accent gap-2"') :]
+        submit = html[html.index('class="btn btn-primary gap-2"') :]
+
+        self.assertIn("<svg", forgot[: forgot.index("</a>")])
+        self.assertIn("<svg", submit[: submit.index("</button>")])
+
+
+class MfaButtonIconTests(TestCase):
+    """Every button on the MFA screens carries an icon, and the recovery-code actions are
+    ranked: View is primary, Download and Generate are outline. Generate throws away the
+    codes you already have, so it must not read as the obvious thing to click."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(email="mfa@example.com", password="pw-secret-123")
+        # Sign in *before* enrolling: a user who already holds a second factor is stopped at
+        # the 2FA challenge and never reaches these pages.
+        self.client.post(reverse("account_login"), {"login": "mfa@example.com", "password": "pw-secret-123"}, follow=True)
+        enrol_mfa(self.user)
+        RecoveryCodes.activate(self.user).instance.save()
+
+    def buttons(self, url):
+        """Every <a class="btn"> / <button class="btn"> in the page body, minus the navbar."""
+        html = self.client.get(url, follow=True).content.decode()
+        body = html[html.index("<main") :]
+        return re.findall(r'<(?:a|button)[^>]*class="btn[^"]*"[^>]*>(.*?)</(?:a|button)>', body, re.S)
+
+    def test_every_button_on_the_manage_page_has_an_icon(self):
+        found = self.buttons(reverse("mfa_index"))
+
+        self.assertTrue(found)
+        for button in found:
+            self.assertIn("<svg", button)
+
+    def test_download_and_generate_are_outline_buttons(self):
+        html = self.client.get(reverse("mfa_index"), follow=True).content.decode()
+
+        self.assertEqual(html.count("btn-outline"), 2)  # Download + Generate, not View
+
+    def test_the_panel_actions_are_spaced_off_the_body_text(self):
+        self.assertContains(self.client.get(reverse("mfa_index"), follow=True), "card-actions mt-4")
+
+    def test_every_button_on_the_deactivate_page_has_an_icon(self):
+        for button in self.buttons(reverse("mfa_deactivate_totp")):
+            self.assertIn("<svg", button)
+
+    def test_every_button_on_the_add_security_key_page_has_an_icon(self):
+        for button in self.buttons(reverse("mfa_add_webauthn")):
+            self.assertIn("<svg", button)
+
+    def test_the_activate_page_gives_the_code_box_no_visible_label(self):
+        Authenticator.objects.filter(user=self.user, type=Authenticator.Type.TOTP).delete()
+
+        response = self.client.get(reverse("mfa_activate_totp"), follow=True)
+
+        self.assertContains(response, "otp otp-lg")
+        self.assertNotContains(response, '<span class="label-text">Code</span>')

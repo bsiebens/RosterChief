@@ -35,7 +35,9 @@
                 <span class="label-text">{{ field.label }}</span>
             </label>
         {% else %}
-            {% if not attrs.unlabeled %}
+            {# An otp box never takes a visible label — the boxes say what they are, and a
+               heading above them just crowds the field. It keeps an sr-only one below. #}
+            {% if not attrs.unlabeled and not field|is_otp %}
                 <label class="label" for="{{ field.id_for_label }}">
                     <span class="label-text">{{ field.label }}</span>
                 </label>
@@ -53,7 +55,7 @@
                         For the same reason the sr-only label lives outside the container: another
                         child would throw the count off again.
                     {% endcomment %}
-                    {% if attrs.unlabeled %}<label class="sr-only" for="{{ field.id_for_label }}">{{ field.label }}</label>{% endif %}
+                    <label class="sr-only" for="{{ field.id_for_label }}">{{ field.label }}</label>
                     <div class="flex justify-center">
                         <div class="otp otp-lg" data-otp>
                             <span></span>

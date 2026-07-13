@@ -48,7 +48,7 @@
             {% if user.is_authenticated %}
                 <div class="dropdown dropdown-end">
                     <div tabindex="0" role="button" class="btn btn-ghost gap-4">{% lucide "circle-user" %}{{ user.get_full_name }}</div>
-                    <ul tabindex="0" class="menu dropdown-content z-10 mt-2 w-60 rounded-box bg-base-100 p-2 shadow">
+                    <ul tabindex="0" class="menu dropdown-content z-10 mt-2 w-60 rounded-box bg-base-100 p-2 shadow border border-base-content/20">
                         <li>
                             <a href="{% url 'mfa_index' %}">{% lucide "shield-check" size=16 %} Two-factor authentication</a>
                         </li>
