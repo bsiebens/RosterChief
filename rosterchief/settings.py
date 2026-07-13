@@ -61,6 +61,8 @@ INSTALLED_APPS = [
     "events.apps.EventsConfig",
     "formbuilder.apps.FormbuilderConfig",
     "shop.apps.ShopConfig",
+    # Platform billing: RosterChief charging the clubs. Not tenant data — see billing/models.py.
+    "billing.apps.BillingConfig",
     "waffle",
     "features.apps.FeaturesConfig",
     "controlpanel.apps.ControlpanelConfig",

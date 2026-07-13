@@ -1,0 +1,337 @@
+import datetime
+import sys
+from decimal import Decimal
+from io import StringIO
+from unittest import mock
+
+from django.core.management import call_command
+from django.test import TestCase
+from django.utils import timezone
+
+from club.models import Club
+
+from .models import GRACE_DAYS, Due, Invoice, Subscription, Tier, TierPrice, add_one_year
+from .services import BillingError
+from .services.dues import archivable_clubs, dues_in_grace, dues_overdue, next_period_start, open_period, reactivate, record_payment, remove_payment, subscribe, waive
+from .services.invoices import invoice_pdf, issue_invoice, render_pdf
+
+
+class BillingTestBase(TestCase):
+    def setUp(self):
+        self.today = timezone.localdate()
+        self.club = Club.objects.create(name="Ajax United")
+        self.tier = Tier.objects.create(name="Standard")
+        # Priced well back, so a backdated (lapsed) period still has a price in force —
+        # opening one before any price existed is refused, and rightly so.
+        TierPrice.objects.create(tier=self.tier, active_from=self.today - datetime.timedelta(days=1200), amount=Decimal("500.00"))
+
+    def bill(self, start=None, club=None):
+        return open_period(club or self.club, start=start, tier=self.tier)
+
+
+class TierPriceTests(BillingTestBase):
+    def test_the_price_in_force_is_the_latest_one_that_has_started(self):
+        TierPrice.objects.create(tier=self.tier, active_from=self.today, amount=Decimal("600.00"))
+
+        self.assertEqual(self.tier.price_on(self.today - datetime.timedelta(days=1)), Decimal("500.00"))
+        self.assertEqual(self.tier.price_on(self.today), Decimal("600.00"))
+
+    def test_a_future_price_does_not_apply_yet(self):
+        TierPrice.objects.create(tier=self.tier, active_from=self.today + datetime.timedelta(days=30), amount=Decimal("600.00"))
+
+        self.assertEqual(self.tier.price_on(self.today), Decimal("500.00"))
+
+    def test_a_tier_with_no_price_yet_cannot_be_billed(self):
+        # None must never be read as free.
+        empty = Tier.objects.create(name="Enterprise")
+
+        self.assertIsNone(empty.price_on(self.today))
+
+        with self.assertRaises(BillingError):
+            open_period(self.club, tier=empty)
+
+
+class PeriodTests(BillingTestBase):
+    def test_a_period_runs_a_rolling_year_with_a_grace_tail(self):
+        due = self.bill(start=datetime.date(2026, 3, 1))
+
+        self.assertEqual(due.period_end, datetime.date(2027, 2, 28))
+        self.assertEqual(due.grace_until, due.period_end + datetime.timedelta(days=GRACE_DAYS))
+
+    def test_a_leap_day_period_does_not_explode(self):
+        # 29 February has no counterpart in a common year.
+        self.assertEqual(add_one_year(datetime.date(2028, 2, 29)), datetime.date(2029, 2, 28))
+
+    def test_the_next_period_continues_from_the_last_one(self):
+        # Not from today: a club that pays two months late has still used those two months,
+        # and restarting the clock at the payment date would quietly gift them away.
+        first = self.bill(start=self.today - datetime.timedelta(days=400))
+
+        self.assertEqual(next_period_start(self.club), first.period_end + datetime.timedelta(days=1))
+
+    def test_a_first_period_starts_today(self):
+        self.assertEqual(next_period_start(self.club), self.today)
+
+    def test_the_amount_is_snapshotted_at_the_price_of_the_day(self):
+        due = self.bill()
+        TierPrice.objects.create(tier=self.tier, active_from=self.today + datetime.timedelta(days=1), amount=Decimal("900.00"))
+        due.refresh_from_db()
+
+        # Raising the rate must not rewrite what was already billed.
+        self.assertEqual(due.amount, Decimal("500.00"))
+
+    def test_a_club_cannot_be_billed_twice_for_one_period(self):
+        self.bill(start=self.today)
+
+        with self.assertRaises(BillingError):
+            self.bill(start=self.today)
+
+    def test_a_club_with_no_tier_cannot_be_billed(self):
+        with self.assertRaises(BillingError):
+            open_period(Club.objects.create(name="Feyenoord"))
+
+    def test_subscribing_puts_a_club_on_a_tier_and_opens_a_period(self):
+        club = Club.objects.create(name="Feyenoord")
+
+        subscribe(club, self.tier)
+
+        self.assertEqual(Subscription.objects.get(club=club).tier, self.tier)
+        self.assertEqual(club.dues.count(), 1)
+
+
+class PaymentTests(BillingTestBase):
+    def setUp(self):
+        super().setUp()
+        self.due = self.bill()
+
+    def test_a_part_payment_leaves_the_due_partially_paid(self):
+        record_payment(self.due, Decimal("200.00"))
+        self.due.refresh_from_db()
+
+        self.assertEqual(self.due.status, Due.Status.PARTIAL)
+        self.assertEqual(self.due.balance, Decimal("300.00"))
+        self.assertIsNone(self.due.paid_at)
+
+    def test_payments_accumulate_until_the_due_is_settled(self):
+        record_payment(self.due, Decimal("200.00"))
+        record_payment(self.due, Decimal("300.00"))
+        self.due.refresh_from_db()
+
+        self.assertEqual(self.due.status, Due.Status.PAID)
+        self.assertEqual(self.due.balance, Decimal("0.00"))
+        self.assertIsNotNone(self.due.paid_at)
+
+    def test_an_overpayment_still_settles_the_due(self):
+        record_payment(self.due, Decimal("600.00"))
+        self.due.refresh_from_db()
+
+        self.assertEqual(self.due.status, Due.Status.PAID)
+
+    def test_removing_a_payment_re_derives_the_due(self):
+        # amount_paid is summed from the payments, never incremented: an increment drifts the
+        # moment one is deleted, and the drift still looks like money.
+        first = record_payment(self.due, Decimal("200.00"))
+        record_payment(self.due, Decimal("300.00"))
+
+        remove_payment(first)
+        self.due.refresh_from_db()
+
+        self.assertEqual(self.due.amount_paid, Decimal("300.00"))
+        self.assertEqual(self.due.status, Due.Status.PARTIAL)
+
+    def test_removing_the_only_payment_puts_the_due_back_to_unpaid(self):
+        payment = record_payment(self.due, Decimal("500.00"))
+
+        remove_payment(payment)
+        self.due.refresh_from_db()
+
+        self.assertEqual(self.due.status, Due.Status.UNPAID)
+        self.assertEqual(self.due.amount_paid, Decimal("0.00"))
+        self.assertIsNone(self.due.paid_at)
+
+    def test_a_zero_payment_is_refused(self):
+        with self.assertRaises(BillingError):
+            record_payment(self.due, Decimal("0.00"))
+
+    def test_a_waived_period_cannot_take_a_payment(self):
+        waive(self.due)
+
+        with self.assertRaises(BillingError):
+            record_payment(self.due, Decimal("100.00"))
+
+    def test_a_period_with_payments_cannot_be_waived(self):
+        record_payment(self.due, Decimal("100.00"))
+
+        with self.assertRaises(BillingError):
+            waive(self.due)
+
+    def test_a_waived_period_owes_nothing_and_never_archives_a_club(self):
+        waive(self.due)
+        self.due.refresh_from_db()
+
+        self.assertFalse(self.due.is_owing)
+        self.assertFalse(self.due.is_overdue(self.due.grace_until + datetime.timedelta(days=1)))
+
+
+class GraceAndArchiveTests(BillingTestBase):
+    LAPSED = 365 + GRACE_DAYS + 10
+
+    def test_a_period_past_its_end_but_inside_grace_is_in_grace(self):
+        due = self.bill(start=self.today - datetime.timedelta(days=370))
+
+        self.assertTrue(due.is_in_grace(self.today))
+        self.assertFalse(due.is_overdue(self.today))
+        self.assertIn(due, dues_in_grace(self.today))
+
+    def test_a_period_past_grace_is_overdue(self):
+        due = self.bill(start=self.today - datetime.timedelta(days=self.LAPSED))
+
+        self.assertTrue(due.is_overdue(self.today))
+        self.assertFalse(due.is_in_grace(self.today))
+        self.assertIn(due, dues_overdue(self.today))
+
+    def test_a_paid_period_is_never_overdue(self):
+        due = self.bill(start=self.today - datetime.timedelta(days=self.LAPSED))
+        record_payment(due, Decimal("500.00"))
+        due.refresh_from_db()
+
+        self.assertFalse(due.is_overdue(self.today))
+        self.assertNotIn(due, dues_overdue(self.today))
+
+    def test_an_overdue_club_is_archivable(self):
+        subscribe(self.club, self.tier, start=self.today - datetime.timedelta(days=self.LAPSED))
+
+        self.assertEqual(archivable_clubs(self.today).count(), 1)
+
+    def test_a_club_that_opted_out_is_never_archived(self):
+        # auto_archive off is how you stop a club you are negotiating with from being
+        # switched off overnight.
+        subscribe(self.club, self.tier, start=self.today - datetime.timedelta(days=self.LAPSED), auto_archive=False)
+
+        self.assertEqual(archivable_clubs(self.today).count(), 0)
+
+    def test_an_already_archived_club_is_not_archived_again(self):
+        subscribe(self.club, self.tier, start=self.today - datetime.timedelta(days=self.LAPSED))
+        self.club.archive()
+
+        self.assertEqual(archivable_clubs(self.today).count(), 0)
+
+
+class ArchiveCommandTests(BillingTestBase):
+    def setUp(self):
+        super().setUp()
+        subscribe(self.club, self.tier, start=self.today - datetime.timedelta(days=365 + GRACE_DAYS + 10))
+
+    def run_command(self, *args):
+        out = StringIO()
+        call_command("archive_overdue_clubs", *args, stdout=out)
+        return out.getvalue()
+
+    def test_it_reports_without_archiving_by_default(self):
+        # The asymmetry is the point: this switches off paying customers, so a cron
+        # misconfiguration or a clock skew must cost an email, not a morning of angry clubs.
+        output = self.run_command()
+
+        self.club.refresh_from_db()
+        self.assertFalse(self.club.is_archived)
+        self.assertIn("Dry run", output)
+        self.assertIn("Ajax United", output)
+
+    def test_it_archives_with_commit(self):
+        self.run_command("--commit")
+
+        self.club.refresh_from_db()
+        self.assertTrue(self.club.is_archived)
+
+    def test_it_says_so_when_nothing_is_overdue(self):
+        record_payment(self.club.dues.first(), Decimal("500.00"))
+
+        self.assertIn("Nothing overdue", self.run_command())
+
+
+class ReactivationTests(BillingTestBase):
+    def setUp(self):
+        super().setUp()
+        # Through subscribe(), not open_period(): reactivating reads the club's tier off its
+        # subscription, and a club billed without one cannot be re-billed later.
+        subscribe(self.club, self.tier, start=self.today - datetime.timedelta(days=400))
+        self.first = self.club.dues.first()
+        self.club.archive()
+
+    def test_reactivating_continues_from_the_lapsed_period_by_default(self):
+        due = reactivate(self.club)
+
+        self.club.refresh_from_db()
+        self.assertFalse(self.club.is_archived)
+        self.assertEqual(due.period_start, self.first.period_end + datetime.timedelta(days=1))
+
+    def test_a_chosen_start_forgives_the_gap(self):
+        due = reactivate(self.club, start=self.today)
+
+        self.assertEqual(due.period_start, self.today)
+
+
+class InvoiceTests(BillingTestBase):
+    def test_every_period_is_invoiced_when_it_opens(self):
+        due = self.bill()
+
+        self.assertTrue(Invoice.objects.filter(due=due).exists())
+
+    def test_numbers_run_in_one_platform_wide_series(self):
+        # Unlike the shop's per-club order numbers: these are OUR invoices, and one sequence
+        # covers every club we bill.
+        first = self.bill(start=self.today).invoice
+        second = open_period(Club.objects.create(name="Feyenoord"), tier=self.tier).invoice
+
+        year = timezone.now().year
+        self.assertEqual(first.number, f"INV-{year}-00001")
+        self.assertEqual(second.number, f"INV-{year}-00002")
+
+    def test_re_issuing_does_not_burn_a_number(self):
+        # A gap in an invoice series is a question you do not want to have to answer.
+        due = self.bill()
+
+        self.assertEqual(issue_invoice(due), due.invoice)
+        self.assertEqual(Invoice.objects.count(), 1)
+
+    def test_the_invoice_renders_the_frozen_snapshot(self):
+        due = self.bill()
+        record_payment(due, Decimal("200.00"), reference="TRX-9")
+        due.refresh_from_db()
+
+        with mock.patch("billing.services.invoices.render_pdf", return_value=b"%PDF-fake") as renderer:
+            invoice_pdf(due.invoice)
+
+        html = renderer.call_args.args[0]
+        self.assertIn("INV-", html)
+        self.assertIn("Ajax United", html)
+        self.assertIn("500.00", html)  # billed
+        self.assertIn("200.00", html)  # paid
+        self.assertIn("300.00", html)  # balance
+
+    def test_the_pdf_library_is_only_needed_when_a_pdf_is_asked_for(self):
+        # WeasyPrint binds to native pango/cairo. The app, the tests and every other page must
+        # run without them; only this call may fail.
+        with mock.patch.dict(sys.modules, {"weasyprint": mock.MagicMock()}):
+            sys.modules["weasyprint"].HTML.return_value.write_pdf.return_value = b"%PDF-1.7"
+
+            self.assertEqual(render_pdf("<p>hi</p>"), b"%PDF-1.7")
+
+    def test_a_missing_pdf_library_says_what_is_missing(self):
+        with mock.patch.dict(sys.modules, {"weasyprint": None}), self.assertRaises(BillingError) as caught:
+            render_pdf("<p>hi</p>")
+
+        self.assertIn("pango", str(caught.exception))
+
+
+class ModelStringTests(BillingTestBase):
+    def test_models_describe_themselves(self):
+        due = self.bill()
+        payment = record_payment(due, Decimal("10.00"))
+
+        self.assertEqual(str(self.tier), "Standard")
+        self.assertIn("500.00", str(self.tier.prices.first()))
+        self.assertIn("Ajax United", str(due))
+        self.assertIn("10.00", str(payment))
+        self.assertIn("INV-", str(due.invoice))
+        self.assertIn("Standard", str(subscribe(Club.objects.create(name="PSV"), self.tier)))
