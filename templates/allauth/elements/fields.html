@@ -43,20 +43,26 @@
             {% with icon=field|field_icon %}
                 {% if field|is_otp %}
                     {% comment %}
-                        daisyUI's otp is one input overlaid on the boxes, and it sizes itself from
-                        its `span` children — so the sr-only label goes OUTSIDE the container, or it
-                        would count as a seventh box and throw the width off.
+                        daisyUI's otp is one input overlaid on the boxes. Child order is load-bearing:
+                        it places each box with `nth-child`, which counts *every* child, not just the
+                        spans — so the input must come LAST. Put it first and all six boxes shift one
+                        stride right, the container matches :has(>span:nth-child(7)) and grows to
+                        seven strides, and the ::after active-box marker (invisible until focus) shows
+                        up in the gap as a phantom seventh box.
+
+                        For the same reason the sr-only label lives outside the container: another
+                        child would throw the count off again.
                     {% endcomment %}
                     {% if attrs.unlabeled %}<label class="sr-only" for="{{ field.id_for_label }}">{{ field.label }}</label>{% endif %}
                     <div class="flex justify-center">
                         <div class="otp otp-lg" data-otp>
+                            <span></span>
+                            <span></span>
+                            <span></span>
+                            <span></span>
+                            <span></span>
+                            <span></span>
                             {{ field|as_otp }}
-                            <span></span>
-                            <span></span>
-                            <span></span>
-                            <span></span>
-                            <span></span>
-                            <span></span>
                         </div>
                     </div>
                 {% elif icon %}

@@ -265,6 +265,15 @@ class TwoFactorPageTests(TestCase):
         self.assertContains(self.response, 'name="code"')
         self.assertContains(self.response, "otp otp-lg")
 
+    def test_the_input_comes_after_the_boxes(self):
+        # daisyUI places each box with nth-child, which counts every child. With the input
+        # first, all six boxes shift a stride right, the container grows to seven strides
+        # and the ::after focus marker appears as a phantom seventh box.
+        html = self.response.content.decode()
+        otp = html[html.index('class="otp otp-lg"') : html.index('name="code"')]
+
+        self.assertEqual(otp.count("<span></span>"), 6)
+
     def test_the_otp_field_has_no_placeholder(self):
         # allauth sets placeholder="Code"; inside the boxes it reads as a typed-in code.
         self.assertNotContains(self.response, 'placeholder="Code"')
