@@ -1,6 +1,7 @@
 from datetime import timedelta
 from io import StringIO
 
+from django.core.exceptions import ValidationError
 from django.core.management import call_command
 from django.db import IntegrityError
 from django.test import TestCase
@@ -353,3 +354,50 @@ class ExtendSeriesCommandTests(RecurrenceTestBase):
 
         self.assertEqual(series.occurrences.count(), 4)
         self.assertIn("Done.", out.getvalue())
+
+
+class EventClubScopeTests(EventsTestBase):
+    def setUp(self):
+        super().setUp()
+        self.other = Club.objects.create(name="Rival FC", slug="rival-fc")
+        today = timezone.localdate()
+        self.other_season = Season.objects.create(club=self.other, start_date=today - timedelta(days=30), end_date=today + timedelta(days=300))
+        self.other_location = Location.objects.create(club=self.other, name="Arena", address="1 St", city="Town", zip_code="1000", country="BE")
+        self.other_opponent = Opponent.objects.create(club=self.other, name="Rivals")
+        self.other_team = Team.objects.create(club=self.other, name="First", short_name="1")
+
+    def test_event_rejects_cross_club_season(self):
+        event = Event(club=self.club, title="Match", start=self.future, season=self.other_season)
+        with self.assertRaises(ValidationError) as ctx:
+            event.full_clean()
+        self.assertIn("season", ctx.exception.error_dict)
+
+    def test_event_rejects_cross_club_location(self):
+        event = Event(club=self.club, title="Match", start=self.future, location=self.other_location)
+        with self.assertRaises(ValidationError) as ctx:
+            event.full_clean()
+        self.assertIn("location", ctx.exception.error_dict)
+
+    def test_event_accepts_same_club_fields(self):
+        Event(club=self.club, title="Match", start=self.future, season=self.season).full_clean()
+
+    def test_event_rejects_cross_club_team(self):
+        event = Event.objects.create(club=self.club, title="Match", start=self.future, season=self.season)
+        with self.assertRaises(ValidationError):
+            event.teams.add(self.other_team)
+
+    def test_event_accepts_same_club_team(self):
+        event = Event.objects.create(club=self.club, title="Match", start=self.future, season=self.season)
+        event.teams.add(self.team)
+        self.assertIn(self.team, event.teams.all())
+
+    def test_series_rejects_cross_club_opponent(self):
+        series = EventSeries(club=self.club, title="Weekly", rrule="FREQ=WEEKLY", dtstart=self.future, opponent=self.other_opponent)
+        with self.assertRaises(ValidationError) as ctx:
+            series.full_clean()
+        self.assertIn("opponent", ctx.exception.error_dict)
+
+    def test_series_rejects_cross_club_team(self):
+        series = EventSeries.objects.create(club=self.club, title="Weekly", rrule="FREQ=WEEKLY", dtstart=self.future)
+        with self.assertRaises(ValidationError):
+            series.teams.add(self.other_team)

@@ -2,7 +2,7 @@ from django.db import models
 from django.utils.translation import gettext_lazy as _
 
 from club.models import Season
-from clubmanager.base import ClubScopedModel, UUIDModel
+from clubmanager.base import ClubScopedModel, UUIDModel, validate_club_scope
 from members.models import Member
 from teams.models import Team
 
@@ -64,6 +64,7 @@ class Event(ClubScopedModel):
 
     location = models.ForeignKey(Location, on_delete=models.SET_NULL, related_name="events", null=True, blank=True, verbose_name=_("location"))
     opponent = models.ForeignKey(Opponent, on_delete=models.SET_NULL, related_name="events", null=True, blank=True, verbose_name=_("opponent"))
+    created_by = models.ForeignKey(Member, on_delete=models.SET_NULL, related_name="created_events", null=True, blank=True, verbose_name=_("created by"))
 
     class Meta:
         verbose_name = _("event")
@@ -72,6 +73,9 @@ class Event(ClubScopedModel):
 
     def __str__(self):
         return self.title
+
+    def clean(self):
+        validate_club_scope(self, self.club_id, same_club_fields=("season", "location", "opponent"))
 
 
 class EventSeries(ClubScopedModel):
@@ -102,6 +106,9 @@ class EventSeries(ClubScopedModel):
 
     def __str__(self):
         return self.title
+
+    def clean(self):
+        validate_club_scope(self, self.club_id, same_club_fields=("location", "opponent"))
 
 
 class Attendance(UUIDModel):
