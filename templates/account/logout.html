@@ -1,0 +1,33 @@
+{% extends "account/base_manage.html" %}
+{% load allauth i18n lucide %}
+
+{% comment %}
+    Overridden for layout: Cancel sits beside Sign Out, both with icons.
+
+    Cancel points at "/" rather than the Referer header — "/" already resolves per tenant
+    (club home on a club subdomain, control panel on the base domain), whereas Referer can
+    be missing or off-site, and is not something to turn into a link unchecked.
+{% endcomment %}
+
+{% block head_title %}
+    {% trans "Sign Out" %}
+{% endblock head_title %}
+
+{% block content %}
+    {% element h1 %}
+        {% trans "Sign Out" %}
+    {% endelement %}
+    {% element p %}
+        {% trans 'Are you sure you want to sign out?' %}
+    {% endelement %}
+
+    <form class="mt-8" method="post" action="{% url 'account_logout' %}">
+        {% csrf_token %}
+        {{ redirect_field }}
+
+        <div class="flex flex-wrap items-center justify-end gap-2">
+            <a class="btn gap-2" href="/">{% lucide "arrow-left" size=16 %} {% trans "Cancel" %}</a>
+            <button class="btn btn-primary gap-2" type="submit">{% lucide "log-out" size=16 %} {% trans "Sign Out" %}</button>
+        </div>
+    </form>
+{% endblock content %}

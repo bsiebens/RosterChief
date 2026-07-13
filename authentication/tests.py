@@ -362,3 +362,29 @@ class ActionBarTests(TestCase):
 
         self.assertContains(response, "btn-error")
         self.assertContains(response, 'type="submit"')
+
+
+class SignOutPageTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(email="mfa@example.com", password="pw-secret-123")
+        self.client.force_login(self.user)
+        self.response = self.client.get(reverse("account_logout"))
+
+    def test_sign_out_and_cancel_sit_side_by_side_with_icons(self):
+        html = self.response.content.decode()
+        cancel = html[html.index('<a class="btn gap-2" href="/">') :]
+        sign_out = html[html.index('<button class="btn btn-primary gap-2"') :]
+
+        self.assertIn("<svg", cancel[: cancel.index("</a>")])
+        self.assertIn("<svg", sign_out[: sign_out.index("</button>")])
+
+    def test_cancel_does_not_sign_you_out(self):
+        # It is a link, not a submit: only the POST logs you out.
+        self.client.get("/")
+
+        self.assertTrue(self.client.session.get("_auth_user_id"))
+
+    def test_signing_out_still_works(self):
+        self.client.post(reverse("account_logout"))
+
+        self.assertIsNone(self.client.session.get("_auth_user_id"))
