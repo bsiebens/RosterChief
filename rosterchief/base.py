@@ -68,8 +68,19 @@ class TenantQuerySet(models.QuerySet):
         return self.filter(club=require_current_club())
 
 
-class UUIDModel(models.Model):
-    """Abstract base class giving every model a UUID primary key"""
+class TimeStampedModel(models.Model):
+    """Row birthdays. Without these, every metric can only describe the present —
+    "42 members" is knowable, "members joined this month" is not."""
+
+    created = models.DateTimeField(_("created"), auto_now_add=True)
+    modified = models.DateTimeField(_("modified"), auto_now=True)
+
+    class Meta:
+        abstract = True
+
+
+class UUIDModel(TimeStampedModel):
+    """Abstract base class giving every model a UUID primary key and timestamps."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 

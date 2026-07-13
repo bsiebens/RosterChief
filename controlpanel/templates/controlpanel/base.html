@@ -7,16 +7,18 @@
 
 {% block main %}
     <div class="mb-6 flex flex-wrap items-center justify-between gap-3">
-        <div>
-            <h1 class="text-2xl font-bold">
+        <div class="flex flex-col gap-2">
+            <h1 class="text-3xl font-bold">
                 {% block heading %}Control panel{% endblock heading %}
             </h1>
-            {% block subheading %}{% endblock subheading %}
+            <span class="text-sm text-base-content/50">{% block subheading %}{% endblock subheading %}</span>
         </div>
+
         <div class="flex gap-2">
             {% block actions %}{% endblock actions %}
         </div>
     </div>
+    
     <div role="tablist" class="tabs-boxed tabs mb-6 w-fit">
         <a role="tab" href="{% url 'controlpanel:dashboard' %}" class="tab gap-2 {% if nav == 'dashboard' %}tab-active{% endif %}">{% lucide "layout-dashboard" size=16 %} Dashboard</a>
         <a role="tab" href="{% url 'controlpanel:club_list' %}" class="tab gap-2 {% if nav == 'clubs' %}tab-active{% endif %}">{% lucide "building-2" size=16 %} Clubs</a>

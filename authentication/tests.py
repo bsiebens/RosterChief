@@ -412,7 +412,7 @@ class ChangePasswordPageTests(TestCase):
 
     def test_forgot_password_is_an_accent_button_and_both_actions_have_icons(self):
         html = self.response.content.decode()
-        forgot = html[html.index('class="btn btn-accent gap-2"') :]
+        forgot = html[html.index("btn-accent") :]
         submit = html[html.index('class="btn btn-primary gap-2"') :]
 
         self.assertIn("<svg", forgot[: forgot.index("</a>")])

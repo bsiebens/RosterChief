@@ -1,10 +1,11 @@
 {% extends "controlpanel/base.html" %}
 {% load lucide %}
 
-{% block heading %}Platform overview{% endblock heading %}
+{% block heading %}RosterChief Platform Dashboard{% endblock heading %}
+{% block subheading %}Welcome back {{ user.member.first_name }}!{% endblock subheading %}
 
 {% block actions %}
-    <a class="btn btn-primary gap-2" href="{% url 'controlpanel:club_create' %}">{% lucide "plus" size=16 %} New club</a>
+    <a class="btn btn-primary gap-2" href="{% url 'controlpanel:club_create' %}">{% lucide "plus" size=16 %} Create new club</a>
 {% endblock actions %}
 
 {% block panel %}

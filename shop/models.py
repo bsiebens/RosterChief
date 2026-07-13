@@ -142,8 +142,8 @@ class Order(ClubScopedModel):
     status = models.CharField(_("status"), max_length=255, choices=OrderStatus.choices, default=OrderStatus.PENDING)
     total = models.DecimalField(_("total"), max_digits=10, decimal_places=2)
 
-    created = models.DateTimeField(_("created at"), auto_now_add=True)
-    modified = models.DateTimeField(_("modified"), auto_now=True)
+    # `created`/`modified` come from TimeStampedModel — declaring them here as well
+    # would clash with the abstract base.
 
     class Meta:
         verbose_name = _("order")
