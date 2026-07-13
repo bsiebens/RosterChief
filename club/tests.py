@@ -492,6 +492,80 @@ class AdminRegistrationSmokeTests(TestCase):
                 self.assertEqual(self.client.get(url).status_code, 200)
 
 
+class ClubArchivingTests(TestCase):
+    def setUp(self):
+        self.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+
+    def test_a_new_club_is_active(self):
+        self.assertFalse(self.club.is_archived)
+        self.assertIn(self.club, Club.objects.active())
+        self.assertNotIn(self.club, Club.objects.archived())
+
+    def test_archive_and_restore(self):
+        self.club.archive()
+
+        self.assertTrue(self.club.is_archived)
+        self.assertIn(self.club, Club.objects.archived())
+        self.assertNotIn(self.club, Club.objects.active())
+
+        self.club.restore()
+
+        self.assertFalse(self.club.is_archived)
+        self.assertIn(self.club, Club.objects.active())
+
+    def test_archiving_twice_keeps_the_original_timestamp(self):
+        self.club.archive()
+        first = self.club.archived_at
+
+        self.club.archive()
+
+        self.assertEqual(self.club.archived_at, first)
+
+    def test_restoring_an_active_club_is_a_no_op(self):
+        self.club.restore()
+
+        self.assertFalse(self.club.is_archived)
+
+    def test_archiving_destroys_nothing(self):
+        season = make_season(self.club)
+        member = Member.objects.create(first_name="Jane", last_name="Doe")
+        ClubMembership.objects.create(club=self.club, member=member, season=season)
+
+        self.club.archive()
+
+        self.assertTrue(ClubMembership.objects.filter(club=self.club).exists())
+        self.assertTrue(Season.objects.filter(club=self.club).exists())
+
+
+@override_settings(CLUBMANAGER_BASE_DOMAIN="clubmanager.app", ALLOWED_HOSTS=[".clubmanager.app"])
+class ArchivedClubTenancyTests(TestCase):
+    """An archived club's subdomain must stop resolving — that is what makes
+    archiving a real deactivation rather than a cosmetic flag."""
+
+    def setUp(self):
+        self.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        self.middleware = ClubTenantMiddleware(lambda request: "response")
+
+    def resolve(self):
+        request = RequestFactory().get("/", HTTP_HOST="ajax-united.clubmanager.app")
+        self.middleware(request)
+        return request.club
+
+    def test_active_club_resolves(self):
+        self.assertEqual(self.resolve(), self.club)
+
+    def test_archived_club_stops_resolving(self):
+        self.club.archive()
+
+        self.assertIsNone(self.resolve())
+
+    def test_restored_club_resolves_again(self):
+        self.club.archive()
+        self.club.restore()
+
+        self.assertEqual(self.resolve(), self.club)
+
+
 class ClubRoleTests(TestCase):
     def test_str(self):
         club = Club.objects.create(name="Ajax United", slug="ajax-united")

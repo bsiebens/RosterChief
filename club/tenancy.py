@@ -67,7 +67,8 @@ class ClubTenantMiddleware:
         if not subdomain:
             return None
 
-        return Club.objects.filter(slug=subdomain).first()
+        # Archived clubs stop resolving: their subdomain behaves as unknown.
+        return Club.objects.active().filter(slug=subdomain).first()
 
     @staticmethod
     def get_subdomain(request) -> str | None:

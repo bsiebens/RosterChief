@@ -101,9 +101,7 @@ def members_visible_to(user: User, club: Club) -> QuerySet[Member]:
     staff of every team they're staffed on.
     """
     if is_club_admin(user, club):
-        return Member.objects.filter(
-            Q(member_of__club=club) | Q(team_memberships__team__club=club) | Q(staff_assignments__team__club=club) | Q(roles__club=club)
-        ).distinct()
+        return Member.objects.filter(Q(member_of__club=club) | Q(team_memberships__team__club=club) | Q(staff_assignments__team__club=club) | Q(roles__club=club)).distinct()
 
     me = Member.objects.filter(user=user).first()
     if me is None:
@@ -117,9 +115,7 @@ def members_visible_to(user: User, club: Club) -> QuerySet[Member]:
 
     season = current_season(club)
     teams = teams_staffed_by(user, club)
-    roster = Member.objects.filter(
-        Q(team_memberships__team__in=teams, team_memberships__season=season) | Q(staff_assignments__team__in=teams, staff_assignments__season=season)
-    )
+    roster = Member.objects.filter(Q(team_memberships__team__in=teams, team_memberships__season=season) | Q(staff_assignments__team__in=teams, staff_assignments__season=season))
 
     visible = {me.pk} | set(children.values_list("pk", flat=True)) | set(roster.values_list("pk", flat=True))
     return Member.objects.filter(pk__in=visible)

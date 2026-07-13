@@ -15,10 +15,18 @@ class ClubManager(models.Manager):
 
         return get_current_club()
 
+    def active(self):
+        return self.filter(archived_at__isnull=True)
+
+    def archived(self):
+        return self.filter(archived_at__isnull=False)
+
 
 class Club(UUIDModel):
     name = models.CharField(_("name"), max_length=255)
     slug = models.SlugField(_("slug"), max_length=255, unique=True, blank=True, help_text=_("Drives subdomain / path resolution (e.g. ajax-united.clubmanager.app)."))
+
+    archived_at = models.DateTimeField(_("archived at"), null=True, blank=True, help_text=_("Archived clubs stop resolving on their subdomain, but their data is retained."))
 
     objects = ClubManager()
 
@@ -34,6 +42,26 @@ class Club(UUIDModel):
         if not self.slug:
             self.slug = unique_slugify(self, self.name)
         super().save(*args, **kwargs)
+
+    @property
+    def is_archived(self) -> bool:
+        return self.archived_at is not None
+
+    def archive(self):
+        """Soft-delete: the club stops resolving, but nothing is destroyed.
+
+        Clubs are never hard-deleted — a club with any data cannot be removed
+        anyway (ClubMembership PROTECTs its Season), and financial records must
+        be retained.
+        """
+        if not self.is_archived:
+            self.archived_at = timezone.now()
+            self.save(update_fields=["archived_at"])
+
+    def restore(self):
+        if self.is_archived:
+            self.archived_at = None
+            self.save(update_fields=["archived_at"])
 
 
 class Season(ClubScopedModel):
