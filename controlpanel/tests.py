@@ -56,12 +56,12 @@ class AccessTests(ControlPanelTestBase):
 
         self.assertEqual(self.client.get(reverse("controlpanel:dashboard")).status_code, 200)
 
-    @override_settings(CLUBMANAGER_BASE_DOMAIN="clubmanager.app", ALLOWED_HOSTS=[".clubmanager.app"])
+    @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=[".rosterchief.app"])
     def test_panel_does_not_exist_on_a_club_subdomain(self):
         # It manages *all* clubs, so it must not be reachable from inside one.
         Club.objects.create(name="Rival FC", slug="rival-fc")
 
-        response = self.client.get(reverse("controlpanel:dashboard"), headers={"host": "rival-fc.clubmanager.app"})
+        response = self.client.get(reverse("controlpanel:dashboard"), headers={"host": "rival-fc.rosterchief.app"})
 
         self.assertEqual(response.status_code, 404)
 

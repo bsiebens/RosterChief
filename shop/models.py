@@ -6,8 +6,8 @@ from django.utils.translation import gettext_lazy as _
 from authentication.models import User
 from club.models import Season
 from club.tenancy import require_current_club
-from clubmanager.base import ClubScopedModel, UUIDModel, validate_club_scope
 from members.models import Member
+from rosterchief.base import ClubScopedModel, UUIDModel, validate_club_scope
 from teams.models import Position, Team
 
 

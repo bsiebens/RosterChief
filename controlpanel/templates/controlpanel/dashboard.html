@@ -1,9 +1,10 @@
 {% extends "controlpanel/base.html" %}
+{% load lucide %}
 
 {% block heading %}Platform overview{% endblock heading %}
 
 {% block actions %}
-    <a class="btn btn-primary" href="{% url 'controlpanel:club_create' %}">New club</a>
+    <a class="btn btn-primary gap-2" href="{% url 'controlpanel:club_create' %}">{% lucide "plus" size=16 %} New club</a>
 {% endblock actions %}
 
 {% block panel %}

@@ -58,7 +58,7 @@ class ClubTenantMiddleware:
             reset_current_club(token)
 
     def get_club(self, request) -> Club | None:
-        # Imported lazily: club.models imports clubmanager.base, which imports
+        # Imported lazily: club.models imports rosterchief.base, which imports
         # this module, so a top-level import would be circular.
         from .models import Club
 
@@ -78,7 +78,7 @@ class ClubTenantMiddleware:
         if not host:
             return None
 
-        base_domain = getattr(settings, "CLUBMANAGER_BASE_DOMAIN", "").lower().strip(".")
+        base_domain = getattr(settings, "ROSTERCHIEF_BASE_DOMAIN", "").lower().strip(".")
 
         if base_domain:
             # Only hosts under the configured base domain carry a tenant slug.

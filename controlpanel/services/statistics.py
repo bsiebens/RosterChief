@@ -58,6 +58,7 @@ def club_statistics(club):
     return [
         {
             "title": "Members",
+            "icon": "users",
             "stats": [
                 ("Members", memberships.values("member").distinct().count()),
                 ("Active this season", memberships.filter(season=season, status=ClubMembership.StatusChoices.ACTIVE).count() if season else 0),
@@ -67,6 +68,7 @@ def club_statistics(club):
         },
         {
             "title": "Teams & staff",
+            "icon": "shield",
             "stats": [
                 ("Teams", Team.objects.filter(club=club).count()),
                 ("Players this season", TeamMembership.objects.filter(team__club=club, season=season).count() if season else 0),
@@ -75,6 +77,7 @@ def club_statistics(club):
         },
         {
             "title": "Events",
+            "icon": "calendar-days",
             "stats": [
                 ("Upcoming", events.filter(start__gte=now).count()),
                 ("This season", events.filter(season=season).count() if season else 0),
@@ -82,6 +85,7 @@ def club_statistics(club):
         },
         {
             "title": "Shop",
+            "icon": "shopping-cart",
             "stats": [
                 ("Orders", orders.count()),
                 ("Revenue", _money(orders.filter(status__in=PAID_STATUSES))),

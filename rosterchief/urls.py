@@ -1,4 +1,4 @@
-"""URL configuration for clubmanager.
+"""URL configuration for rosterchief.
 
 ``/admin/login/`` is deliberately intercepted *before* ``admin.site.urls`` and
 redirected to the allauth login, so Django staff go through the same MFA

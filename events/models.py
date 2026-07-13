@@ -2,8 +2,8 @@ from django.db import models
 from django.utils.translation import gettext_lazy as _
 
 from club.models import Season
-from clubmanager.base import ClubScopedModel, UUIDModel, validate_club_scope
 from members.models import Member
+from rosterchief.base import ClubScopedModel, UUIDModel, validate_club_scope
 from teams.models import Team
 
 

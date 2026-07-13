@@ -1,10 +1,10 @@
-# ClubManager — Model & Domain Architecture
+# RosterChief — Model & Domain Architecture
 
 Baseline reference for implementing the domain models. This describes the **intended
 shape** of the data model: what exists today, what is planned, and the conventions every
 app should follow. It is a living document — update it when the model changes.
 
-> **Tenancy: multi-tenant (row-based / shared-schema).** ClubManager is designed as a
+> **Tenancy: multi-tenant (row-based / shared-schema).** RosterChief is designed as a
 > **multi-tenant platform** — one deployment serves many clubs, with **`Club` as the tenant
 > root**. Isolation is **row-based**: a shared database and schema where every club-owned
 > row carries a `club` FK (via `ClubScopedModel`), and *all* access is scoped to the
@@ -54,9 +54,9 @@ only if the app grows unwieldy. The roadmap `members` name is reserved either wa
 
 These are already established in code — every new model follows them.
 
-- **UUID primary keys.** Inherit `clubmanager.base.UUIDModel` (`id = UUIDField(default=uuid4)`).
+- **UUID primary keys.** Inherit `rosterchief.base.UUIDModel` (`id = UUIDField(default=uuid4)`).
   Never expose sequential integer PKs.
-- **`ClubScopedModel`** (`clubmanager.base`) adds the tenant `club` FK
+- **`ClubScopedModel`** (`rosterchief.base`) adds the tenant `club` FK
   (`related_name="%(class)ss"`) and, under multi-tenancy, a tenant-aware manager + auto
   club-stamping `save()` (§2.4). **Every aggregate-root model inherits it**; leaf rows
   reachable only via a scoped parent (e.g. `Attendance` via `Event`) may inherit scope from
@@ -105,12 +105,12 @@ several clubs; a `Member` is that person *within one club*. So:
   current club** (via the tenant context below), falling back to email.
 
 **Tenant resolution → `request.club`.** A `ClubTenantMiddleware` resolves the active club
-per request (recommended: **subdomain**, `ajax-united.clubmanager.app`; path-prefix
+per request (recommended: **subdomain**, `ajax-united.rosterchief.app`; path-prefix
 `/c/<slug>/` is the alternative) and stores it on `request.club` *and* in a context
 variable so non-request code (services, management commands) can read it:
 
 ```
-# clubmanager/tenancy.py
+# rosterchief/tenancy.py
 from contextvars import ContextVar
 _current_club: ContextVar = ContextVar("current_club", default=None)
 
@@ -740,7 +740,7 @@ Legend: `───<` one-to-many, `>───<` many-to-many via a through model
    rows with the current season and re-scopes `unique_together`.
 3. ✅ **Full multi-tenancy** — adopt **row-based multi-tenancy**, `Club` as tenant root
    (§2.4). Requires: `ClubScopedModel` on every aggregate root, `Member.user` →
-   `ForeignKey` (+`unique(club, user)`), tenant middleware + `clubmanager/tenancy.py`
+   `ForeignKey` (+`unique(club, user)`), tenant middleware + `rosterchief/tenancy.py`
    context, tenant-aware manager, per-club uniqueness, per-club roles (§3). **Supersedes
    `CLAUDE.md`.**
 4. ✅ **Jersey uniqueness** — unique **within a team** via a partial `UniqueConstraint`
@@ -822,10 +822,10 @@ Setup:
 
 ### 8.3 Tenancy runtime config (needed once `ClubTenantMiddleware` lands)
 
-- **Hosts:** wildcard `ALLOWED_HOSTS` for the chosen base domain (e.g. `.clubmanager.app`)
+- **Hosts:** wildcard `ALLOWED_HOSTS` for the chosen base domain (e.g. `.rosterchief.app`)
   if using subdomain resolution; add `DJANGO_ALLOWED_HOSTS` accordingly.
 - **CSRF:** `CSRF_TRUSTED_ORIGINS` must cover the wildcard scheme+host set
-  (`https://*.clubmanager.app`).
+  (`https://*.rosterchief.app`).
 - **Cookies:** to share login across club subdomains, set `SESSION_COOKIE_DOMAIN` /
   `CSRF_COOKIE_DOMAIN` to the base domain; otherwise keep per-subdomain sessions
   (decide with the "cross-club users" question in §7).
@@ -842,8 +842,8 @@ Setup:
 
 ---
 
-*Conventions cross-reference:* `clubmanager/base.py` (`UUIDModel`, `ClubScopedModel`),
-`clubmanager/tenancy.py` (*to add* — tenant context/middleware, §2.4),
+*Conventions cross-reference:* `rosterchief/base.py` (`UUIDModel`, `ClubScopedModel`),
+`rosterchief/tenancy.py` (*to add* — tenant context/middleware, §2.4),
 `authentication/managers.py` (`UserManager`), `authentication/services/` (service-layer
 pattern).
 
@@ -852,10 +852,10 @@ pattern).
 > ### ⚠️ Banner: supersedes `CLAUDE.md`
 >
 > This architecture adopts **full multi-tenancy** (§2.4), which **directly contradicts**
-> the current `CLAUDE.md` ("ClubManager is a **single-club** app … deliberately *not*
+> the current `CLAUDE.md` ("RosterChief is a **single-club** app … deliberately *not*
 > multi-tenant — there is no `club_id` tenancy") and the project memory
 > (`project_overview` — "Single-club (NOT multi-tenant)").
 >
 > **Action required** before/alongside implementation: update `CLAUDE.md` and the memory
-> to describe ClubManager as a **multi-tenant platform (row-based, `Club` = tenant root)**.
+> to describe RosterChief as a **multi-tenant platform (row-based, `Club` = tenant root)**.
 > Until that is done, where the two disagree **this document is authoritative**.

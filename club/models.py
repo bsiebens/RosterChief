@@ -4,8 +4,8 @@ from django.db import models
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
-from clubmanager.base import ClubScopedModel, UUIDModel, unique_slugify, validate_club_scope
 from members.models import Member
+from rosterchief.base import ClubScopedModel, UUIDModel, unique_slugify, validate_club_scope
 
 
 class ClubManager(models.Manager):
@@ -24,7 +24,7 @@ class ClubManager(models.Manager):
 
 class Club(UUIDModel):
     name = models.CharField(_("name"), max_length=255)
-    slug = models.SlugField(_("slug"), max_length=255, unique=True, blank=True, help_text=_("Drives subdomain / path resolution (e.g. ajax-united.clubmanager.app)."))
+    slug = models.SlugField(_("slug"), max_length=255, unique=True, blank=True, help_text=_("Drives subdomain / path resolution (e.g. ajax-united.rosterchief.app)."))
 
     archived_at = models.DateTimeField(_("archived at"), null=True, blank=True, help_text=_("Archived clubs stop resolving on their subdomain, but their data is retained."))
 

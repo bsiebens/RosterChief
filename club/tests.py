@@ -231,8 +231,8 @@ class ClubSlugTests(TestCase):
 
 
 @override_settings(
-    CLUBMANAGER_BASE_DOMAIN="clubmanager.app",
-    ALLOWED_HOSTS=[".clubmanager.app", ".example.com", ".example.org"],
+    ROSTERCHIEF_BASE_DOMAIN="rosterchief.app",
+    ALLOWED_HOSTS=[".rosterchief.app", ".example.com", ".example.org"],
 )
 class ClubTenantMiddlewareTests(TestCase):
     def setUp(self):
@@ -252,29 +252,29 @@ class ClubTenantMiddlewareTests(TestCase):
         return request, response
 
     def test_subdomain_resolves_to_club(self):
-        request, response = self._run("ajax-united.clubmanager.app")
+        request, response = self._run("ajax-united.rosterchief.app")
 
         self.assertEqual(response, "response")
         self.assertEqual(request.club, self.club)
         self.assertEqual(self.captured["context_club"], self.club)
 
     def test_subdomain_resolution_ignores_port(self):
-        request, _ = self._run("ajax-united.clubmanager.app:8000")
+        request, _ = self._run("ajax-united.rosterchief.app:8000")
 
         self.assertEqual(request.club, self.club)
 
     def test_unknown_subdomain_sets_none(self):
-        request, _ = self._run("unknown-club.clubmanager.app")
+        request, _ = self._run("unknown-club.rosterchief.app")
 
         self.assertIsNone(request.club)
 
     def test_bare_base_domain_has_no_club(self):
-        request, _ = self._run("clubmanager.app")
+        request, _ = self._run("rosterchief.app")
 
         self.assertIsNone(request.club)
 
     def test_www_is_treated_as_no_club(self):
-        request, _ = self._run("www.clubmanager.app")
+        request, _ = self._run("www.rosterchief.app")
 
         self.assertIsNone(request.club)
 
@@ -284,17 +284,17 @@ class ClubTenantMiddlewareTests(TestCase):
         self.assertIsNone(request.club)
 
     def test_context_var_is_reset_after_request(self):
-        self._run("ajax-united.clubmanager.app")
+        self._run("ajax-united.rosterchief.app")
 
         self.assertIsNone(get_current_club())
 
-    @override_settings(CLUBMANAGER_BASE_DOMAIN="")
+    @override_settings(ROSTERCHIEF_BASE_DOMAIN="")
     def test_generic_host_resolution_without_base_domain(self):
         request, _ = self._run("ajax-united.example.com")
 
         self.assertEqual(request.club, self.club)
 
-    @override_settings(CLUBMANAGER_BASE_DOMAIN="")
+    @override_settings(ROSTERCHIEF_BASE_DOMAIN="")
     def test_two_label_host_has_no_club_without_base_domain(self):
         request, _ = self._run("example.com")
 
@@ -309,7 +309,7 @@ class _FakeRequest:
         return self._host
 
 
-@override_settings(CLUBMANAGER_BASE_DOMAIN="clubmanager.app")
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app")
 class GetSubdomainTests(TestCase):
     def subdomain(self, host):
         return ClubTenantMiddleware.get_subdomain(_FakeRequest(host))
@@ -318,10 +318,10 @@ class GetSubdomainTests(TestCase):
         self.assertIsNone(self.subdomain(""))
 
     def test_trailing_dot_is_stripped(self):
-        self.assertEqual(self.subdomain("ajax-united.clubmanager.app."), "ajax-united")
+        self.assertEqual(self.subdomain("ajax-united.rosterchief.app."), "ajax-united")
 
     def test_nested_subdomain_uses_leftmost_label(self):
-        self.assertEqual(self.subdomain("a.b.clubmanager.app"), "a")
+        self.assertEqual(self.subdomain("a.b.rosterchief.app"), "a")
 
 
 class TenantContextTests(TestCase):
@@ -537,7 +537,7 @@ class ClubArchivingTests(TestCase):
         self.assertTrue(Season.objects.filter(club=self.club).exists())
 
 
-@override_settings(CLUBMANAGER_BASE_DOMAIN="clubmanager.app", ALLOWED_HOSTS=[".clubmanager.app"])
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=[".rosterchief.app"])
 class ArchivedClubTenancyTests(TestCase):
     """An archived club's subdomain must stop resolving — that is what makes
     archiving a real deactivation rather than a cosmetic flag."""
@@ -547,7 +547,7 @@ class ArchivedClubTenancyTests(TestCase):
         self.middleware = ClubTenantMiddleware(lambda request: "response")
 
     def resolve(self):
-        request = RequestFactory().get("/", HTTP_HOST="ajax-united.clubmanager.app")
+        request = RequestFactory().get("/", HTTP_HOST="ajax-united.rosterchief.app")
         self.middleware(request)
         return request.club
 

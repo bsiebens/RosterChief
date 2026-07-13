@@ -1,11 +1,11 @@
-{% load static %}
+{% load lucide static %}
 <!DOCTYPE html>
 <html lang="en">
     <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>
-            {% block title %}ClubManager{% endblock title %}
+            {% block title %}RosterChief{% endblock title %}
         </title>
         {# Apply the stored theme before first paint, otherwise the page flashes
            the wrong colours. With no stored preference we set nothing, so
@@ -22,18 +22,25 @@
     <body class="min-h-screen bg-base-200">
         <div class="navbar bg-base-100 shadow-sm">
             <div class="flex-1">
-                <a class="btn btn-ghost text-xl" href="/">ClubManager</a>
+                <a class="btn btn-ghost gap-2 text-xl" href="/">
+                    {% lucide "clipboard-list" size=22 %}
+                    RosterChief
+                </a>
                 {% if user.is_authenticated and user.is_staff %}
-                    <a class="btn btn-ghost btn-sm" href="{% url 'controlpanel:dashboard' %}">Control panel</a>
+                    <a class="btn btn-ghost btn-sm gap-2" href="{% url 'controlpanel:dashboard' %}">
+                        {% lucide "sliders-horizontal" size=16 %}
+                        Control panel
+                    </a>
                 {% endif %}
             </div>
             <div class="flex-none gap-2">
+                {# Both icons are rendered; JS shows the one matching the effective theme. #}
                 <button class="btn btn-ghost btn-circle"
                         aria-label="Toggle theme"
                         data-theme-toggle
                         type="button">
-                    <svg class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
+                    <span data-theme-icon="light">{% lucide "sun" size=20 %}</span>
+                    <span data-theme-icon="dark" class="hidden">{% lucide "moon" size=20 %}</span>
                 </button>
                 {% if user.is_authenticated %}
                     <div class="dropdown dropdown-end">
@@ -41,18 +48,30 @@
                         <ul tabindex="0"
                             class="menu dropdown-content z-10 mt-2 w-56 rounded-box bg-base-100 p-2 shadow">
                             <li>
-                                <a href="{% url 'mfa_index' %}">Two-factor authentication</a>
+                                <a href="{% url 'mfa_index' %}">
+                                    {% lucide "shield-check" size=16 %}
+                                    Two-factor authentication
+                                </a>
                             </li>
                             <li>
-                                <a href="{% url 'account_change_password' %}">Change password</a>
+                                <a href="{% url 'account_change_password' %}">
+                                    {% lucide "key-round" size=16 %}
+                                    Change password
+                                </a>
                             </li>
                             <li>
-                                <a href="{% url 'account_logout' %}">Sign out</a>
+                                <a href="{% url 'account_logout' %}">
+                                    {% lucide "log-out" size=16 %}
+                                    Sign out
+                                </a>
                             </li>
                         </ul>
                     </div>
                 {% else %}
-                    <a class="btn btn-primary btn-sm" href="{% url 'account_login' %}">Sign in</a>
+                    <a class="btn btn-primary btn-sm gap-2" href="{% url 'account_login' %}">
+                        {% lucide "log-in" size=16 %}
+                        Sign in
+                    </a>
                 {% endif %}
             </div>
         </div>
@@ -69,18 +88,28 @@
             {% block main %}{% endblock main %}
         </main>
         <script>
-      // No stored preference means "follow the OS", so read the effective theme
-      // from the OS when nothing is set yet.
+      // No stored preference means "follow the OS", so the effective theme has to
+      // be read from the OS whenever nothing is set.
+      const effectiveTheme = () =>
+        document.documentElement.getAttribute("data-theme") ||
+        (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+
+      const showThemeIcon = () => {
+        const dark = effectiveTheme() === "dark";
+        document.querySelectorAll('[data-theme-icon="dark"]').forEach((i) => i.classList.toggle("hidden", !dark));
+        document.querySelectorAll('[data-theme-icon="light"]').forEach((i) => i.classList.toggle("hidden", dark));
+      };
+
       document.querySelectorAll("[data-theme-toggle]").forEach((button) => {
         button.addEventListener("click", () => {
-          const current =
-            document.documentElement.getAttribute("data-theme") ||
-            (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
-          const next = current === "dark" ? "light" : "dark";
+          const next = effectiveTheme() === "dark" ? "light" : "dark";
           document.documentElement.setAttribute("data-theme", next);
           localStorage.setItem("theme", next);
+          showThemeIcon();
         });
       });
+
+      showThemeIcon();
         </script>
     </body>
 </html>

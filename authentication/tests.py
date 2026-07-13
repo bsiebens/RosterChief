@@ -13,7 +13,7 @@ from django.urls import reverse
 from club.models import Club, ClubRole
 from members.models import Member
 
-from .adapters import ClubManagerMFAAdapter, webauthn_rp_id
+from .adapters import RosterChiefMFAAdapter, webauthn_rp_id
 from .middleware import RequireMFAMiddleware, mfa_required_for
 
 User = get_user_model()
@@ -104,9 +104,9 @@ class UserModelTests(TestCase):
 
 
 @override_settings(
-    CLUBMANAGER_BASE_DOMAIN="clubmanager.app",
-    MFA_WEBAUTHN_RP_NAME="ClubManager",
-    ALLOWED_HOSTS=[".clubmanager.app", "example.test"],
+    ROSTERCHIEF_BASE_DOMAIN="rosterchief.app",
+    MFA_WEBAUTHN_RP_NAME="RosterChief",
+    ALLOWED_HOSTS=[".rosterchief.app", "example.test"],
 )
 class WebAuthnRelyingPartyTests(TestCase):
     """A passkey is bound to a Relying Party ID (a domain).
@@ -119,22 +119,22 @@ class WebAuthnRelyingPartyTests(TestCase):
     def rp_entity(self, host):
         request = RequestFactory().get("/", HTTP_HOST=host)
         with context.request_context(request):
-            return ClubManagerMFAAdapter().get_public_key_credential_rp_entity()
+            return RosterChiefMFAAdapter().get_public_key_credential_rp_entity()
 
     def test_rp_id_is_the_parent_domain_not_the_club_subdomain(self):
-        self.assertEqual(self.rp_entity("ajax-united.clubmanager.app")["id"], "clubmanager.app")
+        self.assertEqual(self.rp_entity("ajax-united.rosterchief.app")["id"], "rosterchief.app")
 
     def test_rp_id_is_identical_across_clubs(self):
         # The whole point: a passkey registered at one club works at the others.
-        here = self.rp_entity("ajax-united.clubmanager.app")
-        there = self.rp_entity("rival-fc.clubmanager.app")
+        here = self.rp_entity("ajax-united.rosterchief.app")
+        there = self.rp_entity("rival-fc.rosterchief.app")
 
         self.assertEqual(here["id"], there["id"])
 
     def test_rp_name_comes_from_settings(self):
-        self.assertEqual(self.rp_entity("ajax-united.clubmanager.app")["name"], "ClubManager")
+        self.assertEqual(self.rp_entity("ajax-united.rosterchief.app")["name"], "RosterChief")
 
-    @override_settings(CLUBMANAGER_BASE_DOMAIN="")
+    @override_settings(ROSTERCHIEF_BASE_DOMAIN="")
     def test_falls_back_to_the_request_host_without_a_base_domain(self):
         request = RequestFactory().get("/", HTTP_HOST="example.test:8000")
 

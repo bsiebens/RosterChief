@@ -1,7 +1,8 @@
 {% extends "base.html" %}
+{% load lucide %}
 
 {% block title %}
-    {% block panel_title %}Control panel{% endblock panel_title %} · ClubManager
+    {% block panel_title %}Control panel{% endblock panel_title %} · RosterChief
 {% endblock title %}
 
 {% block main %}
@@ -17,8 +18,8 @@
         </div>
     </div>
     <div role="tablist" class="tabs-boxed tabs mb-6 w-fit">
-        <a role="tab" href="{% url 'controlpanel:dashboard' %}" class="tab {% if nav == 'dashboard' %}tab-active{% endif %}">Dashboard</a>
-        <a role="tab" href="{% url 'controlpanel:club_list' %}" class="tab {% if nav == 'clubs' %}tab-active{% endif %}">Clubs</a>
+        <a role="tab" href="{% url 'controlpanel:dashboard' %}" class="tab gap-2 {% if nav == 'dashboard' %}tab-active{% endif %}">{% lucide "layout-dashboard" size=16 %} Dashboard</a>
+        <a role="tab" href="{% url 'controlpanel:club_list' %}" class="tab gap-2 {% if nav == 'clubs' %}tab-active{% endif %}">{% lucide "building-2" size=16 %} Clubs</a>
     </div>
     {% block panel %}{% endblock panel %}
 {% endblock main %}

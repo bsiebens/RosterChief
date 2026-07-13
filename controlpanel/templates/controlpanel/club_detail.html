@@ -1,4 +1,5 @@
 {% extends "controlpanel/base.html" %}
+{% load lucide %}
 
 {% block heading %}{{ club.name }}{% endblock heading %}
 
@@ -12,16 +13,16 @@
 {% endblock subheading %}
 
 {% block actions %}
-    <a class="btn btn-ghost" href="{% url 'controlpanel:club_update' club.pk %}">Edit</a>
+    <a class="btn btn-ghost gap-2" href="{% url 'controlpanel:club_update' club.pk %}">{% lucide "pencil" size=16 %} Edit</a>
     {% if club.is_archived %}
         <form method="post" action="{% url 'controlpanel:club_restore' club.pk %}">
             {% csrf_token %}
-            <button class="btn btn-success" type="submit">Restore</button>
+            <button class="btn btn-success gap-2" type="submit">{% lucide "archive-restore" size=16 %} Restore</button>
         </form>
     {% else %}
         <form method="post" action="{% url 'controlpanel:club_archive' club.pk %}">
             {% csrf_token %}
-            <button class="btn btn-warning" type="submit">Archive</button>
+            <button class="btn btn-warning gap-2" type="submit">{% lucide "archive" size=16 %} Archive</button>
         </form>
     {% endif %}
 {% endblock actions %}
@@ -36,7 +37,7 @@
         {% for group in groups %}
             <div class="card bg-base-100 shadow">
                 <div class="card-body">
-                    <h2 class="card-title text-base">{{ group.title }}</h2>
+                    <h2 class="card-title text-base">{% lucide group.icon size=18 %} {{ group.title }}</h2>
                     <dl class="divide-y divide-base-200">
                         {% for label, value in group.stats %}
                             <div class="flex items-center justify-between py-2">
@@ -53,7 +54,7 @@
         <div class="card-body">
             <div class="flex items-center justify-between">
                 <h2 class="card-title text-base">Club admins</h2>
-                <a class="btn btn-primary btn-sm" href="{% url 'controlpanel:club_admin_add' club.pk %}">Add admin</a>
+                <a class="btn btn-primary btn-sm gap-2" href="{% url 'controlpanel:club_admin_add' club.pk %}">{% lucide "user-plus" size=16 %} Add admin</a>
             </div>
             <div class="overflow-x-auto">
                 <table class="table">
@@ -72,7 +73,7 @@
                                 <td class="text-right">
                                     <form method="post" action="{% url 'controlpanel:club_admin_remove' club.pk role.pk %}">
                                         {% csrf_token %}
-                                        <button class="btn btn-ghost btn-xs text-error" type="submit">Remove</button>
+                                        <button class="btn btn-ghost btn-xs gap-1 text-error" type="submit">{% lucide "trash-2" size=14 %} Remove</button>
                                     </form>
                                 </td>
                             </tr>
