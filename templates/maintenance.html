@@ -1,0 +1,24 @@
+{% extends base_template %}
+{% load lucide %}
+
+{% comment %}
+    Rendered through the tenant's own skin, so a club sees its own logo and colours rather
+    than a bare error page — this is the platform being unavailable, not the club being gone.
+{% endcomment %}
+
+{% block head_title %}Maintenance{% endblock head_title %}
+
+{% block main %}
+    <div class="flex justify-center">
+        <div class="card w-full max-w-xl bg-base-100 shadow">
+            <div class="card-body items-center text-center">
+                <div class="text-warning">{% lucide "wrench" size=48 %}</div>
+                <h1 class="card-title mt-2">Down for maintenance</h1>
+                <p class="opacity-80">{{ message }}</p>
+                {% if maintenance.started_at %}
+                    <p class="text-xs opacity-60">Since {{ maintenance.started_at|date:"j M Y, H:i" }}</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+{% endblock main %}

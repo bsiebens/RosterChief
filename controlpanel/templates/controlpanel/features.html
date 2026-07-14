@@ -1,5 +1,5 @@
 {% extends "controlpanel/base.html" %}
-{% load lucide %}
+{% load lucide ui %}
 
 {% block heading %}Features{% endblock heading %}
 
@@ -8,6 +8,48 @@
 {% endblock actions %}
 
 {% block panel %}
+    {% comment %}
+        The lock-down. Clubs get a maintenance page, the scheduled jobs stand down, and the
+        control panel and the auth screens stay open — otherwise you could not sign in to
+        turn it back off.
+    {% endcomment %}
+    <div class="card mb-6 bg-base-100 shadow {% if maintenance.is_active %}border-l-4 border-error{% endif %}">
+        <div class="card-body">
+            <div class="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                    <h2 class="card-title text-base">{% lucide "wrench" size=18 %} Maintenance mode</h2>
+                    {% if maintenance.is_active %}
+                        <p class="text-sm">
+                            <span class="badge badge-error gap-1">{% lucide "lock" size=12 %} Platform closed</span>
+                            since {{ maintenance.started_at|date:"j M Y, H:i" }}{% if maintenance.started_by %} by {{ maintenance.started_by.email }}{% endif %}.
+                        </p>
+                        {% if maintenance.message %}<p class="mt-1 text-sm opacity-70">“{{ maintenance.message }}”</p>{% endif %}
+                    {% else %}
+                        <p class="text-sm opacity-70">
+                            Closes every club subdomain and stands the scheduled jobs down. The control panel and the sign-in screens stay open.
+                        </p>
+                    {% endif %}
+                </div>
+            </div>
+
+            <form class="mt-2" method="post" action="{% url 'controlpanel:maintenance' %}">
+                {% csrf_token %}
+                {% if not maintenance.is_active %}
+                    <div class="form-control my-2 w-full max-w-xl">
+                        <label class="label" for="{{ maintenance_form.message.id_for_label }}">
+                            <span class="label-text">{{ maintenance_form.message.label }}</span>
+                        </label>
+                        {{ maintenance_form.message|daisy }}
+                        <span class="label-text-alt mt-1 block text-base-content/70">{{ maintenance_form.message.help_text }}</span>
+                    </div>
+                    <button class="btn btn-error gap-2" type="submit">{% lucide "lock" size=16 %} Close the platform</button>
+                {% else %}
+                    <button class="btn btn-success gap-2" type="submit">{% lucide "lock-open" size=16 %} Reopen the platform</button>
+                {% endif %}
+            </form>
+        </div>
+    </div>
+
     <div class="card mb-6 bg-base-100 shadow">
         <div class="card-body">
             <h2 class="card-title text-base">{% lucide "flag" size=18 %} Flags</h2>

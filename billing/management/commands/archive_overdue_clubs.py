@@ -5,13 +5,13 @@ switches off paying customers, and a cron misconfiguration, a clock skew or a ba
 should cost you a confusing email, not a morning of angry clubs.
 """
 
-from django.core.management.base import BaseCommand
 from django.utils import timezone
 
 from billing.services.dues import archivable_clubs
+from features.commands import MaintenanceAwareCommand
 
 
-class Command(BaseCommand):
+class Command(MaintenanceAwareCommand):
     help = "Archive clubs that are unpaid past their grace period (dry run unless --commit)."
 
     def add_arguments(self, parser):

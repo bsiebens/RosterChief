@@ -1,10 +1,9 @@
-from django.core.management.base import BaseCommand
-
 from events.models import EventSeries
 from events.services import generate_occurrences, horizon
+from features.commands import MaintenanceAwareCommand
 
 
-class Command(BaseCommand):
+class Command(MaintenanceAwareCommand):
     help = "Materialise recurring event occurrences up to the rolling horizon."
 
     def handle(self, *args, **options):

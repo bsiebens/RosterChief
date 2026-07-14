@@ -20,6 +20,7 @@ from billing.services import BillingError
 from billing.services.dues import record_payment, subscribe
 from club.models import Club, ClubMembership, ClubRole, Season
 from events.models import Attendance, Event
+from features.models import Maintenance
 from members.models import Member
 from shop.models import Order
 from teams.models import Position, StaffAssignment, Team, TeamMembership
@@ -1315,3 +1316,38 @@ class BillingFormRenderTests(ControlPanelTestBase):
         response = self.client.post(reverse("controlpanel:due_waive", args=[due.pk]), follow=True)
 
         self.assertContains(response, "remove them before waiving")
+
+
+class MaintenancePanelTests(ControlPanelTestBase):
+    def setUp(self):
+        super().setUp()
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def test_closing_the_platform_records_who_did_it(self):
+        self.client.post(reverse("controlpanel:maintenance"), {"message": "Database upgrade."})
+
+        maintenance = Maintenance.current()
+        self.assertTrue(maintenance.is_active)
+        self.assertEqual(maintenance.message, "Database upgrade.")
+        self.assertEqual(maintenance.started_by, self.staff)
+
+    def test_posting_again_reopens_the_platform(self):
+        Maintenance.start(message="x", user=self.staff)
+
+        self.client.post(reverse("controlpanel:maintenance"), {})
+
+        self.assertFalse(Maintenance.is_on())
+
+    def test_every_panel_page_warns_while_the_platform_is_closed(self):
+        # Not a state to leave on by accident.
+        Maintenance.start(user=self.staff)
+
+        for url in (reverse("controlpanel:dashboard"), reverse("controlpanel:club_list"), reverse("controlpanel:features")):
+            self.assertContains(self.client.get(url), "closed for maintenance", msg_prefix=url)
+
+    def test_the_features_page_offers_the_switch(self):
+        response = self.client.get(reverse("controlpanel:features"))
+
+        self.assertContains(response, "Maintenance mode")
+        self.assertContains(response, "Close the platform")

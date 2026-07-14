@@ -13,8 +13,9 @@ from billing.services import BillingError
 from billing.services.dues import next_period_start, open_period, reactivate, record_payment, subscribe, waive
 from billing.services.invoices import invoice_pdf, issue_invoice
 from club.models import Club, ClubRole
+from features.models import Maintenance
 
-from .forms import ClubAdminForm, ClubForm, DuePaymentForm, FlagForm, OpenPeriodForm, PlatformAdminForm, SubscriptionForm, TierForm, TierPriceForm
+from .forms import ClubAdminForm, ClubForm, DuePaymentForm, FlagForm, MaintenanceForm, OpenPeriodForm, PlatformAdminForm, SubscriptionForm, TierForm, TierPriceForm
 from .mixins import PlatformStaffRequiredMixin, PlatformSuperuserRequiredMixin
 from .services.admins import grant_club_admin, revoke_club_admin
 from .services.platform_admins import (
@@ -197,8 +198,26 @@ class FeatureListView(PlatformStaffRequiredMixin, TemplateView):
             nav="features",
             flags=Flag.objects.prefetch_related("clubs").order_by("name"),
             switches=Switch.objects.order_by("name"),
+            maintenance=Maintenance.current(),
+            maintenance_form=MaintenanceForm(),
             **kwargs,
         )
+
+
+class MaintenanceView(PlatformStaffRequiredMixin, View):
+    """Close the platform, or open it again."""
+
+    def post(self, request):
+        if Maintenance.is_on():
+            Maintenance.stop()
+            messages.success(request, "Maintenance ended. The clubs are back.")
+        else:
+            form = MaintenanceForm(request.POST)
+            message = form.cleaned_data["message"] if form.is_valid() else ""
+            Maintenance.start(message=message, user=request.user)
+            messages.warning(request, "Platform closed. Every club subdomain now serves a maintenance page, and the scheduled jobs stand down.")
+
+        return redirect("controlpanel:features")
 
 
 class FlagCreateView(PlatformStaffRequiredMixin, CreateView):

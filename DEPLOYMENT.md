@@ -100,7 +100,144 @@ emails to the same club.
 0 3 * * *  cd /srv/rosterchief && docker compose run --rm web python manage.py extend_event_series
 ```
 
-## Backups
+## Maintenance mode
+
+Control panel → **Features → Maintenance mode**. While it is on:
+
+- every **club subdomain** serves a 503 maintenance page, in that club's own colours;
+- the **control panel and the sign-in screens stay open**, because closing them would leave
+  you with no way to turn it back off;
+- `/healthz` keeps answering on every host, or the load balancer would take the node out of
+  rotation and the control panel with it;
+- the **scheduled jobs stand down** — `archive_overdue_clubs`, `extend_event_series` and
+  `import_members_csv` refuse to run.
+
+`migrate` and `collectstatic` are deliberately **not** blocked. Maintenance is usually
+declared *in order* to run them, and a guard that stopped them would mean turning the mode
+off to do the work you turned it on for.
+
+The scheduled jobs exit **non-zero** while the platform is closed, so cron will mail you.
+That is intended: a job that silently skips itself is how a month of billing goes missing. If
+you genuinely mean to run one during a window, pass `--ignore-maintenance`.
+
+So a migration-heavy deploy looks like:
+
+```bash
+# 1. Close the platform in the control panel (or from a shell):
+docker compose run --rm web python manage.py shell -c \
+  "from features.models import Maintenance; Maintenance.start(message='Upgrading. Back by 21:00.')"
+
+# 2. Do the work — migrate is not blocked.
+docker compose build
+docker compose run --rm web python manage.py migrate
+docker compose up -d --no-deps web
+
+# 3. Reopen from the control panel.
+```
+
+The state lives in Redis as well as the database, so it takes effect on **every worker and
+every server at once** — a per-process cache would leave some workers still serving clubs.
+
+## Behind an existing Caddy (dev / test server)
+
+If the box already runs Caddy on :80 and :443 — a test server sharing a host with other
+sites — do **not** run ours: two Caddies cannot both hold port 80. Run the app only, publish
+it on the loopback, and add a site block to the Caddy that is already there.
+
+```bash
+docker compose -f compose.behind-proxy.yaml up -d          # web + db + redis, no caddy
+```
+
+`web` publishes on `127.0.0.1:8001` (override with `WEB_PORT`). **Loopback, not 0.0.0.0** —
+bound to all interfaces, a test instance is reachable at `http://<server-ip>:8001` with no
+TLS, bypassing the proxy and every security header with it.
+
+Then, in the host's Caddyfile:
+
+```caddy
+test.rosterchief.app, *.test.rosterchief.app {
+	tls {
+		dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+	}
+
+	reverse_proxy 127.0.0.1:8001 {
+		header_up X-Forwarded-Proto {scheme}
+		header_up X-Real-IP {remote_host}
+	}
+}
+```
+
+Three things this needs, and each one is a way to lose an afternoon:
+
+1. **The host's Caddy must have the DNS plugin too.** The wildcard is still a wildcard: the
+   stock `caddy` package cannot answer a DNS-01 challenge. `caddy add-package
+   github.com/caddy-dns/cloudflare` on a package install, or run a Caddy built like
+   `deploy/caddy/Dockerfile`.
+2. **Give the test instance its own subdomain tree** (`*.test.rosterchief.app`) and set
+   `ROSTERCHIEF_BASE_DOMAIN=test.rosterchief.app`. It drives tenant resolution, the shared
+   session cookie *and* the WebAuthn RP ID — point it at the production domain and test
+   passkeys start colliding with real ones.
+3. **`header_up X-Forwarded-Proto` is not optional**, exactly as in the bundled Caddyfile.
+   Without it Django believes the request is plain HTTP behind the proxy.
+
+DNS still needs both records, pointing at the test box:
+
+```
+A   test.rosterchief.app    -> <server ip>
+A   *.test.rosterchief.app  -> <server ip>
+```
+
+The compose project is named `rosterchief-test`, so its containers and volumes never collide
+with a production stack on the same host.
+
+## Automated backups
+
+`deploy/backup.sh` dumps the database, tars the uploads while they are still on local disk,
+prunes anything older than `KEEP_DAYS`, and — if you set `BACKUP_REMOTE` — copies the lot off
+the box with rclone.
+
+```bash
+deploy/backup.sh /var/backups/rosterchief
+```
+
+It writes to a `.part` file and only moves it into place once `gzip -t` says the archive is
+readable and non-empty. A truncated dump that *looks* like a backup is the failure mode worth
+engineering against, because you only discover it on the day you need it.
+
+Schedule it as root on the host (single server; on several, run it on the database node):
+
+```cron
+# Nightly at 02:30, before the billing and event jobs.
+30 2 * * *  cd /srv/rosterchief && BACKUP_REMOTE=b2:rosterchief-backups KEEP_DAYS=14 deploy/backup.sh /var/backups/rosterchief
+
+# Weekly restore rehearsal into a throwaway database. This is the only line here that proves
+# the others work.
+0 4 * * 0   cd /srv/rosterchief && deploy/restore-check.sh
+```
+
+Cron mails you on non-zero exit, and the script uses `set -Eeuo pipefail` so it *does* exit
+non-zero. A backup script that fails quietly is worse than none, because you will believe you
+have backups.
+
+**Offsite matters more than frequency.** A dump sitting on the same disk as the database
+survives a bad migration but not the server. `BACKUP_REMOTE` takes any rclone remote (S3,
+Backblaze, a second box).
+
+**Once uploads move to S3** (`AWS_STORAGE_BUCKET_NAME`), the script skips the media tarball:
+the bucket's own versioning is the backup. Turn versioning on when you create it.
+
+### Restoring
+
+```bash
+gunzip -c /var/backups/rosterchief/db-2026-07-14-0230.sql.gz \
+  | docker compose exec -T db psql -U rosterchief rosterchief
+```
+
+The dump is taken with `--clean --if-exists`, so it drops and recreates rather than colliding
+with what is there. Rehearse it once, now, against a scratch database — not the first time you
+need it.
+
+## Backups (manual)
 
 Two things carry state: Postgres and the uploads.
 

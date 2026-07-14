@@ -86,6 +86,8 @@ MIDDLEWARE = [
     "allauth.account.middleware.AccountMiddleware",
     "authentication.middleware.RequireMFAMiddleware",
     "club.tenancy.ClubTenantMiddleware",
+    # After tenancy: it decides club-vs-platform from request.club, which was just resolved.
+    "features.middleware.MaintenanceMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
@@ -166,6 +168,7 @@ TEMPLATES = [
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
                 "club.context_processors.branding",
+                "features.context_processors.maintenance",
             ],
         },
     },

@@ -103,3 +103,15 @@ class OpenPeriodForm(forms.Form):
     """Renew, or reactivate an archived club."""
 
     start = forms.DateField(required=False, widget=forms.DateInput(attrs={"type": "date"}), label=_("Period starts"), help_text=_("Left blank, it continues from the end of the last period — so a lapsed year is still owed."))
+
+
+class MaintenanceForm(forms.Form):
+    """Closing the platform is a deliberate act, so it takes a sentence explaining itself —
+    that message is the only thing a club will see."""
+
+    message = forms.CharField(
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 2}),
+        label=_("Message"),
+        help_text=_("Shown to every club while the platform is closed. Left blank, they get a generic notice."),
+    )

@@ -6,6 +6,16 @@
 {% endblock title %}
 
 {% block main %}
+    {% if maintenance_on %}
+        <div class="alert alert-error mb-6">
+            {% lucide "wrench" size=20 %}
+            <span>
+                <strong>The platform is closed for maintenance.</strong>
+                Clubs see a maintenance page and the scheduled jobs are standing down.
+            </span>
+            <a class="btn btn-sm" href="{% url 'controlpanel:features' %}">Reopen</a>
+        </div>
+    {% endif %}
     <div class="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div class="flex flex-col gap-2">
             <h1 class="text-3xl font-bold">

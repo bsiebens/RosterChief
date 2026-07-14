@@ -1,9 +1,8 @@
-from django.core.management.base import BaseCommand, CommandError
-
+from features.commands import CommandError, MaintenanceAwareCommand
 from members.services import MemberCsvImporter
 
 
-class Command(BaseCommand):
+class Command(MaintenanceAwareCommand):
     help = "Import club members from a CSV file."
 
     def add_arguments(self, parser) -> None:
