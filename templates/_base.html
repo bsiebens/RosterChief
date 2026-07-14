@@ -33,8 +33,14 @@
         {% block extra %}{% endblock extra %}
     </head>
 
-    <body class="min-h-screen bg-base-200">
-        <div class="navbar mb-4 border-b border-base-300 bg-base-100 px-6 shadow-sm">
+    {% comment %}
+        An app shell: the viewport is the frame, and exactly one region scrolls. The body is a
+        flex column pinned to the screen height with overflow hidden, so the navbar and the
+        sidebar cannot be scrolled away — only <main> moves. Leave the body scrollable instead
+        and a "sticky" sidebar still drifts on a long page, which is the thing this is for.
+    {% endcomment %}
+    <body class="flex h-screen flex-col overflow-hidden bg-base-200">
+        <div class="navbar shrink-0 border-b border-base-300 bg-base-100 px-6 shadow-sm">
             <div class="my-4 flex-1">
                 {% block brand %}{% endblock brand %}
             </div>
@@ -65,25 +71,36 @@
             {% endif %}
         </div>
 
-        {% if messages %}
-            <div class="mx-auto mt-4 w-full space-y-2 px-4">
-                {% for message in messages %}
-                    {% with alert=message|as_alert %}
-                        <div class="alert alert-soft {{ alert.css }}" role="alert">
-                            {% lucide alert.icon size=20 %}
-                            <div>
-                                <div class="font-bold">{{ alert.title }}</div>
-                                <div class="text-sm">{{ alert.body }}</div>
-                            </div>
-                        </div>
-                    {% endwith %}
-                {% endfor %}
-            </div>
-        {% endif %}
+        <div class="flex flex-1 overflow-hidden">
+            {% comment %}
+                The sidebar is a sibling of <main>, not inside it, so it sits outside the one
+                scrolling region and stays put by construction. Pages with no menu (the auth
+                screens) leave the block empty and <main> simply takes the full width.
+            {% endcomment %}
+            {% block menu %}{% endblock menu %}
 
-        <main class="mx-auto w-full py-4 px-8">
-            {% block main %}{% endblock main %}
-        </main>
+            <main class="flex-1 overflow-y-auto">
+                <div class="mx-auto w-full px-8 py-6">
+                    {% if messages %}
+                        <div class="mb-6 w-full space-y-2">
+                            {% for message in messages %}
+                                {% with alert=message|as_alert %}
+                                    <div class="alert alert-soft {{ alert.css }}" role="alert">
+                                        {% lucide alert.icon size=20 %}
+                                        <div>
+                                            <div class="font-bold">{{ alert.title }}</div>
+                                            <div class="text-sm">{{ alert.body }}</div>
+                                        </div>
+                                    </div>
+                                {% endwith %}
+                            {% endfor %}
+                        </div>
+                    {% endif %}
+
+                    {% block main %}{% endblock main %}
+                </div>
+            </main>
+        </div>
 
         <script>
             // The button cycles light -> dark -> auto. "auto" removes the attribute and the

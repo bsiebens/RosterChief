@@ -5,15 +5,28 @@
     {% block panel_title %}Control panel{% endblock panel_title %} · RosterChief
 {% endblock title %}
 
+{% block menu %}
+    {% comment %}
+        Outside <main>, so it never scrolls with the content. Its own overflow-y-auto is for
+        the day the menu itself grows taller than the screen.
+    {% endcomment %}
+    <aside class="hidden w-64 shrink-0 overflow-y-auto border-r border-base-300 bg-base-100 lg:block">
+        <ul class="menu w-full gap-1 p-3">
+            <li class="menu-title">Platform</li>
+            {% include "controlpanel/_nav_items.html" %}
+        </ul>
+    </aside>
+{% endblock menu %}
+
 {% block main %}
     {% if maintenance_on %}
         <div class="alert alert-error mb-6">
             {% lucide "wrench" size=20 %}
             <span>
-                <strong>The platform is closed for maintenance.</strong>
-                Clubs see a maintenance page and the scheduled jobs are standing down.
-            </span>
-            <a class="btn btn-sm" href="{% url 'controlpanel:features' %}">Reopen</a>
+        <strong>The platform is currently closed for maintenance.</strong>
+        Clubs see a maintenance page and the scheduled jobs are standing down.
+    </span>
+            <a class="btn btn-sm gap-2 btn-error btn-soft" href="{% url 'controlpanel:features' %}">{% lucide "unlock" size=16 %} Reopen platform</a>
         </div>
     {% endif %}
     <div class="mb-6 flex flex-wrap items-center justify-between gap-3">
@@ -28,15 +41,11 @@
             {% block actions %}{% endblock actions %}
         </div>
     </div>
-    
-    <div role="tablist" class="tabs-boxed tabs mb-6 w-fit">
-        <a role="tab" href="{% url 'controlpanel:dashboard' %}" class="tab gap-2 {% if nav == 'dashboard' %}tab-active{% endif %}">{% lucide "layout-dashboard" size=16 %} Dashboard</a>
-        <a role="tab" href="{% url 'controlpanel:club_list' %}" class="tab gap-2 {% if nav == 'clubs' %}tab-active{% endif %}">{% lucide "building-2" size=16 %} Clubs</a>
-        <a role="tab" href="{% url 'controlpanel:billing' %}" class="tab gap-2 {% if nav == 'billing' %}tab-active{% endif %}">{% lucide "receipt-euro" size=16 %} Billing</a>
-        <a role="tab" href="{% url 'controlpanel:features' %}" class="tab gap-2 {% if nav == 'features' %}tab-active{% endif %}">{% lucide "toggle-right" size=16 %} Features</a>
-        {% if user.is_superuser %}
-            <a role="tab" href="{% url 'controlpanel:admins' %}" class="tab gap-2 {% if nav == 'admins' %}tab-active{% endif %}">{% lucide "user-cog" size=16 %} Admins</a>
-        {% endif %}
-    </div>
+
+    {# Below `lg` the sidebar is hidden, so the same links appear here rather than nowhere. #}
+    <ul class="menu menu-horizontal mb-6 w-full gap-1 overflow-x-auto rounded-box bg-base-100 lg:hidden">
+        {% include "controlpanel/_nav_items.html" %}
+    </ul>
+
     {% block panel %}{% endblock panel %}
 {% endblock main %}
