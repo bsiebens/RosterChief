@@ -8,11 +8,16 @@ dependencies = [
     "django-allauth[mfa]>=65.18.0",
     "django-lucide",
     "django-phonenumber-field[phonenumbers]>=8.4.0",
+    "django-redis>=7.0.0",
+    "django-storages[s3]>=1.14.6",
     "django-waffle>=5.0.0",
+    "gunicorn>=26.0.0",
     "pillow>=12.3.0",
+    "psycopg[binary]>=3.3.4",
     "python-dateutil>=2.9.0.post0",
     "python-decouple>=3.8",
     "weasyprint>=69.0",
+    "whitenoise>=6.12.0",
 ]
 
 [dependency-groups]

@@ -75,6 +75,10 @@ WAFFLE_FLAG_MODEL = "features.Flag"
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    # Directly after SecurityMiddleware, per WhiteNoise's contract. It serves the collected
+    # static files from the app itself, so no shared volume or CDN is needed to add a second
+    # app server.
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -209,7 +213,20 @@ USE_I18N = True
 USE_TZ = True
 
 
-# Static files (CSS, JavaScript, Images)
+# Cache
+#
+# Redis in production, and not merely for speed: waffle caches each flag's targeting in the
+# Django cache, and LocMemCache is private to one process. Under several gunicorn workers a
+# toggle flipped in the control panel flushes ONE worker's cache while the others keep
+# serving the stale flag — a feature that "sometimes doesn't turn on". A shared cache is the
+# fix, so Redis is required from the first multi-worker deploy, not from the second server.
+
+REDIS_URL = config("DJANGO_REDIS_URL", default="")
+
+CACHES = {"default": {"BACKEND": "django_redis.cache.RedisCache", "LOCATION": REDIS_URL, "OPTIONS": {"CLIENT_CLASS": "django_redis.client.DefaultClient"}} if REDIS_URL else {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}}
+
+
+# Static files and uploads
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = "static/"
@@ -218,6 +235,44 @@ STATICFILES_DIRS = [BASE_DIR / "static"]
 
 MEDIA_URL = "media/"
 MEDIA_ROOT = BASE_DIR / "media"
+
+# Uploads (club logos) go to S3-compatible storage as soon as a bucket is configured. On one
+# server the local disk works; on two, a logo uploaded to node A 404s on node B — so this is
+# the switch that decides whether "add a server" is an afternoon or a migration.
+AWS_STORAGE_BUCKET_NAME = config("AWS_STORAGE_BUCKET_NAME", default="")
+AWS_S3_ENDPOINT_URL = config("AWS_S3_ENDPOINT_URL", default="")  # set for Hetzner/Scaleway/Backblaze
+AWS_S3_REGION_NAME = config("AWS_S3_REGION_NAME", default="")
+AWS_ACCESS_KEY_ID = config("AWS_ACCESS_KEY_ID", default="")
+AWS_SECRET_ACCESS_KEY = config("AWS_SECRET_ACCESS_KEY", default="")
+AWS_S3_FILE_OVERWRITE = False
+AWS_QUERYSTRING_AUTH = False  # logos are public; signed URLs would break browser caching
+
+STORAGES = {
+    "default": {"BACKEND": "storages.backends.s3.S3Storage"} if AWS_STORAGE_BUCKET_NAME else {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    # Manifest storage only in production: it demands a collectstatic manifest, and every
+    # {% static %} in a test would blow up without one.
+    "staticfiles": {"BACKEND": config("DJANGO_STATICFILES_BACKEND", default="django.contrib.staticfiles.storage.StaticFilesStorage")},
+}
+
+
+# HTTPS, behind a reverse proxy
+#
+# SECURE_PROXY_SSL_HEADER is not optional here: Caddy terminates TLS, so without it Django
+# believes every request is plain HTTP. request.is_secure() goes false, allauth and WebAuthn
+# disagree with the browser about the origin, and SECURE_SSL_REDIRECT becomes a loop.
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
+# Off by default and switched on by the production env, deliberately: defaulting these to
+# `not DEBUG` would redirect every test request to https and break the suite anywhere DEBUG
+# is unset. `manage.py check --deploy` is what catches a deploy that forgot them.
+SECURE_SSL_REDIRECT = config("DJANGO_SECURE_SSL_REDIRECT", default=False, cast=bool)
+SESSION_COOKIE_SECURE = config("DJANGO_SESSION_COOKIE_SECURE", default=False, cast=bool)
+CSRF_COOKIE_SECURE = config("DJANGO_CSRF_COOKIE_SECURE", default=False, cast=bool)
+
+SECURE_HSTS_SECONDS = config("DJANGO_SECURE_HSTS_SECONDS", default=0, cast=int)
+# Every club is a subdomain, so HSTS must cover them all or it protects only the bare domain.
+SECURE_HSTS_INCLUDE_SUBDOMAINS = config("DJANGO_SECURE_HSTS_INCLUDE_SUBDOMAINS", default=True, cast=bool)
+SECURE_HSTS_PRELOAD = config("DJANGO_SECURE_HSTS_PRELOAD", default=False, cast=bool)
 
 
 # Phone numbers (django-phonenumber-field)
