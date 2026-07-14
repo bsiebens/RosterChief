@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
+from importlib.util import find_spec
 from pathlib import Path
 
 from decouple import Csv, config
@@ -92,10 +93,17 @@ MIDDLEWARE = [
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
-# Reload the browser when templates, static files or Python change. Dev only: it
-# injects a script tag into every HTML response and serves an open event stream,
-# neither of which belongs in production.
-if DEBUG:
+# Reload the browser when templates, static files or Python change. Dev only: it injects a
+# script tag into every HTML response and serves an open event stream, neither of which
+# belongs in production.
+#
+# Guarded on the module being *importable*, not just on DEBUG: it is a dev dependency, and the
+# production image installs with --no-dev. Without the guard, DEBUG=True in a deployed
+# container does not merely turn on debugging — it stops the app from starting at all, with a
+# ModuleNotFoundError that says nothing about the actual mistake.
+BROWSER_RELOAD_AVAILABLE = find_spec("django_browser_reload") is not None
+
+if DEBUG and BROWSER_RELOAD_AVAILABLE:
     INSTALLED_APPS += ["django_browser_reload"]
     MIDDLEWARE += ["django_browser_reload.middleware.BrowserReloadMiddleware"]
 

@@ -67,6 +67,16 @@ docker compose run --rm web python manage.py check --deploy
 **off** in code, because defaulting them to `not DEBUG` would redirect every test request to
 https and break the suite anywhere `DEBUG` is unset.
 
+### Keep DJANGO_DEBUG=False, even on the test server
+
+A test box is still a deployment: it is behind TLS, on a real domain, with real passkeys.
+`DEBUG=True` there leaks tracebacks and settings to anyone who can reach a 500, and turns off
+several of the protections in this document. Use it locally, not on a server.
+
+The app no longer *crashes* if you set it — `django_browser_reload` is a dev dependency that
+the image installs with `--no-dev`, so settings guard on the module being importable rather
+than assuming DEBUG implies it is there — but the reason to keep it off is not the crash.
+
 ### One dependency comes from git
 
 `django-lucide` is our fork (`[tool.uv.sources]` in `pyproject.toml`, pinned by `uv.lock` to a

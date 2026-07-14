@@ -30,6 +30,11 @@ urlpatterns = [
 ]
 
 if settings.DEBUG:
-    urlpatterns += [path("__reload__/", include("django_browser_reload.urls"))]
+    # Only when the app is actually installed. It is a dev dependency, and the production
+    # image installs with --no-dev, so DEBUG=True in a container must not take the whole
+    # site down over a package that is only there to refresh a browser tab.
+    if settings.BROWSER_RELOAD_AVAILABLE:
+        urlpatterns += [path("__reload__/", include("django_browser_reload.urls"))]
+
     # Club logos are uploads: runserver has to serve MEDIA_ROOT itself.
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
