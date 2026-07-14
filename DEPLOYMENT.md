@@ -152,13 +152,33 @@ docker compose -f compose.behind-proxy.yaml up -d          # web + db + redis, n
 bound to all interfaces, a test instance is reachable at `http://<server-ip>:8001` with no
 TLS, bypassing the proxy and every security header with it.
 
-Then, in the host's Caddyfile:
+Then add a site block to the host's Caddyfile. Caddy serves any number of domains on the same
+ports — TLS is chosen per connection by SNI — so a second (or tenth) site is just another
+block.
+
+### If that Caddy already does Cloudflare DNS-01
+
+Which is the usual case: the box has a domain on Cloudflare and Caddy already has the DNS
+plugin. Then set the challenge **once, globally**, and every site inherits it — no `tls`
+block per site, and wildcards simply work:
 
 ```caddy
+{
+	email you@example.com
+
+	# Applies DNS-01 to every site below.
+	acme_dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+}
+
+# --- whatever the box already serves --------------------------------------
+existing-thing.example.com {
+	reverse_proxy 127.0.0.1:3000
+}
+
+# --- RosterChief test instance --------------------------------------------
+# The bare host AND the wildcard, on one certificate.
 test.rosterchief.app, *.test.rosterchief.app {
-	tls {
-		dns cloudflare {env.CLOUDFLARE_API_TOKEN}
-	}
+	encode zstd gzip
 
 	reverse_proxy 127.0.0.1:8001 {
 		header_up X-Forwarded-Proto {scheme}
@@ -167,20 +187,82 @@ test.rosterchief.app, *.test.rosterchief.app {
 }
 ```
 
-Three things this needs, and each one is a way to lose an afternoon:
+### If the two domains need different tokens
 
-1. **The host's Caddy must have the DNS plugin too.** The wildcard is still a wildcard: the
-   stock `caddy` package cannot answer a DNS-01 challenge. `caddy add-package
-   github.com/caddy-dns/cloudflare` on a package install, or run a Caddy built like
-   `deploy/caddy/Dockerfile`.
-2. **Give the test instance its own subdomain tree** (`*.test.rosterchief.app`) and set
-   `ROSTERCHIEF_BASE_DOMAIN=test.rosterchief.app`. It drives tenant resolution, the shared
-   session cookie *and* the WebAuthn RP ID — point it at the production domain and test
-   passkeys start colliding with real ones.
-3. **`header_up X-Forwarded-Proto` is not optional**, exactly as in the bundled Caddyfile.
-   Without it Django believes the request is plain HTTP behind the proxy.
+Different Cloudflare accounts, or tokens scoped per zone. Drop `acme_dns` and give each site
+its own `tls`; a snippet keeps it short:
 
-DNS still needs both records, pointing at the test box:
+```caddy
+{
+	email you@example.com
+}
+
+(cf) {
+	tls {
+		dns cloudflare {args[0]}
+	}
+}
+
+existing-thing.example.com {
+	import cf {env.CF_TOKEN_EXAMPLE}
+	reverse_proxy 127.0.0.1:3000
+}
+
+test.rosterchief.app, *.test.rosterchief.app {
+	import cf {env.CF_TOKEN_ROSTERCHIEF}
+	reverse_proxy 127.0.0.1:8001 {
+		header_up X-Forwarded-Proto {scheme}
+	}
+}
+```
+
+### What actually goes wrong
+
+1. **The token must cover the *new* zone.** A Cloudflare token is scoped to named zones, and
+   an existing one almost certainly grants `Zone:DNS:Edit` on the domain it was made for and
+   nothing else. The new site then fails its DNS-01 challenge on a permissions error whose
+   text does not say so. Widen the token, or mint a second one and use the snippet form.
+2. **Both hostnames must be listed.** `*.test.rosterchief.app` does **not** match
+   `test.rosterchief.app` — a wildcard covers exactly one label. Leave the bare host out and
+   the club subdomains have a certificate while the control panel does not. Hence the comma.
+   (Wildcards are also only one level deep: `ajax.test.…` yes, `a.b.test.…` no.)
+3. **Caddy must have the DNS plugin.** Stock `caddy` cannot answer a DNS-01 challenge at all.
+   `caddy add-package github.com/caddy-dns/cloudflare`, or run a Caddy built like
+   `deploy/caddy/Dockerfile`. (If DNS-01 already works on the box, you have it.)
+4. **The token must be in *Caddy's* environment**, not your shell's — `{env.…}` reads the
+   process it runs in:
+
+   ```ini
+   # /etc/systemd/system/caddy.service.d/override.conf
+   [Service]
+   EnvironmentFile=/etc/caddy/caddy.env     # CLOUDFLARE_API_TOKEN=...
+   ```
+
+   Then `systemctl daemon-reload && systemctl restart caddy`.
+
+5. **`header_up X-Forwarded-Proto` is not optional**, exactly as in the bundled Caddyfile:
+   without it Django believes the request behind the proxy is plain HTTP.
+
+6. **Give the test instance its own subdomain tree** and set
+   `ROSTERCHIEF_BASE_DOMAIN=test.rosterchief.app`. That variable drives tenant resolution,
+   the shared session cookie *and* the WebAuthn RP ID — point it at the production domain and
+   test passkeys start colliding with real ones.
+
+### Applying and checking it
+
+```bash
+caddy validate --config /etc/caddy/Caddyfile   # syntax and modules
+systemctl reload caddy                          # zero downtime; existing certs untouched
+journalctl -u caddy -f                          # watch the DNS-01 challenge
+
+curl -I https://test.rosterchief.app/healthz
+curl -I https://any-club-slug.test.rosterchief.app/   # proves the WILDCARD, not just the host
+```
+
+Reloading provisions only what is new, so the existing site's certificate is not reissued.
+Allow 30–60s for the DNS record to propagate before the challenge completes.
+
+DNS needs both records, pointing at the test box:
 
 ```
 A   test.rosterchief.app    -> <server ip>
