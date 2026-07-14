@@ -334,6 +334,178 @@ docker compose cp web:/app/media ./media-backup
 Restore is `gunzip -c dump.sql.gz | docker compose exec -T db psql -U rosterchief rosterchief`.
 Test it once, now, rather than the first time you need it.
 
+## Sizing the server
+
+For **1–5 clubs, ~1000 members, ~10 events per club per week**.
+
+The short answer: **2 vCPU, 4 GB RAM, 40 GB SSD** — a €4–6/month VPS (Hetzner CX22 or
+equivalent). The interesting part is *why*, because the data is not what sizes this box.
+
+### The data is negligible
+
+Row counts for that workload, from the actual schema (attendance dominates: every event
+invites a squad, so one event is ~20 rows):
+
+| table | rows/year | MB/year |
+|---|---:|---:|
+| `events.Attendance` | 52,000 | 16 |
+| `events.Event` | 2,600 | 2 |
+| `formbuilder` answers | 10,000 | 3 |
+| `shop` orders + lines | 3,000 | 1 |
+| members, memberships, rosters | ~3,000 | 1 |
+| **total, with WAL and bloat** | | **~40 MB/year** |
+
+That is **0.2 GB after five years**. Uploads are club logos — a handful of files. Invoices are
+rendered on demand and never stored. Nothing here grows into a problem.
+
+So do not size for the data. Size for the **processes**.
+
+### What actually consumes the box
+
+Measured, running this app under gunicorn with `DEBUG=False`:
+
+| | memory |
+|---|---|
+| gunicorn master + 3 workers | **~270 MB** (~54 MB per worker) |
+| PostgreSQL (default `shared_buffers`) | ~200–400 MB |
+| Redis (cache only) | < 50 MB |
+| Caddy | ~30 MB |
+| OS + Docker daemon | ~400 MB |
+| **steady state** | **~1.0–1.2 GB** |
+
+2 GB would run it. 4 GB is the recommendation for three reasons, all of which are the kind of
+thing that bites at the worst moment:
+
+1. **`docker compose build` is the memory spike, not serving.** npm, uv and `collectstatic`
+   together will OOM a 2 GB box that is also running Postgres. Either take the 4 GB, or build
+   the image elsewhere and pull it.
+2. **Rendering an invoice loads WeasyPrint.** It is imported lazily (which is why the workers
+   measure 54 MB and not 150), so pango and its fonts land in whichever worker renders a PDF —
+   expect that worker to grow by ~50–100 MB the first time someone downloads an invoice.
+3. **Headroom is Postgres's page cache.** With 200 MB of data and 4 GB of RAM, the entire
+   database lives in cache and the disk is never touched for reads.
+
+### Disk
+
+| | |
+|---|---|
+| Docker images (app ~1 GB with pango, postgres, redis, caddy) | ~1.5 GB |
+| Build cache | 2–4 GB |
+| Database, 5 years | < 0.5 GB |
+| Backups: 14 daily compressed dumps | < 0.5 GB |
+| Logs | ~1 GB |
+| **40 GB is roomy; 20 GB works** | |
+
+### CPU and concurrency
+
+2 vCPU. Three workers × four threads is twelve concurrent requests, against a peak of "the
+whole club checks the Saturday line-up at 09:00" — perhaps a few hundred requests over a few
+minutes. This workload is not CPU-bound; the one CPU-heavy operation is PDF rendering, which
+happens a handful of times a month.
+
+### When to grow
+
+Not at "more members" — at these:
+
+- **Uploads become real content** (photo galleries, documents). Media, not rows, is what makes
+  storage grow, and it is also the trigger for moving to S3.
+- **Attendance passes a few million rows** (~20 clubs at this rate, i.e. several years out).
+  Add an index before adding a server.
+- **You want zero-downtime deploys.** That is a second app node, not a bigger one.
+
+## For fun: three nodes on AWS
+
+Wildly over-engineered for 1000 members, but here is what it looks like — and what it costs.
+
+### The layout
+
+```
+Route 53 (rosterchief.app + *.rosterchief.app)
+        |
+   ACM certificate (wildcard, free)
+        |
+Application Load Balancer  (TLS terminates here)
+        |
+   +----+----+----+
+   |         |    |
+ ECS task  task  task        3 × Fargate, one per AZ, same image
+   |         |    |
+   +----+----+----+
+        |
+   +----+---------------+----------------+
+   |                    |                |
+ RDS PostgreSQL   ElastiCache Redis    S3 (media)
+ (Multi-AZ)       (cache.t4g.micro)    + CloudFront (optional)
+```
+
+**The one genuinely nice thing AWS gives you here: ACM issues the wildcard certificate for
+free, with DNS validation in Route 53.** The whole DNS-01 dance disappears — no Caddy plugin,
+no API token, no renewal. The ALB terminates TLS and forwards to the tasks. That is the single
+biggest simplification versus the VPS.
+
+### What changes in the app
+
+Nothing in the code. Only environment:
+
+| | |
+|---|---|
+| `DJANGO_DATABASE_URL` | the RDS endpoint |
+| `DJANGO_REDIS_URL` | the ElastiCache endpoint |
+| `AWS_STORAGE_BUCKET_NAME` | the media bucket — **required** now, three nodes cannot share a disk |
+| `SECURE_PROXY_SSL_HEADER` | already set; the ALB sends `X-Forwarded-Proto` |
+| health check | point the target group at **`/healthz`** — that is what it is for |
+
+Sessions are database-backed, so **no sticky sessions**: any task can serve any request.
+
+**Scheduled jobs get better here.** EventBridge Scheduler firing a one-off ECS task solves the
+"run it on exactly one node" problem properly — no cron on three boxes racing each other:
+
+```
+EventBridge (cron: 0 6 * * ? *) -> ECS RunTask -> archive_overdue_clubs --commit
+```
+
+Backups become RDS automated snapshots + PITR, and `deploy/backup.sh` retires — though the
+*restore rehearsal* does not. Snapshots you have never restored are still a hypothesis.
+
+### Monthly cost (eu-central-1, on-demand, indicative)
+
+| | | $/month |
+|---|---|---:|
+| ALB | fixed + a little LCU | ~22 |
+| ECS Fargate | 3 × (0.5 vCPU, 1 GB) | ~54 |
+| RDS PostgreSQL | `db.t4g.micro`, 20 GB gp3, single-AZ | ~17 |
+| ElastiCache | `cache.t4g.micro` | ~12 |
+| S3 + CloudFront | a few GB, low traffic | ~2 |
+| Route 53 | hosted zone + queries | ~1 |
+| ECR, CloudWatch logs | small | ~3 |
+| | **single-AZ total** | **~110** |
+| RDS Multi-AZ | doubles the database | +17 |
+| | **highly-available total** | **~130** |
+
+**Watch the NAT Gateway.** If the tasks sit in private subnets and reach the internet through
+a NAT Gateway, add **~$32/month per AZ plus data charges** — for three AZs that is more than
+the compute. Either put the tasks in public subnets with tight security groups, or use VPC
+endpoints for ECR/S3/CloudWatch. It is the single most common surprise on an AWS bill of this
+shape.
+
+Prices are indicative and move; check the calculator before committing.
+
+### The honest comparison
+
+| | | |
+|---|---|---|
+| **Hetzner CX22** | 2 vCPU, 4 GB, 40 GB | **~€5/month** |
+| **AWS, three nodes** | as above | **~$110–130/month** |
+
+Roughly **25×**, for a workload whose database is 200 MB after five years. What the money buys
+is real — managed Postgres with PITR, three AZs, no box to patch, free wildcard certificates —
+but it is bought for *resilience*, not for capacity. At 1000 members you are paying for the
+insurance, not the compute.
+
+A reasonable middle: one VPS now, and move Postgres to a managed service (RDS, or a €15/month
+managed Postgres) the day the data starts to matter more than the uptime. That is the change
+that is painful to do late, and everything else in this document is already designed for it.
+
 ## Going multi-server
 
 Nothing in the code changes. What changes is where the services live:
