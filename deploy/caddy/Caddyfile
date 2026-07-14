@@ -1,0 +1,24 @@
+{
+	email {$ACME_EMAIL}
+}
+
+# The bare domain (control panel, admin, auth) and every club subdomain, on one certificate.
+{$ROSTERCHIEF_BASE_DOMAIN}, *.{$ROSTERCHIEF_BASE_DOMAIN} {
+	tls {
+		dns cloudflare {$CLOUDFLARE_API_TOKEN}
+	}
+
+	encode zstd gzip
+
+	# X-Forwarded-Proto is what SECURE_PROXY_SSL_HEADER reads. Without it Django believes every
+	# request is plain HTTP: request.is_secure() goes false, WebAuthn disagrees with the browser
+	# about the origin, and the SSL redirect becomes a loop.
+	reverse_proxy web:8000 {
+		header_up X-Forwarded-Proto {scheme}
+		header_up X-Real-IP {remote_host}
+	}
+
+	log {
+		output stdout
+	}
+}

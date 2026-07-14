@@ -2,8 +2,9 @@
 
 /* Scan Django templates for utility classes (Tailwind's auto-detection doesn't
    know about our template dirs). */
-@source "../../templates";
-@source "../../controlpanel";
+@source "../templates";
+@source "../controlpanel";
+@source "../billing";
 
 /* daisyUI: light is the default, dark applies automatically when the OS asks
    for it. An explicit data-theme on <html> (set by the toggle) overrides both. */

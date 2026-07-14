@@ -1,0 +1,13 @@
+.git
+.venv
+node_modules
+staticfiles
+media
+db.sqlite3
+.env
+*.pyc
+__pycache__
+.coverage
+.idea
+.ruff_cache
+ARCHITECTURE.pdf
