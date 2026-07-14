@@ -67,6 +67,22 @@ docker compose run --rm web python manage.py check --deploy
 **off** in code, because defaulting them to `not DEBUG` would redirect every test request to
 https and break the suite anywhere `DEBUG` is unset.
 
+### One dependency comes from git
+
+`django-lucide` is our fork (`[tool.uv.sources]` in `pyproject.toml`, pinned by `uv.lock` to a
+commit), so **uv shells out to `git`** to fetch it. `python:*-slim` has no git, which is why
+the image builds the virtualenv in a **separate stage** that installs git, and copies the
+finished `.venv` into a runtime stage that does not have it — a build tool has no business in
+a production image.
+
+Two consequences worth knowing:
+
+- The build needs **network access to GitHub**, and the fork must stay reachable. If that ever
+  becomes awkward (a private runner, an air-gapped build), publish the fork to a private index
+  or vendor the wheel, and the git stage disappears.
+- `uv.lock` pins the exact commit, so the build is reproducible even though the source is a
+  branch. Don't build with `--no-frozen`.
+
 The first `docker compose up` will take a minute or two: Caddy is provisioning the wildcard
 certificate over DNS-01, and DNS propagation is not instant. Watch it with
 `docker compose logs -f caddy`.

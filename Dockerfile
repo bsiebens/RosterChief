@@ -15,7 +15,31 @@ COPY billing ./billing
 RUN npm run build
 
 
-# --- 2. the runtime ----------------------------------------------------------
+# --- 2. the virtualenv -------------------------------------------------------
+# Separate from the runtime for one reason: django-lucide is a *git* dependency (our lucide
+# fork), so uv shells out to git to fetch it. python:*-slim has no git, and installing it in
+# the runtime image would leave a build-time tool — plus its dependency tree — in production
+# for the sake of one package that is already vendored into the venv by then.
+FROM python:3.14-slim AS venv
+
+RUN apt-get update && apt-get install --no-install-recommends -y git ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_PYTHON_DOWNLOADS=never
+
+WORKDIR /app
+
+# Dependencies first: they change far less often than the code, so this layer caches.
+COPY pyproject.toml uv.lock ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --no-install-project
+
+
+# --- 3. the runtime ----------------------------------------------------------
 FROM python:3.14-slim AS app
 
 # WeasyPrint binds to these at import: no pango, no invoices. This is also why building the
@@ -31,25 +55,18 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
         curl \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
-
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    UV_COMPILE_BYTECODE=1 \
-    UV_LINK_MODE=copy \
     PATH="/app/.venv/bin:$PATH"
 
 WORKDIR /app
 
-# Dependencies first: they change far less often than the code, so this layer caches.
-COPY pyproject.toml uv.lock ./
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --no-install-project
+# The venv arrives fully built. Same base image, so the compiled wheels inside it are ABI
+# compatible; nothing is re-resolved here, and no git is needed to run what git fetched.
+COPY --from=venv /app/.venv ./.venv
 
 COPY . .
 COPY --from=css /build/static/css/app.css ./static/css/app.css
-
-RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-dev
 
 # collectstatic needs a settings module that imports: a throwaway key, never used at runtime.
 RUN DJANGO_SECRET_KEY=build-only-not-a-secret \
