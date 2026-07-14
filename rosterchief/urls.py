@@ -15,7 +15,11 @@ from django.views.generic import RedirectView
 
 from club.views import root
 
+from .health import healthz
+
 urlpatterns = [
+    # No auth and no tenant: the proxy and the load balancer must reach it on any host.
+    path("healthz", healthz, name="healthz"),
     path("admin/login/", RedirectView.as_view(pattern_name="account_login", query_string=True), name="admin_login_redirect"),
     path("admin/", admin.site.urls),
     path("accounts/", include("allauth.urls")),
