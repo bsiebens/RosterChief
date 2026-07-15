@@ -298,6 +298,35 @@ A   *.test.rosterchief.app  -> <server ip>
 The compose project is named `rosterchief-test`, so its containers and volumes never collide
 with a production stack on the same host.
 
+### Deploying with one command
+
+Once the server has the repo cloned at `/home/bernard/RosterChief` and its two env files in
+place, `deploy/deploy-dev.sh` does a full deploy over SSH:
+
+```bash
+deploy/deploy-dev.sh            # deploy the current branch
+BRANCH=main deploy/deploy-dev.sh
+deploy/deploy-dev.sh --push     # push the branch first, then deploy
+```
+
+It runs from your machine and does the work on the server in one SSH session: fetch the pushed
+branch (a hard reset to `origin/<branch>`, since a deploy target only receives deploys), build
+the image, run migrations *explicitly*, restart only `web`, and wait for `/healthz`.
+
+It refuses to deploy a branch whose local commits are not pushed — the server pulls from git,
+so unpushed work would ship stale code silently. Override the host, user, directory or branch
+with the `SSH_HOST` / `SSH_USER` / `REMOTE_DIR` / `BRANCH` environment variables.
+
+First-time setup on the server, once:
+
+```bash
+git clone git@git.siebens.org:bernard/RosterChief.git /home/bernard/RosterChief
+cd /home/bernard/RosterChief
+cp .env.compose.example .env             # fill in POSTGRES_PASSWORD etc.
+cp .env.production.example .env.production
+# then add the reverse_proxy site block to the host's Caddy (see above)
+```
+
 ## Automated backups
 
 `deploy/backup.sh` dumps the database, tars the uploads while they are still on local disk,
