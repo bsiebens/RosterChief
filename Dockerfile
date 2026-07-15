@@ -57,7 +57,11 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PATH="/app/.venv/bin:$PATH"
+    PATH="/app/.venv/bin:$PATH" \
+    # gunicorn 26's control server puts a socket in $HOME. The app user has no home dir, so
+    # without this it logs "Permission denied: /home/rosterchief" on every boot. /app is
+    # already the workdir and owned by the app user, so point HOME there.
+    HOME="/app"
 
 WORKDIR /app
 
