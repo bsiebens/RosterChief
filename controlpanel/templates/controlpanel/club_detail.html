@@ -24,6 +24,7 @@
 
 {% block actions %}
     <a class="btn btn-outline gap-2" href="{% url 'controlpanel:club_update' club.pk %}">{% lucide "pencil" size=16 %} Edit</a>
+    <a class="btn btn-primary gap-2" href="https://{{ club.slug }}.rosterchief.app">{% lucide "external-link" size=16 %} Open</a>
     {% if club.is_archived %}
         <form method="post" action="{% url 'controlpanel:club_restore' club.pk %}">
             {% csrf_token %}
