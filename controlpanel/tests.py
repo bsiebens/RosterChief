@@ -17,7 +17,7 @@ from waffle import get_waffle_flag_model, get_waffle_switch_model
 
 from billing.models import GRACE_DAYS, Due, Tier, TierPrice
 from billing.services import BillingError
-from billing.services.dues import record_payment, subscribe
+from billing.services.dues import record_payment, subscribe, waive
 from club.models import Club, ClubMembership, ClubRole, Season
 from events.models import Attendance, Event
 from features.models import Maintenance
@@ -1139,12 +1139,27 @@ class PlatformDuesMetricTests(TestCase):
 
         club = clubs_with_health().get(pk=self.club.pk)
 
-        self.assertEqual(club.paid_until, due.period_end)
+        self.assertEqual(club.covered_until, due.period_end)
+        self.assertEqual(club.covered_status, Due.Status.PAID)
 
-    def test_a_club_that_owes_has_no_paid_until(self):
+    def test_a_waived_period_also_shows_its_cover_end(self):
+        # Waived is settled too — the club is covered for that time, so its end date shows,
+        # badged "waived" rather than "paid".
+        subscribe(self.club, self.tier)
+        due = self.club.dues.first()
+        waive(due)
+
+        club = clubs_with_health().get(pk=self.club.pk)
+
+        self.assertEqual(club.covered_until, due.period_end)
+        self.assertEqual(club.covered_status, Due.Status.WAIVED)
+
+    def test_a_club_that_owes_has_no_cover(self):
         subscribe(self.club, self.tier)  # unpaid
 
-        self.assertIsNone(clubs_with_health().get(pk=self.club.pk).paid_until)
+        club = clubs_with_health().get(pk=self.club.pk)
+        self.assertIsNone(club.covered_until)
+        self.assertIsNone(club.covered_status)
 
     def test_the_health_table_still_costs_one_query_with_billing_on_it(self):
         subscribe(self.club, self.tier)

@@ -11,7 +11,7 @@ from decimal import Decimal
 
 from allauth.mfa.models import Authenticator
 from django.contrib.auth import get_user_model
-from django.db.models import Count, DecimalField, Exists, F, IntegerField, OuterRef, Q, Subquery, Sum, Value
+from django.db.models import Count, DateField, DecimalField, Exists, F, IntegerField, OuterRef, Q, Subquery, Sum, Value
 from django.db.models.functions import Coalesce, TruncMonth
 from django.utils import timezone
 from waffle import get_waffle_flag_model
@@ -64,6 +64,8 @@ def clubs_with_health(queryset=None, today=None, now=None):
     clubs = Club.objects.active() if queryset is None else queryset
 
     in_season = Q(season__start_date__lte=today, season__end_date__gte=today)
+    # A period the club is covered for, most recent first — paid or waived, both settled.
+    _covered = Due.objects.filter(club=OuterRef("pk"), status__in=(Due.Status.PAID, Due.Status.WAIVED)).order_by("-period_end")
     managed_this_season = Q(
         staff_assignments__season__start_date__lte=today,
         staff_assignments__season__end_date__gte=today,
@@ -84,9 +86,13 @@ def clubs_with_health(queryset=None, today=None, now=None):
             dues_owed=_subquery(Due.objects.filter(status__in=Due.OWING), Sum(F("amount") - F("amount_paid")), DecimalField(max_digits=10, decimal_places=2)),
             dues_grace_until=Subquery(Due.objects.filter(club=OuterRef("pk"), status__in=Due.OWING).order_by("grace_until").values("grace_until")[:1]),
             dues_period_end=Subquery(Due.objects.filter(club=OuterRef("pk"), status__in=Due.OWING).order_by("period_end").values("period_end")[:1]),
-            # How far a fully-paid club is covered: the furthest-out PAID period end — the day
-            # grace would start if nothing is renewed. Null when the club owes, or was never billed.
-            paid_until=Subquery(Due.objects.filter(club=OuterRef("pk"), status=Due.Status.PAID).order_by("-period_end").values("period_end")[:1]),
+            # How far the club is covered: the furthest-out period that is settled. PAID and
+            # WAIVED both mean nothing is owed for that period, and its end is the day grace
+            # would start if nothing renews — so both count. `covered_status` is read from the
+            # same top row, so the table can badge "paid" vs "waived". Null when the club owes
+            # or was never billed.
+            covered_until=Subquery(_covered.values("period_end")[:1], output_field=DateField()),
+            covered_status=Subquery(_covered.values("status")[:1]),
         )
         .annotate(teams_without_coach=F("team_count") - F("teams_managed"))
         .order_by("name")

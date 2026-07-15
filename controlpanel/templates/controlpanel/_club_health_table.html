@@ -87,11 +87,22 @@
                         <div class="flex flex-row gap-2 items-center justify-end">
                             {% if not club.dues_owed %}
                                 {% if club.tier_name %}
-                                    {% comment %} paid_until is the current period's end — the day grace would start if nothing renews. On its own row under the badge. {% endcomment %}
+                                    {% comment %}
+                                        Not owing and on a plan. covered_until is the settled period's end — the day
+                                        grace would start if nothing renews — shown on its own row under the badge,
+                                        for a paid period AND a waived one (both cover the club, they just differ in
+                                        how). No covered period at all (only cancelled dues, say) shows a dash.
+                                    {% endcomment %}
                                     <div class="flex flex-col items-end gap-1">
-                                        <span class="badge badge-success">paid</span>
-                                        {% if club.paid_until %}
-                                            <span class="whitespace-nowrap text-xs opacity-60">until {{ club.paid_until|date:"j M Y" }}</span>
+                                        {% if club.covered_status == "waived" %}
+                                            <span class="badge badge-ghost">waived</span>
+                                        {% elif club.covered_until %}
+                                            <span class="badge badge-success">paid</span>
+                                        {% else %}
+                                            <span class="badge badge-ghost badge-outline">&mdash;</span>
+                                        {% endif %}
+                                        {% if club.covered_until %}
+                                            <span class="whitespace-nowrap text-xs opacity-60">until {{ club.covered_until|date:"j M Y" }}</span>
                                         {% endif %}
                                     </div>
                                 {% else %}
