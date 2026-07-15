@@ -457,3 +457,34 @@ class RenewalTests(BillingTestBase):
         out = StringIO()
         call_command("renew_subscriptions", *args, stdout=out)
         return out.getvalue()
+
+
+class RenewedButUnpaidTests(BillingTestBase):
+    """A club auto-renewed that never pays the new fee flows through the ordinary
+    unpaid -> grace -> overdue -> archive path. Renewal creates a normal Due; it does not
+    create a special case, and the safety net that the never-billed club slipped past now
+    fires, because there IS an unpaid due."""
+
+    def lapsed_club(self):
+        """A club on its first, PAID period — far enough back that a renewal from its end is
+        itself already past grace, so only the renewal's payment state decides the outcome."""
+        club = Club.objects.create(name="Renewed FC")
+        subscribe(club, self.tier, start=self.today - datetime.timedelta(days=800))
+        first = club.dues.first()
+        record_payment(first, first.amount)  # the FIRST period is settled; only the renewal is in question
+        return club
+
+    def test_an_unpaid_renewal_becomes_overdue_and_archivable(self):
+        club = self.lapsed_club()
+        renewed = renew(club.subscription)  # continues from the first period's end, unpaid
+
+        self.assertTrue(renewed.is_overdue(self.today))
+        self.assertIn(renewed, dues_overdue(self.today))
+        self.assertIn(club, [d.club for d in archivable_clubs(self.today)])
+
+    def test_a_paid_renewal_is_not_chased(self):
+        club = self.lapsed_club()
+        renewed = renew(club.subscription)
+        record_payment(renewed, renewed.amount)
+
+        self.assertNotIn(club, [d.club for d in archivable_clubs(self.today)])

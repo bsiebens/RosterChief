@@ -751,8 +751,8 @@ class DashboardMetricsTests(ControlPanelTestBase):
 
         self.assertContains(response, "No current season")
         self.assertContains(response, "MFA pending")
+        self.assertContains(response, "Payment pending")
         self.assertContains(response, 'id="signups-chart"')
-        self.assertContains(response, 'id="revenue-chart"')
         self.assertContains(response, "js/chart.js")
         self.assertIn("signups", response.context["charts"])
 
@@ -1014,18 +1014,17 @@ class ClubHealthTableTests(TestCase):
 
         response = self.client.get(reverse("controlpanel:dashboard"))
 
-        self.assertContains(response, "Owed")
-        self.assertContains(response, "Upcoming")
-        self.assertContains(response, "Unpaid")
+        # Health, not vanity: Plan and Dues each name something to act on, next to the counts.
+        for column in ("Members", "Admins", "Teams", "Events", "Plan", "Dues"):
+            self.assertContains(response, f">{column}</th>")
 
 
 class ClubListHealthTests(ControlPanelTestBase):
     def test_the_list_shows_the_same_health_columns_as_the_dashboard(self):
         response = self.client.get(reverse("controlpanel:club_list"))
 
-        self.assertContains(response, "Owed")
-        self.assertContains(response, "Upcoming")
-        self.assertContains(response, "Unpaid")
+        for column in ("Members", "Admins", "Teams", "Events", "Plan", "Dues"):
+            self.assertContains(response, f">{column}</th>")
         self.assertTemplateUsed(response, "controlpanel/_club_health_table.html")
 
     def test_an_archived_club_is_badged_archived_rather_than_dormant(self):
@@ -1096,6 +1095,24 @@ class PlatformDuesMetricTests(TestCase):
         subscribe(self.club, self.tier)
 
         self.assertEqual(platform_attention()["clubs_unbilled"], 0)
+
+    def test_renewals_pending_counts_clubs_about_to_lapse(self):
+        # ~0 in normal running; a number here means the renewal cron has stopped.
+        self.assertEqual(platform_attention()["renewals_pending"], 0)
+
+        subscribe(self.club, self.tier, start=self.today - datetime.timedelta(days=350))  # ends in 15 days
+
+        self.assertEqual(platform_attention()["renewals_pending"], 1)
+
+    def test_the_dashboard_surfaces_pending_renewals(self):
+        # The whole point of the KPI: a club about to go free is visible, though nothing is
+        # owed yet, so no other figure on the page would show it.
+        subscribe(self.club, self.tier, start=self.today - datetime.timedelta(days=350))
+        staff = User.objects.create_user(email="staff@example.com", password="pw-secret-123", is_staff=True)
+        enrol_mfa(staff)
+        self.client.force_login(staff)
+
+        self.assertContains(self.client.get(reverse("controlpanel:dashboard")), "awaiting renewal")
 
     def test_platform_dues_and_club_shop_money_are_different_charts(self):
         subscribe(self.club, self.tier)

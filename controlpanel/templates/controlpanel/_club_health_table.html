@@ -13,65 +13,98 @@
         <thead>
             <tr>
                 <th>Club</th>
+                <th></th>
                 <th class="text-right">Members</th>
-                <th class="text-right">Unpaid</th>
-                <th class="text-right">Owed</th>
-                <th>Plan</th>
-                <th class="text-right">Dues</th>
-                <th class="text-right">Teams</th>
-                <th class="text-right">Upcoming</th>
                 <th class="text-right">Admins</th>
+                <th class="text-right">Teams</th>
+                <th class="text-right">Events</th>
+                <th class="text-right">Plan</th>
+                <th class="text-right">Dues</th>
+                <th></th>
             </tr>
         </thead>
         <tbody>
             {% for club in clubs %}
                 <tr>
                     <td>
-                        <a class="link link-hover font-medium" href="{% url 'controlpanel:club_detail' club.pk %}">{{ club.name }}</a>
-                        <div class="mt-1 flex flex-wrap items-center gap-1">
-                            <span class="text-xs opacity-60">{{ club.slug }}</span>
+                        <div class="flex flex-row items-center gap-4">
+                            <div>
+                                {% if club.logo %}
+                                    <img class="h-12 w-12 object-contain" src="{{ club.logo.url }}" alt="{{ club.name }}">
+                                {% else %}
+                                    <div class="avatar avatar-placeholder">
+                                        <div class="w-12 rounded-full bg-neutral text-neutral-content">
+                                            <span>{{ club.initials }}</span>
+                                        </div>
+                                    </div>
+                                {% endif %}
+                            </div>
+
+                            <div class="flex flex-col gap-1">
+                                <a class="link link-hover font-semibold tracking-wide" href="{% url "controlpanel:club_detail" club.pk %}">{{ club.name }}</a>
+                                <div class="text-xs opacity-60">{{ club.slug }}.rosterchief.app</div>
+                            </div>
+                        </div>
+                    </td>
+
+                    <td>
+                        <div class="flex flex-row gap-2">
                             {% if club.is_archived %}
-                                {% comment %}
-                                    An archived club's subdomain does not resolve, so "dormant" and
-                                    "no season" would be noise: of course nothing is scheduled.
-                                {% endcomment %}
-                                <span class="badge badge-warning badge-xs gap-1">{% lucide "archive" size=10 %} Archived</span>
+                                <span class="badge badge-warning">{% lucide "archive" size=14 %} archived</span>
                             {% else %}
-                                {% if not club.has_season %}<span class="badge badge-warning badge-xs gap-1">{% lucide "calendar-x" size=10 %} No season</span>{% endif %}
-                                {% if not club.upcoming_events %}<span class="badge badge-ghost badge-xs gap-1">{% lucide "moon-star" size=10 %} Dormant</span>{% endif %}
+                                {% if not club.has_season %}
+                                    <span class="badge badge-warning">{% lucide "calendar-x" size=14 %} no seasons</span>
+                                {% endif %}
+
+                                {% if not club.upcoming_events %}
+                                    <span class="badge badge-ghost badge-outline">{% lucide "moon-star" size=14 %}dormant</span>
+                                {% endif %}
                             {% endif %}
                         </div>
                     </td>
+
                     <td class="text-right tabular-nums">{{ club.active_members }}</td>
-                    <td class="text-right tabular-nums {% if club.unpaid_members %}text-warning{% endif %}">{{ club.unpaid_members }}</td>
-                    <td class="text-right tabular-nums {% if club.outstanding %}font-semibold text-error{% endif %}">€{{ club.outstanding|floatformat:2 }}</td>
-                    <td>
-                        {% if club.tier_name %}
-                            <span class="text-sm">{{ club.tier_name }}</span>
-                        {% else %}
-                            <span class="badge badge-warning badge-xs">Not billed</span>
-                        {% endif %}
-                    </td>
                     <td class="text-right tabular-nums">
-                        {% if not club.dues_owed %}
-                            {% if club.tier_name %}<span class="badge badge-success badge-xs">Paid</span>{% endif %}
-                        {% else %}
-                            <span class="font-semibold">€{{ club.dues_owed|floatformat:2 }}</span>
-                            {% if club.dues_grace_until < today %}
-                                <span class="badge badge-error badge-xs">Overdue</span>
-                            {% elif club.dues_period_end < today %}
-                                <span class="badge badge-warning badge-xs">Grace</span>
+                        <div class="flex flex-row gap-2 items-center justify-end">
+                            {% if not club.admin_count %}
+                                <span class="text-error">{% lucide "triangle-alert" size=16 %}</span>
                             {% endif %}
-                        {% endif %}
+                            <span class="{% if not club.admin_count %}font-bold text-error{% endif %}">{{ club.admin_count }}</span>
+                        </div>
                     </td>
-                    <td class="text-right tabular-nums">
-                        {{ club.team_count }}
-                        {% if club.teams_without_coach %}
-                            <span class="badge badge-error badge-xs ml-1" title="Teams with nobody able to pick the squad">{{ club.teams_without_coach }} no coach</span>
-                        {% endif %}
-                    </td>
+                    <td class="text-right tabular-nums">{{ club.team_count }}</td>
                     <td class="text-right tabular-nums">{{ club.upcoming_events }}</td>
-                    <td class="text-right tabular-nums {% if not club.admin_count %}text-error{% endif %}">{{ club.admin_count }}</td>
+
+                    <td class="text-right">
+                        {% if club.tier_name %}
+                            <span class="badge badge-accent">{{ club.tier_name|lower }}</span>
+                        {% else %}
+                            <span class="badge badge-ghost badge-outline">n/a</span>
+                        {% endif %}
+                    </td>
+
+                    <td class="text-right">
+                        <div class="flex flex-row gap-2 items-center justify-end">
+                            {% if not club.dues_owed %}
+                                {% if club.tier_name %}
+                                    <span class="badge badge-success">paid</span>
+                                {% else %}
+                                    <span class="badge badge-ghost badge-outline">n/a</span>
+                                {% endif %}
+                            {% else %}
+                                <span class="font-semibold">€{{ club.dues_owed|floatformat:2 }}</span>
+                                {% if club.dues_grace_until < today %}
+                                    <span class="badge badge-error">overdue</span>
+                                {% elif club.dues_period_end < today %}
+                                    <span class="badge badge-warning">grace</span>
+                                {% endif %}
+                            {% endif %}
+                        </div>
+                    </td>
+
+                    <td>
+                        <a class="btn btn-sm gap-2" href="{% url "controlpanel:club_detail" club.pk %}">{% lucide "pencil" size=14 %} Edit</a>
+                    </td>
                 </tr>
             {% empty %}
                 <tr>
