@@ -20,6 +20,7 @@
                 <th class="text-right">Events</th>
                 <th class="text-right">Plan</th>
                 <th class="text-right">Dues</th>
+                <th class="text-right">Plan end</th>
                 <th></th>
             </tr>
         </thead>
@@ -79,7 +80,7 @@
                         {% if club.tier_name %}
                             <span class="badge badge-accent">{{ club.tier_name|lower }}</span>
                         {% else %}
-                            <span class="badge badge-ghost badge-outline">n/a</span>
+                            -
                         {% endif %}
                     </td>
 
@@ -95,18 +96,15 @@
                                     {% endcomment %}
                                     <div class="flex flex-col items-end gap-1">
                                         {% if club.covered_status == "waived" %}
-                                            <span class="badge badge-ghost">waived</span>
+                                            <span class="badge badge-ghost badge-outline">waived</span>
                                         {% elif club.covered_until %}
                                             <span class="badge badge-success">paid</span>
                                         {% else %}
                                             <span class="badge badge-ghost badge-outline">&mdash;</span>
                                         {% endif %}
-                                        {% if club.covered_until %}
-                                            <span class="whitespace-nowrap text-xs opacity-60">until {{ club.covered_until|date:"j M Y" }}</span>
-                                        {% endif %}
                                     </div>
                                 {% else %}
-                                    <span class="badge badge-ghost badge-outline">n/a</span>
+                                    -
                                 {% endif %}
                             {% else %}
                                 <span class="font-semibold">€{{ club.dues_owed|floatformat:2 }}</span>
@@ -117,6 +115,10 @@
                                 {% endif %}
                             {% endif %}
                         </div>
+                    </td>
+
+                    <td class="text-right">
+                        <span class="whitespace-nowrap">{{ club.covered_until|date:"j M Y"|default:"-" }}</span>
                     </td>
 
                     <td>
