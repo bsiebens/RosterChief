@@ -30,6 +30,12 @@ SECRET_KEY = config("DJANGO_SECRET_KEY")
 DEBUG = config("DJANGO_DEBUG", default=False, cast=bool)
 
 ALLOWED_HOSTS = config("DJANGO_ALLOWED_HOSTS", cast=Csv(), default="")
+# The loopback is always allowed, and it must be: the container's own healthcheck and the
+# deploy probe hit /healthz over 127.0.0.1/localhost, before any proxy has supplied a real
+# Host header. Without this they get a 400 and the container is marked unhealthy forever.
+# It widens nothing — gunicorn binds to the loopback only; the proxy owns the public domains.
+ALLOWED_HOSTS += [host for host in ("localhost", "127.0.0.1") if host not in ALLOWED_HOSTS]
+
 INTERNAL_IPS = config("DJANGO_INTERNAL_IPS", cast=Csv(), default="127.0.0.1")
 
 CSRF_TRUSTED_ORIGINS = config("DJANGO_CSRF_TRUSTED_ORIGINS", cast=Csv(), default="")

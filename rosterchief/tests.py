@@ -78,3 +78,11 @@ class HealthCheckTests(SimpleTestCase):
         response = self.client.get(reverse("healthz"))
 
         self.assertIn("no-cache", response["Cache-Control"])
+
+    @override_settings(ALLOWED_HOSTS=["example.com", "localhost", "127.0.0.1"])
+    def test_it_answers_over_the_loopback(self):
+        # The container healthcheck and the deploy probe hit it as 127.0.0.1/localhost, before
+        # a proxy supplies a real Host. If ALLOWED_HOSTS rejects those, /healthz 400s and the
+        # container is unhealthy forever — which is exactly how the first deploy failed.
+        for host in ("127.0.0.1", "localhost"):
+            self.assertEqual(self.client.get(reverse("healthz"), HTTP_HOST=host).status_code, 200, host)
