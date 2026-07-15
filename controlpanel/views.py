@@ -414,7 +414,7 @@ class SubscribeClubView(PlatformStaffRequiredMixin, FormView):
                 subscription.save()
                 messages.success(self.request, f"{club} is now on {subscription.tier}. The current period keeps the amount it was billed at.")
             else:
-                subscribe(club, form.cleaned_data["tier"], start=form.cleaned_data.get("start"), auto_archive=form.cleaned_data["auto_archive"])
+                subscribe(club, form.cleaned_data["tier"], start=form.cleaned_data.get("start"), auto_archive=form.cleaned_data["auto_archive"], auto_renew=form.cleaned_data["auto_renew"])
                 messages.success(self.request, f"{club} is on {form.cleaned_data['tier']}. Its first period is open.")
         except BillingError as error:
             messages.error(self.request, str(error))

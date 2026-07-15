@@ -6,17 +6,17 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from django.db import transaction
-from django.db.models import Sum
+from django.db.models import DateField, OuterRef, Subquery, Sum
 from django.utils import timezone
 
-from billing.models import ZERO, Due, DuePayment, Subscription, Tier
+from billing.models import RENEWAL_LEAD_DAYS, ZERO, Due, DuePayment, Subscription, Tier
 from billing.services import BillingError
 from billing.services.invoices import issue_invoice
 
 
-def subscribe(club, tier: Tier, *, start: date | None = None, auto_archive: bool = True) -> Subscription:
+def subscribe(club, tier: Tier, *, start: date | None = None, auto_archive: bool = True, auto_renew: bool = True) -> Subscription:
     """Put a club on a tier and open its first period."""
-    subscription, _created = Subscription.objects.update_or_create(club=club, defaults={"tier": tier, "auto_archive": auto_archive})
+    subscription, _created = Subscription.objects.update_or_create(club=club, defaults={"tier": tier, "auto_archive": auto_archive, "auto_renew": auto_renew})
     open_period(club, start=start)
 
     return subscription
@@ -151,3 +151,36 @@ def reactivate(club, *, start: date | None = None) -> Due:
     club.restore()
 
     return open_period(club, start=start)
+
+
+def subscriptions_due_for_renewal(today: date | None = None, lead_days: int = RENEWAL_LEAD_DAYS):
+    """Clubs whose next period should be issued now.
+
+    Idempotent by construction: a club that has just been renewed has a latest period ending a
+    year out, which is past the horizon, so it cannot be picked up twice. Running the job twice
+    a day is harmless.
+
+    A subscription with no period at all (its only due was cancelled) counts too — a club on a
+    plan and billed for nothing is the leak this whole job exists to close.
+    """
+    today = today or timezone.localdate()
+    horizon = today + timedelta(days=lead_days)
+
+    latest_period_end = Subquery(
+        Due.objects.filter(club=OuterRef("club")).exclude(status=Due.Status.CANCELLED).order_by("-period_end").values("period_end")[:1],
+        output_field=DateField(),
+    )
+
+    subscriptions = (
+        Subscription.objects.filter(auto_renew=True, club__archived_at__isnull=True)
+        .select_related("club", "tier")
+        .annotate(latest_period_end=latest_period_end)
+        .order_by("club__name")
+    )
+
+    return [subscription for subscription in subscriptions if subscription.latest_period_end is None or subscription.latest_period_end <= horizon]
+
+
+def renew(subscription: Subscription) -> Due:
+    """Open the club's next period, continuing from the last one."""
+    return open_period(subscription.club)

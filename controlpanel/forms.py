@@ -82,7 +82,7 @@ class SubscriptionForm(forms.ModelForm):
 
     class Meta:
         model = Subscription
-        fields = ["tier", "auto_archive", "notes"]
+        fields = ["tier", "auto_renew", "auto_archive", "notes"]
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

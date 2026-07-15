@@ -18,7 +18,7 @@ from waffle import get_waffle_flag_model
 
 from authentication.middleware import ELEVATED_ROLES
 from billing.models import Due, DuePayment, Subscription
-from billing.services.dues import dues_in_grace, dues_overdue
+from billing.services.dues import dues_in_grace, dues_overdue, subscriptions_due_for_renewal
 from club.models import Club, ClubMembership, ClubRole, Season
 from events.models import Attendance, Event
 from members.models import Member
@@ -141,7 +141,7 @@ def onboarding_funnel():
     return [
         {"label": "Clubs", "count": total, "icon": "building-2"},
         {"label": "With members", "count": sum(1 for club in clubs if club.member_count), "icon": "users"},
-        {"label": "With a team", "count": sum(1 for club in clubs if club.team_count), "icon": "shield"},
+        {"label": "With a team", "count": sum(1 for club in clubs if club.team_count), "icon": "trophy"},
         {"label": "With events", "count": sum(1 for club in clubs if club.event_count), "icon": "calendar-days"},
     ]
 
@@ -172,6 +172,10 @@ def platform_attention():
         "dues_in_grace": dues_in_grace().count(),
         "dues_overdue": dues_overdue().count(),
         "clubs_unbilled": Club.objects.active().filter(subscription__isnull=True).count(),
+        # Normally ~0: the renewal job keeps it there. A number that sits here means cron is
+        # dead, and a club is about to use the platform for free — silently, because nothing is
+        # owed, so no other number on this page would go red.
+        "renewals_pending": len(subscriptions_due_for_renewal()),
     }
 
 

@@ -25,8 +25,8 @@ class TierPriceAdmin(admin.ModelAdmin):
 
 @admin.register(Subscription)
 class SubscriptionAdmin(admin.ModelAdmin):
-    list_display = ["club", "tier", "auto_archive"]
-    list_filter = ["tier", "auto_archive"]
+    list_display = ["club", "tier", "auto_renew", "auto_archive"]
+    list_filter = ["tier", "auto_renew", "auto_archive"]
     search_fields = ["club__name"]
 
 

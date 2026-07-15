@@ -22,6 +22,11 @@ ZERO = Decimal("0.00")
 #: A club stays live for six weeks past the end of an unpaid period before it is archived.
 GRACE_DAYS = 45
 
+#: The next period is issued this long before the current one ends, so the invoice reaches the
+#: club — and can be paid — before the old period lapses. Grace then only matters for genuine
+#: non-payers, rather than for everyone who takes a fortnight to pay a bank transfer.
+RENEWAL_LEAD_DAYS = 30
+
 
 def add_one_year(day: date) -> date:
     """The day one year on. 29 February has no counterpart in a common year, so it falls
@@ -93,6 +98,7 @@ class Subscription(UUIDModel):
 
     club = models.OneToOneField("club.Club", on_delete=models.CASCADE, related_name="subscription", verbose_name=_("club"))
     tier = models.ForeignKey(Tier, on_delete=models.PROTECT, related_name="subscriptions", verbose_name=_("tier"))
+    auto_renew = models.BooleanField(_("auto renew"), default=True, help_text=_("Issue the next period automatically before this one ends. Off means you invoice this club by hand."))
     auto_archive = models.BooleanField(_("auto archive"), default=True, help_text=_("Archive this club when a period goes unpaid past its grace period."))
     notes = models.TextField(_("notes"), blank=True)
 

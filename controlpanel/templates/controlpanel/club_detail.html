@@ -234,6 +234,11 @@
             {% else %}
                 <p class="text-sm opacity-70">
                     On <strong>{{ subscription.tier.name }}</strong>.
+                    {% if subscription.auto_renew %}
+                        Renews automatically 30 days before the period ends.
+                    {% else %}
+                        <span class="badge badge-warning badge-sm">Auto-renew off</span> — you must open each period by hand, or this club uses the platform for free.
+                    {% endif %}
                     {% if subscription.auto_archive %}
                         Archived automatically when a period goes unpaid past its grace period.
                     {% else %}

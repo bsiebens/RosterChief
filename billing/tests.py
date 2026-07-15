@@ -5,6 +5,7 @@ from io import StringIO
 from unittest import mock
 
 from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.test import TestCase
 from django.utils import timezone
 
@@ -12,7 +13,7 @@ from club.models import Club
 
 from .models import GRACE_DAYS, Due, Invoice, Subscription, Tier, TierPrice, add_one_year
 from .services import BillingError
-from .services.dues import archivable_clubs, dues_in_grace, dues_overdue, next_period_start, open_period, reactivate, record_payment, remove_payment, subscribe, waive
+from .services.dues import archivable_clubs, dues_in_grace, dues_overdue, next_period_start, open_period, reactivate, record_payment, remove_payment, renew, subscribe, subscriptions_due_for_renewal, waive
 from .services.invoices import invoice_pdf, issue_invoice, render_pdf
 
 
@@ -335,3 +336,124 @@ class ModelStringTests(BillingTestBase):
         self.assertIn("10.00", str(payment))
         self.assertIn("INV-", str(due.invoice))
         self.assertIn("Standard", str(subscribe(Club.objects.create(name="PSV"), self.tier)))
+
+
+class RenewalTests(BillingTestBase):
+    """The leak this closes: a club whose period lapses with its last due PAID owes nothing,
+    so dues_overdue() is empty, so archive_overdue_clubs never fires — and the club keeps
+    using the platform for free while every number on the dashboard stays green."""
+
+    def ending_in(self, days, **kwargs):
+        """A club whose current period ends `days` from now."""
+        club = Club.objects.create(name=f"Club {days}")
+        subscribe(club, self.tier, start=self.today - datetime.timedelta(days=365 - days), **kwargs)
+        return club
+
+    def test_a_club_nearing_its_end_date_is_picked_up(self):
+        club = self.ending_in(20)
+
+        due = [s.club for s in subscriptions_due_for_renewal()]
+
+        self.assertIn(club, due)
+
+    def test_a_club_with_a_period_beyond_the_horizon_is_left_alone(self):
+        club = self.ending_in(200)
+
+        self.assertNotIn(club, [s.club for s in subscriptions_due_for_renewal()])
+
+    def test_renewing_continues_from_the_last_period(self):
+        club = self.ending_in(20)
+        first = club.dues.first()
+
+        renew(club.subscription)
+
+        latest = club.dues.order_by("-period_start").first()
+        self.assertEqual(latest.period_start, first.period_end + datetime.timedelta(days=1))
+        self.assertEqual(club.dues.count(), 2)
+
+    def test_running_twice_does_not_bill_twice(self):
+        # Idempotent by construction: once renewed, the club's latest period ends a year out,
+        # which is past the horizon.
+        club = self.ending_in(20)
+
+        call_command("renew_subscriptions", stdout=StringIO())
+        call_command("renew_subscriptions", stdout=StringIO())
+
+        self.assertEqual(club.dues.count(), 2)
+
+    def test_a_club_that_opted_out_is_not_renewed(self):
+        club = self.ending_in(20, auto_renew=False)
+
+        self.assertNotIn(club, [s.club for s in subscriptions_due_for_renewal()])
+
+    def test_an_archived_club_is_not_renewed(self):
+        # Reactivation is the way back, and it opens a period of its own.
+        club = self.ending_in(20)
+        club.archive()
+
+        self.assertNotIn(club, [s.club for s in subscriptions_due_for_renewal()])
+
+    def test_the_new_period_is_billed_at_the_price_in_force_then(self):
+        club = self.ending_in(20)
+        TierPrice.objects.create(tier=self.tier, active_from=self.today, amount=Decimal("900.00"))
+
+        due = renew(club.subscription)
+
+        self.assertEqual(due.amount, Decimal("900.00"))  # the new rate
+        self.assertEqual(club.dues.order_by("period_start").first().amount, Decimal("500.00"))  # the old one, untouched
+
+    def test_the_new_period_is_invoiced(self):
+        club = self.ending_in(20)
+
+        due = renew(club.subscription)
+
+        self.assertTrue(due.invoice.number.startswith("INV-"))
+
+    def test_a_dry_run_issues_nothing(self):
+        club = self.ending_in(20)
+        out = StringIO()
+
+        call_command("renew_subscriptions", "--dry-run", stdout=out)
+
+        self.assertEqual(club.dues.count(), 1)
+        self.assertIn("would renew", out.getvalue())
+
+    def test_the_command_issues_by_default(self):
+        # The opposite asymmetry to archiving: NOT acting is the expensive failure here,
+        # because a club that is never billed is never chased either.
+        club = self.ending_in(20)
+
+        call_command("renew_subscriptions", stdout=StringIO())
+
+        self.assertEqual(club.dues.count(), 2)
+
+    def test_an_unpriced_tier_fails_loudly_without_stopping_the_others(self):
+        priced = self.ending_in(20)
+        broken = Club.objects.create(name="Unpriced FC")
+        subscribe(broken, self.tier, start=self.today - datetime.timedelta(days=350))
+        # Its next period starts beyond the last price... by removing every price, it cannot bill.
+        TierPrice.objects.all().delete()
+        cheap = Tier.objects.create(name="Cheap")
+        TierPrice.objects.create(tier=cheap, active_from=self.today - datetime.timedelta(days=1200), amount=Decimal("100.00"))
+        priced.subscription.tier = cheap
+        priced.subscription.save()
+
+        with self.assertRaises(CommandError):
+            call_command("renew_subscriptions", stdout=StringIO(), stderr=StringIO())
+
+        # ...and the club that COULD be billed still was.
+        self.assertEqual(priced.dues.count(), 2)
+
+    def test_a_subscription_with_no_period_at_all_is_renewed(self):
+        club = Club.objects.create(name="Orphan FC")
+        Subscription.objects.create(club=club, tier=self.tier)
+
+        self.assertIn(club, [s.club for s in subscriptions_due_for_renewal()])
+
+    def test_it_says_so_when_there_is_nothing_to_renew(self):
+        self.assertIn("Nothing to renew", self.run_renewal())
+
+    def run_renewal(self, *args):
+        out = StringIO()
+        call_command("renew_subscriptions", *args, stdout=out)
+        return out.getvalue()
