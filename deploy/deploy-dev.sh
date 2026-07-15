@@ -75,7 +75,10 @@ step "Starting db + redis"
 dc up -d db redis
 
 step "Running migrations"
-dc run --rm web python manage.py migrate --noinput
+# -T and </dev/null are load-bearing: this whole script IS ssh's stdin (a heredoc), and
+# `compose run` without them attaches that stdin to the container — swallowing every command
+# below it, so web never restarts and the script exits 0 having done half the job.
+dc run --rm -T web python manage.py migrate --noinput </dev/null
 
 # Recreate only web, with the freshly built image. db and redis keep running untouched.
 step "Restarting web"
