@@ -87,6 +87,10 @@
                         <div class="flex flex-row gap-2 items-center justify-end">
                             {% if not club.dues_owed %}
                                 {% if club.tier_name %}
+                                    {% comment %} paid_until is the current period's end — the day grace would start if nothing renews. {% endcomment %}
+                                    {% if club.paid_until %}
+                                        <span class="whitespace-nowrap text-xs opacity-60">until {{ club.paid_until|date:"j M Y" }}</span>
+                                    {% endif %}
                                     <span class="badge badge-success">paid</span>
                                 {% else %}
                                     <span class="badge badge-ghost badge-outline">n/a</span>

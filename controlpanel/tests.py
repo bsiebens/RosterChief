@@ -1131,6 +1131,21 @@ class PlatformDuesMetricTests(TestCase):
         self.assertEqual(club.tier_name, "Standard")
         self.assertEqual(club.dues_owed, Decimal("500.00"))
 
+    def test_a_fully_paid_club_shows_when_its_cover_ends(self):
+        # The end of the current paid period is the day grace would start if nothing renews.
+        subscribe(self.club, self.tier)
+        due = self.club.dues.first()
+        record_payment(due, due.amount)
+
+        club = clubs_with_health().get(pk=self.club.pk)
+
+        self.assertEqual(club.paid_until, due.period_end)
+
+    def test_a_club_that_owes_has_no_paid_until(self):
+        subscribe(self.club, self.tier)  # unpaid
+
+        self.assertIsNone(clubs_with_health().get(pk=self.club.pk).paid_until)
+
     def test_the_health_table_still_costs_one_query_with_billing_on_it(self):
         subscribe(self.club, self.tier)
         subscribe(Club.objects.create(name="Feyenoord"), self.tier)

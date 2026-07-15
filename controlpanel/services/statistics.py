@@ -84,6 +84,9 @@ def clubs_with_health(queryset=None, today=None, now=None):
             dues_owed=_subquery(Due.objects.filter(status__in=Due.OWING), Sum(F("amount") - F("amount_paid")), DecimalField(max_digits=10, decimal_places=2)),
             dues_grace_until=Subquery(Due.objects.filter(club=OuterRef("pk"), status__in=Due.OWING).order_by("grace_until").values("grace_until")[:1]),
             dues_period_end=Subquery(Due.objects.filter(club=OuterRef("pk"), status__in=Due.OWING).order_by("period_end").values("period_end")[:1]),
+            # How far a fully-paid club is covered: the furthest-out PAID period end — the day
+            # grace would start if nothing is renewed. Null when the club owes, or was never billed.
+            paid_until=Subquery(Due.objects.filter(club=OuterRef("pk"), status=Due.Status.PAID).order_by("-period_end").values("period_end")[:1]),
         )
         .annotate(teams_without_coach=F("team_count") - F("teams_managed"))
         .order_by("name")
