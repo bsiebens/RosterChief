@@ -85,7 +85,7 @@
                         <div class="mb-6 w-full space-y-2">
                             {% for message in messages %}
                                 {% with alert=message|as_alert %}
-                                    <div class="alert alert-soft {{ alert.css }}" role="alert">
+                                    <div class="alert alert-soft border-2 {{ alert.css }}" role="alert">
                                         {% lucide alert.icon size=20 %}
                                         <div>
                                             <div class="font-bold">{{ alert.title }}</div>

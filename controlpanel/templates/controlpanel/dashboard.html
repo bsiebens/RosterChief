@@ -91,7 +91,7 @@
                         <div>
                             <div class="mb-1 flex items-center justify-between text-sm">
                                 <span class="flex items-center gap-2">{% lucide step.icon size=14 %} {{ step.label }}</span>
-                                <span class="font-semibold tabular-nums">{{ step.count }}</span>
+                                <span class="font-semibold tabular-nums font-mono">{{ step.count }}</span>
                             </div>
                             <progress class="progress {% if step.count == funnel.0.count %}progress-success{% elif step.count == 0 %}progress-error{% else %}progress-warning{% endif %} w-full" value="{{ step.count }}"
                                       max="{{ funnel.0.count }}"></progress>

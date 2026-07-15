@@ -18,11 +18,11 @@ DEFAULT_WIDGET_CLASS = "input input-bordered w-full"
 
 #: Icon, default heading and daisyUI colour per message level.
 MESSAGE_ALERTS = {
-    "debug": ("bug", "Debug", "alert-info"),
-    "info": ("info", "Heads up", "alert-info"),
-    "success": ("circle-check", "Done", "alert-success"),
-    "warning": ("triangle-alert", "Careful", "alert-warning"),
-    "error": ("circle-x", "Something went wrong", "alert-error"),
+    "debug": ("bug", "Debug", "alert-info border-info"),
+    "info": ("info", "Heads up", "alert-info border-info"),
+    "success": ("circle-check", "Done", "alert-success border-success"),
+    "warning": ("triangle-alert", "Careful", "alert-warning border-warning"),
+    "error": ("circle-x", "Something went wrong", "alert-error border-error"),
 }
 DEFAULT_MESSAGE_ALERT = MESSAGE_ALERTS["info"]
 

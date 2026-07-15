@@ -80,6 +80,9 @@ class ClubCreateView(PlatformStaffRequiredMixin, CreateView):
     def get_success_url(self):
         return reverse("controlpanel:club_detail", args=[self.object.pk])
 
+    def get_context_data(self, **kwargs):
+        return super().get_context_data(nav="clubs", **kwargs)
+
 
 class ClubUpdateView(PlatformStaffRequiredMixin, UpdateView):
     model = Club
@@ -93,6 +96,9 @@ class ClubUpdateView(PlatformStaffRequiredMixin, UpdateView):
 
     def get_success_url(self):
         return reverse("controlpanel:club_detail", args=[self.object.pk])
+
+    def get_context_data(self, **kwargs):
+        return super().get_context_data(nav="clubs", update_view=True, **kwargs)
 
 
 class ClubDetailView(PlatformStaffRequiredMixin, DetailView):
