@@ -171,12 +171,7 @@ def subscriptions_due_for_renewal(today: date | None = None, lead_days: int = RE
         output_field=DateField(),
     )
 
-    subscriptions = (
-        Subscription.objects.filter(auto_renew=True, club__archived_at__isnull=True)
-        .select_related("club", "tier")
-        .annotate(latest_period_end=latest_period_end)
-        .order_by("club__name")
-    )
+    subscriptions = Subscription.objects.filter(auto_renew=True, club__archived_at__isnull=True).select_related("club", "tier").annotate(latest_period_end=latest_period_end).order_by("club__name")
 
     return [subscription for subscription in subscriptions if subscription.latest_period_end is None or subscription.latest_period_end <= horizon]
 
