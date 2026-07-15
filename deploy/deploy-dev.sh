@@ -17,7 +17,10 @@ SSH_USER="${SSH_USER:-bernard}"
 REMOTE_DIR="${REMOTE_DIR:-/home/bernard/RosterChief}"
 BRANCH="${BRANCH:-$(git rev-parse --abbrev-ref HEAD)}"
 COMPOSE_FILE="${COMPOSE_FILE:-compose.behind-proxy.yaml}"
-HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:8001/healthz}"
+# The published port lives in the server's .env (WEB_PORT), so it is read there, not here —
+# see the remote block. This default only applies if that file omits it, matching compose's
+# own `${WEB_PORT:-8001}`.
+DEFAULT_WEB_PORT="${DEFAULT_WEB_PORT:-8001}"
 
 SSH_TARGET="${SSH_USER}@${SSH_HOST}"
 
@@ -42,9 +45,9 @@ say "Deploying ${BRANCH} to ${SSH_TARGET}:${REMOTE_DIR}"
 # --- the work, on the server ------------------------------------------------
 # One SSH session runs the whole remote script; args are passed positionally so nothing has to
 # be re-quoted inside the heredoc.
-ssh -o ConnectTimeout=10 "${SSH_TARGET}" bash -s -- "${REMOTE_DIR}" "${BRANCH}" "${COMPOSE_FILE}" "${HEALTH_URL}" <<'REMOTE'
+ssh -o ConnectTimeout=10 "${SSH_TARGET}" bash -s -- "${REMOTE_DIR}" "${BRANCH}" "${COMPOSE_FILE}" "${DEFAULT_WEB_PORT}" <<'REMOTE'
 set -Eeuo pipefail
-REMOTE_DIR="$1"; BRANCH="$2"; COMPOSE_FILE="$3"; HEALTH_URL="$4"
+REMOTE_DIR="$1"; BRANCH="$2"; COMPOSE_FILE="$3"; DEFAULT_WEB_PORT="$4"
 
 step() { printf '\033[1;34m  ->\033[0m %s\n' "$*"; }
 
@@ -57,6 +60,13 @@ cd "$REMOTE_DIR" 2>/dev/null || { echo "ERROR: $REMOTE_DIR not found. Clone the 
 [ -f .env ]            || { echo "ERROR: .env missing (compose vars: POSTGRES_PASSWORD, ...). Copy from .env.compose.example."; exit 1; }
 
 dc() { docker compose -f "$COMPOSE_FILE" "$@"; }
+
+# The health probe must hit the port the container actually publishes, which is WEB_PORT in
+# the same .env compose reads. Parse it the way compose does — last assignment wins, quotes
+# and inline whitespace stripped — and fall back to the compose default when it is unset.
+WEB_PORT="$(sed -n 's/^[[:space:]]*WEB_PORT[[:space:]]*=[[:space:]]*//p' .env | tail -1 | tr -d '"'"'"' \r')"
+WEB_PORT="${WEB_PORT:-$DEFAULT_WEB_PORT}"
+HEALTH_URL="http://127.0.0.1:${WEB_PORT}/healthz"
 
 # reset --hard, not pull: a deploy target only receives deploys, so make it exactly match the
 # remote branch rather than risk a merge conflict from drift no one meant to leave there.
@@ -84,7 +94,7 @@ dc run --rm -T web python manage.py migrate --noinput </dev/null
 step "Restarting web"
 dc up -d --no-deps web
 
-step "Waiting for /healthz"
+step "Waiting for /healthz on :${WEB_PORT}"
 for attempt in $(seq 1 20); do
     if curl -fsS "$HEALTH_URL" >/dev/null 2>&1; then
         echo "     healthy after ${attempt} check(s)"
