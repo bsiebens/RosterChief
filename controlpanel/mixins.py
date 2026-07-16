@@ -1,5 +1,7 @@
+from django.contrib import messages
 from django.contrib.auth.mixins import UserPassesTestMixin
 from django.http import Http404
+from django.shortcuts import redirect
 
 
 class PlatformStaffRequiredMixin(UserPassesTestMixin):
@@ -38,3 +40,21 @@ class PlatformSuperuserRequiredMixin(PlatformStaffRequiredMixin):
 
     def test_func(self):
         return self.request.user.is_superuser
+
+
+class RedirectOnInvalidMixin:
+    """A form submitted from a modal has nowhere sensible to re-render on error: the page
+    that opened it has already moved on, and the view has no standalone template of its
+    own. Redirect back to ``invalid_redirect_url_name`` instead, with the errors flattened
+    into messages, rather than Django's default of re-rendering ``template_name``.
+    """
+
+    invalid_redirect_url_name = None
+
+    def get_invalid_redirect_kwargs(self):
+        return {}
+
+    def form_invalid(self, form):
+        for error in form.errors.values():
+            messages.error(self.request, " ".join(error))
+        return redirect(self.invalid_redirect_url_name, **self.get_invalid_redirect_kwargs())

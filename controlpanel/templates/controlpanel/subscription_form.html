@@ -1,8 +1,0 @@
-{% extends "controlpanel/base.html" %}
-
-{% block heading %}{% if subscription %}Change plan{% else %}Start billing{% endif %} — {{ club }}{% endblock heading %}
-
-{% block panel %}
-    {% url 'controlpanel:club_detail' club.pk as club_url %}
-    {% include "controlpanel/_billing_form.html" with cancel_url=club_url submit_label="Save plan" submit_icon="layers" blurb="Changing tier does not re-bill: the current period keeps the amount it was issued at, and the new rate applies from the next one." %}
-{% endblock panel %}

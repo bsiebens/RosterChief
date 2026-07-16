@@ -155,6 +155,20 @@ def onboarding_funnel():
     ]
 
 
+def flags_for_club(club):
+    """Every flag, annotated with whether it is on for this club and why."""
+    enabled_ids = set(club.flags.values_list("pk", flat=True))
+    return [
+        {
+            "flag": flag,
+            "enabled": flag.pk in enabled_ids,
+            # `everyone` overrides club targeting, so the per-club toggle is moot.
+            "overridden": flag.everyone is not None,
+        }
+        for flag in get_waffle_flag_model().objects.order_by("name")
+    ]
+
+
 def flag_adoption():
     """Clubs per feature flag. `everyone` overrides club targeting, so a flag set that
     way is on (or off) everywhere and its club count says nothing — hence `overridden`."""

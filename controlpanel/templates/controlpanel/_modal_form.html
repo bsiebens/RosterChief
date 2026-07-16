@@ -1,0 +1,28 @@
+{% load lucide %}
+
+{% comment %}
+    A daisyUI native <dialog> modal wrapping a Django form that posts straight to
+    `action_url`. Included with `modal_id`, `title`, `form`, `action_url`, `submit_label`
+    and `submit_icon`, plus an optional `blurb`. The submit button sits outside the form
+    tag (linked via the `form` attribute) so it can share the `modal-action` row with the
+    dialog-closing Cancel button without nesting one <form> inside another.
+{% endcomment %}
+<dialog id="{{ modal_id }}" class="modal">
+    <div class="modal-box">
+        <h3 class="text-lg font-bold">{{ title }}</h3>
+        {% if blurb %}<p class="py-2 text-sm opacity-70">{{ blurb }}</p>{% endif %}
+        <form method="post" action="{{ action_url }}" id="{{ modal_id }}-form">
+            {% csrf_token %}
+            {% include "controlpanel/_form_fields.html" %}
+        </form>
+        <div class="modal-action">
+            <form method="dialog">
+                <button class="btn btn-outline gap-2">{% lucide "x" size=16 %} Cancel</button>
+            </form>
+            <button class="btn btn-primary gap-2" type="submit" form="{{ modal_id }}-form">{% lucide submit_icon|default:"check" size=16 %} {{ submit_label|default:"Save" }}</button>
+        </div>
+    </div>
+    <form method="dialog" class="modal-backdrop">
+        <button>close</button>
+    </form>
+</dialog>

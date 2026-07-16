@@ -114,7 +114,7 @@ def waive(due: Due, *, note: str = "") -> Due:
     return due
 
 
-def owing_dues(today: date | None = None):
+def owing_dues():
     return Due.objects.filter(status__in=Due.OWING)
 
 

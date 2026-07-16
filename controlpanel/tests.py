@@ -1297,7 +1297,9 @@ class BillingFormRenderTests(ControlPanelTestBase):
         self.tier = Tier.objects.create(name="Standard")
         TierPrice.objects.create(tier=self.tier, active_from=self.today - datetime.timedelta(days=1200), amount=Decimal("500.00"))
 
-    def test_the_billing_forms_render(self):
+    def test_the_billing_forms_are_post_only(self):
+        # Every one of these is reachable only through a modal on the billing or club
+        # detail page: there is no standalone template to render on a GET.
         subscribe(self.club, self.tier)
         due = self.club.dues.first()
 
@@ -1309,17 +1311,33 @@ class BillingFormRenderTests(ControlPanelTestBase):
             reverse("controlpanel:club_open_period", args=[self.club.pk]),
             reverse("controlpanel:due_pay", args=[due.pk]),
         ):
-            self.assertEqual(self.client.get(url).status_code, 200, url)
+            self.assertEqual(self.client.get(url).status_code, 405, url)
 
-    def test_the_payment_form_defaults_to_the_outstanding_balance(self):
+    def test_the_billing_forms_redirect_with_a_message_on_invalid_input(self):
+        # Rejected input has nowhere to re-render — the modal that submitted it is on a
+        # page this view no longer serves — so it must bounce back with an error message
+        # rather than 500 or silently drop the submission.
+        subscribe(self.club, self.tier)
+        due = self.club.dues.first()
+
+        response = self.client.post(reverse("controlpanel:tier_create"), {"name": "", "description": "", "is_active": "on"}, follow=True)
+        self.assertRedirects(response, reverse("controlpanel:billing"))
+        self.assertContains(response, "This field is required")
+
+        response = self.client.post(reverse("controlpanel:due_pay", args=[due.pk]), {"amount": "not-a-number", "method": "bank_transfer", "reference": "", "paid_at": "", "note": ""}, follow=True)
+        self.assertRedirects(response, reverse("controlpanel:club_detail", args=[self.club.pk]))
+        self.assertContains(response, "Enter a number")
+
+    def test_the_payment_modal_defaults_to_the_outstanding_balance(self):
         subscribe(self.club, self.tier)
         due = self.club.dues.first()
         record_payment(due, Decimal("200.00"))
         due.refresh_from_db()
 
-        response = self.client.get(reverse("controlpanel:due_pay", args=[due.pk]))
+        response = self.client.get(reverse("controlpanel:club_detail", args=[self.club.pk]))
 
-        self.assertEqual(response.context["form"].initial["amount"], Decimal("300.00"))
+        rendered_due = next(rendered for rendered in response.context["dues"] if rendered.pk == due.pk)
+        self.assertEqual(rendered_due.payment_form.initial["amount"], Decimal("300.00"))
 
     def test_a_tier_can_be_renamed(self):
         self.client.post(reverse("controlpanel:tier_update", args=[self.tier.pk]), {"name": "Standard plus", "description": "", "is_active": "on"})

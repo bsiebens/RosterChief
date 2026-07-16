@@ -1,3 +1,5 @@
+from contextlib import contextmanager
+
 from django.contrib import messages
 from django.contrib.auth import get_user_model
 from django.db.models import Count
@@ -5,6 +7,7 @@ from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.formats import date_format
 from django.views.generic import CreateView, DetailView, FormView, ListView, TemplateView, UpdateView, View
 from waffle import get_waffle_flag_model, get_waffle_switch_model
 
@@ -16,7 +19,7 @@ from club.models import Club, ClubRole
 from features.models import Maintenance
 
 from .forms import ClubAdminForm, ClubForm, DuePaymentForm, FlagForm, MaintenanceForm, OpenPeriodForm, PlatformAdminForm, SubscriptionForm, TierForm, TierPriceForm
-from .mixins import PlatformStaffRequiredMixin, PlatformSuperuserRequiredMixin
+from .mixins import PlatformStaffRequiredMixin, PlatformSuperuserRequiredMixin, RedirectOnInvalidMixin
 from .services.admins import grant_club_admin, revoke_club_admin
 from .services.platform_admins import (
     PlatformAdminError,
@@ -25,10 +28,24 @@ from .services.platform_admins import (
     revoke_platform_access,
     set_platform_access,
 )
-from .services.statistics import club_attention, club_charts, club_statistics, clubs_with_health, flag_adoption, onboarding_funnel, platform_attention, platform_charts, platform_totals
+from .services.statistics import club_attention, club_charts, club_statistics, clubs_with_health, flag_adoption, flags_for_club, onboarding_funnel, platform_attention, platform_charts, platform_totals
 
 Flag = get_waffle_flag_model()
 Switch = get_waffle_switch_model()
+
+
+@contextmanager
+def suppress_billing_errors(request):
+    """Turn a BillingError into an error message rather than letting it propagate.
+
+    Fits call sites that fall through to the same redirect on the happy and unhappy path
+    alike — the success message is set inside the block, the failure message by this
+    context manager, and whichever fired, the caller's next line runs unchanged.
+    """
+    try:
+        yield
+    except BillingError as error:
+        messages.error(request, str(error))
 
 
 class DashboardView(PlatformStaffRequiredMixin, TemplateView):
@@ -107,16 +124,29 @@ class ClubDetailView(PlatformStaffRequiredMixin, DetailView):
     context_object_name = "club"
 
     def get_context_data(self, **kwargs):
+        subscription = getattr(self.object, "subscription", None)
+        next_start = next_period_start(self.object)
+
+        # Bound per-row so each due's "Add payment" modal can render its own form without
+        # the template calling DuePaymentForm(initial=...) itself.
+        dues = list(self.object.dues.select_related("tier", "invoice").prefetch_related("payments"))
+        for due in dues:
+            if due.is_owing:
+                due.payment_form = DuePaymentForm(initial={"amount": due.balance})
+
         return super().get_context_data(
             nav="clubs",
             groups=club_statistics(self.object),
             attention=club_attention(self.object),
             charts=club_charts(self.object),
-            subscription=getattr(self.object, "subscription", None),
-            dues=self.object.dues.select_related("tier", "invoice").prefetch_related("payments"),
+            subscription=subscription,
+            dues=dues,
             today=timezone.localdate(),
             admins=ClubRole.objects.filter(club=self.object, role=ClubRole.Roles.ADMIN).select_related("member", "member__user"),
             flags=flags_for_club(self.object),
+            open_period_form=OpenPeriodForm(),
+            open_period_blurb=f"Next period starts {date_format(next_start, 'j M Y')} unless you say otherwise. By default it continues from the end of the last one, so a lapsed year is still owed — pick a start date to forgive the gap.",
+            subscription_form=SubscriptionForm(instance=subscription) if subscription else SubscriptionForm(),
             **kwargs,
         )
 
@@ -163,20 +193,6 @@ class ClubAdminRemoveView(PlatformStaffRequiredMixin, View):
         revoke_club_admin(role)
         messages.warning(request, f"{member} is no longer an admin of this club.")
         return redirect("controlpanel:club_detail", pk=pk)
-
-
-def flags_for_club(club):
-    """Every flag, annotated with whether it is on for this club and why."""
-    enabled_ids = set(club.flags.values_list("pk", flat=True))
-    return [
-        {
-            "flag": flag,
-            "enabled": flag.pk in enabled_ids,
-            # `everyone` overrides club targeting, so the per-club toggle is moot.
-            "overridden": flag.everyone is not None,
-        }
-        for flag in Flag.objects.order_by("name")
-    ]
 
 
 class ClubFeatureToggleView(PlatformStaffRequiredMixin, View):
@@ -328,55 +344,73 @@ class BillingView(PlatformStaffRequiredMixin, TemplateView):
 
     def get_context_data(self, **kwargs):
         today = timezone.localdate()
+
+        # Bound per-row so each "Edit" / "New price" modal can render its own form: the
+        # template can't call TierForm(instance=tier) itself, so the form rides along on
+        # the object it belongs to.
+        tiers = list(Tier.objects.prefetch_related("prices").annotate(club_count=Count("subscriptions")))
+        for tier in tiers:
+            tier.edit_form = TierForm(instance=tier)
+            tier.price_form = TierPriceForm()
+
+        owing = list(Due.objects.filter(status__in=Due.OWING).select_related("club", "tier").order_by("grace_until"))
+        for due in owing:
+            due.payment_form = DuePaymentForm(initial={"amount": due.balance})
+
         return super().get_context_data(
             nav="billing",
-            tiers=Tier.objects.prefetch_related("prices").annotate(club_count=Count("subscriptions")),
-            owing=Due.objects.filter(status__in=Due.OWING).select_related("club", "tier").order_by("grace_until"),
+            tiers=tiers,
+            tier_form=TierForm(),
+            owing=owing,
             today=today,
             **kwargs,
         )
 
 
-class TierCreateView(PlatformStaffRequiredMixin, CreateView):
+class TierCreateView(PlatformStaffRequiredMixin, RedirectOnInvalidMixin, CreateView):
+    """Reachable only via the "New plan" modal on the billing page — POST-only, and there
+    is no standalone template to render on GET or on a rejected submission."""
+
     model = Tier
     form_class = TierForm
-    template_name = "controlpanel/tier_form.html"
-
-    def get_context_data(self, **kwargs):
-        return super().get_context_data(nav="billing", **kwargs)
+    http_method_names = ["post"]
+    invalid_redirect_url_name = "controlpanel:billing"
 
     def get_success_url(self):
         messages.success(self.request, f"Tier “{self.object}” created. Give it a price before billing anyone.")
         return reverse("controlpanel:billing")
 
 
-class TierUpdateView(PlatformStaffRequiredMixin, UpdateView):
+class TierUpdateView(PlatformStaffRequiredMixin, RedirectOnInvalidMixin, UpdateView):
+    """Reachable only via a tier's "Edit" modal on the billing page — POST-only, and there
+    is no standalone template to render on GET or on a rejected submission."""
+
     model = Tier
     form_class = TierForm
-    template_name = "controlpanel/tier_form.html"
-
-    def get_context_data(self, **kwargs):
-        return super().get_context_data(nav="billing", **kwargs)
+    http_method_names = ["post"]
+    invalid_redirect_url_name = "controlpanel:billing"
 
     def get_success_url(self):
         messages.success(self.request, f"Tier “{self.object}” updated.")
         return reverse("controlpanel:billing")
 
 
-class TierPriceCreateView(PlatformStaffRequiredMixin, CreateView):
+class TierPriceCreateView(PlatformStaffRequiredMixin, RedirectOnInvalidMixin, CreateView):
     """A rate change is a new dated price, never an edit of the old one — periods already
-    billed keep the amount they were billed at."""
+    billed keep the amount they were billed at.
+
+    Reachable only via a tier's "New price" modal on the billing page — POST-only, and
+    there is no standalone template to render on GET or on a rejected submission.
+    """
 
     model = TierPrice
     form_class = TierPriceForm
-    template_name = "controlpanel/tier_price_form.html"
+    http_method_names = ["post"]
+    invalid_redirect_url_name = "controlpanel:billing"
 
     @property
     def tier(self):
         return get_object_or_404(Tier, pk=self.kwargs["pk"])
-
-    def get_context_data(self, **kwargs):
-        return super().get_context_data(nav="billing", tier=self.tier, **kwargs)
 
     def form_valid(self, form):
         form.instance.tier = self.tier
@@ -388,15 +422,23 @@ class TierPriceCreateView(PlatformStaffRequiredMixin, CreateView):
         return reverse("controlpanel:billing")
 
 
-class SubscribeClubView(PlatformStaffRequiredMixin, FormView):
-    """Put a club on a tier, which opens its first period."""
+class SubscribeClubView(PlatformStaffRequiredMixin, RedirectOnInvalidMixin, FormView):
+    """Put a club on a tier, which opens its first period.
+
+    Reachable only via the "Change plan" modal on the club detail page — POST-only, and
+    there is no standalone template to render on GET or on a rejected submission.
+    """
 
     form_class = SubscriptionForm
-    template_name = "controlpanel/subscription_form.html"
+    http_method_names = ["post"]
+    invalid_redirect_url_name = "controlpanel:club_detail"
 
     @property
     def club(self):
         return get_object_or_404(Club, pk=self.kwargs["pk"])
+
+    def get_invalid_redirect_kwargs(self):
+        return {"pk": self.club.pk}
 
     def get_form_kwargs(self):
         kwargs = super().get_form_kwargs()
@@ -405,13 +447,10 @@ class SubscribeClubView(PlatformStaffRequiredMixin, FormView):
             kwargs["instance"] = subscription
         return kwargs
 
-    def get_context_data(self, **kwargs):
-        return super().get_context_data(nav="clubs", club=self.club, subscription=getattr(self.club, "subscription", None), **kwargs)
-
     def form_valid(self, form):
         club = self.club
         existing = getattr(club, "subscription", None)
-        try:
+        with suppress_billing_errors(self.request):
             if existing:
                 # Changing tier does not re-bill: the current period keeps the amount it was
                 # issued at, and the new rate applies from the next one.
@@ -422,29 +461,29 @@ class SubscribeClubView(PlatformStaffRequiredMixin, FormView):
             else:
                 subscribe(club, form.cleaned_data["tier"], start=form.cleaned_data.get("start"), auto_archive=form.cleaned_data["auto_archive"], auto_renew=form.cleaned_data["auto_renew"])
                 messages.success(self.request, f"{club} is on {form.cleaned_data['tier']}. Its first period is open.")
-        except BillingError as error:
-            messages.error(self.request, str(error))
 
         return redirect("controlpanel:club_detail", pk=club.pk)
 
 
-class RecordPaymentView(PlatformStaffRequiredMixin, FormView):
+class RecordPaymentView(PlatformStaffRequiredMixin, RedirectOnInvalidMixin, FormView):
+    """Reachable only via a due's "Record payment" modal on the club or billing page —
+    POST-only, and there is no standalone template to render on GET or on a rejected
+    submission."""
+
     form_class = DuePaymentForm
-    template_name = "controlpanel/payment_form.html"
+    http_method_names = ["post"]
+    invalid_redirect_url_name = "controlpanel:club_detail"
 
     @property
     def due(self):
         return get_object_or_404(Due.objects.select_related("club", "tier"), pk=self.kwargs["pk"])
 
-    def get_initial(self):
-        return {"amount": self.due.balance}
-
-    def get_context_data(self, **kwargs):
-        return super().get_context_data(nav="clubs", due=self.due, **kwargs)
+    def get_invalid_redirect_kwargs(self):
+        return {"pk": self.due.club_id}
 
     def form_valid(self, form):
         due = self.due
-        try:
+        with suppress_billing_errors(self.request):
             record_payment(
                 due,
                 form.cleaned_data["amount"],
@@ -456,8 +495,6 @@ class RecordPaymentView(PlatformStaffRequiredMixin, FormView):
             )
             due.refresh_from_db()
             messages.success(self.request, f"€{form.cleaned_data['amount']} recorded. {due.get_status_display().capitalize()} — €{due.balance} outstanding.")
-        except BillingError as error:
-            messages.error(self.request, str(error))
 
         return redirect("controlpanel:club_detail", pk=due.club_id)
 
@@ -465,37 +502,37 @@ class RecordPaymentView(PlatformStaffRequiredMixin, FormView):
 class WaiveDueView(PlatformStaffRequiredMixin, View):
     def post(self, request, pk):
         due = get_object_or_404(Due, pk=pk)
-        try:
+        with suppress_billing_errors(request):
             waive(due)
             messages.warning(request, f"Period {due.period_start} to {due.period_end} waived. Nothing is owed and the club will not be archived for it.")
-        except BillingError as error:
-            messages.error(request, str(error))
 
         return redirect("controlpanel:club_detail", pk=due.club_id)
 
 
-class OpenPeriodView(PlatformStaffRequiredMixin, FormView):
-    """Renew a club, or reactivate an archived one."""
+class OpenPeriodView(PlatformStaffRequiredMixin, RedirectOnInvalidMixin, FormView):
+    """Renew a club, or reactivate an archived one.
+
+    Reachable only via the "Open period" modal on the club detail page — POST-only, and
+    there is no standalone template to render on GET or on a rejected submission.
+    """
 
     form_class = OpenPeriodForm
-    template_name = "controlpanel/period_form.html"
+    http_method_names = ["post"]
+    invalid_redirect_url_name = "controlpanel:club_detail"
 
     @property
     def club(self):
         return get_object_or_404(Club, pk=self.kwargs["pk"])
 
-    def get_context_data(self, **kwargs):
-        club = self.club
-        return super().get_context_data(nav="clubs", club=club, next_start=next_period_start(club), **kwargs)
+    def get_invalid_redirect_kwargs(self):
+        return {"pk": self.club.pk}
 
     def form_valid(self, form):
         club = self.club
         start = form.cleaned_data.get("start")
-        try:
+        with suppress_billing_errors(self.request):
             due = reactivate(club, start=start) if club.is_archived else open_period(club, start=start)
             messages.success(self.request, f"Period {due.period_start} to {due.period_end} opened for €{due.amount}. Invoice {due.invoice.number}.")
-        except BillingError as error:
-            messages.error(self.request, str(error))
 
         return redirect("controlpanel:club_detail", pk=club.pk)
 

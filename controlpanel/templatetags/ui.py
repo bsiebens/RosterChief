@@ -100,6 +100,17 @@ def excluded(field, names):
 
 
 @register.filter
+def dom_id(pk, prefix):
+    """A stable per-row DOM id, e.g. ``{{ due.pk|dom_id:"due_pay_modal" }}``.
+
+    Django templates cannot concatenate a string literal with a non-string filter
+    argument directly (``"prefix_"|add:some_uuid`` raises), which is what a per-row modal
+    id needs. This is the one place that builds one, so every call site reads the same way.
+    """
+    return f"{prefix}_{pk}"
+
+
+@register.filter
 def daisy(field, css=None):
     """Render a bound form field with the right daisyUI classes.
 

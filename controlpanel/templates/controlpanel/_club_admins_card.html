@@ -1,0 +1,43 @@
+{% load lucide %}
+
+{% comment %}
+    Club-scoped admins, and the form to add one. Included with `club`, `admins` already
+    in context.
+{% endcomment %}
+<div class="card bg-base-100 shadow">
+    <div class="card-body">
+        <div class="flex items-center justify-between">
+            <h2 class="card-title text-base">{% lucide "shield-user" size=18 %} Club admins</h2>
+            <a class="btn btn-primary btn-sm gap-2" href="{% url 'controlpanel:club_admin_add' club.pk %}">{% lucide "user-plus" size=16 %} Add admin</a>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Email</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for role in admins %}
+                        <tr>
+                            <td>{{ role.member }}</td>
+                            <td>{{ role.member.user.email|default:"—" }}</td>
+                            <td class="text-right">
+                                <form method="post" action="{% url 'controlpanel:club_admin_remove' club.pk role.pk %}">
+                                    {% csrf_token %}
+                                    <button class="btn btn-error btn-outline btn-sm gap-1" type="submit">{% lucide "trash-2" size=14 %} Remove</button>
+                                </form>
+                            </td>
+                        </tr>
+                    {% empty %}
+                        <tr>
+                            <td colspan="3" class="text-center opacity-60">No admins yet.</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
