@@ -397,7 +397,7 @@
                 // Colour carries the meaning here — unpaid must read as a problem, waived must
                 // not — so the slices are pinned to the semantic theme colours, in order.
                 const fees = new Chart(document.getElementById("fees-chart"), {
-                    type: "doughnut",
+                    type: "pie",
                     data: {
                         labels: data.fees.map((slice) => slice.label),
                         datasets: [
