@@ -11,6 +11,14 @@ from rosterchief.base import ClubScopedModel, UUIDModel, validate_club_scope
 from teams.models import Position, Team
 
 
+class DiscountType(models.TextChoices):
+    """Shared by ``Product`` (early-bird), ``Discount`` and ``AppliedDiscount`` (its
+    snapshot on an order) — one discount vocabulary, not three copies of it."""
+
+    PERCENTAGE = "percentage", _("Percentage")
+    FIXED_AMOUNT = "fixed_amount", _("Fixed amount")
+
+
 def next_scoped_number(instance, code):
     """Next per-club sequential number for the current year: ``<code>-<year>-<seq>``."""
     prefix = f"{code}-{timezone.now().year}-"
@@ -45,10 +53,6 @@ class Product(ClubScopedModel):
         EVENT_FEE = "event_fee", _("Event fee")
         MERCHANDISE = "merchandise", _("Merchandise")
         DONATION = "donation", _("Donation")
-
-    class DiscountType(models.TextChoices):
-        PERCENTAGE = "percentage", _("Percentage")
-        FIXED_AMOUNT = "fixed_amount", _("Fixed amount")
 
     name = models.CharField(_("name"), max_length=255)
     slug = models.SlugField(_("slug"), max_length=255, blank=True)
@@ -191,10 +195,6 @@ class OrderLine(UUIDModel):
 
 
 class Discount(ClubScopedModel):
-    class DiscountType(models.TextChoices):
-        PERCENTAGE = "percentage", _("Percentage")
-        FIXED_AMOUNT = "fixed_amount", _("Fixed amount")
-
     name = models.CharField(_("name"), max_length=255)
     slug = models.SlugField(_("slug"), max_length=255, blank=True)
     description = models.TextField(_("description"), blank=True)
@@ -219,10 +219,6 @@ class Discount(ClubScopedModel):
 
 
 class AppliedDiscount(UUIDModel):
-    class DiscountType(models.TextChoices):
-        PERCENTAGE = "percentage", _("Percentage")
-        FIXED_AMOUNT = "fixed_amount", _("Fixed amount")
-
     order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name="applied_discounts", verbose_name=_("order"))
     discount = models.ForeignKey(Discount, on_delete=models.PROTECT, related_name="applied_discounts", verbose_name=_("discount"))
 
@@ -240,7 +236,7 @@ class AppliedDiscount(UUIDModel):
         ]
 
     def __str__(self):
-        suffix = "%" if self.discount_type == self.DiscountType.PERCENTAGE else ""
+        suffix = "%" if self.discount_type == DiscountType.PERCENTAGE else ""
         return f"{self.discount} - {self.discount_amount}{suffix}"
 
     def clean(self):

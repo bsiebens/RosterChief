@@ -1,5 +1,5 @@
 {% extends "controlpanel/base.html" %}
-{% load lucide %}
+{% load lucide ui %}
 
 {% block heading %}Platform admins{% endblock heading %}
 
@@ -8,10 +8,13 @@
 {% endblock subheading %}
 
 {% block actions %}
-    <a class="btn btn-primary gap-2" href="{% url 'controlpanel:admin_add' %}">{% lucide "user-plus" size=16 %} Grant access</a>
+    <button class="btn btn-primary gap-2" type="button" onclick="document.getElementById('admin_add_modal').showModal()">{% lucide "user-plus" size=16 %} Grant access</button>
 {% endblock actions %}
 
 {% block panel %}
+    {% url 'controlpanel:admin_add' as admin_add_url %}
+    {% include "controlpanel/_modal_form.html" with modal_id="admin_add_modal" title="Grant platform access" form=admin_form action_url=admin_add_url submit_label="Grant access" submit_icon="user-plus" blurb="Platform admins can manage every club. They must set up two-factor authentication before they can sign in." %}
+
     <div class="card bg-base-100 shadow">
         <div class="card-body">
             <div class="overflow-x-auto">
@@ -30,15 +33,16 @@
                             <tr>
                                 <td>
                                     <div class="font-medium">{{ admin.email }}</div>
-                                    {% if admin.pk == user.pk %}<div class="text-xs opacity-60">That's you</div>{% endif %}
+                                    {% if admin.pk == user.pk %}
+                                        <div class="text-xs opacity-60">That's you</div>{% endif %}
                                 </td>
                                 <td>
                                     <form method="post" action="{% url 'controlpanel:admin_update' admin.pk %}">
                                         {% csrf_token %}
                                         <input type="hidden" name="is_staff" value="{% if admin.is_staff %}0{% else %}1{% endif %}">
                                         <input type="hidden" name="is_superuser" value="{% if admin.is_superuser %}1{% else %}0{% endif %}">
-                                        <button class="btn btn-xs gap-1 {% if admin.is_staff %}btn-success{% else %}btn-ghost{% endif %}" type="submit">
-                                            {% if admin.is_staff %}{% lucide "check" size=14 %} Yes{% else %}No{% endif %}
+                                        <button class="btn btn-sm gap-1 {% if admin.is_staff %}btn-success{% else %}btn-outline{% endif %}" type="submit">
+                                            {% if admin.is_staff %}{% lucide "user" size=14 %} Yes{% else %}{% lucide "x" size=14 %} No{% endif %}
                                         </button>
                                     </form>
                                 </td>
@@ -47,17 +51,14 @@
                                         {% csrf_token %}
                                         <input type="hidden" name="is_staff" value="{% if admin.is_staff %}1{% else %}0{% endif %}">
                                         <input type="hidden" name="is_superuser" value="{% if admin.is_superuser %}0{% else %}1{% endif %}">
-                                        <button class="btn btn-xs gap-1 {% if admin.is_superuser %}btn-warning{% else %}btn-ghost{% endif %}" type="submit">
-                                            {% if admin.is_superuser %}{% lucide "shield" size=14 %} Yes{% else %}No{% endif %}
+                                        <button class="btn btn-sm gap-1 {% if admin.is_superuser %}btn-warning{% else %}btn-outline{% endif %}" type="submit">
+                                            {% if admin.is_superuser %}{% lucide "shield" size=14 %} Yes{% else %}{% lucide "x" size=14 %} No{% endif %}
                                         </button>
                                     </form>
                                 </td>
                                 <td class="opacity-70">{{ admin.last_login|date:"j M Y"|default:"Never" }}</td>
                                 <td class="text-right">
-                                    <form method="post" action="{% url 'controlpanel:admin_revoke' admin.pk %}">
-                                        {% csrf_token %}
-                                        <button class="btn btn-ghost btn-xs gap-1 text-error" type="submit">{% lucide "user-minus" size=14 %} Revoke</button>
-                                    </form>
+                                    <button class="btn btn-error btn-outline btn-sm gap-1" type="button" onclick="document.getElementById('{{ admin.pk|dom_id:"admin_revoke_modal" }}').showModal()">{% lucide "user-minus" size=14 %} Revoke</button>
                                 </td>
                             </tr>
                         {% empty %}
@@ -68,6 +69,12 @@
                     </tbody>
                 </table>
             </div>
+
+            {% comment %} Dialogs live outside the table: <tbody> may only contain <tr> elements. {% endcomment %}
+            {% for admin in admins %}
+                {% url 'controlpanel:admin_revoke' admin.pk as admin_revoke_url %}
+                {% include "controlpanel/_confirm_modal.html" with modal_id=admin.pk|dom_id:"admin_revoke_modal" title="Revoke platform access" body="Revoke platform access for "|add:admin.email|add:"? They will no longer be able to reach the control panel." action_url=admin_revoke_url submit_label="Revoke" submit_icon="user-minus" %}
+            {% endfor %}
         </div>
     </div>
 {% endblock panel %}

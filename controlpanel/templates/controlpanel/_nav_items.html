@@ -31,7 +31,7 @@
     {# Superusers only, exactly as the view is gated: a link staff cannot follow is a lie. #}
     <li>
         <a class="{% if nav == 'admins' %}menu-active{% endif %}" href="{% url 'controlpanel:admins' %}">
-            {% lucide "user-cog" size=16 %} Admins
+            {% lucide "user-cog" size=16 %} Platform admins
         </a>
     </li>
 {% endif %}

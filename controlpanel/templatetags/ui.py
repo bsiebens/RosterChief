@@ -32,10 +32,11 @@ def as_alert(message):
     """Presentation for one Django message: icon, bold title, body, colour.
 
     Django messages carry a level and a string — there is no title field — so the
-    title comes from the level, and a call site that wants a specific one passes it
-    as ``extra_tags``::
+    title comes from the level, unless the message carries one as ``extra_tags``.
+    Call sites queue messages with ``notify`` (controlpanel/messages.py), which sets
+    exactly that from a compact ``"<level>|<title>|<body>"`` spec::
 
-        messages.success(request, f"{club} is live.", extra_tags="Club created")
+        notify(request, f"s|Club created|{club} is live.")
 
     Keyed on ``level_tag``, never ``tags``: ``tags`` is extra_tags and level_tag
     joined, so a message carrying a custom title would stop matching its own level

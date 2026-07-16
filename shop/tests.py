@@ -21,6 +21,7 @@ from .models import (
     Cart,
     CartItem,
     Discount,
+    DiscountType,
     Invoice,
     Order,
     OrderLine,
@@ -251,12 +252,12 @@ class AppliedDiscountTests(ShopEntitiesTestBase):
         return AppliedDiscount.objects.create(**kwargs)
 
     def test_str_percentage_shows_percent(self):
-        applied = self.apply(discount_type=AppliedDiscount.DiscountType.PERCENTAGE)
+        applied = self.apply(discount_type=DiscountType.PERCENTAGE)
 
         self.assertEqual(str(applied), "Sibling - 10.00%")
 
     def test_str_fixed_amount_has_no_percent(self):
-        applied = self.apply(discount_type=AppliedDiscount.DiscountType.FIXED_AMOUNT)
+        applied = self.apply(discount_type=DiscountType.FIXED_AMOUNT)
 
         self.assertEqual(str(applied), "Sibling - 10.00")
 

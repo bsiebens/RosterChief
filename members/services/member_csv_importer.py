@@ -123,7 +123,7 @@ class MemberCsvImporter:
             },
         )
 
-        club, _ = Club.objects.get_or_create(name=club_name)
+        club = self.get_club(club_name)
         season = self.get_current_season(club)
 
         _, membership_created = ClubMembership.objects.update_or_create(
@@ -140,6 +140,19 @@ class MemberCsvImporter:
             user_created=user_created,
             membership_created=membership_created,
         )
+
+    def get_club(self, club_name) -> Club:
+        # Never get_or_create: Club.name isn't unique, so a typo'd or differently-cased
+        # value would otherwise either spin up a duplicate club or raise
+        # MultipleObjectsReturned against one that already exists. Matching
+        # case-insensitively absorbs the harmless variety (a CSV export's casing rarely
+        # matches the platform's own); an unknown club is a data problem the importer
+        # must not paper over by inventing one.
+        club = Club.objects.filter(name__iexact=club_name).first()
+        if club is None:
+            raise ValueError(f"Unknown club '{club_name}'.")
+
+        return club
 
     def get_current_season(self, club) -> Season:
         # Season.get_current() is tenant-scoped, so bind the row's club as the

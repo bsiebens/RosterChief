@@ -211,6 +211,24 @@ class SubmitFormTests(FormbuilderTestBase):
 
         self.assertIn("size", ctx.exception.errors)
 
+    def test_number_field_rejects_non_numeric_input(self):
+        # Validation goes through the same dynamic Django Form the UI renders, so a
+        # NUMBER field is checked as a decimal — not merely "present".
+        Field.objects.create(form=self.form, key="age", label="Age", field_type=Field.FieldType.NUMBER, required=True, order=3)
+
+        with self.assertRaises(FormSubmissionError) as ctx:
+            submit_form(self.form, self.member, {"name": "Jane", "age": "not-a-number"})
+
+        self.assertIn("age", ctx.exception.errors)
+
+    def test_email_field_rejects_an_invalid_address(self):
+        Field.objects.create(form=self.form, key="contact", label="Contact", field_type=Field.FieldType.EMAIL, required=True, order=3)
+
+        with self.assertRaises(FormSubmissionError) as ctx:
+            submit_form(self.form, self.member, {"name": "Jane", "contact": "not-an-email"})
+
+        self.assertIn("contact", ctx.exception.errors)
+
     def test_multichoice_validation(self):
         field = Field.objects.create(form=self.form, key="days", label="Days", field_type=Field.FieldType.MULTICHOICE, required=False, order=3, options=["mon", "tue", "wed"])
 

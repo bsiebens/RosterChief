@@ -4,10 +4,13 @@
 {% block heading %}Features{% endblock heading %}
 
 {% block actions %}
-    <a class="btn btn-primary gap-2" href="{% url 'controlpanel:flag_create' %}">{% lucide "plus" size=16 %} New feature</a>
+    <button class="btn btn-primary gap-2" type="button" onclick="document.getElementById('flag_create_modal').showModal()">{% lucide "plus" size=16 %} New feature</button>
 {% endblock actions %}
 
 {% block panel %}
+    {% url 'controlpanel:flag_create' as flag_create_url %}
+    {% include "controlpanel/_modal_form.html" with modal_id="flag_create_modal" title="New feature" form=flag_form action_url=flag_create_url submit_label="Create" submit_icon="plus" %}
+
     {% comment %}
         The lock-down. Clubs get a maintenance page, the scheduled jobs stand down, and the
         control panel and the auth screens stay open — otherwise you could not sign in to
@@ -84,13 +87,13 @@
                                     {% elif flag.everyone is False %}
                                         <span class="badge badge-error">Off everywhere</span>
                                     {% else %}
-                                        <span class="badge badge-ghost">Per club</span>
+                                        <span class="badge badge-info">Per club</span>
                                     {% endif %}
                                 </td>
                                 <td>{{ flag.clubs.count }}</td>
-                                <td class="max-w-xs truncate opacity-70">{{ flag.note|default:"—" }}</td>
+                                <td class="max-w-xs truncate opacity-70">{{ flag.note|default:"-" }}</td>
                                 <td class="text-right">
-                                    <a class="btn btn-ghost btn-xs gap-1" href="{% url 'controlpanel:flag_update' flag.pk %}">{% lucide "pencil" size=14 %} Edit</a>
+                                    <button class="btn btn-outline btn-sm gap-1" type="button" onclick="document.getElementById('{{ flag.pk|dom_id:"flag_edit_modal" }}').showModal()">{% lucide "pencil" size=14 %} Edit</button>
                                 </td>
                             </tr>
                         {% empty %}
@@ -101,6 +104,12 @@
                     </tbody>
                 </table>
             </div>
+
+            {% comment %} Dialogs live outside the table: <tbody> may only contain <tr> elements. {% endcomment %}
+            {% for flag in flags %}
+                {% url 'controlpanel:flag_update' flag.pk as flag_update_url %}
+                {% include "controlpanel/_modal_form.html" with modal_id=flag.pk|dom_id:"flag_edit_modal" title="Edit "|add:flag.name form=flag.edit_form action_url=flag_update_url submit_label="Save" submit_icon="check" %}
+            {% endfor %}
         </div>
     </div>
     <div class="card bg-base-100 shadow">
@@ -113,7 +122,7 @@
                         {% for switch in switches %}
                             <tr>
                                 <td class="font-mono font-medium">{{ switch.name }}</td>
-                                <td class="opacity-70">{{ switch.note|default:"—" }}</td>
+                                <td class="opacity-70">{{ switch.note|default:"-" }}</td>
                                 <td class="text-right">
                                     <form method="post" action="{% url 'controlpanel:switch_toggle' switch.pk %}">
                                         {% csrf_token %}

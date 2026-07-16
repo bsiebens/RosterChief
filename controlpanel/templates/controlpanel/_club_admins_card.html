@@ -1,14 +1,14 @@
-{% load lucide %}
+{% load lucide ui %}
 
 {% comment %}
-    Club-scoped admins, and the form to add one. Included with `club`, `admins` already
-    in context.
+    Club-scoped admins, and the modals to add one / confirm removing one. Included with
+    `club`, `admins`, `admin_form` already in context.
 {% endcomment %}
 <div class="card bg-base-100 shadow">
     <div class="card-body">
         <div class="flex items-center justify-between">
             <h2 class="card-title text-base">{% lucide "shield-user" size=18 %} Club admins</h2>
-            <a class="btn btn-primary btn-sm gap-2" href="{% url 'controlpanel:club_admin_add' club.pk %}">{% lucide "user-plus" size=16 %} Add admin</a>
+            <button class="btn btn-primary btn-sm gap-2" type="button" onclick="document.getElementById('club_admin_add_modal').showModal()">{% lucide "user-plus" size=16 %} Add admin</button>
         </div>
         <div class="overflow-x-auto">
             <table class="table">
@@ -25,10 +25,7 @@
                             <td>{{ role.member }}</td>
                             <td>{{ role.member.user.email|default:"—" }}</td>
                             <td class="text-right">
-                                <form method="post" action="{% url 'controlpanel:club_admin_remove' club.pk role.pk %}">
-                                    {% csrf_token %}
-                                    <button class="btn btn-error btn-outline btn-sm gap-1" type="submit">{% lucide "trash-2" size=14 %} Remove</button>
-                                </form>
+                                <button class="btn btn-error btn-outline btn-sm gap-1" type="button" onclick="document.getElementById('{{ role.pk|dom_id:"admin_remove_modal" }}').showModal()">{% lucide "trash-2" size=14 %} Remove</button>
                             </td>
                         </tr>
                     {% empty %}
@@ -41,3 +38,12 @@
         </div>
     </div>
 </div>
+
+{% url 'controlpanel:club_admin_add' club.pk as club_admin_add_url %}
+{% include "controlpanel/_modal_form.html" with modal_id="club_admin_add_modal" title="Add admin" form=admin_form action_url=club_admin_add_url submit_label="Grant admin" submit_icon="user-plus" blurb="A club admin can manage everything in this club. They will be required to set up two-factor authentication before they can sign in." %}
+
+{% comment %} Dialogs live outside the table: <tbody> may only contain <tr> elements. {% endcomment %}
+{% for role in admins %}
+    {% url 'controlpanel:club_admin_remove' club.pk role.pk as admin_remove_url %}
+    {% include "controlpanel/_confirm_modal.html" with modal_id=role.pk|dom_id:"admin_remove_modal" title="Remove admin" body="Remove "|add:role.member.get_full_name|add:" as an admin of this club? They keep their membership — only admin rights are revoked." action_url=admin_remove_url submit_label="Remove" %}
+{% endfor %}

@@ -1,7 +1,8 @@
-from django.contrib import messages
 from django.contrib.auth.mixins import UserPassesTestMixin
 from django.http import Http404
 from django.shortcuts import redirect
+
+from .messages import notify
 
 
 class PlatformStaffRequiredMixin(UserPassesTestMixin):
@@ -56,5 +57,5 @@ class RedirectOnInvalidMixin:
 
     def form_invalid(self, form):
         for error in form.errors.values():
-            messages.error(self.request, " ".join(error))
+            notify(self.request, f"e|Couldn't save|{' '.join(error)}")
         return redirect(self.invalid_redirect_url_name, **self.get_invalid_redirect_kwargs())

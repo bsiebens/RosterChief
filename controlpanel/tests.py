@@ -9,8 +9,9 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import get_user_model
 from django.contrib.messages.storage.base import Message
+from django.contrib.messages.storage.fallback import FallbackStorage
 from django.core.cache import cache
-from django.test import TestCase, override_settings
+from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 from waffle import get_waffle_flag_model, get_waffle_switch_model
@@ -25,6 +26,7 @@ from members.models import Member
 from shop.models import Order
 from teams.models import Position, StaffAssignment, Team, TeamMembership
 
+from .messages import LEVELS, notify
 from .services.admins import grant_club_admin
 from .services.platform_admins import PlatformAdminError, is_last_superuser, set_platform_access
 from .services.statistics import (
@@ -175,11 +177,18 @@ class ClubAdminManagementTests(ControlPanelTestBase):
         self.assertEqual(ClubRole.objects.get(club=self.club, member__user=user).role, ClubRole.Roles.ADMIN)
 
     def test_a_new_email_must_come_with_a_name(self):
-        response = self.add_admin(email="nameless@example.com", first_name="", last_name="")
+        # Reachable only via the "Add admin" modal on the club detail page, so a rejected
+        # submission bounces back there with the error as a message.
+        response = self.client.post(reverse("controlpanel:club_admin_add", args=[self.club.pk]), {"email": "nameless@example.com", "first_name": "", "last_name": ""}, follow=True)
 
-        self.assertEqual(response.status_code, 200)
+        self.assertRedirects(response, reverse("controlpanel:club_detail", args=[self.club.pk]))
         self.assertFalse(ClubRole.objects.exists())
-        self.assertFormError(response.context["form"], "first_name", "Required: this email has no account yet.")
+        self.assertContains(response, "Required: this email has no account yet.")
+
+    def test_add_admin_is_post_only(self):
+        response = self.client.get(reverse("controlpanel:club_admin_add", args=[self.club.pk]))
+
+        self.assertEqual(response.status_code, 405)
 
     def test_an_existing_member_is_promoted_rather_than_duplicated(self):
         user = User.objects.create_user(email="existing@example.com", password="pw-secret-123")
@@ -315,8 +324,10 @@ class PlatformAdminTests(TestCase):
     def test_superuser_sees_the_admins_section(self):
         self.assertEqual(self.client.get(reverse("controlpanel:admins")).status_code, 200)
 
-    def test_the_grant_form_renders(self):
-        self.assertEqual(self.client.get(reverse("controlpanel:admin_add")).status_code, 200)
+    def test_the_grant_form_is_post_only(self):
+        # Reachable only via the "Grant access" modal on the admins page: there is no
+        # standalone template to render on a GET.
+        self.assertEqual(self.client.get(reverse("controlpanel:admin_add")).status_code, 405)
 
     def test_grant_access_to_a_new_email_creates_a_staff_account(self):
         self.client.post(reverse("controlpanel:admin_add"), {"email": "New.Admin@Example.com"})
@@ -407,9 +418,17 @@ class FeatureViewTests(ControlPanelTestBase):
         self.assertContains(response, "shop")
         self.assertContains(response, "maintenance")
 
-    def test_the_flag_forms_render(self):
-        self.assertEqual(self.client.get(reverse("controlpanel:flag_create")).status_code, 200)
-        self.assertEqual(self.client.get(reverse("controlpanel:flag_update", args=[self.flag.pk])).status_code, 200)
+    def test_the_flag_forms_are_post_only(self):
+        # Reachable only through a modal on the features page: there is no standalone
+        # template to render on a GET.
+        self.assertEqual(self.client.get(reverse("controlpanel:flag_create")).status_code, 405)
+        self.assertEqual(self.client.get(reverse("controlpanel:flag_update", args=[self.flag.pk])).status_code, 405)
+
+    def test_an_invalid_flag_submission_redirects_with_a_message(self):
+        response = self.client.post(reverse("controlpanel:flag_create"), {"name": "", "note": "", "percent": "", "everyone": ""}, follow=True)
+
+        self.assertRedirects(response, reverse("controlpanel:features"))
+        self.assertContains(response, "This field is required")
 
     def test_create_a_flag(self):
         self.client.post(reverse("controlpanel:flag_create"), {"name": "news", "note": "News module", "percent": "", "everyone": ""})
@@ -456,33 +475,75 @@ class FeatureViewTests(ControlPanelTestBase):
         self.assertNotContains(response, reverse("controlpanel:club_feature_toggle", args=[self.club.pk, self.flag.pk]))
 
 
+class NotifyTests(TestCase):
+    def request(self):
+        request = RequestFactory().get("/")
+        request.session = {}
+        storage = FallbackStorage(request)
+        request._messages = storage
+        return request, storage
+
+    def test_splits_level_title_and_body(self):
+        request, storage = self.request()
+
+        notify(request, "s|Club created|Ajax United is live.")
+
+        [message] = list(storage)
+        self.assertEqual(message.level, messages.SUCCESS)
+        self.assertEqual(message.extra_tags, "Club created")
+        self.assertEqual(message.message, "Ajax United is live.")
+
+    def test_maps_every_level_code_to_its_django_level(self):
+        self.assertEqual(LEVELS, {"s": messages.SUCCESS, "i": messages.INFO, "w": messages.WARNING, "e": messages.ERROR, "d": messages.DEBUG})
+
+    def test_a_pipe_inside_the_body_is_preserved_intact(self):
+        # maxsplit=2 stops after the level and the title, so a "|" a club/tier/flag name
+        # might contain stays part of the body rather than truncating it.
+        request, storage = self.request()
+
+        notify(request, "s|Title|Before | after.")
+
+        [message] = list(storage)
+        self.assertEqual(message.message, "Before | after.")
+
+    def test_an_empty_title_falls_back_to_the_generic_one_at_render_time(self):
+        request, storage = self.request()
+
+        notify(request, "s||No custom title.")
+
+        [message] = list(storage)
+        self.assertEqual(as_alert(message)["title"], "Done")
+
+
 class MessageAlertTests(TestCase):
     def alert(self, level, text, extra_tags=None):
         return as_alert(Message(level, text, extra_tags=extra_tags))
 
     def test_each_level_gets_its_own_icon_title_and_colour(self):
         self.assertEqual(self.alert(messages.SUCCESS, "Saved.")["icon"], "circle-check")
-        self.assertEqual(self.alert(messages.WARNING, "Careful.")["css"], "alert-warning")
+        self.assertEqual(self.alert(messages.WARNING, "Careful.")["css"], "alert-warning border-warning")
         self.assertEqual(self.alert(messages.ERROR, "Boom.")["title"], "Something went wrong")
-        self.assertEqual(self.alert(messages.INFO, "FYI.")["css"], "alert-info")
+        self.assertEqual(self.alert(messages.INFO, "FYI.")["css"], "alert-info border-info")
 
     def test_extra_tags_override_the_title(self):
         alert = self.alert(messages.SUCCESS, "Ajax United is live.", extra_tags="Club created")
 
         self.assertEqual(alert["title"], "Club created")
         self.assertEqual(alert["body"], "Ajax United is live.")
-        self.assertEqual(alert["css"], "alert-success")  # a custom title must not change the level
+        self.assertEqual(alert["css"], "alert-success border-success")  # a custom title must not change the level
 
     def test_an_unknown_level_falls_back_to_info(self):
-        self.assertEqual(self.alert(999, "Odd.")["css"], "alert-info")
+        self.assertEqual(self.alert(999, "Odd.")["css"], "alert-info border-info")
 
 
 class MessageRenderingTests(ControlPanelTestBase):
     def test_a_message_renders_as_a_soft_alert_with_icon_and_title(self):
+        # club_archive queues its message through `notify`, which sets a custom title —
+        # so the generic per-level one ("Careful") must not show.
         response = self.client.post(reverse("controlpanel:club_archive", args=[self.club.pk]), follow=True)
 
-        self.assertContains(response, "alert alert-soft alert-warning")
-        self.assertContains(response, '<div class="font-bold">Careful</div>', html=False)
+        self.assertContains(response, "alert alert-soft border-2 alert-warning border-warning")
+        self.assertContains(response, '<div class="font-bold">Club archived</div>', html=False)
         self.assertContains(response, "<svg")  # the lucide icon
 
 

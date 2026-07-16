@@ -1,6 +1,5 @@
 from contextlib import contextmanager
 
-from django.contrib import messages
 from django.contrib.auth import get_user_model
 from django.db.models import Count
 from django.http import HttpResponse
@@ -19,6 +18,7 @@ from club.models import Club, ClubRole
 from features.models import Maintenance
 
 from .forms import ClubAdminForm, ClubForm, DuePaymentForm, FlagForm, MaintenanceForm, OpenPeriodForm, PlatformAdminForm, SubscriptionForm, TierForm, TierPriceForm
+from .messages import notify
 from .mixins import PlatformStaffRequiredMixin, PlatformSuperuserRequiredMixin, RedirectOnInvalidMixin
 from .services.admins import grant_club_admin, revoke_club_admin
 from .services.platform_admins import (
@@ -35,7 +35,7 @@ Switch = get_waffle_switch_model()
 
 
 @contextmanager
-def suppress_billing_errors(request):
+def suppress_billing_errors(request, title="Billing error"):
     """Turn a BillingError into an error message rather than letting it propagate.
 
     Fits call sites that fall through to the same redirect on the happy and unhappy path
@@ -45,7 +45,7 @@ def suppress_billing_errors(request):
     try:
         yield
     except BillingError as error:
-        messages.error(request, str(error))
+        notify(request, f"e|{title}|{error}")
 
 
 class DashboardView(PlatformStaffRequiredMixin, TemplateView):
@@ -91,7 +91,7 @@ class ClubCreateView(PlatformStaffRequiredMixin, CreateView):
 
     def form_valid(self, form):
         response = super().form_valid(form)
-        messages.success(self.request, f"Club “{self.object}” created.")
+        notify(self.request, f"s|Club created|Club “{self.object}” created.")
         return response
 
     def get_success_url(self):
@@ -108,7 +108,7 @@ class ClubUpdateView(PlatformStaffRequiredMixin, UpdateView):
 
     def form_valid(self, form):
         response = super().form_valid(form)
-        messages.success(self.request, f"Club “{self.object}” updated.")
+        notify(self.request, f"s|Club updated|Club “{self.object}” updated.")
         return response
 
     def get_success_url(self):
@@ -143,6 +143,7 @@ class ClubDetailView(PlatformStaffRequiredMixin, DetailView):
             dues=dues,
             today=timezone.localdate(),
             admins=ClubRole.objects.filter(club=self.object, role=ClubRole.Roles.ADMIN).select_related("member", "member__user"),
+            admin_form=ClubAdminForm(),
             flags=flags_for_club(self.object),
             open_period_form=OpenPeriodForm(),
             open_period_blurb=f"Next period starts {date_format(next_start, 'j M Y')} unless you say otherwise. By default it continues from the end of the last one, so a lapsed year is still owed — pick a start date to forgive the gap.",
@@ -157,7 +158,7 @@ class ClubArchiveView(PlatformStaffRequiredMixin, View):
     def post(self, request, pk):
         club = get_object_or_404(Club, pk=pk)
         club.archive()
-        messages.warning(request, f"Club “{club}” archived. Its subdomain no longer resolves.")
+        notify(request, f"w|Club archived|Club “{club}” archived. Its subdomain no longer resolves.")
         return redirect("controlpanel:club_detail", pk=club.pk)
 
 
@@ -165,24 +166,28 @@ class ClubRestoreView(PlatformStaffRequiredMixin, View):
     def post(self, request, pk):
         club = get_object_or_404(Club, pk=pk)
         club.restore()
-        messages.success(request, f"Club “{club}” restored.")
+        notify(request, f"s|Club restored|Club “{club}” restored.")
         return redirect("controlpanel:club_detail", pk=club.pk)
 
 
-class ClubAdminAddView(PlatformStaffRequiredMixin, FormView):
+class ClubAdminAddView(PlatformStaffRequiredMixin, RedirectOnInvalidMixin, FormView):
+    """Reachable only via the "Add admin" modal on the club detail page — POST-only, and
+    there is no standalone template to render on GET or on a rejected submission."""
+
     form_class = ClubAdminForm
-    template_name = "controlpanel/club_admin_form.html"
+    http_method_names = ["post"]
+    invalid_redirect_url_name = "controlpanel:club_detail"
 
     @property
     def club(self):
         return get_object_or_404(Club, pk=self.kwargs["pk"])
 
-    def get_context_data(self, **kwargs):
-        return super().get_context_data(nav="clubs", club=self.club, **kwargs)
+    def get_invalid_redirect_kwargs(self):
+        return {"pk": self.kwargs["pk"]}
 
     def form_valid(self, form):
         role = grant_club_admin(self.club, **form.cleaned_data)
-        messages.success(self.request, f"{role.member} is now an admin of {role.club}. They must set up two-factor authentication before they can sign in.")
+        notify(self.request, f"s|Admin added|{role.member} is now an admin of {role.club}. They must set up two-factor authentication before they can sign in.")
         return redirect("controlpanel:club_detail", pk=self.kwargs["pk"])
 
 
@@ -191,7 +196,7 @@ class ClubAdminRemoveView(PlatformStaffRequiredMixin, View):
         role = get_object_or_404(ClubRole, pk=role_pk, club_id=pk, role=ClubRole.Roles.ADMIN)
         member = role.member
         revoke_club_admin(role)
-        messages.warning(request, f"{member} is no longer an admin of this club.")
+        notify(request, f"w|Admin removed|{member} is no longer an admin of this club.")
         return redirect("controlpanel:club_detail", pk=pk)
 
 
@@ -204,10 +209,10 @@ class ClubFeatureToggleView(PlatformStaffRequiredMixin, View):
 
         if flag.clubs.filter(pk=club.pk).exists():
             flag.clubs.remove(club)
-            messages.warning(request, f"“{flag.name}” turned off for {club}.")
+            notify(request, f"w|Feature disabled|“{flag.name}” turned off for {club}.")
         else:
             flag.clubs.add(club)
-            messages.success(request, f"“{flag.name}” turned on for {club}.")
+            notify(request, f"s|Feature enabled|“{flag.name}” turned on for {club}.")
 
         return redirect("controlpanel:club_detail", pk=club.pk)
 
@@ -216,9 +221,16 @@ class FeatureListView(PlatformStaffRequiredMixin, TemplateView):
     template_name = "controlpanel/features.html"
 
     def get_context_data(self, **kwargs):
+        # Bound per-row so each flag's "Edit" modal can render its own form: the template
+        # can't call FlagForm(instance=flag) itself, so the form rides along on the flag.
+        flags = list(Flag.objects.prefetch_related("clubs").order_by("name"))
+        for flag in flags:
+            flag.edit_form = FlagForm(instance=flag)
+
         return super().get_context_data(
             nav="features",
-            flags=Flag.objects.prefetch_related("clubs").order_by("name"),
+            flags=flags,
+            flag_form=FlagForm(),
             switches=Switch.objects.order_by("name"),
             maintenance=Maintenance.current(),
             maintenance_form=MaintenanceForm(),
@@ -232,45 +244,46 @@ class MaintenanceView(PlatformStaffRequiredMixin, View):
     def post(self, request):
         if Maintenance.is_on():
             Maintenance.stop()
-            messages.success(request, "Maintenance ended. The clubs are back.")
+            notify(request, "s|Maintenance ended|The clubs are back.")
         else:
             form = MaintenanceForm(request.POST)
             message = form.cleaned_data["message"] if form.is_valid() else ""
             Maintenance.start(message=message, user=request.user)
-            messages.warning(request, "Platform closed. Every club subdomain now serves a maintenance page, and the scheduled jobs stand down.")
+            notify(request, "w|Platform closed|Every club subdomain now serves a maintenance page, and the scheduled jobs stand down.")
 
         return redirect("controlpanel:features")
 
 
-class FlagCreateView(PlatformStaffRequiredMixin, CreateView):
+class FlagCreateView(PlatformStaffRequiredMixin, RedirectOnInvalidMixin, CreateView):
+    """Reachable only via the "New feature" modal on the features page — POST-only, and
+    there is no standalone template to render on GET or on a rejected submission."""
+
     model = Flag
     form_class = FlagForm
-    template_name = "controlpanel/flag_form.html"
-    success_url = None
-
-    def get_context_data(self, **kwargs):
-        return super().get_context_data(nav="features", **kwargs)
+    http_method_names = ["post"]
+    invalid_redirect_url_name = "controlpanel:features"
 
     def form_valid(self, form):
         response = super().form_valid(form)
-        messages.success(self.request, f"Feature “{self.object.name}” created.")
+        notify(self.request, f"s|Feature created|Feature “{self.object.name}” created.")
         return response
 
     def get_success_url(self):
         return reverse("controlpanel:features")
 
 
-class FlagUpdateView(PlatformStaffRequiredMixin, UpdateView):
+class FlagUpdateView(PlatformStaffRequiredMixin, RedirectOnInvalidMixin, UpdateView):
+    """Reachable only via a flag's "Edit" modal on the features page — POST-only, and
+    there is no standalone template to render on GET or on a rejected submission."""
+
     model = Flag
     form_class = FlagForm
-    template_name = "controlpanel/flag_form.html"
-
-    def get_context_data(self, **kwargs):
-        return super().get_context_data(nav="features", **kwargs)
+    http_method_names = ["post"]
+    invalid_redirect_url_name = "controlpanel:features"
 
     def form_valid(self, form):
         response = super().form_valid(form)
-        messages.success(self.request, f"Feature “{self.object.name}” updated.")
+        notify(self.request, f"s|Feature updated|Feature “{self.object.name}” updated.")
         return response
 
     def get_success_url(self):
@@ -284,7 +297,8 @@ class SwitchToggleView(PlatformStaffRequiredMixin, View):
         switch = get_object_or_404(Switch, pk=pk)
         switch.active = not switch.active
         switch.save()
-        messages.success(request, f"Switch “{switch.name}” is now {'on' if switch.active else 'off'}.")
+        title = "Switch on" if switch.active else "Switch off"
+        notify(request, f"s|{title}|Switch “{switch.name}” is now {'on' if switch.active else 'off'}.")
         return redirect("controlpanel:features")
 
 
@@ -292,19 +306,20 @@ class PlatformAdminListView(PlatformSuperuserRequiredMixin, TemplateView):
     template_name = "controlpanel/admins.html"
 
     def get_context_data(self, **kwargs):
-        return super().get_context_data(nav="admins", admins=platform_admins(), **kwargs)
+        return super().get_context_data(nav="admins", admins=platform_admins(), admin_form=PlatformAdminForm(), **kwargs)
 
 
-class PlatformAdminAddView(PlatformSuperuserRequiredMixin, FormView):
+class PlatformAdminAddView(PlatformSuperuserRequiredMixin, RedirectOnInvalidMixin, FormView):
+    """Reachable only via the "Grant access" modal on the admins page — POST-only, and
+    there is no standalone template to render on GET or on a rejected submission."""
+
     form_class = PlatformAdminForm
-    template_name = "controlpanel/admin_form.html"
-
-    def get_context_data(self, **kwargs):
-        return super().get_context_data(nav="admins", **kwargs)
+    http_method_names = ["post"]
+    invalid_redirect_url_name = "controlpanel:admins"
 
     def form_valid(self, form):
         user = grant_platform_access(form.cleaned_data["email"], is_superuser=form.cleaned_data["is_superuser"])
-        messages.success(self.request, f"{user.email} now has platform access. They must set up two-factor authentication before they can sign in.")
+        notify(self.request, f"s|Platform access granted|{user.email} now has platform access. They must set up two-factor authentication before they can sign in.")
         return redirect("controlpanel:admins")
 
 
@@ -319,9 +334,9 @@ class PlatformAdminUpdateView(PlatformSuperuserRequiredMixin, View):
                 is_superuser=request.POST.get("is_superuser") == "1",
             )
         except PlatformAdminError as error:
-            messages.error(request, str(error))
+            notify(request, f"e|Couldn't update access|{error}")
         else:
-            messages.success(request, f"Updated platform access for {user.email}.")
+            notify(request, f"s|Access updated|Updated platform access for {user.email}.")
         return redirect("controlpanel:admins")
 
 
@@ -331,9 +346,9 @@ class PlatformAdminRevokeView(PlatformSuperuserRequiredMixin, View):
         try:
             revoke_platform_access(request.user, user)
         except PlatformAdminError as error:
-            messages.error(request, str(error))
+            notify(request, f"e|Couldn't revoke access|{error}")
         else:
-            messages.warning(request, f"{user.email} no longer has platform access.")
+            notify(request, f"w|Access revoked|{user.email} no longer has platform access.")
         return redirect("controlpanel:admins")
 
 
@@ -377,7 +392,7 @@ class TierCreateView(PlatformStaffRequiredMixin, RedirectOnInvalidMixin, CreateV
     invalid_redirect_url_name = "controlpanel:billing"
 
     def get_success_url(self):
-        messages.success(self.request, f"Tier “{self.object}” created. Give it a price before billing anyone.")
+        notify(self.request, f"s|Plan created|Tier “{self.object}” created. Give it a price before billing anyone.")
         return reverse("controlpanel:billing")
 
 
@@ -391,7 +406,7 @@ class TierUpdateView(PlatformStaffRequiredMixin, RedirectOnInvalidMixin, UpdateV
     invalid_redirect_url_name = "controlpanel:billing"
 
     def get_success_url(self):
-        messages.success(self.request, f"Tier “{self.object}” updated.")
+        notify(self.request, f"s|Plan updated|Tier “{self.object}” updated.")
         return reverse("controlpanel:billing")
 
 
@@ -415,7 +430,7 @@ class TierPriceCreateView(PlatformStaffRequiredMixin, RedirectOnInvalidMixin, Cr
     def form_valid(self, form):
         form.instance.tier = self.tier
         response = super().form_valid(form)
-        messages.success(self.request, f"{self.tier} is €{self.object.amount} for periods opening from {self.object.active_from}.")
+        notify(self.request, f"s|Price added|{self.tier} is €{self.object.amount} for periods opening from {self.object.active_from}.")
         return response
 
     def get_success_url(self):
@@ -450,17 +465,17 @@ class SubscribeClubView(PlatformStaffRequiredMixin, RedirectOnInvalidMixin, Form
     def form_valid(self, form):
         club = self.club
         existing = getattr(club, "subscription", None)
-        with suppress_billing_errors(self.request):
+        with suppress_billing_errors(self.request, title="Couldn't change plan"):
             if existing:
                 # Changing tier does not re-bill: the current period keeps the amount it was
                 # issued at, and the new rate applies from the next one.
                 subscription = form.save(commit=False)
                 subscription.club = club
                 subscription.save()
-                messages.success(self.request, f"{club} is now on {subscription.tier}. The current period keeps the amount it was billed at.")
+                notify(self.request, f"s|Plan changed|{club} is now on {subscription.tier}. The current period keeps the amount it was billed at.")
             else:
                 subscribe(club, form.cleaned_data["tier"], start=form.cleaned_data.get("start"), auto_archive=form.cleaned_data["auto_archive"], auto_renew=form.cleaned_data["auto_renew"])
-                messages.success(self.request, f"{club} is on {form.cleaned_data['tier']}. Its first period is open.")
+                notify(self.request, f"s|Billing started|{club} is on {form.cleaned_data['tier']}. Its first period is open.")
 
         return redirect("controlpanel:club_detail", pk=club.pk)
 
@@ -483,7 +498,7 @@ class RecordPaymentView(PlatformStaffRequiredMixin, RedirectOnInvalidMixin, Form
 
     def form_valid(self, form):
         due = self.due
-        with suppress_billing_errors(self.request):
+        with suppress_billing_errors(self.request, title="Couldn't record payment"):
             record_payment(
                 due,
                 form.cleaned_data["amount"],
@@ -494,7 +509,7 @@ class RecordPaymentView(PlatformStaffRequiredMixin, RedirectOnInvalidMixin, Form
                 user=self.request.user,
             )
             due.refresh_from_db()
-            messages.success(self.request, f"€{form.cleaned_data['amount']} recorded. {due.get_status_display().capitalize()} — €{due.balance} outstanding.")
+            notify(self.request, f"s|Payment recorded|€{form.cleaned_data['amount']} recorded. {due.get_status_display().capitalize()} — €{due.balance} outstanding.")
 
         return redirect("controlpanel:club_detail", pk=due.club_id)
 
@@ -502,9 +517,9 @@ class RecordPaymentView(PlatformStaffRequiredMixin, RedirectOnInvalidMixin, Form
 class WaiveDueView(PlatformStaffRequiredMixin, View):
     def post(self, request, pk):
         due = get_object_or_404(Due, pk=pk)
-        with suppress_billing_errors(request):
+        with suppress_billing_errors(request, title="Couldn't waive period"):
             waive(due)
-            messages.warning(request, f"Period {due.period_start} to {due.period_end} waived. Nothing is owed and the club will not be archived for it.")
+            notify(request, f"w|Period waived|Period {due.period_start} to {due.period_end} waived. Nothing is owed and the club will not be archived for it.")
 
         return redirect("controlpanel:club_detail", pk=due.club_id)
 
@@ -530,9 +545,9 @@ class OpenPeriodView(PlatformStaffRequiredMixin, RedirectOnInvalidMixin, FormVie
     def form_valid(self, form):
         club = self.club
         start = form.cleaned_data.get("start")
-        with suppress_billing_errors(self.request):
+        with suppress_billing_errors(self.request, title="Couldn't open period"):
             due = reactivate(club, start=start) if club.is_archived else open_period(club, start=start)
-            messages.success(self.request, f"Period {due.period_start} to {due.period_end} opened for €{due.amount}. Invoice {due.invoice.number}.")
+            notify(self.request, f"s|Period opened|Period {due.period_start} to {due.period_end} opened for €{due.amount}. Invoice {due.invoice.number}.")
 
         return redirect("controlpanel:club_detail", pk=club.pk)
 
@@ -545,7 +560,7 @@ class InvoicePdfView(PlatformStaffRequiredMixin, View):
             pdf = invoice_pdf(invoice)
         except BillingError as error:
             # The native PDF libraries are missing: say so rather than 500.
-            messages.error(request, str(error))
+            notify(request, f"e|PDF unavailable|{error}")
             return redirect("controlpanel:club_detail", pk=due.club_id)
 
         response = HttpResponse(pdf, content_type="application/pdf")

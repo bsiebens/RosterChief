@@ -554,8 +554,9 @@ class ImportMembersCsvCommandTests(TestCase):
         self.assertFalse(Member.objects.filter(email="nofirst@example.com").exists())
 
     def test_import_skips_row_when_club_has_no_current_season(self):
-        # "New Club" has no season, so the row is skipped and — because the row
-        # is atomic — the member and club creation roll back too.
+        # The club exists but has no season, so the row is skipped and — because
+        # the row is atomic — the member creation rolls back too.
+        Club.objects.create(name="New Club")
         csv_path = self.write_csv(
             "\n".join(
                 [
@@ -571,7 +572,45 @@ class ImportMembersCsvCommandTests(TestCase):
         self.assertIn("No current season for club 'New Club'.", stderr)
         self.assertIn("Rows skipped: 1.", stdout)
         self.assertFalse(Member.objects.filter(email="jane@example.com").exists())
-        self.assertFalse(Club.objects.filter(name="New Club").exists())
+
+    def test_import_skips_row_for_an_unknown_club(self):
+        # The importer must not silently spin up a club for a typo'd or unknown
+        # name — that is a data problem, not something to paper over.
+        csv_path = self.write_csv(
+            "\n".join(
+                [
+                    "first_name,last_name,email,date_of_birth,create_account,club_name,license_number",
+                    "Jane,Doe,jane@example.com,2010-04-12,false,Nonexistent Club,LIC-001",
+                ]
+            )
+        )
+
+        stdout, stderr = self.call_import_command(csv_path)
+
+        self.assertIn("Row 2 skipped:", stderr)
+        self.assertIn("Unknown club 'Nonexistent Club'.", stderr)
+        self.assertIn("Rows skipped: 1.", stdout)
+        self.assertFalse(Member.objects.filter(email="jane@example.com").exists())
+        self.assertFalse(Club.objects.filter(name="Nonexistent Club").exists())
+
+    def test_import_matches_a_club_name_case_insensitively(self):
+        # A CSV export's casing rarely matches the platform's own; that is
+        # harmless variation, not a different club.
+        csv_path = self.write_csv(
+            "\n".join(
+                [
+                    "first_name,last_name,email,date_of_birth,create_account,club_name,license_number",
+                    "Jane,Doe,jane@example.com,2010-04-12,false,city swim club,LIC-001",
+                ]
+            )
+        )
+
+        stdout, stderr = self.call_import_command(csv_path)
+
+        self.assertEqual(stderr, "")
+        self.assertIn("Rows skipped: 0.", stdout)
+        membership = ClubMembership.objects.get(club=self.club, member__email="jane@example.com")
+        self.assertEqual(membership.season, self.season)
 
 
 class MemberImportResultTests(TestCase):
