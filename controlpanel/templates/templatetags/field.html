@@ -1,0 +1,228 @@
+{% load i18n %}
+
+<div class="w-full max-w-6xl {% if size_modifier %}lg:w-fit{% endif %}">
+    <div class="flex flex-col gap-y-2">
+        {% if show_label %}
+            <div class="flex flex-row items-end min-h-6 mb-1">
+                <div class="ml-1 grow text-sm font-semibold {% if field.errors %}text-error{% else %}text-base-content{% endif %}">
+                    {{ field.label }}
+                </div>
+
+                {% if field.field.required %}
+                    <div class="mr-1">
+                        <span class="badge badge-sm {% if field.errors %}badge-error text-error-content{% else %}badge-neutral text-neutral-content{% endif %}">{% translate "required" %}</span>
+                    </div>
+                {% endif %}
+            </div>
+        {% endif %}
+
+        <div>
+            {% if field_type == "input" %}
+                <input
+                        type="{% if field.widget_type == "regionalphonenumber" %}tel{% elif field.widget_type == "datetime" %}datetime-local{% else %}{{ field.widget_type }}{% endif %}"
+                        class="input w-full {% if field.errors %}input-error text-error{% endif %} {% if size_modifier %}input-{{ size_modifier }}{% endif %}"
+                        name="{{ field.html_name }}"
+                        value="{% if field.widget_type == "date" or field.widget_type == "datetime" %}{% if field.value|date:"c"|default:"" != "" %}{{ field.value|date:"c"|default:"" }}{% else %}{{ field.value|default:"" }}{% endif %}{% else %}{% if field.value == None %}{{ field.value|default:"" }}{% else %}{{ field.value }}{% endif %}{% endif %}"
+                        {% if show_placeholder %}placeholder="{{ field.label|capfirst }}"{% endif %}
+                />
+
+            {% elif field_type == "checkbox" %}
+                <div class="flex flex-row items-center gap-2">
+                    <input
+                            type="checkbox"
+                            {% if show_as_toggle %}
+                            class="toggle {% if size_modifier %}toggle-{{ size_modifier }}{% endif %}"
+                            {% else %}
+                            class="checkbox {% if size_modifier %}checkbox-{{ size_modifier }}{% endif %}"
+                            {% endif %}
+                            name="{{ field.html_name }}"
+                            {% if field.value %}checked="checked"{% endif %}
+                    />
+
+                    {% if show_help_text %}
+                        <div class="text-sm">
+                            {{ field.help_text }}
+                        </div>
+                    {% endif %}
+                </div>
+
+            {% elif field_type == "textarea" %}
+                <textarea
+                        name="{{ field.html_name }}"
+                        class="{% if type == "markdownx" %}markdownx{% endif %} textarea textarea-bordered h-72 w-full {% if field.errors %}textarea-error text-error{% endif %} {% if size_modifier %}textarea-{{ size_modifier }}{% endif %}"
+                        {% if show_placeholder %}placeholder="{{ field.label }}"{% endif %}
+                >{{ field.value|default:"" }}</textarea>
+
+            {% elif field_type == "select" %}
+                <select
+                        class="select w-full {% if size_modifier %}select-{{ size_modifier }}{% endif %} {% if field.errors %}select-error text-error{% endif %}"
+                        name="{{ field.html_name }}"
+                        id="{{ field.auto_id }}"
+                        {% if field.widget_type == "selectmultiple" %}multiple{% endif %}
+                >
+
+                    {% if field.widget_type == "selectmultiple" %}
+                        {% if not show_label %}
+                            <option selected disabled>{{ field.label|capfirst }}</option>
+                        {% endif %}
+
+                        {% for option_value, option_label in field.field.choices %}
+                            <option value="{{ option_value }}" {% if option_value in field.value %}selected="selected"{% endif %}>
+                                {{ option_label }}
+                            </option>
+                        {% endfor %}
+                    {% else %}
+                        {% if not show_label %}
+                            <option selected disabled>{{ field.label|capfirst }}</option>
+                        {% endif %}
+
+                        {% for option_value, option_label in field.field.choices %}
+                            <option value="{{ option_value }}" {% if field.value|stringformat:"s" == option_value|stringformat:"s" %}selected="selected"{% endif %}>
+                                {{ option_label }}
+                            </option>
+                        {% endfor %}
+                    {% endif %}
+
+                </select>
+
+            {% elif field_type == "file" %}
+                <input
+                        type="file"
+                        class="file-input w-full {% if size_modifier %}file-input-{{ size_modifier }}{% endif %}"
+                        name="{{ field.html_name }}"
+                        {% if field.field.widget.attrs.accept %}accept="{{ field.field.widget.attrs.accept }}"{% endif %}
+                />
+
+                {% if field.value %}
+                    <span class="my-1 text-xs opacity-50">{% translate "Current file:" %} {{ field.value }}</span>
+                {% endif %}
+            {% endif %}
+        </div>
+
+        {% if field_type != "checkbox" and field.help_text and show_help_text or field.errors %}
+            <div class="flex flex-col gap-1 ml-2">
+                {% if field.errors %}
+                    <div class="text-xs text-error">
+                        {{ field.errors }}
+                    </div>
+                {% endif %}
+
+                {% if field.help_text %}
+                    <div class="text-xs self-start opacity-50 {% if field.errors %}text-error{% endif %}">
+                        {{ field.help_text }}
+                    </div>
+                {% endif %}
+            </div>
+        {% endif %}
+    </div>
+</div>
+
+
+{% comment %} <div class="w-full max-w-6xl {% if size_modifier %}lg:w-fit{% endif %}">
+    <label class="w-full form-control">
+        {% if show_label %}
+            <div class="label">
+                <span class="label-text opacity-50 {% if field.errors %}text-error{% else %}text-base-content{% endif %}">{{ field.label }}</span>
+
+                {% if field.field.required %}
+                    <span class="label-text-alt badge badge-sm {% if field.errors %}badge-error text-error-content{% else %}badge-neutral text-neutral-content{% endif %}">{% translate "required" %}</span>
+                {% endif %}
+            </div>
+        {% endif %}
+
+        {% if field_type == "select" %}
+            <select
+                class="select select-bordered {% if size_modifier %}select-{{ size_modifier }}{% endif %} {% if field.errors %}select-error text-error{% endif %}"
+                name="{{ field.html_name }}"
+                id="{{ field.auto_id }}"
+                {% if field.widget_type == "selectmultiple" %}multiple{% endif %}
+            >
+
+                {% if field.widget_type == "selectmultiple" %}
+                    {% if not show_label %}
+                        <option selected disabled>{{ field.label|capfirst }}</option>
+                    {% endif %}
+
+                    {% for option_value, option_label in field.field.choices %}
+                        <option value="{{ option_value }}" {% if option_value in field.value %}selected="selected"{% endif %}>
+                            {{ option_label }}
+                        </option>
+                    {% endfor %}
+                {% else %}
+                    {% if not show_label %}
+                        <option selected disabled>{{ field.label|capfirst }}</option>
+                    {% endif %}
+
+                    {% for option_value, option_label in field.field.choices %}
+                        <option value="{{ option_value }}" {% if field.value|stringformat:"s" == option_value|stringformat:"s" %}selected="selected"{% endif %}>
+                            {{ option_label }}
+                        </option>
+                    {% endfor %}
+                {% endif %}
+
+            </select>
+
+        {% elif field_type == "checkbox" %}
+            <div class="flex flex-row items-center gap-2">
+                <input
+                    type="checkbox"
+                    {% if show_as_toggle %}
+                        class="toggle {% if size_modifier %}toggle-{{ size_modifier }}{% endif %}"
+                    {% else %}
+                        class="checkbox {% if size_modifier %}checkbox-{{ size_modifier }}{% endif %}"
+                    {% endif %}
+                    name="{{ field.html_name }}"
+                    {% if field.value %}checked="checked"{% endif %}
+                />
+
+                {% if show_help_text %}
+                    <div class="label-text">
+                        {{ field.help_text }}
+                    </div>
+                {% endif %}
+            </div>
+
+        {% elif field_type == "textarea" %}
+            <textarea
+                name="{{ field.html_name }}"
+                class="{% if type == "markdownx" %}markdownx{% endif %} textarea textarea-bordered h-72 {% if field.errors %}textarea-error text-error{% endif %} {% if size_modifier %}textarea-{{ size_modifier }}{% endif %}"
+                {% if show_placeholder %}placeholder="{{ field.label }}"{% endif %}
+            >{{ field.value|default:"" }}</textarea>
+
+        {% elif field_type == "file" %}
+            <input
+                type="file"
+                class="file-input file-input-bordered {% if size_modifier %}file-input-{{ size_modifier }}{% endif %}"
+                name="{{ field.html_name }}"
+            />
+            {% if field.value %}
+                <span class="my-1 text-sm text-gray-500">{% translate "Current file:" %} {{ field.value }}</span>
+            {% endif %}
+
+        {% elif field_type == "input" %}
+            <input
+                type="{% if field.widget_type == "regionalphonenumber" %}tel{% elif field.widget_type == "datetime" %}datetime-local{% else %}{{ field.widget_type }}{% endif %}"
+                class="input input-bordered {% if field.errors %}input-error text-error{% endif %} {% if size_modifier %}input-{{ size_modifier }}{% endif %}"
+                name="{{ field.html_name }}"
+                value="{% if field.widget_type == "date" or field.widget_type == "datetime" %}{{ field.value|date:"c"|default:"" }}{% else %}{{ field.value|default:"" }}{% endif %}"
+                {% if show_placeholder %}placeholder="{{ field.label|capfirst }}"{% endif %}
+            />
+        {% endif %}
+
+        {% if field.help_text and show_help_text or field.errors %}
+            <div class="label">
+                {% if field.errors %}
+                    <div class="label-text-alt text-error">
+                        {{ field.errors }}
+                    </div>
+                {% endif %}
+
+                {% if field.help_text and field_type != "checkbox" %}
+                    <div class="label-text-alt self-start {% if field.errors %}text-error{% endif %}">
+                        {{ field.help_text }}
+                    </div>
+                {% endif %}
+            </div>
+        {% endif %}
+    </label>
+</div> {% endcomment %}
