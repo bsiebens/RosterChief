@@ -22,13 +22,15 @@ OPEN_PREFIXES = (
     "/accounts/",  # ...which you cannot reach without signing in
     "/admin/",
     "/static/",
-    "/media/",
     "/__reload__/",  # dev only; absent outside DEBUG
 )
 
 #: Reachable on every host, always. The health check must answer or the load balancer will
-#: take the node out of rotation and the control panel with it.
-ALWAYS_OPEN = ("/healthz",)
+#: take the node out of rotation and the control panel with it. /media/ has to stay open too:
+#: the club maintenance page is rendered through the tenant's own skin specifically so it can
+#: show the club's logo, and that logo is itself a /media/ file — closing it outright would
+#: serve the maintenance page over the top of its own image.
+ALWAYS_OPEN = ("/healthz", "/media/")
 
 RETRY_AFTER_SECONDS = 3600
 
@@ -57,7 +59,8 @@ class MaintenanceMiddleware:
         if not Maintenance.is_on():
             return False
 
-        # A club subdomain is closed outright — no login, no shop, nothing.
+        # A club subdomain is closed outright — no login, no shop, nothing (besides the
+        # /media/ exemption above, which its own maintenance page needs to render).
         if getattr(request, "club", None) is not None:
             return True
 

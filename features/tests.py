@@ -151,6 +151,14 @@ class MaintenanceModeTests(TestCase):
 
         self.assertEqual(self.platform_get("/accounts/login/").status_code, 200)
 
+    def test_the_club_logo_still_loads_on_the_maintenance_page(self):
+        # The maintenance page is rendered through the club's own skin specifically to show
+        # its logo -- closing /media/ on the club subdomain too would serve the maintenance
+        # page itself in place of that logo, making it look like the logo vanished.
+        Maintenance.start()
+
+        self.assertEqual(self.club_get("/media/clubs/ajax-united/crest.png").status_code, 404)
+
     def test_the_health_check_still_answers(self):
         # Close it and the load balancer decides the node is dead and stops routing to it —
         # taking the control panel down with everything else.
