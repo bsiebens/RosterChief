@@ -193,3 +193,18 @@
 [data-theme="dark"] .logo {
     background-image: var(--logo-light);
 }
+
+/* Club-uploaded logos are arbitrary raster files (often much smaller than the
+   badge they're displayed in), so the browser is upscaling them -- and the
+   default resampling some engines fall back to for that reads as pixelated.
+   Forcing the element onto its own GPU-composited layer makes Chrome/Safari
+   pick their higher-quality scaler; the image-rendering hints are a no-op
+   where unsupported, degrading gracefully to the browser default. Doesn't
+   apply to SVG logos, which scale losslessly regardless. */
+.club-logo {
+    image-rendering: -webkit-optimize-contrast;
+    image-rendering: smooth;
+    image-rendering: high-quality;
+    backface-visibility: hidden;
+    transform: translateZ(0);
+}

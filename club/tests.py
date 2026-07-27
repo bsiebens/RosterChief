@@ -1009,6 +1009,12 @@ class BrandingTests(TestCase):
 
         self.assertContains(self.login_page("ajax-united.rosterchief.app"), "clubs/ajax-united/crest.png")
 
+    def test_a_club_logo_gets_a_primary_coloured_ring(self):
+        self.club.logo = "clubs/ajax-united/crest.png"
+        self.club.save()
+
+        self.assertContains(self.login_page("ajax-united.rosterchief.app"), "ring-primary")
+
     def test_a_club_colour_overrides_the_theme(self):
         self.club.primary_color = "#1e40af"
         self.club.save()
