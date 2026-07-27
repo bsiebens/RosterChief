@@ -1018,6 +1018,15 @@ class BrandingTests(TestCase):
     def test_no_colour_means_no_override(self):
         self.assertNotContains(self.login_page("ajax-united.rosterchief.app"), "--color-primary")
 
+    def test_a_club_secondary_colour_overrides_the_theme(self):
+        self.club.secondary_color = "#be185d"
+        self.club.save()
+
+        self.assertContains(self.login_page("ajax-united.rosterchief.app"), "--color-secondary: #be185d")
+
+    def test_no_secondary_colour_means_no_override(self):
+        self.assertNotContains(self.login_page("ajax-united.rosterchief.app"), "--color-secondary")
+
 
 class ClubBrandingModelTests(TestCase):
     def test_initials_use_the_first_two_words(self):

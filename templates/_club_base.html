@@ -10,17 +10,24 @@
 {% endblock title %}
 
 {% block extra %}
-    {% if club.primary_color %}
+    {% if club.primary_color or club.secondary_color %}
         {% comment %}
             daisyUI declares its theme variables inside `@layer base`, and unlayered styles
             beat every layered rule regardless of specificity -- so this plain :root wins
-            without any !important or selector games. primary_content_color is computed from
-            the club's colour so a pale brand doesn't end up with white-on-yellow buttons.
+            without any !important or selector games. primary_content_color / secondary_content_color
+            are computed from the club's colours so a pale brand doesn't end up with
+            white-on-yellow buttons or initials.
         {% endcomment %}
         <style>
             :root {
-                --color-primary: {{ club.primary_color }};
-                --color-primary-content: {{ club.primary_content_color }};
+                {% if club.primary_color %}
+                    --color-primary: {{ club.primary_color }};
+                    --color-primary-content: {{ club.primary_content_color }};
+                {% endif %}
+                {% if club.secondary_color %}
+                    --color-secondary: {{ club.secondary_color }};
+                    --color-secondary-content: {{ club.secondary_content_color }};
+                {% endif %}
             }
         </style>
     {% endif %}
@@ -33,7 +40,7 @@
         {% else %}
             {# Never the RosterChief mark: that would pass our branding off as the club's own. #}
             <div class="avatar avatar-placeholder">
-                <div class="w-16 rounded-full bg-primary text-primary-content">
+                <div class="w-16 rounded-full bg-secondary text-secondary-content">
                     <span class="font-roboto text-xl font-bold">{{ club.initials }}</span>
                 </div>
             </div>

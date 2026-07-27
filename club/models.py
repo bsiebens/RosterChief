@@ -40,6 +40,14 @@ class Club(UUIDModel):
         help_text=_("Hex colour for buttons and links on the club's pages, e.g. #1e40af."),
     )
 
+    secondary_color = models.CharField(
+        _("secondary colour"),
+        max_length=7,
+        blank=True,
+        validators=[RegexValidator(r"^#[0-9a-fA-F]{6}$", _("Enter a colour as a hex value, e.g. #be185d."))],
+        help_text=_("Hex colour for highlights on the club's pages, e.g. avatar initials. Defaults to the theme's secondary colour."),
+    )
+
     archived_at = models.DateTimeField(_("archived at"), null=True, blank=True, help_text=_("Archived clubs stop resolving on their subdomain, but their data is retained."))
 
     objects = ClubManager()
@@ -69,19 +77,29 @@ class Club(UUIDModel):
 
     @property
     def primary_content_color(self) -> str:
-        """Readable text colour to sit *on* ``primary_color``.
+        """Readable text colour to sit *on* ``primary_color``. See ``_content_color_for``."""
+        return self._content_color_for(self.primary_color)
+
+    @property
+    def secondary_content_color(self) -> str:
+        """Readable text colour to sit *on* ``secondary_color``. See ``_content_color_for``."""
+        return self._content_color_for(self.secondary_color)
+
+    @staticmethod
+    def _content_color_for(hex_color: str) -> str:
+        """Black or white, whichever reads on ``hex_color``.
 
         A club picking a pale yellow would otherwise get white-on-yellow buttons.
         Relative luminance per WCAG, with its 0.179 threshold for black vs white.
         """
-        if not self.primary_color:
+        if not hex_color:
             return ""
 
         def channel(value: int) -> float:
             fraction = value / 255
             return fraction / 12.92 if fraction <= 0.04045 else ((fraction + 0.055) / 1.055) ** 2.4
 
-        red, green, blue = (channel(int(self.primary_color[index : index + 2], 16)) for index in (1, 3, 5))
+        red, green, blue = (channel(int(hex_color[index : index + 2], 16)) for index in (1, 3, 5))
         luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue
 
         return "#000000" if luminance > 0.179 else "#ffffff"
