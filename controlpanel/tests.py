@@ -779,6 +779,17 @@ class PlatformChartTests(TestCase):
         self.assertEqual(len(series), 13)
         self.assertTrue(all(point["new"] == 0 and point["returning"] == 0 for point in series))
 
+    def test_the_series_stays_dense_on_a_late_day_of_the_month(self):
+        # A 30-days-per-month approximation of "12 months ago" drifts by a few days a
+        # year, and on the tail end of a month that drift used to fall short of a full
+        # calendar month, silently dropping the series to 12 points instead of 13.
+        late_month_day = timezone.now().replace(day=28)
+
+        with mock.patch.object(timezone, "now", return_value=late_month_day):
+            series = platform_charts()["signups"]
+
+        self.assertEqual(len(series), 13)
+
     def test_signups_land_in_the_month_they_happened(self):
         ClubMembership.objects.create(club=self.club, season=self.season, member=self.member, signed_up_at=timezone.localdate())
 

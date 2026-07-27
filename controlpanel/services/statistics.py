@@ -10,6 +10,7 @@ from datetime import timedelta
 from decimal import Decimal
 
 from allauth.mfa.models import Authenticator
+from dateutil.relativedelta import relativedelta
 from django.contrib.auth import get_user_model
 from django.db.models import Count, DateField, DecimalField, Exists, F, IntegerField, OuterRef, Q, Subquery, Sum, Value
 from django.db.models.functions import Coalesce, TruncMonth
@@ -212,7 +213,7 @@ def _dues_owed():
 def _monthly(queryset, field, value, months=MONTHS_OF_HISTORY):
     """A dense month-by-month series — zero-filled, because a chart that silently skips
     empty months draws a smooth line over a month where nothing happened."""
-    start = (timezone.now() - timedelta(days=30 * months)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    start = (timezone.now() - relativedelta(months=months)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
     rows = queryset.filter(**{f"{field}__gte": start}).annotate(month=TruncMonth(field)).values("month").annotate(value=value).order_by("month")
     found = {row["month"].strftime("%Y-%m"): row["value"] or 0 for row in rows if row["month"]}
@@ -297,7 +298,7 @@ def signup_split(club=None, months=MONTHS_OF_HISTORY):
     Each member's earliest season is resolved once up front rather than per row: the same
     question asked inside a loop is one query per membership.
     """
-    start = (timezone.now() - timedelta(days=30 * months)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    start = (timezone.now() - relativedelta(months=months)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
     memberships = ClubMembership.objects.all() if club is None else ClubMembership.objects.filter(club=club)
 
