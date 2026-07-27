@@ -276,6 +276,20 @@ class TwoFactorPageTests(TestCase):
 
         self.assertEqual(otp.count("<span></span>"), 6)
 
+    def test_the_boxes_are_wrapped_in_a_label_so_tapping_focuses_the_input(self):
+        # daisyUI's overlaid otp input carries `pointer-events: none` (so clicks land on the
+        # boxes, not a naked input) — which also means a tap on the boxes never reaches the
+        # input directly. A <label for> is what closes that gap: browsers focus a labelled
+        # control on click regardless of the control's own pointer-events. Without this
+        # wrapper the field cannot be entered on a touchscreen, which has no Tab key to fall
+        # back on.
+        html = self.response.content.decode()
+        label_start = html.index('<label class="contents"')
+        otp_start = html.index('class="otp otp-lg"')
+
+        self.assertLess(label_start, otp_start)
+        self.assertIn('for="id_code"', html[label_start : label_start + 60])
+
     def test_the_otp_field_has_no_placeholder(self):
         # allauth sets placeholder="Code"; inside the boxes it reads as a typed-in code.
         self.assertNotContains(self.response, 'placeholder="Code"')

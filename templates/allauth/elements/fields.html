@@ -52,18 +52,30 @@
 
                         For the same reason the sr-only label lives outside the container: another
                         child would throw the count off again.
+
+                        The overlaid input carries daisyUI's own `pointer-events: none` (it exists so
+                        clicks land on the boxes, not a naked input) — which also means a tap/click on
+                        the boxes never reaches the input directly. A <label for> is what actually
+                        closes that gap: browsers focus a labelled control on click regardless of the
+                        control's own pointer-events, so wrapping the boxes in one (without adding a
+                        child *inside* the otp container, which would break the nth-child count above)
+                        makes the whole visible field tappable. Without it the field is a decorative
+                        box nobody can enter a code into — invisible on desktop, where autofocus or Tab
+                        gets you there anyway, but a dead end on mobile, which has neither.
                     {% endcomment %}
                             <label class="sr-only" for="{{ field.id_for_label }}">{{ field.label }}</label>
                             <div class="flex justify-center">
-                                <div class="otp otp-lg" data-otp>
-                                    <span></span>
-                                    <span></span>
-                                    <span></span>
-                                    <span></span>
-                                    <span></span>
-                                    <span></span>
-                                    {{ field|as_otp }}
-                                </div>
+                                <label class="contents" for="{{ field.id_for_label }}">
+                                    <div class="otp otp-lg" data-otp>
+                                        <span></span>
+                                        <span></span>
+                                        <span></span>
+                                        <span></span>
+                                        <span></span>
+                                        <span></span>
+                                        {{ field|as_otp }}
+                                    </div>
+                                </label>
                             </div>
                         {% elif icon %}
                             <label class="input flex w-full items-center gap-2 {% if field.errors %}input-error{% endif %}" for="{{ field.id_for_label }}">
