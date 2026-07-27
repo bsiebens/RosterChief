@@ -1,6 +1,6 @@
 import datetime
 
-from django.core.validators import RegexValidator
+from django.core.validators import FileExtensionValidator, RegexValidator
 from django.db import models
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
@@ -31,7 +31,15 @@ class Club(UUIDModel):
     name = models.CharField(_("name"), max_length=255)
     slug = models.SlugField(_("slug"), max_length=255, unique=True, blank=True, help_text=_("Drives subdomain / path resolution (e.g. ajax-united.rosterchief.app)."))
 
-    logo = models.ImageField(_("logo"), upload_to=club_logo_path, blank=True, help_text=_("Shown on the club's own pages. Without one, the club's initials are used."))
+    logo = models.FileField(
+        _("logo"),
+        upload_to=club_logo_path,
+        blank=True,
+        # A plain FileField, not ImageField: Pillow (which ImageField validates through)
+        # cannot read SVGs, and club crests are commonly vector logos.
+        validators=[FileExtensionValidator(allowed_extensions=["png", "jpg", "jpeg", "gif", "webp", "svg"])],
+        help_text=_("Shown on the club's own pages. Without one, the club's initials are used."),
+    )
     primary_color = models.CharField(
         _("primary colour"),
         max_length=7,
