@@ -961,6 +961,19 @@ class ClubDetailMetricsTests(ControlPanelTestBase):
 
         self.assertContains(response, "cannot take a signup")
 
+    def test_a_club_logo_gets_a_primary_coloured_ring(self):
+        # The control panel never injects a page-wide --color-primary override (that would
+        # dress the whole panel up as the club), so the ring colour is scoped locally to
+        # this element instead — assert the club's own colour reaches it regardless.
+        self.club.logo = "clubs/ajax-united/crest.png"
+        self.club.primary_color = "#1e40af"
+        self.club.save()
+
+        response = self.client.get(reverse("controlpanel:club_detail", args=[self.club.pk]))
+
+        self.assertContains(response, "ring-primary")
+        self.assertContains(response, "--color-primary: #1e40af")
+
 
 class NewMemberTests(TestCase):
     def setUp(self):

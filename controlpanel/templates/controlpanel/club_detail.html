@@ -3,7 +3,18 @@
 
 {% block logo %}
     {% if club.logo %}
-        <img class="h-16 w-16 object-contain" src="{{ club.logo.url }}" alt="{{ club.name }}">
+        {% comment %}
+            The ring is the club's own primary colour, same as on the club's own subdomain --
+            but the control panel never injects a page-wide --color-primary override (it must
+            not dress itself up as the club), so it's set here as a locally-scoped custom
+            property instead: it only reaches this element and its children, not the rest of
+            the panel's buttons and badges.
+        {% endcomment %}
+        <div class="avatar">
+            <div class="w-16 rounded-full bg-base-100 ring-2 ring-primary ring-offset-2 ring-offset-base-100" {% if club.primary_color %}style="--color-primary: {{ club.primary_color }};"{% endif %}>
+                <img class="club-logo object-contain" src="{{ club.logo.url }}" alt="{{ club.name }}">
+            </div>
+        </div>
     {% else %}
         <div class="avatar avatar-placeholder">
             <div class="w-16 text-xl rounded-full bg-neutral text-neutral-content">
