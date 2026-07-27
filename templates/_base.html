@@ -40,21 +40,38 @@
         and a "sticky" sidebar still drifts on a long page, which is the thing this is for.
     {% endcomment %}
     <body class="flex h-screen flex-col overflow-hidden bg-base-200">
-        <div class="navbar shrink-0 border-b border-base-300 bg-base-100 px-6 shadow-sm">
-            <div class="my-4 flex-1">
+        {% comment %}
+            Every text label on the right (theme name, "Django admin", the user's email) is
+            wrapped in `hidden sm:inline` — icon-only below the `sm` breakpoint, with the
+            button's own padding doing the rest (no fixed width to fight). None of these
+            buttons wrap or shrink on their own (button labels don't break), so on a
+            360-400px phone the unlabelled row is what keeps the navbar from forcing the
+            whole page wider than the device — which, left unchecked, makes the browser
+            zoom the entire layout out to fit rather than actually rendering at device width.
+            `min-w-0` on the brand block matters for the same reason: a flex item defaults to
+            `min-width: auto`, which ignores `flex-1` and refuses to shrink past its content's
+            intrinsic width.
+        {% endcomment %}
+        <div class="navbar shrink-0 border-b border-base-300 bg-base-100 px-3 shadow-sm sm:px-6">
+            <div class="my-4 min-w-0 flex-1">
                 {% block brand %}{% endblock brand %}
             </div>
 
-            <button class="btn btn-ghost w-24" type="button" data-theme-toggle aria-label="Theme">
-                <span data-theme-icon="light" class="hidden items-center gap-4">{% lucide "sun" size=20 %} light</span>
-                <span data-theme-icon="dark" class="hidden items-center gap-4">{% lucide "moon" size=20 %} dark</span>
-                <span data-theme-icon="auto" class="hidden items-center gap-4">{% lucide "sun-moon" size=20 %} auto</span>
+            <button class="btn btn-ghost" type="button" data-theme-toggle aria-label="Theme">
+                <span data-theme-icon="light" class="hidden items-center gap-4">{% lucide "sun" size=20 %} <span class="hidden sm:inline">light</span></span>
+                <span data-theme-icon="dark" class="hidden items-center gap-4">{% lucide "moon" size=20 %} <span class="hidden sm:inline">dark</span></span>
+                <span data-theme-icon="auto" class="hidden items-center gap-4">{% lucide "sun-moon" size=20 %} <span class="hidden sm:inline">auto</span></span>
             </button>
 
             {% if user.is_authenticated %}
+                {% if user.is_superuser %}
+                    <a class="btn btn-ghost gap-4" href="{% url "admin:index" %}" aria-label="Django admin">{% lucide "shield-cog" %}<span class="hidden sm:inline">Django admin</span></a>
+                {% endif %}
+
                 <div class="dropdown dropdown-end">
-                    <div tabindex="0" role="button" class="btn btn-ghost gap-4">{% lucide "circle-user" %}{{ user.get_full_name }}</div>
+                    <div tabindex="0" role="button" class="btn btn-ghost gap-4" aria-label="Account">{% lucide "circle-user" %}<span class="hidden max-w-40 truncate sm:inline">{{ user.get_full_name }}</span></div>
                     <ul tabindex="0" class="menu dropdown-content z-10 mt-2 w-60 rounded-box bg-base-100 p-2 shadow border border-base-content/20">
+                        <li class="menu-title truncate sm:hidden">{{ user.email }}</li>
                         <li>
                             <a href="{% url 'mfa_index' %}">{% lucide "shield-check" size=16 %} Two-factor authentication</a>
                         </li>
@@ -79,7 +96,13 @@
             {% endcomment %}
             {% block menu %}{% endblock menu %}
 
-            <main class="flex-1 overflow-y-auto">
+            {% comment %}
+                `scrollbar-gutter: stable` reserves the scrollbar's width whether or not
+                the page actually overflows -- without it, a short page (nothing to
+                scroll) renders a hair wider than a tall one (scrollbar eats the width),
+                and switching between them visibly shifts the content.
+            {% endcomment %}
+            <main class="flex-1 overflow-y-auto scrollbar-gutter-stable">
                 <div class="mx-auto w-full px-8 py-6">
                     {% if messages %}
                         <div class="mb-6 w-full space-y-2">
