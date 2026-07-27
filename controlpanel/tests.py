@@ -939,9 +939,9 @@ class ClubDetailMetricsTests(ControlPanelTestBase):
     def test_the_club_page_renders_its_metrics_and_charts(self):
         response = self.client.get(reverse("controlpanel:club_detail", args=[self.club.pk]))
 
-        self.assertContains(response, "No coach")
+        self.assertContains(response, "Teams without coach")
         self.assertContains(response, "Unrostered")
-        self.assertContains(response, "Unpaid, by age")
+        self.assertContains(response, "Club fee status this season")
         self.assertContains(response, 'id="fees-chart"')
         self.assertIn("fees", response.context["charts"])
 
