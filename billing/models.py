@@ -9,6 +9,7 @@ by one, and a tenant-scoped manager would be exactly the wrong default.
 from datetime import date, timedelta
 from decimal import Decimal
 
+from dateutil import relativedelta
 from django.conf import settings
 from django.core.validators import MinValueValidator
 from django.db import models
@@ -19,22 +20,17 @@ from rosterchief.base import UUIDModel, unique_slugify
 
 ZERO = Decimal("0.00")
 
-#: A club stays live for six weeks past the end of an unpaid period before it is archived.
+# A club stays live for six weeks past the end of an unpaid period before it is archived.
 GRACE_DAYS = 45
 
-#: The next period is issued this long before the current one ends, so the invoice reaches the
-#: club — and can be paid — before the old period lapses. Grace then only matters for genuine
-#: non-payers, rather than for everyone who takes a fortnight to pay a bank transfer.
+# The next period is issued this long before the current one ends, so the invoice reaches the
+# club — and can be paid — before the old period lapses. Grace then only matters for genuine
+# non-payers, rather than for everyone who takes a fortnight to pay a bank transfer.
 RENEWAL_LEAD_DAYS = 30
 
 
 def add_one_year(day: date) -> date:
-    """The day one year on. 29 February has no counterpart in a common year, so it falls
-    back to the 28th rather than raising."""
-    try:
-        return day.replace(year=day.year + 1)
-    except ValueError:
-        return day.replace(year=day.year + 1, day=28)
+    return day + relativedelta.relativedelta(years=1)
 
 
 class Tier(UUIDModel):
