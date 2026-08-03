@@ -47,6 +47,7 @@ class ClubRoleAssignForm(forms.ModelForm):
     class Meta:
         model = ClubRole
         fields = ["member", "role"]
+        widgets = {"member": forms.Select(attrs={"data-searchable": "true", "data-search-placeholder": _("Type a name to search...")})}
 
     def __init__(self, *args, club=None, **kwargs):
         super().__init__(*args, **kwargs)
@@ -155,7 +156,10 @@ class NewsForm(forms.ModelForm):
     class Meta:
         model = News
         fields = ["title", "teams", "visibility", "body"]
-        widgets = {"teams": forms.CheckboxSelectMultiple, "body": forms.Textarea(attrs={"rows": 8})}
+        widgets = {
+            "teams": forms.SelectMultiple(attrs={"data-searchable": "true", "data-search-placeholder": _("Type to filter teams...")}),
+            "body": forms.Textarea(attrs={"rows": 8}),
+        }
 
     def __init__(self, *args, club=None, **kwargs):
         super().__init__(*args, **kwargs)

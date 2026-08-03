@@ -3900,6 +3900,18 @@
       }
     }
   }
+  .empty\:hidden {
+    &:empty {
+      display: none;
+    }
+  }
+  .hover\:opacity-100 {
+    &:hover {
+      @media (hover: hover) {
+        opacity: 100%;
+      }
+    }
+  }
   .sm\:hidden {
     @media (width >= 40rem) {
       display: none;

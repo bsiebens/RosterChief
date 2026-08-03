@@ -59,6 +59,7 @@
                         name="{{ field.html_name }}"
                         id="{{ field.auto_id }}"
                         {% if field.widget_type == "selectmultiple" %}multiple{% endif %}
+                        {% for attr, value in field.field.widget.attrs.items %}{{ attr }}="{{ value }}" {% endfor %}
                 >
 
                     {% if field.widget_type == "selectmultiple" %}

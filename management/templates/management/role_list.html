@@ -1,5 +1,5 @@
 {% extends "management/base.html" %}
-{% load i18n lucide %}
+{% load i18n lucide static %}
 
 {% comment %}
     One section per non-MEMBER role (management.views.ClubRoleListView) -- the
@@ -62,93 +62,5 @@
 {% endblock panel %}
 
 {% block extra_body %}
-    {% trans "Type a name to search..." as search_placeholder %}
-    <script>
-        (() => {
-            // Progressive enhancement: the plain <select name="member"> in the "Grant
-            // role" modal still works with no JS -- this hides it and drives it from a
-            // small typeahead combobox instead (a select2-alike without the dependency):
-            // type to filter, click or Enter to pick, the hidden <select> still carries
-            // the actual value the form submits.
-            const select = document.querySelector("#grant_role_modal select[name='member']");
-            if (!select) return;
-
-            const options = Array.from(select.options).filter((option) => option.value !== "");
-
-            const wrapper = document.createElement("div");
-            wrapper.className = "relative";
-
-            const input = document.createElement("input");
-            input.type = "text";
-            input.className = "input input-bordered w-full";
-            input.placeholder = "{{ search_placeholder }}";
-            input.autocomplete = "off";
-
-            const list = document.createElement("ul");
-            list.className = "menu absolute z-10 mt-1 w-full rounded-box bg-base-100 shadow max-h-60 overflow-y-auto flex-nowrap hidden";
-
-            select.parentNode.insertBefore(wrapper, select);
-            wrapper.append(input, list, select);
-            select.classList.add("hidden");
-
-            let highlighted = -1;
-
-            const choose = (option) => {
-                select.value = option.value;
-                input.value = option.text;
-                list.classList.add("hidden");
-            };
-
-            const render = (query) => {
-                const needle = query.trim().toLowerCase();
-                const matches = needle ? options.filter((option) => option.text.toLowerCase().includes(needle)) : options;
-
-                list.innerHTML = "";
-                matches.forEach((option) => {
-                    const item = document.createElement("li");
-                    const link = document.createElement("a");
-                    link.textContent = option.text;
-                    // mousedown, not click: it fires before the input's blur, so the
-                    // list is still in the DOM (and un-hidden) when the pick is applied.
-                    link.addEventListener("mousedown", (event) => {
-                        event.preventDefault();
-                        choose(option);
-                    });
-                    item.appendChild(link);
-                    list.appendChild(item);
-                });
-
-                highlighted = -1;
-                list.classList.toggle("hidden", matches.length === 0);
-                return matches;
-            };
-
-            input.addEventListener("input", () => render(input.value));
-            input.addEventListener("focus", () => render(input.value));
-            input.addEventListener("blur", () => list.classList.add("hidden"));
-
-            input.addEventListener("keydown", (event) => {
-                const items = Array.from(list.querySelectorAll("a"));
-                if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-                    event.preventDefault();
-                    if (!items.length) return;
-                    highlighted = event.key === "ArrowDown" ? (highlighted + 1) % items.length : (highlighted - 1 + items.length) % items.length;
-                    items.forEach((item, index) => item.classList.toggle("menu-active", index === highlighted));
-                    items[highlighted].scrollIntoView({ block: "nearest" });
-                } else if (event.key === "Enter" && highlighted >= 0 && items[highlighted]) {
-                    event.preventDefault();
-                    items[highlighted].dispatchEvent(new Event("mousedown"));
-                } else if (event.key === "Escape") {
-                    list.classList.add("hidden");
-                }
-            });
-
-            // Redisplayed after a validation error elsewhere in the modal: keep
-            // whatever member was already chosen visible in the text input.
-            if (select.value) {
-                const selected = options.find((option) => option.value === select.value);
-                if (selected) input.value = selected.text;
-            }
-        })();
-    </script>
+    <script src="{% static 'js/searchable-select.js' %}"></script>
 {% endblock extra_body %}

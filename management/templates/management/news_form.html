@@ -1,5 +1,5 @@
 {% extends "management/base.html" %}
-{% load i18n lucide ui %}
+{% load i18n lucide static ui %}
 
 {% block heading %}{% if update_view %}{% blocktrans %}Edit {{ object }}{% endblocktrans %}{% else %}{% trans "New news item" %}{% endif %}{% endblock heading %}
 
@@ -15,6 +15,10 @@
                     </div>
                 {% endfor %}
 
+                {% if not update_view %}
+                    <p class="opacity-70 text-sm mb-2">{% trans "Photos can be added once the news item is created." %}</p>
+                {% endif %}
+
                 <div class="grid grid-cols-1 gap-4">
                     {% for field in form %}
                         {% form_field field %}
@@ -29,3 +33,7 @@
         </div>
     </div>
 {% endblock panel %}
+
+{% block extra_body %}
+    <script src="{% static 'js/searchable-select.js' %}"></script>
+{% endblock extra_body %}
