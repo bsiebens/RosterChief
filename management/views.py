@@ -52,7 +52,8 @@ class HomeView(ClubStaffRequiredMixin, TemplateView):
     """The at-a-glance numbers a club admin/team manager/coach would actually want:
     club_attention/club_charts/club_statistics are the exact functions
     controlpanel/club_detail.html uses for the platform admin's per-club drill-down --
-    already club-scoped, so directly reusable for this club's own staff."""
+    already club-scoped, so directly reusable for this club's own staff. Published
+    news sits alongside upcoming events -- open to everyone here, same as events."""
 
     template_name = "management/home.html"
 
@@ -63,6 +64,7 @@ class HomeView(ClubStaffRequiredMixin, TemplateView):
             charts=club_charts(club),
             groups=club_statistics(club),
             upcoming_events=Event.objects.filter(club=club, start__gte=timezone.now()).order_by("start")[:5],
+            published_news=News.objects.filter(club=club, status=News.Status.PUBLISHED, published_at__lte=timezone.now()).order_by("-published_at")[:5],
             today=timezone.localdate(),
             **kwargs,
         )

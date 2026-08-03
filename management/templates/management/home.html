@@ -22,7 +22,7 @@
         money-shaped renders below for non-admins, same line the nav already draws
         around the Shop section.
     {% endcomment %}
-    <div class="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-6">
+    <div class="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <div class="card bg-base-100 shadow border-l-4 {% if attention.teams_without_manager %}border-error{% else %}border-success{% endif %}">
             <div class="card-body p-4">
                 <div class="flex items-center gap-2 text-sm opacity-70 mb-3">{% lucide "user-x" size=16 %} {% trans "Teams without coach" %}</div>
@@ -55,27 +55,6 @@
             </div>
         </div>
 
-        <div class="card bg-base-100 shadow border-l-4 {% if attention.renewal_rate is None %}border-info{% elif attention.renewal_rate < 30 %}border-error{% elif attention.renewal_rate < 65 %}border-warning{% else %}border-success{% endif %}">
-            <div class="card-body p-4">
-                <div class="flex items-center gap-2 text-sm opacity-70 mb-3">{% lucide "repeat" size=16 %} {% trans "Renewal rate" %}</div>
-                <div class="text-4xl font-bold tabular-nums font-mono">
-                    {% if attention.renewal_rate is None %}
-                        {% trans "N/A" %}
-                    {% else %}
-                        {{ attention.renewal_rate }}%
-                    {% endif %}
-                </div>
-                <div class="text-xs opacity-60">
-                    {% if attention.renewal_rate is None %}
-                        {% trans "No previous season" %}
-                    {% else %}
-                        <progress class="progress w-full {% if attention.renewal_rate < 30 %}progress-error{% elif attention.renewal_rate < 65 %}progress-warning{% else %}progress-success{% endif %}" value="{{ attention.renewal_rate }}"
-                                  max="100"></progress>
-                    {% endif %}
-                </div>
-            </div>
-        </div>
-
         <div class="card bg-base-100 shadow border-l-4 {% if attention.attendance.turnout is None %}border-info{% elif attention.attendance.turnout < 30 %}border-error{% elif attention.attendance.turnout < 65 %}border-warning{% else %}border-success{% endif %}">
             <div class="card-body p-4">
                 <div class="flex items-center gap-2 text-sm opacity-70 mb-3">{% lucide "user-check" size=16 %} {% trans "Attendance rate" %}</div>
@@ -98,43 +77,71 @@
         </div>
     </div>
 
-    <div class="card bg-base-100 shadow mb-6">
-        <div class="card-body">
-            <div class="flex items-center justify-between">
-                <h2 class="card-title text-base">{% lucide "calendar" size=18 %} {% trans "Upcoming events" %}</h2>
-                <a class="btn btn-outline btn-neutral btn-sm gap-2" href="{% url 'management:event_list' %}">{% lucide "arrow-right" size=14 %} {% trans "View all" %}</a>
+    <div class="mb-6 grid gap-4 lg:grid-cols-2">
+        <div class="card bg-base-100 shadow">
+            <div class="card-body">
+                <div class="flex items-center justify-between">
+                    <h2 class="card-title text-base">{% lucide "calendar" size=18 %} {% trans "Upcoming events" %}</h2>
+                    <a class="btn btn-outline btn-neutral btn-sm gap-2" href="{% url 'management:event_list' %}">{% lucide "arrow-right" size=14 %} {% trans "View all" %}</a>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="table">
+                        <tbody>
+                            {% for event in upcoming_events %}
+                                <tr>
+                                    <td class="whitespace-nowrap">{{ event.start|date:"D j M, H:i" }}</td>
+                                    <td>{{ event.title }}</td>
+                                    <td>{{ event.get_kind_display|capfirst }}</td>
+                                </tr>
+                            {% empty %}
+                                <tr>
+                                    <td class="text-center opacity-60">{% trans "Nothing scheduled." %}</td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
             </div>
-            <div class="overflow-x-auto">
-                <table class="table">
-                    <tbody>
-                        {% for event in upcoming_events %}
-                            <tr>
-                                <td class="whitespace-nowrap">{{ event.start|date:"D j M, H:i" }}</td>
-                                <td>{{ event.title }}</td>
-                                <td>{{ event.get_kind_display|capfirst }}</td>
-                            </tr>
-                        {% empty %}
-                            <tr>
-                                <td class="text-center opacity-60">{% trans "Nothing scheduled." %}</td>
-                            </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
+        </div>
+
+        <div class="card bg-base-100 shadow">
+            <div class="card-body">
+                <div class="flex items-center justify-between">
+                    <h2 class="card-title text-base">{% lucide "newspaper" size=18 %} {% trans "News" %}</h2>
+                    <a class="btn btn-outline btn-neutral btn-sm gap-2" href="{% url 'management:news_list' %}">{% lucide "arrow-right" size=14 %} {% trans "View all" %}</a>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="table">
+                        <tbody>
+                            {% for news_item in published_news %}
+                                <tr>
+                                    <td class="whitespace-nowrap">{{ news_item.published_at|date:"D j M" }}</td>
+                                    <td><a class="link link-hover" href="{% url 'management:news_detail' news_item.pk %}">{{ news_item.title }}</a></td>
+                                </tr>
+                            {% empty %}
+                                <tr>
+                                    <td class="text-center opacity-60">{% trans "Nothing published yet." %}</td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
     </div>
 
-    <div class="mb-6 grid gap-4 lg:grid-cols-2">
-        <div class="card bg-base-100 shadow">
-            <div class="card-body">
-                <h2 class="card-title text-base">{% lucide "user-plus" size=18 %} {% trans "Signups per month" %}</h2>
-                <p class="text-sm opacity-70">{% trans "New members against returning ones." %}</p>
-                <div class="h-56">
-                    <canvas id="signups-chart"></canvas>
+    {% if is_club_admin %}
+        <div class="mb-6 grid gap-4 lg:grid-cols-3">
+            <div class="card bg-base-100 shadow">
+                <div class="card-body">
+                    <h2 class="card-title text-base">{% lucide "user-plus" size=18 %} {% trans "Signups per month" %}</h2>
+                    <p class="text-sm opacity-70">{% trans "New members against returning ones." %}</p>
+                    <div class="h-56">
+                        <canvas id="signups-chart"></canvas>
+                    </div>
                 </div>
             </div>
-        </div>
-        {% if is_club_admin %}
+
             <div class="card bg-base-100 shadow">
                 <div class="card-body">
                     <h2 class="card-title text-base">{% lucide "wallet" size=18 %} {% trans "Club fee status this season" %}</h2>
@@ -143,10 +150,23 @@
                     </div>
                 </div>
             </div>
-        {% endif %}
-    </div>
 
-    <div class="grid gap-4 md:grid-cols-4">
+            <div class="card bg-base-100 shadow">
+                <div class="card-body">
+                    <h2 class="card-title text-base">{% lucide "repeat" size=18 %} {% trans "Renewal rate" %}</h2>
+                    {% if attention.renewal_rate is None %}
+                        <p class="text-sm opacity-70">{% trans "No previous season to compare." %}</p>
+                    {% else %}
+                        <div class="h-56">
+                            <canvas id="renewal-chart"></canvas>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    {% endif %}
+
+    <div class="grid gap-4 {% if is_club_admin %}md:grid-cols-4{% else %}md:grid-cols-3{% endif %}">
         {% for group in groups %}
             {% if group.title != "Shop" or is_club_admin %}
                 <div class="card bg-base-100 shadow">
@@ -170,44 +190,51 @@
 {% block extra_body %}
     {% trans "New" as new_label %}
     {% trans "Returning" as returning_label %}
+    {% trans "Renewed" as renewed_label %}
+    {% trans "Not renewed" as not_renewed_label %}
     {{ charts|json_script:"chart-data" }}
+    {{ attention.renewal_rate|json_script:"renewal-rate-data" }}
     <script src="{% static 'js/chart.js' %}"></script>
     <script>
         (() => {
             const data = JSON.parse(document.getElementById("chart-data").textContent);
+            const renewalRate = JSON.parse(document.getElementById("renewal-rate-data").textContent);
             const css = (name, fallback) => getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+            const signupsCanvas = document.getElementById("signups-chart");
             const feesCanvas = document.getElementById("fees-chart");
+            const renewalCanvas = document.getElementById("renewal-chart");
 
             const render = () => {
                 const ink = css("--color-base-content", "#333");
                 const grid = "color-mix(in oklab, " + ink + " 15%, transparent)";
+                const charts = [];
 
-                // Stacked: the bar height stays "signups this month" while the split shows where
-                // they came from. Side-by-side bars would answer a different question.
-                const signups = new Chart(document.getElementById("signups-chart"), {
-                    type: "bar",
-                    data: {
-                        labels: data.signups.map((point) => point.month),
-                        datasets: [
-                            {label: "{{ new_label|escapejs }}", data: data.signups.map((point) => point.new), backgroundColor: css("--color-primary", "#4f46e5")},
-                            {label: "{{ returning_label|escapejs }}", data: data.signups.map((point) => point.returning), backgroundColor: css("--color-accent", "#0ea5e9")},
-                        ],
-                    },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        plugins: {legend: {position: "bottom", labels: {color: ink}}},
-                        scales: {
-                            x: {stacked: true, ticks: {color: ink}, grid: {color: grid}},
-                            y: {stacked: true, beginAtZero: true, ticks: {color: ink, precision: 0}, grid: {color: grid}},
+                // Both canvases are admin-only -- absent entirely for a manager/coach,
+                // same gate as the Shop nav section and the rest of this row.
+                if (signupsCanvas) {
+                    // Stacked: the bar height stays "signups this month" while the split shows
+                    // where they came from. Side-by-side bars would answer a different question.
+                    charts.push(new Chart(signupsCanvas, {
+                        type: "bar",
+                        data: {
+                            labels: data.signups.map((point) => point.month),
+                            datasets: [
+                                {label: "{{ new_label|escapejs }}", data: data.signups.map((point) => point.new), backgroundColor: css("--color-primary", "#4f46e5")},
+                                {label: "{{ returning_label|escapejs }}", data: data.signups.map((point) => point.returning), backgroundColor: css("--color-accent", "#0ea5e9")},
+                            ],
                         },
-                    },
-                });
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: {legend: {position: "bottom", labels: {color: ink}}},
+                            scales: {
+                                x: {stacked: true, ticks: {color: ink}, grid: {color: grid}},
+                                y: {stacked: true, beginAtZero: true, ticks: {color: ink, precision: 0}, grid: {color: grid}},
+                            },
+                        },
+                    }));
+                }
 
-                const charts = [signups];
-
-                // Absent for non-admins -- the fee chart is financial, same gate as the Shop
-                // nav section.
                 if (feesCanvas) {
                     // Colour carries the meaning here — unpaid must read as a problem, waived
                     // must not — so the slices are pinned to the semantic theme colours, in order.
@@ -219,6 +246,28 @@
                                 {
                                     data: data.fees.map((slice) => slice.value),
                                     backgroundColor: [css("--color-success", "#16a34a"), css("--color-warning", "#f59e0b"), css("--color-error", "#dc2626"), css("--color-neutral", "#6b7280")],
+                                },
+                            ],
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: {legend: {position: "right", labels: {color: ink}}},
+                        },
+                    }));
+                }
+
+                if (renewalCanvas && renewalRate !== null) {
+                    // Same "colour carries the meaning" reasoning as the fee chart: a low
+                    // renewal rate reads as a problem, so it's pinned to error, not neutral.
+                    charts.push(new Chart(renewalCanvas, {
+                        type: "pie",
+                        data: {
+                            labels: ["{{ renewed_label|escapejs }}", "{{ not_renewed_label|escapejs }}"],
+                            datasets: [
+                                {
+                                    data: [renewalRate, 100 - renewalRate],
+                                    backgroundColor: [css("--color-success", "#16a34a"), css("--color-error", "#dc2626")],
                                 },
                             ],
                         },

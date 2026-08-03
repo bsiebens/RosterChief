@@ -1708,7 +1708,10 @@ class HomeViewTests(ManagementTestBase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'id="fees-chart"')
+        self.assertContains(response, 'id="signups-chart"')
+        self.assertContains(response, "Renewal rate")
         self.assertContains(response, "Open carts")
+        self.assertContains(response, "md:grid-cols-4")
 
     def test_non_admin_staff_does_not_see_the_financial_sections(self):
         self.client.force_login(self.make_coach("coach6@example.com"))
@@ -1717,7 +1720,30 @@ class HomeViewTests(ManagementTestBase):
 
         self.assertEqual(response.status_code, 200)
         self.assertNotContains(response, 'id="fees-chart"')
+        self.assertNotContains(response, 'id="signups-chart"')
+        self.assertNotContains(response, "Renewal rate")
         self.assertNotContains(response, "Open carts")
+        self.assertContains(response, "md:grid-cols-3")
+
+    def test_published_news_is_shown_to_everyone(self):
+        item = News.objects.create(club=self.club, title="Season kickoff", body="Body.")
+        item.publish()
+        self.client.force_login(self.make_coach("coach-news-home@example.com"))
+
+        response = self.club_get("home")
+
+        self.assertContains(response, "Season kickoff")
+
+    def test_a_draft_or_scheduled_news_item_is_not_shown_on_the_home_page(self):
+        draft = News.objects.create(club=self.club, title="Still a draft", body="Body.")
+        scheduled = News.objects.create(club=self.club, title="Scheduled for later", body="Body.")
+        scheduled.publish(at=timezone.now() + datetime.timedelta(days=7))
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("home")
+
+        self.assertNotContains(response, draft.title)
+        self.assertNotContains(response, scheduled.title)
 
     def test_upcoming_events_are_listed_in_order_and_future_only(self):
         now = timezone.now()
