@@ -295,7 +295,7 @@ class TwoFactorPageTests(TestCase):
         self.assertNotContains(self.response, 'placeholder="Code"')
 
     def test_cancel_sits_beside_sign_in_and_is_not_primary(self):
-        self.assertContains(self.response, '<button class="btn btn-outline gap-2" type="submit" form="logout-from-stage">')
+        self.assertContains(self.response, '<button class="btn btn-outline btn-neutral gap-2" type="submit" form="logout-from-stage">')
         self.assertContains(self.response, '<button class="btn btn-primary gap-2" type="submit">')
 
     def test_cancel_has_a_form_to_submit(self):
@@ -388,7 +388,7 @@ class SignOutPageTests(TestCase):
 
     def test_sign_out_and_cancel_sit_side_by_side_with_icons(self):
         html = self.response.content.decode()
-        cancel = html[html.index('<a class="btn btn-outline gap-2" href="/">') :]
+        cancel = html[html.index('<a class="btn btn-outline btn-neutral gap-2" href="/">') :]
         sign_out = html[html.index('<button class="btn btn-primary gap-2"') :]
 
         self.assertIn("<svg", cancel[: cancel.index("</a>")])

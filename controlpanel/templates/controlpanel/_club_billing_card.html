@@ -11,7 +11,7 @@
         <div class="flex flex-wrap items-center justify-between gap-2">
             <h2 class="card-title text-base">{% lucide "receipt-euro" size=18 %} Billing</h2>
             <div class="flex flex-wrap gap-2">
-                <button class="btn btn-outline btn-sm gap-2" type="button" onclick="document.getElementById('subscription_modal').showModal()">
+                <button class="btn btn-outline btn-neutral btn-sm gap-2" type="button" onclick="document.getElementById('subscription_modal').showModal()">
                     {% lucide "layers" size=14 %} {% if subscription %}Change plan{% else %}Start billing{% endif %}
                 </button>
                 {% if subscription %}
@@ -78,7 +78,7 @@
                                         {% if not due.payments.all %}
                                             <form class="inline" method="post" action="{% url 'controlpanel:due_waive' due.pk %}">
                                                 {% csrf_token %}
-                                                <button class="btn btn-outline btn-sm gap-1" type="submit">{% lucide "ban" size=14 %} Waive payment</button>
+                                                <button class="btn btn-outline btn-neutral btn-sm gap-1" type="submit">{% lucide "ban" size=14 %} Waive payment</button>
                                             </form>
                                         {% endif %}
                                     {% endif %}

@@ -16,13 +16,21 @@
                 {% endfor %}
 
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {% for field in form %}
-                        {% form_field field %}
-                    {% endfor %}
+                    {% form_field form.name %}
+                    {% form_field form.slug %}
+
+                    {% form_field form.logo %}
+
+                    <div></div>
+
+                    {% form_field form.primary_color %}
+                    {% form_field form.secondary_color %}
+                    {% form_field form.season_start %}
+                    {% form_field form.season_duration_months %}
                 </div>
 
                 <div class="card-actions justify-start pt-2 mt-2">
-                    <a class="btn btn-outline gap-2" href="{% if update_view %}{% url "controlpanel:club_detail" object.pk %}{% else %}{% url "controlpanel:club_list" %}{% endif %}">{% lucide "arrow-left" size=16 %} Cancel</a>
+                    <a class="btn btn-outline btn-neutral gap-2" href="{% if update_view %}{% url "controlpanel:club_detail" object.pk %}{% else %}{% url "controlpanel:club_list" %}{% endif %}">{% lucide "arrow-left" size=16 %} Cancel</a>
                     <button class="btn btn-primary gap-2" type="submit">{% lucide "save" size=16 %} Save</button>
                 </div>
             </form>

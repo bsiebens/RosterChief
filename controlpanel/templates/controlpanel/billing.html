@@ -53,7 +53,7 @@
                                 </td>
                                 <td class="flex flex-row gap-2 justify-end">
                                     <button class="btn btn-primary btn-sm btn-outline gap-1" type="button" onclick="document.getElementById('{{ tier.pk|dom_id:"tier_price_modal" }}').showModal()">{% lucide "euro" size=14 %} New price</button>
-                                    <button class="btn btn-sm btn-outline gap-1" type="button" onclick="document.getElementById('{{ tier.pk|dom_id:"tier_edit_modal" }}').showModal()">{% lucide "pencil" size=14 %} Edit</button>
+                                    <button class="btn btn-sm btn-outline btn-neutral gap-1" type="button" onclick="document.getElementById('{{ tier.pk|dom_id:"tier_edit_modal" }}').showModal()">{% lucide "pencil" size=14 %} Edit</button>
                                 </td>
                             </tr>
                         {% empty %}

@@ -93,7 +93,7 @@
                                 <td>{{ flag.clubs.count }}</td>
                                 <td class="max-w-xs truncate opacity-70">{{ flag.note|default:"-" }}</td>
                                 <td class="text-right">
-                                    <button class="btn btn-outline btn-sm gap-1" type="button" onclick="document.getElementById('{{ flag.pk|dom_id:"flag_edit_modal" }}').showModal()">{% lucide "pencil" size=14 %} Edit</button>
+                                    <button class="btn btn-outline btn-neutral btn-sm gap-1" type="button" onclick="document.getElementById('{{ flag.pk|dom_id:"flag_edit_modal" }}').showModal()">{% lucide "pencil" size=14 %} Edit</button>
                                 </td>
                             </tr>
                         {% empty %}
