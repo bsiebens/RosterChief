@@ -3,9 +3,11 @@ admin-only sections (seasons, positions, roles, shop, forms) from plain staff.
 
 The underlying views are gated regardless (``ClubAdminRequiredMixin``) -- this is
 purely so the nav doesn't show a link a coach or manager can't actually follow.
+Same reasoning for ``news_permissions`` below, gating just the "New news item"
+action rather than the whole section (``NewsAuthorRequiredMixin``/``can_add_news``).
 """
 
-from club.services.access import has_management_access, is_club_admin
+from club.services.access import can_add_news, has_management_access, is_club_admin
 
 #: Every management URL name, mapped to the nav item it should light up --
 #: management/templates/management/_nav_items.html compares against this.
@@ -47,6 +49,15 @@ _NAV_SECTIONS = {
     "team_detail": "team_list",
     "roster_list": "roster_list",
     "staff_list": "staff_list",
+    "news_list": "news_list",
+    "news_create": "news_list",
+    "news_detail": "news_list",
+    "news_update": "news_list",
+    "news_publish": "news_list",
+    "news_unpublish": "news_list",
+    "news_photo_upload": "news_list",
+    "news_photo_set_main": "news_list",
+    "news_photo_delete": "news_list",
     "event_list": "event_list",
     "event_series_list": "event_series_list",
     "location_list": "location_list",
@@ -88,3 +99,13 @@ def management_link(request):
         return {"has_management_access": False}
 
     return {"has_management_access": has_management_access(request.user, club)}
+
+
+def news_permissions(request):
+    """Whether the "New news item" action should show -- viewing the News
+    section itself is open to any staff, same as Roster/Staff."""
+    club = getattr(request, "club", None)
+    if club is None or not request.user.is_authenticated:
+        return {"can_add_news": False}
+
+    return {"can_add_news": can_add_news(request.user, club)}

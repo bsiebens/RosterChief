@@ -31,6 +31,9 @@
 <li><a class="{% if nav == 'roster_list' %}menu-active{% endif %}" href="{% url 'management:roster_list' %}">{% lucide "clipboard-list" size=16 %} {% trans "Roster" %}</a></li>
 <li><a class="{% if nav == 'staff_list' %}menu-active{% endif %}" href="{% url 'management:staff_list' %}">{% lucide "hard-hat" size=16 %} {% trans "Staff" %}</a></li>
 
+<li class="menu-title">{% trans "News" %}</li>
+<li><a class="{% if nav == 'news_list' %}menu-active{% endif %}" href="{% url 'management:news_list' %}">{% lucide "newspaper" size=16 %} {% trans "News" %}</a></li>
+
 <li class="menu-title">{% trans "Calendar" %}</li>
 <li><a class="{% if nav == 'event_list' %}menu-active{% endif %}" href="{% url 'management:event_list' %}">{% lucide "calendar" size=16 %} {% trans "Events" %}</a></li>
 <li><a class="{% if nav == 'event_series_list' %}menu-active{% endif %}" href="{% url 'management:event_series_list' %}">{% lucide "repeat" size=16 %} {% trans "Event series" %}</a></li>

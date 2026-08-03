@@ -2,11 +2,13 @@ from decimal import Decimal
 
 from django import forms
 from django.contrib.auth import get_user_model
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 from club.models import ClubMembership, ClubRole, FeePayment
 from members.models import Family, FamilyMembership, Member
 from members.services.family import find_member_by_email
+from news.models import News
 from teams.models import Position, Team
 
 User = get_user_model()
@@ -144,6 +146,53 @@ class ClubMembershipForm(forms.ModelForm):
     class Meta:
         model = ClubMembership
         fields = ["license", "status", "fee_status", "fee_amount"]
+
+
+class NewsForm(forms.ModelForm):
+    """Title/teams/visibility/body only -- status and published_at are never
+    directly editable, only through the publish/unpublish actions."""
+
+    class Meta:
+        model = News
+        fields = ["title", "teams", "visibility", "body"]
+        widgets = {"teams": forms.CheckboxSelectMultiple, "body": forms.Textarea(attrs={"rows": 8})}
+
+    def __init__(self, *args, club=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["teams"].queryset = Team.objects.filter(club=club)
+
+
+class MultipleFileInput(forms.ClearableFileInput):
+    allow_multiple_selected = True
+
+
+class MultipleFileField(forms.FileField):
+    """Django's own documented recipe for a multi-file upload field: the plain
+    FileField only ever picks up one of several selected files, so clean() has
+    to iterate the list itself instead."""
+
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault("widget", MultipleFileInput(attrs={"multiple": True}))
+        super().__init__(*args, **kwargs)
+
+    def clean(self, data, initial=None):
+        single_file_clean = super().clean
+        if isinstance(data, (list, tuple)):
+            return [single_file_clean(item, initial) for item in data]
+        return [single_file_clean(data, initial)] if data else []
+
+
+class NewsPhotoUploadForm(forms.Form):
+    images = MultipleFileField(label=_("Photos"))
+
+
+class NewsPublishForm(forms.Form):
+    published_at = forms.DateTimeField(
+        label=_("Publish date"),
+        initial=timezone.now,
+        widget=forms.DateTimeInput(attrs={"type": "datetime-local"}),
+        help_text=_("Leave as now to publish immediately, or pick a future date/time to schedule it."),
+    )
 
 
 class RecordFeePaymentForm(forms.Form):

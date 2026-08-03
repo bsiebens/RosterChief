@@ -33,7 +33,7 @@ labels to `known-first-party` in `pyproject.toml` when they land. The target dec
 | `club`           | **built**    | Tenant root, **season**, season-scoped affiliation, club roles | `Club`, `Season` *(planned)*, `ClubMembership`, `ClubRole` *(planned)* |
 | `teams`          | planned      | Teams and season rosters                                  | `Team`, `TeamMembership`, `StaffAssignment` |
 | `events`         | planned      | Training / matches / social events + attendance           | `Event`, `Attendance` |
-| `news`           | planned      | Editorial news for the public site                        | `Article`, `Category` |
+| `news`           | **built**    | Club news: coach_manager-authored, editor-released         | `News`, `NewsPhoto` |
 | `pages`          | planned      | Flat CMS pages for the public site                        | `Page` |
 | `home`           | planned      | Homepage composition / featured content                   | `HomeConfig` (per-club) or config-only |
 | `formbuilder`    | planned      | Admin-defined dynamic forms + submissions + reporting     | `Form`, `Field`, `Submission`, `Answer` |
@@ -229,6 +229,11 @@ ClubRole(ClubScopedModel)              # ClubScopedModel -> carries `club` (§2.
 | `TREASURER` | Manage that club's `shop`: products, orders, payments, issue/void invoices.   |
 | `BOARD`     | Full management of that club: members, roles, all of the above.              |
 
+`news` is the one place a `ClubRole` and a derived role (`COACH_MANAGER`, see below)
+share a single workflow rather than each owning a separate permission: drafting is
+open to EDITOR/ADMIN *or* any coach_manager, but only EDITOR/ADMIN may publish —
+see §5.4.
+
 `COACH` / `TEAM_MANAGER` are deliberately **not** `ClubRole`s — being a coach is always
 *of a team*, so it lives on `StaffAssignment` (§5.3). "Is this user a coach at this club?"
 = "do they have any `StaffAssignment` on a team in this club?".
@@ -418,16 +423,30 @@ service/clean().
 
 ### 5.4 `news`, `pages`, `home` (public site / editorial)
 
-```
-news.Article(ClubScopedModel)      # -> carries `club`
-  title, slug (SlugField), body (TextField)
-  excerpt (blank), cover_image (ImageField, null)
-  author      FK members.Member (SET_NULL, null, related_name="articles")
-  category    FK news.Category (SET_NULL, null)
-  is_published BooleanField; published_at DateTimeField (null)
-  Meta: unique_together (club, slug); ordering = ["-published_at"]
+**`news` is built** (as of the coach_manager-authoring / editor-release-flow work) —
+team-tagged instead of categorised, with a two-step release flow rather than a bare
+`is_published` flag:
 
-news.Category(ClubScopedModel): name, slug   # Meta: unique_together (club, slug)
+```
+news.News(ClubScopedModel)         # -> carries `club`
+  title, slug (SlugField, auto from title), body (TextField)
+  teams       M2M teams.Team (blank -- empty means club-wide)
+  visibility  CharField (TextChoices: internal | external | both)
+  status      CharField (TextChoices: draft | published)
+  published_at DateTimeField (null) -- may be in the future: a *scheduled* release,
+                                       not a cron-flipped field (see below)
+  created_by  FK members.Member (SET_NULL, null, related_name="news_items")
+  Meta: unique_together (club, slug); ordering = ["-created"]
+
+news.NewsPhoto(UUIDModel)          # club reached via news_item, not directly scoped
+  news_item   FK news.News (CASCADE, related_name="photos")
+  image       ImageField
+  is_main     BooleanField
+  ordering    PositiveSmallIntegerField
+  Meta: UniqueConstraint(fields=["news_item"], condition=Q(is_main=True))
+        -- a partial unique index enforcing "at most one main photo per item"
+        at the DB level, the same trick teams.Position uses for
+        management_position_implies_staff_position.
 
 pages.Page(ClubScopedModel)        # flat CMS pages: "About", "Contact", ...
   title, slug, body (TextField)
@@ -439,12 +458,26 @@ home.HomeConfig(ClubScopedModel)   # one row PER CLUB: featured articles/teams, 
                                    # (unique_together (club,) — one per tenant). May be config-only.
 ```
 
-- **`Article.author` links to `members.Member`** (decision §7 #5) — attribution is to a
+- **Authoring vs. releasing are deliberately separate authorities**
+  (`club/services/access.py::can_add_news`/`can_publish_news`/`can_edit_news`): any
+  current-season coach_manager (management-position `StaffAssignment`), EDITOR, or
+  ADMIN can draft a `News` item and edit it while it's a draft; only EDITOR/ADMIN can
+  move it to `published` (or edit it once it is) — a physio or plain staff member can't
+  post news, and a coach_manager can't push their own draft live.
+- **Scheduling needs no cron job.** `published_at` can be set in the future; `status`
+  already reads `PUBLISHED` (it passed the editor's release gate) but `News.is_scheduled`
+  is true until that moment passes. A later public/member-facing consumer just filters
+  `status=PUBLISHED, published_at__lte=now()` — nothing has to flip a row at the
+  scheduled instant.
+- **`created_by` links to `members.Member`** (decision §7 #5) — attribution is to a
   club person, not a raw login; `SET_NULL` so deleting a member doesn't erase their posts.
 - `slug`s back clean public URLs and feed `search`; they are **unique per club** (§2.4), so
   two clubs can both have `/news/season-kickoff`. Resolve within the request's club.
-- `cover_image` / hero images use `ImageField` → **media storage must be configured** (§8).
-  If page/news trees grow, consider a tree library later — start flat.
+- `visibility` (internal/external/both) is stored and enforced nowhere yet — no
+  member-facing reading page or public API exists. Both are later work; the field is
+  there so they don't need a backfill when they land.
+- `NewsPhoto.image` / hero images use `ImageField` → **media storage must be configured**
+  (§8). If page/news trees grow, consider a tree library later — start flat.
 
 ### 5.5 `search`
 

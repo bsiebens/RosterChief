@@ -1,0 +1,102 @@
+{% extends "management/base.html" %}
+{% load i18n lucide ui %}
+
+{% block heading %}{{ news_item.title }}{% endblock heading %}
+{% block subheading %}
+    {% if news_item.status == "draft" %}
+        {% trans "Draft" %}
+    {% elif news_item.is_scheduled %}
+        {% blocktrans with date=news_item.published_at %}Scheduled for {{ date }}{% endblocktrans %}
+    {% else %}
+        {% blocktrans with date=news_item.published_at %}Published {{ date }}{% endblocktrans %}
+    {% endif %}
+    · {{ news_item.get_visibility_display }}
+{% endblock subheading %}
+
+{% block actions %}
+    {% if can_edit %}
+        <a class="btn btn-outline btn-neutral gap-2" href="{% url 'management:news_update' news_item.pk %}">{% lucide "pencil" size=16 %} {% trans "Edit" %}</a>
+    {% endif %}
+    {% if can_publish %}
+        {% if news_item.status == "draft" %}
+            <button class="btn btn-primary gap-2" type="button" onclick="document.getElementById('publish_modal').showModal()">{% lucide "upload" size=16 %} {% trans "Publish" %}</button>
+        {% else %}
+            <button class="btn btn-outline btn-warning gap-2" type="button" onclick="document.getElementById('unpublish_modal').showModal()">{% lucide "eye-off" size=16 %} {% trans "Unpublish" %}</button>
+        {% endif %}
+    {% endif %}
+{% endblock actions %}
+
+{% block panel %}
+    <div class="card bg-base-100 shadow">
+        <div class="card-body">
+            {% if news_item.teams.all %}
+                <div class="flex flex-wrap gap-2 mb-2">
+                    {% for team in news_item.teams.all %}
+                        <span class="badge badge-neutral">{{ team.short_name }}</span>
+                    {% endfor %}
+                </div>
+            {% endif %}
+            <p class="whitespace-pre-line">{{ news_item.body }}</p>
+        </div>
+    </div>
+
+    <div class="card bg-base-100 shadow mt-4">
+        <div class="card-body">
+            <div class="flex items-center justify-between">
+                <h2 class="card-title text-base">{% trans "Photos" %}</h2>
+                {% if can_edit %}
+                    <button class="btn btn-outline btn-neutral btn-sm gap-2" type="button" onclick="document.getElementById('add_photos_modal').showModal()">{% lucide "image-plus" size=14 %} {% trans "Add photos" %}</button>
+                {% endif %}
+            </div>
+
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mt-2">
+                {% for photo in news_item.photos.all %}
+                    <div class="relative">
+                        <img class="rounded-box aspect-square object-cover w-full" src="{{ photo.image.url }}" alt="">
+                        {% if photo.is_main %}
+                            <span class="badge badge-success badge-sm absolute top-1 left-1">{% trans "Main" %}</span>
+                        {% endif %}
+                        {% if can_edit %}
+                            <div class="flex gap-1 mt-1">
+                                {% if not photo.is_main %}
+                                    <form method="post" action="{% url 'management:news_photo_set_main' news_item.pk photo.pk %}">
+                                        {% csrf_token %}
+                                        <button class="btn btn-outline btn-neutral btn-xs gap-1" type="submit">{% lucide "star" size=12 %} {% trans "Set main" %}</button>
+                                    </form>
+                                {% endif %}
+                                <button class="btn btn-outline btn-error btn-xs gap-1" type="button" onclick="document.getElementById('{{ photo.pk|dom_id:"delete_photo_modal" }}').showModal()">{% lucide "trash-2" size=12 %} {% trans "Delete" %}</button>
+                            </div>
+                            {% url 'management:news_photo_delete' news_item.pk photo.pk as delete_photo_url %}
+                            {% trans "Delete photo" as delete_photo_title %}
+                            {% trans "This photo will be permanently removed." as delete_photo_body %}
+                            {% trans "Delete" as delete_label %}
+                            {% include "controlpanel/_confirm_modal.html" with modal_id=photo.pk|dom_id:"delete_photo_modal" title=delete_photo_title body=delete_photo_body action_url=delete_photo_url submit_label=delete_label submit_icon="trash-2" %}
+                        {% endif %}
+                    </div>
+                {% empty %}
+                    <p class="opacity-60 col-span-full">{% trans "No photos yet." %}</p>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+
+    {% if can_edit %}
+        {% trans "Add photos" as add_photos_label %}
+        {% url 'management:news_photo_upload' news_item.pk as add_photos_url %}
+        {% include "controlpanel/_modal_form.html" with modal_id="add_photos_modal" title=add_photos_label form=photo_upload_form action_url=add_photos_url submit_label=add_photos_label submit_icon="image-plus" %}
+    {% endif %}
+
+    {% if can_publish %}
+        {% if news_item.status == "draft" %}
+            {% trans "Publish" as publish_label %}
+            {% url 'management:news_publish' news_item.pk as publish_url %}
+            {% trans "Leave as now to publish immediately, or pick a future date/time to schedule it." as publish_blurb %}
+            {% include "controlpanel/_modal_form.html" with modal_id="publish_modal" title=publish_label form=publish_form action_url=publish_url submit_label=publish_label submit_icon="upload" blurb=publish_blurb %}
+        {% else %}
+            {% trans "Unpublish" as unpublish_label %}
+            {% blocktrans asvar unpublish_body %}This pulls “{{ news_item }}” back to a draft. It won't be visible anywhere until it's published again.{% endblocktrans %}
+            {% url 'management:news_unpublish' news_item.pk as unpublish_url %}
+            {% include "controlpanel/_confirm_modal.html" with modal_id="unpublish_modal" title=unpublish_label body=unpublish_body action_url=unpublish_url submit_label=unpublish_label submit_icon="eye-off" %}
+        {% endif %}
+    {% endif %}
+{% endblock panel %}

@@ -1,0 +1,57 @@
+{% extends "management/base.html" %}
+{% load i18n lucide %}
+
+{% block heading %}{% trans "News" %}{% endblock heading %}
+
+{% block actions %}
+    {% if can_add_news %}
+        <a class="btn btn-primary gap-2" href="{% url 'management:news_create' %}">{% lucide "plus" size=16 %} {% trans "New news item" %}</a>
+    {% endif %}
+{% endblock actions %}
+
+{% block panel %}
+    <div class="card bg-base-100 shadow">
+        <div class="card-body">
+            <div class="overflow-x-auto">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>{% trans "Title" %}</th>
+                            <th>{% trans "Teams" %}</th>
+                            <th>{% trans "Visibility" %}</th>
+                            <th>{% trans "Status" %}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for news_item in news_items %}
+                            <tr>
+                                <td><a class="link link-hover" href="{% url 'management:news_detail' news_item.pk %}">{{ news_item.title }}</a></td>
+                                <td>
+                                    {% for team in news_item.teams.all %}
+                                        <span class="badge badge-neutral badge-sm">{{ team.short_name }}</span>
+                                    {% empty %}
+                                        <span class="opacity-60">{% trans "Club-wide" %}</span>
+                                    {% endfor %}
+                                </td>
+                                <td>{{ news_item.get_visibility_display }}</td>
+                                <td>
+                                    {% if news_item.status == "draft" %}
+                                        <span class="badge badge-neutral badge-sm">{% trans "Draft" %}</span>
+                                    {% elif news_item.is_scheduled %}
+                                        <span class="badge badge-warning badge-sm">{% blocktrans with date=news_item.published_at %}Scheduled for {{ date }}{% endblocktrans %}</span>
+                                    {% else %}
+                                        <span class="badge badge-success badge-sm">{% trans "Published" %}</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                        {% empty %}
+                            <tr>
+                                <td colspan="4" class="text-center opacity-60">{% trans "No news items yet." %}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+{% endblock panel %}

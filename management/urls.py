@@ -42,6 +42,16 @@ urlpatterns = [
     path("teams/<uuid:pk>/edit/", views.TeamUpdateView.as_view(), name="team_update"),
     path("roster/", views.RosterListView.as_view(), name="roster_list"),
     path("staff/", views.StaffListView.as_view(), name="staff_list"),
+    # News
+    path("news/", views.NewsListView.as_view(), name="news_list"),
+    path("news/new/", views.NewsCreateView.as_view(), name="news_create"),
+    path("news/<uuid:pk>/", views.NewsDetailView.as_view(), name="news_detail"),
+    path("news/<uuid:pk>/edit/", views.NewsUpdateView.as_view(), name="news_update"),
+    path("news/<uuid:pk>/publish/", views.NewsPublishView.as_view(), name="news_publish"),
+    path("news/<uuid:pk>/unpublish/", views.NewsUnpublishView.as_view(), name="news_unpublish"),
+    path("news/<uuid:pk>/photos/", views.NewsPhotoUploadView.as_view(), name="news_photo_upload"),
+    path("news/<uuid:pk>/photos/<uuid:photo_pk>/set-main/", views.NewsPhotoSetMainView.as_view(), name="news_photo_set_main"),
+    path("news/<uuid:pk>/photos/<uuid:photo_pk>/delete/", views.NewsPhotoDeleteView.as_view(), name="news_photo_delete"),
     # Calendar
     path("events/", views.EventListView.as_view(), name="event_list"),
     path("event-series/", views.EventSeriesListView.as_view(), name="event_series_list"),

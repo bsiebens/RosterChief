@@ -66,6 +66,7 @@ INSTALLED_APPS = [
     "members.apps.MembersConfig",
     "teams.apps.TeamsConfig",
     "events.apps.EventsConfig",
+    "news.apps.NewsConfig",
     "formbuilder.apps.FormbuilderConfig",
     "shop.apps.ShopConfig",
     # Platform billing: RosterChief charging the clubs. Not tenant data — see billing/models.py.
@@ -189,6 +190,7 @@ TEMPLATES = [
                 "management.context_processors.is_admin",
                 "management.context_processors.management_link",
                 "management.context_processors.active_nav_section",
+                "management.context_processors.news_permissions",
             ],
         },
     },

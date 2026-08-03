@@ -6,11 +6,12 @@ from django.urls import reverse
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils.translation import gettext_lazy as _
+from django.utils.translation import ngettext
 from django.views.generic import CreateView, DetailView, FormView, ListView, TemplateView, UpdateView, View
 
-from club.mixins import ClubAdminRequiredMixin, ClubStaffRequiredMixin
+from club.mixins import ClubAdminRequiredMixin, ClubStaffRequiredMixin, NewsAuthorRequiredMixin, NewsEditRequiredMixin, NewsPublisherRequiredMixin
 from club.models import ClubMembership, ClubRole, Season
-from club.services.access import current_season, members_visible_to
+from club.services.access import can_edit_news, can_publish_news, current_season, members_visible_to
 from club.services.fees import mark_as_paid, record_payment, remaining_balance
 from controlpanel.messages import notify
 from controlpanel.mixins import RedirectOnInvalidMixin
@@ -20,6 +21,7 @@ from formbuilder.models import Form as FormBuilderForm
 from formbuilder.models import Submission
 from members.models import Family, FamilyMembership, Member
 from members.services.family import add_child_to_family, add_parent_to_family, attach_to_family, detach_from_family, grant_login, register_family
+from news.models import News, NewsPhoto
 from shop.models import Discount, Invoice, Order, Product
 from teams.models import Position, StaffAssignment, Team, TeamMembership
 
@@ -34,6 +36,9 @@ from .forms import (
     GrantLoginForm,
     MemberForm,
     MemberImportUploadForm,
+    NewsForm,
+    NewsPhotoUploadForm,
+    NewsPublishForm,
     PositionForm,
     RecordFeePaymentForm,
     TeamForm,
@@ -723,8 +728,8 @@ class TeamDetailView(ClubStaffRequiredMixin, DetailView):
 #: What each non-default role actually grants -- shown on the roles overview so an
 #: admin granting one knows what they're handing out. See club/services/access.py.
 ROLE_DESCRIPTIONS = {
-    ClubRole.Roles.ADMIN: _("Full control over the club: memberships, positions, roles, teams, shop, and every event."),
-    ClubRole.Roles.EDITOR: _("Can create and edit events, but not memberships, positions, roles, or shop settings."),
+    ClubRole.Roles.ADMIN: _("Full control over the club: memberships, positions, roles, teams, shop, every event, and news."),
+    ClubRole.Roles.EDITOR: _("Can create and edit events, and publish news items, but not memberships, positions, roles, or shop settings."),
 }
 
 
@@ -948,6 +953,169 @@ class PositionUpdateView(ClubAdminRequiredMixin, UpdateView):
 
     def get_context_data(self, **kwargs):
         return super().get_context_data(update_view=True, **kwargs)
+
+
+# --- News: draft/edit is broad (any coach_manager/editor/admin), but only EDITOR/ADMIN
+# may publish -- the release flow the news app exists for ---------------------------
+
+
+class NewsListView(ClubStaffRequiredMixin, ListView):
+    template_name = "management/news_list.html"
+    context_object_name = "news_items"
+
+    def get_queryset(self):
+        return News.objects.filter(club=self.request.club).prefetch_related("teams")
+
+
+class NewsCreateView(NewsAuthorRequiredMixin, CreateView):
+    model = News
+    form_class = NewsForm
+    template_name = "management/news_form.html"
+
+    def get_form_kwargs(self):
+        return super().get_form_kwargs() | {"club": self.request.club}
+
+    def form_valid(self, form):
+        form.instance.club = self.request.club
+        form.instance.created_by = Member.objects.filter(user=self.request.user).first()
+        response = super().form_valid(form)
+        body = _("“%(news)s” created.") % {"news": self.object}
+        notify(self.request, f"s|{_('News item created')}|{body}")
+        return response
+
+    def get_success_url(self):
+        return reverse("management:news_detail", args=[self.object.pk])
+
+
+class NewsDetailView(ClubStaffRequiredMixin, DetailView):
+    template_name = "management/news_detail.html"
+    context_object_name = "news_item"
+
+    def get_queryset(self):
+        return News.objects.filter(club=self.request.club).prefetch_related("teams", "photos")
+
+    def get_context_data(self, **kwargs):
+        return super().get_context_data(
+            can_edit=can_edit_news(self.request.user, self.object),
+            can_publish=can_publish_news(self.request.user, self.request.club),
+            publish_form=NewsPublishForm(),
+            photo_upload_form=NewsPhotoUploadForm(),
+            **kwargs,
+        )
+
+
+class NewsUpdateView(NewsEditRequiredMixin, UpdateView):
+    model = News
+    form_class = NewsForm
+    template_name = "management/news_form.html"
+
+    def get_news_item(self):
+        return get_object_or_404(News.objects.filter(club=self.request.club), pk=self.kwargs["pk"])
+
+    def get_queryset(self):
+        return News.objects.filter(club=self.request.club)
+
+    def get_form_kwargs(self):
+        return super().get_form_kwargs() | {"club": self.request.club}
+
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        body = _("“%(news)s” updated.") % {"news": self.object}
+        notify(self.request, f"s|{_('News item updated')}|{body}")
+        return response
+
+    def get_success_url(self):
+        return reverse("management:news_detail", args=[self.object.pk])
+
+    def get_context_data(self, **kwargs):
+        return super().get_context_data(update_view=True, **kwargs)
+
+
+class NewsPublishView(NewsPublisherRequiredMixin, RedirectOnInvalidMixin, FormView):
+    form_class = NewsPublishForm
+    http_method_names = ["post"]
+    invalid_redirect_url_name = "management:news_detail"
+
+    def get_invalid_redirect_kwargs(self):
+        return {"pk": self.kwargs["pk"]}
+
+    def form_valid(self, form):
+        news_item = get_object_or_404(News.objects.filter(club=self.request.club), pk=self.kwargs["pk"])
+        news_item.publish(at=form.cleaned_data["published_at"])
+
+        if news_item.is_scheduled:
+            body = _("“%(news)s” is scheduled to go live on %(date)s.") % {"news": news_item, "date": news_item.published_at}
+        else:
+            body = _("“%(news)s” is now live.") % {"news": news_item}
+        notify(self.request, f"s|{_('News item published')}|{body}")
+        return redirect("management:news_detail", pk=news_item.pk)
+
+
+class NewsUnpublishView(NewsPublisherRequiredMixin, View):
+    def post(self, request, pk):
+        news_item = get_object_or_404(News.objects.filter(club=request.club), pk=pk)
+        news_item.unpublish()
+        body = _("“%(news)s” is back to a draft.") % {"news": news_item}
+        notify(request, f"w|{_('News item unpublished')}|{body}")
+        return redirect("management:news_detail", pk=news_item.pk)
+
+
+class NewsPhotoUploadView(NewsEditRequiredMixin, RedirectOnInvalidMixin, FormView):
+    """One NewsPhoto per uploaded file; if the item had none yet, the first one
+    in this batch is auto-flagged main so there's always one once any photo exists."""
+
+    form_class = NewsPhotoUploadForm
+    http_method_names = ["post"]
+    invalid_redirect_url_name = "management:news_detail"
+
+    def get_news_item(self):
+        return get_object_or_404(News.objects.filter(club=self.request.club), pk=self.kwargs["pk"])
+
+    def get_invalid_redirect_kwargs(self):
+        return {"pk": self.kwargs["pk"]}
+
+    def form_valid(self, form):
+        news_item = self.get_news_item()
+        has_main = news_item.photos.filter(is_main=True).exists()
+
+        count = 0
+        for image in form.cleaned_data["images"]:
+            NewsPhoto.objects.create(news_item=news_item, image=image, is_main=not has_main)
+            has_main = True
+            count += 1
+
+        body = ngettext("%(count)d photo added.", "%(count)d photos added.", count) % {"count": count}
+        notify(self.request, f"s|{_('Photos added')}|{body}")
+        return redirect("management:news_detail", pk=news_item.pk)
+
+
+class NewsPhotoSetMainView(NewsEditRequiredMixin, View):
+    def get_news_item(self):
+        return get_object_or_404(News.objects.filter(club=self.request.club), pk=self.kwargs["pk"])
+
+    def post(self, request, pk, photo_pk):
+        news_item = self.get_news_item()
+        photo = get_object_or_404(NewsPhoto, pk=photo_pk, news_item=news_item)
+
+        with transaction.atomic():
+            NewsPhoto.objects.filter(news_item=news_item).update(is_main=False)
+            photo.is_main = True
+            photo.save(update_fields=["is_main"])
+
+        return redirect("management:news_detail", pk=news_item.pk)
+
+
+class NewsPhotoDeleteView(NewsEditRequiredMixin, View):
+    def get_news_item(self):
+        return get_object_or_404(News.objects.filter(club=self.request.club), pk=self.kwargs["pk"])
+
+    def post(self, request, pk, photo_pk):
+        news_item = self.get_news_item()
+        photo = get_object_or_404(NewsPhoto, pk=photo_pk, news_item=news_item)
+        photo.delete()
+
+        notify(request, f"w|{_('Photo removed')}|{_('The photo was removed.')}")
+        return redirect("management:news_detail", pk=news_item.pk)
 
 
 class RosterListView(ClubStaffRequiredMixin, StubListMixin, ListView):

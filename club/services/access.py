@@ -151,3 +151,22 @@ def can_edit_event(user: User, event: Event) -> bool:
 
 def can_manage_shop(user: User, club: Club) -> bool:
     return is_club_admin(user, club)
+
+
+def can_add_news(user: User, club: Club) -> bool:
+    """ADMIN, EDITOR, or a current-season coach_manager -- who's trusted to
+    author club content, not just anyone on staff (a physio shouldn't post news)."""
+    return is_club_admin(user, club) or has_club_role(user, club, ClubRole.Roles.EDITOR) or is_coach_manager(user, club)
+
+
+def can_publish_news(user: User, club: Club) -> bool:
+    """Only ADMIN/EDITOR may push a news item live -- the release-flow gate."""
+    return is_club_admin(user, club) or has_club_role(user, club, ClubRole.Roles.EDITOR)
+
+
+def can_edit_news(user: User, news_item) -> bool:
+    """Broad while it's a draft (anyone who could create one); editor/admin-only
+    once published -- an editor is accountable for what's actually live."""
+    if news_item.status == news_item.Status.PUBLISHED:
+        return can_publish_news(user, news_item.club)
+    return can_add_news(user, news_item.club)

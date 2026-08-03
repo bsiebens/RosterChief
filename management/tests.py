@@ -17,6 +17,7 @@ from events.models import Event
 from management.bulk_import import TEMPLATE_COLUMNS
 from management.pdf import PDFExportError, render_pdf
 from members.models import Family, FamilyMembership, Member
+from news.models import News, NewsPhoto
 from shop.models import Order
 from teams.models import Position, StaffAssignment, Team, TeamMembership
 
@@ -1710,3 +1711,169 @@ class MemberBulkImportTests(ManagementTestBase):
         response = self.club_post("member_import_confirm", {})
 
         self.assertEqual(response.status_code, 403)
+
+
+class NewsManagementTests(ManagementTestBase):
+    def setUp(self):
+        super().setUp()
+        self.team = Team.objects.create(club=self.club, name="First Team", short_name="1st")
+
+    def make_coach_manager(self, email="coach-news@example.com"):
+        coach_user = User.objects.create_user(email=email, password="pw-secret-123")
+        coach_member = Member.objects.create(user=coach_user, first_name="Cara", last_name="Coach")
+        position = Position.objects.create(club=self.club, name="Head Coach", short_name="HC", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=self.team, member=coach_member, season=self.season, position=position)
+        return coach_user
+
+    def make_plain_staff(self, email="physio-news@example.com"):
+        staff_user = User.objects.create_user(email=email, password="pw-secret-123")
+        staff_member = Member.objects.create(user=staff_user, first_name="Pat", last_name="Physio")
+        position = Position.objects.create(club=self.club, name="Physio", short_name="PH", staff_position=True, management_position=False)
+        StaffAssignment.objects.create(team=self.team, member=staff_member, season=self.season, position=position)
+        return staff_user
+
+    def make_editor(self, email="editor-news@example.com"):
+        editor_user = User.objects.create_user(email=email, password="pw-secret-123")
+        editor_member = Member.objects.create(user=editor_user, first_name="Eve", last_name="Editor")
+        ClubMembership.objects.create(club=self.club, member=editor_member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        ClubRole.objects.filter(club=self.club, member=editor_member).update(role=ClubRole.Roles.EDITOR)
+        enrol_mfa(editor_user)  # ClubRole ADMIN/EDITOR requires a second factor; StaffAssignment-only doesn't.
+        return editor_user
+
+    def test_list_is_scoped_to_the_club(self):
+        other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
+        News.objects.create(club=other_club, title="Rival news", body="Body.")
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("news_list")
+
+        self.assertNotContains(response, "Rival news")
+
+    def test_a_coach_manager_can_create_a_draft(self):
+        self.client.force_login(self.make_coach_manager())
+
+        response = self.club_post("news_create", {"title": "Season Kickoff", "body": "Big news.", "visibility": News.Visibility.INTERNAL, "teams": [str(self.team.pk)]})
+
+        item = News.objects.get(club=self.club, title="Season Kickoff")
+        self.assertRedirects(response, reverse("management:news_detail", args=[item.pk]))
+        self.assertEqual(item.status, News.Status.DRAFT)
+
+    def test_plain_staff_cannot_create_news(self):
+        self.client.force_login(self.make_plain_staff())
+
+        response = self.club_post("news_create", {"title": "Not allowed", "body": "Body.", "visibility": News.Visibility.INTERNAL})
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(News.objects.filter(club=self.club, title="Not allowed").exists())
+
+    def test_coach_manager_cannot_publish(self):
+        item = News.objects.create(club=self.club, title="Draft item", body="Body.")
+        self.client.force_login(self.make_coach_manager())
+
+        response = self.club_post("news_publish", {"published_at": "2026-08-10T10:00"}, item.pk)
+
+        self.assertEqual(response.status_code, 403)
+        item.refresh_from_db()
+        self.assertEqual(item.status, News.Status.DRAFT)
+
+    def test_editor_can_publish(self):
+        item = News.objects.create(club=self.club, title="Draft item", body="Body.")
+        self.client.force_login(self.make_editor())
+
+        self.club_post("news_publish", {"published_at": "2026-08-10T10:00"}, item.pk)
+
+        item.refresh_from_db()
+        self.assertEqual(item.status, News.Status.PUBLISHED)
+
+    def test_publishing_with_a_future_date_leaves_it_scheduled(self):
+        item = News.objects.create(club=self.club, title="Draft item", body="Body.")
+        self.client.force_login(self.make_editor())
+        future = timezone.now() + datetime.timedelta(days=7)
+
+        self.club_post("news_publish", {"published_at": future.strftime("%Y-%m-%dT%H:%M")}, item.pk)
+
+        item.refresh_from_db()
+        self.assertTrue(item.is_scheduled)
+
+    def test_publishing_with_now_makes_it_live_immediately(self):
+        item = News.objects.create(club=self.club, title="Draft item", body="Body.")
+        self.client.force_login(self.make_editor())
+
+        self.club_post("news_publish", {"published_at": timezone.now().strftime("%Y-%m-%dT%H:%M")}, item.pk)
+
+        item.refresh_from_db()
+        self.assertFalse(item.is_scheduled)
+
+    def test_unpublishing_reverts_to_draft(self):
+        item = News.objects.create(club=self.club, title="Live item", body="Body.")
+        item.publish()
+        self.client.force_login(self.make_editor())
+
+        self.club_post("news_unpublish", {}, item.pk)
+
+        item.refresh_from_db()
+        self.assertEqual(item.status, News.Status.DRAFT)
+        self.assertIsNone(item.published_at)
+
+    def test_a_coach_manager_can_edit_someone_elses_draft(self):
+        item = News.objects.create(club=self.club, title="Old title", body="Body.")
+        self.client.force_login(self.make_coach_manager())
+
+        self.club_post("news_update", {"title": "New title", "body": "Body.", "visibility": News.Visibility.INTERNAL}, item.pk)
+
+        item.refresh_from_db()
+        self.assertEqual(item.title, "New title")
+
+    def test_a_coach_manager_cannot_edit_once_published(self):
+        item = News.objects.create(club=self.club, title="Old title", body="Body.")
+        item.publish()
+        self.client.force_login(self.make_coach_manager())
+
+        response = self.club_post("news_update", {"title": "New title", "body": "Body.", "visibility": News.Visibility.INTERNAL}, item.pk)
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_an_editor_can_still_edit_once_published(self):
+        item = News.objects.create(club=self.club, title="Old title", body="Body.")
+        item.publish()
+        self.client.force_login(self.make_editor())
+
+        self.club_post("news_update", {"title": "New title", "body": "Body.", "visibility": News.Visibility.INTERNAL}, item.pk)
+
+        item.refresh_from_db()
+        self.assertEqual(item.title, "New title")
+
+    def test_uploading_multiple_photos_creates_one_per_file_and_marks_the_first_main(self):
+        item = News.objects.create(club=self.club, title="Match report", body="Body.")
+        self.client.force_login(self.make_coach_manager())
+        images = [
+            SimpleUploadedFile("one.jpg", b"fake-bytes-one", content_type="image/jpeg"),
+            SimpleUploadedFile("two.jpg", b"fake-bytes-two", content_type="image/jpeg"),
+        ]
+
+        self.club_post("news_photo_upload", {"images": images}, item.pk)
+
+        self.assertEqual(item.photos.count(), 2)
+        self.assertEqual(item.photos.filter(is_main=True).count(), 1)
+
+    def test_set_main_moves_the_main_flag(self):
+        item = News.objects.create(club=self.club, title="Match report", body="Body.")
+        first = NewsPhoto.objects.create(news_item=item, image=SimpleUploadedFile("one.jpg", b"one", content_type="image/jpeg"), is_main=True)
+        second = NewsPhoto.objects.create(news_item=item, image=SimpleUploadedFile("two.jpg", b"two", content_type="image/jpeg"), is_main=False)
+        self.client.force_login(self.make_coach_manager())
+
+        self.club_post("news_photo_set_main", {}, item.pk, second.pk)
+
+        first.refresh_from_db()
+        second.refresh_from_db()
+        self.assertFalse(first.is_main)
+        self.assertTrue(second.is_main)
+
+    def test_deleting_a_photo_removes_it(self):
+        item = News.objects.create(club=self.club, title="Match report", body="Body.")
+        photo = NewsPhoto.objects.create(news_item=item, image=SimpleUploadedFile("one.jpg", b"one", content_type="image/jpeg"))
+        self.client.force_login(self.make_coach_manager())
+
+        self.club_post("news_photo_delete", {}, item.pk, photo.pk)
+
+        self.assertFalse(NewsPhoto.objects.filter(pk=photo.pk).exists())

@@ -1,7 +1,7 @@
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from django.http import Http404
 
-from .services.access import has_management_access, is_club_admin, teams_managed_by
+from .services.access import can_add_news, can_edit_news, can_publish_news, has_management_access, is_club_admin, teams_managed_by
 
 
 class ClubStaffRequiredMixin(LoginRequiredMixin, UserPassesTestMixin):
@@ -49,3 +49,31 @@ class TeamManagerRequiredMixin(ClubStaffRequiredMixin):
         if is_club_admin(user, club):
             return True
         return teams_managed_by(user, club).filter(pk=self.get_team().pk).exists()
+
+
+class NewsAuthorRequiredMixin(ClubStaffRequiredMixin):
+    """ADMIN, EDITOR, or a current-season coach_manager -- who's trusted to
+    author club content in the first place (creating a draft)."""
+
+    def test_func(self):
+        return can_add_news(self.request.user, self.request.club)
+
+
+class NewsPublisherRequiredMixin(ClubStaffRequiredMixin):
+    """ADMIN/EDITOR only -- the release-flow gate for pushing a news item live
+    (or pulling it back)."""
+
+    def test_func(self):
+        return can_publish_news(self.request.user, self.request.club)
+
+
+class NewsEditRequiredMixin(ClubStaffRequiredMixin):
+    """Whoever may edit *this* news item right now: broad while it's a draft,
+    editor/admin-only once published. ``self.get_news_item()`` must return the
+    News the view acts on before ``test_func`` runs."""
+
+    def get_news_item(self):
+        raise NotImplementedError("Subclasses must return the News item this view acts on.")
+
+    def test_func(self):
+        return can_edit_news(self.request.user, self.get_news_item())
