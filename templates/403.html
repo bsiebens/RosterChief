@@ -1,0 +1,26 @@
+{% extends base_template %}
+{% load i18n lucide %}
+
+{% comment %}
+    Django's default 403 handler (django.views.defaults.permission_denied) looks up
+    this exact filename automatically -- no urls.py wiring needed. Rendered through
+    the tenant's own skin (base_template, from club.context_processors.branding),
+    same reasoning as maintenance.html: a club sees its own logo and colours, not a
+    bare error page, and the navbar (sign out, theme toggle, ...) stays reachable
+    since {% block main %} is the only thing this page actually replaces.
+{% endcomment %}
+
+{% block head_title %}{% trans "Access denied" %}{% endblock head_title %}
+
+{% block main %}
+    <div class="flex justify-center">
+        <div class="card w-full max-w-xl bg-base-100 shadow">
+            <div class="card-body items-center text-center">
+                <div class="text-error">{% lucide "shield-x" size=48 %}</div>
+                <h1 class="card-title mt-2">{% trans "Access denied" %}</h1>
+                <p class="opacity-80">{% trans "You don't have permission to view this page." %}</p>
+                <a class="btn btn-primary mt-4 gap-2" href="/">{% lucide "house" size=16 %} {% trans "Go to home" %}</a>
+            </div>
+        </div>
+    </div>
+{% endblock main %}

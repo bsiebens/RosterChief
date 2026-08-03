@@ -1043,6 +1043,40 @@ class BrandingTests(TestCase):
         self.assertNotContains(self.login_page("ajax-united.rosterchief.app"), "--color-secondary")
 
 
+@override_settings(
+    ROSTERCHIEF_BASE_DOMAIN="rosterchief.app",
+    ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"],
+)
+class Custom403PageTests(TestCase):
+    """Django's default 403 handler picks up templates/403.html automatically --
+    branded per tenant (base_template, same as maintenance.html) so a permission
+    error still looks like the app, not a bare Django error page, and the navbar
+    (sign out, theme toggle, home link) stays reachable."""
+
+    def setUp(self):
+        self.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+
+    def test_a_club_subdomain_403_gets_the_club_skin(self):
+        member = get_user_model().objects.create_user(email="member-403@example.com", password="pw-secret-123")
+        self.client.force_login(member)
+
+        response = self.client.get(reverse("management:position_list"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 403)
+        self.assertContains(response, "Access denied", status_code=403)
+        self.assertContains(response, "Ajax United", status_code=403)
+        self.assertContains(response, "Sign out", status_code=403)
+
+    def test_the_base_domain_403_gets_the_platform_skin(self):
+        self.client.force_login(get_user_model().objects.create_user(email="platform-403@example.com", password="pw-secret-123"))
+
+        response = self.client.get(reverse("controlpanel:dashboard"))
+
+        self.assertEqual(response.status_code, 403)
+        self.assertContains(response, "Access denied", status_code=403)
+        self.assertContains(response, "Club &amp; Team Management", status_code=403)
+
+
 class ClubBrandingModelTests(TestCase):
     def test_initials_use_the_first_two_words(self):
         self.assertEqual(Club(name="Ajax United Football Club").initials, "AU")
