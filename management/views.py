@@ -1,4 +1,4 @@
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Count, ProtectedError
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -808,7 +808,16 @@ class TeamRosterAddView(TeamManagerRequiredMixin, FormView):
         return redirect(self.team_detail_url())
 
     def form_valid(self, form):
-        form.save()
+        try:
+            form.save()
+        except IntegrityError:
+            # Belt and braces: form.clean() already checks jersey-number and
+            # member uniqueness by hand (team/season aren't form fields, so
+            # Django's own validate_unique() can't see those constraints) --
+            # this is the backstop for whatever that doesn't catch.
+            notify(self.request, f"e|{_('Could not add player')}|{_('That player could not be added -- please check the details and try again.')}")
+            return redirect(self.team_detail_url())
+
         body = _("“%(member)s” added to the roster.") % {"member": form.instance.member}
         notify(self.request, f"s|{_('Player added')}|{body}")
         return redirect(self.team_detail_url())
@@ -837,7 +846,12 @@ class TeamRosterUpdateView(TeamManagerRequiredMixin, FormView):
         return redirect(self.team_detail_url())
 
     def form_valid(self, form):
-        form.save()
+        try:
+            form.save()
+        except IntegrityError:
+            notify(self.request, f"e|{_('Could not update player')}|{_('That change could not be saved -- please check the details and try again.')}")
+            return redirect(self.team_detail_url())
+
         body = _("“%(member)s” updated.") % {"member": form.instance.member}
         notify(self.request, f"s|{_('Player updated')}|{body}")
         return redirect(self.team_detail_url())
@@ -881,7 +895,12 @@ class TeamStaffAddView(TeamManagerRequiredMixin, FormView):
         return redirect(self.team_detail_url())
 
     def form_valid(self, form):
-        form.save()
+        try:
+            form.save()
+        except IntegrityError:
+            notify(self.request, f"e|{_('Could not assign staff')}|{_('That assignment could not be saved -- please check the details and try again.')}")
+            return redirect(self.team_detail_url())
+
         body = _("“%(member)s” assigned as staff.") % {"member": form.instance.member}
         notify(self.request, f"s|{_('Staff assigned')}|{body}")
         return redirect(self.team_detail_url())
@@ -910,7 +929,12 @@ class TeamStaffUpdateView(TeamManagerRequiredMixin, FormView):
         return redirect(self.team_detail_url())
 
     def form_valid(self, form):
-        form.save()
+        try:
+            form.save()
+        except IntegrityError:
+            notify(self.request, f"e|{_('Could not update staff assignment')}|{_('That change could not be saved -- please check the details and try again.')}")
+            return redirect(self.team_detail_url())
+
         body = _("“%(member)s” updated.") % {"member": form.instance.member}
         notify(self.request, f"s|{_('Staff assignment updated')}|{body}")
         return redirect(self.team_detail_url())

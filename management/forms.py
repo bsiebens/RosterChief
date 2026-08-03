@@ -38,6 +38,8 @@ class TeamMembershipForm(forms.ModelForm):
 
     def __init__(self, *args, club=None, team=None, season=None, **kwargs):
         super().__init__(*args, **kwargs)
+        self.team = team
+        self.season = season
         members = Member.objects.filter(member_of__club=club).distinct()
         if team is not None and season is not None:
             # Already on this team's roster this season -- offering them again
@@ -46,6 +48,20 @@ class TeamMembershipForm(forms.ModelForm):
             members = members.exclude(pk__in=taken)
         self.fields["member"].queryset = members
         self.fields["position"].queryset = Position.objects.filter(club=club, staff_position=False)
+
+    def clean(self):
+        cleaned = super().clean()
+        # team/season aren't form fields (the view sets them from the URL, not user
+        # input), so Django's automatic validate_unique() excludes both of them --
+        # and with them, the whole unique_jersey_number_per_team_per_season check.
+        # Without this, a clashing jersey number reaches the database unrejected
+        # and surfaces as a raw IntegrityError instead of a form error.
+        jersey_number = cleaned.get("jersey_number")
+        if jersey_number is not None and self.team is not None and self.season is not None:
+            clash = TeamMembership.objects.filter(team=self.team, season=self.season, jersey_number=jersey_number).exclude(pk=self.instance.pk).exists()
+            if clash:
+                self.add_error("jersey_number", _("Another player on this team already has this jersey number this season."))
+        return cleaned
 
 
 class StaffAssignmentForm(forms.ModelForm):

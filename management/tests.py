@@ -386,6 +386,38 @@ class TeamRosterStaffTests(ManagementTestBase):
         self.assertEqual(response.status_code, 302)
         self.assertEqual(TeamMembership.objects.filter(team=self.team, season=self.season).count(), 1)
 
+    def test_a_duplicate_jersey_number_fails_with_a_form_error_not_a_500(self):
+        # team/season aren't TeamMembershipForm fields, so Django's own
+        # validate_unique() can't see unique_jersey_number_per_team_per_season --
+        # this constraint only gets checked because the form does it by hand.
+        other_player = Member.objects.create(first_name="Olly", last_name="Other")
+        ClubMembership.objects.create(club=self.club, member=other_player, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        TeamMembership.objects.create(team=self.team, season=self.season, member=self.player, position=self.player_position, jersey_number=7)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("team_roster_add", {"member": str(other_player.pk), "position": str(self.player_position.pk), "jersey_number": "7"}, self.team.pk, self.season.pk)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(TeamMembership.objects.filter(team=self.team, season=self.season, member=other_player).exists())
+
+    def test_editing_a_roster_entry_to_a_clashing_jersey_number_fails_gracefully(self):
+        other_player = Member.objects.create(first_name="Olly", last_name="Other")
+        ClubMembership.objects.create(club=self.club, member=other_player, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        TeamMembership.objects.create(team=self.team, season=self.season, member=self.player, position=self.player_position, jersey_number=7)
+        other_membership = TeamMembership.objects.create(team=self.team, season=self.season, member=other_player, position=self.player_position, jersey_number=8)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post(
+            "team_roster_update",
+            {"member": str(other_player.pk), "position": str(self.player_position.pk), "jersey_number": "7"},
+            self.team.pk,
+            other_membership.pk,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        other_membership.refresh_from_db()
+        self.assertEqual(other_membership.jersey_number, 8)
+
     def test_editing_a_roster_entry_updates_it(self):
         membership = TeamMembership.objects.create(team=self.team, season=self.season, member=self.player, position=self.player_position, jersey_number=9)
         self.client.force_login(self.admin_user)
