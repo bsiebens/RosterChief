@@ -47,6 +47,7 @@ urlpatterns = [
     path("news/new/", views.NewsCreateView.as_view(), name="news_create"),
     path("news/<uuid:pk>/", views.NewsDetailView.as_view(), name="news_detail"),
     path("news/<uuid:pk>/edit/", views.NewsUpdateView.as_view(), name="news_update"),
+    path("news/<uuid:pk>/delete/", views.NewsDeleteView.as_view(), name="news_delete"),
     path("news/<uuid:pk>/publish/", views.NewsPublishView.as_view(), name="news_publish"),
     path("news/<uuid:pk>/unpublish/", views.NewsUnpublishView.as_view(), name="news_unpublish"),
     path("news/<uuid:pk>/photos/", views.NewsPhotoUploadView.as_view(), name="news_photo_upload"),

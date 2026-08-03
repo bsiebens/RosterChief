@@ -1877,3 +1877,49 @@ class NewsManagementTests(ManagementTestBase):
         self.club_post("news_photo_delete", {}, item.pk, photo.pk)
 
         self.assertFalse(NewsPhoto.objects.filter(pk=photo.pk).exists())
+
+    def test_a_coach_manager_can_delete_a_draft(self):
+        item = News.objects.create(club=self.club, title="Draft item", body="Body.")
+        self.client.force_login(self.make_coach_manager())
+
+        response = self.club_post("news_delete", {}, item.pk)
+
+        self.assertRedirects(response, reverse("management:news_list"))
+        self.assertFalse(News.objects.filter(pk=item.pk).exists())
+
+    def test_a_coach_manager_cannot_delete_once_published(self):
+        item = News.objects.create(club=self.club, title="Live item", body="Body.")
+        item.publish()
+        self.client.force_login(self.make_coach_manager())
+
+        response = self.club_post("news_delete", {}, item.pk)
+
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(News.objects.filter(pk=item.pk).exists())
+
+    def test_an_editor_can_delete_once_published(self):
+        item = News.objects.create(club=self.club, title="Live item", body="Body.")
+        item.publish()
+        self.client.force_login(self.make_editor())
+
+        self.club_post("news_delete", {}, item.pk)
+
+        self.assertFalse(News.objects.filter(pk=item.pk).exists())
+
+    def test_deleting_a_news_item_removes_its_photos(self):
+        item = News.objects.create(club=self.club, title="Match report", body="Body.")
+        photo = NewsPhoto.objects.create(news_item=item, image=SimpleUploadedFile("one.jpg", b"one", content_type="image/jpeg"))
+        self.client.force_login(self.make_coach_manager())
+
+        self.club_post("news_delete", {}, item.pk)
+
+        self.assertFalse(NewsPhoto.objects.filter(pk=photo.pk).exists())
+
+    def test_the_edit_and_delete_buttons_are_hidden_once_published_for_a_coach_manager(self):
+        item = News.objects.create(club=self.club, title="Live item", body="Body.")
+        item.publish()
+        self.client.force_login(self.make_coach_manager())
+
+        response = self.club_get("news_list")
+
+        self.assertNotContains(response, reverse("management:news_update", args=[item.pk]))

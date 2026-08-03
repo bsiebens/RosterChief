@@ -1,5 +1,5 @@
 {% extends "management/base.html" %}
-{% load i18n lucide %}
+{% load i18n lucide ui %}
 
 {% block heading %}{% trans "News" %}{% endblock heading %}
 
@@ -20,6 +20,7 @@
                             <th>{% trans "Teams" %}</th>
                             <th>{% trans "Visibility" %}</th>
                             <th>{% trans "Status" %}</th>
+                            <th></th>
                         </tr>
                     </thead>
                     <tbody>
@@ -43,10 +44,18 @@
                                         <span class="badge badge-success badge-sm">{% trans "Published" %}</span>
                                     {% endif %}
                                 </td>
+                                <td class="text-right">
+                                    {% if news_item.can_edit %}
+                                        <div class="flex justify-end gap-1">
+                                            <a class="btn btn-sm btn-outline btn-neutral" href="{% url 'management:news_detail' news_item.pk %}" aria-label="{% trans 'Edit' %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</a>
+                                            <button class="btn btn-sm btn-outline btn-error" type="button" onclick="document.getElementById('{{ news_item.pk|dom_id:"news_delete_modal" }}').showModal()" aria-label="{% trans 'Delete' %}">{% lucide "trash-2" size=14 %} {% trans "Delete" %}</button>
+                                        </div>
+                                    {% endif %}
+                                </td>
                             </tr>
                         {% empty %}
                             <tr>
-                                <td colspan="4" class="text-center opacity-60">{% trans "No news items yet." %}</td>
+                                <td colspan="5" class="text-center opacity-60">{% trans "No news items yet." %}</td>
                             </tr>
                         {% endfor %}
                     </tbody>
@@ -54,4 +63,14 @@
             </div>
         </div>
     </div>
+
+    {% trans "Delete news item" as delete_news_title %}
+    {% trans "Delete" as delete_label %}
+    {% for news_item in news_items %}
+        {% if news_item.can_edit %}
+            {% url 'management:news_delete' news_item.pk as news_delete_url %}
+            {% blocktrans with title=news_item.title asvar delete_news_body %}Delete “{{ title }}”? Its photos go with it. This cannot be undone.{% endblocktrans %}
+            {% include "controlpanel/_confirm_modal.html" with modal_id=news_item.pk|dom_id:"news_delete_modal" title=delete_news_title body=delete_news_body action_url=news_delete_url submit_label=delete_label %}
+        {% endif %}
+    {% endfor %}
 {% endblock panel %}

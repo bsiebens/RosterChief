@@ -966,6 +966,11 @@ class NewsListView(ClubStaffRequiredMixin, ListView):
     def get_queryset(self):
         return News.objects.filter(club=self.request.club).prefetch_related("teams")
 
+    def get_context_data(self, **kwargs):
+        for news_item in self.object_list:
+            news_item.can_edit = can_edit_news(self.request.user, news_item)
+        return super().get_context_data(**kwargs)
+
 
 class NewsCreateView(NewsAuthorRequiredMixin, CreateView):
     model = News
@@ -1029,6 +1034,20 @@ class NewsUpdateView(NewsEditRequiredMixin, UpdateView):
 
     def get_context_data(self, **kwargs):
         return super().get_context_data(update_view=True, **kwargs)
+
+
+class NewsDeleteView(NewsEditRequiredMixin, View):
+    def get_news_item(self):
+        return get_object_or_404(News.objects.filter(club=self.request.club), pk=self.kwargs["pk"])
+
+    def post(self, request, pk):
+        news_item = self.get_news_item()
+        title = str(news_item)
+        news_item.delete()
+
+        body = _("“%(news)s” has been deleted.") % {"news": title}
+        notify(request, f"w|{_('News item deleted')}|{body}")
+        return redirect("management:news_list")
 
 
 class NewsPublishView(NewsPublisherRequiredMixin, RedirectOnInvalidMixin, FormView):

@@ -16,6 +16,7 @@
 {% block actions %}
     {% if can_edit %}
         <a class="btn btn-outline btn-neutral gap-2" href="{% url 'management:news_update' news_item.pk %}">{% lucide "pencil" size=16 %} {% trans "Edit" %}</a>
+        <button class="btn btn-outline btn-error gap-2" type="button" onclick="document.getElementById('delete_news_modal').showModal()">{% lucide "trash-2" size=16 %} {% trans "Delete" %}</button>
     {% endif %}
     {% if can_publish %}
         {% if news_item.status == "draft" %}
@@ -84,6 +85,12 @@
         {% trans "Add photos" as add_photos_label %}
         {% url 'management:news_photo_upload' news_item.pk as add_photos_url %}
         {% include "controlpanel/_modal_form.html" with modal_id="add_photos_modal" title=add_photos_label form=photo_upload_form action_url=add_photos_url submit_label=add_photos_label submit_icon="image-plus" %}
+
+        {% trans "Delete news item" as delete_news_title %}
+        {% blocktrans asvar delete_news_body %}Delete “{{ news_item }}”? Its photos go with it. This cannot be undone.{% endblocktrans %}
+        {% trans "Delete" as delete_label %}
+        {% url 'management:news_delete' news_item.pk as delete_news_url %}
+        {% include "controlpanel/_confirm_modal.html" with modal_id="delete_news_modal" title=delete_news_title body=delete_news_body action_url=delete_news_url submit_label=delete_label %}
     {% endif %}
 
     {% if can_publish %}

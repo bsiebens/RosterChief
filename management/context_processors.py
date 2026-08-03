@@ -53,6 +53,7 @@ _NAV_SECTIONS = {
     "news_create": "news_list",
     "news_detail": "news_list",
     "news_update": "news_list",
+    "news_delete": "news_list",
     "news_publish": "news_list",
     "news_unpublish": "news_list",
     "news_photo_upload": "news_list",
