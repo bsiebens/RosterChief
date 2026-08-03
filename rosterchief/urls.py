@@ -24,6 +24,7 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path("accounts/", include("allauth.urls")),
     path("controlpanel/", include("controlpanel.urls")),
+    path("manage/", include("management.urls")),
     # "/" resolves per tenant: a club subdomain lands on the club, the base domain
     # hands off to the control panel. This is why LOGIN_REDIRECT_URL can stay "/".
     path("", root, name="root"),

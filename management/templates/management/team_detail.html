@@ -1,0 +1,19 @@
+{% extends "management/base.html" %}
+{% load i18n lucide %}
+
+{% block heading %}{{ team.name }}{% endblock heading %}
+{% block subheading %}{{ team.short_name }}{% endblock subheading %}
+
+{% block actions %}
+    {% if is_club_admin %}
+        <a class="btn btn-outline btn-neutral gap-2" href="{% url 'management:team_update' team.pk %}">{% lucide "pencil" size=16 %} {% trans "Edit" %}</a>
+    {% endif %}
+{% endblock actions %}
+
+{% block panel %}
+    <div class="card bg-base-100 shadow">
+        <div class="card-body">
+            <p class="opacity-70">{% trans "Roster and staff assignments for this team are managed from the Roster and Staff sections." %}</p>
+        </div>
+    </div>
+{% endblock panel %}

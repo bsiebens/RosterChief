@@ -64,6 +64,11 @@
             </button>
 
             {% if user.is_authenticated %}
+                {% if has_management_access %}
+                    {# Only ever true on a club subdomain -- see management.context_processors.management_link. #}
+                    <a class="btn btn-ghost gap-4" href="{% url "management:home" %}" aria-label="Management">{% lucide "layout-dashboard" %}<span class="hidden sm:inline">Management</span></a>
+                {% endif %}
+
                 {% if user.is_superuser %}
                     <a class="btn btn-ghost gap-4" href="{% url "admin:index" %}" aria-label="Django admin">{% lucide "shield-cog" %}<span class="hidden sm:inline">Django admin</span></a>
                 {% endif %}

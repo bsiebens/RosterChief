@@ -1,0 +1,49 @@
+{% load i18n lucide %}
+
+{% comment %}
+    The management nav, in one place: the sidebar renders it on a wide screen and the
+    collapsed menu renders it on a narrow one. Admin-only sections are hidden here for
+    plain staff -- the views are gated regardless (ClubAdminRequiredMixin), this is
+    just so the nav never shows a link they can't follow.
+
+    `nav` (management.context_processors.active_nav_section) is the current page's
+    section, derived from the resolved URL name -- `menu-active` is daisyUI's active
+    state, same convention as controlpanel/templates/controlpanel/_nav_items.html.
+{% endcomment %}
+<li>
+    <a class="{% if nav == 'home' %}menu-active{% endif %}" href="{% url 'management:home' %}">{% lucide "layout-dashboard" size=16 %} {% trans "Dashboard" %}</a>
+</li>
+
+<li class="menu-title">{% trans "People" %}</li>
+<li><a class="{% if nav == 'member_list' %}menu-active{% endif %}" href="{% url 'management:member_list' %}">{% lucide "users" size=16 %} {% trans "Members" %}</a></li>
+{% if is_club_admin %}
+    <li><a class="{% if nav == 'membership_list' %}menu-active{% endif %}" href="{% url 'management:membership_list' %}">{% lucide "wallet" size=16 %} {% trans "Memberships" %}</a></li>
+{% endif %}
+
+{% if is_club_admin %}
+    <li class="menu-title">{% trans "Club setup" %}</li>
+    <li><a class="{% if nav == 'position_list' %}menu-active{% endif %}" href="{% url 'management:position_list' %}">{% lucide "tags" size=16 %} {% trans "Positions" %}</a></li>
+    <li><a class="{% if nav == 'role_list' %}menu-active{% endif %}" href="{% url 'management:role_list' %}">{% lucide "shield-check" size=16 %} {% trans "Roles" %}</a></li>
+{% endif %}
+
+<li class="menu-title">{% trans "Teams" %}</li>
+<li><a class="{% if nav == 'team_list' %}menu-active{% endif %}" href="{% url 'management:team_list' %}">{% lucide "shirt" size=16 %} {% trans "Teams" %}</a></li>
+<li><a class="{% if nav == 'roster_list' %}menu-active{% endif %}" href="{% url 'management:roster_list' %}">{% lucide "clipboard-list" size=16 %} {% trans "Roster" %}</a></li>
+<li><a class="{% if nav == 'staff_list' %}menu-active{% endif %}" href="{% url 'management:staff_list' %}">{% lucide "hard-hat" size=16 %} {% trans "Staff" %}</a></li>
+
+<li class="menu-title">{% trans "Calendar" %}</li>
+<li><a class="{% if nav == 'event_list' %}menu-active{% endif %}" href="{% url 'management:event_list' %}">{% lucide "calendar" size=16 %} {% trans "Events" %}</a></li>
+<li><a class="{% if nav == 'event_series_list' %}menu-active{% endif %}" href="{% url 'management:event_series_list' %}">{% lucide "repeat" size=16 %} {% trans "Event series" %}</a></li>
+<li><a class="{% if nav == 'location_list' %}menu-active{% endif %}" href="{% url 'management:location_list' %}">{% lucide "map-pin" size=16 %} {% trans "Locations" %}</a></li>
+<li><a class="{% if nav == 'opponent_list' %}menu-active{% endif %}" href="{% url 'management:opponent_list' %}">{% lucide "swords" size=16 %} {% trans "Opponents" %}</a></li>
+
+{% if is_club_admin %}
+    <li class="menu-title">{% trans "Shop" %}</li>
+    <li><a class="{% if nav == 'product_list' %}menu-active{% endif %}" href="{% url 'management:product_list' %}">{% lucide "package" size=16 %} {% trans "Products" %}</a></li>
+    <li><a class="{% if nav == 'order_list' %}menu-active{% endif %}" href="{% url 'management:order_list' %}">{% lucide "shopping-cart" size=16 %} {% trans "Orders" %}</a></li>
+    <li><a class="{% if nav == 'discount_list' %}menu-active{% endif %}" href="{% url 'management:discount_list' %}">{% lucide "percent" size=16 %} {% trans "Discounts" %}</a></li>
+    <li><a class="{% if nav == 'invoice_list' %}menu-active{% endif %}" href="{% url 'management:invoice_list' %}">{% lucide "receipt" size=16 %} {% trans "Invoices" %}</a></li>
+
+    <li class="menu-title">{% trans "Forms" %}</li>
+    <li><a class="{% if nav == 'form_list' %}menu-active{% endif %}" href="{% url 'management:form_list' %}">{% lucide "clipboard-list" size=16 %} {% trans "Forms" %}</a></li>
+{% endif %}

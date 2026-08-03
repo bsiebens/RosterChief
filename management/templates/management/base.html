@@ -1,0 +1,42 @@
+{% extends "_club_base.html" %}
+{% load i18n lucide %}
+
+{% comment %}
+    The club-staff shell: team managers, coaches and admins only (never parents or
+    players -- see club.mixins.ClubStaffRequiredMixin). Mirrors controlpanel/base.html's
+    block structure, extending the club's own skin instead of the platform's.
+{% endcomment %}
+
+{% block head_title %}
+    {% block section_title %}{% trans "Management" %}{% endblock section_title %}
+{% endblock head_title %}
+
+{% block menu %}
+    <aside class="hidden w-64 shrink-0 overflow-y-auto border-r border-base-300 bg-base-100 lg:block">
+        <ul class="menu w-full gap-1 p-3 mt-4">
+            {% include "management/_nav_items.html" %}
+        </ul>
+    </aside>
+{% endblock menu %}
+
+{% block main %}
+    <div class="mb-6 flex flex-wrap flex-row items-center justify-between gap-3">
+        <div class="flex flex-col gap-2 grow">
+            <h1 class="text-3xl font-bold">
+                {% block heading %}{% trans "Management" %}{% endblock heading %}
+            </h1>
+            <span class="text-sm text-base-content/50">{% block subheading %}{% endblock subheading %}</span>
+        </div>
+
+        <div class="flex gap-2">
+            {% block actions %}{% endblock actions %}
+        </div>
+    </div>
+
+    {# Below `lg` the sidebar is hidden, so the same links appear here rather than nowhere. #}
+    <ul class="menu menu-horizontal mb-6 w-full gap-1 overflow-x-auto rounded-box bg-base-100 lg:hidden">
+        {% include "management/_nav_items.html" %}
+    </ul>
+
+    {% block panel %}{% endblock panel %}
+{% endblock main %}

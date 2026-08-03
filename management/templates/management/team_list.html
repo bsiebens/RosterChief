@@ -1,0 +1,39 @@
+{% extends "management/base.html" %}
+{% load i18n lucide %}
+
+{% block heading %}{% trans "Teams" %}{% endblock heading %}
+
+{% block actions %}
+    {% if is_club_admin %}
+        <a class="btn btn-primary gap-2" href="{% url 'management:team_create' %}">{% lucide "plus" size=16 %} {% trans "New team" %}</a>
+    {% endif %}
+{% endblock actions %}
+
+{% block panel %}
+    <div class="card bg-base-100 shadow">
+        <div class="card-body">
+            <div class="overflow-x-auto">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>{% trans "Name" %}</th>
+                            <th>{% trans "Short name" %}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for team in teams %}
+                            <tr>
+                                <td><a class="link link-hover" href="{% url 'management:team_detail' team.pk %}">{{ team.name }}</a></td>
+                                <td>{{ team.short_name }}</td>
+                            </tr>
+                        {% empty %}
+                            <tr>
+                                <td colspan="2" class="text-center opacity-60">{% trans "No teams yet." %}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+{% endblock panel %}

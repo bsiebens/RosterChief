@@ -1,0 +1,33 @@
+{% extends "management/base.html" %}
+{% load i18n %}
+
+{% comment %}
+    Shared placeholder for every entity that doesn't have its own list template yet
+    (see management.views.StubListMixin) -- a plain one-column table of __str__, just
+    enough to prove the query scoping and permission gate work. Not meant to stay this
+    bare once each section gets its own page.
+{% endcomment %}
+
+{% block heading %}{{ page_title }}{% endblock heading %}
+
+{% block panel %}
+    <div class="card bg-base-100 shadow">
+        <div class="card-body">
+            <div class="overflow-x-auto">
+                <table class="table">
+                    <tbody>
+                        {% for object in object_list %}
+                            <tr>
+                                <td>{{ object }}</td>
+                            </tr>
+                        {% empty %}
+                            <tr>
+                                <td class="text-center opacity-60">{% trans "Nothing here yet." %}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+{% endblock panel %}

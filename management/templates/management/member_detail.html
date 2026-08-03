@@ -1,0 +1,157 @@
+{% extends "management/base.html" %}
+{% load lucide ui i18n %}
+
+{% block heading %}{{ member.get_full_name }}{% endblock heading %}
+{% block subheading %}{{ member.contact_email }}{% endblock subheading %}
+
+{% block actions %}
+    {% if is_club_admin %}
+        <a class="btn btn-outline btn-neutral gap-2" href="{% url 'management:member_update' member.pk %}">{% lucide "pencil" size=16 %} {% trans "Edit" %}</a>
+    {% endif %}
+{% endblock actions %}
+
+{% block panel %}
+    <div class="grid gap-4 lg:grid-cols-2">
+        <div class="card bg-base-100 shadow">
+            <div class="card-body">
+                <h2 class="card-title text-base">{% lucide "user" size=18 %} {% trans "Personal information" %}</h2>
+                <dl class="divide-y divide-base-200">
+                    <div class="flex items-center justify-between py-2">
+                        <dt class="text-sm opacity-70">{% trans "Date of birth" %}</dt>
+                        <dd class="font-semibold">{{ member.date_of_birth|default:"-" }}</dd>
+                    </div>
+                    <div class="flex items-center justify-between py-2">
+                        <dt class="text-sm opacity-70">{% trans "Phone" %}</dt>
+                        <dd class="font-semibold">{{ member.phone.as_international|default:"-" }}</dd>
+                    </div>
+                    <div class="flex items-center justify-between py-2">
+                        <dt class="text-sm opacity-70">{% trans "Emergency phone" %}</dt>
+                        <dd class="font-semibold">{{ member.emergency_phone.as_international|default:"-" }}</dd>
+                    </div>
+                </dl>
+
+                <div class="flex flex-row gap-2 items-center mt-2">
+                    {% if member.phone %}
+                        <a class="btn btn-sm btn-outline btn-primary grow" href="tel:{{ member.phone.as_international }}">{% lucide "phone" size=14 %} {% trans "Call" %}</a>
+                    {% endif %}
+                    {% if member.emergency_phone %}
+                        <a class="btn btn-sm btn-outline btn-error grow" href="tel:{{ member.emergency_phone.as_international }}">{% lucide "shield-alert" size=14 %} {% trans "Emergency call" %}</a>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        {% comment %}
+            A Member has no club of its own -- ClubMembership is the only thing that
+            actually ties this person to *this* club, so it gets its own panel: the
+            current season's standing, plus every season they've been part of.
+        {% endcomment %}
+        <div class="card bg-base-100 shadow">
+            <div class="card-body">
+                <h2 class="card-title text-base">{% lucide "id-card" size=18 %} {% trans "Club membership" %}</h2>
+                {% if current_membership %}
+                    <dl class="divide-y divide-base-200">
+                        <div class="flex items-center justify-between py-2">
+                            <dt class="text-sm opacity-70">{% trans "License" %}</dt>
+                            <dd class="font-semibold">{{ current_membership.license|default:"-" }}</dd>
+                        </div>
+                        <div class="flex items-center justify-between py-2">
+                            <dt class="text-sm opacity-70">{% trans "Status" %}</dt>
+                            <dd class="font-semibold">{{ current_membership.get_status_display }}</dd>
+                        </div>
+                        <div class="flex items-center justify-between py-2">
+                            <dt class="text-sm opacity-70">{% trans "Fee status" %}</dt>
+                            <dd class="font-semibold">{{ current_membership.get_fee_status_display }}</dd>
+                        </div>
+                    </dl>
+                {% else %}
+                    <p class="text-sm opacity-60">{% trans "Not rostered for the current season." %}</p>
+                {% endif %}
+
+                {% if membership_history %}
+                    <div class="divider"></div>
+                    <h3 class="text-sm font-semibold opacity-70">{% trans "Season history" %}</h3>
+                    <div class="overflow-x-auto">
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th>{% trans "Season" %}</th>
+                                    <th>{% trans "Status" %}</th>
+                                    <th>{% trans "Fee status" %}</th>
+                                    <th>{% trans "License" %}</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for membership in membership_history %}
+                                    <tr>
+                                        <td>{{ membership.season.start_date|date:"Y" }} - {{ membership.season.end_date|date:"Y" }}</td>
+                                        <td>{{ membership.get_status_display }}</td>
+                                        <td>{{ membership.get_fee_status_display }}</td>
+                                        <td>{{ membership.license|default:"-" }}</td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    {% trans "Add parent" as add_parent_label %}
+    {% trans "Add child" as add_child_label %}
+    {% trans "If this email has no account yet, one is created and they set a password via the reset link." as add_parent_blurb %}
+    {% blocktrans with short_name=member.get_short_name asvar remove_from_family_label %}Remove {{ short_name }} from family{% endblocktrans %}
+    {% trans "Remove from family" as remove_from_family_title %}
+    {% trans "Remove" as remove_label %}
+    {% for family_group in family_groups %}
+        <div class="card bg-base-100 shadow mt-4">
+            <div class="card-body">
+                <div class="flex items-center justify-between">
+                    <h2 class="card-title text-base">
+                        {% lucide "users" size=18 %}
+                        <a class="link link-hover" href="{% url 'management:family_detail' family_group.family.pk %}">{{ family_group.family }}</a>
+                    </h2>
+                    {% if is_club_admin %}
+                        <div class="flex gap-2">
+                            <button class="btn btn-outline btn-neutral btn-sm gap-2" type="button" onclick="document.getElementById('{{ family_group.family.pk|dom_id:"add_parent_modal" }}').showModal()">{% lucide "user-plus" size=14 %} {{ add_parent_label }}</button>
+                            <button class="btn btn-outline btn-neutral btn-sm gap-2" type="button" onclick="document.getElementById('{{ family_group.family.pk|dom_id:"add_child_modal" }}').showModal()">{% lucide "baby" size=14 %} {{ add_child_label }}</button>
+                            <button class="btn btn-outline btn-error btn-sm gap-2" type="button" onclick="document.getElementById('{{ family_group.family.pk|dom_id:"detach_family_modal" }}').showModal()">{% lucide "user-x" size=14 %} {{ remove_from_family_label }}</button>
+                        </div>
+                    {% endif %}
+                </div>
+                {% include "management/_family_members_table.html" with group=family_group next_url=request.path %}
+            </div>
+        </div>
+
+        {% if is_club_admin %}
+            {% url 'management:family_add_parent' family_group.family.pk as add_parent_url %}
+            {% url 'management:family_add_child' family_group.family.pk as add_child_url %}
+            {% url 'management:member_detach_family' member.pk family_group.family.pk as detach_family_url %}
+            {% blocktrans with full_name=member.get_full_name family_name=family_group.family asvar detach_family_body %}Remove {{ full_name }} from {{ family_name }}? They become a standalone member -- nothing else about them changes.{% endblocktrans %}
+            {% include "controlpanel/_modal_form.html" with modal_id=family_group.family.pk|dom_id:"add_parent_modal" title=add_parent_label form=add_parent_form action_url=add_parent_url submit_label=add_parent_label submit_icon="user-plus" blurb=add_parent_blurb %}
+            {% include "controlpanel/_modal_form.html" with modal_id=family_group.family.pk|dom_id:"add_child_modal" title=add_child_label form=add_child_form action_url=add_child_url submit_label=add_child_label submit_icon="baby" %}
+            {% include "controlpanel/_confirm_modal.html" with modal_id=family_group.family.pk|dom_id:"detach_family_modal" title=remove_from_family_title body=detach_family_body action_url=detach_family_url submit_label=remove_label submit_icon="user-x" %}
+        {% endif %}
+    {% endfor %}
+
+    {% if is_club_admin %}
+        <div class="card bg-base-100 shadow mt-4">
+            <div class="card-body">
+                <div class="flex items-center justify-between">
+                    <h2 class="card-title text-base">{% lucide "users" size=18 %} {% trans "Family" %}</h2>
+                    <button class="btn btn-outline btn-neutral btn-sm gap-2" type="button" onclick="document.getElementById('attach_family_modal').showModal()">{% lucide "user-plus" size=14 %} {% trans "Add to family" %}</button>
+                </div>
+                {% if not family_groups %}
+                    <p class="text-sm opacity-60">{% trans "Not part of a family." %}</p>
+                {% endif %}
+            </div>
+        </div>
+
+        {% url 'management:member_attach_family' member.pk as attach_family_url %}
+        {% trans "Add to family" as add_to_family_title %}
+        {% trans "Add" as add_label %}
+        {% trans "Pick an existing family, or leave it blank to start a new one." as attach_family_blurb %}
+        {% include "controlpanel/_modal_form.html" with modal_id="attach_family_modal" title=add_to_family_title form=attach_to_family_form action_url=attach_family_url submit_label=add_label submit_icon="user-plus" blurb=attach_family_blurb %}
+    {% endif %}
+{% endblock panel %}

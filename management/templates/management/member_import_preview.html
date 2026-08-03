@@ -1,0 +1,68 @@
+{% extends "management/base.html" %}
+{% load lucide i18n %}
+
+{% block heading %}{% trans "Review import" %}{% endblock heading %}
+
+{% block panel %}
+    {% if not season %}
+        <div class="alert alert-warning mb-4">
+            {% lucide "triangle-alert" size=16 %}
+            <span>{% trans "No active season — members will still be created, but won't be rostered for one until it exists." %}</span>
+        </div>
+    {% endif %}
+
+    <div class="card bg-base-100 shadow">
+        <div class="card-body">
+            <p class="text-sm opacity-70">
+                {% blocktrans count counter=valid_count %}{{ counter }} member will be created.{% plural %}{{ counter }} members will be created.{% endblocktrans %}
+                {% if skipped_count %}{% blocktrans count counter=skipped_count %}{{ counter }} row will be skipped.{% plural %}{{ counter }} rows will be skipped.{% endblocktrans %}{% endif %}
+            </p>
+
+            <div class="overflow-x-auto">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>{% trans "Row" %}</th>
+                            <th>{% trans "Last name" %}</th>
+                            <th>{% trans "First name" %}</th>
+                            <th>{% trans "Email" %}</th>
+                            <th>{% trans "Outcome" %}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for result in results %}
+                            <tr>
+                                <td>{{ result.line_number }}</td>
+                                <td>{{ result.raw.last_name }}</td>
+                                <td>{{ result.raw.first_name }}</td>
+                                <td>{{ result.raw.email }}</td>
+                                <td>
+                                    {% if result.member %}
+                                        <span class="badge badge-success badge-sm">{% trans "Will create" %}</span>
+                                    {% else %}
+                                        <span class="badge badge-error badge-sm">{% trans "Skipped" %}</span>
+                                        <div class="text-xs opacity-70 mt-1">{{ result.errors|join:"; " }}</div>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                        {% empty %}
+                            <tr>
+                                <td colspan="5" class="text-center opacity-60">{% trans "No rows found in the uploaded file." %}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="card-actions justify-start pt-2 mt-2">
+                <a class="btn btn-outline btn-neutral gap-2" href="{% url 'management:member_import' %}">{% lucide "arrow-left" size=16 %} {% trans "Back" %}</a>
+                {% if valid_count %}
+                    <form method="post" action="{% url 'management:member_import_confirm' %}">
+                        {% csrf_token %}
+                        <button class="btn btn-primary gap-2" type="submit">{% lucide "check" size=16 %} {% blocktrans %}Confirm import ({{ valid_count }}){% endblocktrans %}</button>
+                    </form>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+{% endblock panel %}

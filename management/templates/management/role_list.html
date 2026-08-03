@@ -1,0 +1,44 @@
+{% extends "management/base.html" %}
+{% load i18n lucide %}
+
+{% block heading %}{% trans "Roles" %}{% endblock heading %}
+
+{% block actions %}
+    <a class="btn btn-primary gap-2" href="{% url 'management:role_create' %}">{% lucide "plus" size=16 %} {% trans "Grant role" %}</a>
+{% endblock actions %}
+
+{% block panel %}
+    <div class="card bg-base-100 shadow">
+        <div class="card-body">
+            <div class="overflow-x-auto">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>{% trans "Member" %}</th>
+                            <th>{% trans "Role" %}</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for role in roles %}
+                            <tr>
+                                <td>{{ role.member }}</td>
+                                <td>{{ role.get_role_display }}</td>
+                                <td class="text-right">
+                                    <form method="post" action="{% url 'management:role_revoke' role.pk %}">
+                                        {% csrf_token %}
+                                        <button class="btn btn-outline btn-error btn-sm gap-2" type="submit">{% lucide "x" size=14 %} {% trans "Revoke" %}</button>
+                                    </form>
+                                </td>
+                            </tr>
+                        {% empty %}
+                            <tr>
+                                <td colspan="3" class="text-center opacity-60">{% trans "No roles granted yet." %}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+{% endblock panel %}

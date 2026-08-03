@@ -12,6 +12,7 @@ dependencies = [
     "django-storages[s3]>=1.14.6",
     "django-waffle>=5.0.0",
     "gunicorn>=26.0.0",
+    "openpyxl>=3.1.5",
     "pillow>=12.3.0",
     "psycopg[binary]>=3.3.4",
     "python-dateutil>=2.9.0.post0",
@@ -56,7 +57,7 @@ ignore = [
 
 [tool.ruff.lint.isort]
 known-first-party = [
-    "billing", "authentication", "club", "members", "teams", "events", "formbuilder", "shop", "controlpanel", "news", "pages", "home", "search", "rosterchief"]
+    "billing", "authentication", "club", "members", "teams", "events", "formbuilder", "shop", "controlpanel", "management", "news", "pages", "home", "search", "rosterchief"]
 
 [tool.uv.sources]
 django-lucide = { git = "https://github.com/bsiebens/lucide" }

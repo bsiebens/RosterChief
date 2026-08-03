@@ -1,6 +1,7 @@
 import datetime
 import uuid
 from contextlib import contextmanager
+from decimal import Decimal
 
 from allauth.mfa.models import Authenticator
 from django.contrib import admin as django_admin
@@ -16,7 +17,7 @@ from events.models import Event
 from members.models import Family, FamilyMembership, Member
 from teams.models import Position, StaffAssignment, Team, TeamMembership
 
-from .models import Club, ClubMembership, ClubRole, Season, club_logo_path
+from .models import Club, ClubMembership, ClubRole, FeePayment, Season, club_logo_path
 from .services.access import (
     COACH_MANAGER,
     can_edit_event,
@@ -27,6 +28,7 @@ from .services.access import (
     teams_managed_by,
     teams_staffed_by,
 )
+from .services.fees import mark_as_paid, record_payment, remaining_balance
 from .tenancy import (
     ClubTenantMiddleware,
     get_current_club,
@@ -440,14 +442,17 @@ class SeasonGetCurrentTests(TestCase):
         self.assertEqual(found.club, self.other)
 
     def test_defaults_to_today(self):
+        # self.other, not self.club -- setUp's self.season (2026-08-01 to 2027-05-31)
+        # would otherwise also cover "today" once real dates reach that window,
+        # colliding with the one created here.
         today = timezone.now().date()
         current = Season.objects.create(
-            club=self.club,
+            club=self.other,
             start_date=today - datetime.timedelta(days=10),
             end_date=today + datetime.timedelta(days=10),
         )
 
-        with with_club(self.club):
+        with with_club(self.other):
             self.assertEqual(Season.get_current(), current)
 
     def test_requires_an_active_club(self):
@@ -1083,3 +1088,105 @@ class RootViewTests(TestCase):
         response = self.client.get("/", HTTP_HOST="ajax-united.rosterchief.app")
 
         self.assertRedirects(response, f"{reverse('account_login')}?next=/", fetch_redirect_response=False)
+
+
+class FeeServiceTests(TestCase):
+    """club.services.fees -- record_payment/mark_as_paid/remaining_balance, the
+    service layer behind the Memberships page's per-row payment actions."""
+
+    def setUp(self):
+        self.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        self.season = make_season(self.club)
+        self.member = Member.objects.create(first_name="Jane", last_name="Doe")
+        self.membership = ClubMembership.objects.create(
+            club=self.club, member=self.member, season=self.season, status=ClubMembership.StatusChoices.PENDING, fee_amount=Decimal("150.00")
+        )
+
+    def roles(self):
+        return ClubRole.objects.filter(club=self.club, member=self.member)
+
+    def test_remaining_balance_starts_at_the_full_fee(self):
+        self.assertEqual(remaining_balance(self.membership), Decimal("150.00"))
+
+    def test_remaining_balance_is_never_negative(self):
+        record_payment(self.membership, amount=Decimal("200.00"))
+
+        self.assertEqual(remaining_balance(self.membership), Decimal("0.00"))
+
+    def test_a_partial_payment_creates_a_record_and_updates_the_running_total(self):
+        payment = record_payment(self.membership, amount=Decimal("50.00"), method=FeePayment.Method.CASH, reference="R1", note="first installment")
+
+        self.assertEqual(payment.membership, self.membership)
+        self.assertEqual(payment.amount, Decimal("50.00"))
+        self.membership.refresh_from_db()
+        self.assertEqual(self.membership.amount_paid, Decimal("50.00"))
+        self.assertEqual(self.membership.fee_status, ClubMembership.FeeStatus.PARTIALLY_PAID)
+        # Not yet settled -- status doesn't change on a partial payment.
+        self.assertEqual(self.membership.status, ClubMembership.StatusChoices.PENDING)
+
+    def test_multiple_partial_payments_accumulate(self):
+        record_payment(self.membership, amount=Decimal("50.00"))
+        record_payment(self.membership, amount=Decimal("60.00"))
+
+        self.membership.refresh_from_db()
+        self.assertEqual(self.membership.amount_paid, Decimal("110.00"))
+        self.assertEqual(self.membership.fee_status, ClubMembership.FeeStatus.PARTIALLY_PAID)
+        self.assertEqual(FeePayment.objects.filter(membership=self.membership).count(), 2)
+
+    def test_reaching_the_full_amount_settles_and_activates(self):
+        record_payment(self.membership, amount=Decimal("100.00"))
+        record_payment(self.membership, amount=Decimal("50.00"))
+
+        self.membership.refresh_from_db()
+        self.assertEqual(self.membership.fee_status, ClubMembership.FeeStatus.PAID)
+        self.assertEqual(self.membership.status, ClubMembership.StatusChoices.ACTIVE)
+        self.assertEqual(self.membership.activated_at, timezone.localdate())
+        self.assertTrue(self.roles().filter(role=ClubRole.Roles.MEMBER).exists())
+
+    def test_settling_in_full_does_not_overwrite_an_earlier_activated_at(self):
+        earlier = datetime.date(2026, 1, 1)
+        self.membership.activated_at = earlier
+        self.membership.save()
+
+        record_payment(self.membership, amount=Decimal("150.00"))
+
+        self.membership.refresh_from_db()
+        self.assertEqual(self.membership.activated_at, earlier)
+
+    def test_a_waived_membership_is_untouched_by_a_payment(self):
+        self.membership.fee_status = ClubMembership.FeeStatus.WAIVED
+        self.membership.save()
+
+        record_payment(self.membership, amount=Decimal("50.00"))
+
+        self.membership.refresh_from_db()
+        self.assertEqual(self.membership.fee_status, ClubMembership.FeeStatus.WAIVED)
+
+    def test_mark_as_paid_records_the_exact_remaining_balance(self):
+        record_payment(self.membership, amount=Decimal("100.00"))
+
+        mark_as_paid(self.membership)
+
+        self.membership.refresh_from_db()
+        self.assertEqual(self.membership.fee_status, ClubMembership.FeeStatus.PAID)
+        payment = FeePayment.objects.get(membership=self.membership, amount=Decimal("50.00"))
+        self.assertEqual(payment.note, "Marked as paid")
+
+    def test_mark_as_paid_with_no_fee_amount_set_skips_creating_a_zero_payment(self):
+        # FeePayment.amount has a MinValueValidator(0.01) -- a $0 "payment" isn't a
+        # real transaction, so this must flip the flags directly instead.
+        unpriced = ClubMembership.objects.create(club=self.club, member=Member.objects.create(first_name="No", last_name="Price"), season=self.season, status=ClubMembership.StatusChoices.PENDING)
+
+        mark_as_paid(unpriced)
+
+        unpriced.refresh_from_db()
+        self.assertEqual(unpriced.fee_status, ClubMembership.FeeStatus.PAID)
+        self.assertEqual(unpriced.status, ClubMembership.StatusChoices.ACTIVE)
+        self.assertFalse(FeePayment.objects.filter(membership=unpriced).exists())
+
+    def test_recorded_by_is_stored_on_the_payment(self):
+        user = get_user_model().objects.create_user(email="admin-fees@example.com", password="pw-secret-123")
+
+        payment = record_payment(self.membership, amount=Decimal("50.00"), recorded_by=user)
+
+        self.assertEqual(payment.recorded_by, user)

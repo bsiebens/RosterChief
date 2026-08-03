@@ -73,6 +73,9 @@ INSTALLED_APPS = [
     "waffle",
     "features.apps.FeaturesConfig",
     "controlpanel.apps.ControlpanelConfig",
+    # Club-facing UI for team managers, coaches and admins -- not controlpanel (platform
+    # staff managing every club) and not the future parent/player app.
+    "management.apps.ManagementConfig",
 ]
 
 # Feature flags (django-waffle). The Flag model is swappable, like AUTH_USER_MODEL:
@@ -183,6 +186,9 @@ TEMPLATES = [
                 "django.contrib.messages.context_processors.messages",
                 "club.context_processors.branding",
                 "features.context_processors.maintenance",
+                "management.context_processors.is_admin",
+                "management.context_processors.management_link",
+                "management.context_processors.active_nav_section",
             ],
         },
     },

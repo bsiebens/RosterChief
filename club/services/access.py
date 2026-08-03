@@ -49,6 +49,18 @@ def is_club_admin(user: User, club: Club) -> bool:
     return has_club_role(user, club, ClubRole.Roles.ADMIN)
 
 
+def has_management_access(user: User, club: Club) -> bool:
+    """Anyone with real authority in the club: ADMIN/EDITOR, or *any* current-season
+    staff assignment (coach, team manager, physio, ...).
+
+    Deliberately excludes the plain MEMBER role -- every signed-up player (or club
+    member generally) holds that automatically the moment their ClubMembership goes
+    active (club/signals.py), so it says nothing about whether someone is staff.
+    """
+    elevated = ClubRole.objects.filter(member__user=user, club=club, role__in=(ClubRole.Roles.ADMIN, ClubRole.Roles.EDITOR)).exists()
+    return elevated or teams_staffed_by(user, club).exists()
+
+
 def is_coach_manager(user: User, club: Club) -> bool:
     """Derived from a current-season StaffAssignment in a *management* position."""
     return StaffAssignment.objects.filter(

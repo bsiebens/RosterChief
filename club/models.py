@@ -1,6 +1,8 @@
 import datetime
+from decimal import Decimal
 
-from django.core.validators import FileExtensionValidator, RegexValidator
+from django.conf import settings
+from django.core.validators import FileExtensionValidator, MinValueValidator, RegexValidator
 from django.db import models
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
@@ -182,6 +184,9 @@ class ClubMembership(ClubScopedModel):
     status = models.CharField(_("status"), max_length=250, choices=StatusChoices.choices, default=StatusChoices.PENDING)
     fee_status = models.CharField(_("fee status"), max_length=250, choices=FeeStatus.choices, default=FeeStatus.UNPAID)
 
+    fee_amount = models.DecimalField(_("fee amount"), max_digits=10, decimal_places=2, default=Decimal("0.00"), blank=True)
+    amount_paid = models.DecimalField(_("amount paid"), max_digits=10, decimal_places=2, default=Decimal("0.00"), blank=True, help_text=_("Kept in step with payments by the fee service; not hand-edited."))
+
     signed_up_at = models.DateField(_("signed up at"), blank=True, null=True)
     activated_at = models.DateField(_("activated at"), blank=True, null=True)
 
@@ -198,6 +203,35 @@ class ClubMembership(ClubScopedModel):
 
     def clean(self):
         validate_club_scope(self, self.club_id, same_club_fields=("season",))
+
+
+class FeePayment(UUIDModel):
+    """Money received against one membership's fee. Several may land on one
+    membership: a family paying in two installments must not read as unpaid, and
+    the part that did arrive has to be recorded somewhere. Not itself club-scoped
+    -- its club is reached through ``membership``, same as DuePayment/Due."""
+
+    class Method(models.TextChoices):
+        BANK_TRANSFER = "bank_transfer", _("bank transfer")
+        CASH = "cash", _("cash")
+        CARD = "card", _("card")
+        OTHER = "other", _("other")
+
+    membership = models.ForeignKey(ClubMembership, on_delete=models.CASCADE, related_name="payments", verbose_name=_("membership"))
+    amount = models.DecimalField(_("amount"), max_digits=10, decimal_places=2, validators=[MinValueValidator(Decimal("0.01"))])
+    method = models.CharField(_("method"), max_length=20, choices=Method.choices, default=Method.BANK_TRANSFER)
+    reference = models.CharField(_("reference"), max_length=255, blank=True, help_text=_("Bank reference, transaction id — whatever lets you find this again."))
+    paid_at = models.DateTimeField(_("paid at"), default=timezone.now)
+    note = models.TextField(_("note"), blank=True)
+    recorded_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="recorded_fee_payments", verbose_name=_("recorded by"))
+
+    class Meta:
+        verbose_name = _("fee payment")
+        verbose_name_plural = _("fee payments")
+        ordering = ["-paid_at"]
+
+    def __str__(self):
+        return f"{self.membership} — {self.amount}"
 
 
 class ClubRole(ClubScopedModel):
