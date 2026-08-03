@@ -158,7 +158,7 @@ def form_field(
             field_type = "checkbox"
         case "textarea" | "markdownx":
             field_type = "textarea"
-        case "clearablefile":
+        case "clearablefile" | "multiplefile":
             field_type = "file"
         case "selectmultiple":
             field_type = "select"

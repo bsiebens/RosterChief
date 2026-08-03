@@ -92,6 +92,7 @@
                         class="file-input w-full {% if size_modifier %}file-input-{{ size_modifier }}{% endif %}"
                         name="{{ field.html_name }}"
                         {% if field.field.widget.attrs.accept %}accept="{{ field.field.widget.attrs.accept }}"{% endif %}
+                        {% if field.field.widget.attrs.multiple %}multiple{% endif %}
                 />
 
                 {% if field.value %}
