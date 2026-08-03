@@ -61,7 +61,7 @@ class Product(ClubScopedModel):
     season = models.ForeignKey(Season, on_delete=models.PROTECT, related_name="products", verbose_name=_("season"), blank=True, null=True)
 
     is_active = models.BooleanField(_("is active?"), default=True)
-    is_public = models.BooleanField(_("is public?"), default=True, help_text="Non-public products are only visible to staff members for adding on to an order later on.")
+    is_public = models.BooleanField(_("is public?"), default=True, help_text=_("Non-public products are only visible to staff members for adding on to an order later on."))
     staff_role = models.ForeignKey(Position, on_delete=models.PROTECT, related_name="staff_products", verbose_name=_("staff role"), blank=True, null=True, limit_choices_to={"staff_position": True})
 
     early_bird_discount_enabled = models.BooleanField(_("early bird discount enabled?"), default=False)

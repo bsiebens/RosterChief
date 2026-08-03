@@ -15,6 +15,7 @@ from django.contrib.auth import get_user_model
 from django.db.models import Count, DateField, DecimalField, Exists, F, IntegerField, OuterRef, Q, Subquery, Sum, Value
 from django.db.models.functions import Coalesce, TruncMonth
 from django.utils import timezone
+from django.utils.translation import gettext_lazy as _
 from waffle import get_waffle_flag_model
 
 from authentication.middleware import ELEVATED_ROLES
@@ -149,10 +150,10 @@ def onboarding_funnel():
     total = len(clubs)
 
     return [
-        {"label": "Clubs", "count": total, "icon": "building-2"},
-        {"label": "With members", "count": sum(1 for club in clubs if club.member_count), "icon": "users"},
-        {"label": "With a team", "count": sum(1 for club in clubs if club.team_count), "icon": "trophy"},
-        {"label": "With events", "count": sum(1 for club in clubs if club.event_count), "icon": "calendar-days"},
+        {"label": _("Clubs"), "count": total, "icon": "building-2"},
+        {"label": _("With members"), "count": sum(1 for club in clubs if club.member_count), "icon": "users"},
+        {"label": _("With a team"), "count": sum(1 for club in clubs if club.team_count), "icon": "trophy"},
+        {"label": _("With events"), "count": sum(1 for club in clubs if club.event_count), "icon": "calendar-days"},
     ]
 
 
@@ -351,7 +352,7 @@ def fee_aging(club):
     owed = Order.objects.filter(club=club, status__in=OWED_STATUSES)
 
     buckets = []
-    for label, older_than, newer_than in (("0-30 days", 0, 30), ("30-60 days", 30, 60), ("60+ days", 60, None)):
+    for label, older_than, newer_than in ((_("0-30 days"), 0, 30), (_("30-60 days"), 30, 60), (_("60+ days"), 60, None)):
         rows = owed.filter(created__lte=now - timedelta(days=older_than))
         if newer_than is not None:
             rows = rows.filter(created__gt=now - timedelta(days=newer_than))
@@ -415,10 +416,10 @@ def club_charts(club):
         "fees": [
             {"label": label, "value": memberships.filter(fee_status=status).count()}
             for status, label in (
-                (ClubMembership.FeeStatus.PAID, "Paid"),
-                (ClubMembership.FeeStatus.PARTIALLY_PAID, "Partial"),
-                (ClubMembership.FeeStatus.UNPAID, "Unpaid"),
-                (ClubMembership.FeeStatus.WAIVED, "Waived"),
+                (ClubMembership.FeeStatus.PAID, _("Paid")),
+                (ClubMembership.FeeStatus.PARTIALLY_PAID, _("Partial")),
+                (ClubMembership.FeeStatus.UNPAID, _("Unpaid")),
+                (ClubMembership.FeeStatus.WAIVED, _("Waived")),
             )
         ],
     }
@@ -435,40 +436,40 @@ def club_statistics(club):
 
     return [
         {
-            "title": "Members",
+            "title": _("Members"),
             "icon": "users",
             "stats": [
-                ("Members", memberships.values("member").distinct().count()),
-                ("Active this season", memberships.filter(season=season, status=ClubMembership.StatusChoices.ACTIVE).count() if season else 0),
-                ("Pending", memberships.filter(status=ClubMembership.StatusChoices.PENDING).count()),
-                ("Lapsed", memberships.filter(status=ClubMembership.StatusChoices.LAPSED).count()),
+                (_("Members"), memberships.values("member").distinct().count()),
+                (_("Active this season"), memberships.filter(season=season, status=ClubMembership.StatusChoices.ACTIVE).count() if season else 0),
+                (_("Pending"), memberships.filter(status=ClubMembership.StatusChoices.PENDING).count()),
+                (_("Lapsed"), memberships.filter(status=ClubMembership.StatusChoices.LAPSED).count()),
             ],
         },
         {
-            "title": "Teams & staff",
+            "title": _("Teams & staff"),
             "icon": "shield",
             "stats": [
-                ("Teams", Team.objects.filter(club=club).count()),
-                ("Players this season", TeamMembership.objects.filter(team__club=club, season=season).count() if season else 0),
-                ("Staff this season", StaffAssignment.objects.filter(team__club=club, season=season).count() if season else 0),
+                (_("Teams"), Team.objects.filter(club=club).count()),
+                (_("Players this season"), TeamMembership.objects.filter(team__club=club, season=season).count() if season else 0),
+                (_("Staff this season"), StaffAssignment.objects.filter(team__club=club, season=season).count() if season else 0),
             ],
         },
         {
-            "title": "Events",
+            "title": _("Events"),
             "icon": "calendar-days",
             "stats": [
-                ("Upcoming", events.filter(start__gte=now).count()),
-                ("This season", events.filter(season=season).count() if season else 0),
+                (_("Upcoming"), events.filter(start__gte=now).count()),
+                (_("This season"), events.filter(season=season).count() if season else 0),
             ],
         },
         {
-            "title": "Shop",
+            "title": _("Shop"),
             "icon": "shopping-cart",
             "stats": [
-                ("Orders", orders.count()),
-                ("Revenue", _money(orders.filter(status__in=PAID_STATUSES))),
-                ("Outstanding", _money(orders.filter(status__in=OWED_STATUSES))),
-                ("Open carts", Cart.objects.filter(club=club, status=Cart.CartStatus.OPEN).count()),
+                (_("Orders"), orders.count()),
+                (_("Revenue"), _money(orders.filter(status__in=PAID_STATUSES))),
+                (_("Outstanding"), _money(orders.filter(status__in=OWED_STATUSES))),
+                (_("Open carts"), Cart.objects.filter(club=club, status=Cart.CartStatus.OPEN).count()),
             ],
         },
     ]

@@ -1,4 +1,4 @@
-{% load lucide %}
+{% load i18n lucide %}
 
 {% comment %}
     A daisyUI native <dialog> modal wrapping a Django form that posts straight to
@@ -7,6 +7,7 @@
     tag (linked via the `form` attribute) so it can share the `modal-action` row with the
     dialog-closing Cancel button without nesting one <form> inside another.
 {% endcomment %}
+{% trans "Save" as default_submit_label %}
 <dialog id="{{ modal_id }}" class="modal">
     <div class="modal-box">
         <h3 class="text-lg font-bold">{{ title }}</h3>
@@ -17,9 +18,9 @@
         </form>
         <div class="modal-action">
             <form method="dialog">
-                <button class="btn btn-outline gap-2">{% lucide "x" size=16 %} Cancel</button>
+                <button class="btn btn-outline btn-neutral gap-2">{% lucide "x" size=16 %} {% trans "Cancel" %}</button>
             </form>
-            <button class="btn btn-primary gap-2" type="submit" form="{{ modal_id }}-form">{% lucide submit_icon|default:"check" size=16 %} {{ submit_label|default:"Save" }}</button>
+            <button class="btn btn-primary gap-2" type="submit" form="{{ modal_id }}-form">{% lucide submit_icon|default:"check" size=16 %} {{ submit_label|default:default_submit_label }}</button>
         </div>
     </div>
     <form method="dialog" class="modal-backdrop">
