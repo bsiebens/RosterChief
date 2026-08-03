@@ -18,13 +18,19 @@
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {% form_field form.name %}
                     {% form_field form.slug %}
+                </div>
 
+                <div class="divider"></div>
+
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                     {% form_field form.logo %}
-
-                    <div></div>
-
                     {% form_field form.primary_color %}
                     {% form_field form.secondary_color %}
+                </div>
+
+                <div class="divider"></div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {% form_field form.season_start %}
                     {% form_field form.season_duration_months %}
                 </div>
