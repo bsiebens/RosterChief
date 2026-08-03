@@ -713,6 +713,19 @@ class TeamUpdateView(ClubAdminRequiredMixin, UpdateView):
         return super().get_context_data(update_view=True, **kwargs)
 
 
+class TeamDeleteView(ClubAdminRequiredMixin, View):
+    def post(self, request, pk):
+        team = get_object_or_404(Team.objects.filter(club=request.club), pk=pk)
+        name = str(team)
+        # TeamMembership/StaffAssignment cascade away with the team -- no ProtectedError
+        # to catch, unlike a Member (which orders/invoices can still reference).
+        team.delete()
+
+        body = _("“%(team)s” has been deleted.") % {"team": name}
+        notify(request, f"w|{_('Team deleted')}|{body}")
+        return redirect("management:team_list")
+
+
 class TeamDetailView(ClubStaffRequiredMixin, DetailView):
     template_name = "management/team_detail.html"
     context_object_name = "team"

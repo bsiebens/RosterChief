@@ -46,6 +46,7 @@ _NAV_SECTIONS = {
     "team_list": "team_list",
     "team_create": "team_list",
     "team_update": "team_list",
+    "team_delete": "team_list",
     "team_detail": "team_list",
     "roster_list": "roster_list",
     "staff_list": "staff_list",

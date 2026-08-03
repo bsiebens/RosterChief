@@ -40,6 +40,7 @@ urlpatterns = [
     path("teams/new/", views.TeamCreateView.as_view(), name="team_create"),
     path("teams/<uuid:pk>/", views.TeamDetailView.as_view(), name="team_detail"),
     path("teams/<uuid:pk>/edit/", views.TeamUpdateView.as_view(), name="team_update"),
+    path("teams/<uuid:pk>/delete/", views.TeamDeleteView.as_view(), name="team_delete"),
     path("roster/", views.RosterListView.as_view(), name="roster_list"),
     path("staff/", views.StaffListView.as_view(), name="staff_list"),
     # News

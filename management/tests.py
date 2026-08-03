@@ -256,6 +256,37 @@ class TeamManagementTests(ManagementTestBase):
         team = Team.objects.get(club=self.club, name="U15")
         self.assertRedirects(response, reverse("management:team_detail", args=[team.pk]))
 
+    def test_deleting_a_team(self):
+        team = Team.objects.create(club=self.club, name="U16", short_name="U16")
+
+        response = self.club_post("team_delete", {}, team.pk)
+
+        self.assertRedirects(response, reverse("management:team_list"))
+        self.assertFalse(Team.objects.filter(pk=team.pk).exists())
+
+    def test_deleting_a_team_cascades_its_roster_and_staff(self):
+        team = Team.objects.create(club=self.club, name="U17", short_name="U17")
+        position = Position.objects.create(club=self.club, name="Coach17", short_name="C17", staff_position=True)
+        member = Member.objects.create(first_name="Sam", last_name="Staffer")
+        StaffAssignment.objects.create(team=team, member=member, season=self.season, position=position)
+
+        self.club_post("team_delete", {}, team.pk)
+
+        self.assertFalse(StaffAssignment.objects.filter(team=team).exists())
+
+    def test_a_non_admin_cannot_delete_a_team(self):
+        team = Team.objects.create(club=self.club, name="U18", short_name="U18")
+        coach_user = User.objects.create_user(email="coach-team-delete@example.com", password="pw-secret-123")
+        coach_member = Member.objects.create(user=coach_user, first_name="Cara", last_name="Coach")
+        position = Position.objects.create(club=self.club, name="CoachTeamDelete", short_name="CTD", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=team, member=coach_member, season=self.season, position=position)
+        self.client.force_login(coach_user)
+
+        response = self.club_post("team_delete", {}, team.pk)
+
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(Team.objects.filter(pk=team.pk).exists())
+
 
 class PositionManagementTests(ManagementTestBase):
     def setUp(self):
