@@ -9,7 +9,7 @@ from allauth.mfa.models import Authenticator
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
-from django.urls import reverse
+from django.urls import NoReverseMatch, reverse
 from django.utils import timezone
 
 from club.models import Club, ClubMembership, ClubRole, FeePayment, Season
@@ -286,6 +286,155 @@ class TeamManagementTests(ManagementTestBase):
 
         self.assertEqual(response.status_code, 403)
         self.assertTrue(Team.objects.filter(pk=team.pk).exists())
+
+
+class TeamRosterStaffTests(ManagementTestBase):
+    """Roster/staff management folded into the team page -- see
+    management.views.TeamDetailView and the TeamRoster*/TeamStaff* views."""
+
+    def setUp(self):
+        super().setUp()
+        self.team = Team.objects.create(club=self.club, name="First Team", short_name="1st")
+        self.other_team = Team.objects.create(club=self.club, name="Second Team", short_name="2nd")
+        self.player_position = Position.objects.create(club=self.club, name="Forward", short_name="FW", staff_position=False)
+        self.coach_position = Position.objects.create(club=self.club, name="Head Coach", short_name="HC", staff_position=True, management_position=True)
+
+        self.player = Member.objects.create(first_name="Peter", last_name="Player")
+        ClubMembership.objects.create(club=self.club, member=self.player, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+
+    def make_team_coach(self, team, email="coach-roster@example.com"):
+        coach_user = User.objects.create_user(email=email, password="pw-secret-123")
+        coach_member = Member.objects.create(user=coach_user, first_name="Cara", last_name="Coach")
+        StaffAssignment.objects.create(team=team, member=coach_member, season=self.season, position=self.coach_position)
+        return coach_user
+
+    def test_nav_no_longer_lists_roster_or_staff(self):
+        # Not a bare "Roster"/"Staff" substring check -- "RosterChief" branding is
+        # on every page regardless. The nav's old icons are a safe, specific proxy.
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("team_list")
+
+        self.assertNotContains(response, "clipboard-list")
+        self.assertNotContains(response, "hard-hat")
+
+    def test_roster_and_staff_urls_no_longer_resolve(self):
+        with self.assertRaises(NoReverseMatch):
+            reverse("management:roster_list")
+        with self.assertRaises(NoReverseMatch):
+            reverse("management:staff_list")
+
+    def test_season_switcher_defaults_to_the_current_season(self):
+        self.client.force_login(self.admin_user)
+        TeamMembership.objects.create(team=self.team, season=self.season, member=self.player, position=self.player_position)
+
+        response = self.club_get("team_detail", self.team.pk)
+
+        self.assertContains(response, "Peter Player")
+
+    def test_season_switcher_honours_the_query_param(self):
+        other_season = Season.objects.create(club=self.club, start_date=datetime.date(2020, 1, 1), end_date=datetime.date(2020, 12, 31))
+        TeamMembership.objects.create(team=self.team, season=other_season, member=self.player, position=self.player_position)
+        self.client.force_login(self.admin_user)
+
+        default_response = self.club_get("team_detail", self.team.pk)
+        other_response = self.client.get(f"{reverse('management:team_detail', args=[self.team.pk])}?season={other_season.pk}", HTTP_HOST="ajax-united.rosterchief.app")
+
+        # Not assertNotContains("Peter Player") on the default response -- he's
+        # still a valid pick in the "Add player" combobox even when he isn't on
+        # *this* season's roster, so his name legitimately appears there too.
+        self.assertContains(default_response, "No one on the roster for this season yet.")
+        self.assertContains(other_response, "Peter Player")
+
+    def test_a_teams_own_coach_can_add_a_player(self):
+        self.client.force_login(self.make_team_coach(self.team))
+
+        response = self.club_post("team_roster_add", {"member": str(self.player.pk), "position": str(self.player_position.pk), "jersey_number": "9"}, self.team.pk, self.season.pk)
+
+        self.assertRedirects(response, f"{reverse('management:team_detail', args=[self.team.pk])}?season={self.season.pk}")
+        membership = TeamMembership.objects.get(team=self.team, season=self.season, member=self.player)
+        self.assertEqual(membership.jersey_number, 9)
+
+    def test_a_different_teams_coach_cannot_add_a_player(self):
+        self.client.force_login(self.make_team_coach(self.other_team))
+
+        response = self.club_post("team_roster_add", {"member": str(self.player.pk), "position": str(self.player_position.pk)}, self.team.pk, self.season.pk)
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(TeamMembership.objects.filter(team=self.team, season=self.season).exists())
+
+    def test_a_different_teams_coach_can_still_view_the_team(self):
+        self.client.force_login(self.make_team_coach(self.other_team))
+
+        response = self.club_get("team_detail", self.team.pk)
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_admin_can_add_a_player_to_any_team(self):
+        self.client.force_login(self.admin_user)
+
+        self.club_post("team_roster_add", {"member": str(self.player.pk), "position": str(self.player_position.pk)}, self.team.pk, self.season.pk)
+
+        self.assertTrue(TeamMembership.objects.filter(team=self.team, season=self.season, member=self.player).exists())
+
+    def test_adding_the_same_member_twice_fails_with_a_form_error_not_a_500(self):
+        self.client.force_login(self.admin_user)
+        TeamMembership.objects.create(team=self.team, season=self.season, member=self.player, position=self.player_position)
+
+        response = self.club_post("team_roster_add", {"member": str(self.player.pk), "position": str(self.player_position.pk)}, self.team.pk, self.season.pk)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(TeamMembership.objects.filter(team=self.team, season=self.season).count(), 1)
+
+    def test_editing_a_roster_entry_updates_it(self):
+        membership = TeamMembership.objects.create(team=self.team, season=self.season, member=self.player, position=self.player_position, jersey_number=9)
+        self.client.force_login(self.admin_user)
+
+        self.club_post(
+            "team_roster_update",
+            {"member": str(self.player.pk), "position": str(self.player_position.pk), "jersey_number": "10", "is_captain": "on"},
+            self.team.pk,
+            membership.pk,
+        )
+
+        membership.refresh_from_db()
+        self.assertEqual(membership.jersey_number, 10)
+        self.assertTrue(membership.is_captain)
+
+    def test_removing_a_roster_entry_deletes_it(self):
+        membership = TeamMembership.objects.create(team=self.team, season=self.season, member=self.player, position=self.player_position)
+        self.client.force_login(self.admin_user)
+
+        self.club_post("team_roster_remove", {}, self.team.pk, membership.pk)
+
+        self.assertFalse(TeamMembership.objects.filter(pk=membership.pk).exists())
+
+    def test_a_teams_own_coach_can_assign_staff(self):
+        physio_position = Position.objects.create(club=self.club, name="Physio", short_name="PH", staff_position=True)
+        physio = Member.objects.create(first_name="Pat", last_name="Physio")
+        ClubMembership.objects.create(club=self.club, member=physio, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        self.client.force_login(self.make_team_coach(self.team))
+
+        self.club_post("team_staff_add", {"member": str(physio.pk), "position": str(physio_position.pk)}, self.team.pk, self.season.pk)
+
+        self.assertTrue(StaffAssignment.objects.filter(team=self.team, season=self.season, member=physio).exists())
+
+    def test_a_different_teams_coach_cannot_assign_staff(self):
+        physio_position = Position.objects.create(club=self.club, name="Physio", short_name="PH", staff_position=True)
+        physio = Member.objects.create(first_name="Pat", last_name="Physio")
+        self.client.force_login(self.make_team_coach(self.other_team))
+
+        response = self.club_post("team_staff_add", {"member": str(physio.pk), "position": str(physio_position.pk)}, self.team.pk, self.season.pk)
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_removing_a_staff_assignment_deletes_it(self):
+        assignment = StaffAssignment.objects.create(team=self.team, season=self.season, member=self.player, position=self.coach_position)
+        self.client.force_login(self.admin_user)
+
+        self.club_post("team_staff_remove", {}, self.team.pk, assignment.pk)
+
+        self.assertFalse(StaffAssignment.objects.filter(pk=assignment.pk).exists())
 
 
 class PositionManagementTests(ManagementTestBase):

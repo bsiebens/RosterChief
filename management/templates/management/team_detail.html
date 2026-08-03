@@ -1,5 +1,5 @@
 {% extends "management/base.html" %}
-{% load i18n lucide %}
+{% load i18n lucide static ui %}
 
 {% block heading %}{{ team.name }}{% endblock heading %}
 {% block subheading %}{{ team.short_name }}{% endblock subheading %}
@@ -11,9 +11,150 @@
 {% endblock actions %}
 
 {% block panel %}
-    <div class="card bg-base-100 shadow">
-        <div class="card-body">
-            <p class="opacity-70">{% trans "Roster and staff assignments for this team are managed from the Roster and Staff sections." %}</p>
+    <form method="get" class="mb-4">
+        <div class="flex flex-row items-center gap-2">
+            <select name="season" class="select select-bordered">
+                {% for season in seasons %}
+                    <option value="{{ season.pk }}" {% if season.pk == selected_season.pk %}selected{% endif %}>{% trans "Season" %} {{ season.start_date|date:"Y" }} - {{ season.end_date|date:"Y" }}</option>
+                {% endfor %}
+            </select>
+            <button class="btn btn-outline btn-neutral gap-2" type="submit">{% lucide "filter" size=16 %} {% trans "View" %}</button>
         </div>
-    </div>
+    </form>
+
+    {% if not selected_season %}
+        <div class="alert alert-warning mb-6">
+            {% lucide "calendar-x" size=20 %}
+            <span>{% trans "This club has no seasons yet, so there's no roster or staff to show." %}</span>
+        </div>
+    {% else %}
+        <div class="card bg-base-100 shadow">
+            <div class="card-body">
+                <div class="flex items-center justify-between">
+                    <h2 class="card-title text-base">{% trans "Roster" %}</h2>
+                    {% if can_manage %}
+                        <button class="btn btn-outline btn-neutral btn-sm gap-2" type="button" onclick="document.getElementById('add_player_modal').showModal()">{% lucide "user-plus" size=14 %} {% trans "Add player" %}</button>
+                    {% endif %}
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>{% trans "Member" %}</th>
+                                <th>{% trans "Position" %}</th>
+                                <th>{% trans "Jersey #" %}</th>
+                                <th></th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for membership in roster %}
+                                <tr>
+                                    <td>{{ membership.member }}</td>
+                                    <td>{{ membership.position }}</td>
+                                    <td>{{ membership.jersey_number|default:"—" }}</td>
+                                    <td>
+                                        {% if membership.is_captain %}<span class="badge badge-neutral badge-sm">{% trans "Captain" %}</span>{% endif %}
+                                        {% if membership.is_alternate_captain %}<span class="badge badge-neutral badge-sm">{% trans "Alternate captain" %}</span>{% endif %}
+                                    </td>
+                                    <td class="text-right">
+                                        {% if can_manage %}
+                                            <div class="flex justify-end gap-1">
+                                                <button class="btn btn-sm btn-outline btn-neutral" type="button" onclick="document.getElementById('{{ membership.pk|dom_id:"edit_player_modal" }}').showModal()" aria-label="{% trans 'Edit' %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</button>
+                                                <button class="btn btn-sm btn-outline btn-error" type="button" onclick="document.getElementById('{{ membership.pk|dom_id:"remove_player_modal" }}').showModal()" aria-label="{% trans 'Remove' %}">{% lucide "user-minus" size=14 %} {% trans "Remove" %}</button>
+                                            </div>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                            {% empty %}
+                                <tr>
+                                    <td colspan="5" class="text-center opacity-60">{% trans "No one on the roster for this season yet." %}</td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div class="card bg-base-100 shadow mt-4">
+            <div class="card-body">
+                <div class="flex items-center justify-between">
+                    <h2 class="card-title text-base">{% trans "Staff" %}</h2>
+                    {% if can_manage %}
+                        <button class="btn btn-outline btn-neutral btn-sm gap-2" type="button" onclick="document.getElementById('add_staff_modal').showModal()">{% lucide "user-plus" size=14 %} {% trans "Assign staff" %}</button>
+                    {% endif %}
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>{% trans "Member" %}</th>
+                                <th>{% trans "Position" %}</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for assignment in staff %}
+                                <tr>
+                                    <td>{{ assignment.member }}</td>
+                                    <td>{{ assignment.position }}</td>
+                                    <td class="text-right">
+                                        {% if can_manage %}
+                                            <div class="flex justify-end gap-1">
+                                                <button class="btn btn-sm btn-outline btn-neutral" type="button" onclick="document.getElementById('{{ assignment.pk|dom_id:"edit_staff_modal" }}').showModal()" aria-label="{% trans 'Edit' %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</button>
+                                                <button class="btn btn-sm btn-outline btn-error" type="button" onclick="document.getElementById('{{ assignment.pk|dom_id:"remove_staff_modal" }}').showModal()" aria-label="{% trans 'Remove' %}">{% lucide "user-minus" size=14 %} {% trans "Remove" %}</button>
+                                            </div>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                            {% empty %}
+                                <tr>
+                                    <td colspan="3" class="text-center opacity-60">{% trans "No staff assigned for this season yet." %}</td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        {% if can_manage %}
+            {% trans "Add player" as add_player_label %}
+            {% url 'management:team_roster_add' team.pk selected_season.pk as add_player_url %}
+            {% include "controlpanel/_modal_form.html" with modal_id="add_player_modal" title=add_player_label form=roster_form action_url=add_player_url submit_label=add_player_label submit_icon="user-plus" %}
+
+            {% trans "Assign staff" as add_staff_label %}
+            {% url 'management:team_staff_add' team.pk selected_season.pk as add_staff_url %}
+            {% include "controlpanel/_modal_form.html" with modal_id="add_staff_modal" title=add_staff_label form=staff_form action_url=add_staff_url submit_label=add_staff_label submit_icon="user-plus" %}
+
+            {% trans "Edit player" as edit_player_label %}
+            {% trans "Save" as save_label %}
+            {% for membership in roster %}
+                {% url 'management:team_roster_update' team.pk membership.pk as edit_player_url %}
+                {% include "controlpanel/_modal_form.html" with modal_id=membership.pk|dom_id:"edit_player_modal" title=edit_player_label form=membership.edit_form action_url=edit_player_url submit_label=save_label submit_icon="save" %}
+
+                {% blocktrans asvar remove_player_body with member=membership.member %}Remove {{ member }} from the roster?{% endblocktrans %}
+                {% trans "Remove player" as remove_player_title %}
+                {% trans "Remove" as remove_label %}
+                {% url 'management:team_roster_remove' team.pk membership.pk as remove_player_url %}
+                {% include "controlpanel/_confirm_modal.html" with modal_id=membership.pk|dom_id:"remove_player_modal" title=remove_player_title body=remove_player_body action_url=remove_player_url submit_label=remove_label submit_icon="user-minus" %}
+            {% endfor %}
+
+            {% trans "Edit staff assignment" as edit_staff_label %}
+            {% for assignment in staff %}
+                {% url 'management:team_staff_update' team.pk assignment.pk as edit_staff_url %}
+                {% include "controlpanel/_modal_form.html" with modal_id=assignment.pk|dom_id:"edit_staff_modal" title=edit_staff_label form=assignment.edit_form action_url=edit_staff_url submit_label=save_label submit_icon="save" %}
+
+                {% blocktrans asvar remove_staff_body with member=assignment.member %}Remove {{ member }} from staff?{% endblocktrans %}
+                {% trans "Remove staff" as remove_staff_title %}
+                {% url 'management:team_staff_remove' team.pk assignment.pk as remove_staff_url %}
+                {% include "controlpanel/_confirm_modal.html" with modal_id=assignment.pk|dom_id:"remove_staff_modal" title=remove_staff_title body=remove_staff_body action_url=remove_staff_url submit_label=remove_label submit_icon="user-minus" %}
+            {% endfor %}
+        {% endif %}
+    {% endif %}
 {% endblock panel %}
+
+{% block extra_body %}
+    <script src="{% static 'js/searchable-select.js' %}"></script>
+{% endblock extra_body %}

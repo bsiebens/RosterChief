@@ -9,9 +9,9 @@ from django.utils.translation import gettext_lazy as _
 from django.utils.translation import ngettext
 from django.views.generic import CreateView, DetailView, FormView, ListView, TemplateView, UpdateView, View
 
-from club.mixins import ClubAdminRequiredMixin, ClubStaffRequiredMixin, NewsAuthorRequiredMixin, NewsEditRequiredMixin, NewsPublisherRequiredMixin
+from club.mixins import ClubAdminRequiredMixin, ClubStaffRequiredMixin, NewsAuthorRequiredMixin, NewsEditRequiredMixin, NewsPublisherRequiredMixin, TeamManagerRequiredMixin
 from club.models import ClubMembership, ClubRole, Season
-from club.services.access import can_edit_news, can_publish_news, current_season, members_visible_to
+from club.services.access import can_edit_news, can_publish_news, current_season, is_club_admin, members_visible_to, teams_managed_by
 from club.services.fees import mark_as_paid, record_payment, remaining_balance
 from controlpanel.messages import notify
 from controlpanel.mixins import RedirectOnInvalidMixin
@@ -41,7 +41,9 @@ from .forms import (
     NewsPublishForm,
     PositionForm,
     RecordFeePaymentForm,
+    StaffAssignmentForm,
     TeamForm,
+    TeamMembershipForm,
 )
 from .pdf import PDFExportError, membership_list_pdf
 
@@ -154,6 +156,18 @@ class MemberListView(ClubStaffRequiredMixin, ListView):
         return context | {"members": members}
 
 
+def selected_season_from_request(request, club):
+    """Which season a page showing season-scoped data should use: ``?season=<pk>``
+    if given (and it's actually one of this club's own seasons), else whichever
+    season covers today. Shared by every page with a season switcher."""
+    season_id = request.GET.get("season")
+    if season_id:
+        season = Season.objects.filter(club=club, pk=season_id).first()
+        if season is not None:
+            return season
+    return current_season(club)
+
+
 class MembershipListView(ClubAdminRequiredMixin, ListView):
     """Who's paid for the current season, and who hasn't -- MemberListView's Status
     column can only show this one row at a time. Financial data, so admin-only
@@ -163,12 +177,7 @@ class MembershipListView(ClubAdminRequiredMixin, ListView):
     context_object_name = "memberships"
 
     def get_selected_season(self):
-        season_id = self.request.GET.get("season")
-        if season_id:
-            season = Season.objects.filter(club=self.request.club, pk=season_id).first()
-            if season is not None:
-                return season
-        return current_season(self.request.club)
+        return selected_season_from_request(self.request, self.request.club)
 
     def get_queryset(self):
         season = self.get_selected_season()
@@ -727,11 +736,196 @@ class TeamDeleteView(ClubAdminRequiredMixin, View):
 
 
 class TeamDetailView(ClubStaffRequiredMixin, DetailView):
+    """Team, roster and staff for one season, all in one place -- viewing is open
+    to any staff (visibility, not authority); managing the roster/staff of *this*
+    team is gated by can_manage (TeamManagerRequiredMixin's own rule, computed
+    here too since the template needs it to show/hide the add/edit/remove UI)."""
+
     template_name = "management/team_detail.html"
     context_object_name = "team"
 
     def get_queryset(self):
         return Team.objects.filter(club=self.request.club)
+
+    def get_context_data(self, **kwargs):
+        club = self.request.club
+        team = self.object
+        season = selected_season_from_request(self.request, club)
+        can_manage = is_club_admin(self.request.user, club) or teams_managed_by(self.request.user, club).filter(pk=team.pk).exists()
+
+        roster = TeamMembership.objects.none()
+        staff = StaffAssignment.objects.none()
+        if season is not None:
+            roster = list(TeamMembership.objects.filter(team=team, season=season).select_related("member", "position").order_by("position__ordering", "member__last_name"))
+            staff = list(StaffAssignment.objects.filter(team=team, season=season).select_related("member", "position").order_by("position__ordering", "member__last_name"))
+            if can_manage:
+                for membership in roster:
+                    membership.edit_form = TeamMembershipForm(instance=membership, club=club, team=team, season=season)
+                for assignment in staff:
+                    assignment.edit_form = StaffAssignmentForm(instance=assignment, club=club, team=team, season=season)
+
+        return super().get_context_data(
+            seasons=Season.objects.filter(club=club).order_by("-start_date"),
+            selected_season=season,
+            roster=roster,
+            staff=staff,
+            can_manage=can_manage,
+            roster_form=TeamMembershipForm(club=club, team=team, season=season) if can_manage and season else None,
+            staff_form=StaffAssignmentForm(club=club, team=team, season=season) if can_manage and season else None,
+            **kwargs,
+        )
+
+
+class TeamRosterAddView(TeamManagerRequiredMixin, FormView):
+    """Reachable only via the "Add player" modal on the team page. Not
+    RedirectOnInvalidMixin: that can't carry ?season= through a plain
+    redirect(view_name, **kwargs), and losing the season on a failed add would
+    land the admin back looking at a different one than they were editing."""
+
+    form_class = TeamMembershipForm
+    http_method_names = ["post"]
+
+    def get_team(self):
+        return get_object_or_404(Team.objects.filter(club=self.request.club), pk=self.kwargs["pk"])
+
+    def get_season(self):
+        return get_object_or_404(Season.objects.filter(club=self.request.club), pk=self.kwargs["season_pk"])
+
+    def get_form_kwargs(self):
+        # instance carries team/season *before* validation runs -- TeamMembership.clean()
+        # (validate_club_scope) needs self.team_id set to check season/position are the
+        # same club's, and form_valid() runs only after that validation already passed.
+        return super().get_form_kwargs() | {"club": self.request.club, "team": self.get_team(), "season": self.get_season(), "instance": TeamMembership(team=self.get_team(), season=self.get_season())}
+
+    def team_detail_url(self):
+        return f"{reverse('management:team_detail', args=[self.kwargs['pk']])}?season={self.kwargs['season_pk']}"
+
+    def form_invalid(self, form):
+        for error in form.errors.values():
+            notify(self.request, f"e|{_('Could not add player')}|{' '.join(error)}")
+        return redirect(self.team_detail_url())
+
+    def form_valid(self, form):
+        form.save()
+        body = _("“%(member)s” added to the roster.") % {"member": form.instance.member}
+        notify(self.request, f"s|{_('Player added')}|{body}")
+        return redirect(self.team_detail_url())
+
+
+class TeamRosterUpdateView(TeamManagerRequiredMixin, FormView):
+    form_class = TeamMembershipForm
+    http_method_names = ["post"]
+
+    def get_object(self):
+        return get_object_or_404(TeamMembership.objects.filter(team__club=self.request.club, team__pk=self.kwargs["pk"]), pk=self.kwargs["membership_pk"])
+
+    def get_team(self):
+        return self.get_object().team
+
+    def get_form_kwargs(self):
+        membership = self.get_object()
+        return super().get_form_kwargs() | {"instance": membership, "club": self.request.club, "team": membership.team, "season": membership.season}
+
+    def team_detail_url(self):
+        return f"{reverse('management:team_detail', args=[self.kwargs['pk']])}?season={self.get_object().season_id}"
+
+    def form_invalid(self, form):
+        for error in form.errors.values():
+            notify(self.request, f"e|{_('Could not update player')}|{' '.join(error)}")
+        return redirect(self.team_detail_url())
+
+    def form_valid(self, form):
+        form.save()
+        body = _("“%(member)s” updated.") % {"member": form.instance.member}
+        notify(self.request, f"s|{_('Player updated')}|{body}")
+        return redirect(self.team_detail_url())
+
+
+class TeamRosterRemoveView(TeamManagerRequiredMixin, View):
+    def get_team(self):
+        return get_object_or_404(Team.objects.filter(club=self.request.club), pk=self.kwargs["pk"])
+
+    def post(self, request, pk, membership_pk):
+        membership = get_object_or_404(TeamMembership.objects.filter(team__club=request.club, team__pk=pk), pk=membership_pk)
+        season_id, member = membership.season_id, membership.member
+        membership.delete()
+
+        body = _("“%(member)s” removed from the roster.") % {"member": member}
+        notify(request, f"w|{_('Player removed')}|{body}")
+        return redirect(f"{reverse('management:team_detail', args=[pk])}?season={season_id}")
+
+
+class TeamStaffAddView(TeamManagerRequiredMixin, FormView):
+    form_class = StaffAssignmentForm
+    http_method_names = ["post"]
+
+    def get_team(self):
+        return get_object_or_404(Team.objects.filter(club=self.request.club), pk=self.kwargs["pk"])
+
+    def get_season(self):
+        return get_object_or_404(Season.objects.filter(club=self.request.club), pk=self.kwargs["season_pk"])
+
+    def get_form_kwargs(self):
+        # See TeamRosterAddView -- StaffAssignment.clean() needs team_id set before
+        # validation runs, not after (form_valid() only runs once already valid).
+        return super().get_form_kwargs() | {"club": self.request.club, "team": self.get_team(), "season": self.get_season(), "instance": StaffAssignment(team=self.get_team(), season=self.get_season())}
+
+    def team_detail_url(self):
+        return f"{reverse('management:team_detail', args=[self.kwargs['pk']])}?season={self.kwargs['season_pk']}"
+
+    def form_invalid(self, form):
+        for error in form.errors.values():
+            notify(self.request, f"e|{_('Could not assign staff')}|{' '.join(error)}")
+        return redirect(self.team_detail_url())
+
+    def form_valid(self, form):
+        form.save()
+        body = _("“%(member)s” assigned as staff.") % {"member": form.instance.member}
+        notify(self.request, f"s|{_('Staff assigned')}|{body}")
+        return redirect(self.team_detail_url())
+
+
+class TeamStaffUpdateView(TeamManagerRequiredMixin, FormView):
+    form_class = StaffAssignmentForm
+    http_method_names = ["post"]
+
+    def get_object(self):
+        return get_object_or_404(StaffAssignment.objects.filter(team__club=self.request.club, team__pk=self.kwargs["pk"]), pk=self.kwargs["assignment_pk"])
+
+    def get_team(self):
+        return self.get_object().team
+
+    def get_form_kwargs(self):
+        assignment = self.get_object()
+        return super().get_form_kwargs() | {"instance": assignment, "club": self.request.club, "team": assignment.team, "season": assignment.season}
+
+    def team_detail_url(self):
+        return f"{reverse('management:team_detail', args=[self.kwargs['pk']])}?season={self.get_object().season_id}"
+
+    def form_invalid(self, form):
+        for error in form.errors.values():
+            notify(self.request, f"e|{_('Could not update staff assignment')}|{' '.join(error)}")
+        return redirect(self.team_detail_url())
+
+    def form_valid(self, form):
+        form.save()
+        body = _("“%(member)s” updated.") % {"member": form.instance.member}
+        notify(self.request, f"s|{_('Staff assignment updated')}|{body}")
+        return redirect(self.team_detail_url())
+
+
+class TeamStaffRemoveView(TeamManagerRequiredMixin, View):
+    def get_team(self):
+        return get_object_or_404(Team.objects.filter(club=self.request.club), pk=self.kwargs["pk"])
+
+    def post(self, request, pk, assignment_pk):
+        assignment = get_object_or_404(StaffAssignment.objects.filter(team__club=request.club, team__pk=pk), pk=assignment_pk)
+        season_id, member = assignment.season_id, assignment.member
+        assignment.delete()
+
+        body = _("“%(member)s” removed from staff.") % {"member": member}
+        notify(request, f"w|{_('Staff removed')}|{body}")
+        return redirect(f"{reverse('management:team_detail', args=[pk])}?season={season_id}")
 
 
 # --- Club roles (full tier: assign / revoke, no update -- a role isn't edited, just
@@ -1148,20 +1342,6 @@ class NewsPhotoDeleteView(NewsEditRequiredMixin, View):
 
         notify(request, f"w|{_('Photo removed')}|{_('The photo was removed.')}")
         return redirect("management:news_detail", pk=news_item.pk)
-
-
-class RosterListView(ClubStaffRequiredMixin, StubListMixin, ListView):
-    page_title = _("Roster")
-
-    def get_queryset(self):
-        return TeamMembership.objects.filter(team__club=self.request.club)
-
-
-class StaffListView(ClubStaffRequiredMixin, StubListMixin, ListView):
-    page_title = _("Staff")
-
-    def get_queryset(self):
-        return StaffAssignment.objects.filter(team__club=self.request.club)
 
 
 class EventListView(ClubStaffRequiredMixin, StubListMixin, ListView):

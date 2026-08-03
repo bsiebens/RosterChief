@@ -9,7 +9,7 @@ from club.models import ClubMembership, ClubRole, FeePayment
 from members.models import Family, FamilyMembership, Member
 from members.services.family import find_member_by_email
 from news.models import News
-from teams.models import Position, Team
+from teams.models import Position, StaffAssignment, Team, TeamMembership
 
 User = get_user_model()
 
@@ -25,6 +25,46 @@ class TeamForm(forms.ModelForm):
     class Meta:
         model = Team
         fields = ["name", "short_name"]
+
+
+class TeamMembershipForm(forms.ModelForm):
+    """Add/edit one roster entry -- team and season come from the view (the URL
+    already identifies both), never from the form itself."""
+
+    class Meta:
+        model = TeamMembership
+        fields = ["member", "position", "jersey_number", "is_captain", "is_alternate_captain"]
+        widgets = {"member": forms.Select(attrs={"data-searchable": "true", "data-search-placeholder": _("Type a name to search...")})}
+
+    def __init__(self, *args, club=None, team=None, season=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        members = Member.objects.filter(member_of__club=club).distinct()
+        if team is not None and season is not None:
+            # Already on this team's roster this season -- offering them again
+            # would just fail the unique_member_per_team_per_season constraint.
+            taken = TeamMembership.objects.filter(team=team, season=season).exclude(pk=self.instance.pk).values_list("member_id", flat=True)
+            members = members.exclude(pk__in=taken)
+        self.fields["member"].queryset = members
+        self.fields["position"].queryset = Position.objects.filter(club=club, staff_position=False)
+
+
+class StaffAssignmentForm(forms.ModelForm):
+    """Assign/edit one staff assignment -- team and season come from the view,
+    same reasoning as TeamMembershipForm."""
+
+    class Meta:
+        model = StaffAssignment
+        fields = ["member", "position"]
+        widgets = {"member": forms.Select(attrs={"data-searchable": "true", "data-search-placeholder": _("Type a name to search...")})}
+
+    def __init__(self, *args, club=None, team=None, season=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        members = Member.objects.filter(member_of__club=club).distinct()
+        if team is not None and season is not None:
+            taken = StaffAssignment.objects.filter(team=team, season=season).exclude(pk=self.instance.pk).values_list("member_id", flat=True)
+            members = members.exclude(pk__in=taken)
+        self.fields["member"].queryset = members
+        self.fields["position"].queryset = Position.objects.filter(club=club, staff_position=True)
 
 
 class PositionForm(forms.ModelForm):

@@ -28,8 +28,6 @@
 
 <li class="menu-title">{% trans "Teams" %}</li>
 <li><a class="{% if nav == 'team_list' %}menu-active{% endif %}" href="{% url 'management:team_list' %}">{% lucide "shirt" size=16 %} {% trans "Teams" %}</a></li>
-<li><a class="{% if nav == 'roster_list' %}menu-active{% endif %}" href="{% url 'management:roster_list' %}">{% lucide "clipboard-list" size=16 %} {% trans "Roster" %}</a></li>
-<li><a class="{% if nav == 'staff_list' %}menu-active{% endif %}" href="{% url 'management:staff_list' %}">{% lucide "hard-hat" size=16 %} {% trans "Staff" %}</a></li>
 
 <li class="menu-title">{% trans "News" %}</li>
 <li><a class="{% if nav == 'news_list' %}menu-active{% endif %}" href="{% url 'management:news_list' %}">{% lucide "newspaper" size=16 %} {% trans "News" %}</a></li>
