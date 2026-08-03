@@ -2,7 +2,7 @@ import datetime
 from decimal import Decimal
 
 from django.conf import settings
-from django.core.validators import FileExtensionValidator, MinValueValidator, RegexValidator
+from django.core.validators import FileExtensionValidator, MaxValueValidator, MinValueValidator, RegexValidator
 from django.db import models
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
@@ -59,6 +59,18 @@ class Club(UUIDModel):
     )
 
     archived_at = models.DateTimeField(_("archived at"), null=True, blank=True, help_text=_("Archived clubs stop resolving on their subdomain, but their data is retained."))
+
+    season_start = models.DateField(
+        _("season start"),
+        default=datetime.date(2000, 8, 1),
+        help_text=_("Which day of the year a season begins — only the month and day are used, the year is ignored."),
+    )
+    season_duration_months = models.PositiveSmallIntegerField(
+        _("season duration (months)"),
+        default=12,
+        validators=[MinValueValidator(1), MaxValueValidator(24)],
+        help_text=_("How many months a season lasts, counted from its start date."),
+    )
 
     objects = ClubManager()
 

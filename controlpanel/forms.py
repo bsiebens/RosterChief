@@ -13,7 +13,7 @@ from .services.admins import find_member_by_email
 class ClubForm(forms.ModelForm):
     class Meta:
         model = Club
-        fields = ["name", "slug", "logo", "primary_color", "secondary_color"]
+        fields = ["name", "slug", "logo", "primary_color", "secondary_color", "season_start", "season_duration_months"]
         help_texts = {"slug": _("Drives the club's subdomain. Left blank, it is derived from the name.")}
         # Deliberately a text input, not <input type="color">: a colour picker cannot
         # express "no colour" -- it would submit #000000 for every club that never
@@ -22,6 +22,7 @@ class ClubForm(forms.ModelForm):
             "primary_color": forms.TextInput(attrs={"placeholder": "#1e40af"}),
             "secondary_color": forms.TextInput(attrs={"placeholder": "#be185d"}),
             "logo": forms.ClearableFileInput(attrs={"accept": "image/png,image/jpeg,image/gif,image/webp,image/svg+xml"}),
+            "season_start": forms.DateInput(attrs={"type": "date"}),
         }
 
     def __init__(self, *args, **kwargs):

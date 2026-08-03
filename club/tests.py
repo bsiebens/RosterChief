@@ -2,11 +2,14 @@ import datetime
 import uuid
 from contextlib import contextmanager
 from decimal import Decimal
+from io import StringIO
 
 from allauth.mfa.models import Authenticator
+from dateutil.relativedelta import relativedelta
 from django.contrib import admin as django_admin
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
+from django.core.management import call_command
 from django.db import IntegrityError
 from django.db.models import ProtectedError
 from django.test import RequestFactory, TestCase, override_settings
@@ -29,6 +32,7 @@ from .services.access import (
     teams_staffed_by,
 )
 from .services.fees import mark_as_paid, record_payment, remaining_balance
+from .services.seasons import _initial_season_start, _season_end, generate_seasons, resync_seasons
 from .tenancy import (
     ClubTenantMiddleware,
     get_current_club,
@@ -1190,3 +1194,240 @@ class FeeServiceTests(TestCase):
         payment = record_payment(self.membership, amount=Decimal("50.00"), recorded_by=user)
 
         self.assertEqual(payment.recorded_by, user)
+
+
+class SeasonStartEndTests(TestCase):
+    """club.services.seasons._initial_season_start / _season_end -- the
+    per-club rules generate_seasons chains off, now that a club's own
+    season_start/season_duration_months drive them instead of a fixed Aug-May
+    window."""
+
+    def setUp(self):
+        self.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+
+    def test_a_date_past_this_years_anchor_uses_this_year(self):
+        self.club.season_start = datetime.date(2000, 8, 1)
+
+        start = _initial_season_start(self.club, datetime.date(2026, 8, 15))
+
+        self.assertEqual(start, datetime.date(2026, 8, 1))
+
+    def test_a_date_before_this_years_anchor_uses_last_year(self):
+        self.club.season_start = datetime.date(2000, 8, 1)
+
+        start = _initial_season_start(self.club, datetime.date(2027, 2, 1))
+
+        self.assertEqual(start, datetime.date(2026, 8, 1))
+
+    def test_the_anchor_date_itself_uses_this_year(self):
+        self.club.season_start = datetime.date(2000, 8, 1)
+
+        start = _initial_season_start(self.club, datetime.date(2026, 8, 1))
+
+        self.assertEqual(start, datetime.date(2026, 8, 1))
+
+    def test_season_end_is_the_day_before_the_start_plus_the_duration(self):
+        self.club.season_duration_months = 12
+
+        end = _season_end(datetime.date(2026, 8, 1), self.club)
+
+        self.assertEqual(end, datetime.date(2027, 7, 31))
+
+    def test_a_shorter_duration_produces_a_shorter_season(self):
+        self.club.season_duration_months = 6
+
+        end = _season_end(datetime.date(2026, 8, 1), self.club)
+
+        self.assertEqual(end, datetime.date(2027, 1, 31))
+
+
+class GenerateSeasonsTests(TestCase):
+    """club.services.seasons.generate_seasons -- the service behind the
+    generate_seasons management command."""
+
+    def setUp(self):
+        self.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+
+    def test_generates_a_season_covering_today(self):
+        today = timezone.localdate()
+
+        generate_seasons(self.club, today)
+
+        self.assertTrue(Season.objects.filter(club=self.club, start_date__lte=today, end_date__gte=today).exists())
+
+    def test_generates_every_window_through_the_horizon(self):
+        today = timezone.localdate()
+        until = today + relativedelta(years=2)
+
+        created = generate_seasons(self.club, until)
+
+        self.assertGreaterEqual(len(created), 2)
+        for season in created:
+            self.assertLessEqual(season.start_date, until)
+
+    def test_is_idempotent_on_a_second_run(self):
+        until = timezone.localdate() + relativedelta(years=2)
+        generate_seasons(self.club, until)
+        count_after_first = Season.objects.filter(club=self.club).count()
+
+        second_run = generate_seasons(self.club, until)
+
+        self.assertEqual(second_run, [])
+        self.assertEqual(Season.objects.filter(club=self.club).count(), count_after_first)
+
+    def test_a_new_season_starts_the_day_after_the_last_one_ends(self):
+        today = timezone.localdate()
+        generate_seasons(self.club, today)
+        latest = Season.objects.filter(club=self.club).order_by("-end_date").first()
+
+        generate_seasons(self.club, latest.end_date + relativedelta(months=self.club.season_duration_months))
+
+        next_season = Season.objects.filter(club=self.club, start_date=latest.end_date + datetime.timedelta(days=1)).first()
+        self.assertIsNotNone(next_season)
+
+    def test_changing_the_duration_only_affects_the_next_generated_season(self):
+        today = timezone.localdate()
+        generate_seasons(self.club, today)
+        first = Season.objects.filter(club=self.club).order_by("-end_date").first()
+
+        self.club.season_duration_months = 6
+        self.club.save()
+        generate_seasons(self.club, first.end_date + relativedelta(months=6))
+
+        first_end_before = first.end_date
+        first.refresh_from_db()
+        self.assertEqual(first.end_date, first_end_before)  # existing season untouched
+        second = Season.objects.get(club=self.club, start_date=first.end_date + datetime.timedelta(days=1))
+        self.assertEqual(second.end_date, second.start_date + relativedelta(months=6) - datetime.timedelta(days=1))
+
+    def test_does_not_disturb_a_pre_existing_irregular_season(self):
+        odd = Season.objects.create(club=self.club, start_date=datetime.date(2020, 3, 1), end_date=datetime.date(2020, 9, 1))
+
+        generate_seasons(self.club, timezone.localdate())
+
+        odd.refresh_from_db()
+        self.assertEqual(odd.start_date, datetime.date(2020, 3, 1))
+        self.assertEqual(odd.end_date, datetime.date(2020, 9, 1))
+
+
+class ResyncSeasonsTests(TestCase):
+    """club.services.seasons.resync_seasons -- cleaning up seasons that don't
+    match a club's current settings (e.g. left over from a since-changed
+    season_start/season_duration_months)."""
+
+    def setUp(self):
+        self.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        self.until = timezone.localdate() + relativedelta(years=2)
+
+    def test_a_wrong_and_unreferenced_season_is_reported_as_removable(self):
+        wrong = Season.objects.create(club=self.club, start_date=datetime.date(2020, 3, 1), end_date=datetime.date(2020, 9, 1))
+
+        removed, kept = resync_seasons(self.club, self.until)
+
+        self.assertIn(wrong, removed)
+        self.assertEqual(kept, [])
+
+    def test_commit_actually_deletes_a_wrong_unreferenced_season(self):
+        wrong = Season.objects.create(club=self.club, start_date=datetime.date(2020, 3, 1), end_date=datetime.date(2020, 9, 1))
+
+        resync_seasons(self.club, self.until, commit=True)
+
+        self.assertFalse(Season.objects.filter(pk=wrong.pk).exists())
+
+    def test_without_commit_nothing_is_actually_deleted(self):
+        wrong = Season.objects.create(club=self.club, start_date=datetime.date(2020, 3, 1), end_date=datetime.date(2020, 9, 1))
+
+        resync_seasons(self.club, self.until, commit=False)
+
+        self.assertTrue(Season.objects.filter(pk=wrong.pk).exists())
+
+    def test_a_wrong_but_referenced_season_is_kept_not_removed(self):
+        wrong = Season.objects.create(club=self.club, start_date=datetime.date(2020, 3, 1), end_date=datetime.date(2020, 9, 1))
+        member = Member.objects.create(first_name="Jane", last_name="Doe")
+        ClubMembership.objects.create(club=self.club, member=member, season=wrong)
+
+        removed, kept = resync_seasons(self.club, self.until, commit=True)
+
+        self.assertEqual(removed, [])
+        self.assertIn(wrong, kept)
+        self.assertTrue(Season.objects.filter(pk=wrong.pk).exists())
+
+    def test_a_season_matching_current_settings_is_left_alone(self):
+        generate_seasons(self.club, timezone.localdate())
+
+        removed, kept = resync_seasons(self.club, self.until)
+
+        self.assertEqual(removed, [])
+        self.assertEqual(kept, [])
+
+    def test_a_season_referenced_only_via_staff_assignment_is_kept_not_removed(self):
+        # Season is PROTECTed by more than just ClubMembership -- a season kept
+        # alive only through a StaffAssignment must not be silently deleted either.
+        wrong = Season.objects.create(club=self.club, start_date=datetime.date(2020, 3, 1), end_date=datetime.date(2020, 9, 1))
+        team = Team.objects.create(club=self.club, name="First Team", short_name="1st")
+        position = Position.objects.create(club=self.club, name="Head Coach", short_name="HC", staff_position=True)
+        member = Member.objects.create(first_name="Jane", last_name="Doe")
+        StaffAssignment.objects.create(team=team, member=member, season=wrong, position=position)
+
+        removed, kept = resync_seasons(self.club, self.until, commit=True)
+
+        self.assertEqual(removed, [])
+        self.assertIn(wrong, kept)
+        self.assertTrue(Season.objects.filter(pk=wrong.pk).exists())
+
+
+class GenerateSeasonsCommandTests(TestCase):
+    def setUp(self):
+        self.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+
+    def test_default_years_is_two(self):
+        call_command("generate_seasons", stdout=StringIO())
+
+        today = timezone.localdate()
+        until = today + relativedelta(years=2)
+        seasons = Season.objects.filter(club=self.club).order_by("start_date")
+        self.assertTrue(seasons.exists())
+        for season in seasons:
+            self.assertLessEqual(season.start_date, until)
+        self.assertTrue(seasons.filter(start_date__lte=today, end_date__gte=today).exists())
+
+    def test_years_argument_controls_the_horizon(self):
+        call_command("generate_seasons", "--years", "1", stdout=StringIO())
+
+        until = timezone.localdate() + relativedelta(years=1)
+        for season in Season.objects.filter(club=self.club):
+            self.assertLessEqual(season.start_date, until)
+
+    def test_archived_clubs_are_skipped(self):
+        self.club.archive()
+
+        call_command("generate_seasons", stdout=StringIO())
+
+        self.assertFalse(Season.objects.filter(club=self.club).exists())
+
+    def test_second_run_creates_nothing_new(self):
+        call_command("generate_seasons", stdout=StringIO())
+        count_after_first = Season.objects.filter(club=self.club).count()
+
+        out = StringIO()
+        call_command("generate_seasons", stdout=out)
+
+        self.assertEqual(Season.objects.filter(club=self.club).count(), count_after_first)
+        self.assertIn("Generated 0 season", out.getvalue())
+
+    def test_resync_without_commit_reports_but_does_not_delete(self):
+        wrong = Season.objects.create(club=self.club, start_date=datetime.date(2020, 3, 1), end_date=datetime.date(2020, 9, 1))
+
+        out = StringIO()
+        call_command("generate_seasons", "--resync", stdout=out)
+
+        self.assertTrue(Season.objects.filter(pk=wrong.pk).exists())
+        self.assertIn("Would remove", out.getvalue())
+
+    def test_resync_with_commit_deletes_the_wrong_season(self):
+        wrong = Season.objects.create(club=self.club, start_date=datetime.date(2020, 3, 1), end_date=datetime.date(2020, 9, 1))
+
+        call_command("generate_seasons", "--resync", "--commit", stdout=StringIO())
+
+        self.assertFalse(Season.objects.filter(pk=wrong.pk).exists())
+

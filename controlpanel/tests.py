@@ -117,14 +117,17 @@ class ClubManagementTests(ControlPanelTestBase):
         self.assertContains(self.client.get(reverse("controlpanel:dashboard")), "Ajax United")
 
     def test_create_club_derives_the_slug(self):
-        response = self.client.post(reverse("controlpanel:club_create"), {"name": "New Club", "slug": ""})
+        response = self.client.post(reverse("controlpanel:club_create"), {"name": "New Club", "slug": "", "season_start": "2000-08-01", "season_duration_months": "12"})
 
         club = Club.objects.get(name="New Club")
         self.assertEqual(club.slug, "new-club")
         self.assertRedirects(response, reverse("controlpanel:club_detail", args=[club.pk]))
 
     def test_update_club(self):
-        self.client.post(reverse("controlpanel:club_update", args=[self.club.pk]), {"name": "Renamed", "slug": self.club.slug})
+        self.client.post(
+            reverse("controlpanel:club_update", args=[self.club.pk]),
+            {"name": "Renamed", "slug": self.club.slug, "season_start": "2000-08-01", "season_duration_months": "12"},
+        )
 
         self.club.refresh_from_db()
         self.assertEqual(self.club.name, "Renamed")
