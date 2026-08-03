@@ -7,7 +7,7 @@ from django.utils.translation import gettext_lazy as _
 from club.models import ClubMembership, ClubRole, FeePayment
 from members.models import Family, FamilyMembership, Member
 from members.services.family import find_member_by_email
-from teams.models import Team
+from teams.models import Position, Team
 
 User = get_user_model()
 
@@ -23,6 +23,20 @@ class TeamForm(forms.ModelForm):
     class Meta:
         model = Team
         fields = ["name", "short_name"]
+
+
+class PositionForm(forms.ModelForm):
+    class Meta:
+        model = Position
+        fields = ["name", "short_name", "ordering", "staff_position", "management_position"]
+
+    def clean(self):
+        cleaned = super().clean()
+        # Mirrors Position's management_position_implies_staff_position check
+        # constraint -- caught here so it reads as a form error, not a 500.
+        if cleaned.get("management_position") and not cleaned.get("staff_position"):
+            self.add_error("management_position", _("A management position must also be a staff position."))
+        return cleaned
 
 
 class ClubRoleAssignForm(forms.ModelForm):

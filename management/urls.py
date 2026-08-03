@@ -30,6 +30,8 @@ urlpatterns = [
     path("families/<uuid:family_pk>/members/<uuid:member_pk>/role/", views.FamilyMembershipRoleUpdateView.as_view(), name="family_membership_role_update"),
     # Club setup (admin only)
     path("positions/", views.PositionListView.as_view(), name="position_list"),
+    path("positions/new/", views.PositionCreateView.as_view(), name="position_create"),
+    path("positions/<uuid:pk>/edit/", views.PositionUpdateView.as_view(), name="position_update"),
     path("roles/", views.ClubRoleListView.as_view(), name="role_list"),
     path("roles/new/", views.ClubRoleCreateView.as_view(), name="role_create"),
     path("roles/<uuid:pk>/revoke/", views.ClubRoleRevokeView.as_view(), name="role_revoke"),

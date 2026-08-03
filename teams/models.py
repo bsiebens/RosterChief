@@ -25,10 +25,10 @@ class Team(ClubScopedModel):
 class Position(ClubScopedModel):
     name = models.CharField(_("name"), max_length=255)
     short_name = models.CharField(_("short name"), max_length=255)
-    ordering = models.PositiveSmallIntegerField(_("ordering"), default=0)
+    ordering = models.PositiveSmallIntegerField(_("ordering"), default=0, help_text=_("Lower numbers are listed first (e.g. on a team's roster). Positions with the same number are ordered by name."))
 
-    staff_position = models.BooleanField(_("staff position"), default=False)
-    management_position = models.BooleanField(_("management position"), default=False)
+    staff_position = models.BooleanField(_("staff position"), default=False, help_text=_("Coach, manager, physio, ... -- assignable via a StaffAssignment rather than a team roster spot."))
+    management_position = models.BooleanField(_("management position"), default=False, help_text=_("A staff position with management authority over the team (e.g. head coach) -- requires staff position to also be checked."))
 
     class Meta:
         verbose_name = _("position")

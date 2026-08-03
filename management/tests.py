@@ -256,6 +256,43 @@ class TeamManagementTests(ManagementTestBase):
         self.assertRedirects(response, reverse("management:team_detail", args=[team.pk]))
 
 
+class PositionManagementTests(ManagementTestBase):
+    def setUp(self):
+        super().setUp()
+        self.client.force_login(self.admin_user)
+
+    def test_position_list_is_scoped_to_the_club(self):
+        other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
+        Position.objects.create(club=other_club, name="Rival Coach", short_name="RC", staff_position=True)
+
+        response = self.club_get("position_list")
+
+        self.assertNotContains(response, "Rival Coach")
+
+    def test_creating_a_position(self):
+        response = self.club_post("position_create", {"name": "Physio", "short_name": "PH", "ordering": 0, "staff_position": "on", "management_position": ""})
+
+        position = Position.objects.get(club=self.club, name="Physio")
+        self.assertRedirects(response, reverse("management:position_list"))
+        self.assertTrue(position.staff_position)
+        self.assertFalse(position.management_position)
+
+    def test_updating_a_position(self):
+        position = Position.objects.create(club=self.club, name="Old name", short_name="ON")
+
+        self.club_post("position_update", {"name": "New name", "short_name": "NN", "ordering": 0}, position.pk)
+
+        position.refresh_from_db()
+        self.assertEqual(position.name, "New name")
+
+    def test_a_management_position_must_also_be_a_staff_position(self):
+        response = self.club_post("position_create", {"name": "Bad", "short_name": "B", "ordering": 0, "management_position": "on"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Position.objects.filter(club=self.club, name="Bad").exists())
+        self.assertFormError(response.context["form"], "management_position", "A management position must also be a staff position.")
+
+
 class ClubRoleManagementTests(ManagementTestBase):
     def setUp(self):
         super().setUp()
@@ -278,6 +315,37 @@ class ClubRoleManagementTests(ManagementTestBase):
         self.club_post("role_revoke", {}, role.pk)
 
         self.assertFalse(ClubRole.objects.filter(pk=role.pk).exists())
+
+    def test_the_plain_member_role_never_appears_on_the_list(self):
+        # self.admin_member and self.member both hold an implicit MEMBER role --
+        # noise this page must never show. (self.member's name still legitimately
+        # appears once, in the "Grant role" modal's member picker.)
+        response = self.club_get("role_list")
+
+        self.assertContains(response, "No one has the Editor role yet.")
+
+    def test_a_granted_role_appears_under_its_own_section(self):
+        self.club_post("role_create", {"member": str(self.member.pk), "role": ClubRole.Roles.EDITOR})
+
+        response = self.club_get("role_list")
+
+        self.assertContains(response, "Future Editor")
+
+    def test_grant_role_is_a_modal_on_the_list_page(self):
+        response = self.club_get("role_list")
+
+        self.assertContains(response, 'id="grant_role_modal"')
+
+    def test_each_section_explains_what_the_role_grants(self):
+        response = self.club_get("role_list")
+
+        self.assertContains(response, "Full control over the club")
+        self.assertContains(response, "Can create and edit events")
+
+    def test_an_invalid_submission_redirects_back_to_the_list_instead_of_a_page(self):
+        response = self.club_post("role_create", {"member": "", "role": ClubRole.Roles.EDITOR})
+
+        self.assertRedirects(response, reverse("management:role_list"))
 
 
 class FamilyManagementTests(ManagementTestBase):

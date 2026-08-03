@@ -24,7 +24,20 @@ from shop.models import Discount, Invoice, Order, Product
 from teams.models import Position, StaffAssignment, Team, TeamMembership
 
 from .bulk_import import build_member_import_template, parse_member_import_rows, read_member_import_workbook
-from .forms import AddChildForm, AddParentForm, AttachToFamilyForm, ClubMembershipForm, ClubRoleAssignForm, FamilyCreateForm, GrantLoginForm, MemberForm, MemberImportUploadForm, RecordFeePaymentForm, TeamForm
+from .forms import (
+    AddChildForm,
+    AddParentForm,
+    AttachToFamilyForm,
+    ClubMembershipForm,
+    ClubRoleAssignForm,
+    FamilyCreateForm,
+    GrantLoginForm,
+    MemberForm,
+    MemberImportUploadForm,
+    PositionForm,
+    RecordFeePaymentForm,
+    TeamForm,
+)
 from .pdf import PDFExportError, membership_list_pdf
 
 
@@ -707,18 +720,38 @@ class TeamDetailView(ClubStaffRequiredMixin, DetailView):
 # granted or taken away) -------------------------------------------------------------
 
 
+#: What each non-default role actually grants -- shown on the roles overview so an
+#: admin granting one knows what they're handing out. See club/services/access.py.
+ROLE_DESCRIPTIONS = {
+    ClubRole.Roles.ADMIN: _("Full control over the club: memberships, positions, roles, teams, shop, and every event."),
+    ClubRole.Roles.EDITOR: _("Can create and edit events, but not memberships, positions, roles, or shop settings."),
+}
+
+
 class ClubRoleListView(ClubAdminRequiredMixin, ListView):
+    """Every non-default role holder, grouped by role. The plain MEMBER role is
+    excluded entirely -- every active club member holds it automatically
+    (club/signals.py), so listing it here would just be noise; this page is for
+    the roles someone was actually *granted*. ClubRole.Roles has few enough
+    values that a section per role reads better than one flat table."""
+
     template_name = "management/role_list.html"
     context_object_name = "roles"
 
     def get_queryset(self):
-        return ClubRole.objects.filter(club=self.request.club).select_related("member")
+        return ClubRole.objects.filter(club=self.request.club).exclude(role=ClubRole.Roles.MEMBER).select_related("member")
+
+    def get_context_data(self, **kwargs):
+        sections = [(value, label, ROLE_DESCRIPTIONS.get(value, ""), [role for role in self.object_list if role.role == value]) for value, label in ClubRole.Roles.choices if value != ClubRole.Roles.MEMBER]
+        return super().get_context_data(sections=sections, role_form=ClubRoleAssignForm(club=self.request.club), **kwargs)
 
 
-class ClubRoleCreateView(ClubAdminRequiredMixin, CreateView):
-    model = ClubRole
+class ClubRoleCreateView(ClubAdminRequiredMixin, RedirectOnInvalidMixin, FormView):
+    """Reachable only via the "Grant role" modal on the roles overview."""
+
     form_class = ClubRoleAssignForm
-    template_name = "management/role_form.html"
+    http_method_names = ["post"]
+    invalid_redirect_url_name = "management:role_list"
 
     def get_form_kwargs(self):
         return super().get_form_kwargs() | {"club": self.request.club}
@@ -729,17 +762,14 @@ class ClubRoleCreateView(ClubAdminRequiredMixin, CreateView):
         # so granting ADMIN/EDITOR promotes that existing row rather than inserting a
         # second one, exactly like controlpanel.services.admins.grant_club_admin.
         member, role = form.cleaned_data["member"], form.cleaned_data["role"]
-        self.object, created = ClubRole.objects.get_or_create(club=self.request.club, member=member, defaults={"role": role})
-        if not created and self.object.role != role:
-            self.object.role = role
-            self.object.save(update_fields=["role"])
+        role_obj, created = ClubRole.objects.get_or_create(club=self.request.club, member=member, defaults={"role": role})
+        if not created and role_obj.role != role:
+            role_obj.role = role
+            role_obj.save(update_fields=["role"])
 
-        body = _("“%(member)s” is now %(role)s.") % {"member": member, "role": self.object.get_role_display()}
+        body = _("“%(member)s” is now %(role)s.") % {"member": member, "role": role_obj.get_role_display()}
         notify(self.request, f"s|{_('Role granted')}|{body}")
-        return redirect(self.get_success_url())
-
-    def get_success_url(self):
-        return reverse("management:role_list")
+        return redirect("management:role_list")
 
 
 class ClubRoleRevokeView(ClubAdminRequiredMixin, View):
@@ -875,11 +905,49 @@ class FamilyAddParentView(ClubAdminRequiredMixin, RedirectOnInvalidMixin, FormVi
         return redirect("management:family_detail", pk=family.pk)
 
 
-class PositionListView(ClubAdminRequiredMixin, StubListMixin, ListView):
-    page_title = _("Positions")
+class PositionListView(ClubAdminRequiredMixin, ListView):
+    template_name = "management/position_list.html"
+    context_object_name = "positions"
 
     def get_queryset(self):
         return Position.objects.filter(club=self.request.club)
+
+
+class PositionCreateView(ClubAdminRequiredMixin, CreateView):
+    model = Position
+    form_class = PositionForm
+    template_name = "management/position_form.html"
+
+    def form_valid(self, form):
+        form.instance.club = self.request.club
+        response = super().form_valid(form)
+        body = _("“%(position)s” created.") % {"position": self.object}
+        notify(self.request, f"s|{_('Position created')}|{body}")
+        return response
+
+    def get_success_url(self):
+        return reverse("management:position_list")
+
+
+class PositionUpdateView(ClubAdminRequiredMixin, UpdateView):
+    model = Position
+    form_class = PositionForm
+    template_name = "management/position_form.html"
+
+    def get_queryset(self):
+        return Position.objects.filter(club=self.request.club)
+
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        body = _("“%(position)s” updated.") % {"position": self.object}
+        notify(self.request, f"s|{_('Position updated')}|{body}")
+        return response
+
+    def get_success_url(self):
+        return reverse("management:position_list")
+
+    def get_context_data(self, **kwargs):
+        return super().get_context_data(update_view=True, **kwargs)
 
 
 class RosterListView(ClubStaffRequiredMixin, StubListMixin, ListView):

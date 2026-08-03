@@ -36,6 +36,8 @@ _NAV_SECTIONS = {
     "membership_mark_fully_paid": "membership_list",
     "membership_record_payment": "membership_list",
     "position_list": "position_list",
+    "position_create": "position_list",
+    "position_update": "position_list",
     "role_list": "role_list",
     "role_create": "role_list",
     "role_revoke": "role_list",

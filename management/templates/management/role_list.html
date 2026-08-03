@@ -1,44 +1,154 @@
 {% extends "management/base.html" %}
 {% load i18n lucide %}
 
+{% comment %}
+    One section per non-MEMBER role (management.views.ClubRoleListView) -- the
+    plain MEMBER role every active club member holds automatically is excluded
+    entirely, since listing it here would just be noise. "Grant role" opens a
+    modal (controlpanel/_modal_form.html) rather than a separate page -- role_create
+    is POST-only, see ClubRoleCreateView.
+{% endcomment %}
+
 {% block heading %}{% trans "Roles" %}{% endblock heading %}
 
 {% block actions %}
-    <a class="btn btn-primary gap-2" href="{% url 'management:role_create' %}">{% lucide "plus" size=16 %} {% trans "Grant role" %}</a>
+    <button class="btn btn-primary gap-2" type="button" onclick="document.getElementById('grant_role_modal').showModal()">{% lucide "plus" size=16 %} {% trans "Grant role" %}</button>
 {% endblock actions %}
 
 {% block panel %}
-    <div class="card bg-base-100 shadow">
-        <div class="card-body">
-            <div class="overflow-x-auto">
-                <table class="table">
-                    <thead>
-                        <tr>
-                            <th>{% trans "Member" %}</th>
-                            <th>{% trans "Role" %}</th>
-                            <th></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for role in roles %}
-                            <tr>
-                                <td>{{ role.member }}</td>
-                                <td>{{ role.get_role_display }}</td>
-                                <td class="text-right">
-                                    <form method="post" action="{% url 'management:role_revoke' role.pk %}">
-                                        {% csrf_token %}
-                                        <button class="btn btn-outline btn-error btn-sm gap-2" type="submit">{% lucide "x" size=14 %} {% trans "Revoke" %}</button>
-                                    </form>
-                                </td>
-                            </tr>
-                        {% empty %}
-                            <tr>
-                                <td colspan="3" class="text-center opacity-60">{% trans "No roles granted yet." %}</td>
-                            </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        </div>
+    <div class="flex flex-col gap-4">
+        {% for value, label, description, roles_for_section in sections %}
+            {% with role_label=label|capfirst %}
+                <div class="card bg-base-100 shadow">
+                    <div class="card-body">
+                        <h2 class="card-title text-base">{{ role_label }}</h2>
+                        {% if description %}<p class="text-sm opacity-70">{{ description }}</p>{% endif %}
+                        <div class="overflow-x-auto">
+                            <table class="table">
+                                <thead>
+                                    <tr>
+                                        <th>{% trans "Member" %}</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for role in roles_for_section %}
+                                        <tr>
+                                            <td>{{ role.member }}</td>
+                                            <td class="text-right">
+                                                <form method="post" action="{% url 'management:role_revoke' role.pk %}">
+                                                    {% csrf_token %}
+                                                    <button class="btn btn-outline btn-error btn-sm gap-2" type="submit">{% lucide "x" size=14 %} {% trans "Revoke" %}</button>
+                                                </form>
+                                            </td>
+                                        </tr>
+                                    {% empty %}
+                                        <tr>
+                                            <td colspan="2" class="text-center opacity-60">{% blocktrans %}No one has the {{ role_label }} role yet.{% endblocktrans %}</td>
+                                        </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            {% endwith %}
+        {% endfor %}
     </div>
+
+    {% trans "Grant role" as grant_role_label %}
+    {% url 'management:role_create' as role_create_url %}
+    {% include "controlpanel/_modal_form.html" with modal_id="grant_role_modal" title=grant_role_label form=role_form action_url=role_create_url submit_label=grant_role_label submit_icon="shield-check" %}
 {% endblock panel %}
+
+{% block extra_body %}
+    {% trans "Type a name to search..." as search_placeholder %}
+    <script>
+        (() => {
+            // Progressive enhancement: the plain <select name="member"> in the "Grant
+            // role" modal still works with no JS -- this hides it and drives it from a
+            // small typeahead combobox instead (a select2-alike without the dependency):
+            // type to filter, click or Enter to pick, the hidden <select> still carries
+            // the actual value the form submits.
+            const select = document.querySelector("#grant_role_modal select[name='member']");
+            if (!select) return;
+
+            const options = Array.from(select.options).filter((option) => option.value !== "");
+
+            const wrapper = document.createElement("div");
+            wrapper.className = "relative";
+
+            const input = document.createElement("input");
+            input.type = "text";
+            input.className = "input input-bordered w-full";
+            input.placeholder = "{{ search_placeholder }}";
+            input.autocomplete = "off";
+
+            const list = document.createElement("ul");
+            list.className = "menu absolute z-10 mt-1 w-full rounded-box bg-base-100 shadow max-h-60 overflow-y-auto flex-nowrap hidden";
+
+            select.parentNode.insertBefore(wrapper, select);
+            wrapper.append(input, list, select);
+            select.classList.add("hidden");
+
+            let highlighted = -1;
+
+            const choose = (option) => {
+                select.value = option.value;
+                input.value = option.text;
+                list.classList.add("hidden");
+            };
+
+            const render = (query) => {
+                const needle = query.trim().toLowerCase();
+                const matches = needle ? options.filter((option) => option.text.toLowerCase().includes(needle)) : options;
+
+                list.innerHTML = "";
+                matches.forEach((option) => {
+                    const item = document.createElement("li");
+                    const link = document.createElement("a");
+                    link.textContent = option.text;
+                    // mousedown, not click: it fires before the input's blur, so the
+                    // list is still in the DOM (and un-hidden) when the pick is applied.
+                    link.addEventListener("mousedown", (event) => {
+                        event.preventDefault();
+                        choose(option);
+                    });
+                    item.appendChild(link);
+                    list.appendChild(item);
+                });
+
+                highlighted = -1;
+                list.classList.toggle("hidden", matches.length === 0);
+                return matches;
+            };
+
+            input.addEventListener("input", () => render(input.value));
+            input.addEventListener("focus", () => render(input.value));
+            input.addEventListener("blur", () => list.classList.add("hidden"));
+
+            input.addEventListener("keydown", (event) => {
+                const items = Array.from(list.querySelectorAll("a"));
+                if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                    event.preventDefault();
+                    if (!items.length) return;
+                    highlighted = event.key === "ArrowDown" ? (highlighted + 1) % items.length : (highlighted - 1 + items.length) % items.length;
+                    items.forEach((item, index) => item.classList.toggle("menu-active", index === highlighted));
+                    items[highlighted].scrollIntoView({ block: "nearest" });
+                } else if (event.key === "Enter" && highlighted >= 0 && items[highlighted]) {
+                    event.preventDefault();
+                    items[highlighted].dispatchEvent(new Event("mousedown"));
+                } else if (event.key === "Escape") {
+                    list.classList.add("hidden");
+                }
+            });
+
+            // Redisplayed after a validation error elsewhere in the modal: keep
+            // whatever member was already chosen visible in the text input.
+            if (select.value) {
+                const selected = options.find((option) => option.value === select.value);
+                if (selected) input.value = selected.text;
+            }
+        })();
+    </script>
+{% endblock extra_body %}
