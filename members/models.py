@@ -19,7 +19,7 @@ class Family(UUIDModel):
             return self.name
         surnames = sorted({last_name for last_name in self.memberships.values_list("member__last_name", flat=True) if last_name})
         if surnames:
-            return _("%(surnames)s family") % {"surnames": " / ".join(surnames)}
+            return _("%(surnames)s") % {"surnames": " / ".join(surnames)}
         return _("Family %(id)s") % {"id": str(self.pk)[:8]}
 
     @property

@@ -87,7 +87,7 @@ class FamilyNameOptionalTests(TestCase):
         FamilyMembership.objects.create(family=family, member=jones, role=FamilyMembership.FamilyRole.CHILD)
 
         # Distinct surnames, alphabetically ordered.
-        self.assertEqual(str(family), "Jones / Smith family")
+        self.assertEqual(str(family), "Jones / Smith")
 
     def test_str_falls_back_to_short_id_when_empty(self):
         family = Family.objects.create()
