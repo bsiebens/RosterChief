@@ -13,7 +13,7 @@ from django.urls import NoReverseMatch, reverse
 from django.utils import timezone
 
 from club.models import Club, ClubMembership, ClubRole, FeePayment, Season
-from events.models import Event
+from events.models import Attendance, Event
 from management.bulk_import import TEMPLATE_COLUMNS
 from management.pdf import PDFExportError, render_pdf
 from members.models import Family, FamilyMembership, Member
@@ -2161,3 +2161,51 @@ class NewsManagementTests(ManagementTestBase):
         response = self.club_get("news_list")
 
         self.assertNotContains(response, reverse("management:news_update", args=[item.pk]))
+
+
+class TeamAttendancePanelTests(ManagementTestBase):
+    """The attendance KPI panel on the team page -- see
+    management.views.TeamDetailView and events.services.attendance."""
+
+    def setUp(self):
+        super().setUp()
+        self.team = Team.objects.create(club=self.club, name="First Team", short_name="1st")
+        self.position = Position.objects.create(club=self.club, name="Forward", short_name="FW", staff_position=False)
+        self.player = Member.objects.create(first_name="Peter", last_name="Player")
+        ClubMembership.objects.create(club=self.club, member=self.player, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        TeamMembership.objects.create(team=self.team, season=self.season, member=self.player, position=self.position)
+
+    def make_past_training(self, days_ago=1):
+        event = Event.objects.create(club=self.club, title="Practice", kind=Event.EventKind.TRAINING, season=self.season, start=timezone.now() - datetime.timedelta(days=days_ago))
+        event.teams.add(self.team)
+        return event
+
+    def test_attendance_panel_shows_the_rate_and_rankings(self):
+        event = self.make_past_training()
+        Attendance.objects.create(event=event, member=self.player, status=Attendance.AttendanceStatus.PRESENT)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("team_detail", self.team.pk)
+
+        self.assertContains(response, "Attendance rate")
+        self.assertContains(response, "Peter Player")
+
+    def test_a_present_rsvp_without_a_check_in_is_never_a_no_show(self):
+        event = self.make_past_training()
+        Attendance.objects.create(event=event, member=self.player, status=Attendance.AttendanceStatus.PRESENT)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("team_detail", self.team.pk)
+
+        self.assertContains(response, "None recorded.")
+
+    def test_a_checked_in_no_show_appears_in_the_panel(self):
+        event = self.make_past_training()
+        attendance = Attendance.objects.create(event=event, member=self.player, status=Attendance.AttendanceStatus.PRESENT, showed_up=False)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("team_detail", self.team.pk)
+
+        self.assertContains(response, "Peter Player")
+        self.assertContains(response, attendance.event.title)
+        self.assertNotContains(response, "None recorded.")

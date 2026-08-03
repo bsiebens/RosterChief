@@ -58,7 +58,7 @@ class EventAdmin(admin.ModelAdmin):
 
 @admin.register(Attendance)
 class AttendanceAdmin(admin.ModelAdmin):
-    list_display = ["event", "member", "status"]
-    list_filter = ["status", "event__kind"]
+    list_display = ["event", "member", "status", "showed_up"]
+    list_filter = ["status", "showed_up", "event__kind"]
     search_fields = ["event__title", "member__first_name", "member__last_name"]
     raw_id_fields = ["event", "member"]

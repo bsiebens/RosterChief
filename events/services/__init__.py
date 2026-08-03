@@ -1,4 +1,12 @@
-from .attendance import effective_members, sync_event_attendances
+from .attendance import (
+    effective_members,
+    player_attendance_rankings,
+    players_who_missed_recent_practices,
+    record_check_in,
+    sync_event_attendances,
+    team_attendance_rate,
+    team_no_shows,
+)
 from .recurrence import (
     apply_template,
     cancel_occurrence,
@@ -17,6 +25,11 @@ __all__ = [
     "generate_occurrences",
     "horizon",
     "occurrence_datetimes",
+    "player_attendance_rankings",
+    "players_who_missed_recent_practices",
     "propagate_series",
+    "record_check_in",
     "sync_event_attendances",
+    "team_attendance_rate",
+    "team_no_shows",
 ]

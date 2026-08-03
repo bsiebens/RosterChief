@@ -18,7 +18,12 @@ from .services import (
     effective_members,
     generate_occurrences,
     occurrence_datetimes,
+    player_attendance_rankings,
+    players_who_missed_recent_practices,
     propagate_series,
+    record_check_in,
+    team_attendance_rate,
+    team_no_shows,
 )
 
 
@@ -401,3 +406,114 @@ class EventClubScopeTests(EventsTestBase):
         series = EventSeries.objects.create(club=self.club, title="Weekly", rrule="FREQ=WEEKLY", dtstart=self.future)
         with self.assertRaises(ValidationError):
             series.teams.add(self.other_team)
+
+
+class TeamAttendanceStatsTests(EventsTestBase):
+    """events.services.attendance's team+season-scoped stats -- the queries
+    behind management.views.TeamDetailView's attendance panel."""
+
+    def make_past_training(self, days_ago, **kwargs):
+        # Past-start events are never auto-synced (see test_past_event_is_not_synced
+        # above), so attendance rows have to be created by hand here.
+        kwargs.setdefault("kind", Event.EventKind.TRAINING)
+        event = self.make_event(start=timezone.now() - timedelta(days=days_ago), **kwargs)
+        event.teams.add(self.team)
+        return event
+
+    def set_status(self, event, member, status):
+        attendance, _created = Attendance.objects.update_or_create(event=event, member=member, defaults={"status": status})
+        return attendance
+
+    def test_record_check_in_sets_showed_up(self):
+        event = self.make_past_training(1)
+        attendance = self.set_status(event, self.alice, Attendance.AttendanceStatus.PRESENT)
+
+        record_check_in(attendance, showed_up=False)
+
+        attendance.refresh_from_db()
+        self.assertFalse(attendance.showed_up)
+
+    def test_team_attendance_rate_excludes_excused_and_no_response(self):
+        event = self.make_past_training(1)
+        self.set_status(event, self.alice, Attendance.AttendanceStatus.PRESENT)
+        self.set_status(event, self.bob, Attendance.AttendanceStatus.ABSENT)
+
+        self.assertEqual(team_attendance_rate(self.team, self.season), 50)
+
+    def test_team_attendance_rate_is_none_with_no_past_events(self):
+        self.assertIsNone(team_attendance_rate(self.team, self.season))
+
+    def test_rankings_exclude_players_below_the_response_minimum(self):
+        event = self.make_past_training(1)
+        self.set_status(event, self.alice, Attendance.AttendanceStatus.PRESENT)
+        self.set_status(event, self.bob, Attendance.AttendanceStatus.ABSENT)
+
+        rankings = player_attendance_rankings(self.team, self.season, minimum_responses=2)
+
+        self.assertEqual(rankings, [])
+
+    def test_rankings_rank_best_first(self):
+        e1 = self.make_past_training(10)
+        e2 = self.make_past_training(3)
+        self.set_status(e1, self.alice, Attendance.AttendanceStatus.PRESENT)
+        self.set_status(e2, self.alice, Attendance.AttendanceStatus.PRESENT)
+        self.set_status(e1, self.bob, Attendance.AttendanceStatus.PRESENT)
+        self.set_status(e2, self.bob, Attendance.AttendanceStatus.ABSENT)
+
+        rankings = player_attendance_rankings(self.team, self.season, minimum_responses=2)
+
+        self.assertEqual([entry["member"] for entry in rankings], [self.alice, self.bob])
+        self.assertEqual(rankings[0]["rate"], 100)
+        self.assertEqual(rankings[1]["rate"], 50)
+
+    def test_missed_recent_practices_needs_full_history(self):
+        self.make_past_training(3)  # only one practice logged so far
+
+        self.assertFalse(players_who_missed_recent_practices(self.team, self.season, count=2).exists())
+
+    def test_missed_recent_practices_flags_absence_on_both(self):
+        e1 = self.make_past_training(10)
+        e2 = self.make_past_training(3)
+        self.set_status(e1, self.alice, Attendance.AttendanceStatus.ABSENT)
+        self.set_status(e2, self.alice, Attendance.AttendanceStatus.NO_RESPONSE)
+        self.set_status(e1, self.bob, Attendance.AttendanceStatus.PRESENT)
+        self.set_status(e2, self.bob, Attendance.AttendanceStatus.ABSENT)
+
+        missed = players_who_missed_recent_practices(self.team, self.season, count=2)
+
+        self.assertEqual(list(missed), [self.alice])
+
+    def test_missed_recent_practices_excludes_an_excused_absence(self):
+        e1 = self.make_past_training(10)
+        e2 = self.make_past_training(3)
+        self.set_status(e1, self.alice, Attendance.AttendanceStatus.EXCUSED)
+        self.set_status(e2, self.alice, Attendance.AttendanceStatus.ABSENT)
+
+        missed = players_who_missed_recent_practices(self.team, self.season, count=2)
+
+        self.assertNotIn(self.alice, missed)
+
+    def test_no_shows_requires_an_explicit_check_in(self):
+        event = self.make_past_training(1)
+        self.set_status(event, self.alice, Attendance.AttendanceStatus.PRESENT)
+
+        # Nobody has been checked in at all -- must not read as a no-show.
+        self.assertEqual(list(team_no_shows(self.team, self.season)), [])
+
+    def test_no_shows_flags_a_present_rsvp_checked_in_as_absent(self):
+        event = self.make_past_training(1)
+        attendance = self.set_status(event, self.alice, Attendance.AttendanceStatus.PRESENT)
+        record_check_in(attendance, showed_up=False)
+
+        no_shows = team_no_shows(self.team, self.season)
+
+        self.assertEqual(len(no_shows), 1)
+        self.assertEqual(no_shows[0].member, self.alice)
+        self.assertEqual(no_shows[0].event, event)
+
+    def test_a_confirmed_check_in_is_not_a_no_show(self):
+        event = self.make_past_training(1)
+        attendance = self.set_status(event, self.alice, Attendance.AttendanceStatus.PRESENT)
+        record_check_in(attendance, showed_up=True)
+
+        self.assertEqual(list(team_no_shows(self.team, self.season)), [])

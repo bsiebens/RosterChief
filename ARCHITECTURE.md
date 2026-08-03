@@ -421,6 +421,14 @@ Attendance(UUIDModel)              # through model Event <-> Member
 club-wide (`team=None`), so `season` stays a first-class FK. Keep it consistent in a
 service/clean().
 
+**As built, `Attendance` also carries `showed_up`** (nullable bool, default `None`) —
+deliberately separate from `status`: `status` is the RSVP, `showed_up` is whether they
+actually turned up, set by a check-in. `None` means "never checked in" (true for every
+row today — there's no check-in UI yet, only Django admin); a "no-show" is
+`status in (present, selected)` and `showed_up is False`, and is *never* inferred from
+a missing check-in. See `events/services/attendance.py::record_check_in` and
+`management/views.py::TeamDetailView`'s attendance panel.
+
 ### 5.4 `news`, `pages`, `home` (public site / editorial)
 
 **`news` is built** (as of the coach_manager-authoring / editor-release-flow work) —

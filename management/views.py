@@ -17,6 +17,7 @@ from controlpanel.messages import notify
 from controlpanel.mixins import RedirectOnInvalidMixin
 from controlpanel.services.statistics import club_attention, club_charts, club_statistics
 from events.models import Event, EventSeries, Location, Opponent
+from events.services.attendance import player_attendance_rankings, players_who_missed_recent_practices, team_attendance_rate, team_no_shows
 from formbuilder.models import Form as FormBuilderForm
 from formbuilder.models import Submission
 from members.models import Family, FamilyMembership, Member
@@ -757,6 +758,10 @@ class TeamDetailView(ClubStaffRequiredMixin, DetailView):
 
         roster = TeamMembership.objects.none()
         staff = StaffAssignment.objects.none()
+        attendance_rate = None
+        top_attenders, bottom_attenders = [], []
+        missed_practices = Member.objects.none()
+        no_shows = []
         if season is not None:
             roster = list(TeamMembership.objects.filter(team=team, season=season).select_related("member", "position").order_by("position__ordering", "member__last_name"))
             staff = list(StaffAssignment.objects.filter(team=team, season=season).select_related("member", "position").order_by("position__ordering", "member__last_name"))
@@ -766,6 +771,13 @@ class TeamDetailView(ClubStaffRequiredMixin, DetailView):
                 for assignment in staff:
                     assignment.edit_form = StaffAssignmentForm(instance=assignment, club=club, team=team, season=season)
 
+            attendance_rate = team_attendance_rate(team, season)
+            rankings = player_attendance_rankings(team, season)
+            top_attenders = rankings[:5]
+            bottom_attenders = list(reversed(rankings))[:5]
+            missed_practices = players_who_missed_recent_practices(team, season)
+            no_shows = team_no_shows(team, season)[:10]
+
         return super().get_context_data(
             seasons=Season.objects.filter(club=club).order_by("-start_date"),
             selected_season=season,
@@ -774,6 +786,11 @@ class TeamDetailView(ClubStaffRequiredMixin, DetailView):
             can_manage=can_manage,
             roster_form=TeamMembershipForm(club=club, team=team, season=season) if can_manage and season else None,
             staff_form=StaffAssignmentForm(club=club, team=team, season=season) if can_manage and season else None,
+            attendance_rate=attendance_rate,
+            top_attenders=top_attenders,
+            bottom_attenders=bottom_attenders,
+            missed_practices=missed_practices,
+            no_shows=no_shows,
             **kwargs,
         )
 

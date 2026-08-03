@@ -124,6 +124,13 @@ class Attendance(UUIDModel):
     event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="attendances", verbose_name=_("event"))
     member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="attendances", verbose_name=_("member"))
     status = models.CharField(_("status"), max_length=20, choices=AttendanceStatus.choices, default=AttendanceStatus.NO_RESPONSE)
+    showed_up = models.BooleanField(
+        _("showed up"),
+        null=True,
+        blank=True,
+        default=None,
+        help_text=_("Recorded by a check-in, separate from the RSVP status above. Blank means no check-in has been recorded yet."),
+    )
     note = models.TextField(_("note"), blank=True)
 
     class Meta:

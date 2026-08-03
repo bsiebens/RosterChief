@@ -28,6 +28,99 @@
             <span>{% trans "This club has no seasons yet, so there's no roster or staff to show." %}</span>
         </div>
     {% else %}
+        <div class="mb-4 grid gap-4 lg:grid-cols-3">
+            <div class="card bg-base-100 shadow border-l-4 {% if attendance_rate is None %}border-info{% elif attendance_rate < 30 %}border-error{% elif attendance_rate < 65 %}border-warning{% else %}border-success{% endif %}">
+                <div class="card-body p-4">
+                    <div class="flex items-center gap-2 text-sm opacity-70 mb-3">{% lucide "user-check" size=16 %} {% trans "Attendance rate" %}</div>
+                    <div class="text-4xl font-bold tabular-nums font-mono">
+                        {% if attendance_rate is None %}
+                            {% trans "N/A" %}
+                        {% else %}
+                            {{ attendance_rate }}%
+                        {% endif %}
+                    </div>
+                    <div class="text-xs opacity-60">
+                        {% if attendance_rate is None %}
+                            {% trans "No past events this season" %}
+                        {% else %}
+                            <progress class="progress w-full {% if attendance_rate < 30 %}progress-error{% elif attendance_rate < 65 %}progress-warning{% else %}progress-success{% endif %}" value="{{ attendance_rate }}" max="100"></progress>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+
+            <div class="card bg-base-100 shadow">
+                <div class="card-body">
+                    <h2 class="card-title text-base">{% lucide "trending-up" size=18 %} {% trans "Top attenders" %}</h2>
+                    <ul class="divide-y divide-base-200">
+                        {% for entry in top_attenders %}
+                            <li class="flex items-center justify-between py-2">
+                                <span class="text-sm">{{ entry.member }}</span>
+                                <span class="font-semibold tabular-nums font-mono">{{ entry.rate }}%</span>
+                            </li>
+                        {% empty %}
+                            <li class="py-2 text-center text-sm opacity-60">{% trans "Not enough data yet." %}</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            </div>
+
+            <div class="card bg-base-100 shadow">
+                <div class="card-body">
+                    <h2 class="card-title text-base">{% lucide "trending-down" size=18 %} {% trans "Needs attention" %}</h2>
+                    <ul class="divide-y divide-base-200">
+                        {% for entry in bottom_attenders %}
+                            <li class="flex items-center justify-between py-2">
+                                <span class="text-sm">{{ entry.member }}</span>
+                                <span class="font-semibold tabular-nums font-mono">{{ entry.rate }}%</span>
+                            </li>
+                        {% empty %}
+                            <li class="py-2 text-center text-sm opacity-60">{% trans "Not enough data yet." %}</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <div class="mb-6 grid gap-4 lg:grid-cols-2">
+            <div class="card bg-base-100 shadow">
+                <div class="card-body">
+                    <h2 class="card-title text-base">{% lucide "alert-triangle" size=18 %} {% trans "Missed the last 2 practices" %}</h2>
+                    <ul class="divide-y divide-base-200">
+                        {% for member in missed_practices %}
+                            <li class="py-2 text-sm">{{ member }}</li>
+                        {% empty %}
+                            <li class="py-2 text-center text-sm opacity-60">{% trans "No one -- or not enough practice history yet." %}</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            </div>
+
+            <div class="card bg-base-100 shadow">
+                <div class="card-body">
+                    <h2 class="card-title text-base">{% lucide "user-x" size=18 %} {% trans "No-shows" %}</h2>
+                    <p class="text-sm opacity-70">{% trans "Said they'd attend, but were checked in as absent." %}</p>
+                    <div class="overflow-x-auto">
+                        <table class="table">
+                            <tbody>
+                                {% for entry in no_shows %}
+                                    <tr>
+                                        <td>{{ entry.member }}</td>
+                                        <td class="opacity-70">{{ entry.event.title }}</td>
+                                        <td class="whitespace-nowrap text-right opacity-60">{{ entry.event.start|date:"j M" }}</td>
+                                    </tr>
+                                {% empty %}
+                                    <tr>
+                                        <td colspan="3" class="text-center opacity-60">{% trans "None recorded." %}</td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <div class="card bg-base-100 shadow">
             <div class="card-body">
                 <div class="flex items-center justify-between">
