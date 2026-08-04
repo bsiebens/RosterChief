@@ -20,7 +20,7 @@ from billing.models import GRACE_DAYS, Due, Tier, TierPrice
 from billing.services import BillingError
 from billing.services.dues import record_payment, subscribe, waive
 from club.models import Club, ClubMembership, ClubRole, Season
-from events.models import Attendance, Event
+from events.models import Attendance, Event, Location
 from features.models import Maintenance
 from members.models import Member
 from shop.models import Order
@@ -224,6 +224,74 @@ class ClubAdminManagementTests(ControlPanelTestBase):
 
         self.assertContains(response, "Ada Min")
         self.assertContains(response, "ada@example.com")
+
+
+class ClubHomeLocationTests(ControlPanelTestBase):
+    """The club detail page's "Home location" box -- see
+    controlpanel.views.ClubHomeLocationSetView. Setting it here creates/updates
+    an events.Location row flagged is_home, which is also what shows up on the
+    club's own Teams > Locations page (management app) -- there's no separate
+    sync step, it's the same row."""
+
+    def set_home_location(self, **data):
+        data = {"name": "Home Ground", "address": "1 Main St", "city": "Town", "zip_code": "1000", "country": "BE"} | data
+        return self.client.post(reverse("controlpanel:club_home_location_set", args=[self.club.pk]), data)
+
+    def test_setting_it_creates_a_location(self):
+        response = self.set_home_location()
+
+        self.assertRedirects(response, reverse("controlpanel:club_detail", args=[self.club.pk]))
+        location = Location.objects.get(club=self.club, is_home=True)
+        self.assertEqual(location.name, "Home Ground")
+
+    def test_the_home_location_modal_renders_country_as_a_dropdown(self):
+        # Regression: CountryField's widget_type ("lazyselect") wasn't recognised
+        # by the form_field templatetag and fell through to a broken plain
+        # <input type="lazyselect">, not a <select> -- see form_field in
+        # controlpanel/templatetags/ui.py.
+        response = self.client.get(reverse("controlpanel:club_detail", args=[self.club.pk]))
+
+        self.assertNotContains(response, 'type="lazyselect"')
+        self.assertContains(response, "Belgium")
+        self.assertContains(response, '<select')
+
+    def test_the_club_detail_page_shows_the_home_location(self):
+        self.set_home_location(name="Home Ground")
+
+        response = self.client.get(reverse("controlpanel:club_detail", args=[self.club.pk]))
+
+        self.assertContains(response, "Home Ground")
+
+    def test_setting_it_again_updates_the_same_location_instead_of_creating_another(self):
+        self.set_home_location(name="Home Ground")
+
+        self.set_home_location(name="Renamed Ground")
+
+        self.assertEqual(Location.objects.filter(club=self.club, is_home=True).count(), 1)
+        self.assertEqual(Location.objects.get(club=self.club, is_home=True).name, "Renamed Ground")
+
+    def test_the_home_location_is_visible_on_the_clubs_own_locations_page(self):
+        # Same row, no sync needed -- the club-facing management app reads straight
+        # from events.Location, same as this view writes to.
+        self.set_home_location(name="Home Ground")
+        self.client.logout()
+        admin_user = User.objects.create_user(email="clubadmin@example.com", password="pw-secret-123")
+        admin_member = Member.objects.create(user=admin_user, first_name="Ada", last_name="Admin")
+        ClubMembership.objects.create(club=self.club, member=admin_member, season=Season.objects.create(club=self.club, start_date=datetime.date(2020, 1, 1), end_date=datetime.date(2020, 12, 31)), status=ClubMembership.StatusChoices.ACTIVE)
+        ClubRole.objects.filter(club=self.club, member=admin_member).update(role=ClubRole.Roles.ADMIN)
+        enrol_mfa(admin_user)
+        self.client.force_login(admin_user)
+
+        with override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=[".rosterchief.app"]):
+            response = self.client.get(reverse("management:location_list"), headers={"host": f"{self.club.slug}.rosterchief.app"})
+
+        self.assertContains(response, "Home Ground")
+
+    def test_invalid_submission_redirects_back_with_an_error(self):
+        response = self.set_home_location(name="")
+
+        self.assertRedirects(response, reverse("controlpanel:club_detail", args=[self.club.pk]))
+        self.assertFalse(Location.objects.filter(club=self.club, is_home=True).exists())
 
 
 class StatisticsTests(TestCase):

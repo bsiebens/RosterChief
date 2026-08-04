@@ -194,12 +194,14 @@
     </div>
     {% include "controlpanel/_club_features_card.html" %}
     {% include "controlpanel/_club_billing_card.html" %}
+    {% include "controlpanel/_club_home_location_card.html" %}
     {% include "controlpanel/_club_admins_card.html" %}
 {% endblock panel %}
 
 {% block extra_body %}
     {{ charts|json_script:"chart-data" }}
     <script src="{% static 'js/chart.js' %}"></script>
+    <script src="{% static 'js/searchable-select.js' %}"></script>
     <script>
         (() => {
             const data = JSON.parse(document.getElementById("chart-data").textContent);

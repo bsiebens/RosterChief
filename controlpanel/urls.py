@@ -13,6 +13,7 @@ urlpatterns = [
     path("clubs/<uuid:pk>/edit/", views.ClubUpdateView.as_view(), name="club_update"),
     path("clubs/<uuid:pk>/archive/", views.ClubArchiveView.as_view(), name="club_archive"),
     path("clubs/<uuid:pk>/restore/", views.ClubRestoreView.as_view(), name="club_restore"),
+    path("clubs/<uuid:pk>/home-location/", views.ClubHomeLocationSetView.as_view(), name="club_home_location_set"),
     path("clubs/<uuid:pk>/admins/add/", views.ClubAdminAddView.as_view(), name="club_admin_add"),
     path("clubs/<uuid:pk>/admins/<uuid:role_pk>/remove/", views.ClubAdminRemoveView.as_view(), name="club_admin_remove"),
     path("clubs/<uuid:pk>/features/<int:flag_pk>/toggle/", views.ClubFeatureToggleView.as_view(), name="club_feature_toggle"),

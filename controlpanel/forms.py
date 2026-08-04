@@ -6,6 +6,7 @@ from waffle import get_waffle_flag_model
 
 from billing.models import DuePayment, Subscription, Tier, TierPrice
 from club.models import Club
+from events.models import Location
 
 from .services.admins import find_member_by_email
 
@@ -28,6 +29,21 @@ class ClubForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields["slug"].required = False
+
+
+class HomeLocationForm(forms.ModelForm):
+    """Create or update the club's home ground -- this *is* an events.Location row
+    (flagged ``is_home``), the same one that shows up under the club's own
+    Teams > Locations page, so the two stay in sync by construction rather than
+    needing anything to keep them that way."""
+
+    class Meta:
+        model = Location
+        fields = ["name", "address", "city", "zip_code", "country"]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["country"].widget.attrs.update({"data-searchable": "true", "data-search-placeholder": _("Type a country to search...")})
 
 
 class ClubAdminForm(forms.Form):

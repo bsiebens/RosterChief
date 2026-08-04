@@ -15,9 +15,10 @@ from billing.services import BillingError
 from billing.services.dues import next_period_start, open_period, reactivate, record_payment, subscribe, waive
 from billing.services.invoices import invoice_pdf, issue_invoice
 from club.models import Club, ClubRole
+from events.models import Location
 from features.models import Maintenance
 
-from .forms import ClubAdminForm, ClubForm, DuePaymentForm, FlagForm, MaintenanceForm, OpenPeriodForm, PlatformAdminForm, SubscriptionForm, TierForm, TierPriceForm
+from .forms import ClubAdminForm, ClubForm, DuePaymentForm, FlagForm, HomeLocationForm, MaintenanceForm, OpenPeriodForm, PlatformAdminForm, SubscriptionForm, TierForm, TierPriceForm
 from .messages import notify
 from .mixins import PlatformStaffRequiredMixin, PlatformSuperuserRequiredMixin, RedirectOnInvalidMixin
 from .services.admins import grant_club_admin, revoke_club_admin
@@ -134,7 +135,11 @@ class ClubDetailView(PlatformStaffRequiredMixin, DetailView):
             if due.is_owing:
                 due.payment_form = DuePaymentForm(initial={"amount": due.balance})
 
+        home_location = Location.objects.filter(club=self.object, is_home=True).first()
+
         return super().get_context_data(
+            home_location=home_location,
+            home_location_form=HomeLocationForm(instance=home_location),
             nav="clubs",
             groups=club_statistics(self.object),
             attention=club_attention(self.object),
@@ -188,6 +193,35 @@ class ClubAdminAddView(PlatformStaffRequiredMixin, RedirectOnInvalidMixin, FormV
     def form_valid(self, form):
         role = grant_club_admin(self.club, **form.cleaned_data)
         notify(self.request, f"s|Admin added|{role.member} is now an admin of {role.club}. They must set up two-factor authentication before they can sign in.")
+        return redirect("controlpanel:club_detail", pk=self.kwargs["pk"])
+
+
+class ClubHomeLocationSetView(PlatformStaffRequiredMixin, RedirectOnInvalidMixin, FormView):
+    """Create or update the club's home Location -- reachable only via the "Home
+    location" modal on the club detail page. Binds to the existing home Location
+    (if any) so submitting the form edits it in place rather than ever creating
+    a second one; ``unique_home_location_per_club`` backs that up at the DB level."""
+
+    form_class = HomeLocationForm
+    http_method_names = ["post"]
+    invalid_redirect_url_name = "controlpanel:club_detail"
+
+    @property
+    def club(self):
+        return get_object_or_404(Club, pk=self.kwargs["pk"])
+
+    def get_invalid_redirect_kwargs(self):
+        return {"pk": self.kwargs["pk"]}
+
+    def get_form_kwargs(self):
+        return super().get_form_kwargs() | {"instance": Location.objects.filter(club=self.club, is_home=True).first()}
+
+    def form_valid(self, form):
+        location = form.save(commit=False)
+        location.club = self.club
+        location.is_home = True
+        location.save()
+        notify(self.request, f"s|Home location set|{location} is now {self.club}'s home location.")
         return redirect("controlpanel:club_detail", pk=self.kwargs["pk"])
 
 

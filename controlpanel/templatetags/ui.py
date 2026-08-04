@@ -152,7 +152,11 @@ def form_field(
 
     field_type = None
     match field.widget_type:
-        case "select" | "nullbooleanselect" | "radioselect":
+        # "lazyselect" is django_countries' CountryField widget (a Select subclass
+        # with a lazily-translated choice list) -- without it here, this fell
+        # through to the "input" case below and rendered as a plain text box
+        # (`<input type="lazyselect">`, which browsers just treat as text).
+        case "select" | "nullbooleanselect" | "radioselect" | "lazyselect":
             field_type = "select"
         case "checkbox":
             field_type = "checkbox"
