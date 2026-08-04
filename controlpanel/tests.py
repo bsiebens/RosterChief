@@ -1446,6 +1446,71 @@ class BillingPanelTests(ControlPanelTestBase):
         self.assertContains(response, "pango")
 
 
+class TrialPanelTests(ControlPanelTestBase):
+    """The club detail page's "Start trial" modal -- see
+    controlpanel.views.ClubStartTrialView / billing.services.dues.start_trial."""
+
+    def setUp(self):
+        super().setUp()
+        self.today = timezone.localdate()
+        self.trial_tier = Tier.objects.create(name="Trial")
+        TierPrice.objects.create(tier=self.trial_tier, active_from=self.today - datetime.timedelta(days=1200), amount=Decimal("50.00"))
+        self.tier = Tier.objects.create(name="Standard")
+        TierPrice.objects.create(tier=self.tier, active_from=self.today - datetime.timedelta(days=1200), amount=Decimal("500.00"))
+
+    def start_trial(self, **data):
+        data = {"trial_tier": self.trial_tier.pk, "post_trial_tier": self.tier.pk, "trial_months": 2, "start": ""} | data
+        return self.client.post(reverse("controlpanel:club_trial_start", args=[self.club.pk]), data)
+
+    def test_starting_a_trial_opens_a_short_first_period(self):
+        response = self.start_trial()
+
+        self.assertRedirects(response, reverse("controlpanel:club_detail", args=[self.club.pk]))
+        self.assertEqual(self.club.subscription.tier, self.trial_tier)
+        self.assertEqual(self.club.subscription.post_trial_tier, self.tier)
+        due = self.club.dues.first()
+        self.assertTrue(due.is_trial)
+        self.assertLess((due.period_end - due.period_start).days, 65)
+
+    def test_a_club_already_subscribed_cannot_be_started_on_a_trial(self):
+        subscribe(self.club, self.tier)
+
+        response = self.client.post(
+            reverse("controlpanel:club_trial_start", args=[self.club.pk]),
+            {"trial_tier": self.trial_tier.pk, "post_trial_tier": self.tier.pk, "trial_months": 2, "start": ""},
+            follow=True,
+        )
+
+        self.assertContains(response, "already subscribed")
+        self.assertEqual(self.club.dues.count(), 1)
+
+    def test_an_invalid_trial_length_redirects_back_with_an_error(self):
+        response = self.client.post(reverse("controlpanel:club_trial_start", args=[self.club.pk]), {"trial_tier": self.trial_tier.pk, "post_trial_tier": self.tier.pk, "trial_months": 0, "start": ""}, follow=True)
+
+        self.assertFalse(hasattr(self.club, "subscription"))
+        self.assertTrue(response.context["messages"])
+
+    def test_the_club_page_shows_the_active_trial(self):
+        self.start_trial()
+
+        response = self.client.get(reverse("controlpanel:club_detail", args=[self.club.pk]))
+
+        self.assertContains(response, "On trial")
+        self.assertContains(response, "Standard")
+
+    def test_manually_changing_tier_mid_trial_clears_the_trial(self):
+        self.start_trial()
+        other = Tier.objects.create(name="Other")
+        TierPrice.objects.create(tier=other, active_from=self.today - datetime.timedelta(days=1200), amount=Decimal("300.00"))
+
+        self.client.post(reverse("controlpanel:club_subscribe", args=[self.club.pk]), {"tier": other.pk, "auto_archive": "on", "notes": ""})
+
+        self.club.refresh_from_db()
+        self.assertEqual(self.club.subscription.tier, other)
+        self.assertIsNone(self.club.subscription.trial_ends_at)
+        self.assertIsNone(self.club.subscription.post_trial_tier)
+
+
 class BillingFormRenderTests(ControlPanelTestBase):
     def setUp(self):
         super().setUp()

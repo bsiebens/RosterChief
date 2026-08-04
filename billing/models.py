@@ -13,6 +13,7 @@ from dateutil import relativedelta
 from django.conf import settings
 from django.core.validators import MinValueValidator
 from django.db import models
+from django.db.models import Q
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
@@ -31,6 +32,10 @@ RENEWAL_LEAD_DAYS = 30
 
 def add_one_year(day: date) -> date:
     return day + relativedelta.relativedelta(years=1)
+
+
+def add_months(day: date, months: int) -> date:
+    return day + relativedelta.relativedelta(months=months)
 
 
 class Tier(UUIDModel):
@@ -98,10 +103,21 @@ class Subscription(UUIDModel):
     auto_archive = models.BooleanField(_("auto archive"), default=True, help_text=_("Archive this club when a period goes unpaid past its grace period."))
     notes = models.TextField(_("notes"), blank=True)
 
+    trial_ends_at = models.DateField(_("trial ends at"), null=True, blank=True, help_text=_("Set while this club is on a trial. The tier switches to post_trial_tier the next time a period is opened after this date."))
+    post_trial_tier = models.ForeignKey(Tier, on_delete=models.PROTECT, null=True, blank=True, related_name="+", verbose_name=_("post-trial tier"), help_text=_("The plan this club switches to automatically once its trial ends."))
+
     class Meta:
         verbose_name = _("subscription")
         verbose_name_plural = _("subscriptions")
         ordering = ["club__name"]
+        constraints = [
+            # Both set together or neither -- a trial with no target plan (or a target
+            # plan with no trial end date) is a half-configured state nothing should read.
+            models.CheckConstraint(
+                condition=Q(trial_ends_at__isnull=True, post_trial_tier__isnull=True) | Q(trial_ends_at__isnull=False, post_trial_tier__isnull=False),
+                name="trial_fields_set_together",
+            ),
+        ]
 
     def __str__(self):
         return f"{self.club} — {self.tier}"
@@ -137,6 +153,8 @@ class Due(UUIDModel):
 
     status = models.CharField(_("status"), max_length=20, choices=Status.choices, default=Status.UNPAID)
     paid_at = models.DateTimeField(_("paid at"), null=True, blank=True)
+
+    is_trial = models.BooleanField(_("trial period"), default=False, help_text=_("This period was opened as a trial. A durable marker on the row itself -- the subscription's own trial fields are cleared once it converts."))
 
     class Meta:
         verbose_name = _("due")

@@ -112,6 +112,23 @@ class SubscriptionForm(forms.ModelForm):
         self.fields["tier"].queryset = Tier.objects.filter(is_active=True)
 
 
+class TrialForm(forms.Form):
+    """Put a club with no subscription yet on a short trial that switches itself to
+    ``post_trial_tier`` automatically once it ends -- see billing.services.dues.start_trial."""
+
+    trial_tier = forms.ModelChoiceField(queryset=Tier.objects.none(), label=_("Trial tier"), help_text=_("What this club is billed on during the trial."))
+    post_trial_tier = forms.ModelChoiceField(queryset=Tier.objects.none(), label=_("Then switch to"), help_text=_("The plan it lands on automatically once the trial ends."))
+    trial_months = forms.IntegerField(min_value=1, initial=2, label=_("Trial length (months)"))
+    start = forms.DateField(required=False, widget=forms.DateInput(attrs={"type": "date"}), label=_("Trial starts"), help_text=_("Left blank, the trial starts today."))
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Same reasoning as SubscriptionForm: a retired tier keeps billing whoever is
+        # already on it, but must not be offered for a new trial or a new plan either.
+        self.fields["trial_tier"].queryset = Tier.objects.filter(is_active=True)
+        self.fields["post_trial_tier"].queryset = Tier.objects.filter(is_active=True)
+
+
 class DuePaymentForm(forms.Form):
     amount = forms.DecimalField(max_digits=10, decimal_places=2, min_value=Decimal("0.01"), label=_("Amount"))
     method = forms.ChoiceField(choices=DuePayment.Method.choices, initial=DuePayment.Method.BANK_TRANSFER, label=_("Method"))

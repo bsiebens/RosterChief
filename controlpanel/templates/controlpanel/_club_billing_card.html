@@ -14,6 +14,11 @@
                 <button class="btn btn-outline btn-neutral btn-sm gap-2" type="button" onclick="document.getElementById('subscription_modal').showModal()">
                     {% lucide "layers" size=14 %} {% if subscription %}Change plan{% else %}Start billing{% endif %}
                 </button>
+                {% if not subscription %}
+                    <button class="btn btn-outline btn-neutral btn-sm gap-2" type="button" onclick="document.getElementById('trial_modal').showModal()">
+                        {% lucide "hourglass" size=14 %} Start trial
+                    </button>
+                {% endif %}
                 {% if subscription %}
                     <button class="btn btn-primary btn-sm gap-2" type="button" onclick="document.getElementById('open_period_modal').showModal()">
                         {% lucide "calendar-plus" size=14 %} {% if club.is_archived %}Reactivate{% else %}Open period{% endif %}
@@ -27,6 +32,10 @@
         {% else %}
             <p class="text-sm opacity-70">
                 On plan <strong>{{ subscription.tier.name }}</strong>.
+                {% if subscription.trial_ends_at %}
+                    <span class="badge badge-info badge-sm gap-1">{% lucide "hourglass" size=12 %} Trial</span>
+                    On trial until {{ subscription.trial_ends_at|date:"j M Y" }}, then switches to <strong>{{ subscription.post_trial_tier.name }}</strong>.
+                {% endif %}
                 {% if subscription.auto_renew %}
                     Renews automatically 30 days before the period ends.
                 {% else %}
@@ -117,6 +126,11 @@
 
 {% url 'controlpanel:club_subscribe' club.pk as subscribe_url %}
 {% include "controlpanel/_modal_form.html" with modal_id="subscription_modal" title=subscription|yesno:"Change plan,Start billing" form=subscription_form action_url=subscribe_url submit_label="Save plan" submit_icon="layers" blurb="Changing tier does not re-bill: the current period keeps the amount it was issued at, and the new rate applies from the next one." %}
+
+{% if not subscription %}
+    {% url 'controlpanel:club_trial_start' club.pk as trial_start_url %}
+    {% include "controlpanel/_modal_form.html" with modal_id="trial_modal" title="Start trial" form=trial_form action_url=trial_start_url submit_label="Start trial" submit_icon="hourglass" blurb="The trial period is billed like any other, on the trial tier you pick. It switches to the plan you pick here automatically the next time a period is opened after it ends -- no follow-up needed." %}
+{% endif %}
 
 {% if subscription %}
     {% url 'controlpanel:club_open_period' club.pk as open_period_url %}

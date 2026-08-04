@@ -12,13 +12,13 @@ from waffle import get_waffle_flag_model, get_waffle_switch_model
 
 from billing.models import Due, Tier, TierPrice
 from billing.services import BillingError
-from billing.services.dues import next_period_start, open_period, reactivate, record_payment, subscribe, waive
+from billing.services.dues import next_period_start, open_period, reactivate, record_payment, start_trial, subscribe, waive
 from billing.services.invoices import invoice_pdf, issue_invoice
 from club.models import Club, ClubRole
 from events.models import Location
 from features.models import Maintenance
 
-from .forms import ClubAdminForm, ClubForm, DuePaymentForm, FlagForm, HomeLocationForm, MaintenanceForm, OpenPeriodForm, PlatformAdminForm, SubscriptionForm, TierForm, TierPriceForm
+from .forms import ClubAdminForm, ClubForm, DuePaymentForm, FlagForm, HomeLocationForm, MaintenanceForm, OpenPeriodForm, PlatformAdminForm, SubscriptionForm, TierForm, TierPriceForm, TrialForm
 from .messages import notify
 from .mixins import PlatformStaffRequiredMixin, PlatformSuperuserRequiredMixin, RedirectOnInvalidMixin
 from .services.admins import grant_club_admin, revoke_club_admin
@@ -153,6 +153,7 @@ class ClubDetailView(PlatformStaffRequiredMixin, DetailView):
             open_period_form=OpenPeriodForm(),
             open_period_blurb=f"Next period starts {date_format(next_start, 'j M Y')} unless you say otherwise. By default it continues from the end of the last one, so a lapsed year is still owed — pick a start date to forgive the gap.",
             subscription_form=SubscriptionForm(instance=subscription) if subscription else SubscriptionForm(),
+            trial_form=TrialForm(),
             **kwargs,
         )
 
@@ -503,13 +504,51 @@ class SubscribeClubView(PlatformStaffRequiredMixin, RedirectOnInvalidMixin, Form
             if existing:
                 # Changing tier does not re-bill: the current period keeps the amount it was
                 # issued at, and the new rate applies from the next one.
+                was_on_trial = existing.trial_ends_at is not None
                 subscription = form.save(commit=False)
                 subscription.club = club
+                if was_on_trial:
+                    # A manual tier change while on a trial is a deliberate override --
+                    # left in place, the trial fields would silently swap the tier again
+                    # later, onto a plan the admin didn't just choose.
+                    subscription.trial_ends_at = None
+                    subscription.post_trial_tier = None
                 subscription.save()
                 notify(self.request, f"s|Plan changed|{club} is now on {subscription.tier}. The current period keeps the amount it was billed at.")
             else:
                 subscribe(club, form.cleaned_data["tier"], start=form.cleaned_data.get("start"), auto_archive=form.cleaned_data["auto_archive"], auto_renew=form.cleaned_data["auto_renew"])
                 notify(self.request, f"s|Billing started|{club} is on {form.cleaned_data['tier']}. Its first period is open.")
+
+        return redirect("controlpanel:club_detail", pk=club.pk)
+
+
+class ClubStartTrialView(PlatformStaffRequiredMixin, RedirectOnInvalidMixin, FormView):
+    """Put a club with no subscription yet on a short trial -- reachable only via the
+    "Start trial" modal on the club detail page, shown alongside "Start billing" only
+    while the club has no subscription. POST-only, no standalone template."""
+
+    form_class = TrialForm
+    http_method_names = ["post"]
+    invalid_redirect_url_name = "controlpanel:club_detail"
+
+    @property
+    def club(self):
+        return get_object_or_404(Club, pk=self.kwargs["pk"])
+
+    def get_invalid_redirect_kwargs(self):
+        return {"pk": self.kwargs["pk"]}
+
+    def form_valid(self, form):
+        club = self.club
+        with suppress_billing_errors(self.request, title="Couldn't start trial"):
+            start_trial(
+                club,
+                form.cleaned_data["trial_tier"],
+                post_trial_tier=form.cleaned_data["post_trial_tier"],
+                trial_months=form.cleaned_data["trial_months"],
+                start=form.cleaned_data.get("start"),
+            )
+            notify(self.request, f"s|Trial started|{club} is on a {form.cleaned_data['trial_months']}-month trial of {form.cleaned_data['trial_tier']}, then switches to {form.cleaned_data['post_trial_tier']}.")
 
         return redirect("controlpanel:club_detail", pk=club.pk)
 

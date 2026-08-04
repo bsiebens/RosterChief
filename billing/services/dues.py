@@ -9,7 +9,7 @@ from django.db import transaction
 from django.db.models import DateField, OuterRef, Subquery, Sum
 from django.utils import timezone
 
-from billing.models import RENEWAL_LEAD_DAYS, ZERO, Due, DuePayment, Subscription, Tier
+from billing.models import RENEWAL_LEAD_DAYS, ZERO, Due, DuePayment, Subscription, Tier, add_months
 from billing.services import BillingError
 from billing.services.invoices import issue_invoice
 
@@ -20,6 +20,27 @@ def subscribe(club, tier: Tier, *, start: date | None = None, auto_archive: bool
     open_period(club, start=start)
 
     return subscription
+
+
+@transaction.atomic
+def start_trial(club, trial_tier: Tier, *, post_trial_tier: Tier, trial_months: int, start: date | None = None, auto_renew: bool = True, auto_archive: bool = True) -> Due:
+    """Put a club on a short trial that switches itself to ``post_trial_tier`` the moment
+    the trial period is renewed -- see open_period()'s trial-conversion check.
+
+    Only for a club with no subscription yet -- converting an existing paying subscription
+    into a trial is a different, deliberately unsupported operation for now.
+    """
+    if trial_months <= 0:
+        raise BillingError("Trial length must be at least 1 month.")
+    if getattr(club, "subscription", None) is not None:
+        raise BillingError(f"{club} is already subscribed -- use Change plan instead.")
+
+    start = start or next_period_start(club)
+    trial_end = add_months(start, trial_months) - timedelta(days=1)
+
+    Subscription.objects.create(club=club, tier=trial_tier, trial_ends_at=trial_end, post_trial_tier=post_trial_tier, auto_renew=auto_renew, auto_archive=auto_archive)
+
+    return open_period(club, start=start, period_end=trial_end, is_trial=True)
 
 
 def next_period_start(club, today: date | None = None) -> date:
@@ -36,12 +57,23 @@ def next_period_start(club, today: date | None = None) -> date:
 
 
 @transaction.atomic
-def open_period(club, *, start: date | None = None, tier: Tier | None = None) -> Due:
+def open_period(club, *, start: date | None = None, tier: Tier | None = None, period_end: date | None = None, is_trial: bool = False) -> Due:
     """Issue the next due for a club, snapshotting the tier and the price of the day."""
     subscription = getattr(club, "subscription", None)
-    tier = tier or (subscription.tier if subscription else None)
     if tier is None:
-        raise BillingError(f"{club} has no tier: put it on a subscription before billing it.")
+        if subscription is None:
+            raise BillingError(f"{club} has no tier: put it on a subscription before billing it.")
+        # A trial that has run its course: swap onto the pre-selected plan before billing
+        # the next period, rather than silently renewing the trial tier forever. Checked
+        # here (not in renew()) so it fires whether this period was opened by the renewal
+        # command or by a platform admin clicking "Open period"/"Reactivate" by hand --
+        # both call open_period() directly.
+        if subscription.trial_ends_at is not None and (start or next_period_start(club)) > subscription.trial_ends_at:
+            subscription.tier = subscription.post_trial_tier
+            subscription.trial_ends_at = None
+            subscription.post_trial_tier = None
+            subscription.save(update_fields=["tier", "trial_ends_at", "post_trial_tier"])
+        tier = subscription.tier
 
     start = start or next_period_start(club)
 
@@ -52,7 +84,13 @@ def open_period(club, *, start: date | None = None, tier: Tier | None = None) ->
     if club.dues.filter(period_start=start).exists():
         raise BillingError(f"{club} is already billed for a period starting {start:%d %b %Y}.")
 
-    due = Due.objects.create(club=club, tier=tier, amount=amount, period_start=start)
+    due = Due.objects.create(club=club, tier=tier, amount=amount, period_start=start, period_end=period_end, is_trial=is_trial)
+    if amount == ZERO:
+        # Nothing is actually owed -- left at the default UNPAID, this would eventually
+        # trip is_overdue() and get a free club archived for non-payment of nothing.
+        due.status = Due.Status.PAID
+        due.paid_at = timezone.now()
+        due.save(update_fields=["status", "paid_at"])
     issue_invoice(due)  # every period is billable the moment it opens
 
     return due

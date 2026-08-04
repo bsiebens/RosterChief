@@ -13,7 +13,7 @@ from club.models import Club
 
 from .models import GRACE_DAYS, Due, Invoice, Subscription, Tier, TierPrice, add_one_year
 from .services import BillingError
-from .services.dues import archivable_clubs, dues_in_grace, dues_overdue, next_period_start, open_period, reactivate, record_payment, remove_payment, renew, subscribe, subscriptions_due_for_renewal, waive
+from .services.dues import archivable_clubs, dues_in_grace, dues_overdue, next_period_start, open_period, reactivate, record_payment, remove_payment, renew, start_trial, subscribe, subscriptions_due_for_renewal, waive
 from .services.invoices import invoice_pdf, issue_invoice, render_pdf
 
 
@@ -488,3 +488,76 @@ class RenewedButUnpaidTests(BillingTestBase):
         record_payment(renewed, renewed.amount)
 
         self.assertNotIn(club, [d.club for d in archivable_clubs(self.today)])
+
+
+class TrialTests(BillingTestBase):
+    """A club with no subscription yet can be started on a short trial that switches
+    itself to a pre-selected plan automatically once the trial period is renewed --
+    see billing.services.dues.start_trial and the trial-conversion check in
+    open_period()."""
+
+    def setUp(self):
+        super().setUp()
+        self.trial_tier = Tier.objects.create(name="Trial")
+        TierPrice.objects.create(tier=self.trial_tier, active_from=self.today - datetime.timedelta(days=1200), amount=Decimal("50.00"))
+
+    def test_start_trial_creates_a_short_trial_period(self):
+        due = start_trial(self.club, self.trial_tier, post_trial_tier=self.tier, trial_months=2)
+
+        subscription = self.club.subscription
+        self.assertEqual(subscription.tier, self.trial_tier)
+        self.assertEqual(subscription.post_trial_tier, self.tier)
+        self.assertEqual(subscription.trial_ends_at, due.period_end)
+        self.assertTrue(due.is_trial)
+        # Roughly 2 months, nowhere near the standard ~1-year period.
+        self.assertLess((due.period_end - due.period_start).days, 65)
+
+    def test_start_trial_refuses_if_already_subscribed(self):
+        subscribe(self.club, self.tier)
+
+        with self.assertRaises(BillingError):
+            start_trial(self.club, self.trial_tier, post_trial_tier=self.tier, trial_months=2)
+
+    def test_start_trial_refuses_a_non_positive_length(self):
+        with self.assertRaises(BillingError):
+            start_trial(self.club, self.trial_tier, post_trial_tier=self.tier, trial_months=0)
+
+    def test_renewing_after_the_trial_switches_to_the_post_trial_tier(self):
+        start_trial(self.club, self.trial_tier, post_trial_tier=self.tier, trial_months=2)
+
+        due = renew(self.club.subscription)
+
+        self.club.refresh_from_db()
+        self.assertEqual(self.club.subscription.tier, self.tier)
+        self.assertIsNone(self.club.subscription.trial_ends_at)
+        self.assertIsNone(self.club.subscription.post_trial_tier)
+        self.assertEqual(due.tier, self.tier)
+        self.assertFalse(due.is_trial)
+        self.assertEqual(due.amount, Decimal("500.00"))
+
+    def test_manually_opening_the_next_period_also_switches_tier(self):
+        # Same conversion must fire via the control panel's "Open period" button, which
+        # calls open_period() directly rather than renew().
+        start_trial(self.club, self.trial_tier, post_trial_tier=self.tier, trial_months=2)
+
+        open_period(self.club)
+
+        self.club.refresh_from_db()
+        self.assertEqual(self.club.subscription.tier, self.tier)
+
+    def test_a_trial_nearing_its_end_is_picked_up_for_renewal(self):
+        start_trial(self.club, self.trial_tier, post_trial_tier=self.tier, trial_months=2, start=self.today - datetime.timedelta(days=50))
+
+        self.assertIn(self.club, [s.club for s in subscriptions_due_for_renewal()])
+
+    def test_a_zero_amount_trial_is_created_already_paid(self):
+        free_tier = Tier.objects.create(name="Free Trial")
+        TierPrice.objects.create(tier=free_tier, active_from=self.today - datetime.timedelta(days=1200), amount=Decimal("0.00"))
+
+        due = start_trial(self.club, free_tier, post_trial_tier=self.tier, trial_months=2)
+
+        self.assertEqual(due.status, Due.Status.PAID)
+        self.assertIsNotNone(due.paid_at)
+        far_future = due.grace_until + datetime.timedelta(days=100)
+        self.assertNotIn(due, dues_overdue(far_future))
+        self.assertNotIn(self.club, [d.club for d in archivable_clubs(far_future)])

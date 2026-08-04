@@ -32,6 +32,7 @@ urlpatterns = [
     path("billing/dues/<uuid:pk>/waive/", views.WaiveDueView.as_view(), name="due_waive"),
     path("billing/dues/<uuid:pk>/invoice.pdf", views.InvoicePdfView.as_view(), name="due_invoice"),
     path("clubs/<uuid:pk>/subscription/", views.SubscribeClubView.as_view(), name="club_subscribe"),
+    path("clubs/<uuid:pk>/trial/start/", views.ClubStartTrialView.as_view(), name="club_trial_start"),
     path("clubs/<uuid:pk>/period/new/", views.OpenPeriodView.as_view(), name="club_open_period"),
     # Platform admins (superusers only)
     path("admins/", views.PlatformAdminListView.as_view(), name="admins"),
