@@ -54,6 +54,7 @@ INSTALLED_APPS = [
     # that page raises TemplateSyntaxError.
     "django.contrib.humanize",
     "phonenumber_field",
+    "django_countries",
     "lucide",
     # Auth: allauth deliberately WITHOUT django.contrib.sites — it is optional in
     # allauth 65+, and ARCHITECTURE.md §2.4 rejects the Sites framework (Club is
@@ -188,6 +189,7 @@ TEMPLATES = [
                 "club.context_processors.branding",
                 "features.context_processors.maintenance",
                 "management.context_processors.is_admin",
+                "management.context_processors.management_position",
                 "management.context_processors.management_link",
                 "management.context_processors.active_nav_section",
                 "management.context_processors.news_permissions",

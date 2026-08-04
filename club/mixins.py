@@ -1,7 +1,7 @@
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from django.http import Http404
 
-from .services.access import can_add_news, can_edit_news, can_publish_news, has_management_access, is_club_admin, teams_managed_by
+from .services.access import can_add_news, can_edit_news, can_publish_news, has_management_access, is_club_admin, is_coach_manager, teams_managed_by
 
 
 class ClubStaffRequiredMixin(LoginRequiredMixin, UserPassesTestMixin):
@@ -49,6 +49,16 @@ class TeamManagerRequiredMixin(ClubStaffRequiredMixin):
         if is_club_admin(user, club):
             return True
         return teams_managed_by(user, club).filter(pk=self.get_team().pk).exists()
+
+
+class ManagementPositionRequiredMixin(ClubStaffRequiredMixin):
+    """ADMIN, or anyone with a current-season *management*-position
+    StaffAssignment on any team -- unlike ``TeamManagerRequiredMixin``, the
+    entity here (Location, Opponent, ...) isn't scoped to one team, so "manager
+    of this team" doesn't apply; any management position qualifies."""
+
+    def test_func(self):
+        return is_club_admin(self.request.user, self.request.club) or is_coach_manager(self.request.user, self.request.club)
 
 
 class NewsAuthorRequiredMixin(ClubStaffRequiredMixin):

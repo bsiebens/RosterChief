@@ -1,0 +1,56 @@
+{% extends "management/base.html" %}
+{% load i18n lucide ui %}
+
+{% block heading %}{% trans "Opponents" %}{% endblock heading %}
+
+{% block actions %}
+    <a class="btn btn-primary gap-2" href="{% url 'management:opponent_create' %}">{% lucide "plus" size=16 %} {% trans "New opponent" %}</a>
+{% endblock actions %}
+
+{% block panel %}
+    <div class="card bg-base-100 shadow">
+        <div class="card-body">
+            <div class="overflow-x-auto">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th></th>
+                            <th>{% trans "Name" %}</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for opponent in opponents %}
+                            <tr>
+                                <td>
+                                    {% if opponent.logo %}
+                                        <img src="{{ opponent.logo.url }}" alt="" class="size-8 rounded object-contain">
+                                    {% endif %}
+                                </td>
+                                <td>{{ opponent.name }}</td>
+                                <td class="text-right">
+                                    <div class="flex justify-end gap-1">
+                                        <a class="btn btn-sm btn-outline btn-neutral" href="{% url 'management:opponent_update' opponent.pk %}" aria-label="{% trans 'Edit' %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</a>
+                                        <button class="btn btn-sm btn-outline btn-error" type="button" onclick="document.getElementById('{{ opponent.pk|dom_id:"opponent_delete_modal" }}').showModal()" aria-label="{% trans 'Delete' %}">{% lucide "trash-2" size=14 %} {% trans "Delete" %}</button>
+                                    </div>
+                                </td>
+                            </tr>
+                        {% empty %}
+                            <tr>
+                                <td colspan="3" class="text-center opacity-60">{% trans "No opponents yet." %}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    {% trans "Delete opponent" as delete_opponent_title %}
+    {% trans "Delete" as delete_label %}
+    {% for opponent in opponents %}
+        {% url 'management:opponent_delete' opponent.pk as opponent_delete_url %}
+        {% blocktrans with name=opponent.name asvar delete_opponent_body %}Delete “{{ name }}”? Any events against this opponent keep their history but lose the link. This cannot be undone.{% endblocktrans %}
+        {% include "controlpanel/_confirm_modal.html" with modal_id=opponent.pk|dom_id:"opponent_delete_modal" title=delete_opponent_title body=delete_opponent_body action_url=opponent_delete_url submit_label=delete_label %}
+    {% endfor %}
+{% endblock panel %}

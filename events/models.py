@@ -1,5 +1,7 @@
 from django.db import models
+from django.db.models import Q
 from django.utils.translation import gettext_lazy as _
+from django_countries.fields import CountryField
 
 from club.models import Season
 from members.models import Member
@@ -25,12 +27,20 @@ class Location(ClubScopedModel):
     address = models.CharField(_("address"), max_length=255)
     city = models.CharField(_("city"), max_length=255)
     zip_code = models.CharField(_("zip code"), max_length=255)
-    country = models.CharField(_("country"), max_length=255)
+    country = CountryField(_("country"))
+    is_home = models.BooleanField(
+        _("home location"),
+        default=False,
+        help_text=_("The club's own ground, set from the control panel -- lets an event's location tell a home game from an away one."),
+    )
 
     class Meta:
         verbose_name = _("location")
         verbose_name_plural = _("locations")
         ordering = ["name"]
+        constraints = [
+            models.UniqueConstraint(fields=["club"], condition=Q(is_home=True), name="unique_home_location_per_club"),
+        ]
 
     def __str__(self):
         return self.name

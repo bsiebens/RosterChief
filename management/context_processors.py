@@ -7,7 +7,7 @@ Same reasoning for ``news_permissions`` below, gating just the "New news item"
 action rather than the whole section (``NewsAuthorRequiredMixin``/``can_add_news``).
 """
 
-from club.services.access import can_add_news, has_management_access, is_club_admin
+from club.services.access import can_add_news, has_management_access, is_club_admin, is_coach_manager
 
 #: Every management URL name, mapped to the nav item it should light up --
 #: management/templates/management/_nav_items.html compares against this.
@@ -67,7 +67,13 @@ _NAV_SECTIONS = {
     "event_list": "event_list",
     "event_series_list": "event_series_list",
     "location_list": "location_list",
+    "location_create": "location_list",
+    "location_update": "location_list",
+    "location_delete": "location_list",
     "opponent_list": "opponent_list",
+    "opponent_create": "opponent_list",
+    "opponent_update": "opponent_list",
+    "opponent_delete": "opponent_list",
     "product_list": "product_list",
     "order_list": "order_list",
     "discount_list": "discount_list",
@@ -94,6 +100,17 @@ def is_admin(request):
         return {"is_club_admin": False}
 
     return {"is_club_admin": is_club_admin(request.user, club)}
+
+
+def management_position(request):
+    """Whether the signed-in user holds a management position (or is ADMIN) --
+    gates the nav's Locations/Opponents links, which ``ManagementPositionRequiredMixin``
+    restricts to exactly this group (unlike most staff-visible sections)."""
+    club = getattr(request, "club", None)
+    if club is None or not request.user.is_authenticated:
+        return {"has_management_position": False}
+
+    return {"has_management_position": is_club_admin(request.user, club) or is_coach_manager(request.user, club)}
 
 
 def management_link(request):

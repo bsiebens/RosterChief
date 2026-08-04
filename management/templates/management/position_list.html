@@ -4,7 +4,9 @@
 {% block heading %}{% trans "Positions" %}{% endblock heading %}
 
 {% block actions %}
-    <a class="btn btn-primary gap-2" href="{% url 'management:position_create' %}">{% lucide "plus" size=16 %} {% trans "New position" %}</a>
+    {% if is_club_admin %}
+        <a class="btn btn-primary gap-2" href="{% url 'management:position_create' %}">{% lucide "plus" size=16 %} {% trans "New position" %}</a>
+    {% endif %}
 {% endblock actions %}
 
 {% block panel %}
@@ -39,7 +41,9 @@
                                     </span>
                                 </td>
                                 <td class="text-right">
-                                    <a class="btn btn-outline btn-neutral btn-sm gap-2" href="{% url 'management:position_update' position.pk %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</a>
+                                    {% if is_club_admin %}
+                                        <a class="btn btn-outline btn-neutral btn-sm gap-2" href="{% url 'management:position_update' position.pk %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</a>
+                                    {% endif %}
                                 </td>
                             </tr>
                         {% empty %}

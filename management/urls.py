@@ -62,7 +62,13 @@ urlpatterns = [
     path("events/", views.EventListView.as_view(), name="event_list"),
     path("event-series/", views.EventSeriesListView.as_view(), name="event_series_list"),
     path("locations/", views.LocationListView.as_view(), name="location_list"),
+    path("locations/new/", views.LocationCreateView.as_view(), name="location_create"),
+    path("locations/<uuid:pk>/edit/", views.LocationUpdateView.as_view(), name="location_update"),
+    path("locations/<uuid:pk>/delete/", views.LocationDeleteView.as_view(), name="location_delete"),
     path("opponents/", views.OpponentListView.as_view(), name="opponent_list"),
+    path("opponents/new/", views.OpponentCreateView.as_view(), name="opponent_create"),
+    path("opponents/<uuid:pk>/edit/", views.OpponentUpdateView.as_view(), name="opponent_update"),
+    path("opponents/<uuid:pk>/delete/", views.OpponentDeleteView.as_view(), name="opponent_delete"),
     # Shop (admin only)
     path("shop/products/", views.ProductListView.as_view(), name="product_list"),
     path("shop/orders/", views.OrderListView.as_view(), name="order_list"),

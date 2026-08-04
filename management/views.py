@@ -1,5 +1,5 @@
 from django.db import IntegrityError, transaction
-from django.db.models import Count, ProtectedError
+from django.db.models import Count, ProtectedError, Q
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -9,9 +9,9 @@ from django.utils.translation import gettext_lazy as _
 from django.utils.translation import ngettext
 from django.views.generic import CreateView, DetailView, FormView, ListView, TemplateView, UpdateView, View
 
-from club.mixins import ClubAdminRequiredMixin, ClubStaffRequiredMixin, NewsAuthorRequiredMixin, NewsEditRequiredMixin, NewsPublisherRequiredMixin, TeamManagerRequiredMixin
+from club.mixins import ClubAdminRequiredMixin, ClubStaffRequiredMixin, ManagementPositionRequiredMixin, NewsAuthorRequiredMixin, NewsEditRequiredMixin, NewsPublisherRequiredMixin, TeamManagerRequiredMixin
 from club.models import ClubMembership, ClubRole, Season
-from club.services.access import can_edit_news, can_publish_news, current_season, is_club_admin, members_visible_to, teams_managed_by
+from club.services.access import can_edit_news, can_publish_news, current_season, is_club_admin, members_visible_to, teams_managed_by, teams_staffed_by
 from club.services.fees import mark_as_paid, record_payment, remaining_balance
 from controlpanel.messages import notify
 from controlpanel.mixins import RedirectOnInvalidMixin
@@ -35,11 +35,13 @@ from .forms import (
     ClubRoleAssignForm,
     FamilyCreateForm,
     GrantLoginForm,
+    LocationForm,
     MemberForm,
     MemberImportUploadForm,
     NewsForm,
     NewsPhotoUploadForm,
     NewsPublishForm,
+    OpponentForm,
     PositionForm,
     RecordFeePaymentForm,
     StaffAssignmentForm,
@@ -675,15 +677,25 @@ class MemberDeleteView(ClubAdminRequiredMixin, View):
 
 
 class TeamListView(ClubStaffRequiredMixin, ListView):
+    """ADMIN sees every team; everyone else (coach, manager, other staff) only
+    the teams they're staffed on this season -- same visibility rule as
+    ``members_visible_to``, not the narrower management-only ``teams_managed_by``."""
+
     template_name = "management/team_list.html"
     context_object_name = "teams"
 
     def get_queryset(self):
-        teams = Team.objects.filter(club=self.request.club)
+        club = self.request.club
+        teams = Team.objects.filter(club=club) if is_club_admin(self.request.user, club) else teams_staffed_by(self.request.user, club)
         search = self.request.GET.get("q", "").strip()
         if search:
             teams = teams.filter(name__icontains=search)
-        return teams
+
+        season = current_season(club)
+        return teams.annotate(
+            player_count=Count("roster", filter=Q(roster__season=season), distinct=True),
+            staff_count=Count("staff_assignments", filter=Q(staff_assignments__season=season), distinct=True),
+        )
 
     def get_context_data(self, **kwargs):
         return super().get_context_data(search=self.request.GET.get("q", ""), **kwargs)
@@ -1160,7 +1172,11 @@ class FamilyAddParentView(ClubAdminRequiredMixin, RedirectOnInvalidMixin, FormVi
         return redirect("management:family_detail", pk=family.pk)
 
 
-class PositionListView(ClubAdminRequiredMixin, ListView):
+class PositionListView(ClubStaffRequiredMixin, ListView):
+    """Visible to any staff (coaches need to see positions to make sense of a
+    roster); creating/editing positions is still ADMIN-only, gated in the
+    template and on PositionCreateView/PositionUpdateView themselves."""
+
     template_name = "management/position_list.html"
     context_object_name = "positions"
 
@@ -1381,7 +1397,15 @@ class NewsPhotoDeleteView(NewsEditRequiredMixin, View):
     def post(self, request, pk, photo_pk):
         news_item = self.get_news_item()
         photo = get_object_or_404(NewsPhoto, pk=photo_pk, news_item=news_item)
-        photo.delete()
+        was_main = photo.is_main
+
+        with transaction.atomic():
+            photo.delete()
+            if was_main:
+                replacement = news_item.photos.first()
+                if replacement is not None:
+                    replacement.is_main = True
+                    replacement.save(update_fields=["is_main"])
 
         notify(request, f"w|{_('Photo removed')}|{_('The photo was removed.')}")
         return redirect("management:news_detail", pk=news_item.pk)
@@ -1401,18 +1425,116 @@ class EventSeriesListView(ClubStaffRequiredMixin, StubListMixin, ListView):
         return EventSeries.objects.filter(club=self.request.club)
 
 
-class LocationListView(ClubStaffRequiredMixin, StubListMixin, ListView):
-    page_title = _("Locations")
+class LocationListView(ManagementPositionRequiredMixin, ListView):
+    template_name = "management/location_list.html"
+    context_object_name = "locations"
 
     def get_queryset(self):
         return Location.objects.filter(club=self.request.club)
 
 
-class OpponentListView(ClubStaffRequiredMixin, StubListMixin, ListView):
-    page_title = _("Opponents")
+class LocationCreateView(ManagementPositionRequiredMixin, CreateView):
+    model = Location
+    form_class = LocationForm
+    template_name = "management/location_form.html"
+
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        body = _("“%(location)s” created.") % {"location": self.object}
+        notify(self.request, f"s|{_('Location created')}|{body}")
+        return response
+
+    def get_success_url(self):
+        return reverse("management:location_list")
+
+
+class LocationUpdateView(ManagementPositionRequiredMixin, UpdateView):
+    model = Location
+    form_class = LocationForm
+    template_name = "management/location_form.html"
+
+    def get_queryset(self):
+        return Location.objects.filter(club=self.request.club)
+
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        body = _("“%(location)s” updated.") % {"location": self.object}
+        notify(self.request, f"s|{_('Location updated')}|{body}")
+        return response
+
+    def get_success_url(self):
+        return reverse("management:location_list")
+
+    def get_context_data(self, **kwargs):
+        return super().get_context_data(update_view=True, **kwargs)
+
+
+class LocationDeleteView(ManagementPositionRequiredMixin, View):
+    def post(self, request, pk):
+        location = get_object_or_404(Location.objects.filter(club=request.club), pk=pk)
+        name = str(location)
+        # Event/EventSeries.location is SET_NULL -- no ProtectedError to catch.
+        location.delete()
+
+        body = _("“%(location)s” has been deleted.") % {"location": name}
+        notify(request, f"w|{_('Location deleted')}|{body}")
+        return redirect("management:location_list")
+
+
+class OpponentListView(ManagementPositionRequiredMixin, ListView):
+    template_name = "management/opponent_list.html"
+    context_object_name = "opponents"
 
     def get_queryset(self):
         return Opponent.objects.filter(club=self.request.club)
+
+
+class OpponentCreateView(ManagementPositionRequiredMixin, CreateView):
+    model = Opponent
+    form_class = OpponentForm
+    template_name = "management/opponent_form.html"
+
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        body = _("“%(opponent)s” created.") % {"opponent": self.object}
+        notify(self.request, f"s|{_('Opponent created')}|{body}")
+        return response
+
+    def get_success_url(self):
+        return reverse("management:opponent_list")
+
+
+class OpponentUpdateView(ManagementPositionRequiredMixin, UpdateView):
+    model = Opponent
+    form_class = OpponentForm
+    template_name = "management/opponent_form.html"
+
+    def get_queryset(self):
+        return Opponent.objects.filter(club=self.request.club)
+
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        body = _("“%(opponent)s” updated.") % {"opponent": self.object}
+        notify(self.request, f"s|{_('Opponent updated')}|{body}")
+        return response
+
+    def get_success_url(self):
+        return reverse("management:opponent_list")
+
+    def get_context_data(self, **kwargs):
+        return super().get_context_data(update_view=True, **kwargs)
+
+
+class OpponentDeleteView(ManagementPositionRequiredMixin, View):
+    def post(self, request, pk):
+        opponent = get_object_or_404(Opponent.objects.filter(club=request.club), pk=pk)
+        name = str(opponent)
+        # Event/EventSeries.opponent is SET_NULL -- no ProtectedError to catch.
+        opponent.delete()
+
+        body = _("“%(opponent)s” has been deleted.") % {"opponent": name}
+        notify(request, f"w|{_('Opponent deleted')}|{body}")
+        return redirect("management:opponent_list")
 
 
 class ProductListView(ClubAdminRequiredMixin, StubListMixin, ListView):

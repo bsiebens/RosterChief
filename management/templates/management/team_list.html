@@ -18,6 +18,8 @@
                         <tr>
                             <th>{% trans "Name" %}</th>
                             <th>{% trans "Short name" %}</th>
+                            <th>{% trans "Players" %}</th>
+                            <th>{% trans "Staff" %}</th>
                             <th></th>
                         </tr>
                     </thead>
@@ -26,6 +28,8 @@
                             <tr>
                                 <td><a class="link link-hover" href="{% url 'management:team_detail' team.pk %}">{{ team.name }}</a></td>
                                 <td>{{ team.short_name }}</td>
+                                <td>{{ team.player_count }}</td>
+                                <td>{{ team.staff_count }}</td>
                                 <td class="text-right">
                                     {% if is_club_admin %}
                                         <div class="flex justify-end gap-1">
@@ -37,7 +41,7 @@
                             </tr>
                         {% empty %}
                             <tr>
-                                <td colspan="3" class="text-center opacity-60">{% trans "No teams yet." %}</td>
+                                <td colspan="5" class="text-center opacity-60">{% trans "No teams yet." %}</td>
                             </tr>
                         {% endfor %}
                     </tbody>

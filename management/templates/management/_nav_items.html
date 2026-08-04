@@ -23,9 +23,7 @@
 
 <li class="menu-title">{% trans "Teams" %}</li>
 <li><a class="{% if nav == 'team_list' %}menu-active{% endif %}" href="{% url 'management:team_list' %}">{% lucide "shirt" size=16 %} {% trans "Teams" %}</a></li>
-{% if is_club_admin %}
-    <li><a class="{% if nav == 'position_list' %}menu-active{% endif %}" href="{% url 'management:position_list' %}">{% lucide "tags" size=16 %} {% trans "Positions" %}</a></li>
-{% endif %}
+<li><a class="{% if nav == 'position_list' %}menu-active{% endif %}" href="{% url 'management:position_list' %}">{% lucide "tags" size=16 %} {% trans "Positions" %}</a></li>
 
 <li class="menu-title">{% trans "News" %}</li>
 <li><a class="{% if nav == 'news_list' %}menu-active{% endif %}" href="{% url 'management:news_list' %}">{% lucide "newspaper" size=16 %} {% trans "News" %}</a></li>
@@ -33,8 +31,10 @@
 <li class="menu-title">{% trans "Calendar" %}</li>
 <li><a class="{% if nav == 'event_list' %}menu-active{% endif %}" href="{% url 'management:event_list' %}">{% lucide "calendar" size=16 %} {% trans "Events" %}</a></li>
 <li><a class="{% if nav == 'event_series_list' %}menu-active{% endif %}" href="{% url 'management:event_series_list' %}">{% lucide "repeat" size=16 %} {% trans "Event series" %}</a></li>
-<li><a class="{% if nav == 'location_list' %}menu-active{% endif %}" href="{% url 'management:location_list' %}">{% lucide "map-pin" size=16 %} {% trans "Locations" %}</a></li>
-<li><a class="{% if nav == 'opponent_list' %}menu-active{% endif %}" href="{% url 'management:opponent_list' %}">{% lucide "swords" size=16 %} {% trans "Opponents" %}</a></li>
+{% if has_management_position %}
+    <li><a class="{% if nav == 'location_list' %}menu-active{% endif %}" href="{% url 'management:location_list' %}">{% lucide "map-pin" size=16 %} {% trans "Locations" %}</a></li>
+    <li><a class="{% if nav == 'opponent_list' %}menu-active{% endif %}" href="{% url 'management:opponent_list' %}">{% lucide "swords" size=16 %} {% trans "Opponents" %}</a></li>
+{% endif %}
 
 {% if is_club_admin %}
     <li class="menu-title">{% trans "Shop" %}</li>

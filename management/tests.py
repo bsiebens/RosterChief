@@ -1,4 +1,5 @@
 import datetime
+import os
 import sys
 from decimal import Decimal
 from io import BytesIO
@@ -13,7 +14,7 @@ from django.urls import NoReverseMatch, reverse
 from django.utils import timezone
 
 from club.models import Club, ClubMembership, ClubRole, FeePayment, Season
-from events.models import Attendance, Event
+from events.models import Attendance, Event, Location, Opponent
 from management.bulk_import import TEMPLATE_COLUMNS
 from management.pdf import PDFExportError, render_pdf
 from members.models import Family, FamilyMembership, Member
@@ -132,7 +133,9 @@ class AccessTests(ManagementTestBase):
         StaffAssignment.objects.create(team=team, member=coach_member, season=self.season, position=position)
         self.client.force_login(coach_user)
 
-        self.assertEqual(self.club_get("position_list").status_code, 403)
+        # position_list itself is open to any staff (see TeamAndPositionAccessTests)
+        # -- creating and editing positions stays admin-only.
+        self.assertEqual(self.club_get("position_create").status_code, 403)
         self.assertEqual(self.club_post("member_create", {"first_name": "X", "last_name": "Y"}).status_code, 403)
 
 
@@ -2110,11 +2113,34 @@ class NewsManagementTests(ManagementTestBase):
     def test_deleting_a_photo_removes_it(self):
         item = News.objects.create(club=self.club, title="Match report", body="Body.")
         photo = NewsPhoto.objects.create(news_item=item, image=SimpleUploadedFile("one.jpg", b"one", content_type="image/jpeg"))
+        photo_path = photo.image.path
         self.client.force_login(self.make_coach_manager())
 
         self.club_post("news_photo_delete", {}, item.pk, photo.pk)
 
         self.assertFalse(NewsPhoto.objects.filter(pk=photo.pk).exists())
+        self.assertFalse(os.path.exists(photo_path))
+
+    def test_deleting_the_main_photo_promotes_another_one(self):
+        item = News.objects.create(club=self.club, title="Match report", body="Body.")
+        main = NewsPhoto.objects.create(news_item=item, image=SimpleUploadedFile("one.jpg", b"one", content_type="image/jpeg"), is_main=True)
+        other = NewsPhoto.objects.create(news_item=item, image=SimpleUploadedFile("two.jpg", b"two", content_type="image/jpeg"), is_main=False)
+        self.client.force_login(self.make_coach_manager())
+
+        self.club_post("news_photo_delete", {}, item.pk, main.pk)
+
+        other.refresh_from_db()
+        self.assertTrue(other.is_main)
+
+    def test_deleting_the_only_photo_leaves_nothing_to_promote(self):
+        item = News.objects.create(club=self.club, title="Match report", body="Body.")
+        photo = NewsPhoto.objects.create(news_item=item, image=SimpleUploadedFile("one.jpg", b"one", content_type="image/jpeg"), is_main=True)
+        self.client.force_login(self.make_coach_manager())
+
+        response = self.club_post("news_photo_delete", {}, item.pk, photo.pk)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(item.photos.count(), 0)
 
     def test_a_coach_manager_can_delete_a_draft(self):
         item = News.objects.create(club=self.club, title="Draft item", body="Body.")
@@ -2147,11 +2173,13 @@ class NewsManagementTests(ManagementTestBase):
     def test_deleting_a_news_item_removes_its_photos(self):
         item = News.objects.create(club=self.club, title="Match report", body="Body.")
         photo = NewsPhoto.objects.create(news_item=item, image=SimpleUploadedFile("one.jpg", b"one", content_type="image/jpeg"))
+        photo_path = photo.image.path
         self.client.force_login(self.make_coach_manager())
 
         self.club_post("news_delete", {}, item.pk)
 
         self.assertFalse(NewsPhoto.objects.filter(pk=photo.pk).exists())
+        self.assertFalse(os.path.exists(photo_path))
 
     def test_the_edit_and_delete_buttons_are_hidden_once_published_for_a_coach_manager(self):
         item = News.objects.create(club=self.club, title="Live item", body="Body.")
@@ -2209,3 +2237,253 @@ class TeamAttendancePanelTests(ManagementTestBase):
         self.assertContains(response, "Peter Player")
         self.assertContains(response, attendance.event.title)
         self.assertNotContains(response, "None recorded.")
+
+
+class TeamAndPositionAccessTests(ManagementTestBase):
+    """Non-admin coaches/managers: scoped to their own teams, read-only on
+    positions -- see club.mixins.TeamManagerRequiredMixin and
+    management.views.TeamListView/PositionListView."""
+
+    def setUp(self):
+        super().setUp()
+        self.own_team = Team.objects.create(club=self.club, name="First Team", short_name="1st")
+        self.other_team = Team.objects.create(club=self.club, name="Second Team", short_name="2nd")
+        self.manager_position = Position.objects.create(club=self.club, name="Head Coach", short_name="HC", staff_position=True, management_position=True)
+
+        self.coach_user = User.objects.create_user(email="coach3@example.com", password="pw-secret-123")
+        coach_member = Member.objects.create(user=self.coach_user, first_name="Cara", last_name="Coach")
+        StaffAssignment.objects.create(team=self.own_team, member=coach_member, season=self.season, position=self.manager_position)
+
+    def test_a_coach_only_sees_their_own_team_in_the_list(self):
+        self.client.force_login(self.coach_user)
+
+        response = self.club_get("team_list")
+
+        self.assertContains(response, "First Team")
+        self.assertNotContains(response, "Second Team")
+
+    def test_an_admin_sees_every_team_in_the_list(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("team_list")
+
+        self.assertContains(response, "First Team")
+        self.assertContains(response, "Second Team")
+
+    def test_a_coach_does_not_see_the_new_team_button(self):
+        self.client.force_login(self.coach_user)
+
+        response = self.club_get("team_list")
+
+        self.assertNotContains(response, reverse("management:team_create"))
+
+    def test_a_coach_does_not_see_the_edit_button_on_their_team_page(self):
+        self.client.force_login(self.coach_user)
+
+        response = self.club_get("team_detail", self.own_team.pk)
+
+        self.assertNotContains(response, reverse("management:team_update", args=[self.own_team.pk]))
+
+    def test_a_coach_can_view_positions_but_not_edit_them(self):
+        self.client.force_login(self.coach_user)
+
+        response = self.club_get("position_list")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Head Coach")
+        self.assertNotContains(response, reverse("management:position_create"))
+        self.assertNotContains(response, reverse("management:position_update", args=[self.manager_position.pk]))
+
+    def test_a_coach_cannot_create_or_edit_a_position(self):
+        self.client.force_login(self.coach_user)
+
+        self.assertEqual(self.club_get("position_create").status_code, 403)
+        self.assertEqual(self.club_get("position_update", self.manager_position.pk).status_code, 403)
+
+
+class TeamListCountsTests(ManagementTestBase):
+    """Player/staff counts on the team list -- see TeamListView.get_queryset."""
+
+    def setUp(self):
+        super().setUp()
+        self.team = Team.objects.create(club=self.club, name="First Team", short_name="1st")
+        self.player_position = Position.objects.create(club=self.club, name="Forward", short_name="FW", staff_position=False)
+        self.coach_position = Position.objects.create(club=self.club, name="Coach", short_name="C", staff_position=True, management_position=True)
+        self.client.force_login(self.admin_user)
+
+    def test_counts_reflect_the_current_seasons_roster_and_staff(self):
+        peter = Member.objects.create(first_name="Peter", last_name="Player")
+        paula = Member.objects.create(first_name="Paula", last_name="Player")
+        cara = Member.objects.create(first_name="Cara", last_name="Coach")
+        TeamMembership.objects.create(team=self.team, season=self.season, member=peter, position=self.player_position)
+        TeamMembership.objects.create(team=self.team, season=self.season, member=paula, position=self.player_position)
+        StaffAssignment.objects.create(team=self.team, season=self.season, member=cara, position=self.coach_position)
+
+        response = self.club_get("team_list")
+
+        team = response.context["teams"].get(pk=self.team.pk)
+        self.assertEqual(team.player_count, 2)
+        self.assertEqual(team.staff_count, 1)
+
+    def test_counts_exclude_a_different_season(self):
+        other_season = Season.objects.create(club=self.club, start_date=datetime.date(2020, 1, 1), end_date=datetime.date(2020, 12, 31))
+        peter = Member.objects.create(first_name="Peter", last_name="Player")
+        TeamMembership.objects.create(team=self.team, season=other_season, member=peter, position=self.player_position)
+
+        response = self.club_get("team_list")
+
+        team = response.context["teams"].get(pk=self.team.pk)
+        self.assertEqual(team.player_count, 0)
+
+
+class LocationOpponentManagementTests(ManagementTestBase):
+    """Full CRUD for Location/Opponent -- restricted to ADMIN and anyone with a
+    current-season management position, see club.mixins.ManagementPositionRequiredMixin
+    and management.views.LocationListView/OpponentListView (and their Create/Update/Delete
+    siblings)."""
+
+    def setUp(self):
+        super().setUp()
+        self.team = Team.objects.create(club=self.club, name="First Team", short_name="1st")
+
+    def make_coach_manager(self, email="coach-loc@example.com"):
+        coach_user = User.objects.create_user(email=email, password="pw-secret-123")
+        coach_member = Member.objects.create(user=coach_user, first_name="Cara", last_name="Coach")
+        position = Position.objects.create(club=self.club, name="Head Coach", short_name="HC", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=self.team, member=coach_member, season=self.season, position=position)
+        return coach_user
+
+    def make_plain_staff(self, email="physio-loc@example.com"):
+        staff_user = User.objects.create_user(email=email, password="pw-secret-123")
+        staff_member = Member.objects.create(user=staff_user, first_name="Pat", last_name="Physio")
+        position = Position.objects.create(club=self.club, name="Physio", short_name="PH", staff_position=True, management_position=False)
+        StaffAssignment.objects.create(team=self.team, member=staff_member, season=self.season, position=position)
+        return staff_user
+
+    # --- Locations ---------------------------------------------------------
+
+    def test_a_management_position_can_view_the_location_list(self):
+        Location.objects.create(club=self.club, name="Main Field", address="1 St", city="Town", zip_code="1000", country="BE")
+        self.client.force_login(self.make_coach_manager())
+
+        response = self.club_get("location_list")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Main Field")
+
+    def test_the_location_form_renders_country_as_a_dropdown(self):
+        # Regression: CountryField's widget reports widget_type "lazyselect", which
+        # the form_field templatetag didn't recognise -- it fell through to the
+        # "input" case and rendered a plain <input type="lazyselect"> (i.e. a
+        # broken text box), not a <select>.
+        self.client.force_login(self.make_coach_manager())
+
+        response = self.club_get("location_create")
+
+        self.assertNotContains(response, 'type="lazyselect"')
+        self.assertContains(response, "Belgium")
+        self.assertContains(response, '<select')
+
+    def test_plain_staff_cannot_view_the_location_list(self):
+        self.client.force_login(self.make_plain_staff())
+
+        self.assertEqual(self.club_get("location_list").status_code, 403)
+
+    def test_a_management_position_can_create_a_location(self):
+        self.client.force_login(self.make_coach_manager())
+
+        response = self.club_post("location_create", {"name": "New Field", "address": "2 St", "city": "Town", "zip_code": "1000", "country": "BE"})
+
+        self.assertRedirects(response, reverse("management:location_list"))
+        self.assertTrue(Location.objects.filter(club=self.club, name="New Field").exists())
+
+    def test_plain_staff_cannot_create_a_location(self):
+        self.client.force_login(self.make_plain_staff())
+
+        response = self.club_post("location_create", {"name": "New Field", "address": "2 St", "city": "Town", "zip_code": "1000", "country": "BE"})
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(Location.objects.filter(club=self.club, name="New Field").exists())
+
+    def test_a_management_position_can_edit_a_location(self):
+        location = Location.objects.create(club=self.club, name="Old name", address="1 St", city="Town", zip_code="1000", country="BE")
+        self.client.force_login(self.make_coach_manager())
+
+        self.club_post("location_update", {"name": "New name", "address": "1 St", "city": "Town", "zip_code": "1000", "country": "BE"}, location.pk)
+
+        location.refresh_from_db()
+        self.assertEqual(location.name, "New name")
+
+    def test_a_management_position_can_delete_a_location(self):
+        location = Location.objects.create(club=self.club, name="Doomed", address="1 St", city="Town", zip_code="1000", country="BE")
+        self.client.force_login(self.make_coach_manager())
+
+        response = self.club_post("location_delete", {}, location.pk)
+
+        self.assertRedirects(response, reverse("management:location_list"))
+        self.assertFalse(Location.objects.filter(pk=location.pk).exists())
+
+    def test_deleting_a_location_nulls_it_on_events_instead_of_erroring(self):
+        location = Location.objects.create(club=self.club, name="Doomed", address="1 St", city="Town", zip_code="1000", country="BE")
+        event = Event.objects.create(club=self.club, title="Match", start=timezone.now() + datetime.timedelta(days=1), location=location)
+        self.client.force_login(self.admin_user)
+
+        self.club_post("location_delete", {}, location.pk)
+
+        event.refresh_from_db()
+        self.assertIsNone(event.location)
+
+    def test_an_admin_has_full_rights_without_any_staff_assignment(self):
+        self.client.force_login(self.admin_user)
+
+        self.assertEqual(self.club_get("location_list").status_code, 200)
+        response = self.club_post("location_create", {"name": "Admin Field", "address": "3 St", "city": "Town", "zip_code": "1000", "country": "BE"})
+        self.assertRedirects(response, reverse("management:location_list"))
+
+    # --- Opponents -----------------------------------------------------------
+
+    def test_a_management_position_can_view_the_opponent_list(self):
+        Opponent.objects.create(club=self.club, name="Rivals FC")
+        self.client.force_login(self.make_coach_manager())
+
+        response = self.club_get("opponent_list")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Rivals FC")
+
+    def test_plain_staff_cannot_view_the_opponent_list(self):
+        self.client.force_login(self.make_plain_staff())
+
+        self.assertEqual(self.club_get("opponent_list").status_code, 403)
+
+    def test_a_management_position_can_create_an_opponent_with_a_logo(self):
+        self.client.force_login(self.make_coach_manager())
+        # Opponent.logo is a real ImageField (unlike NewsPhoto.image, set outside any
+        # ModelForm) -- Django's ImageField.clean() runs it through Pillow, so this
+        # needs to actually decode as an image, not just carry an image/png header.
+        one_pixel_png = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+        logo = SimpleUploadedFile("logo.png", one_pixel_png, content_type="image/png")
+
+        response = self.club_post("opponent_create", {"name": "Rivals FC", "logo": logo})
+
+        self.assertRedirects(response, reverse("management:opponent_list"))
+        opponent = Opponent.objects.get(club=self.club, name="Rivals FC")
+        self.assertTrue(opponent.logo)
+
+    def test_a_management_position_can_delete_an_opponent(self):
+        opponent = Opponent.objects.create(club=self.club, name="Doomed FC")
+        self.client.force_login(self.make_coach_manager())
+
+        response = self.club_post("opponent_delete", {}, opponent.pk)
+
+        self.assertRedirects(response, reverse("management:opponent_list"))
+        self.assertFalse(Opponent.objects.filter(pk=opponent.pk).exists())
+
+    def test_plain_staff_cannot_delete_an_opponent(self):
+        opponent = Opponent.objects.create(club=self.club, name="Safe FC")
+        self.client.force_login(self.make_plain_staff())
+
+        response = self.club_post("opponent_delete", {}, opponent.pk)
+
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(Opponent.objects.filter(pk=opponent.pk).exists())

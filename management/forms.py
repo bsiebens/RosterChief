@@ -6,6 +6,7 @@ from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 from club.models import ClubMembership, ClubRole, FeePayment
+from events.models import Location, Opponent
 from members.models import Family, FamilyMembership, Member
 from members.services.family import find_member_by_email
 from news.models import News
@@ -95,6 +96,25 @@ class PositionForm(forms.ModelForm):
         if cleaned.get("management_position") and not cleaned.get("staff_position"):
             self.add_error("management_position", _("A management position must also be a staff position."))
         return cleaned
+
+
+class LocationForm(forms.ModelForm):
+    class Meta:
+        model = Location
+        fields = ["name", "address", "city", "zip_code", "country"]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # CountryField's own widget (a lazily-translated Select) must stay the widget
+        # class -- only the searchable-select JS hooks are added on top of it, the
+        # same progressive enhancement TeamMembershipForm uses for its member field.
+        self.fields["country"].widget.attrs.update({"data-searchable": "true", "data-search-placeholder": _("Type a country to search...")})
+
+
+class OpponentForm(forms.ModelForm):
+    class Meta:
+        model = Opponent
+        fields = ["name", "logo"]
 
 
 class ClubRoleAssignForm(forms.ModelForm):
