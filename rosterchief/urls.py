@@ -39,5 +39,10 @@ if settings.DEBUG:
     if settings.BROWSER_RELOAD_AVAILABLE:
         urlpatterns += [path("__reload__/", include("django_browser_reload.urls"))]
 
-    # Club logos are uploads: runserver has to serve MEDIA_ROOT itself.
+if not settings.AWS_STORAGE_BUCKET_NAME:
+    # Gated on the storage backend, not on DEBUG: local disk is the default until a bucket is
+    # configured (see settings.STORAGES), and Caddy only reverse-proxies — it never serves
+    # /media/* itself — so without this route every uploaded club logo 404s in production too.
+    # Once AWS_STORAGE_BUCKET_NAME is set, club.logo.url points straight at the bucket and this
+    # route is simply never hit.
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
