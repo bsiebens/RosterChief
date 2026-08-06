@@ -22,6 +22,31 @@ class Team(ClubScopedModel):
         return self.name
 
 
+def team_photo_path(instance, filename):
+    return f"clubs/{instance.team.club.slug}/teams/{instance.team_id}/{instance.season.name}/{filename}"
+
+
+class TeamPhoto(UUIDModel):
+    """One team photo per season -- a team's makeup changes every season, so
+    this can't be a plain field on Team. No club FK of its own: club is
+    already reachable via team.club, same reasoning as NewsPhoto being owned
+    by News rather than club-scoped itself."""
+
+    team = models.ForeignKey(Team, on_delete=models.CASCADE, related_name="photos", verbose_name=_("team"))
+    season = models.ForeignKey(Season, on_delete=models.PROTECT, related_name="team_photos", verbose_name=_("season"))
+    image = models.ImageField(_("image"), upload_to=team_photo_path)
+
+    class Meta:
+        verbose_name = _("team photo")
+        verbose_name_plural = _("team photos")
+        constraints = [
+            models.UniqueConstraint(fields=["team", "season"], name="unique_team_photo_per_season"),
+        ]
+
+    def __str__(self):
+        return f"{self.team} - {self.season}"
+
+
 class Position(ClubScopedModel):
     name = models.CharField(_("name"), max_length=255)
     short_name = models.CharField(_("short name"), max_length=255)

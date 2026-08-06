@@ -13,6 +13,7 @@ from django.contrib import admin
 from django.urls import include, path
 from django.views.generic import RedirectView
 
+from api.urls import api
 from club.views import root
 
 from .health import healthz
@@ -25,6 +26,7 @@ urlpatterns = [
     path("accounts/", include("allauth.urls")),
     path("controlpanel/", include("controlpanel.urls")),
     path("manage/", include("management.urls")),
+    path("api/v1/", api.urls),
     # "/" resolves per tenant: a club subdomain lands on the club, the base domain
     # hands off to the control panel. This is why LOGIN_REDIRECT_URL can stay "/".
     path("", root, name="root"),

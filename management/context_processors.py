@@ -7,6 +7,8 @@ Same reasoning for ``news_permissions`` below, gating just the "New news item"
 action rather than the whole section (``NewsAuthorRequiredMixin``/``can_add_news``).
 """
 
+from waffle import flag_is_active
+
 from club.services.access import can_add_news, has_management_access, is_club_admin, is_coach_manager
 
 #: Every management URL name, mapped to the nav item it should light up --
@@ -54,6 +56,8 @@ _NAV_SECTIONS = {
     "team_staff_add": "team_list",
     "team_staff_update": "team_list",
     "team_staff_remove": "team_list",
+    "team_photo_set": "team_list",
+    "team_photo_delete": "team_list",
     "news_list": "news_list",
     "news_create": "news_list",
     "news_detail": "news_list",
@@ -65,7 +69,20 @@ _NAV_SECTIONS = {
     "news_photo_set_main": "news_list",
     "news_photo_delete": "news_list",
     "event_list": "event_list",
-    "event_series_list": "event_series_list",
+    "event_create": "event_list",
+    "event_detail": "event_list",
+    "event_update": "event_list",
+    "event_delete": "event_list",
+    "event_detach": "event_list",
+    "event_fetch_game_info": "event_list",
+    "rbihf_import": "event_list",
+    "rbihf_import_confirm": "event_list",
+    "event_series_create": "event_list",
+    "event_series_detail": "event_list",
+    "event_series_update": "event_list",
+    "event_series_delete": "event_list",
+    "event_series_stop": "event_list",
+    "event_series_generate": "event_list",
     "location_list": "location_list",
     "location_create": "location_list",
     "location_update": "location_list",
@@ -74,6 +91,10 @@ _NAV_SECTIONS = {
     "opponent_create": "opponent_list",
     "opponent_update": "opponent_list",
     "opponent_delete": "opponent_list",
+    "sponsor_list": "sponsor_list",
+    "sponsor_create": "sponsor_list",
+    "sponsor_update": "sponsor_list",
+    "sponsor_delete": "sponsor_list",
     "product_list": "product_list",
     "order_list": "order_list",
     "discount_list": "discount_list",
@@ -122,6 +143,23 @@ def management_link(request):
         return {"has_management_access": False}
 
     return {"has_management_access": has_management_access(request.user, club)}
+
+
+def feature_sections(request):
+    """Whether the nav's Shop/Forms sections -- and the Events page's "Import
+    from RBIHF" button -- should show at all. Each is gated behind its own
+    waffle Flag (see club.mixins.FeatureRequiredMixin, which gates the
+    underlying views regardless), on top of the existing is_club_admin check
+    those all already require."""
+    club = getattr(request, "club", None)
+    if club is None or not request.user.is_authenticated:
+        return {"shop_enabled": False, "forms_enabled": False, "rbihf_enabled": False}
+
+    return {
+        "shop_enabled": flag_is_active(request, "shop"),
+        "forms_enabled": flag_is_active(request, "formbuilder"),
+        "rbihf_enabled": flag_is_active(request, "RBIHF"),
+    }
 
 
 def news_permissions(request):

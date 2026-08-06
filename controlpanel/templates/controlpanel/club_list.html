@@ -5,9 +5,9 @@
 
 {% block actions %}
     {% if show_archived %}
-        <a class="btn btn-outline btn-neutral" href="{% url 'controlpanel:club_list' %}">{% lucide "archive-x" size=16 %} Hide archived clubs</a>
+        <a class="btn btn-outline" href="{% url 'controlpanel:club_list' %}">{% lucide "archive-x" size=16 %} Hide archived clubs</a>
     {% else %}
-        <a class="btn btn-outline btn-neutral" href="{% url 'controlpanel:club_list' %}?archived=1">{% lucide "archive" size=16 %} Show archived clubs</a>
+        <a class="btn btn-outline" href="{% url 'controlpanel:club_list' %}?archived=1">{% lucide "archive" size=16 %} Show archived clubs</a>
     {% endif %}
     <a class="btn btn-primary gap-2" href="{% url 'controlpanel:club_create' %}">{% lucide "plus" size=16 %} New club</a>
 {% endblock actions %}
@@ -24,7 +24,7 @@
                    class="input input-bordered w-full max-w-xs">
         </label>
 
-        <button class="btn btn-outline btn-neutral gap-2" type="submit">{% lucide "search" size=16 %} Search</button>
+        <button class="btn btn-outline gap-2" type="submit">{% lucide "search" size=16 %} Search</button>
         {% if search %}
             <a class="btn btn-primary gap-2" href="{% url "controlpanel:club_list" %}">{% lucide "x" size=16 %} Clear filter</a>
         {% endif %}

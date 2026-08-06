@@ -5,7 +5,7 @@
 {% block subheading %}{% if current_season %}{% blocktrans %}Fee status for season{% endblocktrans %}{% endif %}{% endblock subheading %}
 
 {% block actions %}
-    <a class="btn btn-outline btn-neutral gap-2" href="{% url 'management:membership_export_pdf' %}?{{ request.GET.urlencode }}">{% lucide "file-down" size=16 %} {% trans "Export to PDF" %}</a>
+    <a class="btn btn-outline gap-2" href="{% url 'management:membership_export_pdf' %}?{{ request.GET.urlencode }}">{% lucide "file-down" size=16 %} {% trans "Export to PDF" %}</a>
 {% endblock actions %}
 
 {% block panel %}
@@ -93,8 +93,8 @@
                 {% endfor %}
             </select>
 
-            <button class="btn btn-outline btn-neutral gap-2" type="submit">{% lucide "filter" size=16 %} {% trans "Filter" %}</button>
-            <a class="btn btn-neutral gap-2" href="{% url 'management:membership_list' %}">{% lucide "x" size=16 %} {% trans "Reset" %}</a>
+            <button class="btn btn-outline gap-2" type="submit">{% lucide "filter" size=16 %} {% trans "Filter" %}</button>
+            <a class="btn gap-2" href="{% url 'management:membership_list' %}">{% lucide "x" size=16 %} {% trans "Reset" %}</a>
         </div>
     </form>
 
@@ -173,7 +173,7 @@
                                     <td class="text-right">
                                         {% if membership.record_payment_form %}
                                             <div class="flex justify-end gap-1">
-                                                <button class="btn btn-sm btn-outline btn-neutral" type="button" onclick="document.getElementById('{{ membership.pk|dom_id:"record_payment_modal" }}').showModal()">
+                                                <button class="btn btn-outline btn-sm" type="button" onclick="document.getElementById('{{ membership.pk|dom_id:"record_payment_modal" }}').showModal()">
                                                     {% lucide "receipt" size=12 %} {% trans "Record payment" %}
                                                 </button>
                                                 <button class="btn btn-sm btn-outline btn-success" type="submit" form="{{ membership.pk|dom_id:"mark_fully_paid_form" }}">

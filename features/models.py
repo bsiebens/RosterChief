@@ -40,6 +40,13 @@ class Flag(AbstractUserFlag):
 
     def _get_club_ids(self) -> set:
         """Club ids this flag is on for, cached the way waffle caches its own M2Ms."""
+        if self.pk is None:
+            # waffle's own BaseModel.get() falls back to a transient, unsaved
+            # Flag(name=...) instance for a name nothing in the DB matches yet
+            # (see waffle/models.py) -- an M2M lookup can't run against that, and
+            # there's genuinely nothing for it to be on for anyway.
+            return set()
+
         cache = get_cache()
         cache_key = keyfmt(FLAG_CLUBS_CACHE_KEY, self.name)
 

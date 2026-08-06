@@ -5,7 +5,7 @@
 
 {% block actions %}
     {% if is_club_admin %}
-        <a class="btn btn-primary gap-2" href="{% url 'management:team_create' %}">{% lucide "plus" size=16 %} {% trans "New team" %}</a>
+        <a class="btn btn-outline gap-2" href="{% url 'management:team_create' %}">{% lucide "plus" size=16 %} {% trans "New team" %}</a>
     {% endif %}
 {% endblock actions %}
 
@@ -33,7 +33,7 @@
                                 <td class="text-right">
                                     {% if is_club_admin %}
                                         <div class="flex justify-end gap-1">
-                                            <a class="btn btn-sm btn-outline btn-neutral" href="{% url 'management:team_detail' team.pk %}" aria-label="{% trans 'Edit' %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</a>
+                                            <a class="btn btn-outline btn-sm" href="{% url 'management:team_detail' team.pk %}" aria-label="{% trans 'Edit' %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</a>
                                             <button class="btn btn-sm btn-outline btn-error" type="button" onclick="document.getElementById('{{ team.pk|dom_id:"team_delete_modal" }}').showModal()" aria-label="{% trans 'Delete' %}">{% lucide "trash-2" size=14 %} {% trans "Delete" %}</button>
                                         </div>
                                     {% endif %}

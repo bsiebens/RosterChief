@@ -18,7 +18,7 @@
         wrapper.className = "relative";
 
         const chips = document.createElement("div");
-        chips.className = "flex flex-wrap gap-1 empty:hidden mb-3";
+        chips.className = "flex flex-wrap gap-1 empty:hidden mt-2";
 
         const input = document.createElement("input");
         input.type = "text";
@@ -31,7 +31,12 @@
 
         select.parentNode.insertBefore(wrapper, select);
         if (isMultiple) {
-            wrapper.append(chips, input, list, select);
+            // Chips render below the input, not above it: above meant every pick grew
+            // the block ahead of the input and shoved it (and your cursor) down --
+            // disorienting mid-search. Below, the input stays put; only the space
+            // beneath it grows, and the open dropdown (absolutely positioned right
+            // under the input) simply overlaps the chips while it's open.
+            wrapper.append(input, list, chips, select);
         } else {
             wrapper.append(input, list, select);
         }

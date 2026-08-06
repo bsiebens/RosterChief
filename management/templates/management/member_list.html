@@ -7,8 +7,8 @@
 <a class="btn btn-outline btn-info gap-2" href="{% url 'management:member_import_template' %}" xmlns:management="http://www.w3.org/1999/xhtml">{% lucide "download" size=16 %} {% trans "Download upload template" %}</a>
     {% if is_club_admin %}
         <a class="btn btn-outline btn-info gap-2" href="{% url 'management:member_import' %}">{% lucide "upload" size=16 %} {% trans "Mass upload" %}</a>
-        <a class="btn btn-outline btn-neutral gap-2" href="{% url 'management:family_create' %}">{% lucide "users" size=16 %} {% trans "Add family" %}</a>
-        <a class="btn btn-outline btn-neutral gap-2" href="{% url 'management:member_create' %}">{% lucide "user-plus" size=16 %} {% trans "Add member" %}</a>
+        <a class="btn btn-outline gap-2" href="{% url 'management:family_create' %}">{% lucide "users" size=16 %} {% trans "Add family" %}</a>
+        <a class="btn btn-outline gap-2" href="{% url 'management:member_create' %}">{% lucide "user-plus" size=16 %} {% trans "Add member" %}</a>
     {% endif %}
 {% endblock actions %}
 
@@ -18,9 +18,9 @@
             <span class="opacity-50">{% lucide "search" size=16 %}</span>
             <input type="search" name="q" value="{{ search }}" placeholder="{% trans 'Search members ...' %}" class="input input-bordered w-full max-w-xs">
         </label>
-        <button class="btn btn-outline btn-neutral gap-2" type="submit">{% lucide "search" size=16 %} {% trans "Search" %}</button>
+        <button class="btn btn-outline gap-2" type="submit">{% lucide "search" size=16 %} {% trans "Search" %}</button>
         {% if search %}
-            <a class="btn btn-neutral gap-2" href="{% url "management:member_list" %}">{% lucide "x" size=16 %} {% trans "Clear filter" %}</a>
+            <a class="btn gap-2" href="{% url "management:member_list" %}">{% lucide "x" size=16 %} {% trans "Clear filter" %}</a>
         {% endif %}
     </form>
 
@@ -49,7 +49,7 @@
                                         <div class="flex flex-col gap-1">
                                             {% for fm in member.family_memberships_display %}
                                                 <div>
-                                                    <a class="btn btn-sm btn-outline btn-neutral" href="{% url 'management:family_detail' fm.family.pk %}">{% lucide "users" size=14 %} {{ fm.family }} {% lucide "arrow-right" size=14 %}</a>
+                                                    <a class="btn btn-outline btn-sm" href="{% url 'management:family_detail' fm.family.pk %}">{% lucide "users" size=14 %} {{ fm.family }} {% lucide "arrow-right" size=14 %}</a>
                                                 </div>
                                             {% endfor %}
                                         </div>
@@ -73,7 +73,7 @@
                                 <td class="text-right">
                                     {% if is_club_admin %}
                                         <div class="flex justify-end gap-1">
-                                            <a class="btn btn-sm btn-outline btn-neutral" href="{% url 'management:member_detail' member.pk %}" aria-label="{% trans 'Edit' %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</a>
+                                            <a class="btn btn-outline btn-sm" href="{% url 'management:member_detail' member.pk %}" aria-label="{% trans 'Edit' %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</a>
                                             <button class="btn btn-sm btn-outline btn-error" type="button" onclick="document.getElementById('{{ member.pk|dom_id:"member_delete_modal" }}').showModal()" aria-label="{% trans 'Delete' %}">{% lucide "trash-2" size=14 %} {% trans "Delete" %}</button>
                                         </div>
                                     {% endif %}

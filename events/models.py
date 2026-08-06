@@ -1,9 +1,10 @@
+from django.conf import settings
 from django.db import models
 from django.db.models import Q
 from django.utils.translation import gettext_lazy as _
 from django_countries.fields import CountryField
 
-from club.models import Season
+from club.models import Club, Season
 from members.models import Member
 from rosterchief.base import ClubScopedModel, UUIDModel, validate_club_scope
 from teams.models import Team
@@ -48,12 +49,12 @@ class Location(ClubScopedModel):
 
 class Event(ClubScopedModel):
     class EventKind(models.TextChoices):
-        TRAINING = "training", _("training")
-        MATCH = "match", _("match")
-        TOURNAMENT = "tournament", _("tournament")
-        MEETING = "meeting", _("meeting")
-        SOCIAL = "social", _("social")
-        OTHER = "other", _("other")
+        TRAINING = "training", _("Training")
+        GAME = "game", _("Game")
+        TOURNAMENT = "tournament", _("Tournament")
+        MEETING = "meeting", _("Meeting")
+        SOCIAL = "social", _("Social")
+        OTHER = "other", _("Other")
 
     series = models.ForeignKey("EventSeries", on_delete=models.CASCADE, related_name="occurrences", null=True, blank=True, verbose_name=_("series"), help_text=_("The recurring series this occurrence belongs to; blank for one-off events."))
     detached = models.BooleanField(_("detached"), default=False, help_text=_("Edited independently; excluded from series-wide updates and regeneration."))
@@ -70,11 +71,20 @@ class Event(ClubScopedModel):
     start = models.DateTimeField(_("start"))
     end = models.DateTimeField(_("end"), blank=True, null=True)
     gathering = models.DateTimeField(_("gathering"), blank=True, null=True)
-    deadline = models.DateTimeField(_("deadline"), blank=True, null=True)
+    deadline = models.DateTimeField(_("registration deadline"), blank=True, null=True)
 
     location = models.ForeignKey(Location, on_delete=models.SET_NULL, related_name="events", null=True, blank=True, verbose_name=_("location"))
     opponent = models.ForeignKey(Opponent, on_delete=models.SET_NULL, related_name="events", null=True, blank=True, verbose_name=_("opponent"))
     created_by = models.ForeignKey(Member, on_delete=models.SET_NULL, related_name="created_events", null=True, blank=True, verbose_name=_("created by"))
+
+    # Game-specific -- meaningless for other kinds, so all optional. external_game_id
+    # is this game's id in an external competition/fixture data source, for a later
+    # automatic score-fetcher to key off; nothing populates it yet.
+    competition = models.CharField(_("competition"), max_length=255, blank=True, help_text=_("The league, cup or competition this game is part of."))
+    external_game_id = models.CharField(_("external game ID"), max_length=255, blank=True, help_text=_("This game's id in an external competition data source, for automatic score fetching later."))
+    score_for = models.PositiveSmallIntegerField(_("score (us)"), null=True, blank=True)
+    score_against = models.PositiveSmallIntegerField(_("score (opponent)"), null=True, blank=True)
+    is_live = models.BooleanField(_("live"), default=False, help_text=_("The game is currently in progress."))
 
     class Meta:
         verbose_name = _("event")
@@ -87,6 +97,13 @@ class Event(ClubScopedModel):
     def clean(self):
         validate_club_scope(self, self.club_id, same_club_fields=("season", "location", "opponent"))
 
+    @property
+    def is_home_game(self) -> bool:
+        """Whether this game is being played at the club's own ground
+        (Location.is_home) -- False for anything that isn't a game, or a game
+        with no location set, or one at an away/neutral location."""
+        return self.kind == self.EventKind.GAME and self.location_id is not None and self.location.is_home
+
 
 class EventSeries(ClubScopedModel):
     """A recurring event definition that materialises concrete Event rows."""
@@ -96,7 +113,7 @@ class EventSeries(ClubScopedModel):
     until = models.DateTimeField(_("until"), null=True, blank=True, help_text=_("Series end: no occurrences are generated after this. Leave blank for open-ended (bounded by the rule's own COUNT/UNTIL, if any)."))
     duration = models.DurationField(_("duration"), null=True, blank=True, help_text=_("Length of each occurrence; sets each event's end."))
     gathering_offset = models.DurationField(_("gathering offset"), null=True, blank=True, help_text=_("How long before the start each occurrence's gathering time is."))
-    deadline_offset = models.DurationField(_("deadline offset"), null=True, blank=True, help_text=_("How long before the start each occurrence's sign-up deadline is."))
+    deadline_offset = models.DurationField(_("registration deadline offset"), null=True, blank=True, help_text=_("How long before the start each occurrence's registration deadline is."))
     excluded_dates = models.JSONField(_("excluded dates"), default=list, blank=True, help_text=_("ISO start datetimes of occurrences removed from the series (EXDATEs)."))
     generated_until = models.DateTimeField(_("generated until"), null=True, blank=True, help_text=_("Occurrences have been materialised up to this point."))
 
@@ -123,13 +140,13 @@ class EventSeries(ClubScopedModel):
 
 class Attendance(UUIDModel):
     class AttendanceStatus(models.TextChoices):
-        PRESENT = "present", _("present")
-        ABSENT = "absent", _("absent")
-        EXCUSED = "excused", _("excused")
-        SELECTED = "selected", _("selected")
-        NOT_SELECTED = "not_selected", _("not selected")
-        MAYBE = "maybe", _("maybe")
-        NO_RESPONSE = "no_response", _("no response")
+        PRESENT = "present", _("Present")
+        ABSENT = "absent", _("Absent")
+        EXCUSED = "excused", _("Excused")
+        SELECTED = "selected", _("Selected")
+        NOT_SELECTED = "not_selected", _("Not selected")
+        MAYBE = "maybe", _("Maybe")
+        NO_RESPONSE = "no_response", _("No response")
 
     event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="attendances", verbose_name=_("event"))
     member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="attendances", verbose_name=_("member"))
@@ -153,3 +170,34 @@ class Attendance(UUIDModel):
 
     def __str__(self):
         return f"{self.event} - {self.member}"
+
+
+class Competition(models.Model):
+    """A competition has a name with a specific URL to fetch data from. These are managed centrally."""
+
+    name = models.CharField(max_length=250)
+    module = models.CharField(max_length=250)
+    sport_type = models.CharField(
+        _("sport"),
+        max_length=20,
+        choices=Club.SportType.choices,
+        default=Club.SportType.OTHER,
+        help_text=_("Which sport this competition is for."),
+    )
+    flag = models.ForeignKey(
+        settings.WAFFLE_FLAG_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="competitions",
+        verbose_name=_("feature flag"),
+        help_text=_("Which clubs this competition is offered to -- set (or leave blank to hide it everywhere) from the control panel's Features page. A competition with no flag never shows up on the Event admin's competition dropdown."),
+    )
+
+    class Meta:
+        verbose_name = _("competition")
+        verbose_name_plural = _("competitions")
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name

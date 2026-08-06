@@ -19,7 +19,7 @@
         </form>
         <div class="modal-action">
             <form method="dialog">
-                <button class="btn btn-outline btn-neutral gap-2">{% lucide "x" size=16 %} {% trans "Cancel" %}</button>
+                <button class="btn btn-outline gap-2">{% lucide "x" size=16 %} {% trans "Cancel" %}</button>
             </form>
             <button class="btn btn-primary gap-2" type="submit" form="{{ modal_id }}-form">{% lucide submit_icon|default:"check" size=16 %} {{ submit_label|default:default_submit_label }}</button>
         </div>

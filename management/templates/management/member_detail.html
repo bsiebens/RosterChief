@@ -6,7 +6,7 @@
 
 {% block actions %}
     {% if is_club_admin %}
-        <a class="btn btn-outline btn-neutral gap-2" href="{% url 'management:member_update' member.pk %}">{% lucide "pencil" size=16 %} {% trans "Edit" %}</a>
+        <a class="btn btn-outline gap-2" href="{% url 'management:member_update' member.pk %}">{% lucide "pencil" size=16 %} {% trans "Edit" %}</a>
     {% endif %}
 {% endblock actions %}
 
@@ -114,8 +114,8 @@
                     </h2>
                     {% if is_club_admin %}
                         <div class="flex gap-2">
-                            <button class="btn btn-outline btn-neutral btn-sm gap-2" type="button" onclick="document.getElementById('{{ family_group.family.pk|dom_id:"add_parent_modal" }}').showModal()">{% lucide "user-plus" size=14 %} {{ add_parent_label }}</button>
-                            <button class="btn btn-outline btn-neutral btn-sm gap-2" type="button" onclick="document.getElementById('{{ family_group.family.pk|dom_id:"add_child_modal" }}').showModal()">{% lucide "baby" size=14 %} {{ add_child_label }}</button>
+                            <button class="btn btn-outline btn-sm gap-2" type="button" onclick="document.getElementById('{{ family_group.family.pk|dom_id:"add_parent_modal" }}').showModal()">{% lucide "user-plus" size=14 %} {{ add_parent_label }}</button>
+                            <button class="btn btn-outline btn-sm gap-2" type="button" onclick="document.getElementById('{{ family_group.family.pk|dom_id:"add_child_modal" }}').showModal()">{% lucide "baby" size=14 %} {{ add_child_label }}</button>
                             <button class="btn btn-outline btn-error btn-sm gap-2" type="button" onclick="document.getElementById('{{ family_group.family.pk|dom_id:"detach_family_modal" }}').showModal()">{% lucide "user-x" size=14 %} {{ remove_from_family_label }}</button>
                         </div>
                     {% endif %}
@@ -140,7 +140,7 @@
             <div class="card-body">
                 <div class="flex items-center justify-between">
                     <h2 class="card-title text-base">{% lucide "users" size=18 %} {% trans "Family" %}</h2>
-                    <button class="btn btn-outline btn-neutral btn-sm gap-2" type="button" onclick="document.getElementById('attach_family_modal').showModal()">{% lucide "user-plus" size=14 %} {% trans "Add to family" %}</button>
+                    <button class="btn btn-outline btn-sm gap-2" type="button" onclick="document.getElementById('attach_family_modal').showModal()">{% lucide "user-plus" size=14 %} {% trans "Add to family" %}</button>
                 </div>
                 {% if not family_groups %}
                     <p class="text-sm opacity-60">{% trans "Not part of a family." %}</p>

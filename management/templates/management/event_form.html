@@ -1,0 +1,96 @@
+{% extends "management/base.html" %}
+{% load i18n lucide static ui %}
+
+{% block heading %}{% if update_view %}{% blocktrans %}Edit {{ object }}{% endblocktrans %}{% else %}{% trans "New event" %}{% endif %}{% endblock heading %}
+
+{% block panel %}
+    <div class="card w-full bg-base-100 shadow">
+        <div class="card-body">
+            <form method="post">
+                {% csrf_token %}
+
+                {% for error in form.non_field_errors %}
+                    <div class="alert alert-error my-2">
+                        <span>{{ error }}</span>
+                    </div>
+                {% endfor %}
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {% form_field form.title %}
+                    {% form_field form.kind %}
+                </div>
+
+                <div class="divider"></div>
+                <h3 class="text-lg font-semibold mb-3">{% trans "Audience" %}</h3>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {% form_field form.teams %}
+                    {% form_field form.invited_members %}
+                    {% form_field form.excluded_members %}
+                </div>
+
+                <div class="divider"></div>
+                <h3 class="text-lg font-semibold mb-3">{% trans "Where" %}</h3>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {% form_field form.location %}
+                    <div class="game-only">
+                        {% form_field form.opponent %}
+                    </div>
+                </div>
+
+                <div class="divider"></div>
+                <h3 class="text-lg font-semibold mb-3">{% trans "When" %}</h3>
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    {% form_field form.start %}
+                    {% form_field form.end %}
+                    {% form_field form.gathering %}
+                    {% form_field form.deadline %}
+                </div>
+
+                <div id="game-details-section" class="game-only">
+                    <div class="divider"></div>
+                    <h3 class="text-lg font-semibold mb-3">{% trans "Game" %}</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {% form_field form.competition %}
+                        {% form_field form.external_game_id %}
+                    </div>
+                    {% if update_view %}
+                        {% comment %}
+                            Score/live status only exist to record once a game has
+                            actually been created -- the add form leaves them out
+                            entirely (see EventForm's editing=False path).
+                        {% endcomment %}
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            {% form_field form.score_for %}
+                            {% form_field form.score_against %}
+                            {% form_field form.is_live %}
+                        </div>
+                    {% endif %}
+                </div>
+
+                <div class="card-actions justify-start pt-2 mt-2">
+                    <a class="btn btn-outline gap-2" href="{% if update_view %}{% url "management:event_detail" object.pk %}{% else %}{% url "management:event_list" %}{% endif %}">{% lucide "arrow-left" size=16 %} {% trans "Cancel" %}</a>
+                    <button class="btn btn-primary gap-2" type="submit">{% lucide "save" size=16 %} {% trans "Save" %}</button>
+                </div>
+            </form>
+        </div>
+    </div>
+{% endblock panel %}
+
+{% block extra_body %}
+    <script src="{% static 'js/searchable-select.js' %}"></script>
+    <script>
+        (() => {
+            // Progressive enhancement only -- the fields stay in the form and post
+            // normally either way, this just hides them when they don't apply so a
+            // training/social/etc. event isn't cluttered with opponent/score/competition
+            // inputs. Anything gated on "only makes sense for a game" carries this class.
+            const kindField = document.getElementById("id_kind");
+            const gameOnlyElements = document.querySelectorAll(".game-only");
+            if (!kindField || !gameOnlyElements.length) return;
+
+            const sync = () => gameOnlyElements.forEach((element) => element.classList.toggle("hidden", kindField.value !== "game"));
+            kindField.addEventListener("change", sync);
+            sync();
+        })();
+    </script>
+{% endblock extra_body %}

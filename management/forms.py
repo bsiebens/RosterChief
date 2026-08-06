@@ -1,3 +1,4 @@
+import datetime
 from decimal import Decimal
 
 from django import forms
@@ -5,12 +6,16 @@ from django.contrib.auth import get_user_model
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
-from club.models import ClubMembership, ClubRole, FeePayment
-from events.models import Location, Opponent
+from club.models import ClubMembership, ClubRole, FeePayment, Season, Sponsor
+from club.services.access import is_club_admin, teams_managed_by
+from events.models import Competition, Event, EventSeries, Location, Opponent
+from events.services.rbihf_import import RBIHFImportError, extract_team_id
 from members.models import Family, FamilyMembership, Member
 from members.services.family import find_member_by_email
 from news.models import News
-from teams.models import Position, StaffAssignment, Team, TeamMembership
+from teams.models import Position, StaffAssignment, Team, TeamMembership, TeamPhoto
+
+from .recurrence_ui import FREQUENCY_CHOICES, WEEKDAY_CHOICES, build_rrule, parse_rrule
 
 User = get_user_model()
 
@@ -28,6 +33,16 @@ class TeamForm(forms.ModelForm):
         fields = ["name", "short_name"]
 
 
+class TeamPhotoForm(forms.ModelForm):
+    """One photo per (team, season) -- bound to the existing TeamPhoto (if
+    any) by the view's get_form_kwargs, same "create or update the one row
+    for this scope" pattern as controlpanel.forms.HomeLocationForm."""
+
+    class Meta:
+        model = TeamPhoto
+        fields = ["image"]
+
+
 class TeamMembershipForm(forms.ModelForm):
     """Add/edit one roster entry -- team and season come from the view (the URL
     already identifies both), never from the form itself."""
@@ -41,7 +56,13 @@ class TeamMembershipForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         self.team = team
         self.season = season
-        members = Member.objects.filter(member_of__club=club).distinct()
+        # Eligible to be added regardless of which season's roster is being edited
+        # (the team detail page's season switcher can be pointed at an older
+        # season): active this season or the next one, not lapsed/pending/cancelled
+        # or active only in some other season.
+        today = timezone.localdate()
+        eligible_seasons = [s for s in (Season.covering(club, today), Season.next_after(club, today)) if s is not None]
+        members = Member.objects.filter(member_of__club=club, member_of__season__in=eligible_seasons, member_of__status=ClubMembership.StatusChoices.ACTIVE).distinct()
         if team is not None and season is not None:
             # Already on this team's roster this season -- offering them again
             # would just fail the unique_member_per_team_per_season constraint.
@@ -76,7 +97,11 @@ class StaffAssignmentForm(forms.ModelForm):
 
     def __init__(self, *args, club=None, team=None, season=None, **kwargs):
         super().__init__(*args, **kwargs)
-        members = Member.objects.filter(member_of__club=club).distinct()
+        # See TeamMembershipForm for why current-or-next-season: eligible to be
+        # assigned regardless of which season's staff list is being edited.
+        today = timezone.localdate()
+        eligible_seasons = [s for s in (Season.covering(club, today), Season.next_after(club, today)) if s is not None]
+        members = Member.objects.filter(member_of__club=club, member_of__season__in=eligible_seasons, member_of__status=ClubMembership.StatusChoices.ACTIVE).distinct()
         if team is not None and season is not None:
             taken = StaffAssignment.objects.filter(team=team, season=season).exclude(pk=self.instance.pk).values_list("member_id", flat=True)
             members = members.exclude(pk__in=taken)
@@ -115,6 +140,206 @@ class OpponentForm(forms.ModelForm):
     class Meta:
         model = Opponent
         fields = ["name", "logo"]
+
+
+class SponsorForm(forms.ModelForm):
+    class Meta:
+        model = Sponsor
+        fields = ["name", "logo", "url", "start_date", "end_date"]
+        widgets = {
+            "start_date": forms.DateInput(attrs={"type": "date"}),
+            "end_date": forms.DateInput(attrs={"type": "date"}),
+        }
+
+    def clean(self):
+        cleaned = super().clean()
+        # Mirrors Sponsor.clean() -- caught here too so it reads as a form
+        # error tied to the end_date field, not a raw ValidationError.
+        start_date, end_date = cleaned.get("start_date"), cleaned.get("end_date")
+        if start_date and end_date and end_date < start_date:
+            self.add_error("end_date", _("End date can't be before the start date."))
+        return cleaned
+
+
+class EventAudienceFormMixin:
+    """Shared club/user-scoped audience fields for EventForm and EventSeriesForm:
+    teams restricted to the ones the requester manages (all of them for an
+    admin), and a non-admin must pick at least one -- a team-less/club-wide
+    event (e.g. an AGM) has no team-manager claim to anchor it to, so that's
+    admin-only."""
+
+    def scope_audience_fields(self, club, user):
+        self.club = club
+        self.user = user
+        self.fields["teams"].queryset = Team.objects.filter(club=club) if is_club_admin(user, club) else teams_managed_by(user, club)
+        self.fields["location"].queryset = Location.objects.filter(club=club)
+        self.fields["opponent"].queryset = Opponent.objects.filter(club=club)
+        members = Member.objects.filter(member_of__club=club).distinct()
+        self.fields["invited_members"].queryset = members
+        self.fields["excluded_members"].queryset = members
+
+    def clean_teams_requires_one_for_non_admins(self, cleaned):
+        teams = cleaned.get("teams")
+        if teams is not None and not teams.exists() and not is_club_admin(self.user, self.club):
+            self.add_error("teams", _("Select at least one of your teams, or ask an admin to create a club-wide event."))
+
+
+_AUDIENCE_WIDGETS = {
+    "teams": forms.SelectMultiple(attrs={"data-searchable": "true", "data-search-placeholder": _("Type a team to search...")}),
+    "invited_members": forms.SelectMultiple(attrs={"data-searchable": "true", "data-search-placeholder": _("Type a name to search...")}),
+    "excluded_members": forms.SelectMultiple(attrs={"data-searchable": "true", "data-search-placeholder": _("Type a name to search...")}),
+}
+
+
+class EventForm(EventAudienceFormMixin, forms.ModelForm):
+    class Meta:
+        model = Event
+        fields = ["title", "kind", "teams", "invited_members", "excluded_members", "location", "opponent", "start", "end", "gathering", "deadline", "competition", "external_game_id", "score_for", "score_against", "is_live"]
+        widgets = {
+            "start": forms.DateTimeInput(attrs={"type": "datetime-local"}),
+            "end": forms.DateTimeInput(attrs={"type": "datetime-local"}),
+            "gathering": forms.DateTimeInput(attrs={"type": "datetime-local"}),
+            "deadline": forms.DateTimeInput(attrs={"type": "datetime-local"}),
+            "score_for": forms.NumberInput(attrs={"min": 0}),
+            "score_against": forms.NumberInput(attrs={"min": 0}),
+            **_AUDIENCE_WIDGETS,
+        }
+
+    def __init__(self, *args, club=None, user=None, editing=False, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.scope_audience_fields(club, user)
+        # Unlike the Django-admin form (events.admin.EventAdminForm), this dropdown
+        # isn't filtered by which competitions have their feature flag on for the
+        # club -- a manager should be able to pick any competition when scheduling a
+        # game; it's fetch_game_info (events.services.competitions) that gates the
+        # actual per-club fetch once a competition is set.
+        self.fields["competition"] = forms.ChoiceField(
+            choices=[("", "---------"), *[(competition.name, competition.name) for competition in Competition.objects.all()]],
+            required=False,
+            label=self.fields["competition"].label,
+            help_text=self.fields["competition"].help_text,
+        )
+        if not editing:
+            # Score/live status don't exist yet for a game that's only just being
+            # scheduled -- offering them on the add form is just noise. Editing an
+            # existing game is the only time there's anything to record here.
+            del self.fields["score_for"]
+            del self.fields["score_against"]
+            del self.fields["is_live"]
+
+    def clean(self):
+        cleaned = super().clean()
+        self.clean_teams_requires_one_for_non_admins(cleaned)
+        return cleaned
+
+
+class RBIHFImportForm(forms.Form):
+    """Step 1 of importing a team's fixtures from RBIHF's own website -- see
+    events.services.rbihf_import. Only the URL and which of the club's own
+    teams it applies to; everything else is scraped."""
+
+    url = forms.CharField(
+        label=_("RBIHF team page URL"),
+        help_text=_("E.g. https://www.rbihf.be/league/team/4460"),
+        widget=forms.URLInput(attrs={"placeholder": "https://www.rbihf.be/league/team/4460"}),
+    )
+    team = forms.ModelChoiceField(queryset=Team.objects.none(), label=_("Team"), help_text=_("Which of your teams this fixture list is for."))
+
+    def __init__(self, *args, club=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["team"].queryset = Team.objects.filter(club=club)
+
+    def clean_url(self):
+        url = self.cleaned_data["url"].strip()
+        try:
+            extract_team_id(url)
+        except RBIHFImportError as error:
+            raise forms.ValidationError(str(error)) from error
+        return url
+
+
+class EventSeriesForm(EventAudienceFormMixin, forms.ModelForm):
+    """A friendly weekly/monthly recurrence picker on top of EventSeries' raw
+    RRULE (see management.recurrence_ui) -- covers the common case (every N
+    weeks/months) with an advanced raw-RRULE field as an escape hatch for
+    anything else."""
+
+    frequency = forms.ChoiceField(choices=FREQUENCY_CHOICES, initial="weekly", label=_("Repeats"))
+    interval = forms.IntegerField(min_value=1, initial=1, label=_("Every"), help_text=_("E.g. 2 for every other week/month."))
+    # A plain multi-select, not CheckboxSelectMultiple: its widget_type ("checkboxselectmultiple")
+    # isn't one form_field's ui.py recognises, which would silently render a broken
+    # plain text input instead -- see the "lazyselect" fix for the same class of bug.
+    weekdays = forms.MultipleChoiceField(choices=WEEKDAY_CHOICES, required=False, label=_("On"), widget=forms.SelectMultiple(attrs={"data-searchable": "true"}))
+    duration_hours = forms.IntegerField(min_value=0, required=False, label=_("Duration (hours)"))
+    duration_minutes = forms.IntegerField(min_value=0, max_value=59, required=False, label=_("Duration (minutes)"))
+    gathering_minutes_before = forms.IntegerField(min_value=0, required=False, label=_("Gather (minutes before)"))
+    deadline_minutes_before = forms.IntegerField(min_value=0, required=False, label=_("Registration deadline (minutes before)"))
+    advanced_rrule = forms.CharField(required=False, label=_("Advanced: raw recurrence rule"), help_text=_("Overrides the fields above if filled in. RFC 5545 RRULE, e.g. FREQ=WEEKLY;BYDAY=MO,WE."))
+
+    class Meta:
+        model = EventSeries
+        fields = ["title", "kind", "dtstart", "until", "teams", "invited_members", "excluded_members", "location", "opponent"]
+        widgets = {
+            "dtstart": forms.DateTimeInput(attrs={"type": "datetime-local"}),
+            "until": forms.DateTimeInput(attrs={"type": "datetime-local"}),
+            **_AUDIENCE_WIDGETS,
+        }
+
+    def __init__(self, *args, club=None, user=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.scope_audience_fields(club, user)
+
+        if self.instance.pk:
+            parsed = parse_rrule(self.instance.rrule)
+            if parsed is not None:
+                self.fields["frequency"].initial = parsed["frequency"]
+                self.fields["interval"].initial = parsed["interval"]
+                self.fields["weekdays"].initial = parsed["weekdays"]
+            else:
+                # Not one of our two shapes (hand-written/imported) -- show it
+                # verbatim in the advanced field rather than guessing at it.
+                self.fields["advanced_rrule"].initial = self.instance.rrule
+
+            if self.instance.duration is not None:
+                total_minutes = int(self.instance.duration.total_seconds() // 60)
+                self.fields["duration_hours"].initial = total_minutes // 60
+                self.fields["duration_minutes"].initial = total_minutes % 60
+            if self.instance.gathering_offset is not None:
+                self.fields["gathering_minutes_before"].initial = int(self.instance.gathering_offset.total_seconds() // 60)
+            if self.instance.deadline_offset is not None:
+                self.fields["deadline_minutes_before"].initial = int(self.instance.deadline_offset.total_seconds() // 60)
+
+    def clean(self):
+        cleaned = super().clean()
+        self.clean_teams_requires_one_for_non_admins(cleaned)
+
+        if cleaned.get("advanced_rrule"):
+            return cleaned  # the advanced field wins outright; nothing else to check
+
+        if cleaned.get("frequency") == "weekly" and not cleaned.get("weekdays"):
+            self.add_error("weekdays", _("Pick at least one day of the week."))
+        return cleaned
+
+    def save(self, commit=True):
+        instance = super().save(commit=False)
+        cleaned = self.cleaned_data
+
+        advanced = (cleaned.get("advanced_rrule") or "").strip()
+        instance.rrule = advanced or build_rrule(cleaned["frequency"], cleaned["interval"], cleaned.get("weekdays"))
+
+        hours, minutes = cleaned.get("duration_hours") or 0, cleaned.get("duration_minutes") or 0
+        instance.duration = datetime.timedelta(hours=hours, minutes=minutes) if (hours or minutes) else None
+
+        gathering_minutes = cleaned.get("gathering_minutes_before")
+        instance.gathering_offset = datetime.timedelta(minutes=gathering_minutes) if gathering_minutes else None
+
+        deadline_minutes = cleaned.get("deadline_minutes_before")
+        instance.deadline_offset = datetime.timedelta(minutes=deadline_minutes) if deadline_minutes else None
+
+        if commit:
+            instance.save()
+            self.save_m2m()
+        return instance
 
 
 class ClubRoleAssignForm(forms.ModelForm):

@@ -20,7 +20,7 @@ from events.models import Event
 from members.models import Family, FamilyMembership, Member
 from teams.models import Position, StaffAssignment, Team, TeamMembership
 
-from .models import Club, ClubMembership, ClubRole, FeePayment, Season, club_logo_path
+from .models import Club, ClubMembership, ClubRole, FeePayment, Season, Sponsor, club_logo_path
 from .services.access import (
     COACH_MANAGER,
     can_edit_event,
@@ -462,6 +462,56 @@ class SeasonGetCurrentTests(TestCase):
     def test_requires_an_active_club(self):
         with self.assertRaises(RuntimeError):
             Season.get_current(datetime.date(2026, 12, 25))
+
+
+class SeasonNextAfterTests(TestCase):
+    def setUp(self):
+        self.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        self.current = Season.objects.create(club=self.club, start_date=datetime.date(2026, 8, 1), end_date=datetime.date(2027, 5, 31))
+        self.next_season = Season.objects.create(club=self.club, start_date=datetime.date(2027, 8, 1), end_date=datetime.date(2028, 5, 31))
+
+    def test_returns_the_soonest_season_starting_after_the_date(self):
+        self.assertEqual(Season.next_after(self.club, datetime.date(2026, 12, 25)), self.next_season)
+
+    def test_returns_none_when_there_is_no_later_season(self):
+        self.assertIsNone(Season.next_after(self.club, datetime.date(2027, 12, 25)))
+
+    def test_is_scoped_to_the_given_club(self):
+        other = Club.objects.create(name="Rival FC", slug="rival-fc")
+        Season.objects.create(club=other, start_date=datetime.date(2027, 8, 1), end_date=datetime.date(2028, 5, 31))
+
+        self.assertEqual(Season.next_after(other, datetime.date(2026, 12, 25)).club, other)
+
+
+class SponsorModelTests(TestCase):
+    def setUp(self):
+        self.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+
+    def test_str_returns_name(self):
+        sponsor = Sponsor.objects.create(club=self.club, name="Acme Corp", start_date=datetime.date(2026, 1, 1))
+
+        self.assertEqual(str(sponsor), "Acme Corp")
+
+    def test_a_blank_end_date_is_valid(self):
+        sponsor = Sponsor(club=self.club, name="Acme Corp", start_date=datetime.date(2026, 1, 1))
+        sponsor.full_clean()
+
+    def test_an_end_date_on_the_same_day_as_start_is_valid(self):
+        sponsor = Sponsor(club=self.club, name="Acme Corp", start_date=datetime.date(2026, 1, 1), end_date=datetime.date(2026, 1, 1))
+        sponsor.full_clean()
+
+    def test_an_end_date_before_start_is_rejected(self):
+        sponsor = Sponsor(club=self.club, name="Acme Corp", start_date=datetime.date(2026, 6, 1), end_date=datetime.date(2026, 1, 1))
+
+        with self.assertRaises(ValidationError) as ctx:
+            sponsor.full_clean()
+        self.assertIn("end_date", ctx.exception.error_dict)
+
+    def test_sponsors_are_ordered_by_name(self):
+        Sponsor.objects.create(club=self.club, name="Zulu Corp", start_date=datetime.date(2026, 1, 1))
+        Sponsor.objects.create(club=self.club, name="Acme Corp", start_date=datetime.date(2026, 1, 1))
+
+        self.assertEqual(list(Sponsor.objects.values_list("name", flat=True)), ["Acme Corp", "Zulu Corp"])
 
 
 class AdminRegistrationSmokeTests(TestCase):

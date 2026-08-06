@@ -1,0 +1,75 @@
+{% extends "management/base.html" %}
+{% load i18n lucide static ui %}
+
+{% block heading %}{% if update_view %}{% blocktrans %}Edit {{ object }}{% endblocktrans %}{% else %}{% trans "New series" %}{% endif %}{% endblock heading %}
+
+{% block panel %}
+    <div class="card w-full bg-base-100 shadow">
+        <div class="card-body">
+            <form method="post">
+                {% csrf_token %}
+
+                {% for error in form.non_field_errors %}
+                    <div class="alert alert-error my-2">
+                        <span>{{ error }}</span>
+                    </div>
+                {% endfor %}
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {% form_field form.title %}
+                    {% form_field form.kind %}
+                </div>
+
+                <div class="divider"></div>
+                <h3 class="text-lg font-semibold mb-3">{% trans "Repeats" %}</h3>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {% form_field form.frequency %}
+                    {% form_field form.interval %}
+                    {% form_field form.dtstart %}
+                    {% form_field form.until %}
+                </div>
+                {% trans "Only used for a weekly pattern -- a monthly one repeats on the same day of the month as the first occurrence above." as weekdays_help %}
+                {% form_field form.weekdays help_text=weekdays_help %}
+                <details class="collapse collapse-arrow bg-base-200 mt-2">
+                    <summary class="collapse-title text-sm font-medium">{% trans "Advanced: raw recurrence rule" %}</summary>
+                    <div class="collapse-content">
+                        {% form_field form.advanced_rrule %}
+                    </div>
+                </details>
+
+                <div class="divider"></div>
+                <h3 class="text-lg font-semibold mb-3">{% trans "Audience" %}</h3>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {% form_field form.teams %}
+                    {% form_field form.invited_members %}
+                    {% form_field form.excluded_members %}
+                </div>
+
+                <div class="divider"></div>
+                <h3 class="text-lg font-semibold mb-3">{% trans "Where" %}</h3>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {% form_field form.location %}
+                    {% form_field form.opponent %}
+                </div>
+
+                <div class="divider"></div>
+                <h3 class="text-lg font-semibold mb-3">{% trans "Timing" %}</h3>
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    {% form_field form.duration_hours %}
+                    {% form_field form.duration_minutes %}
+                    {% form_field form.gathering_minutes_before %}
+                    {% form_field form.deadline_minutes_before %}
+                </div>
+
+                <div class="card-actions justify-start pt-2 mt-2">
+                    <a class="btn btn-outline gap-2" href="{% if update_view %}{% url "management:event_series_detail" object.pk %}{% else %}{% url "management:event_list" %}{% endif %}">{% lucide "arrow-left" size=16 %} {% trans "Cancel" %}</a>
+                    <button class="btn btn-primary gap-2" type="submit">{% lucide "save" size=16 %} {% trans "Save" %}</button>
+                </div>
+            </form>
+        </div>
+    </div>
+{% endblock panel %}
+
+{% block extra_body %}
+    <script src="{% static 'js/searchable-select.js' %}"></script>
+{% endblock extra_body %}

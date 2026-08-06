@@ -7,8 +7,8 @@
 {% if is_club_admin %}
 {% trans "Add parent" as add_parent_label %}
 {% trans "Add child" as add_child_label %}
-<button class="btn btn-outline btn-neutral gap-2" type="button" onclick="document.getElementById('add_parent_modal').showModal()">{% lucide "user-plus" size=16 %} {{ add_parent_label }}</button>
-<button class="btn btn-outline btn-neutral gap-2" type="button" onclick="document.getElementById('add_child_modal').showModal()">{% lucide "baby" size=16 %} {{ add_child_label }}</button>
+<button class="btn btn-outline gap-2" type="button" onclick="document.getElementById('add_parent_modal').showModal()">{% lucide "user-plus" size=16 %} {{ add_parent_label }}</button>
+<button class="btn btn-outline gap-2" type="button" onclick="document.getElementById('add_child_modal').showModal()">{% lucide "baby" size=16 %} {{ add_child_label }}</button>
 {% endif %}
 {% endblock actions %}
 

@@ -116,8 +116,16 @@ class ClubManagementTests(ControlPanelTestBase):
     def test_dashboard_lists_clubs(self):
         self.assertContains(self.client.get(reverse("controlpanel:dashboard")), "Ajax United")
 
+    def test_the_club_rows_subtitle_shows_the_sport_type_behind_the_url(self):
+        self.club.sport_type = Club.SportType.ICE_HOCKEY
+        self.club.save()
+
+        response = self.client.get(reverse("controlpanel:dashboard"))
+
+        self.assertContains(response, f"{self.club.slug}.rosterchief.app &middot; Ice hockey", html=False)
+
     def test_create_club_derives_the_slug(self):
-        response = self.client.post(reverse("controlpanel:club_create"), {"name": "New Club", "slug": "", "season_start": "2000-08-01", "season_duration_months": "12"})
+        response = self.client.post(reverse("controlpanel:club_create"), {"name": "New Club", "slug": "", "sport_type": "other", "season_start": "2000-08-01", "season_duration_months": "12"})
 
         club = Club.objects.get(name="New Club")
         self.assertEqual(club.slug, "new-club")
@@ -126,11 +134,20 @@ class ClubManagementTests(ControlPanelTestBase):
     def test_update_club(self):
         self.client.post(
             reverse("controlpanel:club_update", args=[self.club.pk]),
-            {"name": "Renamed", "slug": self.club.slug, "season_start": "2000-08-01", "season_duration_months": "12"},
+            {"name": "Renamed", "slug": self.club.slug, "sport_type": "other", "season_start": "2000-08-01", "season_duration_months": "12"},
         )
 
         self.club.refresh_from_db()
         self.assertEqual(self.club.name, "Renamed")
+
+    def test_update_club_sport_type(self):
+        self.client.post(
+            reverse("controlpanel:club_update", args=[self.club.pk]),
+            {"name": self.club.name, "slug": self.club.slug, "sport_type": "ice_hockey", "season_start": "2000-08-01", "season_duration_months": "12"},
+        )
+
+        self.club.refresh_from_db()
+        self.assertEqual(self.club.sport_type, "ice_hockey")
 
     def test_club_detail_shows_statistics(self):
         response = self.client.get(reverse("controlpanel:club_detail", args=[self.club.pk]))
@@ -138,6 +155,14 @@ class ClubManagementTests(ControlPanelTestBase):
         self.assertContains(response, "Members")
         self.assertContains(response, "Teams &amp; staff")
         self.assertContains(response, "Shop")
+
+    def test_club_detail_subheading_shows_the_sport_type_behind_the_url(self):
+        self.club.sport_type = Club.SportType.ICE_HOCKEY
+        self.club.save()
+
+        response = self.client.get(reverse("controlpanel:club_detail", args=[self.club.pk]))
+
+        self.assertContains(response, f"{self.club.slug}.rosterchief.app &middot; Ice hockey", html=False)
 
     def test_archive_then_restore(self):
         self.client.post(reverse("controlpanel:club_archive", args=[self.club.pk]))
@@ -489,6 +514,17 @@ class FeatureViewTests(ControlPanelTestBase):
         self.assertContains(response, "shop")
         self.assertContains(response, "maintenance")
 
+    def test_the_everyone_field_renders_as_a_populated_dropdown(self):
+        # Regression: NullBooleanField has no .choices on the field itself (only
+        # on field.widget.choices) -- the shared form_field templatetag read the
+        # wrong attribute and silently rendered the "everyone" tri-state dropdown
+        # with zero <option> tags. See controlpanel/templates/templatetags/field.html.
+        response = self.client.get(reverse("controlpanel:features"))
+
+        self.assertContains(response, '<option value="unknown">Unknown</option>', html=True)
+        self.assertContains(response, '<option value="true">Yes</option>', html=True)
+        self.assertContains(response, '<option value="false">No</option>', html=True)
+
     def test_the_flag_forms_are_post_only(self):
         # Reachable only through a modal on the features page: there is no standalone
         # template to render on a GET.
@@ -824,16 +860,20 @@ class FlagAdoptionTests(TestCase):
         self.club = Club.objects.create(name="Ajax United")
 
     def test_clubs_are_counted_per_flag(self):
+        # Not an exact-list assertion: migration 0018 seeds real "CEHL"/"RBIHF"
+        # flags for the built-in competitions, so a fresh test database is never
+        # actually flag-free.
         flag = Flag.objects.create(name="shop")
         flag.clubs.add(self.club)
 
-        self.assertEqual(flag_adoption(), [{"name": "shop", "clubs": 1, "everyone": None, "overridden": False}])
+        self.assertIn({"name": "shop", "clubs": 1, "everyone": None, "overridden": False}, flag_adoption())
 
     def test_an_everyone_flag_reports_itself_as_overridden(self):
         # `everyone` beats club targeting, so the club count would be a lie.
         Flag.objects.create(name="shop", everyone=True)
 
-        self.assertTrue(flag_adoption()[0]["overridden"])
+        shop_entry = next(entry for entry in flag_adoption() if entry["name"] == "shop")
+        self.assertTrue(shop_entry["overridden"])
 
 
 class PlatformChartTests(TestCase):

@@ -73,6 +73,14 @@ class ClubScopedFlagTests(TestCase):
 
         self.assertFalse(flag_is_active(self.request_for(None), "shop"))
 
+    def test_a_flag_name_with_no_matching_row_is_off_not_an_error(self):
+        # Regression: waffle's own BaseModel.get() falls back to a transient,
+        # unsaved Flag(name=...) instance when nothing in the DB matches the
+        # name -- an M2M lookup (self.clubs) against that unsaved instance used
+        # to raise ValueError instead of just resolving to "off". This is the
+        # normal state for any flag nobody has created in the control panel yet.
+        self.assertFalse(flag_is_active(self.request_for(self.club), "no-such-flag"))
+
     def test_is_active_for_club_without_a_request(self):
         self.flag.clubs.add(self.club)
 

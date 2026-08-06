@@ -78,6 +78,8 @@ INSTALLED_APPS = [
     # Club-facing UI for team managers, coaches and admins -- not controlpanel (platform
     # staff managing every club) and not the future parent/player app.
     "management.apps.ManagementConfig",
+    # Public, read-only JSON API for a club's own external website -- see api/urls.py.
+    "api.apps.ApiConfig",
 ]
 
 # Feature flags (django-waffle). The Flag model is swappable, like AUTH_USER_MODEL:
@@ -100,6 +102,9 @@ MIDDLEWARE = [
     "club.tenancy.ClubTenantMiddleware",
     # After tenancy: it decides club-vs-platform from request.club, which was just resolved.
     "features.middleware.MaintenanceMiddleware",
+    # After maintenance: a club under maintenance closes its public API too, same as
+    # everything else on its subdomain.
+    "api.middleware.PublicApiCorsMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
@@ -193,6 +198,7 @@ TEMPLATES = [
                 "management.context_processors.management_link",
                 "management.context_processors.active_nav_section",
                 "management.context_processors.news_permissions",
+                "management.context_processors.feature_sections",
             ],
         },
     },

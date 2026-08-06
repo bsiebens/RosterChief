@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.utils.translation import gettext_lazy as _
 
-from .models import Position, StaffAssignment, Team, TeamMembership
+from .models import Position, StaffAssignment, Team, TeamMembership, TeamPhoto
 
 
 class TeamMembershipInline(admin.TabularInline):
@@ -20,12 +20,26 @@ class StaffAssignmentInline(admin.TabularInline):
     raw_id_fields = ("member",)
 
 
+class TeamPhotoInline(admin.TabularInline):
+    """One photo per season, shown on the Team page."""
+
+    model = TeamPhoto
+    extra = 0
+
+
 @admin.register(Team)
 class TeamAdmin(admin.ModelAdmin):
     list_display = ["name", "short_name", "club"]
     list_filter = ["club"]
     search_fields = ["name", "short_name"]
-    inlines = [TeamMembershipInline, StaffAssignmentInline]
+    inlines = [TeamMembershipInline, StaffAssignmentInline, TeamPhotoInline]
+
+
+@admin.register(TeamPhoto)
+class TeamPhotoAdmin(admin.ModelAdmin):
+    list_display = ["team", "season"]
+    list_filter = ["team__club", "season"]
+    search_fields = ["team__name"]
 
 
 @admin.register(Position)

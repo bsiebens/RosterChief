@@ -9,22 +9,36 @@ from django.utils.translation import gettext_lazy as _
 from django.utils.translation import ngettext
 from django.views.generic import CreateView, DetailView, FormView, ListView, TemplateView, UpdateView, View
 
-from club.mixins import ClubAdminRequiredMixin, ClubStaffRequiredMixin, ManagementPositionRequiredMixin, NewsAuthorRequiredMixin, NewsEditRequiredMixin, NewsPublisherRequiredMixin, TeamManagerRequiredMixin
-from club.models import ClubMembership, ClubRole, Season
+from billing.models import RENEWAL_LEAD_DAYS, Due
+from club.mixins import (
+    ClubAdminRequiredMixin,
+    ClubStaffRequiredMixin,
+    EventManagerRequiredMixin,
+    FeatureRequiredMixin,
+    ManagementPositionRequiredMixin,
+    NewsAuthorRequiredMixin,
+    NewsEditRequiredMixin,
+    NewsPublisherRequiredMixin,
+    TeamManagerRequiredMixin,
+)
+from club.models import ClubMembership, ClubRole, Season, Sponsor
 from club.services.access import can_edit_news, can_publish_news, current_season, is_club_admin, members_visible_to, teams_managed_by, teams_staffed_by
 from club.services.fees import mark_as_paid, record_payment, remaining_balance
 from controlpanel.messages import notify
 from controlpanel.mixins import RedirectOnInvalidMixin
 from controlpanel.services.statistics import club_attention, club_charts, club_statistics
-from events.models import Event, EventSeries, Location, Opponent
+from events.models import Attendance, Event, EventSeries, Location, Opponent
 from events.services.attendance import player_attendance_rankings, players_who_missed_recent_practices, team_attendance_rate, team_no_shows
+from events.services.competitions import CompetitionFetchError, fetch_game_info
+from events.services.rbihf_import import RBIHFImportError, apply_plan, build_plan, extract_team_id, fetch_html
+from events.services.recurrence import cancel_occurrence, detach_occurrence, generate_occurrences, propagate_series
 from formbuilder.models import Form as FormBuilderForm
 from formbuilder.models import Submission
 from members.models import Family, FamilyMembership, Member
 from members.services.family import add_child_to_family, add_parent_to_family, attach_to_family, detach_from_family, grant_login, register_family
 from news.models import News, NewsPhoto
 from shop.models import Discount, Invoice, Order, Product
-from teams.models import Position, StaffAssignment, Team, TeamMembership
+from teams.models import Position, StaffAssignment, Team, TeamMembership, TeamPhoto
 
 from .bulk_import import build_member_import_template, parse_member_import_rows, read_member_import_workbook
 from .forms import (
@@ -33,6 +47,8 @@ from .forms import (
     AttachToFamilyForm,
     ClubMembershipForm,
     ClubRoleAssignForm,
+    EventForm,
+    EventSeriesForm,
     FamilyCreateForm,
     GrantLoginForm,
     LocationForm,
@@ -43,12 +59,16 @@ from .forms import (
     NewsPublishForm,
     OpponentForm,
     PositionForm,
+    RBIHFImportForm,
     RecordFeePaymentForm,
+    SponsorForm,
     StaffAssignmentForm,
     TeamForm,
     TeamMembershipForm,
+    TeamPhotoForm,
 )
 from .pdf import PDFExportError, membership_list_pdf
+from .recurrence_ui import describe_rrule
 
 
 class HomeView(ClubStaffRequiredMixin, TemplateView):
@@ -56,18 +76,32 @@ class HomeView(ClubStaffRequiredMixin, TemplateView):
     club_attention/club_charts/club_statistics are the exact functions
     controlpanel/club_detail.html uses for the platform admin's per-club drill-down --
     already club-scoped, so directly reusable for this club's own staff. Published
-    news sits alongside upcoming events -- open to everyone here, same as events."""
+    news is open to everyone; upcoming events are scoped the same way the events
+    list is (see scoped_to_managed_teams) -- a manager shouldn't see another
+    team's practice show up here either."""
 
     template_name = "management/home.html"
 
     def get_context_data(self, **kwargs):
-        club = self.request.club
+        club, user = self.request.club, self.request.user
+        subscription = getattr(club, "subscription", None)
+
+        billing_ends_at = None
+        if subscription is not None:
+            latest_due = club.dues.exclude(status=Due.Status.CANCELLED).order_by("-period_end").first()
+            if latest_due is not None and 0 <= (latest_due.period_end - timezone.localdate()).days <= RENEWAL_LEAD_DAYS:
+                billing_ends_at = latest_due.period_end
+
+        upcoming_events = scoped_to_managed_teams(Event.objects.filter(club=club, start__gte=timezone.now()), user, club).order_by("start").prefetch_related("teams")[:5]
+
         return super().get_context_data(
             attention=club_attention(club),
             charts=club_charts(club),
             groups=club_statistics(club),
-            upcoming_events=Event.objects.filter(club=club, start__gte=timezone.now()).order_by("start")[:5],
+            upcoming_events=upcoming_events,
             published_news=News.objects.filter(club=club, status=News.Status.PUBLISHED, published_at__lte=timezone.now()).order_by("-published_at")[:5],
+            billing_ends_at=billing_ends_at,
+            billing_auto_renews=subscription.auto_renew if subscription else False,
             today=timezone.localdate(),
             **kwargs,
         )
@@ -774,6 +808,7 @@ class TeamDetailView(ClubStaffRequiredMixin, DetailView):
         top_attenders, bottom_attenders = [], []
         missed_practices = Member.objects.none()
         no_shows = []
+        team_photo = TeamPhoto.objects.filter(team=team, season=season).first() if season is not None else None
         if season is not None:
             roster = list(TeamMembership.objects.filter(team=team, season=season).select_related("member", "position").order_by("position__ordering", "member__last_name"))
             staff = list(StaffAssignment.objects.filter(team=team, season=season).select_related("member", "position").order_by("position__ordering", "member__last_name"))
@@ -798,6 +833,8 @@ class TeamDetailView(ClubStaffRequiredMixin, DetailView):
             can_manage=can_manage,
             roster_form=TeamMembershipForm(club=club, team=team, season=season) if can_manage and season else None,
             staff_form=StaffAssignmentForm(club=club, team=team, season=season) if can_manage and season else None,
+            team_photo=team_photo,
+            team_photo_form=TeamPhotoForm(instance=team_photo) if can_manage and season else None,
             attendance_rate=attendance_rate,
             top_attenders=top_attenders,
             bottom_attenders=bottom_attenders,
@@ -981,6 +1018,56 @@ class TeamStaffRemoveView(TeamManagerRequiredMixin, View):
         body = _("“%(member)s” removed from staff.") % {"member": member}
         notify(request, f"w|{_('Staff removed')}|{body}")
         return redirect(f"{reverse('management:team_detail', args=[pk])}?season={season_id}")
+
+
+class TeamPhotoSetView(TeamManagerRequiredMixin, FormView):
+    """Reachable only via the "Upload"/"Replace" modal on the team page. Binds
+    to the existing TeamPhoto for this team+season (if any) so re-uploading
+    replaces it in place -- same "create or update the one row for this
+    scope" pattern as controlpanel.views.ClubHomeLocationSetView. Not
+    RedirectOnInvalidMixin, same reasoning as TeamRosterAddView: that can't
+    carry ?season= through a plain redirect(view_name, **kwargs)."""
+
+    form_class = TeamPhotoForm
+    http_method_names = ["post"]
+
+    def get_team(self):
+        return get_object_or_404(Team.objects.filter(club=self.request.club), pk=self.kwargs["pk"])
+
+    def get_season(self):
+        return get_object_or_404(Season.objects.filter(club=self.request.club), pk=self.kwargs["season_pk"])
+
+    def get_form_kwargs(self):
+        return super().get_form_kwargs() | {"instance": TeamPhoto.objects.filter(team=self.get_team(), season=self.get_season()).first()}
+
+    def team_detail_url(self):
+        return f"{reverse('management:team_detail', args=[self.kwargs['pk']])}?season={self.kwargs['season_pk']}"
+
+    def form_invalid(self, form):
+        for error in form.errors.values():
+            notify(self.request, f"e|{_('Could not upload photo')}|{' '.join(error)}")
+        return redirect(self.team_detail_url())
+
+    def form_valid(self, form):
+        photo = form.save(commit=False)
+        photo.team = self.get_team()
+        photo.season = self.get_season()
+        photo.save()
+
+        notify(self.request, f"s|{_('Photo uploaded')}|{_('Team photo updated.')}")
+        return redirect(self.team_detail_url())
+
+
+class TeamPhotoDeleteView(TeamManagerRequiredMixin, View):
+    def get_team(self):
+        return get_object_or_404(Team.objects.filter(club=self.request.club), pk=self.kwargs["pk"])
+
+    def post(self, request, pk, season_pk):
+        team = self.get_team()
+        TeamPhoto.objects.filter(team=team, season_id=season_pk).delete()
+
+        notify(request, f"w|{_('Photo removed')}|{_('Team photo removed.')}")
+        return redirect(f"{reverse('management:team_detail', args=[pk])}?season={season_pk}")
 
 
 # --- Club roles (full tier: assign / revoke, no update -- a role isn't edited, just
@@ -1411,18 +1498,439 @@ class NewsPhotoDeleteView(NewsEditRequiredMixin, View):
         return redirect("management:news_detail", pk=news_item.pk)
 
 
-class EventListView(ClubStaffRequiredMixin, StubListMixin, ListView):
-    page_title = _("Events")
+def scoped_to_managed_teams(queryset, user, club):
+    """Non-admin: only rows for a team they manage, plus team-less/club-wide
+    ones (a social, an AGM) -- there's no team to scope those to, so they stay
+    visible to everyone. Same "manages" rule as who can edit (teams_managed_by),
+    not the broader "staffed on any role" one. Works for any queryset whose
+    model has a `teams` M2M -- Event and EventSeries both do -- so it backs the
+    events list, the dashboard's upcoming-events widget, and both detail views
+    (an out-of-scope one 404s if opened directly, same as any other
+    queryset-scoped detail view here, not just unlisted)."""
+    if is_club_admin(user, club):
+        return queryset
+    managed_team_ids = teams_managed_by(user, club).values_list("pk", flat=True)
+    return queryset.filter(Q(teams__in=managed_team_ids) | Q(teams__isnull=True)).distinct()
+
+
+class EventListView(ClubStaffRequiredMixin, ListView):
+    """Upcoming by default (what a coach actually opens this page to check);
+    ``?show_past=1`` flips to the most recent past events instead. Season
+    filtering mirrors Event.season's own "explicit, else derived from start
+    date" rule (events/models.py) rather than requiring a stored season on
+    every row."""
+
+    template_name = "management/event_list.html"
+    context_object_name = "events"
+
+    def get_queryset(self):
+        club = self.request.club
+        user = self.request.user
+        events = Event.objects.filter(club=club).select_related("location", "opponent").prefetch_related("teams")
+
+        season = selected_season_from_request(self.request, club)
+        if season is not None:
+            events = events.filter(Q(season=season) | Q(season__isnull=True, start__date__gte=season.start_date, start__date__lte=season.end_date))
+
+        kind = self.request.GET.get("kind", "")
+        if kind:
+            events = events.filter(kind=kind)
+
+        events = scoped_to_managed_teams(events, user, club)
+
+        is_admin = is_club_admin(user, club)
+        managed_team_ids = set() if is_admin else set(teams_managed_by(user, club).values_list("pk", flat=True))
+
+        now = timezone.now()
+        if self.request.GET.get("show_past") == "1":
+            events = list(events.filter(start__lt=now).order_by("-start"))
+        else:
+            events = list(events.filter(start__gte=now).order_by("start"))
+
+        # Attached per row so the template can show/hide Edit/Delete per event --
+        # computed once here rather than a query per row (teams is already
+        # prefetched above).
+        for event in events:
+            event.can_manage = is_admin or any(team.pk in managed_team_ids for team in event.teams.all())
+        return events
+
+    def get_context_data(self, **kwargs):
+        club, user = self.request.club, self.request.user
+        return super().get_context_data(
+            seasons=Season.objects.filter(club=club).order_by("-start_date"),
+            selected_season=selected_season_from_request(self.request, club),
+            selected_kind=self.request.GET.get("kind", ""),
+            show_past=self.request.GET.get("show_past") == "1",
+            event_kinds=Event.EventKind.choices,
+            can_create=is_club_admin(user, club) or teams_managed_by(user, club).exists(),
+            **kwargs,
+        )
+
+
+class EventDetailView(ClubStaffRequiredMixin, DetailView):
+    template_name = "management/event_detail.html"
+    context_object_name = "event"
+
+    def get_queryset(self):
+        events = Event.objects.filter(club=self.request.club).select_related("series", "location", "opponent", "season").prefetch_related("teams", "invited_members", "excluded_members")
+        return scoped_to_managed_teams(events, self.request.user, self.request.club)
+
+    def get_context_data(self, **kwargs):
+        club, user, event = self.request.club, self.request.user, self.object
+        can_manage = is_club_admin(user, club) or teams_managed_by(user, club).filter(pk__in=event.teams.values_list("pk", flat=True)).exists()
+
+        rows_by_status = {}
+        for row in event.attendances.select_related("member").order_by("member__last_name", "member__first_name"):
+            rows_by_status.setdefault(row.status, []).append(row)
+
+        # Every status, in its declared order -- not just the ones that happen to have
+        # a response yet, or "0 people excused" silently disappears instead of reading
+        # as good news. Same grouping backs both the breakdown counts and the modal's
+        # per-status sections, so there's exactly one query, not two.
+        attendance_groups = [{"value": value, "label": label, "rows": rows_by_status.get(value, [])} for value, label in Attendance.AttendanceStatus.choices]
+
+        return super().get_context_data(
+            can_manage=can_manage,
+            attendance_groups=attendance_groups,
+            has_attendance_rows=any(group["rows"] for group in attendance_groups),
+            **kwargs,
+        )
+
+
+class EventCreateView(ClubStaffRequiredMixin, CreateView):
+    """Broader than EventManagerRequiredMixin's own gate (no object yet to check
+    teams against): anyone managing at least one team, or an admin. EventForm
+    itself then restricts *which* teams a non-admin can pick and requires at
+    least one, so a team-less/club-wide event stays admin-only."""
+
+    model = Event
+    form_class = EventForm
+    template_name = "management/event_form.html"
+
+    def test_func(self):
+        user, club = self.request.user, self.request.club
+        return is_club_admin(user, club) or teams_managed_by(user, club).exists()
+
+    def get_form_kwargs(self):
+        # Event.clean() rejects a location/opponent from another club by comparing
+        # against self.club_id -- on a brand-new instance that's still None until
+        # ClubScopedModel.save() auto-assigns it, which only happens *after*
+        # validation. Set it here so full_clean() sees the real club, not None.
+        return super().get_form_kwargs() | {"club": self.request.club, "user": self.request.user, "instance": Event(club=self.request.club)}
+
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        body = _("“%(event)s” created.") % {"event": self.object}
+        notify(self.request, f"s|{_('Event created')}|{body}")
+        return response
+
+    def get_success_url(self):
+        return reverse("management:event_detail", args=[self.object.pk])
+
+
+class EventUpdateView(EventManagerRequiredMixin, UpdateView):
+    model = Event
+    form_class = EventForm
+    template_name = "management/event_form.html"
 
     def get_queryset(self):
         return Event.objects.filter(club=self.request.club)
 
+    def get_teams(self):
+        return get_object_or_404(Event.objects.filter(club=self.request.club), pk=self.kwargs["pk"]).teams.all()
 
-class EventSeriesListView(ClubStaffRequiredMixin, StubListMixin, ListView):
-    page_title = _("Event series")
+    def get_form_kwargs(self):
+        return super().get_form_kwargs() | {"club": self.request.club, "user": self.request.user, "editing": True}
+
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        body = _("“%(event)s” updated.") % {"event": self.object}
+        notify(self.request, f"s|{_('Event updated')}|{body}")
+        return response
+
+    def get_success_url(self):
+        return reverse("management:event_detail", args=[self.object.pk])
+
+    def get_context_data(self, **kwargs):
+        return super().get_context_data(update_view=True, **kwargs)
+
+
+class EventDeleteView(EventManagerRequiredMixin, View):
+    """A series occurrence is cancelled (keeps the series' excluded_dates in
+    sync -- see cancel_occurrence), never just deleted outright; a one-off
+    event is deleted outright. One button, the branch is internal."""
+
+    def get_event(self):
+        return get_object_or_404(Event.objects.filter(club=self.request.club), pk=self.kwargs["pk"])
+
+    def get_teams(self):
+        return self.get_event().teams.all()
+
+    def post(self, request, pk):
+        event = self.get_event()
+        title = str(event)
+        if event.series_id:
+            cancel_occurrence(event, hard_delete=request.POST.get("keep_record") != "on")
+            notify(request, f"w|{_('Occurrence cancelled')}|{_('“%(event)s” was cancelled.') % {'event': title}}")
+        else:
+            event.delete()
+            notify(request, f"w|{_('Event deleted')}|{_('“%(event)s” has been deleted.') % {'event': title}}")
+        return redirect("management:event_list")
+
+
+class EventDetachView(EventManagerRequiredMixin, View):
+    """Stop this occurrence from being touched by future series-wide edits --
+    see detach_occurrence. Editing a still-attached occurrence directly would
+    otherwise be silently overwritten by the next propagate_series() call."""
+
+    def get_event(self):
+        return get_object_or_404(Event.objects.filter(club=self.request.club), pk=self.kwargs["pk"])
+
+    def get_teams(self):
+        return self.get_event().teams.all()
+
+    def post(self, request, pk):
+        event = self.get_event()
+        detach_occurrence(event)
+        notify(request, f"s|{_('Detached from series')}|{_('“%(event)s” is now edited independently and will not be touched by future series-wide changes.') % {'event': event}}")
+        return redirect("management:event_detail", pk=event.pk)
+
+
+class EventFetchGameInfoView(EventManagerRequiredMixin, View):
+    """Refresh a game's score/status from its competition -- see
+    events.services.competitions.fetch_game_info, which gates on the
+    competition's feature flag being active for this club and otherwise
+    no-ops. No data source is wired up yet either way, so an actual fetch
+    attempt always reports the same honest "not configured" error; the
+    button/view exist so a real integration only has to replace that function."""
+
+    def get_event(self):
+        return get_object_or_404(Event.objects.filter(club=self.request.club), pk=self.kwargs["pk"])
+
+    def get_teams(self):
+        return self.get_event().teams.all()
+
+    def post(self, request, pk):
+        event = self.get_event()
+        try:
+            if fetch_game_info(event):
+                notify(request, f"s|{_('Game info updated')}|{_('“%(event)s” was refreshed from its competition.') % {'event': event}}")
+            else:
+                notify(request, f"i|{_('Nothing to fetch')}|{_('“%(competition)s” is not enabled for this club.') % {'competition': event.competition}}")
+        except CompetitionFetchError as error:
+            notify(request, f"e|{_('Could not fetch game info')}|{error}")
+        return redirect("management:event_detail", pk=event.pk)
+
+
+class RBIHFImportView(FeatureRequiredMixin, View):
+    """Step 1: paste an RBIHF team page URL, pick which of the club's teams it's
+    for. Fetches and parses the page server-side, stashes the raw HTML (not
+    client-trusted parsed data) in the session, and renders a create/update/
+    delete preview -- see events.services.rbihf_import and
+    RBIHFImportConfirmView, which mirrors MemberImportView/
+    MemberImportConfirmView's session-stash-and-reparse shape."""
+
+    feature_flag = "RBIHF"
+
+    def get(self, request):
+        return render(request, "management/rbihf_import_form.html", {"form": RBIHFImportForm(club=request.club)})
+
+    def post(self, request):
+        form = RBIHFImportForm(request.POST, club=request.club)
+        if not form.is_valid():
+            return render(request, "management/rbihf_import_form.html", {"form": form})
+
+        url = form.cleaned_data["url"]
+        team = form.cleaned_data["team"]
+
+        rbihf_team_id = extract_team_id(url)
+        try:
+            html = fetch_html(url)
+            plan = build_plan(request.club, team, rbihf_team_id, html)
+        except RBIHFImportError as error:
+            form.add_error("url", str(error))
+            return render(request, "management/rbihf_import_form.html", {"form": form})
+
+        request.session["rbihf_import_html"] = html
+        request.session["rbihf_import_team_id"] = str(team.pk)
+        request.session["rbihf_import_rbihf_team_id"] = rbihf_team_id
+        return render(request, "management/rbihf_import_preview.html", {"plan": plan})
+
+
+class RBIHFImportConfirmView(FeatureRequiredMixin, View):
+    """Step 2: re-parses and re-diffs the HTML stashed by RBIHFImportView
+    against the *current* DB state (catching anything that changed since the
+    preview was shown), reads each row's chosen location/opponent back from
+    the preview form, and applies the result in one transaction."""
+
+    feature_flag = "RBIHF"
+
+    def post(self, request):
+        html = request.session.pop("rbihf_import_html", None)
+        team_id = request.session.pop("rbihf_import_team_id", None)
+        rbihf_team_id = request.session.pop("rbihf_import_rbihf_team_id", None)
+        if not html or not team_id or not rbihf_team_id:
+            notify(request, f"w|{_('Nothing to import')}|{_('Start over by pasting the RBIHF team URL again.')}")
+            return redirect("management:rbihf_import")
+
+        team = get_object_or_404(Team.objects.filter(club=request.club), pk=team_id)
+
+        try:
+            plan = build_plan(request.club, team, rbihf_team_id, html)
+        except RBIHFImportError:
+            notify(request, f"e|{_('Could not import')}|{_('Something went wrong re-reading the fetched page. Try again.')}")
+            return redirect("management:rbihf_import")
+
+        locations_by_game_id = {}
+        opponents_by_game_id = {}
+        for planned in [*plan.to_create, *plan.to_update]:
+            game_id = planned.fixture.external_game_id
+            locations_by_game_id[game_id] = request.POST.get(f"location_{game_id}", "")
+            opponents_by_game_id[game_id] = request.POST.get(f"opponent_{game_id}", "")
+
+        result = apply_plan(plan, locations_by_game_id, opponents_by_game_id)
+
+        body = _("%(created)s created, %(updated)s updated, %(deleted)s deleted.") % result
+        notify(request, f"s|{_('Fixtures imported')}|{body}")
+        return redirect("management:event_list")
+
+
+class EventSeriesDetailView(ClubStaffRequiredMixin, DetailView):
+    template_name = "management/event_series_detail.html"
+    context_object_name = "series"
+
+    def get_queryset(self):
+        series = EventSeries.objects.filter(club=self.request.club).select_related("location", "opponent").prefetch_related("teams", "invited_members", "excluded_members")
+        return scoped_to_managed_teams(series, self.request.user, self.request.club)
+
+    def get_context_data(self, **kwargs):
+        club, user, series = self.request.club, self.request.user, self.object
+        can_manage = is_club_admin(user, club) or teams_managed_by(user, club).filter(pk__in=series.teams.values_list("pk", flat=True)).exists()
+        now = timezone.now()
+        occurrences = list(series.occurrences.order_by("start"))
+        for occurrence in occurrences:
+            occurrence.is_past = occurrence.start < now
+        return super().get_context_data(
+            can_manage=can_manage,
+            recurrence_summary=describe_rrule(series.rrule),
+            occurrences=occurrences,
+            **kwargs,
+        )
+
+
+class EventSeriesCreateView(ClubStaffRequiredMixin, CreateView):
+    model = EventSeries
+    form_class = EventSeriesForm
+    template_name = "management/event_series_form.html"
+
+    def test_func(self):
+        user, club = self.request.user, self.request.club
+        return is_club_admin(user, club) or teams_managed_by(user, club).exists()
+
+    def get_form_kwargs(self):
+        # Same reasoning as EventCreateView: EventSeries.clean() needs a real
+        # club_id on the instance before full_clean() runs, not the None a
+        # brand-new instance starts with.
+        return super().get_form_kwargs() | {"club": self.request.club, "user": self.request.user, "instance": EventSeries(club=self.request.club)}
+
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        # Not automatic on save -- without this the series would exist with zero
+        # occurrences until the extend_event_series cron command next runs.
+        created = generate_occurrences(self.object)
+        body = ngettext("“%(series)s” created, with %(count)d occurrence scheduled.", "“%(series)s” created, with %(count)d occurrences scheduled.", len(created)) % {"series": self.object, "count": len(created)}
+        notify(self.request, f"s|{_('Series created')}|{body}")
+        return response
+
+    def get_success_url(self):
+        return reverse("management:event_series_detail", args=[self.object.pk])
+
+
+class EventSeriesUpdateView(EventManagerRequiredMixin, UpdateView):
+    model = EventSeries
+    form_class = EventSeriesForm
+    template_name = "management/event_series_form.html"
 
     def get_queryset(self):
         return EventSeries.objects.filter(club=self.request.club)
+
+    def get_teams(self):
+        return get_object_or_404(EventSeries.objects.filter(club=self.request.club), pk=self.kwargs["pk"]).teams.all()
+
+    def get_form_kwargs(self):
+        return super().get_form_kwargs() | {"club": self.request.club, "user": self.request.user}
+
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        # Push the template change to future, non-detached occurrences, then fill
+        # in any further-out dates the (possibly changed) pattern now implies.
+        # Occurrences that no longer match a changed pattern are NOT auto-removed
+        # -- reconciling that is ambiguous (which to drop vs. keep attendance
+        # history for) and is left as a manual "Cancel" per stale occurrence.
+        propagate_series(self.object)
+        generate_occurrences(self.object)
+        body = _("“%(series)s” updated.") % {"series": self.object}
+        notify(self.request, f"s|{_('Series updated')}|{body}")
+        return response
+
+    def get_success_url(self):
+        return reverse("management:event_series_detail", args=[self.object.pk])
+
+    def get_context_data(self, **kwargs):
+        return super().get_context_data(update_view=True, **kwargs)
+
+
+class EventSeriesDeleteView(EventManagerRequiredMixin, View):
+    """series is on_delete=CASCADE -- this also deletes every occurrence and its
+    attendance history. The confirm modal must say so; "Stop repeating"
+    (EventSeriesStopView) is the non-destructive alternative."""
+
+    def get_series(self):
+        return get_object_or_404(EventSeries.objects.filter(club=self.request.club), pk=self.kwargs["pk"])
+
+    def get_teams(self):
+        return self.get_series().teams.all()
+
+    def post(self, request, pk):
+        series = self.get_series()
+        title = str(series)
+        series.delete()
+        notify(request, f"w|{_('Series deleted')}|{_('“%(series)s” and all of its occurrences have been deleted.') % {'series': title}}")
+        return redirect("management:event_list")
+
+
+class EventSeriesStopView(EventManagerRequiredMixin, View):
+    """Stop future generation without touching any existing occurrence or its
+    attendance history -- the non-destructive alternative to deleting the
+    series outright."""
+
+    def get_series(self):
+        return get_object_or_404(EventSeries.objects.filter(club=self.request.club), pk=self.kwargs["pk"])
+
+    def get_teams(self):
+        return self.get_series().teams.all()
+
+    def post(self, request, pk):
+        series = self.get_series()
+        series.until = timezone.now()
+        series.save(update_fields=["until"])
+        notify(request, f"s|{_('Series stopped')}|{_('“%(series)s” will no longer generate new occurrences. Existing ones are untouched.') % {'series': series}}")
+        return redirect("management:event_series_detail", pk=series.pk)
+
+
+class EventSeriesGenerateView(EventManagerRequiredMixin, View):
+    def get_series(self):
+        return get_object_or_404(EventSeries.objects.filter(club=self.request.club), pk=self.kwargs["pk"])
+
+    def get_teams(self):
+        return self.get_series().teams.all()
+
+    def post(self, request, pk):
+        series = self.get_series()
+        created = generate_occurrences(series)
+        body = ngettext("%(count)d new occurrence generated.", "%(count)d new occurrences generated.", len(created)) % {"count": len(created)}
+        notify(request, f"s|{_('Occurrences generated')}|{body}")
+        return redirect("management:event_series_detail", pk=series.pk)
 
 
 class LocationListView(ManagementPositionRequiredMixin, ListView):
@@ -1537,42 +2045,107 @@ class OpponentDeleteView(ManagementPositionRequiredMixin, View):
         return redirect("management:opponent_list")
 
 
-class ProductListView(ClubAdminRequiredMixin, StubListMixin, ListView):
+class SponsorListView(ClubAdminRequiredMixin, ListView):
+    """Sponsors are a business/revenue relationship, same bucket as
+    memberships/roles/shop -- admin-only, unlike Location/Opponent which any
+    management position can maintain."""
+
+    template_name = "management/sponsor_list.html"
+    context_object_name = "sponsors"
+
+    def get_queryset(self):
+        return Sponsor.objects.filter(club=self.request.club)
+
+
+class SponsorCreateView(ClubAdminRequiredMixin, CreateView):
+    model = Sponsor
+    form_class = SponsorForm
+    template_name = "management/sponsor_form.html"
+
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        body = _("“%(sponsor)s” created.") % {"sponsor": self.object}
+        notify(self.request, f"s|{_('Sponsor created')}|{body}")
+        return response
+
+    def get_success_url(self):
+        return reverse("management:sponsor_list")
+
+
+class SponsorUpdateView(ClubAdminRequiredMixin, UpdateView):
+    model = Sponsor
+    form_class = SponsorForm
+    template_name = "management/sponsor_form.html"
+
+    def get_queryset(self):
+        return Sponsor.objects.filter(club=self.request.club)
+
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        body = _("“%(sponsor)s” updated.") % {"sponsor": self.object}
+        notify(self.request, f"s|{_('Sponsor updated')}|{body}")
+        return response
+
+    def get_success_url(self):
+        return reverse("management:sponsor_list")
+
+    def get_context_data(self, **kwargs):
+        return super().get_context_data(update_view=True, **kwargs)
+
+
+class SponsorDeleteView(ClubAdminRequiredMixin, View):
+    def post(self, request, pk):
+        sponsor = get_object_or_404(Sponsor.objects.filter(club=request.club), pk=pk)
+        name = str(sponsor)
+        sponsor.delete()
+
+        body = _("“%(sponsor)s” has been deleted.") % {"sponsor": name}
+        notify(request, f"w|{_('Sponsor deleted')}|{body}")
+        return redirect("management:sponsor_list")
+
+
+class ProductListView(FeatureRequiredMixin, StubListMixin, ListView):
+    feature_flag = "shop"
     page_title = _("Products")
 
     def get_queryset(self):
         return Product.objects.filter(club=self.request.club)
 
 
-class OrderListView(ClubAdminRequiredMixin, StubListMixin, ListView):
+class OrderListView(FeatureRequiredMixin, StubListMixin, ListView):
+    feature_flag = "shop"
     page_title = _("Orders")
 
     def get_queryset(self):
         return Order.objects.filter(club=self.request.club)
 
 
-class DiscountListView(ClubAdminRequiredMixin, StubListMixin, ListView):
+class DiscountListView(FeatureRequiredMixin, StubListMixin, ListView):
+    feature_flag = "shop"
     page_title = _("Discounts")
 
     def get_queryset(self):
         return Discount.objects.filter(club=self.request.club)
 
 
-class InvoiceListView(ClubAdminRequiredMixin, StubListMixin, ListView):
+class InvoiceListView(FeatureRequiredMixin, StubListMixin, ListView):
+    feature_flag = "shop"
     page_title = _("Invoices")
 
     def get_queryset(self):
         return Invoice.objects.filter(club=self.request.club)
 
 
-class FormListView(ClubAdminRequiredMixin, StubListMixin, ListView):
+class FormListView(FeatureRequiredMixin, StubListMixin, ListView):
+    feature_flag = "formbuilder"
     page_title = _("Forms")
 
     def get_queryset(self):
         return FormBuilderForm.objects.filter(club=self.request.club)
 
 
-class SubmissionListView(ClubAdminRequiredMixin, StubListMixin, ListView):
+class SubmissionListView(FeatureRequiredMixin, StubListMixin, ListView):
+    feature_flag = "formbuilder"
     page_title = _("Submissions")
 
     def get_queryset(self):

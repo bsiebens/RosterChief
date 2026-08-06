@@ -4,7 +4,7 @@
 {% block heading %}{% trans "Mass upload members" %}{% endblock heading %}
 
 {% block actions %}
-    <a class="btn btn-outline btn-neutral gap-2" href="{% url 'management:member_import_template' %}">{% lucide "download" size=16 %} {% trans "Download template" %}</a>
+    <a class="btn btn-outline gap-2" href="{% url 'management:member_import_template' %}">{% lucide "download" size=16 %} {% trans "Download template" %}</a>
 {% endblock actions %}
 
 {% block panel %}
@@ -30,7 +30,7 @@
                 {% endfor %}
 
                 <div class="card-actions justify-start pt-2 mt-2">
-                    <a class="btn btn-outline btn-neutral gap-2" href="{% url 'management:member_list' %}">{% lucide "arrow-left" size=16 %} {% trans "Cancel" %}</a>
+                    <a class="btn btn-outline gap-2" href="{% url 'management:member_list' %}">{% lucide "arrow-left" size=16 %} {% trans "Cancel" %}</a>
                     <button class="btn btn-primary gap-2" type="submit">{% lucide "upload" size=16 %} {% trans "Upload and preview" %}</button>
                 </div>
             </form>

@@ -45,11 +45,11 @@ leaves it unset, since staying on the family page is already the right place the
                     {% if is_club_admin %}
                     <div class="flex justify-end gap-1">
                         {% if person.grant_login_form %}
-                        <button class="btn btn-sm btn-outline btn-neutral" type="button" onclick="document.getElementById('grant_login_modal_{{ group.family.pk }}_{{ person.pk }}').showModal()" aria-label="{% trans 'Grant login' %}">
+                        <button class="btn btn-outline btn-sm" type="button" onclick="document.getElementById('grant_login_modal_{{ group.family.pk }}_{{ person.pk }}').showModal()" aria-label="{% trans 'Grant login' %}">
                             {% lucide "key-round" size=14 %} {% trans "Grant login" %}
                         </button>
                         {% endif %}
-                        <a class="btn btn-sm btn-outline btn-neutral" href="{% url 'management:member_detail' person.pk %}" aria-label="{% trans 'Edit' %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</a>
+                        <a class="btn btn-outline btn-sm" href="{% url 'management:member_detail' person.pk %}" aria-label="{% trans 'Edit' %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</a>
                         <button class="btn btn-sm btn-outline btn-error" type="button" onclick="document.getElementById('remove_family_modal_{{ group.family.pk }}_{{ person.pk }}').showModal()" aria-label="{% trans 'Remove from family' %}">
                             {% lucide "user-x" size=14 %} {% trans "Remove" %}
                         </button>

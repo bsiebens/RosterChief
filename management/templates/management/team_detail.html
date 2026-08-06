@@ -2,11 +2,17 @@
 {% load i18n lucide static ui %}
 
 {% block heading %}{{ team.name }}{% endblock heading %}
-{% block subheading %}{{ team.short_name }}{% endblock subheading %}
+{% block subheading %}
+    <span class="flex flex-row gap-2 items-center">
+        <span>{{ team.short_name }}</span>
+        <span>&middot;</span>
+        <span class="badge-sm badge badge-outline">{% lucide "bookmark" size=14 %} {{ team.pk }}</span>
+    </span>
+{% endblock subheading %}
 
 {% block actions %}
     {% if is_club_admin %}
-        <a class="btn btn-outline btn-neutral gap-2" href="{% url 'management:team_update' team.pk %}">{% lucide "pencil" size=16 %} {% trans "Edit" %}</a>
+        <a class="btn btn-outline gap-2" href="{% url 'management:team_update' team.pk %}">{% lucide "pencil" size=16 %} {% trans "Edit" %}</a>
     {% endif %}
 {% endblock actions %}
 
@@ -18,7 +24,7 @@
                     <option value="{{ season.pk }}" {% if season.pk == selected_season.pk %}selected{% endif %}>{% trans "Season" %} {{ season.start_date|date:"Y" }} - {{ season.end_date|date:"Y" }}</option>
                 {% endfor %}
             </select>
-            <button class="btn btn-outline btn-neutral gap-2" type="submit">{% lucide "filter" size=16 %} {% trans "View" %}</button>
+            <button class="btn btn-outline gap-2" type="submit">{% lucide "filter" size=16 %} {% trans "View" %}</button>
         </div>
     </form>
 
@@ -28,6 +34,23 @@
             <span>{% trans "This club has no seasons yet, so there's no roster or staff to show." %}</span>
         </div>
     {% else %}
+        {% if can_manage %}
+            {% if team_photo %}
+                {% trans "Replace photo" as photo_modal_title %}
+            {% else %}
+                {% trans "Upload photo" as photo_modal_title %}
+            {% endif %}
+            {% url 'management:team_photo_set' team.pk selected_season.pk as team_photo_set_url %}
+            {% include "controlpanel/_modal_form.html" with modal_id="team_photo_modal" title=photo_modal_title form=team_photo_form action_url=team_photo_set_url submit_label="Save" submit_icon="save" %}
+
+            {% if team_photo %}
+                {% trans "Remove team photo?" as remove_photo_body %}
+                {% trans "Remove photo" as remove_photo_title %}
+                {% url 'management:team_photo_delete' team.pk selected_season.pk as team_photo_delete_url %}
+                {% include "controlpanel/_confirm_modal.html" with modal_id="team_photo_delete_modal" title=remove_photo_title body=remove_photo_body action_url=team_photo_delete_url submit_label="Remove" submit_icon="trash-2" %}
+            {% endif %}
+        {% endif %}
+
         <div class="mb-4 grid gap-4 lg:grid-cols-3">
             <div class="card bg-base-100 shadow border-l-4 {% if attendance_rate is None %}border-info{% elif attendance_rate < 30 %}border-error{% elif attendance_rate < 65 %}border-warning{% else %}border-success{% endif %}">
                 <div class="card-body p-4">
@@ -126,7 +149,7 @@
                 <div class="flex items-center justify-between">
                     <h2 class="card-title text-base">{% trans "Roster" %}</h2>
                     {% if can_manage %}
-                        <button class="btn btn-outline btn-neutral btn-sm gap-2" type="button" onclick="document.getElementById('add_player_modal').showModal()">{% lucide "user-plus" size=14 %} {% trans "Add player" %}</button>
+                        <button class="btn btn-outline btn-sm gap-2" type="button" onclick="document.getElementById('add_player_modal').showModal()">{% lucide "user-plus" size=14 %} {% trans "Add player" %}</button>
                     {% endif %}
                 </div>
                 <div class="overflow-x-auto">
@@ -153,7 +176,7 @@
                                     <td class="text-right">
                                         {% if can_manage %}
                                             <div class="flex justify-end gap-1">
-                                                <button class="btn btn-sm btn-outline btn-neutral" type="button" onclick="document.getElementById('{{ membership.pk|dom_id:"edit_player_modal" }}').showModal()" aria-label="{% trans 'Edit' %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</button>
+                                                <button class="btn btn-outline btn-sm" type="button" onclick="document.getElementById('{{ membership.pk|dom_id:"edit_player_modal" }}').showModal()" aria-label="{% trans 'Edit' %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</button>
                                                 <button class="btn btn-sm btn-outline btn-error" type="button" onclick="document.getElementById('{{ membership.pk|dom_id:"remove_player_modal" }}').showModal()" aria-label="{% trans 'Remove' %}">{% lucide "user-minus" size=14 %} {% trans "Remove" %}</button>
                                             </div>
                                         {% endif %}
@@ -175,7 +198,7 @@
                 <div class="flex items-center justify-between">
                     <h2 class="card-title text-base">{% trans "Staff" %}</h2>
                     {% if can_manage %}
-                        <button class="btn btn-outline btn-neutral btn-sm gap-2" type="button" onclick="document.getElementById('add_staff_modal').showModal()">{% lucide "user-plus" size=14 %} {% trans "Assign staff" %}</button>
+                        <button class="btn btn-outline btn-sm gap-2" type="button" onclick="document.getElementById('add_staff_modal').showModal()">{% lucide "user-plus" size=14 %} {% trans "Assign staff" %}</button>
                     {% endif %}
                 </div>
                 <div class="overflow-x-auto">
@@ -195,7 +218,7 @@
                                     <td class="text-right">
                                         {% if can_manage %}
                                             <div class="flex justify-end gap-1">
-                                                <button class="btn btn-sm btn-outline btn-neutral" type="button" onclick="document.getElementById('{{ assignment.pk|dom_id:"edit_staff_modal" }}').showModal()" aria-label="{% trans 'Edit' %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</button>
+                                                <button class="btn btn-outline btn-sm" type="button" onclick="document.getElementById('{{ assignment.pk|dom_id:"edit_staff_modal" }}').showModal()" aria-label="{% trans 'Edit' %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</button>
                                                 <button class="btn btn-sm btn-outline btn-error" type="button" onclick="document.getElementById('{{ assignment.pk|dom_id:"remove_staff_modal" }}').showModal()" aria-label="{% trans 'Remove' %}">{% lucide "user-minus" size=14 %} {% trans "Remove" %}</button>
                                             </div>
                                         {% endif %}
@@ -209,6 +232,36 @@
                         </tbody>
                     </table>
                 </div>
+            </div>
+        </div>
+
+        <div class="card bg-base-100 shadow mt-4">
+            <div class="card-body">
+                <div class="flex items-center justify-between">
+                    <h2 class="card-title text-base">{% trans "Team photo" %}</h2>
+                    {% if can_manage %}
+                    <div class="flex gap-2">
+                        {% trans "Upload photo" as upload_photo_label %}
+                        {% trans "Replace photo" as replace_photo_label %}
+                        <button class="btn btn-outline btn-sm gap-2" type="button" onclick="document.getElementById('team_photo_modal').showModal()">
+                            {% if team_photo %}
+                            {% lucide "pencil" size=14 %} {{ replace_photo_label }}
+                            {% else %}
+                            {% lucide "upload" size=14 %} {{ upload_photo_label }}
+                            {% endif %}
+                        </button>
+                        {% if team_photo %}
+                        <button class="btn btn-outline btn-error btn-sm gap-2" type="button" onclick="document.getElementById('team_photo_delete_modal').showModal()">{% lucide "trash-2" size=14 %} {% trans "Remove" %}</button>
+                        {% endif %}
+                    </div>
+                    {% endif %}
+                </div>
+
+                {% if team_photo %}
+                <img class="mt-2 w-full max-w-md rounded-lg object-cover" src="{{ team_photo.image.url }}" alt="{{ team }}">
+                {% else %}
+                <p class="text-sm opacity-60">{% trans "No photo uploaded for this season yet." %}</p>
+                {% endif %}
             </div>
         </div>
 

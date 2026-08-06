@@ -55,7 +55,7 @@
             </div>
 
             <div class="card-actions justify-start pt-2 mt-2">
-                <a class="btn btn-outline btn-neutral gap-2" href="{% url 'management:member_import' %}">{% lucide "arrow-left" size=16 %} {% trans "Back" %}</a>
+                <a class="btn btn-outline gap-2" href="{% url 'management:member_import' %}">{% lucide "arrow-left" size=16 %} {% trans "Back" %}</a>
                 {% if valid_count %}
                     <form method="post" action="{% url 'management:member_import_confirm' %}">
                         {% csrf_token %}

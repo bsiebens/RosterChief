@@ -2,6 +2,7 @@ import datetime
 from decimal import Decimal
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.core.validators import FileExtensionValidator, MaxValueValidator, MinValueValidator, RegexValidator
 from django.db import models
 from django.utils import timezone
@@ -30,6 +31,13 @@ def club_logo_path(instance: Club, filename: str) -> str:
 
 
 class Club(UUIDModel):
+    class SportType(models.TextChoices):
+        """Which sport this club plays. Only two options for now -- expand this as
+        more sport-specific competition fetchers (see events.competition) are added."""
+
+        ICE_HOCKEY = "ice_hockey", _("Ice hockey")
+        OTHER = "other", _("Other")
+
     name = models.CharField(_("name"), max_length=255)
     slug = models.SlugField(_("slug"), max_length=255, unique=True, blank=True, help_text=_("Drives subdomain / path resolution (e.g. ajax-united.rosterchief.app)."))
 
@@ -56,6 +64,14 @@ class Club(UUIDModel):
         blank=True,
         validators=[RegexValidator(r"^#[0-9a-fA-F]{6}$", _("Enter a colour as a hex value, e.g. #be185d."))],
         help_text=_("Hex colour for highlights on the club's pages, e.g. avatar initials. Defaults to the theme's secondary colour."),
+    )
+
+    sport_type = models.CharField(
+        _("sport"),
+        max_length=20,
+        choices=SportType.choices,
+        default=SportType.OTHER,
+        help_text=_("Which sport this club plays -- determines which competitions and score fetchers are relevant to it."),
     )
 
     archived_at = models.DateTimeField(_("archived at"), null=True, blank=True, help_text=_("Archived clubs stop resolving on their subdomain, but their data is retained."))
@@ -143,6 +159,39 @@ class Club(UUIDModel):
             self.save(update_fields=["archived_at"])
 
 
+def sponsor_logo_path(instance: Sponsor, filename: str) -> str:
+    return f"clubs/{instance.club.slug}/sponsors/{instance.pk}/{filename}"
+
+
+class Sponsor(ClubScopedModel):
+    name = models.CharField(_("name"), max_length=255)
+    logo = models.FileField(
+        _("logo"),
+        upload_to=sponsor_logo_path,
+        blank=True,
+        # A plain FileField, not ImageField: same reasoning as Club.logo -- a
+        # sponsor's own logo is just as commonly a vector file, and ImageField's
+        # Pillow validation can't read those.
+        validators=[FileExtensionValidator(allowed_extensions=["png", "jpg", "jpeg", "gif", "webp", "svg"])],
+    )
+    url = models.URLField(_("URL"), blank=True, help_text=_("The sponsor's own website, if they have one."))
+
+    start_date = models.DateField(_("start date"))
+    end_date = models.DateField(_("end date"), null=True, blank=True, help_text=_("Leave blank to keep this sponsor active indefinitely once it starts."))
+
+    class Meta:
+        verbose_name = _("sponsor")
+        verbose_name_plural = _("sponsors")
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+    def clean(self):
+        if self.end_date is not None and self.start_date is not None and self.end_date < self.start_date:
+            raise ValidationError({"end_date": _("End date can't be before the start date.")})
+
+
 class Season(ClubScopedModel):
     start_date = models.DateField(_("start date"))
     end_date = models.DateField(_("end date"))
@@ -174,6 +223,12 @@ class Season(ClubScopedModel):
     def covering(cls, club, date: datetime.date):
         """Return ``club``'s season covering ``date`` (no tenant context needed)."""
         return cls.objects.filter(club=club, start_date__lte=date, end_date__gte=date).first()
+
+    @classmethod
+    def next_after(cls, club, date: datetime.date):
+        """Return ``club``'s soonest season starting after ``date`` (no tenant
+        context needed) -- the season that follows the one covering ``date``."""
+        return cls.objects.filter(club=club, start_date__gt=date).order_by("start_date").first()
 
 
 class ClubMembership(ClubScopedModel):

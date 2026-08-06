@@ -54,6 +54,15 @@
                 >{{ field.value|default:"" }}</textarea>
 
             {% elif field_type == "select" %}
+                {% comment %}
+                    field.field.widget.choices, not field.field.choices: a plain ChoiceField
+                    exposes both (kept in sync), but NullBooleanField (the "everyone" tri-state
+                    Yes/No/Unknown field) only ever has them on the widget -- the field itself
+                    has no .choices attribute at all. Reading from the field silently rendered
+                    zero <option> tags for it, an empty dropdown, since a template attribute
+                    lookup that raises AttributeError just resolves to nothing rather than
+                    erroring.
+                {% endcomment %}
                 <select
                         class="select w-full {% if size_modifier %}select-{{ size_modifier }}{% endif %} {% if field.errors %}select-error text-error{% endif %}"
                         name="{{ field.html_name }}"
@@ -67,7 +76,7 @@
                             <option selected disabled>{{ field.label|capfirst }}</option>
                         {% endif %}
 
-                        {% for option_value, option_label in field.field.choices %}
+                        {% for option_value, option_label in field.field.widget.choices %}
                             <option value="{{ option_value }}" {% if option_value in field.value %}selected="selected"{% endif %}>
                                 {{ option_label }}
                             </option>
@@ -77,7 +86,7 @@
                             <option selected disabled>{{ field.label|capfirst }}</option>
                         {% endif %}
 
-                        {% for option_value, option_label in field.field.choices %}
+                        {% for option_value, option_label in field.field.widget.choices %}
                             <option value="{{ option_value }}" {% if field.value|stringformat:"s" == option_value|stringformat:"s" %}selected="selected"{% endif %}>
                                 {{ option_label }}
                             </option>

@@ -1,7 +1,8 @@
+from django import forms
 from django.contrib import admin
 from django.utils.translation import gettext_lazy as _
 
-from .models import Attendance, Event, EventSeries, Location, Opponent
+from .models import Attendance, Competition, Event, EventSeries, Location, Opponent
 
 
 @admin.register(Opponent)
@@ -39,8 +40,38 @@ class EventSeriesAdmin(admin.ModelAdmin):
     ]
 
 
+class EventAdminForm(forms.ModelForm):
+    """The `competition` field is a plain CharField on Event (it just stores a
+    name), but the admin should only ever offer a competition this club is
+    actually allowed to use -- one whose feature flag is active for it, set
+    from the control panel's Features page. A competition with no flag never
+    appears at all."""
+
+    class Meta:
+        model = Event
+        fields = [
+            "title", "kind", "season", "series", "detached", "cancelled", "teams", "invited_members", "excluded_members",
+            "start", "end", "gathering", "deadline", "location", "opponent",
+            "competition", "external_game_id", "score_for", "score_against", "is_live",
+        ]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        club = self.instance.club if self.instance.club_id else None
+        competitions = Competition.objects.filter(flag__isnull=False).select_related("flag")
+        if club is not None:
+            competitions = [competition for competition in competitions if competition.flag.is_active_for_club(club)]
+        self.fields["competition"] = forms.ChoiceField(
+            choices=[("", "---------"), *[(competition.name, competition.name) for competition in competitions]],
+            required=False,
+            label=self.fields["competition"].label,
+            help_text=_("Only competitions whose feature flag is active for this club are offered here."),
+        )
+
+
 @admin.register(Event)
 class EventAdmin(admin.ModelAdmin):
+    form = EventAdminForm
     list_display = ["title", "kind", "start", "season", "series", "detached", "club"]
     list_filter = ["kind", "club", "teams", "detached", "cancelled"]
     search_fields = ["title"]
@@ -53,7 +84,16 @@ class EventAdmin(admin.ModelAdmin):
         [_("Audience"), {"fields": ["teams", "invited_members", "excluded_members"]}],
         [_("When"), {"fields": ["start", "end", "gathering", "deadline"]}],
         [_("Where"), {"fields": ["location", "opponent"]}],
+        [_("Game"), {"fields": ["competition", "external_game_id", "score_for", "score_against", "is_live"]}],
     ]
+
+
+@admin.register(Competition)
+class CompetitionAdmin(admin.ModelAdmin):
+    list_display = ["name", "sport_type", "module", "flag"]
+    list_filter = ["sport_type"]
+    search_fields = ["name", "module"]
+    raw_id_fields = ["flag"]
 
 
 @admin.register(Attendance)

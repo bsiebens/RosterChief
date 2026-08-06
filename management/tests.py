@@ -8,19 +8,26 @@ from unittest import mock
 import openpyxl
 from allauth.mfa.models import Authenticator
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.urls import NoReverseMatch, reverse
 from django.utils import timezone
+from waffle import get_waffle_flag_model
 
-from club.models import Club, ClubMembership, ClubRole, FeePayment, Season
-from events.models import Attendance, Event, Location, Opponent
+from billing.models import Tier, TierPrice
+from billing.services.dues import subscribe
+from club.models import Club, ClubMembership, ClubRole, FeePayment, Season, Sponsor
+from events.models import Attendance, Competition, Event, EventSeries, Location, Opponent
+from events.services.rbihf_import import RBIHFImportError
+from events.services.recurrence import detach_occurrence, generate_occurrences
 from management.bulk_import import TEMPLATE_COLUMNS
 from management.pdf import PDFExportError, render_pdf
+from management.recurrence_ui import build_rrule, describe_rrule, parse_rrule
 from members.models import Family, FamilyMembership, Member
 from news.models import News, NewsPhoto
 from shop.models import Order
-from teams.models import Position, StaffAssignment, Team, TeamMembership
+from teams.models import Position, StaffAssignment, Team, TeamMembership, TeamPhoto
 
 User = get_user_model()
 
@@ -380,6 +387,35 @@ class TeamRosterStaffTests(ManagementTestBase):
 
         self.assertTrue(TeamMembership.objects.filter(team=self.team, season=self.season, member=self.player).exists())
 
+    def test_the_add_player_dropdown_excludes_a_member_with_no_active_membership(self):
+        lapsed_player = Member.objects.create(first_name="Lex", last_name="Lapsed")
+        ClubMembership.objects.create(club=self.club, member=lapsed_player, season=self.season, status=ClubMembership.StatusChoices.LAPSED)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("team_detail", self.team.pk)
+
+        self.assertNotContains(response, "Lex Lapsed")
+
+    def test_the_add_player_dropdown_includes_a_member_active_only_next_season(self):
+        next_season = Season.objects.create(club=self.club, start_date=self.season.end_date + datetime.timedelta(days=1), end_date=self.season.end_date + datetime.timedelta(days=300))
+        upcoming_player = Member.objects.create(first_name="Uma", last_name="Upcoming")
+        ClubMembership.objects.create(club=self.club, member=upcoming_player, season=next_season, status=ClubMembership.StatusChoices.ACTIVE)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("team_detail", self.team.pk)
+
+        self.assertContains(response, "Uma Upcoming")
+
+    def test_the_add_player_dropdown_excludes_a_member_active_only_in_a_past_season(self):
+        past_season = Season.objects.create(club=self.club, start_date=datetime.date(2020, 1, 1), end_date=datetime.date(2020, 12, 31))
+        past_player = Member.objects.create(first_name="Pip", last_name="Past")
+        ClubMembership.objects.create(club=self.club, member=past_player, season=past_season, status=ClubMembership.StatusChoices.ACTIVE)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("team_detail", self.team.pk)
+
+        self.assertNotContains(response, "Pip Past")
+
     def test_adding_the_same_member_twice_fails_with_a_form_error_not_a_500(self):
         self.client.force_login(self.admin_user)
         TeamMembership.objects.create(team=self.team, season=self.season, member=self.player, position=self.player_position)
@@ -454,6 +490,18 @@ class TeamRosterStaffTests(ManagementTestBase):
 
         self.assertTrue(StaffAssignment.objects.filter(team=self.team, season=self.season, member=physio).exists())
 
+    def test_the_assign_staff_dropdown_excludes_a_member_active_only_in_a_past_season(self):
+        # Same eligibility rule as the "Add player" dropdown -- see
+        # test_the_add_player_dropdown_excludes_a_member_active_only_in_a_past_season.
+        past_season = Season.objects.create(club=self.club, start_date=datetime.date(2020, 1, 1), end_date=datetime.date(2020, 12, 31))
+        past_member = Member.objects.create(first_name="Sam", last_name="Stale")
+        ClubMembership.objects.create(club=self.club, member=past_member, season=past_season, status=ClubMembership.StatusChoices.ACTIVE)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("team_detail", self.team.pk)
+
+        self.assertNotContains(response, "Sam Stale")
+
     def test_a_different_teams_coach_cannot_assign_staff(self):
         physio_position = Position.objects.create(club=self.club, name="Physio", short_name="PH", staff_position=True)
         physio = Member.objects.create(first_name="Pat", last_name="Physio")
@@ -470,6 +518,108 @@ class TeamRosterStaffTests(ManagementTestBase):
         self.club_post("team_staff_remove", {}, self.team.pk, assignment.pk)
 
         self.assertFalse(StaffAssignment.objects.filter(pk=assignment.pk).exists())
+
+
+ONE_PIXEL_PNG = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+
+
+def make_image_file(name="photo.png"):
+    return SimpleUploadedFile(name, ONE_PIXEL_PNG, content_type="image/png")
+
+
+class TeamPhotoTests(ManagementTestBase):
+    """One photo per (team, season), uploaded from the team page -- see
+    management.views.TeamPhotoSetView/TeamPhotoDeleteView."""
+
+    def setUp(self):
+        super().setUp()
+        self.team = Team.objects.create(club=self.club, name="First Team", short_name="1st")
+        self.other_team = Team.objects.create(club=self.club, name="Second Team", short_name="2nd")
+        self.coach_position = Position.objects.create(club=self.club, name="Head Coach", short_name="HC", staff_position=True, management_position=True)
+
+    def make_team_coach(self, team, email="coach-photo@example.com"):
+        coach_user = User.objects.create_user(email=email, password="pw-secret-123")
+        coach_member = Member.objects.create(user=coach_user, first_name="Cara", last_name="Coach")
+        StaffAssignment.objects.create(team=team, member=coach_member, season=self.season, position=self.coach_position)
+        return coach_user
+
+    def make_plain_staff(self, email="physio-photo@example.com"):
+        staff_user = User.objects.create_user(email=email, password="pw-secret-123")
+        staff_member = Member.objects.create(user=staff_user, first_name="Pat", last_name="Physio")
+        position = Position.objects.create(club=self.club, name="Physio", short_name="PH", staff_position=True, management_position=False)
+        StaffAssignment.objects.create(team=self.team, member=staff_member, season=self.season, position=position)
+        return staff_user
+
+    def test_uploading_creates_a_photo(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("team_photo_set", {"image": make_image_file()}, self.team.pk, self.season.pk)
+
+        self.assertRedirects(response, f"{reverse('management:team_detail', args=[self.team.pk])}?season={self.season.pk}")
+        self.assertEqual(TeamPhoto.objects.filter(team=self.team, season=self.season).count(), 1)
+
+    def test_uploading_again_replaces_it_in_place(self):
+        self.client.force_login(self.admin_user)
+        self.club_post("team_photo_set", {"image": make_image_file("first.png")}, self.team.pk, self.season.pk)
+        first = TeamPhoto.objects.get(team=self.team, season=self.season)
+
+        self.club_post("team_photo_set", {"image": make_image_file("second.png")}, self.team.pk, self.season.pk)
+
+        self.assertEqual(TeamPhoto.objects.filter(team=self.team, season=self.season).count(), 1)
+        second = TeamPhoto.objects.get(team=self.team, season=self.season)
+        self.assertEqual(first.pk, second.pk)
+        self.assertIn("second", second.image.name)
+
+    def test_a_different_teams_coach_cannot_upload(self):
+        self.client.force_login(self.make_team_coach(self.other_team))
+
+        response = self.club_post("team_photo_set", {"image": make_image_file()}, self.team.pk, self.season.pk)
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(TeamPhoto.objects.filter(team=self.team).exists())
+
+    def test_this_teams_coach_can_upload(self):
+        self.client.force_login(self.make_team_coach(self.team))
+
+        response = self.club_post("team_photo_set", {"image": make_image_file()}, self.team.pk, self.season.pk)
+
+        self.assertRedirects(response, f"{reverse('management:team_detail', args=[self.team.pk])}?season={self.season.pk}")
+        self.assertTrue(TeamPhoto.objects.filter(team=self.team, season=self.season).exists())
+
+    def test_deleting_removes_the_photo(self):
+        TeamPhoto.objects.create(team=self.team, season=self.season, image=make_image_file())
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("team_photo_delete", {}, self.team.pk, self.season.pk)
+
+        self.assertRedirects(response, f"{reverse('management:team_detail', args=[self.team.pk])}?season={self.season.pk}")
+        self.assertFalse(TeamPhoto.objects.filter(team=self.team, season=self.season).exists())
+
+    def test_the_team_page_shows_the_photo_when_set(self):
+        TeamPhoto.objects.create(team=self.team, season=self.season, image=make_image_file())
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("team_detail", self.team.pk)
+
+        self.assertContains(response, "Replace photo")
+        self.assertNotContains(response, "No photo uploaded")
+
+    def test_the_team_page_shows_a_placeholder_when_not_set(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("team_detail", self.team.pk)
+
+        self.assertContains(response, "No photo uploaded")
+        self.assertContains(response, "Upload photo")
+
+    def test_upload_ui_is_hidden_from_a_plain_staff_member(self):
+        TeamPhoto.objects.create(team=self.team, season=self.season, image=make_image_file())
+        self.client.force_login(self.make_plain_staff())
+
+        response = self.club_get("team_detail", self.team.pk)
+
+        self.assertNotContains(response, "Replace photo")
+        self.assertNotContains(response, "Upload photo")
 
 
 class PositionManagementTests(ManagementTestBase):
@@ -1784,7 +1934,7 @@ class HomeViewTests(ManagementTestBase):
         now = timezone.now()
         past = Event.objects.create(club=self.club, kind=Event.EventKind.TRAINING, title="Past training", start=now - datetime.timedelta(days=1))
         soon = Event.objects.create(club=self.club, kind=Event.EventKind.TRAINING, title="Sooner training", start=now + datetime.timedelta(days=1))
-        later = Event.objects.create(club=self.club, kind=Event.EventKind.MATCH, title="Later match", start=now + datetime.timedelta(days=5))
+        later = Event.objects.create(club=self.club, kind=Event.EventKind.GAME, title="Later game", start=now + datetime.timedelta(days=5))
         self.client.force_login(self.admin_user)
 
         response = self.club_get("home")
@@ -2487,3 +2637,965 @@ class LocationOpponentManagementTests(ManagementTestBase):
 
         self.assertEqual(response.status_code, 403)
         self.assertTrue(Opponent.objects.filter(pk=opponent.pk).exists())
+
+
+class SponsorManagementTests(ManagementTestBase):
+    """Full CRUD for Sponsor -- admin-only, unlike Location/Opponent which any
+    management position can maintain (see club.mixins.ClubAdminRequiredMixin
+    and management.views.Sponsor*View)."""
+
+    def setUp(self):
+        super().setUp()
+        self.team = Team.objects.create(club=self.club, name="First Team", short_name="1st")
+
+    def make_coach_manager(self, email="coach-sponsor@example.com"):
+        coach_user = User.objects.create_user(email=email, password="pw-secret-123")
+        coach_member = Member.objects.create(user=coach_user, first_name="Cara", last_name="Coach")
+        position = Position.objects.create(club=self.club, name="Head Coach", short_name="HC", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=self.team, member=coach_member, season=self.season, position=position)
+        return coach_user
+
+    def sponsor_data(self, **overrides):
+        data = {"name": "Acme Corp", "url": "https://acme.example.com", "start_date": "2026-01-01", "end_date": ""}
+        data.update(overrides)
+        return data
+
+    def test_an_admin_can_view_the_sponsor_list(self):
+        Sponsor.objects.create(club=self.club, name="Acme Corp", start_date=datetime.date(2026, 1, 1))
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("sponsor_list")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Acme Corp")
+
+    def test_a_management_position_cannot_view_the_sponsor_list(self):
+        self.client.force_login(self.make_coach_manager())
+
+        self.assertEqual(self.club_get("sponsor_list").status_code, 403)
+
+    def test_plain_staff_cannot_view_the_sponsor_list(self):
+        self.client.force_login(self.make_plain_staff())
+
+        self.assertEqual(self.club_get("sponsor_list").status_code, 403)
+
+    def test_an_admin_can_create_a_sponsor_with_a_logo(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("sponsor_create", self.sponsor_data(logo=make_image_file()))
+
+        self.assertRedirects(response, reverse("management:sponsor_list"))
+        sponsor = Sponsor.objects.get(club=self.club, name="Acme Corp")
+        self.assertTrue(sponsor.logo)
+
+    def test_a_management_position_cannot_create_a_sponsor(self):
+        self.client.force_login(self.make_coach_manager())
+
+        response = self.club_post("sponsor_create", self.sponsor_data())
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(Sponsor.objects.filter(club=self.club, name="Acme Corp").exists())
+
+    def test_an_end_date_before_the_start_date_is_a_form_error_not_a_500(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("sponsor_create", self.sponsor_data(start_date="2026-06-01", end_date="2026-01-01"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "before the start date")
+        self.assertFalse(Sponsor.objects.filter(club=self.club).exists())
+
+    def test_an_admin_can_edit_a_sponsor(self):
+        sponsor = Sponsor.objects.create(club=self.club, name="Acme Corp", start_date=datetime.date(2026, 1, 1))
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("sponsor_update", self.sponsor_data(name="Acme Corp Renamed"), sponsor.pk)
+
+        self.assertRedirects(response, reverse("management:sponsor_list"))
+        sponsor.refresh_from_db()
+        self.assertEqual(sponsor.name, "Acme Corp Renamed")
+
+    def test_plain_staff_cannot_edit_a_sponsor(self):
+        sponsor = Sponsor.objects.create(club=self.club, name="Acme Corp", start_date=datetime.date(2026, 1, 1))
+        self.client.force_login(self.make_plain_staff())
+
+        response = self.club_post("sponsor_update", self.sponsor_data(), sponsor.pk)
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_an_admin_can_delete_a_sponsor(self):
+        sponsor = Sponsor.objects.create(club=self.club, name="Doomed Corp", start_date=datetime.date(2026, 1, 1))
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("sponsor_delete", {}, sponsor.pk)
+
+        self.assertRedirects(response, reverse("management:sponsor_list"))
+        self.assertFalse(Sponsor.objects.filter(pk=sponsor.pk).exists())
+
+    def test_plain_staff_cannot_delete_a_sponsor(self):
+        sponsor = Sponsor.objects.create(club=self.club, name="Safe Corp", start_date=datetime.date(2026, 1, 1))
+        self.client.force_login(self.make_plain_staff())
+
+        response = self.club_post("sponsor_delete", {}, sponsor.pk)
+
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(Sponsor.objects.filter(pk=sponsor.pk).exists())
+
+    def test_nav_only_shows_sponsors_for_an_admin(self):
+        self.client.force_login(self.admin_user)
+        self.assertContains(self.club_get("home"), "Sponsors")
+
+        self.client.force_login(self.make_coach_manager())
+        self.assertNotContains(self.club_get("home"), "Sponsors")
+
+    def make_plain_staff(self, email="physio-sponsor@example.com"):
+        staff_user = User.objects.create_user(email=email, password="pw-secret-123")
+        staff_member = Member.objects.create(user=staff_user, first_name="Pat", last_name="Physio")
+        position = Position.objects.create(club=self.club, name="Physio", short_name="PH", staff_position=True, management_position=False)
+        StaffAssignment.objects.create(team=self.team, member=staff_member, season=self.season, position=position)
+        return staff_user
+
+
+class BillingEndingBannerTests(ManagementTestBase):
+    """The club dashboard's "billing is about to stop" warning -- see
+    management.views.HomeView and management/templates/management/home.html.
+    Admin-only, and only within RENEWAL_LEAD_DAYS of the current period ending."""
+
+    def setUp(self):
+        super().setUp()
+        self.tier = Tier.objects.create(name="Standard")
+        TierPrice.objects.create(tier=self.tier, active_from=self.season.start_date - datetime.timedelta(days=1200), amount=Decimal("500.00"))
+
+    def test_admin_sees_the_banner_when_the_period_ends_soon(self):
+        subscribe(self.club, self.tier, start=timezone.localdate() - datetime.timedelta(days=350), auto_renew=False)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("home")
+
+        self.assertContains(response, "billing is about to stop")
+
+    def test_admin_does_not_see_the_banner_when_the_period_is_not_ending_soon(self):
+        subscribe(self.club, self.tier, start=timezone.localdate())
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("home")
+
+        self.assertNotContains(response, "billing is about to stop")
+
+    def test_a_non_admin_manager_never_sees_the_banner(self):
+        subscribe(self.club, self.tier, start=timezone.localdate() - datetime.timedelta(days=350), auto_renew=False)
+        team = Team.objects.create(club=self.club, name="First Team", short_name="1st")
+        position = Position.objects.create(club=self.club, name="Coach", short_name="C", staff_position=True, management_position=True)
+        coach_user = User.objects.create_user(email="coach-banner@example.com", password="pw-secret-123")
+        coach_member = Member.objects.create(user=coach_user, first_name="Cara", last_name="Coach")
+        StaffAssignment.objects.create(team=team, member=coach_member, season=self.season, position=position)
+        self.client.force_login(coach_user)
+
+        response = self.club_get("home")
+
+        self.assertNotContains(response, "billing is about to stop")
+
+    def test_a_club_with_no_subscription_shows_no_banner(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("home")
+
+        self.assertNotContains(response, "billing is about to stop")
+        self.assertNotContains(response, "will renew automatically")
+
+    def test_an_auto_renewing_club_gets_a_reassuring_banner_instead(self):
+        subscribe(self.club, self.tier, start=timezone.localdate() - datetime.timedelta(days=350), auto_renew=True)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("home")
+
+        self.assertContains(response, "will renew automatically")
+        self.assertNotContains(response, "billing is about to stop")
+
+
+class RecurrenceUiTests(TestCase):
+    """management.recurrence_ui's friendly builder <-> raw RRULE round-trip."""
+
+    def test_weekly_round_trips(self):
+        rrule = build_rrule("weekly", 2, ["WE", "MO"])
+
+        self.assertEqual(rrule, "FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE")
+        self.assertEqual(parse_rrule(rrule), {"frequency": "weekly", "interval": 2, "weekdays": ["MO", "WE"]})
+        self.assertEqual(str(describe_rrule(rrule)), "Every 2 weeks on Mon, Wed")
+
+    def test_monthly_round_trips(self):
+        rrule = build_rrule("monthly", 1)
+
+        self.assertEqual(rrule, "FREQ=MONTHLY;INTERVAL=1")
+        self.assertEqual(parse_rrule(rrule), {"frequency": "monthly", "interval": 1, "weekdays": []})
+        self.assertEqual(str(describe_rrule(rrule)), "Every month")
+
+    def test_an_unrecognised_rrule_falls_back_to_the_raw_string(self):
+        self.assertIsNone(parse_rrule("FREQ=DAILY;COUNT=5"))
+        self.assertEqual(describe_rrule("FREQ=DAILY;COUNT=5"), "FREQ=DAILY;COUNT=5")
+
+
+class EventManagementTests(ManagementTestBase):
+    """Event CRUD -- permissions are scoped per-team (like roster/staff), not
+    club-wide, since an event's teams field is M2M: a manager of at least one
+    of an event's current teams can edit it, see club.mixins.EventManagerRequiredMixin."""
+
+    def setUp(self):
+        super().setUp()
+        self.own_team = Team.objects.create(club=self.club, name="First Team", short_name="1st")
+        self.other_team = Team.objects.create(club=self.club, name="Second Team", short_name="2nd")
+        self.coach_position = Position.objects.create(club=self.club, name="Head Coach", short_name="HC", staff_position=True, management_position=True)
+
+    def make_coach(self, team, email="coach-events@example.com"):
+        coach_user = User.objects.create_user(email=email, password="pw-secret-123")
+        coach_member = Member.objects.create(user=coach_user, first_name="Cara", last_name="Coach")
+        StaffAssignment.objects.create(team=team, member=coach_member, season=self.season, position=self.coach_position)
+        return coach_user
+
+    def make_plain_staff(self, email="physio-events@example.com"):
+        staff_user = User.objects.create_user(email=email, password="pw-secret-123")
+        staff_member = Member.objects.create(user=staff_user, first_name="Pat", last_name="Physio")
+        position = Position.objects.create(club=self.club, name="Physio", short_name="PH", staff_position=True, management_position=False)
+        StaffAssignment.objects.create(team=self.own_team, member=staff_member, season=self.season, position=position)
+        return staff_user
+
+    def event_data(self, **overrides):
+        data = {
+            "title": "Training",
+            "kind": "training",
+            "teams": [str(self.own_team.pk)],
+            "invited_members": [],
+            "excluded_members": [],
+            "location": "",
+            "opponent": "",
+            "start": "2026-09-01T18:00",
+            "end": "",
+            "gathering": "",
+            "deadline": "",
+        }
+        data.update(overrides)
+        return data
+
+    def test_a_team_manager_can_create_an_event_for_their_own_team(self):
+        self.client.force_login(self.make_coach(self.own_team))
+
+        response = self.club_post("event_create", self.event_data())
+
+        event = Event.objects.get(title="Training")
+        self.assertRedirects(response, reverse("management:event_detail", args=[event.pk]))
+        self.assertIn(self.own_team, event.teams.all())
+
+    def test_creating_an_event_with_a_same_club_location_does_not_raise_a_cross_club_error(self):
+        # Regression: Event.clean() rejects a location from another club by
+        # comparing against self.club_id, which was still None on a brand-new
+        # instance at validation time (club is only auto-assigned in save(),
+        # which runs after full_clean()) -- so a same-club location falsely
+        # failed as "must belong to the same club". See EventCreateView.get_form_kwargs.
+        location = Location.objects.create(club=self.club, name="Home Ground", address="1 St", city="Town", zip_code="1000", country="BE")
+        self.client.force_login(self.make_coach(self.own_team))
+
+        response = self.club_post("event_create", self.event_data(location=str(location.pk)))
+
+        event = Event.objects.get(title="Training")
+        self.assertRedirects(response, reverse("management:event_detail", args=[event.pk]))
+        self.assertEqual(event.location, location)
+
+    def test_the_new_event_forms_competition_dropdown_shows_every_competition_regardless_of_flag(self):
+        # Unlike the Django-admin form, this dropdown isn't filtered by whether the
+        # competition's flag is active for the club -- see management.forms.EventForm
+        # and events.services.competitions.fetch_game_info (which is where that
+        # per-club gate actually lives).
+        Competition.objects.create(name="Active Cup", module="events.competition.active")
+        Competition.objects.create(name="Inactive Cup", module="events.competition.inactive")
+        self.client.force_login(self.make_coach(self.own_team))
+
+        response = self.club_get("event_create")
+
+        self.assertContains(response, "Active Cup")
+        self.assertContains(response, "Inactive Cup")
+
+    def test_creating_a_game_with_a_competition_selected(self):
+        Competition.objects.create(name="Regional Cup", module="events.competition.regional")
+        self.client.force_login(self.make_coach(self.own_team))
+
+        response = self.club_post("event_create", self.event_data(kind="game", competition="Regional Cup"))
+
+        event = Event.objects.get(title="Training")
+        self.assertRedirects(response, reverse("management:event_detail", args=[event.pk]))
+        self.assertEqual(event.competition, "Regional Cup")
+
+    def test_a_team_manager_cannot_create_an_event_for_a_team_they_dont_manage(self):
+        self.client.force_login(self.make_coach(self.own_team))
+
+        self.club_post("event_create", self.event_data(teams=[str(self.other_team.pk)]))
+
+        self.assertFalse(Event.objects.filter(title="Training").exists())
+
+    def test_a_plain_staff_member_gets_403_creating_an_event(self):
+        self.client.force_login(self.make_plain_staff())
+
+        response = self.club_post("event_create", self.event_data())
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_a_plain_staff_member_can_still_view_the_event_list(self):
+        self.client.force_login(self.make_plain_staff())
+
+        self.assertEqual(self.club_get("event_list").status_code, 200)
+
+    def test_the_list_shows_edit_and_delete_only_for_events_the_manager_manages(self):
+        own_event = Event.objects.create(club=self.club, title="My event", start=timezone.now() + datetime.timedelta(days=1))
+        own_event.teams.add(self.own_team)
+        other_event = Event.objects.create(club=self.club, title="Other event", start=timezone.now() + datetime.timedelta(days=2))
+        other_event.teams.add(self.other_team)
+        self.client.force_login(self.make_coach(self.own_team))
+
+        response = self.club_get("event_list")
+
+        # The Edit link goes to the detail page, not straight to the edit form (same
+        # convention as Teams/News), so what actually distinguishes a manageable row
+        # is the delete action being present.
+        self.assertContains(response, reverse("management:event_delete", args=[own_event.pk]))
+        self.assertNotContains(response, reverse("management:event_delete", args=[other_event.pk]))
+
+    def test_a_manager_only_sees_events_for_teams_they_manage(self):
+        own_event = Event.objects.create(club=self.club, title="My event", start=timezone.now() + datetime.timedelta(days=1))
+        own_event.teams.add(self.own_team)
+        other_event = Event.objects.create(club=self.club, title="Other event", start=timezone.now() + datetime.timedelta(days=2))
+        other_event.teams.add(self.other_team)
+        Event.objects.create(club=self.club, title="AGM", start=timezone.now() + datetime.timedelta(days=3))
+        self.client.force_login(self.make_coach(self.own_team))
+
+        response = self.club_get("event_list")
+
+        self.assertContains(response, "My event")
+        self.assertNotContains(response, "Other event")
+        self.assertContains(response, "AGM")  # team-less events stay visible to everyone
+
+    def test_an_admin_sees_every_event_regardless_of_team(self):
+        own_event = Event.objects.create(club=self.club, title="My event", start=timezone.now() + datetime.timedelta(days=1))
+        own_event.teams.add(self.own_team)
+        other_event = Event.objects.create(club=self.club, title="Other event", start=timezone.now() + datetime.timedelta(days=2))
+        other_event.teams.add(self.other_team)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("event_list")
+
+        self.assertContains(response, "My event")
+        self.assertContains(response, "Other event")
+
+    def test_a_manager_cannot_open_another_teams_event_by_url(self):
+        other_event = Event.objects.create(club=self.club, title="Other event", start=timezone.now() + datetime.timedelta(days=2))
+        other_event.teams.add(self.other_team)
+        self.client.force_login(self.make_coach(self.own_team))
+
+        response = self.club_get("event_detail", other_event.pk)
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_the_dashboard_only_shows_upcoming_events_for_managed_teams(self):
+        own_event = Event.objects.create(club=self.club, title="My event", start=timezone.now() + datetime.timedelta(days=1))
+        own_event.teams.add(self.own_team)
+        other_event = Event.objects.create(club=self.club, title="Other event", start=timezone.now() + datetime.timedelta(days=2))
+        other_event.teams.add(self.other_team)
+        self.client.force_login(self.make_coach(self.own_team))
+
+        response = self.club_get("home")
+
+        self.assertContains(response, "My event")
+        self.assertNotContains(response, "Other event")
+
+    def test_a_team_less_event_is_refused_for_a_non_admin(self):
+        self.client.force_login(self.make_coach(self.own_team))
+
+        self.club_post("event_create", self.event_data(teams=[]))
+
+        self.assertFalse(Event.objects.filter(title="Training").exists())
+
+    def test_an_admin_can_create_a_team_less_event(self):
+        self.client.force_login(self.admin_user)
+
+        self.club_post("event_create", self.event_data(teams=[]))
+
+        self.assertTrue(Event.objects.filter(title="Training").exists())
+
+    def test_a_manager_of_one_team_cannot_edit_an_event_for_another_team(self):
+        event = Event.objects.create(club=self.club, title="Other's event", start=timezone.now() + datetime.timedelta(days=1))
+        event.teams.add(self.other_team)
+        self.client.force_login(self.make_coach(self.own_team))
+
+        response = self.club_get("event_update", event.pk)
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_a_manager_can_edit_their_own_teams_event(self):
+        event = Event.objects.create(club=self.club, title="My event", start=timezone.now() + datetime.timedelta(days=1))
+        event.teams.add(self.own_team)
+        self.client.force_login(self.make_coach(self.own_team))
+
+        self.club_post("event_update", self.event_data(title="Renamed"), event.pk)
+
+        event.refresh_from_db()
+        self.assertEqual(event.title, "Renamed")
+
+    def test_deleting_a_one_off_event_deletes_it(self):
+        event = Event.objects.create(club=self.club, title="Gone", start=timezone.now() + datetime.timedelta(days=1))
+        event.teams.add(self.own_team)
+        self.client.force_login(self.make_coach(self.own_team))
+
+        self.club_post("event_delete", {}, event.pk)
+
+        self.assertFalse(Event.objects.filter(pk=event.pk).exists())
+
+    def test_creating_a_game_records_competition_and_external_id_but_not_score(self):
+        # Score/live status don't exist yet for a game that's only just being
+        # scheduled -- the add form doesn't even offer those fields (see
+        # test_the_add_form_has_no_score_or_live_fields below), so posting them
+        # here has no effect.
+        Competition.objects.create(name="Regional Cup", module="events.competition.regional")
+        self.client.force_login(self.make_coach(self.own_team))
+
+        self.club_post("event_create", self.event_data(kind="game", competition="Regional Cup", external_game_id="ext-42", score_for="3", score_against="1", is_live="on"))
+
+        game = Event.objects.get(title="Training")
+        self.assertEqual(game.kind, Event.EventKind.GAME)
+        self.assertEqual(game.competition, "Regional Cup")
+        self.assertEqual(game.external_game_id, "ext-42")
+        self.assertIsNone(game.score_for)
+        self.assertFalse(game.is_live)
+
+    def test_the_add_form_has_no_score_or_live_fields(self):
+        self.client.force_login(self.make_coach(self.own_team))
+
+        response = self.club_get("event_create")
+
+        self.assertNotContains(response, 'name="score_for"')
+        self.assertNotContains(response, 'name="is_live"')
+        self.assertContains(response, 'name="competition"')
+
+    def test_editing_a_game_can_record_its_score_and_live_status(self):
+        Competition.objects.create(name="Regional Cup", module="events.competition.regional")
+        game = Event.objects.create(club=self.club, title="Cup game", kind=Event.EventKind.GAME, start=timezone.now() + datetime.timedelta(days=1))
+        game.teams.add(self.own_team)
+        self.client.force_login(self.make_coach(self.own_team))
+
+        response = self.club_get("event_update", game.pk)
+        self.assertContains(response, 'name="score_for"')
+        self.assertContains(response, 'name="is_live"')
+
+        self.club_post("event_update", self.event_data(kind="game", competition="Regional Cup", external_game_id="ext-42", score_for="3", score_against="1", is_live="on"), game.pk)
+
+        game.refresh_from_db()
+        self.assertEqual(game.score_for, 3)
+        self.assertEqual(game.score_against, 1)
+        self.assertTrue(game.is_live)
+
+    def test_the_game_kind_choice_is_no_longer_called_match(self):
+        self.assertNotIn("match", dict(Event.EventKind.choices))
+        self.assertEqual(dict(Event.EventKind.choices)["game"], "Game")
+
+
+class EventSeriesManagementTests(ManagementTestBase):
+    """EventSeries CRUD + occurrence lifecycle actions (cancel/detach/stop)."""
+
+    def setUp(self):
+        super().setUp()
+        self.team = Team.objects.create(club=self.club, name="First Team", short_name="1st")
+        self.other_team = Team.objects.create(club=self.club, name="Second Team", short_name="2nd")
+        self.coach_position = Position.objects.create(club=self.club, name="Head Coach", short_name="HC", staff_position=True, management_position=True)
+
+    def make_coach(self, team, email="coach-series@example.com"):
+        coach_user = User.objects.create_user(email=email, password="pw-secret-123")
+        coach_member = Member.objects.create(user=coach_user, first_name="Cara", last_name="Coach")
+        StaffAssignment.objects.create(team=team, member=coach_member, season=self.season, position=self.coach_position)
+        return coach_user
+
+    def series_data(self, **overrides):
+        data = {
+            "title": "Weekly training",
+            "kind": "training",
+            "dtstart": "2026-09-01T18:00",
+            "until": "",
+            "teams": [str(self.team.pk)],
+            "invited_members": [],
+            "excluded_members": [],
+            "location": "",
+            "opponent": "",
+            "frequency": "weekly",
+            "interval": "1",
+            "weekdays": ["MO", "WE"],
+            "duration_hours": "1",
+            "duration_minutes": "0",
+            "gathering_minutes_before": "",
+            "deadline_minutes_before": "",
+            "advanced_rrule": "",
+        }
+        data.update(overrides)
+        return data
+
+    def create_series(self):
+        self.club_post("event_series_create", self.series_data())
+        return EventSeries.objects.get(title="Weekly training")
+
+    def test_creating_a_series_with_a_same_club_location_does_not_raise_a_cross_club_error(self):
+        # Same regression as EventManagementTests' equivalent -- EventSeries.clean()
+        # has the same self.club_id-is-still-None-at-validation-time problem.
+        location = Location.objects.create(club=self.club, name="Home Ground", address="1 St", city="Town", zip_code="1000", country="BE")
+        self.client.force_login(self.make_coach(self.team))
+
+        response = self.club_post("event_series_create", self.series_data(location=str(location.pk)))
+
+        series = EventSeries.objects.get(title="Weekly training")
+        self.assertRedirects(response, reverse("management:event_series_detail", args=[series.pk]))
+        self.assertEqual(series.location, location)
+
+    def test_creating_a_series_generates_occurrences_immediately(self):
+        self.client.force_login(self.make_coach(self.team))
+
+        series = self.create_series()
+
+        self.assertTrue(series.occurrences.exists())
+
+    def test_editing_a_series_propagates_to_future_occurrences_but_not_a_detached_one(self):
+        self.client.force_login(self.make_coach(self.team))
+        series = self.create_series()
+        detached = series.occurrences.filter(start__gte=timezone.now()).order_by("start").first()
+        other = series.occurrences.exclude(pk=detached.pk).filter(start__gte=timezone.now()).first()
+        detach_occurrence(detached)
+
+        self.club_post("event_series_update", self.series_data(title="Renamed training"), series.pk)
+
+        detached.refresh_from_db()
+        other.refresh_from_db()
+        self.assertEqual(detached.title, "Weekly training")
+        self.assertEqual(other.title, "Renamed training")
+
+    def test_cancelling_an_occurrence_records_an_excluded_date_not_a_raw_delete(self):
+        self.client.force_login(self.make_coach(self.team))
+        series = self.create_series()
+        occurrence = series.occurrences.order_by("start").first()
+        start_iso = occurrence.start.isoformat()
+
+        self.club_post("event_delete", {}, occurrence.pk)
+
+        self.assertFalse(Event.objects.filter(pk=occurrence.pk).exists())
+        series.refresh_from_db()
+        self.assertIn(start_iso, series.excluded_dates)
+
+    def test_cancelling_with_keep_record_marks_it_cancelled_instead_of_deleting(self):
+        self.client.force_login(self.make_coach(self.team))
+        series = self.create_series()
+        occurrence = series.occurrences.order_by("start").first()
+
+        self.club_post("event_delete", {"keep_record": "on"}, occurrence.pk)
+
+        occurrence.refresh_from_db()
+        self.assertTrue(occurrence.cancelled)
+
+    def test_stop_repeating_prevents_new_occurrences_without_touching_existing_ones(self):
+        self.client.force_login(self.make_coach(self.team))
+        series = self.create_series()
+        count_before = series.occurrences.count()
+
+        self.club_post("event_series_stop", {}, series.pk)
+        series.refresh_from_db()
+        generate_occurrences(series)
+
+        self.assertEqual(series.occurrences.count(), count_before)
+
+    def test_a_manager_of_a_different_team_cannot_edit_the_series(self):
+        self.client.force_login(self.make_coach(self.team))
+        series = self.create_series()
+        self.client.force_login(self.make_coach(self.other_team, email="other-coach@example.com"))
+
+        response = self.club_get("event_series_update", series.pk)
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_a_manager_of_a_different_team_cannot_view_the_series_either(self):
+        self.client.force_login(self.make_coach(self.team))
+        series = self.create_series()
+        self.client.force_login(self.make_coach(self.other_team, email="other-coach2@example.com"))
+
+        response = self.club_get("event_series_detail", series.pk)
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_deleting_a_series_deletes_its_occurrences(self):
+        self.client.force_login(self.make_coach(self.team))
+        series = self.create_series()
+        occurrence_ids = list(series.occurrences.values_list("pk", flat=True))
+
+        self.club_post("event_series_delete", {}, series.pk)
+
+        self.assertFalse(EventSeries.objects.filter(pk=series.pk).exists())
+        self.assertFalse(Event.objects.filter(pk__in=occurrence_ids).exists())
+
+
+class EventDetailDisplayTests(ManagementTestBase):
+    """The event detail page's RSVP breakdown/modal and the game "fetch info"
+    stub -- see management.views.EventDetailView/EventFetchGameInfoView and
+    events.services.competitions.fetch_game_info."""
+
+    def setUp(self):
+        super().setUp()
+        self.team = Team.objects.create(club=self.club, name="First Team", short_name="1st")
+        self.position = Position.objects.create(club=self.club, name="Forward", short_name="FW")
+        self.player = Member.objects.create(first_name="Peter", last_name="Player")
+        ClubMembership.objects.create(club=self.club, member=self.player, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        TeamMembership.objects.create(team=self.team, season=self.season, member=self.player, position=self.position)
+        self.client.force_login(self.admin_user)
+
+    def make_event(self, **kwargs):
+        kwargs.setdefault("title", "Training")
+        kwargs.setdefault("kind", Event.EventKind.TRAINING)
+        kwargs.setdefault("start", timezone.now() + datetime.timedelta(days=1))
+        event = Event.objects.create(club=self.club, **kwargs)
+        event.teams.add(self.team)
+        return event
+
+    def test_the_rsvp_breakdown_shows_every_status_even_at_zero(self):
+        event = self.make_event()
+
+        response = self.club_get("event_detail", event.pk)
+
+        for label in ["Present", "Absent", "Excused", "Selected", "Not selected", "Maybe", "No response"]:
+            self.assertContains(response, label)
+
+    def test_the_rsvp_modal_shows_who_responded_and_their_note(self):
+        event = self.make_event()
+        Attendance.objects.filter(event=event, member=self.player).update(status=Attendance.AttendanceStatus.PRESENT, note="Bringing the kit bag")
+
+        response = self.club_get("event_detail", event.pk)
+
+        self.assertContains(response, "Peter Player")
+        self.assertContains(response, "Bringing the kit bag")
+
+    def test_the_rsvp_modal_groups_responses_into_collapsible_status_sections(self):
+        event = self.make_event()
+        Attendance.objects.filter(event=event, member=self.player).update(status=Attendance.AttendanceStatus.PRESENT)
+
+        response = self.club_get("event_detail", event.pk)
+
+        self.assertContains(response, "<details")
+        self.assertContains(response, "collapse-arrow")
+
+    def test_the_details_card_shows_gathering_and_deadline_even_when_unset(self):
+        event = self.make_event()
+
+        response = self.club_get("event_detail", event.pk)
+
+        self.assertContains(response, "Gathering")
+        self.assertContains(response, "Registration deadline")
+
+    def test_the_fetch_button_only_shows_for_a_game_with_a_competition_set(self):
+        game_with_competition = self.make_event(title="Cup game", kind=Event.EventKind.GAME, competition="Regional Cup")
+        game_without_competition = self.make_event(title="Friendly game", kind=Event.EventKind.GAME)
+        training = self.make_event(title="Training session")
+
+        self.assertContains(self.club_get("event_detail", game_with_competition.pk), "Fetch new game info")
+        self.assertNotContains(self.club_get("event_detail", game_without_competition.pk), "Fetch new game info")
+        self.assertNotContains(self.club_get("event_detail", training.pk), "Fetch new game info")
+
+    def test_fetching_game_info_reports_that_nothing_is_configured_yet(self):
+        # The competition's flag must be active for this club, or fetch_game_info
+        # gates before ever getting as far as "no data source configured" -- see
+        # test_fetching_game_info_is_a_silent_no_op_when_the_flag_is_not_active.
+        Flag = get_waffle_flag_model()
+        flag = Flag.objects.create(name="regional-cup")
+        flag.clubs.add(self.club)
+        Competition.objects.create(name="Regional Cup", module="events.competition.regional", flag=flag)
+        game = self.make_event(title="Cup game", kind=Event.EventKind.GAME, competition="Regional Cup")
+
+        redirect = self.club_post("event_fetch_game_info", {}, game.pk)
+        response = self.club_get("event_detail", game.pk)
+
+        self.assertRedirects(redirect, reverse("management:event_detail", args=[game.pk]))
+        self.assertContains(response, "No competition data source is configured yet")
+
+    def test_fetching_game_info_is_a_silent_no_op_when_the_flag_is_not_active(self):
+        # No matching Competition row at all -- same "nothing to gate on" outcome
+        # as one that exists but whose flag isn't active for this club.
+        game = self.make_event(title="Cup game", kind=Event.EventKind.GAME, competition="Regional Cup")
+
+        redirect = self.club_post("event_fetch_game_info", {}, game.pk)
+        response = self.club_get("event_detail", game.pk)
+
+        self.assertRedirects(redirect, reverse("management:event_detail", args=[game.pk]))
+        self.assertNotContains(response, "No competition data source is configured yet")
+        self.assertContains(response, "is not enabled for this club")
+
+
+class FeatureGatedSectionsTests(ManagementTestBase):
+    """The Shop and Forms sections are still stubs (StubListMixin) and, on top
+    of being admin-only, only exist for a club at all once their own waffle
+    Flag ("shop" / "formbuilder") is active for it -- see
+    club.mixins.FeatureRequiredMixin and management.context_processors.feature_sections."""
+
+    def setUp(self):
+        super().setUp()
+        # waffle caches Flag lookups outside the DB transaction each test rolls
+        # back, so a flag created in one test can otherwise leak a stale/invalid
+        # pk into the next -- see FeatureViewTests in controlpanel/tests.py.
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def activate(self, flag_name):
+        flag = get_waffle_flag_model().objects.create(name=flag_name)
+        flag.clubs.add(self.club)
+
+    def make_plain_staff(self, email="physio-features@example.com"):
+        staff_user = User.objects.create_user(email=email, password="pw-secret-123")
+        staff_member = Member.objects.create(user=staff_user, first_name="Pat", last_name="Physio")
+        ClubMembership.objects.create(club=self.club, member=staff_member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        team = Team.objects.create(club=self.club, name="Physio Team", short_name="PHY")
+        position = Position.objects.create(club=self.club, name="Physio", short_name="PH", staff_position=True, management_position=False)
+        StaffAssignment.objects.create(team=team, member=staff_member, season=self.season, position=position)
+        return staff_user
+
+    def test_shop_views_404_when_the_flag_is_not_active(self):
+        self.client.force_login(self.admin_user)
+
+        for name in ["product_list", "order_list", "discount_list", "invoice_list"]:
+            with self.subTest(name=name):
+                self.assertEqual(self.club_get(name).status_code, 404)
+
+    def test_forms_view_404_when_the_flag_is_not_active(self):
+        self.client.force_login(self.admin_user)
+
+        self.assertEqual(self.club_get("form_list").status_code, 404)
+
+    def test_shop_views_are_reachable_once_the_flag_is_active(self):
+        self.activate("shop")
+        self.client.force_login(self.admin_user)
+
+        for name in ["product_list", "order_list", "discount_list", "invoice_list"]:
+            with self.subTest(name=name):
+                self.assertEqual(self.club_get(name).status_code, 200)
+
+    def test_forms_view_is_reachable_once_its_own_flag_is_active(self):
+        self.activate("formbuilder")
+        self.client.force_login(self.admin_user)
+
+        self.assertEqual(self.club_get("form_list").status_code, 200)
+
+    def test_the_shop_flag_does_not_also_enable_forms(self):
+        # Different flags -- see the "(but different feature)" ask.
+        self.activate("shop")
+        self.client.force_login(self.admin_user)
+
+        self.assertEqual(self.club_get("form_list").status_code, 404)
+
+    def test_a_non_admin_still_gets_404_not_403_when_the_flag_is_off(self):
+        # The section doesn't exist for this club at all -- not a permissions
+        # question, so even someone who'd otherwise be refused (403) for lack
+        # of admin rights sees the same 404 an admin would.
+        self.client.force_login(self.make_plain_staff())
+
+        self.assertEqual(self.club_get("product_list").status_code, 404)
+
+    def test_a_non_admin_gets_403_once_the_flag_is_active(self):
+        self.activate("shop")
+        self.client.force_login(self.make_plain_staff())
+
+        self.assertEqual(self.club_get("product_list").status_code, 403)
+
+    def test_nav_hides_shop_and_forms_when_their_flags_are_off(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("home")
+
+        self.assertNotContains(response, "Products")
+        self.assertNotContains(response, "Forms")
+
+    def test_nav_shows_shop_once_its_flag_is_active(self):
+        self.activate("shop")
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("home")
+
+        self.assertContains(response, "Products")
+        self.assertNotContains(response, "Forms")
+
+
+RBIHF_SAMPLE_HTML = """<html><body>
+<div class="block"><div class="block-header"><h2>Sportoase Antwerp Phantoms</h2></div></div>
+<div class="block"><div class="block-header"><h2 id="games-upcoming">Upcoming games</h2></div>
+<div class="block-content"><table>
+<tr><th class="game-nr">#</th><th class="date">Date</th><th class="hour">Hour</th><th>Location</th><th>Home</th><th>Visit</th></tr>
+<tr>
+<td class="game-nr"><a href="/game/5002" title="Game 5002">5002</a></td>
+<td class="date">2026-09-12</td>
+<td class="hour">12:15</td>
+<td>Deurne</td>
+<td><a href="/league/team/4460" title="Sportoase Antwerp Phantoms">Sportoase Antwerp Phantoms</a></td>
+<td><a href="/league/team/4464" title="Amsterdam Tigers">Amsterdam Tigers</a></td>
+</tr>
+</table></div></div>
+</body></html>"""
+
+
+class RBIHFImportViewTests(ManagementTestBase):
+    """The Events page's "Import from RBIHF" button/flow -- admin-only, and
+    only when the "RBIHF" waffle Flag is active for the club, same gating
+    machinery as FeatureGatedSectionsTests above. The scrape/diff/apply logic
+    itself (events.services.rbihf_import) has its own offline tests in
+    events/tests.py; these exercise the views end to end via a mocked
+    fetch_html, never touching the network."""
+
+    def setUp(self):
+        super().setUp()
+        cache.clear()
+        self.addCleanup(cache.clear)
+        self.team = Team.objects.create(club=self.club, name="First Team", short_name="1st")
+
+    def activate_flag(self):
+        # "RBIHF" is already seeded (migration 0018 links it to the Competition
+        # row of the same name) -- get_or_create, not create.
+        flag, _created = get_waffle_flag_model().objects.get_or_create(name="RBIHF")
+        flag.clubs.add(self.club)
+
+    def make_coach(self, email="coach-rbihf@example.com"):
+        coach_user = User.objects.create_user(email=email, password="pw-secret-123")
+        coach_member = Member.objects.create(user=coach_user, first_name="Cara", last_name="Coach")
+        ClubMembership.objects.create(club=self.club, member=coach_member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        position = Position.objects.create(club=self.club, name="Head Coach", short_name="HC", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=self.team, member=coach_member, season=self.season, position=position)
+        return coach_user
+
+    def test_button_only_shows_for_admin_with_the_flag_active(self):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("event_list")
+
+        self.assertContains(response, "Import from RBIHF")
+
+    def test_button_hidden_when_the_flag_is_not_active(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("event_list")
+
+        self.assertNotContains(response, "Import from RBIHF")
+
+    def test_button_hidden_from_a_non_admin_even_with_the_flag_active(self):
+        self.activate_flag()
+        self.client.force_login(self.make_coach())
+
+        response = self.club_get("event_list")
+
+        self.assertNotContains(response, "Import from RBIHF")
+
+    def test_the_import_views_404_when_the_flag_is_not_active(self):
+        self.client.force_login(self.admin_user)
+
+        self.assertEqual(self.club_get("rbihf_import").status_code, 404)
+        self.assertEqual(self.club_post("rbihf_import_confirm", {}).status_code, 404)
+
+    def test_a_non_admin_gets_403_when_the_flag_is_active(self):
+        self.activate_flag()
+        self.client.force_login(self.make_coach())
+
+        self.assertEqual(self.club_get("rbihf_import").status_code, 403)
+
+    @mock.patch("management.views.fetch_html", return_value=RBIHF_SAMPLE_HTML)
+    def test_submitting_the_form_shows_a_preview(self, mock_fetch):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("rbihf_import", {"url": "https://www.rbihf.be/league/team/4460", "team": str(self.team.pk)})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Sportoase Antwerp Phantoms")
+        self.assertContains(response, "5002")
+        self.assertContains(response, 'name="opponent_5002"')
+        self.assertContains(response, 'name="location_5002"')
+        mock_fetch.assert_called_once_with("https://www.rbihf.be/league/team/4460")
+
+    @mock.patch("management.views.fetch_html", return_value=RBIHF_SAMPLE_HTML)
+    def test_confirming_creates_the_event(self, mock_fetch):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+        self.club_post("rbihf_import", {"url": "https://www.rbihf.be/league/team/4460", "team": str(self.team.pk)})
+
+        response = self.club_post("rbihf_import_confirm", {})
+
+        self.assertRedirects(response, reverse("management:event_list"))
+        event = Event.objects.get(club=self.club, external_game_id="5002")
+        self.assertEqual(event.opponent.name, "Amsterdam Tigers")
+        self.assertIn(self.team, event.teams.all())
+
+    @mock.patch("management.views.fetch_html", return_value=RBIHF_SAMPLE_HTML)
+    def test_confirming_respects_the_chosen_location(self, mock_fetch):
+        self.activate_flag()
+        location = Location.objects.create(club=self.club, name="Deurne Ice Hall", address="1 St", city="Deurne", zip_code="2100", country="BE")
+        self.client.force_login(self.admin_user)
+        self.club_post("rbihf_import", {"url": "https://www.rbihf.be/league/team/4460", "team": str(self.team.pk)})
+
+        self.club_post("rbihf_import_confirm", {"location_5002": str(location.pk)})
+
+        event = Event.objects.get(club=self.club, external_game_id="5002")
+        self.assertEqual(event.location, location)
+
+    @mock.patch("management.views.fetch_html", return_value=RBIHF_SAMPLE_HTML)
+    def test_confirming_respects_the_chosen_opponent(self, mock_fetch):
+        self.activate_flag()
+        renamed = Opponent.objects.create(club=self.club, name="Amsterdam Tigers HC")
+        self.client.force_login(self.admin_user)
+        self.club_post("rbihf_import", {"url": "https://www.rbihf.be/league/team/4460", "team": str(self.team.pk)})
+
+        self.club_post("rbihf_import_confirm", {"opponent_5002": str(renamed.pk)})
+
+        event = Event.objects.get(club=self.club, external_game_id="5002")
+        self.assertEqual(event.opponent, renamed)
+        self.assertFalse(Opponent.objects.filter(club=self.club, name="Amsterdam Tigers").exists())
+
+    @mock.patch("management.views.fetch_html", return_value=RBIHF_SAMPLE_HTML)
+    def test_a_blank_opponent_choice_falls_back_to_the_scraped_name(self, mock_fetch):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+        self.club_post("rbihf_import", {"url": "https://www.rbihf.be/league/team/4460", "team": str(self.team.pk)})
+
+        self.club_post("rbihf_import_confirm", {})
+
+        event = Event.objects.get(club=self.club, external_game_id="5002")
+        self.assertEqual(event.opponent.name, "Amsterdam Tigers")
+
+    def test_confirming_with_nothing_stashed_redirects_with_a_notice(self):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("rbihf_import_confirm", {})
+
+        self.assertRedirects(response, reverse("management:rbihf_import"))
+
+    def test_a_non_rbihf_url_is_a_form_error_not_a_500(self):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("rbihf_import", {"url": "https://evil.example.com/x", "team": str(self.team.pk)})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "RBIHF team page")
+
+    @mock.patch("management.views.fetch_html", side_effect=RBIHFImportError("Could not reach the page."))
+    def test_a_fetch_failure_is_a_form_error_not_a_500(self, mock_fetch):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("rbihf_import", {"url": "https://www.rbihf.be/league/team/4460", "team": str(self.team.pk)})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Could not reach the page.")
+
+    @mock.patch("management.views.fetch_html", return_value=RBIHF_SAMPLE_HTML)
+    def test_re_running_the_same_import_shows_it_as_unchanged(self, mock_fetch):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+        self.club_post("rbihf_import", {"url": "https://www.rbihf.be/league/team/4460", "team": str(self.team.pk)})
+        self.club_post("rbihf_import_confirm", {})
+
+        response = self.club_post("rbihf_import", {"url": "https://www.rbihf.be/league/team/4460", "team": str(self.team.pk)})
+
+        self.assertContains(response, "already up to date")
+        self.assertEqual(Event.objects.filter(club=self.club, external_game_id="5002").count(), 1)

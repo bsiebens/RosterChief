@@ -27,14 +27,14 @@
 {% block heading %}{{ club.name }}{% endblock heading %}
 
 {% block subheading %}
-    {{ club.slug }}.rosterchief.app
+    {{ club.slug }}.rosterchief.app &middot; {{ club.get_sport_type_display }}
     {% if club.is_archived %}
         <span class="badge badge-warning badge-sm ml-2">Archived</span>
     {% endif %}
 {% endblock subheading %}
 
 {% block actions %}
-    <a class="btn btn-outline btn-neutral gap-2" href="{% url 'controlpanel:club_update' club.pk %}">{% lucide "pencil" size=16 %} Edit</a>
+    <a class="btn btn-outline gap-2" href="{% url 'controlpanel:club_update' club.pk %}">{% lucide "pencil" size=16 %} Edit</a>
     <a class="btn btn-primary gap-2" href="https://{{ club.slug }}.rosterchief.app">{% lucide "external-link" size=16 %} Open</a>
     {% if club.is_archived %}
         <form method="post" action="{% url 'controlpanel:club_restore' club.pk %}">

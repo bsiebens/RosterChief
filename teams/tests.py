@@ -8,7 +8,7 @@ from django.test import TestCase
 from club.models import Club, Season
 from members.models import Member
 
-from .models import Position, StaffAssignment, Team, TeamMembership
+from .models import Position, StaffAssignment, Team, TeamMembership, TeamPhoto
 
 
 class TeamsTestCase(TestCase):
@@ -153,3 +153,38 @@ class RosterCleanTests(TeamsTestCase):
 
     def test_staffassignment_accepts_same_club(self):
         StaffAssignment(team=self.team, member=self.member, season=self.season, position=self.coach).full_clean()
+
+
+class TeamPhotoModelTests(TeamsTestCase):
+    def test_can_set_a_photo(self):
+        photo = TeamPhoto.objects.create(team=self.team, season=self.season, image="clubs/ajax-united/teams/x/26-27/pic.jpg")
+
+        self.assertEqual(str(photo), "First Team - 26-27")
+        self.assertEqual(list(self.team.photos.all()), [photo])
+
+    def test_only_one_photo_per_team_and_season(self):
+        TeamPhoto.objects.create(team=self.team, season=self.season, image="clubs/ajax-united/teams/x/26-27/pic.jpg")
+
+        with self.assertRaises(IntegrityError):
+            TeamPhoto.objects.create(team=self.team, season=self.season, image="clubs/ajax-united/teams/x/26-27/pic2.jpg")
+
+    def test_the_same_team_can_have_a_photo_in_a_different_season(self):
+        other_season = Season.objects.create(club=self.club, start_date=datetime.date(2000, 1, 1), end_date=datetime.date(2000, 12, 31))
+        TeamPhoto.objects.create(team=self.team, season=self.season, image="clubs/ajax-united/teams/x/26-27/pic.jpg")
+
+        TeamPhoto.objects.create(team=self.team, season=other_season, image="clubs/ajax-united/teams/x/00-00/pic.jpg")
+
+        self.assertEqual(self.team.photos.count(), 2)
+
+    def test_season_is_protected_while_a_photo_references_it(self):
+        TeamPhoto.objects.create(team=self.team, season=self.season, image="clubs/ajax-united/teams/x/26-27/pic.jpg")
+
+        with self.assertRaises(ProtectedError):
+            self.season.delete()
+
+    def test_deleting_the_team_deletes_its_photos(self):
+        TeamPhoto.objects.create(team=self.team, season=self.season, image="clubs/ajax-united/teams/x/26-27/pic.jpg")
+
+        self.team.delete()
+
+        self.assertEqual(TeamPhoto.objects.count(), 0)

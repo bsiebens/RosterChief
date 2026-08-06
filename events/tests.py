@@ -6,12 +6,14 @@ from django.core.management import call_command
 from django.db import IntegrityError
 from django.test import TestCase
 from django.utils import timezone
+from waffle import get_waffle_flag_model
 
 from club.models import Club, Season
 from members.models import Member
 from teams.models import Position, Team, TeamMembership
 
-from .models import Attendance, Event, EventSeries, Location, Opponent
+from .admin import EventAdminForm
+from .models import Attendance, Competition, Event, EventSeries, Location, Opponent
 from .services import (
     cancel_occurrence,
     detach_occurrence,
@@ -25,6 +27,7 @@ from .services import (
     team_attendance_rate,
     team_no_shows,
 )
+from .services.rbihf_import import RBIHFImportError, apply_plan, build_plan, extract_team_id, parse_fixtures, suggested_location, suggested_opponent
 
 
 class EventsTestBase(TestCase):
@@ -74,6 +77,76 @@ class EventModelTests(EventsTestBase):
 
         with self.assertRaises(IntegrityError):
             Attendance.objects.create(event=event, member=self.alice)
+
+    def test_is_home_game(self):
+        home_ground = Location.objects.create(club=self.club, name="Home Ground", address="1 St", city="Town", zip_code="1000", country="BE", is_home=True)
+        away_ground = Location.objects.create(club=self.club, name="Away Ground", address="2 St", city="Town", zip_code="1000", country="BE")
+
+        home_game = self.make_event(kind=Event.EventKind.GAME, location=home_ground)
+        away_game = self.make_event(kind=Event.EventKind.GAME, location=away_ground)
+        game_with_no_location = self.make_event(kind=Event.EventKind.GAME)
+        training_at_home_ground = self.make_event(kind=Event.EventKind.TRAINING, location=home_ground)
+
+        self.assertTrue(home_game.is_home_game)
+        self.assertFalse(away_game.is_home_game)
+        self.assertFalse(game_with_no_location.is_home_game)
+        self.assertFalse(training_at_home_ground.is_home_game)
+
+
+class CompetitionModelTests(EventsTestBase):
+    def test_sport_type_defaults_to_other(self):
+        competition = Competition.objects.create(name="Local League", module="events.competition.other")
+
+        self.assertEqual(competition.sport_type, Club.SportType.OTHER)
+
+    def test_the_seeded_hockey_competitions_are_backfilled_as_ice_hockey(self):
+        # Migration 0019's data migration backfills the two competitions seeded
+        # by 0017 (both real ice hockey leagues) rather than leaving them at the
+        # generic "other" default.
+        for name in ["RBIHF", "CEHL"]:
+            with self.subTest(name=name):
+                self.assertEqual(Competition.objects.get(name=name).sport_type, Club.SportType.ICE_HOCKEY)
+
+
+class EventAdminFormCompetitionTests(EventsTestBase):
+    """`competition` is a plain CharField, but the admin should only ever offer
+    competitions this club is actually allowed to use -- see events/admin.py."""
+
+    def setUp(self):
+        super().setUp()
+        Flag = get_waffle_flag_model()
+        self.active_flag = Flag.objects.create(name="active-competition")
+        self.active_flag.clubs.add(self.club)
+        self.inactive_flag = Flag.objects.create(name="inactive-competition")
+        self.active_competition = Competition.objects.create(name="Active Cup", module="events.competition.active", flag=self.active_flag)
+        self.inactive_competition = Competition.objects.create(name="Inactive Cup", module="events.competition.inactive", flag=self.inactive_flag)
+        self.flagless_competition = Competition.objects.create(name="Flagless Cup", module="events.competition.flagless")
+
+    def test_a_flagless_competition_never_appears(self):
+        form = EventAdminForm(instance=Event())
+        choices = dict(form.fields["competition"].choices)
+
+        self.assertNotIn("Flagless Cup", choices)
+
+    def test_a_brand_new_event_offers_every_flagged_competition_unfiltered(self):
+        # The club is unknown until the event is actually saved (see
+        # EventClubScopeTests for the same "club_id is None pre-save" timing issue
+        # elsewhere), so a new event can't be filtered by club yet -- it falls back
+        # to showing everything with a flag rather than crashing or showing nothing.
+        form = EventAdminForm(instance=Event())
+        choices = dict(form.fields["competition"].choices)
+
+        self.assertIn("Active Cup", choices)
+        self.assertIn("Inactive Cup", choices)
+
+    def test_an_existing_event_only_offers_competitions_active_for_its_club(self):
+        event = self.make_event(kind=Event.EventKind.GAME)
+        form = EventAdminForm(instance=event)
+        choices = dict(form.fields["competition"].choices)
+
+        self.assertIn("Active Cup", choices)
+        self.assertNotIn("Inactive Cup", choices)
+        self.assertNotIn("Flagless Cup", choices)
 
 
 class EffectiveMembersTests(EventsTestBase):
@@ -517,3 +590,306 @@ class TeamAttendanceStatsTests(EventsTestBase):
         record_check_in(attendance, showed_up=True)
 
         self.assertEqual(list(team_no_shows(self.team, self.season)), [])
+
+
+RBIHF_TEAM_ID = "4460"
+RBIHF_TEAM_NAME = "Sportoase Antwerp Phantoms"
+
+
+def rbihf_sample_html(rows):
+    """A trimmed stand-in for an RBIHF team page (https://www.rbihf.be/league/team/<id>)
+    -- structure confirmed against the real page while designing this feature.
+    ``rows`` is a list of dicts: game_id, date ("YYYY-MM-DD"), hour ("HH:MM"),
+    venue, home_id, home_name, visit_id, visit_name."""
+    row_html = "".join(
+        f'<tr><td class="game-nr"><a href="/game/{r["game_id"]}" title="Game {r["game_id"]}">{r["game_id"]}</a></td>'
+        f'<td class="date">{r["date"]}</td><td class="hour">{r["hour"]}</td><td>{r["venue"]}</td>'
+        f'<td><a href="/league/team/{r["home_id"]}" title="{r["home_name"]}">{r["home_name"]}</a></td>'
+        f'<td><a href="/league/team/{r["visit_id"]}" title="{r["visit_name"]}">{r["visit_name"]}</a></td></tr>'
+        for r in rows
+    )
+    return f"""<html><body>
+    <div class="block"><div class="block-header"><h2>{RBIHF_TEAM_NAME}</h2></div></div>
+    <div class="block"><div class="block-header"><h2 id="games-upcoming">Upcoming games</h2></div>
+    <div class="block-content"><table>
+    <tr><th class="game-nr">#</th><th class="date">Date</th><th class="hour">Hour</th><th>Location</th><th>Home</th><th>Visit</th></tr>
+    {row_html}
+    </table></div></div>
+    </body></html>"""
+
+
+class RBIHFParseFixturesTests(TestCase):
+    """Pure parsing, no network, no DB -- events.services.rbihf_import.parse_fixtures."""
+
+    def test_parses_team_name_and_fixtures(self):
+        html = rbihf_sample_html(
+            [
+                {"game_id": "5002", "date": "2026-09-12", "hour": "12:15", "venue": "Deurne", "home_id": RBIHF_TEAM_ID, "home_name": RBIHF_TEAM_NAME, "visit_id": "4464", "visit_name": "Amsterdam Tigers"},
+                {"game_id": "5010", "date": "2026-09-20", "hour": "18:30", "venue": "Antwerp Ice Rink", "home_id": "4500", "home_name": "Brussels Bears", "visit_id": RBIHF_TEAM_ID, "visit_name": RBIHF_TEAM_NAME},
+            ]
+        )
+
+        team_name, fixtures = parse_fixtures(html, RBIHF_TEAM_ID)
+
+        self.assertEqual(team_name, RBIHF_TEAM_NAME)
+        self.assertEqual(len(fixtures), 2)
+
+    def test_resolves_home_fixture_correctly(self):
+        html = rbihf_sample_html([{"game_id": "5002", "date": "2026-09-12", "hour": "12:15", "venue": "Deurne", "home_id": RBIHF_TEAM_ID, "home_name": RBIHF_TEAM_NAME, "visit_id": "4464", "visit_name": "Amsterdam Tigers"}])
+
+        _team_name, fixtures = parse_fixtures(html, RBIHF_TEAM_ID)
+
+        self.assertTrue(fixtures[0].is_home)
+        self.assertEqual(fixtures[0].opponent_name, "Amsterdam Tigers")
+        self.assertEqual(fixtures[0].venue_text, "Deurne")
+        self.assertEqual(fixtures[0].external_game_id, "5002")
+
+    def test_resolves_away_fixture_correctly(self):
+        html = rbihf_sample_html([{"game_id": "5010", "date": "2026-09-20", "hour": "18:30", "venue": "Antwerp Ice Rink", "home_id": "4500", "home_name": "Brussels Bears", "visit_id": RBIHF_TEAM_ID, "visit_name": RBIHF_TEAM_NAME}])
+
+        _team_name, fixtures = parse_fixtures(html, RBIHF_TEAM_ID)
+
+        self.assertFalse(fixtures[0].is_home)
+        self.assertEqual(fixtures[0].opponent_name, "Brussels Bears")
+
+    def test_a_row_where_neither_side_matches_is_skipped(self):
+        html = rbihf_sample_html([{"game_id": "9999", "date": "2026-09-20", "hour": "18:30", "venue": "Elsewhere", "home_id": "1", "home_name": "Team One", "visit_id": "2", "visit_name": "Team Two"}])
+
+        _team_name, fixtures = parse_fixtures(html, RBIHF_TEAM_ID)
+
+        self.assertEqual(fixtures, [])
+
+    def test_missing_games_table_raises(self):
+        with self.assertRaises(RBIHFImportError):
+            parse_fixtures("<html><body><h2>Some Team</h2></body></html>", RBIHF_TEAM_ID)
+
+
+class RBIHFExtractTeamIdTests(TestCase):
+    def test_accepts_the_documented_shape(self):
+        self.assertEqual(extract_team_id("https://www.rbihf.be/league/team/4460"), "4460")
+
+    def test_accepts_without_www(self):
+        self.assertEqual(extract_team_id("https://rbihf.be/league/team/4460"), "4460")
+
+    def test_rejects_a_different_host(self):
+        with self.assertRaises(RBIHFImportError):
+            extract_team_id("https://evil.example.com/league/team/4460")
+
+    def test_rejects_a_different_path(self):
+        with self.assertRaises(RBIHFImportError):
+            extract_team_id("https://www.rbihf.be/leagues")
+
+
+class RBIHFImportPlanTests(EventsTestBase):
+    def setUp(self):
+        super().setUp()
+        self.home_location = Location.objects.create(club=self.club, name="Home Arena", address="1 St", city="Antwerp", zip_code="1000", country="BE", is_home=True)
+        self.away_location = Location.objects.create(club=self.club, name="Deurne Ice Hall", address="2 St", city="Deurne", zip_code="2100", country="BE")
+
+    def home_fixture_row(self, game_id="5002", date="2026-09-12"):
+        return {"game_id": game_id, "date": date, "hour": "12:15", "venue": "Deurne", "home_id": RBIHF_TEAM_ID, "home_name": RBIHF_TEAM_NAME, "visit_id": "4464", "visit_name": "Amsterdam Tigers"}
+
+    # -- suggested_location --------------------------------------------------
+
+    def test_suggested_location_for_a_home_fixture_is_the_clubs_home_location(self):
+        _team_name, fixtures = parse_fixtures(rbihf_sample_html([self.home_fixture_row()]), RBIHF_TEAM_ID)
+
+        self.assertEqual(suggested_location(self.club, fixtures[0]), self.home_location)
+
+    def test_suggested_location_for_an_away_fixture_matches_by_city(self):
+        row = {"game_id": "5010", "date": "2026-09-20", "hour": "18:30", "venue": "Deurne", "home_id": "4500", "home_name": "Brussels Bears", "visit_id": RBIHF_TEAM_ID, "visit_name": RBIHF_TEAM_NAME}
+        _team_name, fixtures = parse_fixtures(rbihf_sample_html([row]), RBIHF_TEAM_ID)
+
+        self.assertEqual(suggested_location(self.club, fixtures[0]), self.away_location)
+
+    def test_suggested_location_is_none_when_nothing_matches(self):
+        row = {"game_id": "5010", "date": "2026-09-20", "hour": "18:30", "venue": "Nowhere Familiar", "home_id": "4500", "home_name": "Brussels Bears", "visit_id": RBIHF_TEAM_ID, "visit_name": RBIHF_TEAM_NAME}
+        _team_name, fixtures = parse_fixtures(rbihf_sample_html([row]), RBIHF_TEAM_ID)
+
+        self.assertIsNone(suggested_location(self.club, fixtures[0]))
+
+    # -- suggested_opponent ---------------------------------------------------
+
+    def test_suggested_opponent_matches_case_insensitively(self):
+        opponent = Opponent.objects.create(club=self.club, name="AMSTERDAM TIGERS")
+        _team_name, fixtures = parse_fixtures(rbihf_sample_html([self.home_fixture_row()]), RBIHF_TEAM_ID)
+
+        self.assertEqual(suggested_opponent(self.club, fixtures[0]), opponent)
+
+    def test_suggested_opponent_is_none_when_nothing_matches(self):
+        _team_name, fixtures = parse_fixtures(rbihf_sample_html([self.home_fixture_row()]), RBIHF_TEAM_ID)
+
+        self.assertIsNone(suggested_opponent(self.club, fixtures[0]))
+
+    # -- build_plan ------------------------------------------------------------
+
+    def test_a_new_fixture_is_planned_as_a_create(self):
+        html = rbihf_sample_html([self.home_fixture_row()])
+
+        plan = build_plan(self.club, self.team, RBIHF_TEAM_ID, html)
+
+        self.assertEqual(len(plan.to_create), 1)
+        self.assertEqual(plan.to_create[0].fixture.external_game_id, "5002")
+        self.assertEqual(plan.to_create[0].suggested_location, self.home_location)
+
+    def test_an_identical_existing_fixture_is_unchanged(self):
+        html = rbihf_sample_html([self.home_fixture_row()])
+        plan = build_plan(self.club, self.team, RBIHF_TEAM_ID, html)
+        apply_plan(plan, {})
+
+        plan_again = build_plan(self.club, self.team, RBIHF_TEAM_ID, html)
+
+        self.assertEqual(plan_again.to_create, [])
+        self.assertEqual(plan_again.to_update, [])
+        self.assertEqual(plan_again.unchanged_count, 1)
+
+    def test_a_changed_fixture_is_planned_as_an_update_with_a_diff(self):
+        html = rbihf_sample_html([self.home_fixture_row()])
+        plan = build_plan(self.club, self.team, RBIHF_TEAM_ID, html)
+        apply_plan(plan, {})
+
+        changed_row = self.home_fixture_row()
+        changed_row["hour"] = "20:00"  # same game id, different time
+        changed_html = rbihf_sample_html([changed_row])
+
+        plan_again = build_plan(self.club, self.team, RBIHF_TEAM_ID, changed_html)
+
+        self.assertEqual(len(plan_again.to_update), 1)
+        self.assertIn("start", plan_again.to_update[0].changes)
+
+    def test_a_future_fixture_no_longer_listed_is_planned_for_deletion(self):
+        html = rbihf_sample_html([self.home_fixture_row()])
+        plan = build_plan(self.club, self.team, RBIHF_TEAM_ID, html)
+        apply_plan(plan, {})
+
+        plan_again = build_plan(self.club, self.team, RBIHF_TEAM_ID, rbihf_sample_html([]))
+
+        self.assertEqual(len(plan_again.to_delete), 1)
+        self.assertEqual(plan_again.to_delete[0].external_game_id, "5002")
+
+    def test_a_past_fixture_no_longer_listed_is_not_deleted(self):
+        # "Upcoming games" naturally stops listing a game once it's happened --
+        # that's not a signal it was cancelled.
+        past_row = self.home_fixture_row(date="2020-01-01")
+        html = rbihf_sample_html([past_row])
+        plan = build_plan(self.club, self.team, RBIHF_TEAM_ID, html)
+        apply_plan(plan, {})
+
+        plan_again = build_plan(self.club, self.team, RBIHF_TEAM_ID, rbihf_sample_html([]))
+
+        self.assertEqual(plan_again.to_delete, [])
+
+    def test_a_fixture_for_a_different_team_is_not_touched(self):
+        other_team = Team.objects.create(club=self.club, name="Second Team", short_name="2nd")
+        html = rbihf_sample_html([self.home_fixture_row()])
+        plan = build_plan(self.club, other_team, RBIHF_TEAM_ID, html)
+        apply_plan(plan, {})
+
+        # Re-running for *our* team should see no existing RBIHF events at all
+        # for it -- the one that exists belongs to other_team.
+        plan_for_our_team = build_plan(self.club, self.team, RBIHF_TEAM_ID, html)
+
+        self.assertEqual(len(plan_for_our_team.to_create), 1)
+
+    # -- apply_plan --------------------------------------------------------
+
+    def test_apply_plan_creates_events_with_the_expected_fields(self):
+        html = rbihf_sample_html([self.home_fixture_row()])
+        plan = build_plan(self.club, self.team, RBIHF_TEAM_ID, html)
+
+        result = apply_plan(plan, {"5002": str(self.home_location.pk)})
+
+        self.assertEqual(result, {"created": 1, "updated": 0, "deleted": 0})
+        event = Event.objects.get(club=self.club, external_game_id="5002")
+        self.assertEqual(event.kind, Event.EventKind.GAME)
+        self.assertEqual(event.competition, "RBIHF")
+        self.assertEqual(event.opponent.name, "Amsterdam Tigers")
+        self.assertEqual(event.location, self.home_location)
+        self.assertIn(self.team, event.teams.all())
+        self.assertTrue(event.is_home_game)
+
+    def test_apply_plan_ignores_a_location_id_from_another_club(self):
+        other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
+        foreign_location = Location.objects.create(club=other_club, name="Not ours", address="x", city="x", zip_code="x", country="BE")
+        html = rbihf_sample_html([self.home_fixture_row()])
+        plan = build_plan(self.club, self.team, RBIHF_TEAM_ID, html)
+
+        apply_plan(plan, {"5002": str(foreign_location.pk)})
+
+        event = Event.objects.get(club=self.club, external_game_id="5002")
+        self.assertIsNone(event.location)
+
+    def test_apply_plan_uses_an_explicitly_chosen_opponent_instead_of_the_scraped_name(self):
+        renamed = Opponent.objects.create(club=self.club, name="Amsterdam Tigers HC")
+        html = rbihf_sample_html([self.home_fixture_row()])
+        plan = build_plan(self.club, self.team, RBIHF_TEAM_ID, html)
+
+        apply_plan(plan, {}, {"5002": str(renamed.pk)})
+
+        event = Event.objects.get(club=self.club, external_game_id="5002")
+        self.assertEqual(event.opponent, renamed)
+        self.assertEqual(Opponent.objects.filter(club=self.club, name="Amsterdam Tigers").count(), 0)
+
+    def test_apply_plan_ignores_an_opponent_id_from_another_club(self):
+        other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
+        foreign_opponent = Opponent.objects.create(club=other_club, name="Not ours")
+        html = rbihf_sample_html([self.home_fixture_row()])
+        plan = build_plan(self.club, self.team, RBIHF_TEAM_ID, html)
+
+        apply_plan(plan, {}, {"5002": str(foreign_opponent.pk)})
+
+        event = Event.objects.get(club=self.club, external_game_id="5002")
+        # Falls back to find-or-create by the scraped name, not the foreign row.
+        self.assertEqual(event.opponent.name, "Amsterdam Tigers")
+
+    def test_apply_plan_preserves_a_previously_chosen_opponent_on_update(self):
+        renamed = Opponent.objects.create(club=self.club, name="Amsterdam Tigers HC")
+        html = rbihf_sample_html([self.home_fixture_row()])
+        plan = build_plan(self.club, self.team, RBIHF_TEAM_ID, html)
+        apply_plan(plan, {}, {"5002": str(renamed.pk)})
+
+        # Re-run with a changed start time (something else triggers the update).
+        # build_plan should suggest (pre-select) the event's existing opponent
+        # rather than re-guessing from the scraped name -- a real <select>
+        # always resubmits whichever option is pre-selected, so that's what's
+        # passed to apply_plan here too, not a blank dict.
+        changed_row = self.home_fixture_row()
+        changed_row["hour"] = "20:00"
+        plan_again = build_plan(self.club, self.team, RBIHF_TEAM_ID, rbihf_sample_html([changed_row]))
+        self.assertEqual(plan_again.to_update[0].suggested_opponent, renamed)
+        apply_plan(plan_again, {}, {"5002": str(renamed.pk)})
+
+        event = Event.objects.get(club=self.club, external_game_id="5002")
+        self.assertEqual(event.opponent, renamed)
+
+    def test_apply_plan_updates_only_start_opponent_and_location(self):
+        html = rbihf_sample_html([self.home_fixture_row()])
+        plan = build_plan(self.club, self.team, RBIHF_TEAM_ID, html)
+        apply_plan(plan, {})
+        event = Event.objects.get(club=self.club, external_game_id="5002")
+        event.end = self.future
+        event.gathering = self.future
+        event.score_for = 3
+        event.save()
+
+        changed_row = self.home_fixture_row()
+        changed_row["hour"] = "20:00"
+        plan_again = build_plan(self.club, self.team, RBIHF_TEAM_ID, rbihf_sample_html([changed_row]))
+        apply_plan(plan_again, {})
+
+        event.refresh_from_db()
+        self.assertEqual(timezone.localtime(event.start).strftime("%H:%M"), "20:00")
+        self.assertIsNotNone(event.end)
+        self.assertIsNotNone(event.gathering)
+        self.assertEqual(event.score_for, 3)
+
+    def test_apply_plan_deletes_only_whats_in_to_delete(self):
+        html = rbihf_sample_html([self.home_fixture_row()])
+        plan = build_plan(self.club, self.team, RBIHF_TEAM_ID, html)
+        apply_plan(plan, {})
+
+        plan_again = build_plan(self.club, self.team, RBIHF_TEAM_ID, rbihf_sample_html([]))
+        result = apply_plan(plan_again, {})
+
+        self.assertEqual(result, {"created": 0, "updated": 0, "deleted": 1})
+        self.assertFalse(Event.objects.filter(club=self.club, external_game_id="5002").exists())

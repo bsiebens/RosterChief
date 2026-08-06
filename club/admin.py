@@ -1,15 +1,23 @@
 from django.contrib import admin
 from django.utils.translation import gettext_lazy as _
 
-from .models import Club, ClubMembership, ClubRole, FeePayment, Season
+from .models import Club, ClubMembership, ClubRole, FeePayment, Season, Sponsor
 
 
 @admin.register(Club)
 class ClubAdmin(admin.ModelAdmin):
-    list_display = ["name", "slug"]
+    list_display = ["name", "slug", "sport_type"]
+    list_filter = ["sport_type"]
     search_fields = ["name", "slug"]
     prepopulated_fields = {"slug": ["name"]}
     ordering = ["name"]
+
+
+@admin.register(Sponsor)
+class SponsorAdmin(admin.ModelAdmin):
+    list_display = ["name", "club", "start_date", "end_date"]
+    list_filter = ["club"]
+    search_fields = ["name"]
 
 
 @admin.register(Season)

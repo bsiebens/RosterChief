@@ -1,5 +1,6 @@
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from django.http import Http404
+from waffle import flag_is_active
 
 from .services.access import can_add_news, can_edit_news, can_publish_news, has_management_access, is_club_admin, is_coach_manager, teams_managed_by
 
@@ -36,6 +37,27 @@ class ClubAdminRequiredMixin(ClubStaffRequiredMixin):
         return is_club_admin(self.request.user, self.request.club)
 
 
+class FeatureRequiredMixin(ClubAdminRequiredMixin):
+    """Gate for a whole management section (shop, forms, ...) this club doesn't
+    have at all unless its waffle Flag (see the ``features`` app, set per-club
+    from the control panel's Features page) is active for it. Checked before
+    the admin-only test below and as a plain 404 rather than folded into
+    ``test_func``'s 403: a club with the feature off doesn't have a permissions
+    problem, the section just doesn't exist there, same reasoning as
+    ``ClubStaffRequiredMixin`` 404ing the whole app off the base domain.
+
+    Subclasses set ``feature_flag`` to the Flag's name, e.g. ``"shop"``.
+    """
+
+    feature_flag: str = ""
+
+    def dispatch(self, request, *args, **kwargs):
+        club = getattr(request, "club", None)
+        if club is not None and not flag_is_active(request, self.feature_flag):
+            raise Http404(f"The “{self.feature_flag}” feature isn't enabled for this club.")
+        return super().dispatch(request, *args, **kwargs)
+
+
 class TeamManagerRequiredMixin(ClubStaffRequiredMixin):
     """A manager of *this* team, or a club ADMIN. ``self.get_team()`` must return the
     ``Team`` the view acts on (e.g. from the URL's ``pk``) before ``test_func`` runs.
@@ -49,6 +71,23 @@ class TeamManagerRequiredMixin(ClubStaffRequiredMixin):
         if is_club_admin(user, club):
             return True
         return teams_managed_by(user, club).filter(pk=self.get_team().pk).exists()
+
+
+class EventManagerRequiredMixin(ClubStaffRequiredMixin):
+    """Admin, or a manager of at least one of this event's/series' *current*
+    teams. ``self.get_teams()`` must return the Team queryset/iterable the
+    view acts on (e.g. ``self.get_object().teams.all()``) before ``test_func``
+    runs. Events/series aren't single-team like a roster entry -- ``teams`` is
+    M2M, so authority is "manages at least one", not "manages the one"."""
+
+    def get_teams(self):
+        raise NotImplementedError("Subclasses must return the Teams this view acts on.")
+
+    def test_func(self):
+        user, club = self.request.user, self.request.club
+        if is_club_admin(user, club):
+            return True
+        return teams_managed_by(user, club).filter(pk__in=self.get_teams().values_list("pk", flat=True)).exists()
 
 
 class ManagementPositionRequiredMixin(ClubStaffRequiredMixin):
