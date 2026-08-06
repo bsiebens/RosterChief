@@ -308,6 +308,25 @@ SECURE_HSTS_INCLUDE_SUBDOMAINS = config("DJANGO_SECURE_HSTS_INCLUDE_SUBDOMAINS",
 SECURE_HSTS_PRELOAD = config("DJANGO_SECURE_HSTS_PRELOAD", default=False, cast=bool)
 
 
+# Logging
+#
+# Django's default LOGGING gates its console handler behind `require_debug_true`, so with
+# DEBUG=False (every real deployment) an unhandled exception becomes a 500 response and leaves
+# no trace anywhere — gunicorn's error log only sees WSGI-level crashes, not exceptions Django
+# already caught and turned into a response. Without this, `docker compose logs web` is silent
+# during exactly the incidents it most needs to explain.
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "handlers": {
+        "console": {"class": "logging.StreamHandler"},
+    },
+    "loggers": {
+        "django.request": {"handlers": ["console"], "level": "ERROR", "propagate": False},
+    },
+}
+
+
 # Phone numbers (django-phonenumber-field)
 
 PHONENUMBER_DEFAULT_REGION = "BE"
