@@ -35,7 +35,7 @@
         money-shaped renders below for non-admins, same line the nav already draws
         around the Shop section.
     {% endcomment %}
-    <div class="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+    <div class="mb-6 grid gap-4 sm:grid-cols-2 md:grid-cols-5">
         <div class="card bg-base-100 shadow border-l-4 {% if attention.teams_without_manager %}border-error{% else %}border-success{% endif %}">
             <div class="card-body p-4">
                 <div class="flex items-center gap-2 text-sm opacity-70 mb-3">{% lucide "user-x" size=16 %} {% trans "Teams without coach" %}</div>
