@@ -77,7 +77,13 @@ RUN DJANGO_SECRET_KEY=build-only-not-a-secret \
     DJANGO_STATICFILES_BACKEND=whitenoise.storage.CompressedManifestStaticFilesStorage \
     python manage.py collectstatic --noinput
 
-RUN useradd --system --uid 1000 rosterchief && chown -R rosterchief /app
+# mkdir before chown, and before the volume ever mounts: media_data has nothing to copy from
+# at /app/media otherwise, so Docker creates the mount point itself, owned by root — and the
+# app runs as rosterchief, not root. Existing image content (even an empty, correctly-owned
+# dir) is what a named volume copies its initial ownership from on first use.
+RUN useradd --system --uid 1000 rosterchief \
+    && mkdir -p /app/media \
+    && chown -R rosterchief /app
 USER rosterchief
 
 EXPOSE 8000
