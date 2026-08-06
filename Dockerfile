@@ -91,10 +91,19 @@ EXPOSE 8000
 # Migrations are NOT run here. With more than one app container they would race, and a failed
 # migration inside a starting web process is a bad place to find out — deploy runs them once,
 # explicitly (see DEPLOYMENT.md).
+# 2 workers, not 3: DEPLOYMENT.md's own sizing says this workload isn't CPU-bound, and each
+# worker duplicates a full Django process — the single biggest lever on a memory-limited box.
+# --preload imports the app once in the master and forks workers via copy-on-write instead of
+# each re-importing Django independently (safe here: no app's ready() touches DB/Redis eagerly,
+# checked club/features/news/events). --max-requests recycles a worker periodically so the one
+# that happens to render a WeasyPrint invoice doesn't carry that +50-100MB forever.
 CMD ["gunicorn", "rosterchief.wsgi:application", \
      "--bind", "0.0.0.0:8000", \
-     "--workers", "3", \
+     "--workers", "2", \
      "--threads", "4", \
+     "--preload", \
+     "--max-requests", "500", \
+     "--max-requests-jitter", "50", \
      "--timeout", "60", \
      "--access-logfile", "-", \
      "--error-logfile", "-"]

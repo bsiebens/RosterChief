@@ -423,7 +423,8 @@ So do not size for the data. Size for the **processes**.
 
 ### What actually consumes the box
 
-Measured, running this app under gunicorn with `DEBUG=False`:
+Measured, running this app under gunicorn with `DEBUG=False`, before the tuning below —
+`--workers 3`, no `--preload`, Postgres and Redis on their image defaults:
 
 | | memory |
 |---|---|
@@ -433,6 +434,13 @@ Measured, running this app under gunicorn with `DEBUG=False`:
 | Caddy | ~30 MB |
 | OS + Docker daemon | ~400 MB |
 | **steady state** | **~1.0–1.2 GB** |
+
+Since then, `Dockerfile`/`compose.yaml` were tuned for smaller boxes: `--workers 2 --preload`
+(one fewer duplicated Django process, and `--preload` shares immutable memory across workers
+via copy-on-write instead of each worker importing Django independently), plus trimmed Postgres
+`shared_buffers`/`max_connections` and a Redis `--maxmemory` cap. Expect the gunicorn and
+Postgres rows to come in lower than above — not yet re-measured, so treat the table as the
+shape of where memory goes rather than exact numbers on the current config.
 
 2 GB would run it. 4 GB is the recommendation for three reasons, all of which are the kind of
 thing that bites at the worst moment:
