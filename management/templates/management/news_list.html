@@ -1,0 +1,76 @@
+{% extends "management/base.html" %}
+{% load i18n lucide ui %}
+
+{% block heading %}{% trans "News" %}{% endblock heading %}
+
+{% block actions %}
+    {% if can_add_news %}
+        <a class="btn btn-outline gap-2" href="{% url 'management:news_create' %}">{% lucide "plus" size=16 %} {% trans "New news item" %}</a>
+    {% endif %}
+{% endblock actions %}
+
+{% block panel %}
+    <div class="card bg-base-100 shadow">
+        <div class="card-body">
+            <div class="overflow-x-auto">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>{% trans "Title" %}</th>
+                            <th>{% trans "Teams" %}</th>
+                            <th>{% trans "Visibility" %}</th>
+                            <th>{% trans "Status" %}</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for news_item in news_items %}
+                            <tr>
+                                <td><a class="link link-hover" href="{% url 'management:news_detail' news_item.pk %}">{{ news_item.title }}</a></td>
+                                <td>
+                                    {% for team in news_item.teams.all %}
+                                        <span class="badge badge-neutral badge-sm">{{ team.short_name }}</span>
+                                    {% empty %}
+                                        <span class="opacity-60">{% trans "Club-wide" %}</span>
+                                    {% endfor %}
+                                </td>
+                                <td>{{ news_item.get_visibility_display }}</td>
+                                <td>
+                                    {% if news_item.status == "draft" %}
+                                        <span class="badge badge-neutral badge-sm">{% trans "Draft" %}</span>
+                                    {% elif news_item.is_scheduled %}
+                                        <span class="badge badge-warning badge-sm">{% blocktrans with date=news_item.published_at %}Scheduled for {{ date }}{% endblocktrans %}</span>
+                                    {% else %}
+                                        <span class="badge badge-success badge-sm">{% trans "Published" %}</span>
+                                    {% endif %}
+                                </td>
+                                <td class="text-right">
+                                    {% if news_item.can_edit %}
+                                        <div class="flex justify-end gap-1">
+                                            <a class="btn btn-outline btn-sm" href="{% url 'management:news_detail' news_item.pk %}" aria-label="{% trans 'Edit' %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</a>
+                                            <button class="btn btn-sm btn-outline btn-error" type="button" onclick="document.getElementById('{{ news_item.pk|dom_id:"news_delete_modal" }}').showModal()" aria-label="{% trans 'Delete' %}">{% lucide "trash-2" size=14 %} {% trans "Delete" %}</button>
+                                        </div>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                        {% empty %}
+                            <tr>
+                                <td colspan="5" class="text-center opacity-60">{% trans "No news items yet." %}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    {% trans "Delete news item" as delete_news_title %}
+    {% trans "Delete" as delete_label %}
+    {% for news_item in news_items %}
+        {% if news_item.can_edit %}
+            {% url 'management:news_delete' news_item.pk as news_delete_url %}
+            {% blocktrans with title=news_item.title asvar delete_news_body %}Delete “{{ title }}”? Its photos go with it. This cannot be undone.{% endblocktrans %}
+            {% include "controlpanel/_confirm_modal.html" with modal_id=news_item.pk|dom_id:"news_delete_modal" title=delete_news_title body=delete_news_body action_url=news_delete_url submit_label=delete_label %}
+        {% endif %}
+    {% endfor %}
+{% endblock panel %}

@@ -1,0 +1,43 @@
+{% extends "management/base.html" %}
+{% load lucide ui i18n %}
+
+{% block heading %}{% trans "Add family" %}{% endblock heading %}
+
+{% block panel %}
+    <div class="card w-full bg-base-100 shadow">
+        <div class="card-body">
+            <form method="post">
+                {% csrf_token %}
+
+                {% for error in form.non_field_errors %}
+                    <div class="alert alert-error my-2">
+                        <span>{{ error }}</span>
+                    </div>
+                {% endfor %}
+
+                <h2 class="card-title text-base">{% lucide "user" size=18 %} {% trans "Parent / guardian" %}</h2>
+                <p class="text-sm opacity-70">{% trans "Gets a login -- they set a password via the reset link if this is a new email." %}</p>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {% form_field form.parent_first_name %}
+                    {% form_field form.parent_last_name %}
+                    {% form_field form.parent_email %}
+                </div>
+
+                <div class="divider"></div>
+
+                <h2 class="card-title text-base">{% lucide "baby" size=18 %} {% trans "Child" %}</h2>
+                <p class="text-sm opacity-70">{% trans "No login of their own -- the parent above manages things for them." %}</p>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {% form_field form.child_first_name %}
+                    {% form_field form.child_last_name %}
+                    {% form_field form.child_date_of_birth %}
+                </div>
+
+                <div class="card-actions justify-start pt-2 mt-2">
+                    <a class="btn btn-outline gap-2" href="{% url "management:member_list" %}">{% lucide "arrow-left" size=16 %} {% trans "Cancel" %}</a>
+                    <button class="btn btn-primary gap-2" type="submit">{% lucide "save" size=16 %} {% trans "Save" %}</button>
+                </div>
+            </form>
+        </div>
+    </div>
+{% endblock panel %}

@@ -1,0 +1,66 @@
+{% extends "management/base.html" %}
+{% load i18n lucide static %}
+
+{% comment %}
+    One section per non-MEMBER role (management.views.ClubRoleListView) -- the
+    plain MEMBER role every active club member holds automatically is excluded
+    entirely, since listing it here would just be noise. "Grant role" opens a
+    modal (controlpanel/_modal_form.html) rather than a separate page -- role_create
+    is POST-only, see ClubRoleCreateView.
+{% endcomment %}
+
+{% block heading %}{% trans "Roles" %}{% endblock heading %}
+
+{% block actions %}
+    <button class="btn btn-outline gap-2" type="button" onclick="document.getElementById('grant_role_modal').showModal()">{% lucide "plus" size=16 %} {% trans "Grant role" %}</button>
+{% endblock actions %}
+
+{% block panel %}
+    <div class="flex flex-col gap-4">
+        {% for value, label, description, roles_for_section in sections %}
+            {% with role_label=label|capfirst %}
+                <div class="card bg-base-100 shadow">
+                    <div class="card-body">
+                        <h2 class="card-title text-base">{{ role_label }}</h2>
+                        {% if description %}<p class="text-sm opacity-70">{{ description }}</p>{% endif %}
+                        <div class="overflow-x-auto">
+                            <table class="table">
+                                <thead>
+                                    <tr>
+                                        <th>{% trans "Member" %}</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for role in roles_for_section %}
+                                        <tr>
+                                            <td>{{ role.member }}</td>
+                                            <td class="text-right">
+                                                <form method="post" action="{% url 'management:role_revoke' role.pk %}">
+                                                    {% csrf_token %}
+                                                    <button class="btn btn-outline btn-error btn-sm gap-2" type="submit">{% lucide "x" size=14 %} {% trans "Revoke" %}</button>
+                                                </form>
+                                            </td>
+                                        </tr>
+                                    {% empty %}
+                                        <tr>
+                                            <td colspan="2" class="text-center opacity-60">{% blocktrans %}No one has the {{ role_label }} role yet.{% endblocktrans %}</td>
+                                        </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            {% endwith %}
+        {% endfor %}
+    </div>
+
+    {% trans "Grant role" as grant_role_label %}
+    {% url 'management:role_create' as role_create_url %}
+    {% include "controlpanel/_modal_form.html" with modal_id="grant_role_modal" title=grant_role_label form=role_form action_url=role_create_url submit_label=grant_role_label submit_icon="shield-check" %}
+{% endblock panel %}
+
+{% block extra_body %}
+    <script src="{% static 'js/searchable-select.js' %}"></script>
+{% endblock extra_body %}

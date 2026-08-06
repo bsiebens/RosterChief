@@ -1,0 +1,52 @@
+{% extends "_platform_base.html" %}
+{% load lucide %}
+
+{% block title %}
+    {% block panel_title %}Control panel{% endblock panel_title %} · RosterChief
+{% endblock title %}
+
+{% block menu %}
+    {% comment %}
+        Outside <main>, so it never scrolls with the content. Its own overflow-y-auto is for
+        the day the menu itself grows taller than the screen.
+    {% endcomment %}
+    <aside class="hidden w-64 shrink-0 overflow-y-auto border-r border-base-300 bg-base-100 lg:block">
+        <ul class="menu w-full gap-1 p-3 mt-4">
+            {% include "controlpanel/_nav_items.html" %}
+        </ul>
+    </aside>
+{% endblock menu %}
+
+{% block main %}
+    {% if maintenance_on %}
+        <div class="alert alert-error mb-6">
+            {% lucide "wrench" size=20 %}
+            <span>
+        <strong>The platform is currently closed for maintenance.</strong>
+        Clubs see a maintenance page and the scheduled jobs are standing down.
+    </span>
+            <a class="btn btn-sm gap-2 btn-error btn-soft" href="{% url 'controlpanel:features' %}">{% lucide "unlock" size=16 %} Reopen platform</a>
+        </div>
+    {% endif %}
+    <div class="mb-6 flex flex-wrap flex-row items-center justify-between gap-3">
+        {% block logo %}{% endblock logo %}
+
+        <div class="flex flex-col gap-2 grow">
+            <h1 class="text-3xl font-bold">
+                {% block heading %}Control panel{% endblock heading %}
+            </h1>
+            <span class="text-sm text-base-content/50">{% block subheading %}{% endblock subheading %}</span>
+        </div>
+
+        <div class="flex gap-2">
+            {% block actions %}{% endblock actions %}
+        </div>
+    </div>
+
+    {# Below `lg` the sidebar is hidden, so the same links appear here rather than nowhere. #}
+    <ul class="menu menu-horizontal mb-6 w-full gap-1 overflow-x-auto rounded-box bg-base-100 lg:hidden">
+        {% include "controlpanel/_nav_items.html" %}
+    </ul>
+
+    {% block panel %}{% endblock panel %}
+{% endblock main %}

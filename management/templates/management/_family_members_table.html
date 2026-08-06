@@ -1,0 +1,92 @@
+{% load lucide ui i18n %}
+
+{% comment %}
+Shared by family_detail.html and member_detail.html's own Family panel -- one
+table design for "everyone in this family", included with `group` (a dict from
+management.views.group_by_family: family/guardians/children/others/all) and
+`family_role_choices` (FamilyMembership.FamilyRole.choices, for the role dropdown).
+`next_url`, if passed, is where a role change redirects back to -- member_detail.html
+passes its own URL so admins land back on the member they were viewing; family_detail.html
+leaves it unset, since staying on the family page is already the right place there.
+{% endcomment %}
+<div class="overflow-x-auto">
+    <table class="table">
+        <thead>
+            <tr>
+                <th>{% trans "Last name" %}</th>
+                <th>{% trans "First name" %}</th>
+                <th>{% trans "Email" %}</th>
+                <th>{% trans "Type" %}</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for person in group.all %}
+            <tr>
+                <td><a class="link link-hover" href="{% url 'management:member_detail' person.pk %}">{{ person.last_name }}</a></td>
+                <td>{{ person.first_name }}</td>
+                <td>{{ person.contact_email|default:"-" }}</td>
+                <td>
+                    {% if is_club_admin %}
+                    <form method="post" action="{% url 'management:family_membership_role_update' group.family.pk person.pk %}">
+                        {% csrf_token %}
+                        {% if next_url %}<input type="hidden" name="next" value="{{ next_url }}">{% endif %}
+                        <select name="role" class="select select-bordered select-sm" onchange="this.form.requestSubmit()" aria-label="{% trans 'Role in family' %}">
+                            {% for value, label in family_role_choices %}
+                            <option value="{{ value }}" {% if value == person.role_in_family %}selected{% endif %}>{{ label|capfirst }}</option>
+                            {% endfor %}
+                        </select>
+                    </form>
+                    {% else %}
+                    <span class="badge badge-sm badge-ghost">{{ person.role_in_family_display|capfirst }}</span>
+                    {% endif %}
+                </td>
+                <td class="text-right">
+                    {% if is_club_admin %}
+                    <div class="flex justify-end gap-1">
+                        {% if person.grant_login_form %}
+                        <button class="btn btn-outline btn-sm" type="button" onclick="document.getElementById('grant_login_modal_{{ group.family.pk }}_{{ person.pk }}').showModal()" aria-label="{% trans 'Grant login' %}">
+                            {% lucide "key-round" size=14 %} {% trans "Grant login" %}
+                        </button>
+                        {% endif %}
+                        <a class="btn btn-outline btn-sm" href="{% url 'management:member_detail' person.pk %}" aria-label="{% trans 'Edit' %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</a>
+                        <button class="btn btn-sm btn-outline btn-error" type="button" onclick="document.getElementById('remove_family_modal_{{ group.family.pk }}_{{ person.pk }}').showModal()" aria-label="{% trans 'Remove from family' %}">
+                            {% lucide "user-x" size=14 %} {% trans "Remove" %}
+                        </button>
+                        <button class="btn btn-sm btn-outline btn-error" type="button" onclick="document.getElementById('member_delete_modal_{{ group.family.pk }}_{{ person.pk }}').showModal()" aria-label="{% trans 'Delete' %}">
+                            {% lucide "trash-2" size=14 %} {% trans "Delete" %}
+                        </button>
+                    </div>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+{% if is_club_admin %}
+{% trans "Delete member" as delete_member_title %}
+{% trans "Delete" as delete_label %}
+{% trans "Remove from family" as remove_from_family_title %}
+{% trans "Remove" as remove_label %}
+{% trans "Grant login" as grant_login_title %}
+{% trans "Grant" as grant_login_submit_label %}
+{% trans "They'll be able to sign in with this email once you confirm." as grant_login_blurb %}
+{% with family_pk_str=group.family.pk|stringformat:"s" %}
+{% for person in group.all %}
+{% with person_pk_str=person.pk|stringformat:"s" %}
+{% url 'management:member_delete' person.pk as member_delete_url %}
+{% url 'management:member_detach_family' person.pk group.family.pk as detach_family_url %}
+{% url 'management:member_grant_login' person.pk as grant_login_url %}
+{% blocktrans with full_name=person.get_full_name asvar delete_member_body %}Delete {{ full_name }}? This also removes their club membership, roster spots, staff assignments, and family links. This cannot be undone.{% endblocktrans %}
+{% blocktrans with full_name=person.get_full_name family_name=group.family asvar detach_family_body %}Remove {{ full_name }} from family {{ family_name }}? They become a standalone member - nothing else about them changes.{% endblocktrans %}
+{% include "controlpanel/_confirm_modal.html" with modal_id="member_delete_modal_"|add:family_pk_str|add:"_"|add:person_pk_str title=delete_member_title body=delete_member_body action_url=member_delete_url submit_label=delete_label %}
+{% include "controlpanel/_confirm_modal.html" with modal_id="remove_family_modal_"|add:family_pk_str|add:"_"|add:person_pk_str title=remove_from_family_title body=detach_family_body action_url=detach_family_url submit_label=remove_label submit_icon="user-x" %}
+{% if person.grant_login_form %}
+{% include "controlpanel/_modal_form.html" with modal_id="grant_login_modal_"|add:family_pk_str|add:"_"|add:person_pk_str title=grant_login_title form=person.grant_login_form action_url=grant_login_url submit_label=grant_login_submit_label submit_icon="key-round" blurb=grant_login_blurb %}
+{% endif %}
+{% endwith %}
+{% endfor %}
+{% endwith %}
+{% endif %}

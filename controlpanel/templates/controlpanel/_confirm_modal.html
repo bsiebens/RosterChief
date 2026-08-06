@@ -1,0 +1,29 @@
+{% load i18n lucide %}
+
+{% comment %}
+    A daisyUI native <dialog> confirmation modal for a destructive POST action with no
+    fields of its own. Included with `modal_id`, `title`, `body`, `action_url`, and
+    optional `submit_label` (default "Confirm"), `submit_icon` (default "trash-2"). The
+    submit button sits outside the form tag (linked via the `form` attribute), same as
+    `_modal_form.html`, so it can share the `modal-action` row with the dialog-closing
+    Cancel button without nesting one <form> inside another.
+{% endcomment %}
+{% trans "Confirm" as default_submit_label %}
+<dialog id="{{ modal_id }}" class="modal">
+    <div class="modal-box">
+        <h3 class="text-lg font-bold">{{ title }}</h3>
+        <p class="py-2 text-sm opacity-70">{{ body }}</p>
+        <form method="post" action="{{ action_url }}" id="{{ modal_id }}-form">
+            {% csrf_token %}
+        </form>
+        <div class="modal-action">
+            <form method="dialog">
+                <button class="btn btn-outline gap-2">{% lucide "x" size=16 %} {% trans "Cancel" %}</button>
+            </form>
+            <button class="btn btn-error gap-2" type="submit" form="{{ modal_id }}-form">{% lucide submit_icon|default:"trash-2" size=16 %} {{ submit_label|default:default_submit_label }}</button>
+        </div>
+    </div>
+    <form method="dialog" class="modal-backdrop">
+        <button>close</button>
+    </form>
+</dialog>

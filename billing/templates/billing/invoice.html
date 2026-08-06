@@ -1,0 +1,106 @@
+{% load static %}
+
+{% comment %}
+    Rendered by WeasyPrint, not by a browser: this is a standalone document with its own
+    print stylesheet. It deliberately does NOT pull in app.css — daisyUI is built for a
+    screen, and half of it (dark theme, flex layouts) means nothing on paper.
+{% endcomment %}
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <title>{{ invoice.number }}</title>
+        <style>
+            @page {
+                size: A4;
+                margin: 20mm;
+                @bottom-center {
+                    content: "RosterChief — invoice {{ invoice.number }} — page " counter(page) " of " counter(pages);
+                    font-size: 8pt;
+                    color: #666;
+                }
+            }
+            body { font-family: sans-serif; font-size: 10pt; color: #111; }
+            h1 { font-size: 20pt; margin: 0 0 2mm; }
+            .muted { color: #666; }
+            .header { display: flex; justify-content: space-between; margin-bottom: 12mm; }
+            .parties { display: flex; justify-content: space-between; margin-bottom: 10mm; }
+            .parties h2 { font-size: 9pt; text-transform: uppercase; letter-spacing: 0.5pt; color: #666; margin: 0 0 2mm; }
+            table { width: 100%; border-collapse: collapse; margin-bottom: 6mm; }
+            th { text-align: left; font-size: 9pt; text-transform: uppercase; letter-spacing: 0.5pt; color: #666; border-bottom: 1px solid #ccc; padding: 2mm 0; }
+            td { padding: 2mm 0; border-bottom: 1px solid #eee; }
+            .right { text-align: right; }
+            .total td { font-weight: bold; border-bottom: 2px solid #111; border-top: 1px solid #111; }
+            .balance { font-size: 12pt; font-weight: bold; }
+            .paid { color: #15803d; }
+            .owed { color: #b91c1c; }
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            <div>
+                <h1>RosterChief</h1>
+                <div class="muted">Club &amp; team management</div>
+            </div>
+            <div class="right">
+                <h1>Invoice</h1>
+                <div><strong>{{ invoice.number }}</strong></div>
+                <div class="muted">Issued {{ invoice.issued_at|date:"j F Y" }}</div>
+            </div>
+        </div>
+
+        <div class="parties">
+            <div>
+                <h2>Billed to</h2>
+                <div><strong>{{ club.name }}</strong></div>
+                <div class="muted">{{ club.slug }}.rosterchief.app</div>
+            </div>
+            <div class="right">
+                <h2>Period</h2>
+                <div>{{ due.period_start|date:"j F Y" }} — {{ due.period_end|date:"j F Y" }}</div>
+                <div class="muted">Payable by {{ due.grace_until|date:"j F Y" }}</div>
+            </div>
+        </div>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>Description</th>
+                    <th class="right">Amount</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>
+                        <strong>{{ due.tier.name }}</strong> — platform subscription
+                        <div class="muted">{{ due.period_start|date:"j M Y" }} to {{ due.period_end|date:"j M Y" }}</div>
+                    </td>
+                    <td class="right">€{{ due.amount|floatformat:2 }}</td>
+                </tr>
+                {% for payment in payments %}
+                    <tr>
+                        <td class="muted">
+                            Payment received {{ payment.paid_at|date:"j M Y" }} ({{ payment.get_method_display }}{% if payment.reference %}, {{ payment.reference }}{% endif %})
+                        </td>
+                        <td class="right muted">−€{{ payment.amount|floatformat:2 }}</td>
+                    </tr>
+                {% endfor %}
+                <tr class="total">
+                    <td>Balance due</td>
+                    <td class="right balance {% if due.balance > 0 %}owed{% else %}paid{% endif %}">€{{ due.balance|floatformat:2 }}</td>
+                </tr>
+            </tbody>
+        </table>
+
+        {% if due.status == "paid" %}
+            <p class="paid"><strong>Paid in full.</strong> Thank you.</p>
+        {% elif due.status == "waived" %}
+            <p class="muted"><strong>Waived.</strong> Nothing is owed for this period.</p>
+        {% else %}
+            <p class="muted">
+                Payable by <strong>{{ due.grace_until|date:"j F Y" }}</strong>. Unpaid past that date the club is archived: its
+                subdomain stops resolving, though nothing is deleted.
+            </p>
+        {% endif %}
+    </body>
+</html>

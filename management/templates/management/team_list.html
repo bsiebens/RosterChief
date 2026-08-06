@@ -1,0 +1,62 @@
+{% extends "management/base.html" %}
+{% load i18n lucide ui %}
+
+{% block heading %}{% trans "Teams" %}{% endblock heading %}
+
+{% block actions %}
+    {% if is_club_admin %}
+        <a class="btn btn-outline gap-2" href="{% url 'management:team_create' %}">{% lucide "plus" size=16 %} {% trans "New team" %}</a>
+    {% endif %}
+{% endblock actions %}
+
+{% block panel %}
+    <div class="card bg-base-100 shadow">
+        <div class="card-body">
+            <div class="overflow-x-auto">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>{% trans "Name" %}</th>
+                            <th>{% trans "Short name" %}</th>
+                            <th>{% trans "Players" %}</th>
+                            <th>{% trans "Staff" %}</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for team in teams %}
+                            <tr>
+                                <td><a class="link link-hover" href="{% url 'management:team_detail' team.pk %}">{{ team.name }}</a></td>
+                                <td>{{ team.short_name }}</td>
+                                <td>{{ team.player_count }}</td>
+                                <td>{{ team.staff_count }}</td>
+                                <td class="text-right">
+                                    {% if is_club_admin %}
+                                        <div class="flex justify-end gap-1">
+                                            <a class="btn btn-outline btn-sm" href="{% url 'management:team_detail' team.pk %}" aria-label="{% trans 'Edit' %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</a>
+                                            <button class="btn btn-sm btn-outline btn-error" type="button" onclick="document.getElementById('{{ team.pk|dom_id:"team_delete_modal" }}').showModal()" aria-label="{% trans 'Delete' %}">{% lucide "trash-2" size=14 %} {% trans "Delete" %}</button>
+                                        </div>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                        {% empty %}
+                            <tr>
+                                <td colspan="5" class="text-center opacity-60">{% trans "No teams yet." %}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    {% if is_club_admin %}
+        {% trans "Delete team" as delete_team_title %}
+        {% trans "Delete" as delete_label %}
+        {% for team in teams %}
+            {% url 'management:team_delete' team.pk as team_delete_url %}
+            {% blocktrans with name=team.name asvar delete_team_body %}Delete “{{ name }}”? This also removes its roster and staff assignments. This cannot be undone.{% endblocktrans %}
+            {% include "controlpanel/_confirm_modal.html" with modal_id=team.pk|dom_id:"team_delete_modal" title=delete_team_title body=delete_team_body action_url=team_delete_url submit_label=delete_label %}
+        {% endfor %}
+    {% endif %}
+{% endblock panel %}

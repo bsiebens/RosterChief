@@ -1,0 +1,135 @@
+{% extends "controlpanel/base.html" %}
+{% load lucide ui %}
+
+{% block heading %}Billing{% endblock heading %}
+
+{% block actions %}
+    <button class="btn btn-primary gap-2" type="button" onclick="document.getElementById('tier_create_modal').showModal()">{% lucide "plus" size=16 %} New plan</button>
+{% endblock actions %}
+
+{% block panel %}
+    {% url 'controlpanel:tier_create' as tier_create_url %}
+    {% include "controlpanel/_modal_form.html" with modal_id="tier_create_modal" title="New plan" form=tier_form action_url=tier_create_url submit_label="Create plan" submit_icon="plus" %}
+
+    <div class="card mb-6 bg-base-100 shadow">
+        <div class="card-body">
+            <h2 class="card-title text-base">{% lucide "layers" size=18 %} Plans</h2>
+            {% comment %}
+                Prices are dated, not edited. A rate change is a new row with a future
+                active_from; every period already opened keeps the amount it was billed at,
+                so raising the price cannot rewrite an invoice you have already sent.
+            {% endcomment %}
+            <p class="text-sm opacity-70">A rate change only takes effect as of a certain date. Periods already billed keep the amount they were issued at.</p>
+            <div class="overflow-x-auto">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Plan</th>
+                            <th class="text-right">Clubs</th>
+                            <th>Prices</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for tier in tiers %}
+                            <tr>
+                                <td>
+                                    <div class="font-medium">{{ tier.name }}</div>
+                                    {% if not tier.is_active %}<span class="badge badge-ghost badge-xs">Retired</span>{% endif %}
+                                    {% if tier.description %}
+                                        <div class="text-xs opacity-60">{{ tier.description }}</div>{% endif %}
+                                </td>
+                                <td class="text-right tabular-nums">{{ tier.club_count }}</td>
+                                <td>
+                                    {% for price in tier.prices.all %}
+                                        <div class="text-sm tabular-nums">
+                                            €{{ price.amount|floatformat:2 }}
+                                            <span class="opacity-60">from {{ price.active_from|date:"j M Y" }}</span>
+                                            {% if price.active_from > today %}<span class="badge badge-info badge-xs">Scheduled</span>{% endif %}
+                                        </div>
+                                    {% empty %}
+                                        <span class="badge badge-error badge-sm">No price — cannot be billed</span>
+                                    {% endfor %}
+                                </td>
+                                <td class="flex flex-row gap-2 justify-end">
+                                    <button class="btn btn-primary btn-sm btn-outline gap-1" type="button" onclick="document.getElementById('{{ tier.pk|dom_id:"tier_price_modal" }}').showModal()">{% lucide "euro" size=14 %} New price</button>
+                                    <button class="btn btn-outline btn-sm gap-1" type="button" onclick="document.getElementById('{{ tier.pk|dom_id:"tier_edit_modal" }}').showModal()">{% lucide "pencil" size=14 %} Edit</button>
+                                </td>
+                            </tr>
+                        {% empty %}
+                            <tr>
+                                <td colspan="4" class="text-center opacity-60">No plans yet.</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    {% comment %} Dialogs live outside the table: <tbody> may only contain <tr> elements. {% endcomment %}
+    {% for tier in tiers %}
+        {% url 'controlpanel:tier_price_create' tier.pk as tier_price_url %}
+        {% include "controlpanel/_modal_form.html" with modal_id=tier.pk|dom_id:"tier_price_modal" title="New price — "|add:tier.name form=tier.price_form action_url=tier_price_url submit_label="Add price" submit_icon="euro" %}
+
+        {% url 'controlpanel:tier_update' tier.pk as tier_update_url %}
+        {% include "controlpanel/_modal_form.html" with modal_id=tier.pk|dom_id:"tier_edit_modal" title="Edit "|add:tier.name form=tier.edit_form action_url=tier_update_url submit_label="Save" submit_icon="check" %}
+    {% endfor %}
+
+    <div class="card bg-base-100 shadow">
+        <div class="card-body">
+            <h2 class="card-title text-base">{% lucide "receipt-euro" size=18 %} Owed</h2>
+            <div class="overflow-x-auto">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Club</th>
+                            <th>Period</th>
+                            <th class="text-right">Owed</th>
+                            <th class="text-right">Status</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for due in owing %}
+                            <tr>
+                                <td>
+                                    <a class="link link-hover font-medium" href="{% url 'controlpanel:club_detail' due.club.pk %}">{{ due.club.name }}</a>
+                                    <div class="text-xs opacity-60">{{ due.tier.name }}</div>
+                                </td>
+                                <td class="text-sm">
+                                    {{ due.period_start|date:"j M Y" }} — {{ due.period_end|date:"j M Y" }}
+                                    <div class="text-xs opacity-60">Grace to {{ due.grace_until|date:"j M Y" }}</div>
+                                </td>
+                                <td class="text-right font-semibold tabular-nums">€{{ due.balance|floatformat:2 }}</td>
+                                <td class="text-right">
+                                    {% if due.grace_until < today %}
+                                        <span class="badge badge-error gap-1">{% lucide "triangle-alert" size=12 %} Overdue</span>
+                                    {% elif due.period_end < today %}
+                                        <span class="badge badge-warning gap-1">{% lucide "hourglass" size=12 %} In grace</span>
+                                    {% else %}
+                                        <span class="badge badge-outline">{{ due.get_status_display }}</span>
+                                    {% endif %}
+                                </td>
+                                <td class="text-right flex flex-row gap-2 justify-end">
+                                    <button class="btn btn-primary btn-sm btn-outline gap-1" type="button" onclick="document.getElementById('{{ due.pk|dom_id:"due_pay_modal" }}').showModal()">{% lucide "banknote" size=14 %} Record payment</button>
+                                    <a class="btn btn-accent btn-outline btn-sm gap-1" href="{% url 'controlpanel:due_invoice' due.pk %}">{% lucide "file-down" size=14 %} Download invoice</a>
+                                </td>
+                            </tr>
+                        {% empty %}
+                            <tr>
+                                <td colspan="5" class="text-center opacity-60">Nothing outstanding.</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    {% comment %} Dialogs live outside the table: <tbody> may only contain <tr> elements. {% endcomment %}
+    {% for due in owing %}
+        {% url 'controlpanel:due_pay' due.pk as due_pay_url %}
+        {% include "controlpanel/_modal_form.html" with modal_id=due.pk|dom_id:"due_pay_modal" title="Record payment — "|add:due.club.name form=due.payment_form action_url=due_pay_url submit_label="Record payment" submit_icon="banknote" %}
+    {% endfor %}
+{% endblock panel %}

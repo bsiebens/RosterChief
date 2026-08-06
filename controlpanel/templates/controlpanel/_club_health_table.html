@@ -1,0 +1,135 @@
+{% load lucide %}
+
+{% comment %}
+    The club table, shared by the dashboard and the clubs list so the two cannot drift apart.
+    Health, not vanity: a member total says nothing you can act on, while "no coach",
+    "nothing scheduled", "€ owed" and "no admins" each name something somebody has to go and
+    fix. Every column is annotated by clubs_with_health() in a single query.
+
+    Expects: clubs (from clubs_with_health), and optionally empty_message.
+{% endcomment %}
+<div class="overflow-x-auto">
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Club</th>
+                <th></th>
+                <th class="text-right">Members</th>
+                <th class="text-right">Admins</th>
+                <th class="text-right">Teams</th>
+                <th class="text-right">Events</th>
+                <th class="text-right">Plan</th>
+                <th class="text-right">Dues</th>
+                <th class="text-right">Plan end</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for club in clubs %}
+                <tr>
+                    <td>
+                        <div class="flex flex-row items-center gap-4">
+                            <div>
+                                {% if club.logo %}
+                                    <img class="h-12 w-12 object-contain" src="{{ club.logo.url }}" alt="{{ club.name }}">
+                                {% else %}
+                                    <div class="avatar avatar-placeholder">
+                                        <div class="w-12 rounded-full bg-neutral text-neutral-content">
+                                            <span>{{ club.initials }}</span>
+                                        </div>
+                                    </div>
+                                {% endif %}
+                            </div>
+
+                            <div class="flex flex-col gap-1">
+                                <a class="link link-hover font-semibold tracking-wide" href="{% url "controlpanel:club_detail" club.pk %}">{{ club.name }}</a>
+                                <div class="text-xs opacity-60">{{ club.slug }}.rosterchief.app &middot; {{ club.get_sport_type_display }}</div>
+                            </div>
+                        </div>
+                    </td>
+
+                    <td>
+                        <div class="flex flex-row gap-2">
+                            {% if club.is_archived %}
+                                <span class="badge badge-warning">{% lucide "archive" size=14 %} archived</span>
+                            {% else %}
+                                {% if not club.has_season %}
+                                    <span class="badge badge-warning">{% lucide "calendar-x" size=14 %} no seasons</span>
+                                {% endif %}
+
+                                {% if not club.upcoming_events %}
+                                    <span class="badge badge-ghost badge-outline">{% lucide "moon-star" size=14 %}dormant</span>
+                                {% endif %}
+                            {% endif %}
+                        </div>
+                    </td>
+
+                    <td class="text-right tabular-nums">{{ club.active_members }}</td>
+                    <td class="text-right tabular-nums">
+                        <div class="flex flex-row gap-2 items-center justify-end">
+                            {% if not club.admin_count %}
+                                <span class="text-error">{% lucide "triangle-alert" size=16 %}</span>
+                            {% endif %}
+                            <span class="{% if not club.admin_count %}font-bold text-error{% endif %}">{{ club.admin_count }}</span>
+                        </div>
+                    </td>
+                    <td class="text-right tabular-nums">{{ club.team_count }}</td>
+                    <td class="text-right tabular-nums">{{ club.upcoming_events }}</td>
+
+                    <td class="text-right">
+                        {% if club.tier_name %}
+                            <span class="badge badge-accent">{{ club.tier_name|lower }}</span>
+                        {% else %}
+                            -
+                        {% endif %}
+                    </td>
+
+                    <td class="text-right">
+                        <div class="flex flex-row gap-2 items-center justify-end">
+                            {% if not club.dues_owed %}
+                                {% if club.tier_name %}
+                                    {% comment %}
+                                        Not owing and on a plan. covered_until is the settled period's end — the day
+                                        grace would start if nothing renews — shown on its own row under the badge,
+                                        for a paid period AND a waived one (both cover the club, they just differ in
+                                        how). No covered period at all (only cancelled dues, say) shows a dash.
+                                    {% endcomment %}
+                                    <div class="flex flex-col items-end gap-1">
+                                        {% if club.covered_status == "waived" %}
+                                            <span class="badge badge-ghost badge-outline">waived</span>
+                                        {% elif club.covered_until %}
+                                            <span class="badge badge-success">paid</span>
+                                        {% else %}
+                                            -
+                                        {% endif %}
+                                    </div>
+                                {% else %}
+                                    -
+                                {% endif %}
+                            {% else %}
+                                <span class="font-semibold">€{{ club.dues_owed|floatformat:2 }}</span>
+                                {% if club.dues_grace_until < today %}
+                                    <span class="badge badge-error">overdue</span>
+                                {% elif club.dues_period_end < today %}
+                                    <span class="badge badge-warning">grace</span>
+                                {% endif %}
+                            {% endif %}
+                        </div>
+                    </td>
+
+                    <td class="text-right">
+                        <span class="whitespace-nowrap">{{ club.covered_until|date:"j M Y"|default:"-" }}</span>
+                    </td>
+
+                    <td>
+                        <a class="btn btn-outline btn-sm gap-2" href="{% url "controlpanel:club_detail" club.pk %}">{% lucide "pencil" size=14 %} Edit</a>
+                    </td>
+                </tr>
+            {% empty %}
+                <tr>
+                    <td colspan="9" class="text-center opacity-60">{{ empty_message|default:"No clubs yet." }}</td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>

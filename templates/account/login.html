@@ -1,0 +1,65 @@
+{% extends "account/base_entrance.html" %}
+{% load allauth i18n lucide ui %}
+
+{% comment %}
+    Overridden for layout: "Remember Me" sits on the button row rather than floating as
+    a third field, and the passkey button sits beside Sign In instead of below a rule.
+
+    The passkey button submits a *different* form (the hidden `mfa_login` rendered by the
+    webauthn snippet in extra_body) via the `form` attribute — forms cannot nest, so it
+    can live inside the login form and still post elsewhere.
+{% endcomment %}
+
+{% block head_title %}
+    {% trans "Sign In" %}
+{% endblock head_title %}
+
+{% block content %}
+    {% element h1 %}
+        {% trans "Sign In" %}
+    {% endelement %}
+
+    <form class="mt-8" method="post" action="{% url 'account_login' %}">
+        {% csrf_token %}
+
+        <div class="mb-10">
+            {% element fields form=form unlabeled=True exclude="remember" %}
+            {% endelement %}
+        </div>
+
+        {{ redirect_field }}
+
+        <div class="flex flex-wrap items-center justify-between gap-3">
+            {% if form.fields.remember %}
+                <label class="label cursor-pointer justify-start gap-3" for="{{ form.remember.id_for_label }}">
+                    {{ form.remember|daisy }}
+                    <span class="label-text">{{ form.remember.label }}</span>
+                </label>
+            {% else %}
+                <span></span>
+            {% endif %}
+
+            <div class="flex flex-wrap gap-2">
+                <button class="btn btn-primary gap-2" type="submit">{% lucide "log-in" size=16 %} {% trans "Sign In" %}</button>
+                {% if PASSKEY_LOGIN_ENABLED %}
+                    <button class="btn btn-accent gap-2" type="submit" form="mfa_login" id="passkey_login">{% lucide "key-round" size=16 %} {% trans "Sign in with a passkey" %}</button>
+                {% endif %}
+            </div>
+        </div>
+    </form>
+
+    {% if LOGIN_BY_CODE_ENABLED %}
+        {% element hr %}
+        {% endelement %}
+        {% element button href=request_login_code_url tags="prominent,login,outline,primary" %}
+            {% trans "Send me a sign-in code" %}
+        {% endelement %}
+    {% endif %}
+{% endblock content %}
+
+{% block extra_body %}
+    {{ block.super }}
+    {% if PASSKEY_LOGIN_ENABLED %}
+        {% include "mfa/webauthn/snippets/login_script.html" with button_id="passkey_login" %}
+    {% endif %}
+{% endblock extra_body %}

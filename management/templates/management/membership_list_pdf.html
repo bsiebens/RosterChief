@@ -1,0 +1,99 @@
+{% load i18n %}
+
+{% comment %}
+    Rendered by WeasyPrint, not a browser: a standalone document with its own print
+    stylesheet, same convention as billing/templates/billing/invoice.html -- it
+    deliberately doesn't pull in app.css (daisyUI's dark theme/flex layouts mean
+    nothing on paper).
+{% endcomment %}
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <title>{% trans "Memberships" %}</title>
+        <style>
+            @page {
+                size: A4;
+                margin: 18mm;
+                @bottom-center {
+                    content: "{{ club.name }} — {% trans "memberships" %} — " counter(page) " / " counter(pages);
+                    font-size: 8pt;
+                    color: #666;
+                }
+            }
+            body { font-family: sans-serif; font-size: 9.5pt; color: #111; }
+            h1 { font-size: 18pt; margin: 0 0 2mm; }
+            .muted { color: #666; }
+            .header { display: flex; justify-content: space-between; margin-bottom: 8mm; }
+            table { width: 100%; border-collapse: collapse; }
+            th { text-align: left; font-size: 8pt; text-transform: uppercase; letter-spacing: 0.5pt; color: #666; border-bottom: 1px solid #999; padding: 2mm 2mm 1mm 0; }
+            td { padding: 1.5mm 2mm 1.5mm 0; border-bottom: 1px solid #eee; vertical-align: top; }
+            .badge { display: inline-block; padding: 0.5mm 2mm; border-radius: 2mm; font-size: 8pt; }
+            .badge-success { background: #dcfce7; color: #15803d; }
+            .badge-warning { background: #fef3c7; color: #92400e; }
+            .badge-error { background: #fee2e2; color: #b91c1c; }
+            .badge-neutral { background: #e5e7eb; color: #374151; }
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            <div>
+                <h1>{{ club.name }}</h1>
+                <div class="muted">{% trans "Membership fee status" %}{% if selected_season %} — {{ selected_season }}{% endif %}</div>
+            </div>
+            <div class="muted">
+                {% blocktrans with generated=generated_at|date:"j F Y, H:i" %}Generated {{ generated }}{% endblocktrans %}<br>
+                {% blocktrans count counter=memberships|length %}{{ counter }} member{% plural %}{{ counter }} members{% endblocktrans %}
+            </div>
+        </div>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>{% trans "Last name" %}</th>
+                    <th>{% trans "First name" %}</th>
+                    <th>{% trans "Email" %}</th>
+                    <th>{% trans "Family" %}</th>
+                    <th>{% trans "Status" %}</th>
+                    <th>{% trans "Fee status" %}</th>
+                    <th>{% trans "Owed" %}</th>
+                    <th>{% trans "Paid" %}</th>
+                    <th>{% trans "License" %}</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for membership in memberships %}
+                    <tr>
+                        <td>{{ membership.member.last_name }}</td>
+                        <td>{{ membership.member.first_name }}</td>
+                        <td>{{ membership.member.contact_email|default:"—" }}</td>
+                        <td>
+                            {% for fm in membership.member.family_memberships_display %}{{ fm.family }}{% if not forloop.last %}, {% endif %}{% empty %}—{% endfor %}
+                        </td>
+                        <td>
+                            <span class="badge
+                                {% if membership.status == "active" %}badge-success
+                                {% elif membership.status == "pending" %}badge-warning
+                                {% elif membership.status == "cancelled" %}badge-error
+                                {% else %}badge-neutral{% endif %}">{{ membership.get_status_display }}</span>
+                        </td>
+                        <td>
+                            <span class="badge
+                                {% if membership.fee_status == "paid" %}badge-success
+                                {% elif membership.fee_status == "partially_paid" %}badge-warning
+                                {% elif membership.fee_status == "unpaid" %}badge-error
+                                {% else %}badge-neutral{% endif %}">{{ membership.get_fee_status_display }}</span>
+                        </td>
+                        <td>{{ membership.fee_amount }}</td>
+                        <td>{{ membership.amount_paid }}</td>
+                        <td>{{ membership.license|default:"—" }}</td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="9" class="muted">{% trans "Nobody matches these filters." %}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </body>
+</html>

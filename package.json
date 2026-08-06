@@ -1,0 +1,22 @@
+{
+  "name": "rosterchief",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tailwindcss -i ./assets/app.css -o ./static/css/app.css --minify",
+    "watch": "tailwindcss -i ./assets/app.css -o ./static/css/app.css --watch",
+    "vendor:chart": "node -e \"const fs=require('fs');const s=fs.readFileSync('node_modules/chart.js/dist/chart.umd.js','utf8').split('\\n').filter(l=>!l.startsWith('//# sourceMappingURL=')).join('\\n');fs.writeFileSync('static/js/chart.js',s)\""
+  },
+  "devDependencies": {
+    "@fontsource-variable/jetbrains-mono": "^5.2.8",
+    "@fontsource-variable/roboto": "^5.2.10",
+    "@fontsource-variable/tourney": "^5.2.8",
+    "@fontsource/ubuntu": "^5.2.8",
+    "@tailwindcss/cli": "^4.1.0",
+    "daisyui": "^5.0.0",
+    "tailwindcss": "^4.1.0"
+  },
+  "dependencies": {
+    "chart.js": "^4.5.1"
+  }
+}

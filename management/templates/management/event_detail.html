@@ -1,0 +1,215 @@
+{% extends "management/base.html" %}
+{% load i18n lucide %}
+
+{% block heading %}{{ event.title }}{% endblock heading %}
+{% block subheading %}{{ event.get_kind_display }}{% endblock subheading %}
+
+{% block actions %}
+    {% if can_manage %}
+        <a class="btn btn-outline gap-2" href="{% url 'management:event_update' event.pk %}">{% lucide "pencil" size=16 %} {% trans "Edit" %}</a>
+        {% if event.series_id and not event.detached %}
+            <form method="post" action="{% url 'management:event_detach' event.pk %}">
+                {% csrf_token %}
+                <button class="btn btn-outline gap-2" type="submit">{% lucide "unlink" size=16 %} {% trans "Detach from series" %}</button>
+            </form>
+        {% endif %}
+        <button class="btn btn-outline btn-error gap-2" type="button" onclick="document.getElementById('event_delete_modal').showModal()">
+            {% lucide "trash-2" size=16 %}
+            {% if event.series_id %}{% trans "Cancel occurrence" %}{% else %}{% trans "Delete" %}{% endif %}
+        </button>
+    {% endif %}
+{% endblock actions %}
+
+{% block panel %}
+    {% if event.series_id %}
+        <div class="alert alert-info mb-6">
+            {% lucide "repeat" size=20 %}
+            <span>
+                {% blocktrans with series=event.series %}Part of the recurring series “{{ series }}”.{% endblocktrans %}
+                <a class="link" href="{% url 'management:event_series_detail' event.series_id %}">{% trans "View series" %}</a>
+                {% if event.detached %}<span class="badge badge-sm badge-neutral ml-2">{% trans "Detached" %}</span>{% endif %}
+            </span>
+        </div>
+    {% endif %}
+
+    <div class="mb-6 grid gap-4 lg:grid-cols-2">
+        <div class="card bg-base-100 shadow">
+            <div class="card-body">
+                <h2 class="card-title text-base">{% lucide "info" size=18 %} {% trans "Details" %}</h2>
+                <dl class="divide-y divide-base-200">
+                    <div class="flex items-center justify-between py-2">
+                        <dt class="text-sm opacity-70">{% trans "Start" %}</dt>
+                        <dd>{{ event.start|date:"j M Y H:i" }}</dd>
+                    </div>
+                    <div class="flex items-center justify-between py-2">
+                        <dt class="text-sm opacity-70">{% trans "End" %}</dt>
+                        <dd>{{ event.end|date:"j M Y H:i"|default:"—" }}</dd>
+                    </div>
+                    <div class="flex items-center justify-between py-2">
+                        <dt class="text-sm opacity-70">{% trans "Gathering" %}</dt>
+                        <dd>{{ event.gathering|date:"j M Y H:i"|default:"—" }}</dd>
+                    </div>
+                    <div class="flex items-center justify-between py-2">
+                        <dt class="text-sm opacity-70">{% trans "Registration deadline" %}</dt>
+                        <dd>{{ event.deadline|date:"j M Y H:i"|default:"—" }}</dd>
+                    </div>
+                    <div class="flex items-center justify-between py-2">
+                        <dt class="text-sm opacity-70">{% trans "Location" %}</dt>
+                        <dd>{{ event.location|default:"—" }}</dd>
+                    </div>
+                    <div class="flex items-center justify-between py-2">
+                        <dt class="text-sm opacity-70">{% trans "Opponent" %}</dt>
+                        <dd>{{ event.opponent|default:"—" }}</dd>
+                    </div>
+                    <div class="flex items-center justify-between py-2">
+                        <dt class="text-sm opacity-70">{% trans "Teams" %}</dt>
+                        <dd>{% for team in event.teams.all %}{{ team.name }}{% if not forloop.last %}, {% endif %}{% empty %}—{% endfor %}</dd>
+                    </div>
+                </dl>
+            </div>
+        </div>
+
+        <div class="card bg-base-100 shadow">
+            <div class="card-body">
+                <div class="flex items-center justify-between">
+                    <h2 class="card-title text-base">{% lucide "user-check" size=18 %} {% trans "RSVPs" %}</h2>
+                    {% if has_attendance_rows %}
+                        <button class="btn btn-outline btn-sm gap-2" type="button" onclick="document.getElementById('rsvp_modal').showModal()">
+                            {% lucide "list" size=14 %} {% trans "View responses" %}
+                        </button>
+                    {% endif %}
+                </div>
+                <dl class="divide-y divide-base-200">
+                    {% for group in attendance_groups %}
+                        <div class="flex items-center justify-between py-2">
+                            <dt class="text-sm opacity-70">{{ group.label }}</dt>
+                            <dd class="font-semibold tabular-nums font-mono">{{ group.rows|length }}</dd>
+                        </div>
+                    {% endfor %}
+                </dl>
+                {% if not has_attendance_rows %}
+                    <p class="text-sm opacity-60">{% trans "No one invited yet." %}</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    {% if event.kind == "game" %}
+        <div class="mb-6 card bg-base-100 shadow">
+            <div class="card-body">
+                <div class="flex items-center justify-between">
+                    <h2 class="card-title text-base">
+                        {% lucide "trophy" size=18 %} {% trans "Game" %}
+                        {% if event.is_live %}<span class="badge badge-error gap-1 animate-pulse">{% lucide "circle" size=10 %} {% trans "Live" %}</span>{% endif %}
+                    </h2>
+                    {% if can_manage and event.competition %}
+                        <form method="post" action="{% url 'management:event_fetch_game_info' event.pk %}">
+                            {% csrf_token %}
+                            <button class="btn btn-outline btn-sm gap-2" type="submit">{% lucide "refresh-cw" size=14 %} {% trans "Fetch new game info" %}</button>
+                        </form>
+                    {% endif %}
+                </div>
+                <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                    <div>
+                        <div class="text-sm opacity-70">{% trans "Score" %}</div>
+                        <div class="text-sm font-semibold tabular-nums font-mono">
+                            {% if event.score_for is not None and event.score_against is not None %}{{ event.score_for }} - {{ event.score_against }}{% else %}—{% endif %}
+                        </div>
+                    </div>
+                    <div>
+                        <div class="text-sm opacity-70">{% trans "Competition" %}</div>
+                        <div class="text-sm">{{ event.competition|default:"—" }}</div>
+                    </div>
+                    <div>
+                        <div class="text-sm opacity-70">{% trans "External game ID" %}</div>
+                        <div class="font-mono text-sm">{{ event.external_game_id|default:"—" }}</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    {% endif %}
+{% endblock panel %}
+
+{% block extra_body %}
+    {% if can_manage %}
+        <dialog id="event_delete_modal" class="modal">
+            <div class="modal-box">
+                <h3 class="text-lg font-bold">
+                    {% if event.series_id %}{% trans "Cancel occurrence" %}{% else %}{% trans "Delete event" %}{% endif %}
+                </h3>
+                <form method="post" action="{% url 'management:event_delete' event.pk %}" id="event_delete_form">
+                    {% csrf_token %}
+                    {% if event.series_id %}
+                        <p class="py-2 text-sm opacity-70">{% trans "Removes this occurrence from the schedule. It won't be regenerated." %}</p>
+                        <label class="label cursor-pointer justify-start gap-2">
+                            <input type="checkbox" name="keep_record" class="checkbox">
+                            <span class="label-text">{% trans "Keep a record of it (marks it cancelled instead of deleting it)" %}</span>
+                        </label>
+                    {% else %}
+                        <p class="py-2 text-sm opacity-70">{% trans "This cannot be undone." %}</p>
+                    {% endif %}
+                </form>
+                <div class="modal-action">
+                    <form method="dialog">
+                        <button class="btn btn-outline gap-2">{% lucide "x" size=16 %} {% trans "Cancel" %}</button>
+                    </form>
+                    <button class="btn btn-error gap-2" type="submit" form="event_delete_form">{% lucide "trash-2" size=16 %} {% trans "Confirm" %}</button>
+                </div>
+            </div>
+            <form method="dialog" class="modal-backdrop">
+                <button>close</button>
+            </form>
+        </dialog>
+    {% endif %}
+
+    {% if has_attendance_rows %}
+        <dialog id="rsvp_modal" class="modal">
+            <div class="modal-box max-w-2xl">
+                <h3 class="text-lg font-bold">{% trans "Who responded" %}</h3>
+                <div class="mt-2 space-y-2">
+                    {% for group in attendance_groups %}
+                        {% if group.rows %}
+                            <details class="collapse collapse-arrow border border-base-300 bg-base-100">
+                                <summary class="collapse-title text-sm font-medium">
+                                    <span class="badge badge-sm
+                                        {% if group.value == "present" %}badge-success
+                                        {% elif group.value == "absent" %}badge-error
+                                        {% elif group.value == "excused" %}badge-warning
+                                        {% elif group.value == "selected" %}badge-info
+                                        {% elif group.value == "maybe" %}badge-warning badge-outline
+                                        {% elif group.value == "not_selected" %}badge-neutral
+                                        {% else %}badge-outline{% endif %}">
+                                        {{ group.label }}
+                                    </span>
+                                    <span class="opacity-60">({{ group.rows|length }})</span>
+                                </summary>
+                                <div class="collapse-content">
+                                    <div class="overflow-x-auto">
+                                        <table class="table table-sm">
+                                            <tbody>
+                                                {% for row in group.rows %}
+                                                    <tr>
+                                                        <td>{{ row.member }}</td>
+                                                        <td class="text-sm opacity-70">{{ row.note|default:"—" }}</td>
+                                                    </tr>
+                                                {% endfor %}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </details>
+                        {% endif %}
+                    {% endfor %}
+                </div>
+                <div class="modal-action">
+                    <form method="dialog">
+                        <button class="btn btn-outline gap-2">{% lucide "x" size=16 %} {% trans "Close" %}</button>
+                    </form>
+                </div>
+            </div>
+            <form method="dialog" class="modal-backdrop">
+                <button>close</button>
+            </form>
+        </dialog>
+    {% endif %}
+{% endblock extra_body %}

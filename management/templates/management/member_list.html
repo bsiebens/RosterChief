@@ -1,0 +1,102 @@
+{% extends "management/base.html" %}
+{% load lucide ui i18n %}
+
+{% block heading %}{% trans "Members" %}{% endblock heading %}
+
+{% block actions %}
+<a class="btn btn-outline btn-info gap-2" href="{% url 'management:member_import_template' %}" xmlns:management="http://www.w3.org/1999/xhtml">{% lucide "download" size=16 %} {% trans "Download upload template" %}</a>
+    {% if is_club_admin %}
+        <a class="btn btn-outline btn-info gap-2" href="{% url 'management:member_import' %}">{% lucide "upload" size=16 %} {% trans "Mass upload" %}</a>
+        <a class="btn btn-outline gap-2" href="{% url 'management:family_create' %}">{% lucide "users" size=16 %} {% trans "Add family" %}</a>
+        <a class="btn btn-outline gap-2" href="{% url 'management:member_create' %}">{% lucide "user-plus" size=16 %} {% trans "Add member" %}</a>
+    {% endif %}
+{% endblock actions %}
+
+{% block panel %}
+    <form method="get" class="mb-4 flex gap-2">
+        <label class="input">
+            <span class="opacity-50">{% lucide "search" size=16 %}</span>
+            <input type="search" name="q" value="{{ search }}" placeholder="{% trans 'Search members ...' %}" class="input input-bordered w-full max-w-xs">
+        </label>
+        <button class="btn btn-outline gap-2" type="submit">{% lucide "search" size=16 %} {% trans "Search" %}</button>
+        {% if search %}
+            <a class="btn gap-2" href="{% url "management:member_list" %}">{% lucide "x" size=16 %} {% trans "Clear filter" %}</a>
+        {% endif %}
+    </form>
+
+    <div class="card bg-base-100 shadow">
+        <div class="card-body">
+            <div class="overflow-x-auto">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>{% trans "Last name" %}</th>
+                            <th>{% trans "First name" %}</th>
+                            <th>{% trans "Email" %}</th>
+                            <th>{% trans "Family" %}</th>
+                            <th>{% trans "Status" %}</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for member in members %}
+                            <tr>
+                                <td><a class="link link-hover" href="{% url 'management:member_detail' member.pk %}">{{ member.last_name }}</a></td>
+                                <td>{{ member.first_name }}</td>
+                                <td>{{ member.contact_email|default:"-" }}</td>
+                                <td>
+                                    {% if member.family_memberships_display %}
+                                        <div class="flex flex-col gap-1">
+                                            {% for fm in member.family_memberships_display %}
+                                                <div>
+                                                    <a class="btn btn-outline btn-sm" href="{% url 'management:family_detail' fm.family.pk %}">{% lucide "users" size=14 %} {{ fm.family }} {% lucide "arrow-right" size=14 %}</a>
+                                                </div>
+                                            {% endfor %}
+                                        </div>
+                                    {% else %}
+                                        <span class="opacity-40">-</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if member.current_membership %}
+                                        <span class="badge badge-sm
+                                            {% if member.current_membership.status == "active" %}badge-success
+                                            {% elif member.current_membership.status == "pending" %}badge-warning
+                                            {% elif member.current_membership.status == "cancelled" %}badge-error
+                                            {% else %}badge-neutral{% endif %}">
+                                            {{ member.current_membership.get_status_display }}
+                                        </span>
+                                    {% else %}
+                                        <span class="badge badge-sm badge-neutral">{% trans "unknown" %}</span>
+                                    {% endif %}
+                                </td>
+                                <td class="text-right">
+                                    {% if is_club_admin %}
+                                        <div class="flex justify-end gap-1">
+                                            <a class="btn btn-outline btn-sm" href="{% url 'management:member_detail' member.pk %}" aria-label="{% trans 'Edit' %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</a>
+                                            <button class="btn btn-sm btn-outline btn-error" type="button" onclick="document.getElementById('{{ member.pk|dom_id:"member_delete_modal" }}').showModal()" aria-label="{% trans 'Delete' %}">{% lucide "trash-2" size=14 %} {% trans "Delete" %}</button>
+                                        </div>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                        {% empty %}
+                            <tr>
+                                <td colspan="6" class="text-center opacity-60">{% trans "No members yet." %}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    {% if is_club_admin %}
+        {% trans "Delete member" as delete_member_title %}
+        {% trans "Delete" as delete_label %}
+        {% for member in members %}
+            {% url 'management:member_delete' member.pk as member_delete_url %}
+            {% blocktrans with full_name=member.get_full_name asvar delete_member_body %}Delete {{ full_name }}? This also removes their club membership, roster spots, staff assignments, and family links. This cannot be undone.{% endblocktrans %}
+            {% include "controlpanel/_confirm_modal.html" with modal_id=member.pk|dom_id:"member_delete_modal" title=delete_member_title body=delete_member_body action_url=member_delete_url submit_label=delete_label %}
+        {% endfor %}
+    {% endif %}
+{% endblock panel %}
