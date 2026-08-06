@@ -77,7 +77,13 @@ RUN DJANGO_SECRET_KEY=build-only-not-a-secret \
     DJANGO_STATICFILES_BACKEND=whitenoise.storage.CompressedManifestStaticFilesStorage \
     python manage.py collectstatic --noinput
 
-RUN useradd --system --uid 1000 rosterchief && chown -R rosterchief /app
+# mkdir before chown, and before the volume ever mounts: media_data has nothing to copy from
+# at /app/media otherwise, so Docker creates the mount point itself, owned by root — and the
+# app runs as rosterchief, not root. Existing image content (even an empty, correctly-owned
+# dir) is what a named volume copies its initial ownership from on first use.
+RUN useradd --system --uid 1000 rosterchief \
+    && mkdir -p /app/media \
+    && chown -R rosterchief /app
 USER rosterchief
 
 EXPOSE 8000
@@ -85,10 +91,19 @@ EXPOSE 8000
 # Migrations are NOT run here. With more than one app container they would race, and a failed
 # migration inside a starting web process is a bad place to find out — deploy runs them once,
 # explicitly (see DEPLOYMENT.md).
+# 2 workers, not 3: DEPLOYMENT.md's own sizing says this workload isn't CPU-bound, and each
+# worker duplicates a full Django process — the single biggest lever on a memory-limited box.
+# --preload imports the app once in the master and forks workers via copy-on-write instead of
+# each re-importing Django independently (safe here: no app's ready() touches DB/Redis eagerly,
+# checked club/features/news/events). --max-requests recycles a worker periodically so the one
+# that happens to render a WeasyPrint invoice doesn't carry that +50-100MB forever.
 CMD ["gunicorn", "rosterchief.wsgi:application", \
      "--bind", "0.0.0.0:8000", \
-     "--workers", "3", \
+     "--workers", "2", \
      "--threads", "4", \
+     "--preload", \
+     "--max-requests", "500", \
+     "--max-requests-jitter", "50", \
      "--timeout", "60", \
      "--access-logfile", "-", \
      "--error-logfile", "-"]

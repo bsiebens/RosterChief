@@ -25,6 +25,9 @@ services:
       - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
+      # Read-only: Caddy serves club logos straight off disk instead of round-tripping every
+      # image request through a gunicorn worker. Same volume `web` writes uploads into.
+      - media_data:/srv/media:ro
     depends_on:
       - web
 
@@ -56,6 +59,11 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-rosterchief}
       POSTGRES_USER: ${POSTGRES_USER:-rosterchief}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set a database password}
+    # shared_buffers/max_connections default to 128MB / 100 — sized for a much bigger database
+    # than this app's (DEPLOYMENT.md: ~0.2GB after 5 years). 20 connections is comfortably above
+    # 2 gunicorn workers x 4 threads plus the odd `manage.py` one-off; trimmed both for the box,
+    # not for the data.
+    command: ["postgres", "-c", "shared_buffers=64MB", "-c", "max_connections=20"]
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -67,9 +75,11 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    command: ["redis-server", "--save", "", "--appendonly", "no"]
     # Cache only, so nothing here needs to survive a restart. It is not optional though: it
-    # is what keeps every gunicorn worker agreeing about which feature flags are on.
+    # is what keeps every gunicorn worker agreeing about which feature flags are on. maxmemory
+    # is a ceiling, not a saving — this is already the smallest process in the stack — but on a
+    # memory-limited box it should evict cache entries under pressure, not grow unbounded.
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "32mb", "--maxmemory-policy", "allkeys-lru"]
 
 volumes:
   pgdata:

@@ -7,11 +7,13 @@ second factors. ``RequireMFAMiddleware`` then blocks any staff user who has not
 enrolled.
 """
 
+import re
+
 from django.conf import settings
-from django.conf.urls.static import static
 from django.contrib import admin
-from django.urls import include, path
+from django.urls import include, path, re_path
 from django.views.generic import RedirectView
+from django.views.static import serve
 
 from api.urls import api
 from club.views import root
@@ -45,4 +47,11 @@ if not settings.AWS_STORAGE_BUCKET_NAME:
     # /media/* itself — so without this route every uploaded club logo 404s in production too.
     # Once AWS_STORAGE_BUCKET_NAME is set, club.logo.url points straight at the bucket and this
     # route is simply never hit.
-    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+    #
+    # django.conf.urls.static.static() looks like the right helper, but it hard-codes its own
+    # `if not settings.DEBUG: return []` — it is documented as dev-only and silently no-ops in
+    # production no matter what guards the call site. Build the pattern directly against the
+    # view it wraps instead, which has no such gate.
+    urlpatterns += [
+        re_path(rf"^{re.escape(settings.MEDIA_URL.lstrip('/'))}(?P<path>.*)$", serve, {"document_root": settings.MEDIA_ROOT}),
+    ]

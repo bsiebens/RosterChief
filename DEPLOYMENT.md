@@ -35,12 +35,14 @@ Caddy terminates TLS, so without it Django believes every request is plain HTTP:
 
 **4. Uploads must move to object storage before the second app server.**
 Club logos go to `MEDIA_ROOT` on local disk by default. `compose.yaml` mounts a `media_data`
-volume so that survives a rebuild, and `rosterchief/urls.py` serves `/media/*` itself whenever
-`AWS_STORAGE_BUCKET_NAME` is unset — Caddy only reverse-proxies, it never serves media on its
-own, so without that route every logo 404s even on one box. On two boxes local disk stops
-working regardless: a logo uploaded to node A is still a 404 on node B, since nothing shares
-the volume between them. Setting `AWS_STORAGE_BUCKET_NAME` switches the default storage to S3
-— do it *before* you scale, not during.
+volume, shared read-write with `web` and read-only with `caddy`, so uploads both survive a
+rebuild and get served by Caddy directly (`handle_path /media/*` in the Caddyfile) rather than
+round-tripping through a gunicorn worker. `rosterchief/urls.py` still serves `/media/*` itself
+as a fallback whenever `AWS_STORAGE_BUCKET_NAME` is unset — needed for `compose.behind-proxy.yaml`
+(no bundled Caddy there) and for `runserver`. On two boxes local disk stops working regardless
+of any of this: a logo uploaded to node A is still a 404 on node B, since nothing shares the
+volume between them. Setting `AWS_STORAGE_BUCKET_NAME` switches the default storage to S3 — do
+it *before* you scale, not during.
 
 **5. PDF invoices need native libraries.**
 WeasyPrint binds to pango/cairo. The image installs them; a bare-metal deploy would need
@@ -421,7 +423,8 @@ So do not size for the data. Size for the **processes**.
 
 ### What actually consumes the box
 
-Measured, running this app under gunicorn with `DEBUG=False`:
+Measured, running this app under gunicorn with `DEBUG=False`, before the tuning below —
+`--workers 3`, no `--preload`, Postgres and Redis on their image defaults:
 
 | | memory |
 |---|---|
@@ -431,6 +434,13 @@ Measured, running this app under gunicorn with `DEBUG=False`:
 | Caddy | ~30 MB |
 | OS + Docker daemon | ~400 MB |
 | **steady state** | **~1.0–1.2 GB** |
+
+Since then, `Dockerfile`/`compose.yaml` were tuned for smaller boxes: `--workers 2 --preload`
+(one fewer duplicated Django process, and `--preload` shares immutable memory across workers
+via copy-on-write instead of each worker importing Django independently), plus trimmed Postgres
+`shared_buffers`/`max_connections` and a Redis `--maxmemory` cap. Expect the gunicorn and
+Postgres rows to come in lower than above — not yet re-measured, so treat the table as the
+shape of where memory goes rather than exact numbers on the current config.
 
 2 GB would run it. 4 GB is the recommendation for three reasons, all of which are the kind of
 thing that bites at the worst moment:
