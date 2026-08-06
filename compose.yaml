@@ -25,6 +25,9 @@ services:
       - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
+      # Read-only: Caddy serves club logos straight off disk instead of round-tripping every
+      # image request through a gunicorn worker. Same volume `web` writes uploads into.
+      - media_data:/srv/media:ro
     depends_on:
       - web
 
