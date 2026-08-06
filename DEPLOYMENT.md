@@ -34,9 +34,13 @@ Caddy terminates TLS, so without it Django believes every request is plain HTTP:
 `header_up X-Forwarded-Proto`); don't remove either.
 
 **4. Uploads must move to object storage before the second app server.**
-Club logos go to `MEDIA_ROOT` on local disk. On one box that is fine. On two, a logo
-uploaded to node A is a 404 on node B. Setting `AWS_STORAGE_BUCKET_NAME` switches the
-default storage to S3 — do it *before* you scale, not during.
+Club logos go to `MEDIA_ROOT` on local disk by default. `compose.yaml` mounts a `media_data`
+volume so that survives a rebuild, and `rosterchief/urls.py` serves `/media/*` itself whenever
+`AWS_STORAGE_BUCKET_NAME` is unset — Caddy only reverse-proxies, it never serves media on its
+own, so without that route every logo 404s even on one box. On two boxes local disk stops
+working regardless: a logo uploaded to node A is still a 404 on node B, since nothing shares
+the volume between them. Setting `AWS_STORAGE_BUCKET_NAME` switches the default storage to S3
+— do it *before* you scale, not during.
 
 **5. PDF invoices need native libraries.**
 WeasyPrint binds to pango/cairo. The image installs them; a bare-metal deploy would need

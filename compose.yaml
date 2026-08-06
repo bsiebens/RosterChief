@@ -32,6 +32,11 @@ services:
     build: .
     restart: unless-stopped
     env_file: .env.production
+    volumes:
+      # Uploaded club logos, while storage is local disk (see rosterchief/urls.py). Without
+      # this, a rebuild or recreate wipes MEDIA_ROOT even though the container itself keeps
+      # running fine in between.
+      - media_data:/app/media
     depends_on:
       db:
         condition: service_healthy
@@ -70,3 +75,4 @@ volumes:
   pgdata:
   caddy_data:
   caddy_config:
+  media_data:
