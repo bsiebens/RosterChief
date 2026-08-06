@@ -117,7 +117,7 @@ docker compose up -d --no-deps web
 
 ## Scheduled jobs
 
-Two commands need to run on a schedule. Put them on the **host**, not in a container, and on
+Three commands need to run on a schedule. Put them on the **host**, not in a container, and on
 **exactly one node** when you have several — three nodes archiving the same club is three
 emails to the same club.
 
@@ -130,6 +130,13 @@ emails to the same club.
 
 # Events: extend recurring series so the calendar never runs dry.
 0 3 * * *  cd /srv/rosterchief && docker compose run --rm web python manage.py extend_event_series
+
+# Seasons: generate the next 2 years ahead for every active club. Safe to run repeatedly and
+# needs no --commit — unlike archiving or resyncing, creating a future season row is additive
+# and idempotent, so a monthly cadence just keeps every club's season list from ever running
+# out. --resync exists on the same command for removing seasons that no longer match a club's
+# settings, but that can delete rows, so it isn't run unattended here.
+0 5 1 * *  cd /srv/rosterchief && docker compose run --rm web python manage.py generate_seasons
 ```
 
 ## Maintenance mode
