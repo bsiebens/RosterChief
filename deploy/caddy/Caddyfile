@@ -1,0 +1,33 @@
+{
+	email {$ACME_EMAIL}
+}
+
+# The bare domain (control panel, admin, auth) and every club subdomain, on one certificate.
+{$ROSTERCHIEF_BASE_DOMAIN}, *.{$ROSTERCHIEF_BASE_DOMAIN} {
+	tls {
+		dns cloudflare {$CLOUDFLARE_API_TOKEN}
+	}
+
+	encode zstd gzip
+
+	# Club logos, served straight off the shared volume — no gunicorn worker involved. Only
+	# matters while storage is local disk; once AWS_STORAGE_BUCKET_NAME is set, club.logo.url
+	# points at the bucket directly and this block simply never matches. A missing file 404s
+	# here exactly as django.views.static.serve would, so there is no need to fall through.
+	handle_path /media/* {
+		root * /srv/media
+		file_server
+	}
+
+	# X-Forwarded-Proto is what SECURE_PROXY_SSL_HEADER reads. Without it Django believes every
+	# request is plain HTTP: request.is_secure() goes false, WebAuthn disagrees with the browser
+	# about the origin, and the SSL redirect becomes a loop.
+	reverse_proxy web:8000 {
+		header_up X-Forwarded-Proto {scheme}
+		header_up X-Real-IP {remote_host}
+	}
+
+	log {
+		output stdout
+	}
+}

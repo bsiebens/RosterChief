@@ -1,0 +1,20 @@
+{% extends base_template %}
+
+{% comment %}
+    Not a fixed parent: `base_template` is resolved per request by the branding context
+    processor, so every auth screen allauth ships -- login, password reset, MFA, passkeys,
+    and whatever it adds next -- picks up the club's skin on a club subdomain and the
+    RosterChief one on the base domain, with no template of its own knowing clubs exist.
+
+    The title is left to the chosen base, which suffixes the club or the platform name.
+{% endcomment %}
+
+{% block main %}
+    <div class="flex justify-center">
+        <div class="card w-full max-w-xl bg-base-100 border-2 border-base-content/20 shadow-xl">
+            <div class="card-body prose max-w-none">
+                {% block content %}{% endblock content %}
+            </div>
+        </div>
+    </div>
+{% endblock main %}

@@ -1,0 +1,10 @@
+{% load allauth %}
+
+{% comment %}
+    Only used for the TOTP QR code. The white plate is not decoration: the QR is dark
+    modules on a transparent ground, so on the dark theme it would be dark-on-dark and
+    phones could not scan it.
+{% endcomment %}
+<div class="my-4 flex justify-center">
+    <img class="rounded-box bg-white p-3" src="{{ attrs.src }}" {% if attrs.alt %}alt="{{ attrs.alt }}"{% endif %}>
+</div>

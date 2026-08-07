@@ -1,0 +1,17 @@
+{% load ui %}
+
+{% comment %}
+    The field loop every card-form and modal-form wrapper shares: label, daisyUI-styled
+    widget, help text, errors — with checkboxes laid out label-beside-input instead of
+    label-above. Included with `form`.
+{% endcomment %}
+{% for error in form.non_field_errors %}
+    <div class="alert alert-error my-2">
+        <span>{{ error }}</span>
+    </div>
+{% endfor %}
+{% for field in form %}
+    <div class="form-control my-3 w-full">
+        {% form_field field %}
+    </div>
+{% endfor %}

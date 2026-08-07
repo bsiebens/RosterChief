@@ -1,0 +1,102 @@
+{% load lucide ui %}
+
+{% comment %}
+    allauth passes `unlabeled=True` on the entrance forms (login, signup, reset) and
+    already sets a placeholder on each of their fields ("Email address", "Password"),
+    so dropping the visible label loses nothing on screen. The label is still emitted
+    sr-only inside the wrapper: a placeholder is not a label, and it disappears the
+    moment you start typing.
+
+    Fields with an icon use daisyUI's icon-in-field layout, where the `input` class
+    goes on the *wrapping label* and the input itself carries only `grow`. Putting
+    `input` on both draws a box inside a box.
+{% endcomment %}
+{% for field in attrs.form.hidden_fields %}{{ field }}{% endfor %}
+{% for error in attrs.form.non_field_errors %}
+    <div class="alert alert-error my-2">
+        <span>{{ error }}</span>
+    </div>
+{% endfor %}
+{% comment %}
+    `exclude` lets a page lay a field out itself — the login page puts "remember" on the
+    button row. It is pinned to a real variable first, and that is not cosmetic: passing
+    `attrs.exclude` straight into a filter on a page that never set it raises
+    VariableDoesNotExist, which Django catches for the *main* variable of an expression
+    but not for a filter *argument*. {% if %} then swallows it and reads the condition as
+    false — silently dropping every field on every form that doesn't pass `exclude`.
+{% endcomment %}
+{% with exclude=attrs.exclude|default:"" %}
+    {% for field in attrs.form.visible_fields %}
+        {% if not field|excluded:exclude %}
+            <div class="form-control my-3 w-full">
+                {% if field.field.widget.input_type == "checkbox" %}
+                    <label class="label cursor-pointer justify-start gap-3" for="{{ field.id_for_label }}">
+                        {{ field|daisy }}
+                        <span class="label-text">{{ field.label }}</span>
+                    </label>
+                {% else %}
+                    {% if not attrs.unlabeled and not field|is_otp %}
+                        <label class="label" for="{{ field.id_for_label }}">
+                            <span class="label-text">{{ field.label }}</span>
+                        </label>
+                    {% endif %}
+                    {% with icon=field|field_icon %}
+                        {% if field|is_otp %}
+                            {% comment %}
+                        daisyUI's otp is one input overlaid on the boxes. Child order is load-bearing:
+                        it places each box with `nth-child`, which counts *every* child, not just the
+                        spans — so the input must come LAST. Put it first and all six boxes shift one
+                        stride right, the container matches :has(>span:nth-child(7)) and grows to
+                        seven strides, and the ::after active-box marker (invisible until focus) shows
+                        up in the gap as a phantom seventh box.
+
+                        For the same reason the sr-only label lives outside the container: another
+                        child would throw the count off again.
+
+                        The overlaid input carries daisyUI's own `pointer-events: none` (it exists so
+                        clicks land on the boxes, not a naked input) — which also means a tap/click on
+                        the boxes never reaches the input directly. A <label for> is what actually
+                        closes that gap: browsers focus a labelled control on click regardless of the
+                        control's own pointer-events, so wrapping the boxes in one (without adding a
+                        child *inside* the otp container, which would break the nth-child count above)
+                        makes the whole visible field tappable. Without it the field is a decorative
+                        box nobody can enter a code into — invisible on desktop, where autofocus or Tab
+                        gets you there anyway, but a dead end on mobile, which has neither.
+                    {% endcomment %}
+                            <label class="sr-only" for="{{ field.id_for_label }}">{{ field.label }}</label>
+                            <div class="flex justify-center">
+                                <label class="contents" for="{{ field.id_for_label }}">
+                                    <div class="otp otp-lg" data-otp>
+                                        <span></span>
+                                        <span></span>
+                                        <span></span>
+                                        <span></span>
+                                        <span></span>
+                                        <span></span>
+                                        {{ field|as_otp }}
+                                    </div>
+                                </label>
+                            </div>
+                        {% elif icon %}
+                            <label class="input flex w-full items-center gap-2 {% if field.errors %}input-error{% endif %}" for="{{ field.id_for_label }}">
+                                <span class="opacity-50">{% lucide icon size=16 %}</span>
+                                {% if attrs.unlabeled %}<span class="sr-only">{{ field.label }}</span>{% endif %}
+                                {{ field|daisy:"grow" }}
+                            </label>
+                        {% else %}
+                            {{ field|daisy }}
+                        {% endif %}
+                    {% endwith %}
+                {% endif %}
+                {% comment %}
+            The password field's help_text is allauth's "Forgot your password?" link, so it
+            gets room to breathe. The id is not decorative: Django points the input's
+            aria-describedby at `<auto_id>_helptext`, and without it that reference dangles
+            and the link is never announced.
+        {% endcomment %}
+                {% if field.help_text %}<span id="{{ field.auto_id }}_helptext" class="label-text-alt mt-3 block text-base-content/70">{{ field.help_text }}</span>{% endif %}
+                {% for error in field.errors %}<span class="label-text-alt mt-1 text-error">{{ error }}</span>{% endfor %}
+            </div>
+        {% endif %}
+    {% endfor %}
+{% endwith %}

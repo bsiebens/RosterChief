@@ -1,0 +1,117 @@
+{% extends "management/base.html" %}
+{% load i18n lucide ui %}
+
+{% block heading %}{{ series.title }}{% endblock heading %}
+{% block subheading %}{{ series.get_kind_display }} · {{ recurrence_summary }}{% endblock subheading %}
+
+{% block actions %}
+    {% if can_manage %}
+        <a class="btn btn-outline gap-2" href="{% url 'management:event_series_update' series.pk %}">{% lucide "pencil" size=16 %} {% trans "Edit" %}</a>
+        <form method="post" action="{% url 'management:event_series_generate' series.pk %}">
+            {% csrf_token %}
+            <button class="btn btn-outline gap-2" type="submit">{% lucide "refresh-cw" size=16 %} {% trans "Regenerate occurrences" %}</button>
+        </form>
+        <button class="btn btn-outline btn-warning gap-2" type="button" onclick="document.getElementById('series_stop_modal').showModal()">{% lucide "octagon-pause" size=16 %} {% trans "Stop repeating" %}</button>
+        <button class="btn btn-outline btn-error gap-2" type="button" onclick="document.getElementById('series_delete_modal').showModal()">{% lucide "trash-2" size=16 %} {% trans "Delete series" %}</button>
+    {% endif %}
+{% endblock actions %}
+
+{% block panel %}
+    <div class="mb-6 grid gap-4 lg:grid-cols-2">
+        <div class="card bg-base-100 shadow">
+            <div class="card-body">
+                <h2 class="card-title text-base">{% lucide "repeat" size=18 %} {% trans "Recurrence" %}</h2>
+                <dl class="divide-y divide-base-200">
+                    <div class="flex items-center justify-between py-2">
+                        <dt class="text-sm opacity-70">{% trans "Pattern" %}</dt>
+                        <dd>{{ recurrence_summary }}</dd>
+                    </div>
+                    <div class="flex items-center justify-between py-2">
+                        <dt class="text-sm opacity-70">{% trans "First occurrence" %}</dt>
+                        <dd>{{ series.dtstart|date:"j M Y H:i" }}</dd>
+                    </div>
+                    <div class="flex items-center justify-between py-2">
+                        <dt class="text-sm opacity-70">{% trans "Repeats until" %}</dt>
+                        <dd>{{ series.until|date:"j M Y H:i"|default:"—" }}</dd>
+                    </div>
+                    <div class="flex items-center justify-between py-2">
+                        <dt class="text-sm opacity-70">{% trans "Generated up to" %}</dt>
+                        <dd>{{ series.generated_until|date:"j M Y"|default:"—" }}</dd>
+                    </div>
+                </dl>
+            </div>
+        </div>
+
+        <div class="card bg-base-100 shadow">
+            <div class="card-body">
+                <h2 class="card-title text-base">{% lucide "info" size=18 %} {% trans "Template" %}</h2>
+                <dl class="divide-y divide-base-200">
+                    <div class="flex items-center justify-between py-2">
+                        <dt class="text-sm opacity-70">{% trans "Location" %}</dt>
+                        <dd>{{ series.location|default:"—" }}</dd>
+                    </div>
+                    <div class="flex items-center justify-between py-2">
+                        <dt class="text-sm opacity-70">{% trans "Opponent" %}</dt>
+                        <dd>{{ series.opponent|default:"—" }}</dd>
+                    </div>
+                    <div class="flex items-center justify-between py-2">
+                        <dt class="text-sm opacity-70">{% trans "Teams" %}</dt>
+                        <dd>{% for team in series.teams.all %}{{ team.name }}{% if not forloop.last %}, {% endif %}{% empty %}—{% endfor %}</dd>
+                    </div>
+                </dl>
+            </div>
+        </div>
+    </div>
+
+    <div class="card bg-base-100 shadow">
+        <div class="card-body">
+            <h2 class="card-title text-base">{% lucide "calendar" size=18 %} {% trans "Occurrences" %}</h2>
+            <div class="overflow-x-auto">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>{% trans "When" %}</th>
+                            <th>{% trans "Status" %}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for occurrence in occurrences %}
+                            <tr>
+                                <td><a class="link link-hover" href="{% url 'management:event_detail' occurrence.pk %}">{{ occurrence.start|date:"j M Y H:i" }}</a></td>
+                                <td>
+                                    {% if occurrence.cancelled %}
+                                        <span class="badge badge-outline gap-1">{% lucide "ban" size=12 %} {% trans "Cancelled" %}</span>
+                                    {% elif occurrence.detached %}
+                                        <span class="badge badge-neutral gap-1">{% lucide "unlink" size=12 %} {% trans "Detached" %}</span>
+                                    {% elif occurrence.is_past %}
+                                        <span class="badge badge-outline">{% trans "Past" %}</span>
+                                    {% else %}
+                                        <span class="badge badge-success">{% trans "Upcoming" %}</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                        {% empty %}
+                            <tr>
+                                <td colspan="2" class="text-center opacity-60">{% trans "No occurrences generated yet." %}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+{% endblock panel %}
+
+{% block extra_body %}
+    {% if can_manage %}
+        {% trans "Stop repeating" as stop_title %}
+        {% blocktrans with name=series.title asvar stop_body %}Stop “{{ name }}” from generating new occurrences? Existing ones (past and future) are left exactly as they are — this only affects what happens from here on.{% endblocktrans %}
+        {% url 'management:event_series_stop' series.pk as stop_url %}
+        {% include "controlpanel/_confirm_modal.html" with modal_id="series_stop_modal" title=stop_title body=stop_body action_url=stop_url submit_label=stop_title submit_icon="octagon-pause" %}
+
+        {% trans "Delete series" as delete_title %}
+        {% blocktrans with name=series.title asvar delete_body %}Delete “{{ name }}”? This also deletes every occurrence it has ever generated, past and future, and their attendance records. This cannot be undone — use “Stop repeating” instead if you just want it to stop.{% endblocktrans %}
+        {% url 'management:event_series_delete' series.pk as delete_url %}
+        {% include "controlpanel/_confirm_modal.html" with modal_id="series_delete_modal" title=delete_title body=delete_body action_url=delete_url submit_label=delete_title %}
+    {% endif %}
+{% endblock extra_body %}

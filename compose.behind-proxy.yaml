@@ -1,0 +1,63 @@
+# A dev/test deployment on a server that ALREADY runs Caddy on :80/:443.
+#
+#   docker compose -f compose.behind-proxy.yaml up -d
+#
+# The difference from compose.yaml is only what listens on the network: no caddy service, and
+# web publishes on the loopback instead of the public interface. The host's Caddy reverse
+# proxies to it (see DEPLOYMENT.md, "Behind an existing Caddy").
+#
+# Publishing on 127.0.0.1 and not 0.0.0.0 is the point: bound to all interfaces, a test
+# instance is reachable on http://<server-ip>:8001 with no TLS, bypassing the proxy and every
+# security header with it.
+
+name: rosterchief-test
+
+services:
+  web:
+    build: .
+    restart: unless-stopped
+    env_file: .env.production
+    ports:
+      - "127.0.0.1:${WEB_PORT:-8001}:8000"
+    volumes:
+      # Uploaded club logos, while storage is local disk (see rosterchief/urls.py). Without
+      # this, a rebuild or recreate wipes MEDIA_ROOT even though the container itself keeps
+      # running fine in between.
+      - media_data:/app/media
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-rosterchief}
+      POSTGRES_USER: ${POSTGRES_USER:-rosterchief}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set a database password}
+    # See compose.yaml for why these are trimmed from the defaults.
+    command: ["postgres", "-c", "shared_buffers=64MB", "-c", "max_connections=20"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-rosterchief}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "32mb", "--maxmemory-policy", "allkeys-lru"]
+
+volumes:
+  pgdata:
+  media_data:

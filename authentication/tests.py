@@ -1,0 +1,484 @@
+import re
+import uuid
+from urllib.parse import parse_qs, urlparse
+
+from allauth.core import context
+from allauth.mfa.models import Authenticator
+from allauth.mfa.recovery_codes.internal.auth import RecoveryCodes
+from django.contrib.auth import get_user_model
+from django.contrib.auth.models import AnonymousUser
+from django.db import IntegrityError
+from django.http import HttpResponse
+from django.test import RequestFactory, TestCase, override_settings
+from django.urls import reverse
+
+from club.models import Club, ClubRole
+from members.models import Member
+
+from .adapters import RosterChiefMFAAdapter, webauthn_rp_id
+from .middleware import RequireMFAMiddleware, mfa_required_for
+
+User = get_user_model()
+
+
+def enrol_mfa(user):
+    """Give ``user`` a second factor (enough for is_mfa_enabled)."""
+    return Authenticator.objects.create(user=user, type=Authenticator.Type.TOTP, data={"secret": "JBSWY3DPEHPK3PXP"})
+
+
+class UserManagerTests(TestCase):
+    def test_create_user_defaults(self):
+        user = User.objects.create_user(email="alice@example.com", password="secret123")
+
+        self.assertEqual(user.email, "alice@example.com")
+        self.assertTrue(user.check_password("secret123"))
+        self.assertFalse(user.is_staff)
+        self.assertFalse(user.is_superuser)
+        self.assertTrue(user.is_active)
+
+    def test_create_user_requires_email(self):
+        with self.assertRaises(ValueError):
+            User.objects.create_user(email="", password="secret123")
+
+    def test_create_user_normalizes_email_domain(self):
+        # BaseUserManager lowercases the domain part of the address.
+        user = User.objects.create_user(email="Bob@Example.COM", password="secret123")
+
+        self.assertEqual(user.email, "Bob@example.com")
+
+    def test_create_user_password_is_hashed(self):
+        user = User.objects.create_user(email="carol@example.com", password="secret123")
+
+        self.assertNotEqual(user.password, "secret123")
+
+    def test_create_user_without_password_is_unusable(self):
+        user = User.objects.create_user(email="dave@example.com")
+
+        self.assertFalse(user.has_usable_password())
+
+    def test_create_superuser_defaults(self):
+        admin = User.objects.create_superuser(email="admin@example.com", password="secret123")
+
+        self.assertTrue(admin.is_staff)
+        self.assertTrue(admin.is_superuser)
+        self.assertTrue(admin.is_active)
+
+    def test_create_superuser_rejects_non_staff(self):
+        with self.assertRaises(ValueError):
+            User.objects.create_superuser(email="admin@example.com", password="x", is_staff=False)
+
+    def test_create_superuser_rejects_non_superuser(self):
+        with self.assertRaises(ValueError):
+            User.objects.create_superuser(email="admin@example.com", password="x", is_superuser=False)
+
+
+class UserModelTests(TestCase):
+    def test_email_is_username_field(self):
+        self.assertEqual(User.USERNAME_FIELD, "email")
+        self.assertEqual(User.REQUIRED_FIELDS, [])
+
+    def test_email_is_unique(self):
+        User.objects.create_user(email="dup@example.com", password="x")
+        with self.assertRaises(IntegrityError):
+            User.objects.create_user(email="dup@example.com", password="y")
+
+    def test_pk_is_uuid(self):
+        user = User.objects.create_user(email="uuid@example.com", password="x")
+        self.assertIsInstance(user.pk, uuid.UUID)
+
+    def test_str_and_names_fall_back_to_email_without_member(self):
+        user = User.objects.create_user(email="lonely@example.com", password="x")
+
+        self.assertEqual(str(user), "lonely@example.com")
+        self.assertEqual(user.get_full_name(), "lonely@example.com")
+        self.assertEqual(user.get_short_name(), "lonely@example.com")
+
+    def test_str_and_names_use_linked_member(self):
+        user = User.objects.create_user(email="linked@example.com", password="x")
+        Member.objects.create(user=user, first_name="Jane", last_name="Doe")
+
+        # Re-fetch so the reverse OneToOne relation is resolved from the DB.
+        user = User.objects.get(pk=user.pk)
+
+        self.assertEqual(str(user), "Jane Doe")
+        self.assertEqual(user.get_full_name(), "Jane Doe")
+        self.assertEqual(user.get_short_name(), "Jane")
+
+
+@override_settings(
+    ROSTERCHIEF_BASE_DOMAIN="rosterchief.app",
+    MFA_WEBAUTHN_RP_NAME="RosterChief",
+    ALLOWED_HOSTS=[".rosterchief.app", "example.test"],
+)
+class WebAuthnRelyingPartyTests(TestCase):
+    """A passkey is bound to a Relying Party ID (a domain).
+
+    allauth's default RP ID is the request host, which under our subdomain
+    tenancy would bind a passkey to a single club. We pin it to the registrable
+    parent domain so ONE passkey works across every club.
+    """
+
+    def rp_entity(self, host):
+        request = RequestFactory().get("/", HTTP_HOST=host)
+        with context.request_context(request):
+            return RosterChiefMFAAdapter().get_public_key_credential_rp_entity()
+
+    def test_rp_id_is_the_parent_domain_not_the_club_subdomain(self):
+        self.assertEqual(self.rp_entity("ajax-united.rosterchief.app")["id"], "rosterchief.app")
+
+    def test_rp_id_is_identical_across_clubs(self):
+        # The whole point: a passkey registered at one club works at the others.
+        here = self.rp_entity("ajax-united.rosterchief.app")
+        there = self.rp_entity("rival-fc.rosterchief.app")
+
+        self.assertEqual(here["id"], there["id"])
+
+    def test_rp_name_comes_from_settings(self):
+        self.assertEqual(self.rp_entity("ajax-united.rosterchief.app")["name"], "RosterChief")
+
+    @override_settings(ROSTERCHIEF_BASE_DOMAIN="")
+    def test_falls_back_to_the_request_host_without_a_base_domain(self):
+        request = RequestFactory().get("/", HTTP_HOST="example.test:8000")
+
+        with context.request_context(request):
+            self.assertEqual(webauthn_rp_id(), "example.test")
+
+
+class MFARequirementTests(TestCase):
+    def setUp(self):
+        self.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+
+    def make_user(self, email, **kwargs):
+        return User.objects.create_user(email=email, password="pw-secret-123", **kwargs)
+
+    def with_role(self, user, role):
+        member = Member.objects.create(user=user, first_name="Ada", last_name="Min")
+        ClubRole.objects.create(club=self.club, member=member, role=role)
+        return user
+
+    def test_staff_must_have_mfa(self):
+        self.assertTrue(mfa_required_for(self.make_user("staff@example.com", is_staff=True)))
+
+    def test_superuser_must_have_mfa(self):
+        self.assertTrue(mfa_required_for(User.objects.create_superuser(email="root@example.com", password="pw-secret-123")))
+
+    def test_club_admin_must_have_mfa(self):
+        user = self.with_role(self.make_user("admin@example.com"), ClubRole.Roles.ADMIN)
+
+        self.assertTrue(mfa_required_for(user))
+
+    def test_editor_must_have_mfa(self):
+        user = self.with_role(self.make_user("editor@example.com"), ClubRole.Roles.EDITOR)
+
+        self.assertTrue(mfa_required_for(user))
+
+    def test_plain_member_does_not_need_mfa(self):
+        user = self.with_role(self.make_user("member@example.com"), ClubRole.Roles.MEMBER)
+
+        self.assertFalse(mfa_required_for(user))
+
+    def test_user_without_any_role_does_not_need_mfa(self):
+        self.assertFalse(mfa_required_for(self.make_user("nobody@example.com")))
+
+
+class RequireMFAMiddlewareTests(TestCase):
+    def setUp(self):
+        self.factory = RequestFactory()
+        self.middleware = RequireMFAMiddleware(lambda request: HttpResponse("ok"))
+
+    def dispatch(self, user, path="/"):
+        request = self.factory.get(path)
+        request.user = user
+        return self.middleware(request)
+
+    def make_staff(self):
+        return User.objects.create_user(email="staff@example.com", password="pw-secret-123", is_staff=True)
+
+    def test_anonymous_passes_through(self):
+        self.assertEqual(self.dispatch(AnonymousUser()).content, b"ok")
+
+    def test_unprivileged_user_passes_through(self):
+        user = User.objects.create_user(email="plain@example.com", password="pw-secret-123")
+
+        self.assertEqual(self.dispatch(user).content, b"ok")
+
+    def test_privileged_user_without_mfa_is_sent_to_enrolment(self):
+        response = self.dispatch(self.make_staff())
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse("mfa_index"))
+
+    def test_privileged_user_can_still_reach_the_enrolment_pages(self):
+        # Otherwise they'd be redirected in a loop and could never enrol.
+        response = self.dispatch(self.make_staff(), path="/accounts/2fa/totp/activate/")
+
+        self.assertEqual(response.content, b"ok")
+
+    def test_enrolled_privileged_user_passes_through(self):
+        staff = self.make_staff()
+        enrol_mfa(staff)
+
+        self.assertEqual(self.dispatch(staff).content, b"ok")
+
+
+class AdminLoginRoutingTests(TestCase):
+    def test_admin_login_is_routed_through_allauth(self):
+        # Django's own admin login knows nothing about second factors.
+        response = self.client.get("/admin/login/", {"next": "/admin/"})
+
+        self.assertEqual(response.status_code, 302)
+        redirect = urlparse(response.url)
+        self.assertEqual(redirect.path, reverse("account_login"))
+        # The original destination survives the hop (percent-encoded).
+        self.assertEqual(parse_qs(redirect.query)["next"], ["/admin/"])
+
+    def test_allauth_login_page_loads(self):
+        self.assertEqual(self.client.get(reverse("account_login")).status_code, 200)
+
+
+class AuthFormRenderingTests(TestCase):
+    """Every allauth form must actually render its fields.
+
+    Regression: the `fields` element passed `attrs.exclude` straight into a filter.
+    On a page that never sets it, resolving a filter *argument* raises
+    VariableDoesNotExist — which Django swallows inside {% if %} and reads as false —
+    so every field was silently dropped from every form except the login page (the one
+    page that does pass `exclude`).
+    """
+
+    def test_the_login_form_renders_its_fields(self):
+        self.assertContains(self.client.get(reverse("account_login")), 'name="login"')
+
+    def test_the_password_reset_form_renders_its_fields(self):
+        self.assertContains(self.client.get(reverse("account_reset_password")), 'name="email"')
+
+    def test_the_signup_form_renders_its_fields(self):
+        self.assertContains(self.client.get(reverse("account_signup")), 'name="password1"')
+
+
+class TwoFactorPageTests(TestCase):
+    def setUp(self):
+        user = User.objects.create_user(email="mfa@example.com", password="pw-secret-123")
+        enrol_mfa(user)
+        # Password accepted, second factor still owed: this is the 2FA challenge page.
+        self.response = self.client.post(reverse("account_login"), {"login": "mfa@example.com", "password": "pw-secret-123"}, follow=True)
+
+    def test_the_code_field_renders_as_an_otp_input(self):
+        self.assertContains(self.response, 'name="code"')
+        self.assertContains(self.response, "otp otp-lg")
+
+    def test_the_input_comes_after_the_boxes(self):
+        # daisyUI places each box with nth-child, which counts every child. With the input
+        # first, all six boxes shift a stride right, the container grows to seven strides
+        # and the ::after focus marker appears as a phantom seventh box.
+        html = self.response.content.decode()
+        otp = html[html.index('class="otp otp-lg"') : html.index('name="code"')]
+
+        self.assertEqual(otp.count("<span></span>"), 6)
+
+    def test_the_boxes_are_wrapped_in_a_label_so_tapping_focuses_the_input(self):
+        # daisyUI's overlaid otp input carries `pointer-events: none` (so clicks land on the
+        # boxes, not a naked input) — which also means a tap on the boxes never reaches the
+        # input directly. A <label for> is what closes that gap: browsers focus a labelled
+        # control on click regardless of the control's own pointer-events. Without this
+        # wrapper the field cannot be entered on a touchscreen, which has no Tab key to fall
+        # back on.
+        html = self.response.content.decode()
+        label_start = html.index('<label class="contents"')
+        otp_start = html.index('class="otp otp-lg"')
+
+        self.assertLess(label_start, otp_start)
+        self.assertIn('for="id_code"', html[label_start : label_start + 60])
+
+    def test_the_otp_field_has_no_placeholder(self):
+        # allauth sets placeholder="Code"; inside the boxes it reads as a typed-in code.
+        self.assertNotContains(self.response, 'placeholder="Code"')
+
+    def test_cancel_sits_beside_sign_in_and_is_not_primary(self):
+        self.assertContains(self.response, '<button class="btn btn-outline gap-2" type="submit" form="logout-from-stage">')
+        self.assertContains(self.response, '<button class="btn btn-primary gap-2" type="submit">')
+
+    def test_cancel_has_a_form_to_submit(self):
+        self.assertContains(self.response, 'id="logout-from-stage"')
+
+    def test_the_security_key_button_is_an_accent_button_with_a_working_form(self):
+        self.assertContains(self.response, "btn btn-accent")
+        self.assertContains(self.response, 'form="webauthn_form"')
+        # The id lives on the form element — without it the button submits nothing.
+        self.assertContains(self.response, 'id="webauthn_form"')
+        self.assertContains(self.response, "allauth.webauthn.forms.authenticateForm")
+
+
+class MfaPageTests(TestCase):
+    """Every MFA screen must render. They are built from allauth's `element` primitives,
+    so styling lives in the element overrides rather than in eight page templates."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(email="mfa@example.com", password="pw-secret-123")
+        # A real password login (not force_login) so allauth counts it as a recent
+        # authentication and doesn't bounce the sensitive pages to reauthenticate.
+        self.client.post(reverse("account_login"), {"login": "mfa@example.com", "password": "pw-secret-123"}, follow=True)
+
+    def test_the_manage_page_renders_a_panel_per_authenticator(self):
+        response = self.client.get(reverse("mfa_index"))
+
+        self.assertContains(response, "Authenticator App")
+        self.assertContains(response, "card border")
+
+    def test_the_security_key_list_renders(self):
+        # Regression: allauth's template does {% load humanize %}, which raised
+        # TemplateSyntaxError until django.contrib.humanize was installed.
+        self.assertEqual(self.client.get(reverse("mfa_list_webauthn")).status_code, 200)
+
+    def test_the_totp_activate_page_boxes_the_code_and_plates_the_qr(self):
+        response = self.client.get(reverse("mfa_activate_totp"))
+
+        self.assertContains(response, "otp otp-lg")
+        # The QR is dark-on-transparent: without a white plate it is unscannable on the
+        # dark theme.
+        self.assertContains(response, "bg-white p-3")
+        self.assertContains(response, "font-mono")  # the secret, to be copied by hand
+
+    def test_the_deactivate_button_is_destructive(self):
+        enrol_mfa(self.user)
+
+        response = self.client.get(reverse("mfa_index"))
+
+        # allauth tags it "danger" — it must not look like the safe action.
+        self.assertContains(response, "btn-error")
+
+    def test_reauthenticating_with_a_code_boxes_the_input(self):
+        enrol_mfa(self.user)
+
+        self.assertContains(self.client.get(reverse("mfa_reauthenticate")), "otp otp-lg")
+
+
+class ActionBarTests(TestCase):
+    """A form's action bar is drawn when the actions slot has content.
+
+    Regression: it was keyed on `no_visible_fields`, which allauth sets to say a form has
+    no visible *fields* — logout and TOTP deactivate are a bare csrf token plus a button.
+    Keying the bar on it hid the button on exactly the pages that are nothing but a button.
+    """
+
+    def setUp(self):
+        self.user = User.objects.create_user(email="mfa@example.com", password="pw-secret-123")
+        self.client.post(reverse("account_login"), {"login": "mfa@example.com", "password": "pw-secret-123"}, follow=True)
+
+    def test_the_sign_out_page_has_its_button(self):
+        response = self.client.get(reverse("account_logout"))
+
+        self.assertContains(response, "Sign Out")
+        self.assertContains(response, 'type="submit"')
+
+    def test_the_totp_deactivate_page_has_its_button(self):
+        enrol_mfa(self.user)
+
+        response = self.client.get(reverse("mfa_deactivate_totp"))
+
+        self.assertContains(response, "btn-error")
+        self.assertContains(response, 'type="submit"')
+
+
+class SignOutPageTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(email="mfa@example.com", password="pw-secret-123")
+        self.client.force_login(self.user)
+        self.response = self.client.get(reverse("account_logout"))
+
+    def test_sign_out_and_cancel_sit_side_by_side_with_icons(self):
+        html = self.response.content.decode()
+        cancel = html[html.index('<a class="btn btn-outline gap-2" href="/">') :]
+        sign_out = html[html.index('<button class="btn btn-primary gap-2"') :]
+
+        self.assertIn("<svg", cancel[: cancel.index("</a>")])
+        self.assertIn("<svg", sign_out[: sign_out.index("</button>")])
+
+    def test_cancel_does_not_sign_you_out(self):
+        # It is a link, not a submit: only the POST logs you out.
+        self.client.get("/")
+
+        self.assertTrue(self.client.session.get("_auth_user_id"))
+
+    def test_signing_out_still_works(self):
+        self.client.post(reverse("account_logout"))
+
+        self.assertIsNone(self.client.session.get("_auth_user_id"))
+
+
+class ChangePasswordPageTests(TestCase):
+    def setUp(self):
+        User.objects.create_user(email="mfa@example.com", password="pw-secret-123")
+        self.client.post(reverse("account_login"), {"login": "mfa@example.com", "password": "pw-secret-123"}, follow=True)
+        self.response = self.client.get(reverse("account_change_password"))
+
+    def test_the_fields_have_no_visible_labels(self):
+        # allauth gives each a placeholder, so the label would only repeat it.
+        self.assertNotContains(self.response, '<span class="label-text">Current Password</span>')
+        self.assertContains(self.response, 'name="oldpassword"')
+        self.assertContains(self.response, 'name="password1"')
+
+    def test_the_new_password_keeps_its_help_text(self):
+        self.assertContains(self.response, "id_password1_helptext")
+
+    def test_the_current_password_is_set_apart_from_the_new_one(self):
+        self.assertContains(self.response, "mt-10")
+
+    def test_forgot_password_is_an_accent_button_and_both_actions_have_icons(self):
+        html = self.response.content.decode()
+        forgot = html[html.index("btn-accent") :]
+        submit = html[html.index('class="btn btn-primary gap-2"') :]
+
+        self.assertIn("<svg", forgot[: forgot.index("</a>")])
+        self.assertIn("<svg", submit[: submit.index("</button>")])
+
+
+class MfaButtonIconTests(TestCase):
+    """Every button on the MFA screens carries an icon, and the recovery-code actions are
+    ranked: View is primary, Download and Generate are outline. Generate throws away the
+    codes you already have, so it must not read as the obvious thing to click."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(email="mfa@example.com", password="pw-secret-123")
+        # Sign in *before* enrolling: a user who already holds a second factor is stopped at
+        # the 2FA challenge and never reaches these pages.
+        self.client.post(reverse("account_login"), {"login": "mfa@example.com", "password": "pw-secret-123"}, follow=True)
+        enrol_mfa(self.user)
+        RecoveryCodes.activate(self.user).instance.save()
+
+    def buttons(self, url):
+        """Every <a class="btn"> / <button class="btn"> in the page body, minus the navbar."""
+        html = self.client.get(url, follow=True).content.decode()
+        body = html[html.index("<main") :]
+        return re.findall(r'<(?:a|button)[^>]*class="btn[^"]*"[^>]*>(.*?)</(?:a|button)>', body, re.S)
+
+    def test_every_button_on_the_manage_page_has_an_icon(self):
+        found = self.buttons(reverse("mfa_index"))
+
+        self.assertTrue(found)
+        for button in found:
+            self.assertIn("<svg", button)
+
+    def test_download_and_generate_are_outline_buttons(self):
+        html = self.client.get(reverse("mfa_index"), follow=True).content.decode()
+
+        self.assertEqual(html.count("btn-outline"), 2)  # Download + Generate, not View
+
+    def test_the_panel_actions_are_spaced_off_the_body_text(self):
+        self.assertContains(self.client.get(reverse("mfa_index"), follow=True), "card-actions mt-4")
+
+    def test_every_button_on_the_deactivate_page_has_an_icon(self):
+        for button in self.buttons(reverse("mfa_deactivate_totp")):
+            self.assertIn("<svg", button)
+
+    def test_every_button_on_the_add_security_key_page_has_an_icon(self):
+        for button in self.buttons(reverse("mfa_add_webauthn")):
+            self.assertIn("<svg", button)
+
+    def test_the_activate_page_gives_the_code_box_no_visible_label(self):
+        Authenticator.objects.filter(user=self.user, type=Authenticator.Type.TOTP).delete()
+
+        response = self.client.get(reverse("mfa_activate_totp"), follow=True)
+
+        self.assertContains(response, "otp otp-lg")
+        self.assertNotContains(response, '<span class="label-text">Code</span>')

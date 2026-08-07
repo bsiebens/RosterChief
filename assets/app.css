@@ -1,0 +1,211 @@
+@import "tailwindcss";
+
+/* Scan Django templates for utility classes (Tailwind's auto-detection doesn't
+   know about our template dirs). */
+@source "../templates";
+@source "../controlpanel";
+@source "../billing";
+@source "../management";
+
+/* daisyUI: light is the default, dark applies automatically when the OS asks
+   for it. An explicit data-theme on <html> (set by the toggle) overrides both. */
+@plugin "daisyui" {
+    themes: light --default, dark --prefersdark;
+}
+
+/* Fonts are self-hosted (files copied from the @fontsource packages into
+   static/fonts/, paths are relative to the built css at /static/css/app.css).
+   Google's CDN would leak every visitor's IP to a third party on page load,
+   which we don't want to inherit for an EU club platform.
+
+   Two subsets each: `latin` covers western europe, `latin-ext` carries the
+   polish/czech/turkish letters that turn up in member names. The unicode-range
+   means a browser only fetches latin-ext when a page actually uses those glyphs.
+
+   Ubuntu is static (it has no variable version); its real weights are 400/500/700,
+   so `font-semibold` (600) is synthesised up to 700 by the browser. JetBrains Mono
+   and Roboto are variable: one file covers the whole weight axis. */
+@font-face {
+    font-family: "Ubuntu";
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url("../fonts/ubuntu-latin-400-normal.woff2") format("woff2");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+    font-family: "Ubuntu";
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url("../fonts/ubuntu-latin-ext-400-normal.woff2") format("woff2");
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+    font-family: "Ubuntu";
+    font-style: italic;
+    font-weight: 400;
+    font-display: swap;
+    src: url("../fonts/ubuntu-latin-400-italic.woff2") format("woff2");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+    font-family: "Ubuntu";
+    font-style: italic;
+    font-weight: 400;
+    font-display: swap;
+    src: url("../fonts/ubuntu-latin-ext-400-italic.woff2") format("woff2");
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+    font-family: "Ubuntu";
+    font-style: normal;
+    font-weight: 500;
+    font-display: swap;
+    src: url("../fonts/ubuntu-latin-500-normal.woff2") format("woff2");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+    font-family: "Ubuntu";
+    font-style: normal;
+    font-weight: 500;
+    font-display: swap;
+    src: url("../fonts/ubuntu-latin-ext-500-normal.woff2") format("woff2");
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+    font-family: "Ubuntu";
+    font-style: normal;
+    font-weight: 700;
+    font-display: swap;
+    src: url("../fonts/ubuntu-latin-700-normal.woff2") format("woff2");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+    font-family: "Ubuntu";
+    font-style: normal;
+    font-weight: 700;
+    font-display: swap;
+    src: url("../fonts/ubuntu-latin-ext-700-normal.woff2") format("woff2");
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+    font-family: "JetBrains Mono";
+    font-style: normal;
+    font-weight: 100 800;
+    font-display: swap;
+    src: url("../fonts/jetbrains-mono-latin-wght-normal.woff2") format("woff2-variations");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+    font-family: "JetBrains Mono";
+    font-style: normal;
+    font-weight: 100 800;
+    font-display: swap;
+    src: url("../fonts/jetbrains-mono-latin-ext-wght-normal.woff2") format("woff2-variations");
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+    font-family: "Roboto";
+    font-style: normal;
+    font-weight: 100 900;
+    font-display: swap;
+    src: url("../fonts/roboto-latin-standard-normal.woff2") format("woff2-variations");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+    font-family: "Roboto";
+    font-style: normal;
+    font-weight: 100 900;
+    font-display: swap;
+    src: url("../fonts/roboto-latin-ext-standard-normal.woff2") format("woff2-variations");
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+/* Tourney is a display face for jersey numbers and the like. Its variable file
+   carries two axes -- weight 100-900 and width 75-125 -- so font-stretch has to be
+   declared as a range too, otherwise the browser clamps to the default width and
+   `font-stretch: 125%` (a wide shirt number) silently does nothing. */
+@font-face {
+    font-family: "Tourney";
+    font-style: normal;
+    font-weight: 100 900;
+    font-stretch: 75% 125%;
+    font-display: swap;
+    src: url("../fonts/tourney-latin-standard-normal.woff2") format("woff2-variations");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+    font-family: "Tourney";
+    font-style: normal;
+    font-weight: 100 900;
+    font-stretch: 75% 125%;
+    font-display: swap;
+    src: url("../fonts/tourney-latin-ext-standard-normal.woff2") format("woff2-variations");
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+/* Setting --font-sans / --font-mono changes the body and <code> defaults; every
+   --font-* also generates a utility, so --font-roboto gives us `font-roboto` to
+   opt into Roboto where we want it. */
+@theme {
+    --font-sans: "Ubuntu", ui-sans-serif, system-ui, sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+    --font-ubuntu: "Ubuntu", ui-sans-serif, system-ui, sans-serif;
+    --font-roboto: "Roboto", ui-sans-serif, system-ui, sans-serif;
+    --font-tourney: "Tourney", ui-sans-serif, system-ui, sans-serif;
+}
+
+/* The logo is a background image, not `content:` -- content-replacement on a real
+   element (rather than ::before/::after) isn't supported in Firefox.
+
+   Default = dark-ink logo, for a light background. The media query covers "auto",
+   where the toggle deliberately sets no data-theme at all; the attribute selectors
+   are more specific, so an explicit choice always beats the OS. */
+.logo {
+    background-image: var(--logo-dark);
+    background-position: center;
+    background-repeat: no-repeat;
+    background-size: contain;
+}
+
+@media (prefers-color-scheme: dark) {
+    .logo {
+        background-image: var(--logo-light);
+    }
+}
+
+[data-theme="light"] .logo {
+    background-image: var(--logo-dark);
+}
+
+[data-theme="dark"] .logo {
+    background-image: var(--logo-light);
+}
+
+/* Club-uploaded logos are arbitrary raster files (often much smaller than the
+   badge they're displayed in), so the browser is upscaling them -- and the
+   default resampling some engines fall back to for that reads as pixelated.
+   Forcing the element onto its own GPU-composited layer makes Chrome/Safari
+   pick their higher-quality scaler; the image-rendering hints are a no-op
+   where unsupported, degrading gracefully to the browser default. Doesn't
+   apply to SVG logos, which scale losslessly regardless. */
+.club-logo {
+    image-rendering: -webkit-optimize-contrast;
+    image-rendering: smooth;
+    image-rendering: high-quality;
+    backface-visibility: hidden;
+    transform: translateZ(0);
+}

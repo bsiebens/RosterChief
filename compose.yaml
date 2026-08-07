@@ -1,0 +1,88 @@
+# One server. The same image and the same environment variables run a multi-server
+# deployment: point DJANGO_DATABASE_URL / DJANGO_REDIS_URL at your central services, set a
+# bucket, drop the `db` and `redis` services, and run several `web` containers behind a load
+# balancer. Nothing in the code changes.
+
+name: rosterchief
+
+services:
+  caddy:
+    build:
+      context: ./deploy/caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      # A wildcard certificate for *.rosterchief.app cannot be issued over HTTP-01 — Let's
+      # Encrypt only does wildcards via DNS-01. That is why Caddy needs a DNS API token, and
+      # why this image is built with the provider's DNS plugin rather than pulled as-is.
+      ROSTERCHIEF_BASE_DOMAIN: ${ROSTERCHIEF_BASE_DOMAIN:?set the base domain, e.g. rosterchief.app}
+      ACME_EMAIL: ${ACME_EMAIL:?set an email for Let's Encrypt}
+      CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN:?DNS-01 needs an API token with DNS:Edit on the zone}
+    volumes:
+      - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+      # Read-only: Caddy serves club logos straight off disk instead of round-tripping every
+      # image request through a gunicorn worker. Same volume `web` writes uploads into.
+      - media_data:/srv/media:ro
+    depends_on:
+      - web
+
+  web:
+    build: .
+    restart: unless-stopped
+    env_file: .env.production
+    volumes:
+      # Uploaded club logos, while storage is local disk (see rosterchief/urls.py). Without
+      # this, a rebuild or recreate wipes MEDIA_ROOT even though the container itself keeps
+      # running fine in between.
+      - media_data:/app/media
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-rosterchief}
+      POSTGRES_USER: ${POSTGRES_USER:-rosterchief}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set a database password}
+    # shared_buffers/max_connections default to 128MB / 100 — sized for a much bigger database
+    # than this app's (DEPLOYMENT.md: ~0.2GB after 5 years). 20 connections is comfortably above
+    # 2 gunicorn workers x 4 threads plus the odd `manage.py` one-off; trimmed both for the box,
+    # not for the data.
+    command: ["postgres", "-c", "shared_buffers=64MB", "-c", "max_connections=20"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-rosterchief}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # Cache only, so nothing here needs to survive a restart. It is not optional though: it
+    # is what keeps every gunicorn worker agreeing about which feature flags are on. maxmemory
+    # is a ceiling, not a saving — this is already the smallest process in the stack — but on a
+    # memory-limited box it should evict cache entries under pressure, not grow unbounded.
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "32mb", "--maxmemory-policy", "allkeys-lru"]
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:
+  media_data:

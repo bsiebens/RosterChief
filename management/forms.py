@@ -1,0 +1,512 @@
+import datetime
+from decimal import Decimal
+
+from django import forms
+from django.contrib.auth import get_user_model
+from django.utils import timezone
+from django.utils.translation import gettext_lazy as _
+
+from club.models import ClubMembership, ClubRole, FeePayment, Season, Sponsor
+from club.services.access import is_club_admin, teams_managed_by
+from events.models import Competition, Event, EventSeries, Location, Opponent
+from events.services.rbihf_import import RBIHFImportError, extract_team_id
+from members.models import Family, FamilyMembership, Member
+from members.services.family import find_member_by_email
+from news.models import News
+from teams.models import Position, StaffAssignment, Team, TeamMembership, TeamPhoto
+
+from .recurrence_ui import FREQUENCY_CHOICES, WEEKDAY_CHOICES, build_rrule, parse_rrule
+
+User = get_user_model()
+
+
+class MemberForm(forms.ModelForm):
+    class Meta:
+        model = Member
+        fields = ["first_name", "last_name", "date_of_birth", "email", "phone", "emergency_phone"]
+        widgets = {"date_of_birth": forms.DateInput(attrs={"type": "date"})}
+
+
+class TeamForm(forms.ModelForm):
+    class Meta:
+        model = Team
+        fields = ["name", "short_name"]
+
+
+class TeamPhotoForm(forms.ModelForm):
+    """One photo per (team, season) -- bound to the existing TeamPhoto (if
+    any) by the view's get_form_kwargs, same "create or update the one row
+    for this scope" pattern as controlpanel.forms.HomeLocationForm."""
+
+    class Meta:
+        model = TeamPhoto
+        fields = ["image"]
+
+
+class TeamMembershipForm(forms.ModelForm):
+    """Add/edit one roster entry -- team and season come from the view (the URL
+    already identifies both), never from the form itself."""
+
+    class Meta:
+        model = TeamMembership
+        fields = ["member", "position", "jersey_number", "is_captain", "is_alternate_captain"]
+        widgets = {"member": forms.Select(attrs={"data-searchable": "true", "data-search-placeholder": _("Type a name to search...")})}
+
+    def __init__(self, *args, club=None, team=None, season=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.team = team
+        self.season = season
+        # Eligible to be added regardless of which season's roster is being edited
+        # (the team detail page's season switcher can be pointed at an older
+        # season): active this season or the next one, not lapsed/pending/cancelled
+        # or active only in some other season.
+        today = timezone.localdate()
+        eligible_seasons = [s for s in (Season.covering(club, today), Season.next_after(club, today)) if s is not None]
+        members = Member.objects.filter(member_of__club=club, member_of__season__in=eligible_seasons, member_of__status=ClubMembership.StatusChoices.ACTIVE).distinct()
+        if team is not None and season is not None:
+            # Already on this team's roster this season -- offering them again
+            # would just fail the unique_member_per_team_per_season constraint.
+            taken = TeamMembership.objects.filter(team=team, season=season).exclude(pk=self.instance.pk).values_list("member_id", flat=True)
+            members = members.exclude(pk__in=taken)
+        self.fields["member"].queryset = members
+        self.fields["position"].queryset = Position.objects.filter(club=club, staff_position=False)
+
+    def clean(self):
+        cleaned = super().clean()
+        # team/season aren't form fields (the view sets them from the URL, not user
+        # input), so Django's automatic validate_unique() excludes both of them --
+        # and with them, the whole unique_jersey_number_per_team_per_season check.
+        # Without this, a clashing jersey number reaches the database unrejected
+        # and surfaces as a raw IntegrityError instead of a form error.
+        jersey_number = cleaned.get("jersey_number")
+        if jersey_number is not None and self.team is not None and self.season is not None:
+            clash = TeamMembership.objects.filter(team=self.team, season=self.season, jersey_number=jersey_number).exclude(pk=self.instance.pk).exists()
+            if clash:
+                self.add_error("jersey_number", _("Another player on this team already has this jersey number this season."))
+        return cleaned
+
+
+class StaffAssignmentForm(forms.ModelForm):
+    """Assign/edit one staff assignment -- team and season come from the view,
+    same reasoning as TeamMembershipForm."""
+
+    class Meta:
+        model = StaffAssignment
+        fields = ["member", "position"]
+        widgets = {"member": forms.Select(attrs={"data-searchable": "true", "data-search-placeholder": _("Type a name to search...")})}
+
+    def __init__(self, *args, club=None, team=None, season=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        # See TeamMembershipForm for why current-or-next-season: eligible to be
+        # assigned regardless of which season's staff list is being edited.
+        today = timezone.localdate()
+        eligible_seasons = [s for s in (Season.covering(club, today), Season.next_after(club, today)) if s is not None]
+        members = Member.objects.filter(member_of__club=club, member_of__season__in=eligible_seasons, member_of__status=ClubMembership.StatusChoices.ACTIVE).distinct()
+        if team is not None and season is not None:
+            taken = StaffAssignment.objects.filter(team=team, season=season).exclude(pk=self.instance.pk).values_list("member_id", flat=True)
+            members = members.exclude(pk__in=taken)
+        self.fields["member"].queryset = members
+        self.fields["position"].queryset = Position.objects.filter(club=club, staff_position=True)
+
+
+class PositionForm(forms.ModelForm):
+    class Meta:
+        model = Position
+        fields = ["name", "short_name", "ordering", "staff_position", "management_position"]
+
+    def clean(self):
+        cleaned = super().clean()
+        # Mirrors Position's management_position_implies_staff_position check
+        # constraint -- caught here so it reads as a form error, not a 500.
+        if cleaned.get("management_position") and not cleaned.get("staff_position"):
+            self.add_error("management_position", _("A management position must also be a staff position."))
+        return cleaned
+
+
+class LocationForm(forms.ModelForm):
+    class Meta:
+        model = Location
+        fields = ["name", "address", "city", "zip_code", "country"]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # CountryField's own widget (a lazily-translated Select) must stay the widget
+        # class -- only the searchable-select JS hooks are added on top of it, the
+        # same progressive enhancement TeamMembershipForm uses for its member field.
+        self.fields["country"].widget.attrs.update({"data-searchable": "true", "data-search-placeholder": _("Type a country to search...")})
+
+
+class OpponentForm(forms.ModelForm):
+    class Meta:
+        model = Opponent
+        fields = ["name", "logo"]
+
+
+class SponsorForm(forms.ModelForm):
+    class Meta:
+        model = Sponsor
+        fields = ["name", "logo", "url", "start_date", "end_date"]
+        widgets = {
+            "start_date": forms.DateInput(attrs={"type": "date"}),
+            "end_date": forms.DateInput(attrs={"type": "date"}),
+        }
+
+    def clean(self):
+        cleaned = super().clean()
+        # Mirrors Sponsor.clean() -- caught here too so it reads as a form
+        # error tied to the end_date field, not a raw ValidationError.
+        start_date, end_date = cleaned.get("start_date"), cleaned.get("end_date")
+        if start_date and end_date and end_date < start_date:
+            self.add_error("end_date", _("End date can't be before the start date."))
+        return cleaned
+
+
+class EventAudienceFormMixin:
+    """Shared club/user-scoped audience fields for EventForm and EventSeriesForm:
+    teams restricted to the ones the requester manages (all of them for an
+    admin), and a non-admin must pick at least one -- a team-less/club-wide
+    event (e.g. an AGM) has no team-manager claim to anchor it to, so that's
+    admin-only."""
+
+    def scope_audience_fields(self, club, user):
+        self.club = club
+        self.user = user
+        self.fields["teams"].queryset = Team.objects.filter(club=club) if is_club_admin(user, club) else teams_managed_by(user, club)
+        self.fields["location"].queryset = Location.objects.filter(club=club)
+        self.fields["opponent"].queryset = Opponent.objects.filter(club=club)
+        members = Member.objects.filter(member_of__club=club).distinct()
+        self.fields["invited_members"].queryset = members
+        self.fields["excluded_members"].queryset = members
+
+    def clean_teams_requires_one_for_non_admins(self, cleaned):
+        teams = cleaned.get("teams")
+        if teams is not None and not teams.exists() and not is_club_admin(self.user, self.club):
+            self.add_error("teams", _("Select at least one of your teams, or ask an admin to create a club-wide event."))
+
+
+_AUDIENCE_WIDGETS = {
+    "teams": forms.SelectMultiple(attrs={"data-searchable": "true", "data-search-placeholder": _("Type a team to search...")}),
+    "invited_members": forms.SelectMultiple(attrs={"data-searchable": "true", "data-search-placeholder": _("Type a name to search...")}),
+    "excluded_members": forms.SelectMultiple(attrs={"data-searchable": "true", "data-search-placeholder": _("Type a name to search...")}),
+}
+
+
+class EventForm(EventAudienceFormMixin, forms.ModelForm):
+    class Meta:
+        model = Event
+        fields = ["title", "kind", "teams", "invited_members", "excluded_members", "location", "opponent", "start", "end", "gathering", "deadline", "competition", "external_game_id", "score_for", "score_against", "is_live"]
+        widgets = {
+            "start": forms.DateTimeInput(attrs={"type": "datetime-local"}),
+            "end": forms.DateTimeInput(attrs={"type": "datetime-local"}),
+            "gathering": forms.DateTimeInput(attrs={"type": "datetime-local"}),
+            "deadline": forms.DateTimeInput(attrs={"type": "datetime-local"}),
+            "score_for": forms.NumberInput(attrs={"min": 0}),
+            "score_against": forms.NumberInput(attrs={"min": 0}),
+            **_AUDIENCE_WIDGETS,
+        }
+
+    def __init__(self, *args, club=None, user=None, editing=False, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.scope_audience_fields(club, user)
+        # Unlike the Django-admin form (events.admin.EventAdminForm), this dropdown
+        # isn't filtered by which competitions have their feature flag on for the
+        # club -- a manager should be able to pick any competition when scheduling a
+        # game; it's fetch_game_info (events.services.competitions) that gates the
+        # actual per-club fetch once a competition is set.
+        self.fields["competition"] = forms.ChoiceField(
+            choices=[("", "---------"), *[(competition.name, competition.name) for competition in Competition.objects.all()]],
+            required=False,
+            label=self.fields["competition"].label,
+            help_text=self.fields["competition"].help_text,
+        )
+        if not editing:
+            # Score/live status don't exist yet for a game that's only just being
+            # scheduled -- offering them on the add form is just noise. Editing an
+            # existing game is the only time there's anything to record here.
+            del self.fields["score_for"]
+            del self.fields["score_against"]
+            del self.fields["is_live"]
+
+    def clean(self):
+        cleaned = super().clean()
+        self.clean_teams_requires_one_for_non_admins(cleaned)
+        return cleaned
+
+
+class RBIHFImportForm(forms.Form):
+    """Step 1 of importing a team's fixtures from RBIHF's own website -- see
+    events.services.rbihf_import. Only the URL and which of the club's own
+    teams it applies to; everything else is scraped."""
+
+    url = forms.CharField(
+        label=_("RBIHF team page URL"),
+        help_text=_("E.g. https://www.rbihf.be/league/team/4460"),
+        widget=forms.URLInput(attrs={"placeholder": "https://www.rbihf.be/league/team/4460"}),
+    )
+    team = forms.ModelChoiceField(queryset=Team.objects.none(), label=_("Team"), help_text=_("Which of your teams this fixture list is for."))
+
+    def __init__(self, *args, club=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["team"].queryset = Team.objects.filter(club=club)
+
+    def clean_url(self):
+        url = self.cleaned_data["url"].strip()
+        try:
+            extract_team_id(url)
+        except RBIHFImportError as error:
+            raise forms.ValidationError(str(error)) from error
+        return url
+
+
+class EventSeriesForm(EventAudienceFormMixin, forms.ModelForm):
+    """A friendly weekly/monthly recurrence picker on top of EventSeries' raw
+    RRULE (see management.recurrence_ui) -- covers the common case (every N
+    weeks/months) with an advanced raw-RRULE field as an escape hatch for
+    anything else."""
+
+    frequency = forms.ChoiceField(choices=FREQUENCY_CHOICES, initial="weekly", label=_("Repeats"))
+    interval = forms.IntegerField(min_value=1, initial=1, label=_("Every"), help_text=_("E.g. 2 for every other week/month."))
+    # A plain multi-select, not CheckboxSelectMultiple: its widget_type ("checkboxselectmultiple")
+    # isn't one form_field's ui.py recognises, which would silently render a broken
+    # plain text input instead -- see the "lazyselect" fix for the same class of bug.
+    weekdays = forms.MultipleChoiceField(choices=WEEKDAY_CHOICES, required=False, label=_("On"), widget=forms.SelectMultiple(attrs={"data-searchable": "true"}))
+    duration_hours = forms.IntegerField(min_value=0, required=False, label=_("Duration (hours)"))
+    duration_minutes = forms.IntegerField(min_value=0, max_value=59, required=False, label=_("Duration (minutes)"))
+    gathering_minutes_before = forms.IntegerField(min_value=0, required=False, label=_("Gather (minutes before)"))
+    deadline_minutes_before = forms.IntegerField(min_value=0, required=False, label=_("Registration deadline (minutes before)"))
+    advanced_rrule = forms.CharField(required=False, label=_("Advanced: raw recurrence rule"), help_text=_("Overrides the fields above if filled in. RFC 5545 RRULE, e.g. FREQ=WEEKLY;BYDAY=MO,WE."))
+
+    class Meta:
+        model = EventSeries
+        fields = ["title", "kind", "dtstart", "until", "teams", "invited_members", "excluded_members", "location", "opponent"]
+        widgets = {
+            "dtstart": forms.DateTimeInput(attrs={"type": "datetime-local"}),
+            "until": forms.DateTimeInput(attrs={"type": "datetime-local"}),
+            **_AUDIENCE_WIDGETS,
+        }
+
+    def __init__(self, *args, club=None, user=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.scope_audience_fields(club, user)
+
+        if self.instance.pk:
+            parsed = parse_rrule(self.instance.rrule)
+            if parsed is not None:
+                self.fields["frequency"].initial = parsed["frequency"]
+                self.fields["interval"].initial = parsed["interval"]
+                self.fields["weekdays"].initial = parsed["weekdays"]
+            else:
+                # Not one of our two shapes (hand-written/imported) -- show it
+                # verbatim in the advanced field rather than guessing at it.
+                self.fields["advanced_rrule"].initial = self.instance.rrule
+
+            if self.instance.duration is not None:
+                total_minutes = int(self.instance.duration.total_seconds() // 60)
+                self.fields["duration_hours"].initial = total_minutes // 60
+                self.fields["duration_minutes"].initial = total_minutes % 60
+            if self.instance.gathering_offset is not None:
+                self.fields["gathering_minutes_before"].initial = int(self.instance.gathering_offset.total_seconds() // 60)
+            if self.instance.deadline_offset is not None:
+                self.fields["deadline_minutes_before"].initial = int(self.instance.deadline_offset.total_seconds() // 60)
+
+    def clean(self):
+        cleaned = super().clean()
+        self.clean_teams_requires_one_for_non_admins(cleaned)
+
+        if cleaned.get("advanced_rrule"):
+            return cleaned  # the advanced field wins outright; nothing else to check
+
+        if cleaned.get("frequency") == "weekly" and not cleaned.get("weekdays"):
+            self.add_error("weekdays", _("Pick at least one day of the week."))
+        return cleaned
+
+    def save(self, commit=True):
+        instance = super().save(commit=False)
+        cleaned = self.cleaned_data
+
+        advanced = (cleaned.get("advanced_rrule") or "").strip()
+        instance.rrule = advanced or build_rrule(cleaned["frequency"], cleaned["interval"], cleaned.get("weekdays"))
+
+        hours, minutes = cleaned.get("duration_hours") or 0, cleaned.get("duration_minutes") or 0
+        instance.duration = datetime.timedelta(hours=hours, minutes=minutes) if (hours or minutes) else None
+
+        gathering_minutes = cleaned.get("gathering_minutes_before")
+        instance.gathering_offset = datetime.timedelta(minutes=gathering_minutes) if gathering_minutes else None
+
+        deadline_minutes = cleaned.get("deadline_minutes_before")
+        instance.deadline_offset = datetime.timedelta(minutes=deadline_minutes) if deadline_minutes else None
+
+        if commit:
+            instance.save()
+            self.save_m2m()
+        return instance
+
+
+class ClubRoleAssignForm(forms.ModelForm):
+    """Grant a club-wide role to a member already affiliated with this club."""
+
+    class Meta:
+        model = ClubRole
+        fields = ["member", "role"]
+        widgets = {"member": forms.Select(attrs={"data-searchable": "true", "data-search-placeholder": _("Type a name to search...")})}
+
+    def __init__(self, *args, club=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Never list members of other clubs -- this isn't a platform-wide picker.
+        self.fields["member"].queryset = Member.objects.filter(member_of__club=club).distinct()
+
+
+class FamilyCreateForm(forms.Form):
+    """One new family in one go: a parent (who gets a login) and a child (who
+    doesn't). See members.services.family.register_family."""
+
+    parent_first_name = forms.CharField(label=_("Parent first name"))
+    parent_last_name = forms.CharField(label=_("Parent last name"))
+    parent_email = forms.EmailField(label=_("Parent email"), help_text=_("If this email has no account yet, one is created and they set a password via the reset link."))
+
+    child_first_name = forms.CharField(label=_("Child first name"))
+    child_last_name = forms.CharField(label=_("Child last name"))
+    child_date_of_birth = forms.DateField(label=_("Child date of birth"), required=False, widget=forms.DateInput(attrs={"type": "date"}))
+
+
+class AddChildForm(forms.Form):
+    """A family that needs one more child registered -- see
+    members.services.family.add_child_to_family."""
+
+    first_name = forms.CharField(label=_("First name"))
+    last_name = forms.CharField(label=_("Last name"))
+    date_of_birth = forms.DateField(label=_("Date of birth"), required=False, widget=forms.DateInput(attrs={"type": "date"}))
+
+
+class AddParentForm(forms.Form):
+    """A family that needs one more parent/guardian registered -- see
+    members.services.family.add_parent_to_family."""
+
+    email = forms.EmailField(label=_("Email address"), help_text=_("If this email has no account yet, one is created and they set a password via the reset link."))
+    first_name = forms.CharField(label=_("First name"), required=False)
+    last_name = forms.CharField(label=_("Last name"), required=False)
+
+    def clean(self):
+        cleaned = super().clean()
+        email = cleaned.get("email")
+
+        # Only a brand-new person needs a name; an existing member already has one.
+        if email and find_member_by_email(email) is None:
+            for field in ("first_name", "last_name"):
+                if not cleaned.get(field):
+                    self.add_error(field, _("Required: this email has no account yet."))
+
+        return cleaned
+
+
+class AttachToFamilyForm(forms.Form):
+    """Link a standalone member into a family -- a new one, or an existing one they
+    turn out to belong to. See members.services.family.attach_to_family."""
+
+    role = forms.ChoiceField(label=_("Role"), choices=FamilyMembership.FamilyRole.choices)
+    family = forms.ModelChoiceField(label=_("Family"), queryset=Family.objects.none(), required=False, empty_label=_("— start a new family —"))
+
+    def __init__(self, *args, club=None, member=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Same scoping query as management.views.families_of_club -- inlined rather
+        # than imported, since that function lives in views.py, which imports this
+        # module (a module-level import back here would be circular).
+        queryset = Family.objects.filter(memberships__member__member_of__club=club).distinct()
+        if member is not None:
+            # Already a member of it -- offering it again would be a no-op re-add.
+            queryset = queryset.exclude(memberships__member=member)
+        self.fields["family"].queryset = queryset
+
+
+class MemberImportUploadForm(forms.Form):
+    """The mass-upload entry point -- one .xlsx file, built from the downloadable
+    template. See management.bulk_import.read_member_import_workbook."""
+
+    file = forms.FileField(label=_("Excel file"), help_text=_("Use the downloaded template — one row per member."))
+
+
+class GrantLoginForm(forms.Form):
+    """A login-less family member (a child, typically) getting their own account --
+    see members.services.family.grant_login. Pre-filled from the member's contact
+    email where one is already on file; still editable, and required either way."""
+
+    email = forms.EmailField(label=_("Email"), help_text=_("They'll set a password via the reset link the first time they sign in."))
+
+    def clean_email(self):
+        email = self.cleaned_data["email"]
+        if User.objects.filter(email__iexact=email).exists():
+            raise forms.ValidationError(_("This email is already in use."))
+        return email
+
+
+class ClubMembershipForm(forms.ModelForm):
+    """This season's standing -- shown and edited right on the member's own page,
+    since a Member has no club of its own without one. fee_amount is the only
+    money field here -- amount_paid is exclusively written by club.services.fees,
+    never hand-edited."""
+
+    class Meta:
+        model = ClubMembership
+        fields = ["license", "status", "fee_status", "fee_amount"]
+
+
+class NewsForm(forms.ModelForm):
+    """Title/teams/visibility/body only -- status and published_at are never
+    directly editable, only through the publish/unpublish actions."""
+
+    class Meta:
+        model = News
+        fields = ["title", "teams", "visibility", "body"]
+        widgets = {
+            "teams": forms.SelectMultiple(attrs={"data-searchable": "true", "data-search-placeholder": _("Type to filter teams...")}),
+            "body": forms.Textarea(attrs={"rows": 8}),
+        }
+
+    def __init__(self, *args, club=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["teams"].queryset = Team.objects.filter(club=club)
+
+
+class MultipleFileInput(forms.ClearableFileInput):
+    allow_multiple_selected = True
+
+
+class MultipleFileField(forms.FileField):
+    """Django's own documented recipe for a multi-file upload field: the plain
+    FileField only ever picks up one of several selected files, so clean() has
+    to iterate the list itself instead."""
+
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault("widget", MultipleFileInput(attrs={"multiple": True}))
+        super().__init__(*args, **kwargs)
+
+    def clean(self, data, initial=None):
+        single_file_clean = super().clean
+        if isinstance(data, (list, tuple)):
+            return [single_file_clean(item, initial) for item in data]
+        return [single_file_clean(data, initial)] if data else []
+
+
+class NewsPhotoUploadForm(forms.Form):
+    images = MultipleFileField(label=_("Photos"))
+
+
+class NewsPublishForm(forms.Form):
+    published_at = forms.DateTimeField(
+        label=_("Publish date"),
+        initial=timezone.now,
+        widget=forms.DateTimeInput(attrs={"type": "datetime-local"}),
+        help_text=_("Leave as now to publish immediately, or pick a future date/time to schedule it."),
+    )
+
+
+class RecordFeePaymentForm(forms.Form):
+    """Money received against one membership's fee -- see club.services.fees.record_payment.
+    Reusable for any amount, partial or the exact remaining balance; "Mark fully
+    paid" (management.views.MembershipMarkFullyPaidView) skips this form entirely
+    and settles the balance directly in one click."""
+
+    amount = forms.DecimalField(label=_("Amount"), max_digits=10, decimal_places=2, min_value=Decimal("0.01"))
+    method = forms.ChoiceField(label=_("Method"), choices=FeePayment.Method.choices)
+    reference = forms.CharField(label=_("Reference"), required=False, help_text=_("Bank reference, transaction id — whatever lets you find this again."))
+    note = forms.CharField(label=_("Note"), required=False, widget=forms.Textarea(attrs={"rows": 2}))

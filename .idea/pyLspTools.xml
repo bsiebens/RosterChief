@@ -13,4 +13,7 @@
       </map>
     </option>
   </component>
+  <component name="RuffConfiguration">
+    <option name="enabled" value="true" />
+  </component>
 </project>

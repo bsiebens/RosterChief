@@ -1,0 +1,31 @@
+{% extends "management/base.html" %}
+{% load lucide i18n %}
+
+{% block heading %}{% blocktrans with name=family %}{{ name }} Family{% endblocktrans %}{% endblock heading %}
+
+{% block actions %}
+{% if is_club_admin %}
+{% trans "Add parent" as add_parent_label %}
+{% trans "Add child" as add_child_label %}
+<button class="btn btn-outline gap-2" type="button" onclick="document.getElementById('add_parent_modal').showModal()">{% lucide "user-plus" size=16 %} {{ add_parent_label }}</button>
+<button class="btn btn-outline gap-2" type="button" onclick="document.getElementById('add_child_modal').showModal()">{% lucide "baby" size=16 %} {{ add_child_label }}</button>
+{% endif %}
+{% endblock actions %}
+
+{% block panel %}
+<div class="card bg-base-100 shadow">
+    <div class="card-body">
+        {% include "management/_family_members_table.html" with group=group %}
+    </div>
+</div>
+
+{% if is_club_admin %}
+{% url 'management:family_add_parent' family.pk as add_parent_url %}
+{% url 'management:family_add_child' family.pk as add_child_url %}
+{% trans "Add parent" as add_parent_title %}
+{% trans "Add child" as add_child_title %}
+{% trans "If this email has no account yet, one is created and they set a password via the reset link." as add_parent_blurb %}
+{% include "controlpanel/_modal_form.html" with modal_id="add_parent_modal" title=add_parent_title form=add_parent_form action_url=add_parent_url submit_label=add_parent_title submit_icon="user-plus" blurb=add_parent_blurb %}
+{% include "controlpanel/_modal_form.html" with modal_id="add_child_modal" title=add_child_title form=add_child_form action_url=add_child_url submit_label=add_child_title submit_icon="baby" %}
+{% endif %}
+{% endblock panel %}

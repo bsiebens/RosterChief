@@ -1,0 +1,59 @@
+{% extends "management/base.html" %}
+{% load i18n lucide ui %}
+
+{% block heading %}{% trans "Locations" %}{% endblock heading %}
+
+{% block actions %}
+    <a class="btn btn-primary gap-2" href="{% url 'management:location_create' %}">{% lucide "plus" size=16 %} {% trans "New location" %}</a>
+{% endblock actions %}
+
+{% block panel %}
+    <div class="card bg-base-100 shadow">
+        <div class="card-body">
+            <div class="overflow-x-auto">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>{% trans "Name" %}</th>
+                            <th>{% trans "Address" %}</th>
+                            <th>{% trans "City" %}</th>
+                            <th>{% trans "Country" %}</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for location in locations %}
+                            <tr>
+                                <td>
+                                    {{ location.name }}
+                                    {% if location.is_home %}<span class="badge badge-sm badge-primary ml-1">{% trans "Home" %}</span>{% endif %}
+                                </td>
+                                <td>{{ location.address }}</td>
+                                <td>{{ location.city }}</td>
+                                <td>{{ location.country }}</td>
+                                <td class="text-right">
+                                    <div class="flex justify-end gap-1">
+                                        <a class="btn btn-outline btn-sm" href="{% url 'management:location_update' location.pk %}" aria-label="{% trans 'Edit' %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</a>
+                                        <button class="btn btn-sm btn-outline btn-error" type="button" onclick="document.getElementById('{{ location.pk|dom_id:"location_delete_modal" }}').showModal()" aria-label="{% trans 'Delete' %}">{% lucide "trash-2" size=14 %} {% trans "Delete" %}</button>
+                                    </div>
+                                </td>
+                            </tr>
+                        {% empty %}
+                            <tr>
+                                <td colspan="5" class="text-center opacity-60">{% trans "No locations yet." %}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    {% trans "Delete location" as delete_location_title %}
+    {% trans "Delete" as delete_label %}
+    {% for location in locations %}
+        {% url 'management:location_delete' location.pk as location_delete_url %}
+        {% blocktrans with name=location.name asvar delete_location_body %}Delete “{{ name }}”? Any events at this location keep their history but lose the link. This cannot be undone.{% endblocktrans %}
+        {% include "controlpanel/_confirm_modal.html" with modal_id=location.pk|dom_id:"location_delete_modal" title=delete_location_title body=delete_location_body action_url=location_delete_url submit_label=delete_label %}
+    {% endfor %}
+{% endblock panel %}

@@ -1,0 +1,73 @@
+{% extends "mfa/base_entrance.html" %}
+{% load allauth i18n lucide %}
+
+{% comment %}
+    Overridden for layout only: Cancel sits beside Sign In, and "Use a security key" is an
+    accent button under Alternative options. The code field itself is styled by the `fields`
+    element (it renders a `code` field as a daisyUI otp), so the reauthenticate and TOTP
+    activate pages get the same input without a template of their own.
+
+    Cancel and the security key submit *other* forms (`logout-from-stage`, `webauthn_form`)
+    through the HTML `form` attribute — forms cannot nest, so those sit at the end of the
+    page and the buttons point at them by id.
+{% endcomment %}
+
+{% block head_title %}
+    {% trans "Sign In" %}
+{% endblock head_title %}
+
+{% block content %}
+    {% element h1 %}
+        {% trans "Two-Factor Authentication" %}
+    {% endelement %}
+    {% element p %}
+        {% blocktranslate %}Your account is protected by two-factor authentication. Please enter an authenticator code:{% endblocktranslate %}
+    {% endelement %}
+
+    <form class="mt-8" method="post" action="{% url 'mfa_authenticate' %}">
+        {% csrf_token %}
+
+        <div class="mb-10">
+            {% element fields form=form unlabeled=True %}
+            {% endelement %}
+        </div>
+
+        <div class="flex flex-wrap items-center justify-end gap-2">
+            <button class="btn btn-outline gap-2" type="submit" form="logout-from-stage">{% lucide "x" size=16 %} {% trans "Cancel" %}</button>
+            <button class="btn btn-primary gap-2" type="submit">{% lucide "log-in" size=16 %} {% trans "Sign In" %}</button>
+        </div>
+    </form>
+
+    {% if "webauthn" in MFA_SUPPORTED_TYPES %}
+        {% element hr %}
+        {% endelement %}
+        {% element h2 %}
+            {% translate "Alternative options" %}
+        {% endelement %}
+
+        <button class="btn btn-accent gap-2" type="button" form="webauthn_form" id="mfa_webauthn_authenticate">
+            {% lucide "user-key" size=16 %} {% trans "Use a security key" %}
+        </button>
+
+        <form id="webauthn_form" method="post" action="{% url 'mfa_authenticate' %}">
+            {% csrf_token %}
+            {{ webauthn_form.credential }}
+        </form>
+        {{ js_data|json_script:"js_data" }}
+        {% include "mfa/webauthn/snippets/scripts.html" %}
+        <script data-allauth-onload="allauth.webauthn.forms.authenticateForm" type="application/json">
+            {
+                "ids": {
+                    "authenticate": "mfa_webauthn_authenticate",
+                    "credential": "{{ webauthn_form.credential.auto_id }}",
+                    "data": "js_data"
+                }
+            }
+        </script>
+    {% endif %}
+
+    <form id="logout-from-stage" method="post" action="{% url 'account_logout' %}">
+        <input type="hidden" name="next" value="{% url 'account_login' %}">
+        {% csrf_token %}
+    </form>
+{% endblock content %}
