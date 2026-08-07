@@ -1087,6 +1087,37 @@ class MemberFamilyAttachDetachTests(ManagementTestBase):
 
         self.assertNotIn(family, response.context["attach_to_family_form"].fields["family"].queryset)
 
+    def test_a_childs_page_shows_their_guardians_phone_numbers(self):
+        family = Family.objects.create()
+        parent = Member.objects.create(first_name="Pat", last_name="Parent", phone="+32470000001", emergency_phone="+32470000002")
+        FamilyMembership.objects.create(family=family, member=self.standalone, role=FamilyMembership.FamilyRole.CHILD)
+        FamilyMembership.objects.create(family=family, member=parent, role=FamilyMembership.FamilyRole.PARENT)
+
+        response = self.club_get("member_detail", self.standalone.pk)
+
+        self.assertIn(parent, response.context["guardians"])
+        self.assertContains(response, "Pat Parent")
+        self.assertContains(response, "tel:+32 470 00 00 01")
+        self.assertContains(response, "tel:+32 470 00 00 02")
+
+    def test_a_parents_page_does_not_show_guardian_numbers(self):
+        # self.standalone has no CHILD membership anywhere -- the section must not appear.
+        response = self.club_get("member_detail", self.standalone.pk)
+
+        self.assertEqual(len(response.context["guardians"]), 0)
+        self.assertNotContains(response, "Parent/guardian contact")
+
+    def test_a_guardian_with_no_phone_numbers_gets_no_dial_buttons(self):
+        family = Family.objects.create()
+        parent = Member.objects.create(first_name="Pat", last_name="Parent")
+        FamilyMembership.objects.create(family=family, member=self.standalone, role=FamilyMembership.FamilyRole.CHILD)
+        FamilyMembership.objects.create(family=family, member=parent, role=FamilyMembership.FamilyRole.PARENT)
+
+        response = self.club_get("member_detail", self.standalone.pk)
+
+        self.assertContains(response, "Pat Parent")
+        self.assertNotContains(response, "tel:")
+
 
 class MemberDeleteTests(ManagementTestBase):
     def setUp(self):

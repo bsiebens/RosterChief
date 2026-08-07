@@ -590,6 +590,10 @@ class MemberDetailView(ClubStaffRequiredMixin, DetailView):
             attach_to_family_form=AttachToFamilyForm(club=self.request.club, member=self.object),
             current_membership=ClubMembership.objects.filter(club=self.request.club, member=self.object, season=current_season(self.request.club)).first(),
             membership_history=ClubMembership.objects.filter(club=self.request.club, member=self.object).select_related("season").order_by("-season__start_date"),
+            # Non-empty only when `member` is a CHILD in some family -- that's the same
+            # signal the Personal information card uses to decide whether to show parent
+            # contact numbers at all.
+            guardians=self.object.guardians,
             **kwargs,
         )
 

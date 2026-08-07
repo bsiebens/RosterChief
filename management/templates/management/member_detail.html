@@ -28,6 +28,16 @@
                         <dt class="text-sm opacity-70">{% trans "Emergency phone" %}</dt>
                         <dd class="font-semibold">{{ member.emergency_phone.as_international|default:"-" }}</dd>
                     </div>
+                    {% for guardian in guardians %}
+                        <div class="flex items-center justify-between py-2">
+                            <dt class="text-sm opacity-70">{% trans "Parent phone" %} — {{ guardian.get_full_name }}</dt>
+                            <dd class="font-semibold">{{ guardian.phone.as_international|default:"-" }}</dd>
+                        </div>
+                        <div class="flex items-center justify-between py-2">
+                            <dt class="text-sm opacity-70">{% trans "Parent emergency phone" %} — {{ guardian.get_full_name }}</dt>
+                            <dd class="font-semibold">{{ guardian.emergency_phone.as_international|default:"-" }}</dd>
+                        </div>
+                    {% endfor %}
                 </dl>
 
                 <div class="flex flex-row gap-2 items-center mt-2">
@@ -38,6 +48,25 @@
                         <a class="btn btn-sm btn-outline btn-error grow" href="tel:{{ member.emergency_phone.as_international }}">{% lucide "shield-alert" size=14 %} {% trans "Emergency call" %}</a>
                     {% endif %}
                 </div>
+
+                {% if guardians %}
+                    <div class="divider my-1"></div>
+                    <div class="text-xs font-semibold uppercase opacity-60 flex items-center gap-1 mb-1">
+                        {% lucide "users" size=12 %} {% trans "Parent/guardian contact" %}
+                    </div>
+                    {% for guardian in guardians %}
+                        {% if guardian.phone or guardian.emergency_phone %}
+                            <div class="flex flex-row gap-2 items-center mt-2">
+                                {% if guardian.phone %}
+                                    <a class="btn btn-sm btn-outline btn-primary grow" href="tel:{{ guardian.phone.as_international }}">{% lucide "phone" size=14 %} {% blocktrans with name=guardian.get_full_name %}Call {{ name }}{% endblocktrans %}</a>
+                                {% endif %}
+                                {% if guardian.emergency_phone %}
+                                    <a class="btn btn-sm btn-outline btn-error grow" href="tel:{{ guardian.emergency_phone.as_international }}">{% lucide "shield-alert" size=14 %} {% blocktrans with name=guardian.get_full_name %}Emergency: {{ name }}{% endblocktrans %}</a>
+                                {% endif %}
+                            </div>
+                        {% endif %}
+                    {% endfor %}
+                {% endif %}
             </div>
         </div>
 
