@@ -11,6 +11,7 @@ from ninja import Router, Schema
 from ninja.errors import HttpError
 
 from api.errors import require_club
+from club.models import ClubMembership
 from club.services.access import current_season
 
 from .models import Team, TeamMembership, TeamPhoto
@@ -32,6 +33,7 @@ class PlayerOut(Schema):
     jersey_number: int | None
     is_captain: bool
     is_alternate_captain: bool
+    license: str | None
 
 
 class PositionGroupOut(Schema):
@@ -58,7 +60,7 @@ def _to_team_out(team, request, photo=None) -> TeamOut:
     return TeamOut(id=team.pk, name=team.name, short_name=team.short_name, photo_url=photo_url)
 
 
-def _to_player_out(membership) -> PlayerOut:
+def _to_player_out(membership, license_by_member_id) -> PlayerOut:
     return PlayerOut(
         id=membership.member_id,
         first_name=membership.member.first_name,
@@ -66,6 +68,7 @@ def _to_player_out(membership) -> PlayerOut:
         jersey_number=membership.jersey_number,
         is_captain=membership.is_captain,
         is_alternate_captain=membership.is_alternate_captain,
+        license=license_by_member_id.get(membership.member_id) or None,
     )
 
 
@@ -84,9 +87,13 @@ def build_roster(team, request) -> RosterOut:
     memberships = TeamMembership.objects.filter(team=team, season=season).select_related("member", "position").order_by("position__ordering", "position__name", "jersey_number")
     assignments = team.staff_assignments.filter(season=season).select_related("member", "position").order_by("position__ordering", "position__name", "member__last_name")
 
+    # A player's license lives on their club-wide ClubMembership for the season, not on
+    # TeamMembership -- one query for all of them rather than one per player.
+    license_by_member_id = dict(ClubMembership.objects.filter(club=team.club, season=season).values_list("member_id", "license"))
+
     # groupby only groups consecutive runs -- relies on the queryset already
     # being ordered by position first, which it is.
-    players = [PositionGroupOut(position=position_name, players=[_to_player_out(m) for m in members]) for position_name, members in groupby(memberships, key=lambda m: m.position.name)]
+    players = [PositionGroupOut(position=position_name, players=[_to_player_out(m, license_by_member_id) for m in members]) for position_name, members in groupby(memberships, key=lambda m: m.position.name)]
     staff = [
         StaffMemberOut(id=assignment.member_id, first_name=assignment.member.first_name, last_name=assignment.member.last_name, position=assignment.position.name)
         for assignment in assignments

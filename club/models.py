@@ -174,6 +174,12 @@ class Sponsor(ClubScopedModel):
         # Pillow validation can't read those.
         validators=[FileExtensionValidator(allowed_extensions=["png", "jpg", "jpeg", "gif", "webp", "svg"])],
     )
+    # Not user-editable: recomputed from the logo file itself on every save, same reasoning
+    # NewsPhoto/TeamPhoto don't need this -- FileField (not ImageField) means Django never
+    # populates width/height on its own. The public API exposes these so a consumer can lay
+    # out a sponsor strip without waiting on the image to load.
+    logo_width = models.PositiveIntegerField(_("logo width"), null=True, blank=True, editable=False)
+    logo_height = models.PositiveIntegerField(_("logo height"), null=True, blank=True, editable=False)
     url = models.URLField(_("URL"), blank=True, help_text=_("The sponsor's own website, if they have one."))
 
     start_date = models.DateField(_("start date"))
@@ -190,6 +196,14 @@ class Sponsor(ClubScopedModel):
     def clean(self):
         if self.end_date is not None and self.start_date is not None and self.end_date < self.start_date:
             raise ValidationError({"end_date": _("End date can't be before the start date.")})
+
+    def save(self, *args, **kwargs):
+        # Deferred: club.services (via its __init__) imports back from club.models, so a
+        # module-level import here would be circular.
+        from club.services.images import get_image_dimensions
+
+        self.logo_width, self.logo_height = get_image_dimensions(self.logo) if self.logo else (None, None)
+        super().save(*args, **kwargs)
 
 
 class Season(ClubScopedModel):

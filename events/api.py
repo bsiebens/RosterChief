@@ -40,12 +40,18 @@ class LocationOut(Schema):
     is_home: bool
 
 
+class TeamRefOut(Schema):
+    id: uuid.UUID
+    name: str
+    logo_url: str | None
+
+
 class GameOut(Schema):
     id: uuid.UUID
     start: datetime
     location: LocationOut | None
-    home_team: str | None
-    away_team: str | None
+    home_team: TeamRefOut | None
+    away_team: TeamRefOut | None
     competition: str
     is_live: bool
     status: str  # "upcoming" | "live" | "finished"
@@ -53,21 +59,27 @@ class GameOut(Schema):
     away_score: int | None
 
 
-def _to_game_out(event, team=None) -> GameOut:
+def _to_team_ref_out(request, *, id, name, logo) -> TeamRefOut:
+    return TeamRefOut(id=id, name=name, logo_url=request.build_absolute_uri(logo.url) if logo else None)
+
+
+def _to_game_out(event, request, club, team=None) -> GameOut:
     if team is None:
         # .first() would re-query even with teams prefetched; go through the
         # prefetch cache instead.
         related_teams = list(event.teams.all())
         team = related_teams[0] if related_teams else None
 
-    team_name = team.name if team is not None else None
-    opponent_name = event.opponent.name if event.opponent_id else None
+    # Our own team has no logo of its own -- it's shown under the club's badge. The
+    # opponent is an events.models.Opponent, which does carry its own logo.
+    team_ref = _to_team_ref_out(request, id=team.pk, name=team.name, logo=club.logo) if team is not None else None
+    opponent_ref = _to_team_ref_out(request, id=event.opponent_id, name=event.opponent.name, logo=event.opponent.logo) if event.opponent_id else None
 
     if event.is_home_game:
-        home_team, away_team = team_name, opponent_name
+        home_team, away_team = team_ref, opponent_ref
         home_score, away_score = event.score_for, event.score_against
     else:
-        home_team, away_team = opponent_name, team_name
+        home_team, away_team = opponent_ref, team_ref
         home_score, away_score = event.score_against, event.score_for
 
     if event.is_live:
@@ -103,7 +115,7 @@ def list_upcoming_games(request, count: int = DEFAULT_UPCOMING_COUNT):
 
     events = Event.objects.filter(club=club, kind__in=UPCOMING_KINDS, cancelled=False, start__gte=timezone.now()).select_related("opponent", "location").prefetch_related("teams").order_by("start")[:count]
 
-    return [_to_game_out(event) for event in events]
+    return [_to_game_out(event, request, club) for event in events]
 
 
 @router.get("/games/live/", response=list[GameOut], summary="Live games")
@@ -112,7 +124,7 @@ def list_live_games(request):
 
     events = Event.objects.filter(club=club, kind=Event.EventKind.GAME, cancelled=False, is_live=True).select_related("opponent", "location").prefetch_related("teams").order_by("start")
 
-    return [_to_game_out(event) for event in events]
+    return [_to_game_out(event, request, club) for event in events]
 
 
 @router.get("/teams/{team_id}/games/", response=list[GameOut], summary="A team's current-season games")
@@ -136,4 +148,4 @@ def list_team_games(request, team_id: uuid.UUID):
         .order_by("start")
     )
 
-    return [_to_game_out(event, team=team) for event in events]
+    return [_to_game_out(event, request, club, team=team) for event in events]

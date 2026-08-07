@@ -11,7 +11,9 @@ import uuid
 from datetime import datetime
 
 from django.utils import timezone
+from django.utils.text import Truncator
 from ninja import Router, Schema
+from ninja.errors import HttpError
 
 from api.errors import require_club
 
@@ -21,6 +23,11 @@ router = Router(tags=["news"])
 
 DEFAULT_LIMIT = 20
 MAX_LIMIT = 100
+
+#: Words, not characters -- reads more naturally cut off mid-list than a hard
+#: character count, and body is plain text so there's no markup to worry about
+#: truncating mid-tag.
+EXCERPT_WORDS = 40
 
 
 class NewsPhotoOut(Schema):
@@ -33,6 +40,7 @@ class NewsItemOut(Schema):
     id: uuid.UUID
     title: str
     slug: str
+    excerpt: str
     body: str
     published_at: datetime
     teams: list[str]
@@ -46,11 +54,21 @@ class NewsListOut(Schema):
     results: list[NewsItemOut]
 
 
+def _visible_news(club):
+    return News.objects.filter(
+        club=club,
+        status=News.Status.PUBLISHED,
+        published_at__lte=timezone.now(),
+        visibility__in=[News.Visibility.EXTERNAL, News.Visibility.BOTH],
+    )
+
+
 def _to_news_item_out(item, request) -> NewsItemOut:
     return NewsItemOut(
         id=item.pk,
         title=item.title,
         slug=item.slug,
+        excerpt=Truncator(item.body).words(EXCERPT_WORDS, truncate=" …"),
         body=item.body,
         published_at=item.published_at,
         teams=[team.name for team in item.teams.all()],
@@ -66,18 +84,19 @@ def list_news(request, limit: int = DEFAULT_LIMIT, offset: int = 0):
     limit = max(1, min(limit, MAX_LIMIT))
     offset = max(0, offset)
 
-    queryset = (
-        News.objects.filter(
-            club=club,
-            status=News.Status.PUBLISHED,
-            published_at__lte=timezone.now(),
-            visibility__in=[News.Visibility.EXTERNAL, News.Visibility.BOTH],
-        )
-        .prefetch_related("photos", "teams")
-        .order_by("-published_at")
-    )
+    queryset = _visible_news(club).prefetch_related("photos", "teams").order_by("-published_at")
 
     count = queryset.count()
     page = queryset[offset : offset + limit]
 
     return NewsListOut(count=count, limit=limit, offset=offset, results=[_to_news_item_out(item, request) for item in page])
+
+
+@router.get("/{slug}/", response=NewsItemOut, summary="Single published news item")
+def get_news_item(request, slug: str):
+    club = require_club(request)
+    item = _visible_news(club).filter(slug=slug).prefetch_related("photos", "teams").first()
+    if item is None:
+        raise HttpError(404, "No such news item.")
+
+    return _to_news_item_out(item, request)

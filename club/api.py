@@ -21,6 +21,8 @@ class SponsorOut(Schema):
     id: uuid.UUID
     name: str
     logo_url: str | None
+    logo_width: int | None
+    logo_height: int | None
     url: str | None
     start_date: date
     end_date: date | None
@@ -31,6 +33,8 @@ def _to_sponsor_out(sponsor, request) -> SponsorOut:
         id=sponsor.pk,
         name=sponsor.name,
         logo_url=request.build_absolute_uri(sponsor.logo.url) if sponsor.logo else None,
+        logo_width=sponsor.logo_width,
+        logo_height=sponsor.logo_height,
         url=sponsor.url or None,
         start_date=sponsor.start_date,
         end_date=sponsor.end_date,

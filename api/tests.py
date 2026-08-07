@@ -1,9 +1,12 @@
 import datetime
+import io
 
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.utils import timezone
+from PIL import Image
 
-from club.models import Club, Season, Sponsor
+from club.models import Club, ClubMembership, Season, Sponsor
 from events.models import Event, Location, Opponent
 from members.models import Member
 from news.models import News, NewsPhoto
@@ -96,6 +99,47 @@ class NewsApiTests(ApiTestBase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["results"], [])
+
+    def test_excerpt_is_a_truncated_prefix_of_the_body(self):
+        self.make_news(body=" ".join(f"word{i}" for i in range(80)))
+
+        excerpt = self.api_get("/news/").json()["results"][0]["excerpt"]
+
+        self.assertTrue(excerpt.startswith("word0 word1"))
+        self.assertTrue(excerpt.endswith("…"))
+        self.assertLess(len(excerpt.split()), 80)
+
+    def test_excerpt_is_unchanged_when_the_body_is_already_short(self):
+        item = self.make_news(body="Short body.")
+
+        excerpt = self.api_get("/news/").json()["results"][0]["excerpt"]
+
+        self.assertEqual(excerpt, item.body)
+
+    def test_slug_is_auto_populated_from_the_title(self):
+        item = self.make_news(title="Big Win This Weekend")
+
+        self.assertEqual(item.slug, "big-win-this-weekend")
+
+    def test_get_single_news_item_by_slug(self):
+        item = self.make_news(title="Big Win This Weekend")
+
+        response = self.api_get(f"/news/{item.slug}/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["id"], str(item.pk))
+
+    def test_get_single_news_item_404s_for_an_unknown_slug(self):
+        response = self.api_get("/news/no-such-item/")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_get_single_news_item_respects_visibility(self):
+        item = self.make_news(visibility=News.Visibility.INTERNAL)
+
+        response = self.api_get(f"/news/{item.slug}/")
+
+        self.assertEqual(response.status_code, 404)
 
 
 class TeamsApiTests(ApiTestBase):
@@ -192,6 +236,23 @@ class TeamsApiTests(ApiTestBase):
 
         self.assertEqual(response.status_code, 404)
 
+    def test_a_players_license_comes_from_their_club_membership(self):
+        alice = Member.objects.create(first_name="Alice", last_name="Ash")
+        TeamMembership.objects.create(team=self.team, member=alice, season=self.season, position=self.forward, jersey_number=2)
+        ClubMembership.objects.create(club=self.club, member=alice, season=self.season, license="BE-12345")
+
+        player = self.api_get(f"/teams/{self.team.pk}/roster/").json()["players"][0]["players"][0]
+
+        self.assertEqual(player["license"], "BE-12345")
+
+    def test_a_players_license_is_null_without_a_club_membership(self):
+        alice = Member.objects.create(first_name="Alice", last_name="Ash")
+        TeamMembership.objects.create(team=self.team, member=alice, season=self.season, position=self.forward, jersey_number=2)
+
+        player = self.api_get(f"/teams/{self.team.pk}/roster/").json()["players"][0]["players"][0]
+
+        self.assertIsNone(player["license"])
+
 
 class GamesApiTests(ApiTestBase):
     def setUp(self):
@@ -212,8 +273,8 @@ class GamesApiTests(ApiTestBase):
         games = self.api_get("/games/upcoming/").json()
 
         self.assertEqual(len(games), 1)
-        self.assertEqual(games[0]["home_team"], "First Team")
-        self.assertEqual(games[0]["away_team"], "Rivals FC")
+        self.assertEqual(games[0]["home_team"]["name"], "First Team")
+        self.assertEqual(games[0]["away_team"]["name"], "Rivals FC")
         self.assertEqual(games[0]["location"]["name"], "Home Arena")
         self.assertEqual(games[0]["status"], "upcoming")
 
@@ -289,8 +350,8 @@ class GamesApiTests(ApiTestBase):
 
         games = self.api_get(f"/teams/{self.team.pk}/games/").json()
 
-        self.assertEqual(games[0]["home_team"], "Rivals FC")
-        self.assertEqual(games[0]["away_team"], "First Team")
+        self.assertEqual(games[0]["home_team"]["name"], "Rivals FC")
+        self.assertEqual(games[0]["away_team"]["name"], "First Team")
         self.assertEqual(games[0]["home_score"], 3)
         self.assertEqual(games[0]["away_score"], 4)
         self.assertEqual(games[0]["status"], "finished")
@@ -300,8 +361,8 @@ class GamesApiTests(ApiTestBase):
 
         games = self.api_get(f"/teams/{self.team.pk}/games/").json()
 
-        self.assertEqual(games[0]["home_team"], "First Team")
-        self.assertEqual(games[0]["away_team"], "Rivals FC")
+        self.assertEqual(games[0]["home_team"]["name"], "First Team")
+        self.assertEqual(games[0]["away_team"]["name"], "Rivals FC")
         self.assertEqual(games[0]["home_score"], 4)
         self.assertEqual(games[0]["away_score"], 3)
 
@@ -337,6 +398,36 @@ class GamesApiTests(ApiTestBase):
         response = self.api_get(f"/teams/{other_team.pk}/games/")
 
         self.assertEqual(response.status_code, 404)
+
+    def test_home_team_links_to_the_actual_team_and_the_clubs_logo(self):
+        # Our own teams have no logo of their own -- they're shown under the club's badge.
+        self.club.logo = "clubs/ajax-united/logo.png"
+        self.club.save()
+        self.make_game(location=self.home_location)
+
+        home_team = self.api_get("/games/upcoming/").json()[0]["home_team"]
+
+        self.assertEqual(home_team["id"], str(self.team.pk))
+        self.assertEqual(home_team["name"], "First Team")
+        self.assertTrue(home_team["logo_url"].startswith("http://ajax-united.rosterchief.app/media/"))
+
+    def test_away_team_links_to_the_opponent_and_its_own_logo(self):
+        self.opponent.logo = "opponents/rivals.png"
+        self.opponent.save()
+        self.make_game(location=self.home_location)
+
+        away_team = self.api_get("/games/upcoming/").json()[0]["away_team"]
+
+        self.assertEqual(away_team["id"], str(self.opponent.pk))
+        self.assertEqual(away_team["name"], "Rivals FC")
+        self.assertTrue(away_team["logo_url"].startswith("http://ajax-united.rosterchief.app/media/"))
+
+    def test_team_logo_url_is_null_without_a_club_logo(self):
+        self.make_game(location=self.home_location)
+
+        home_team = self.api_get("/games/upcoming/").json()[0]["home_team"]
+
+        self.assertIsNone(home_team["logo_url"])
 
 
 class TenancyAndCorsTests(ApiTestBase):
@@ -431,6 +522,44 @@ class SponsorApiTests(ApiTestBase):
         self.make_sponsor()
 
         self.assertIsNone(self.api_get("/sponsors/").json()[0]["logo_url"])
+
+    def test_logo_dimensions_are_computed_for_a_raster_image(self):
+        buffer = io.BytesIO()
+        Image.new("RGB", (300, 150)).save(buffer, format="PNG")
+        logo = SimpleUploadedFile("logo.png", buffer.getvalue(), content_type="image/png")
+
+        self.make_sponsor(logo=logo)
+
+        sponsor = self.api_get("/sponsors/").json()[0]
+        self.assertEqual(sponsor["logo_width"], 300)
+        self.assertEqual(sponsor["logo_height"], 150)
+
+    def test_logo_dimensions_are_computed_for_an_svg_with_width_and_height(self):
+        svg = b'<svg xmlns="http://www.w3.org/2000/svg" width="120" height="80"></svg>'
+        logo = SimpleUploadedFile("logo.svg", svg, content_type="image/svg+xml")
+
+        self.make_sponsor(logo=logo)
+
+        sponsor = self.api_get("/sponsors/").json()[0]
+        self.assertEqual(sponsor["logo_width"], 120)
+        self.assertEqual(sponsor["logo_height"], 80)
+
+    def test_logo_dimensions_fall_back_to_an_svg_viewbox(self):
+        svg = b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 32"></svg>'
+        logo = SimpleUploadedFile("logo.svg", svg, content_type="image/svg+xml")
+
+        self.make_sponsor(logo=logo)
+
+        sponsor = self.api_get("/sponsors/").json()[0]
+        self.assertEqual(sponsor["logo_width"], 64)
+        self.assertEqual(sponsor["logo_height"], 32)
+
+    def test_logo_dimensions_are_null_without_a_logo(self):
+        self.make_sponsor()
+
+        sponsor = self.api_get("/sponsors/").json()[0]
+        self.assertIsNone(sponsor["logo_width"])
+        self.assertIsNone(sponsor["logo_height"])
 
     def test_randomize_returns_the_same_set_of_sponsors(self):
         for i in range(5):
