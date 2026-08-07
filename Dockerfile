@@ -8,10 +8,16 @@ FROM node:22-slim AS css
 WORKDIR /build
 COPY package.json package-lock.json ./
 RUN npm ci
+# Every directory assets/app.css's @source lines scan -- miss one here and Tailwind's build
+# silently emits no utilities for classes used only in that app's templates. Locally `npm run
+# build` runs against the full checkout and never shows this; only a container image, built
+# from just what's COPYed here, can.
 COPY assets ./assets
 COPY templates ./templates
 COPY controlpanel ./controlpanel
 COPY billing ./billing
+COPY management ./management
+COPY club ./club
 RUN npm run build
 
 

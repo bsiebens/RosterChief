@@ -6,6 +6,7 @@
 @source "../controlpanel";
 @source "../billing";
 @source "../management";
+@source "../club";
 
 /* daisyUI: light is the default, dark applies automatically when the OS asks
    for it. An explicit data-theme on <html> (set by the toggle) overrides both. */
