@@ -141,6 +141,54 @@ class NewsApiTests(ApiTestBase):
 
         self.assertEqual(response.status_code, 404)
 
+    def test_body_markdown_is_rendered_to_html(self):
+        self.make_news(body="## Big win\n\nWe beat **Rivals FC** 4-2. [Full report](https://example.com).")
+
+        body = self.api_get("/news/").json()["results"][0]["body"]
+
+        self.assertIn("<h2>Big win</h2>", body)
+        self.assertIn("<strong>Rivals FC</strong>", body)
+        self.assertIn('href="https://example.com"', body)
+        self.assertIn(">Full report</a>", body)
+
+    def test_body_markdown_a_single_newline_becomes_a_line_break(self):
+        self.make_news(body="Line one\nLine two")
+
+        body = self.api_get("/news/").json()["results"][0]["body"]
+
+        self.assertIn("Line one<br", body)
+
+    def test_body_html_strips_a_script_tag(self):
+        self.make_news(body="Hello<script>alert('xss')</script>world")
+
+        body = self.api_get("/news/").json()["results"][0]["body"]
+
+        self.assertNotIn("<script", body)
+        self.assertNotIn("alert(", body)
+
+    def test_body_html_strips_an_event_handler_attribute(self):
+        self.make_news(body='<img src="x" onerror="alert(1)">')
+
+        body = self.api_get("/news/").json()["results"][0]["body"]
+
+        self.assertNotIn("onerror", body)
+
+    def test_body_html_strips_a_javascript_url(self):
+        self.make_news(body="[click me](javascript:alert(1))")
+
+        body = self.api_get("/news/").json()["results"][0]["body"]
+
+        self.assertNotIn("javascript:", body)
+
+    def test_excerpt_strips_markdown_syntax(self):
+        self.make_news(body="**Bold** and a [link](https://example.com) and # not a heading here")
+
+        excerpt = self.api_get("/news/").json()["results"][0]["excerpt"]
+
+        self.assertNotIn("**", excerpt)
+        self.assertNotIn("[link]", excerpt)
+        self.assertNotIn("<", excerpt)
+
 
 class TeamsApiTests(ApiTestBase):
     def setUp(self):

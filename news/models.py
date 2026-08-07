@@ -26,7 +26,14 @@ class News(ClubScopedModel):
     slug = models.SlugField(_("slug"), max_length=255, blank=True)
     slug_source = "title"
 
-    body = models.TextField(_("body"))
+    body = models.TextField(
+        _("body"),
+        help_text=_(
+            "Supports Markdown: **bold**, *italic*, [link text](https://example.com), "
+            "# heading, - list item, > quote. Rendered to HTML for the public website; "
+            "shown as plain text here in the control panel."
+        ),
+    )
     teams = models.ManyToManyField(Team, related_name="news_items", blank=True, verbose_name=_("teams"), help_text=_("Leave empty for club-wide news."))
 
     visibility = models.CharField(_("visibility"), max_length=10, choices=Visibility.choices, default=Visibility.INTERNAL)

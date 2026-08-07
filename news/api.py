@@ -11,13 +11,13 @@ import uuid
 from datetime import datetime
 
 from django.utils import timezone
-from django.utils.text import Truncator
 from ninja import Router, Schema
 from ninja.errors import HttpError
 
 from api.errors import require_club
 
 from .models import News
+from .services import render_body_excerpt, render_body_html
 
 router = Router(tags=["news"])
 
@@ -68,8 +68,8 @@ def _to_news_item_out(item, request) -> NewsItemOut:
         id=item.pk,
         title=item.title,
         slug=item.slug,
-        excerpt=Truncator(item.body).words(EXCERPT_WORDS, truncate=" …"),
-        body=item.body,
+        excerpt=render_body_excerpt(item.body, words=EXCERPT_WORDS),
+        body=render_body_html(item.body),
         published_at=item.published_at,
         teams=[team.name for team in item.teams.all()],
         photos=[NewsPhotoOut(url=request.build_absolute_uri(photo.image.url), is_main=photo.is_main, ordering=photo.ordering) for photo in item.photos.all()],
