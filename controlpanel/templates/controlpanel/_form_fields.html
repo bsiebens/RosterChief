@@ -4,14 +4,22 @@
     The field loop every card-form and modal-form wrapper shares: label, daisyUI-styled
     widget, help text, errors — with checkboxes laid out label-beside-input instead of
     label-above. Included with `form`.
+
+    Pass `two_columns` to lay the fields out in two columns instead of one — for a form with
+    several short fields (a handful of day counts, say) that would otherwise make a modal
+    taller than the screen. Textareas and file inputs always span the full width regardless:
+    half a row is not enough to type a description into. Single column below `sm`, since two
+    columns of form fields on a phone is worse than a long scroll.
 {% endcomment %}
 {% for error in form.non_field_errors %}
     <div class="alert alert-error my-2">
         <span>{{ error }}</span>
     </div>
 {% endfor %}
-{% for field in form %}
-    <div class="form-control my-3 w-full">
-        {% form_field field %}
-    </div>
-{% endfor %}
+<div class="{% if two_columns %}grid gap-x-4 sm:grid-cols-2{% endif %}">
+    {% for field in form %}
+        <div class="form-control my-3 w-full {% if two_columns and field.widget_type == "textarea" or two_columns and field.widget_type == "clearablefile" %}sm:col-span-2{% endif %}">
+            {% form_field field %}
+        </div>
+    {% endfor %}
+</div>

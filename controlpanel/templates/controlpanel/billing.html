@@ -9,7 +9,7 @@
 
 {% block panel %}
     {% url 'controlpanel:plan_create' as plan_create_url %}
-    {% include "controlpanel/_modal_form.html" with modal_id="plan_create_modal" title="New plan" form=plan_form action_url=plan_create_url submit_label="Create plan" submit_icon="plus" %}
+    {% include "controlpanel/_modal_form.html" with modal_id="plan_create_modal" title="New plan" form=plan_form action_url=plan_create_url submit_label="Create plan" submit_icon="plus" box_class="max-w-2xl" two_columns=True %}
 
     <div class="card mb-6 bg-base-100 shadow">
         <div class="card-body">
@@ -84,7 +84,7 @@
         {% include "controlpanel/_modal_form.html" with modal_id=plan.pk|dom_id:"plan_price_modal" title="New price — "|add:plan.name form=plan.price_form action_url=plan_price_url submit_label="Add price" submit_icon="euro" %}
 
         {% url 'controlpanel:plan_update' plan.pk as plan_update_url %}
-        {% include "controlpanel/_modal_form.html" with modal_id=plan.pk|dom_id:"plan_edit_modal" title="Edit "|add:plan.name form=plan.edit_form action_url=plan_update_url submit_label="Save" submit_icon="check" %}
+        {% include "controlpanel/_modal_form.html" with modal_id=plan.pk|dom_id:"plan_edit_modal" title="Edit "|add:plan.name form=plan.edit_form action_url=plan_update_url submit_label="Save" submit_icon="check" box_class="max-w-2xl" two_columns=True %}
     {% endfor %}
 
     <div class="card bg-base-100 shadow">

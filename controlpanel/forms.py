@@ -83,9 +83,19 @@ class FlagForm(forms.ModelForm):
 
 
 class PlanForm(forms.ModelForm):
+    """Field order is chosen for the two-column modal (see _form_fields.html): description
+    spans both columns, so pairing name with duration and the two day-counts with each other
+    fills every row instead of leaving half of one empty.
+
+        name              | duration_months
+        description ....................... (spans both)
+        renewal_lead_days | grace_days
+        is_trial          | is_active
+    """
+
     class Meta:
         model = Plan
-        fields = ["name", "description", "duration_months", "renewal_lead_days", "grace_days", "is_trial", "is_active"]
+        fields = ["name", "duration_months", "description", "renewal_lead_days", "grace_days", "is_trial", "is_active"]
 
 
 class PlanPriceForm(forms.ModelForm):

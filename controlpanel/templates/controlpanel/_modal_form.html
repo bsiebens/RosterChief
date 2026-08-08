@@ -7,10 +7,15 @@
     tag (linked via the `form` attribute) so it can share the `modal-action` row with the
     dialog-closing Cancel button without nesting one <form> inside another. `enctype` is
     always multipart -- harmless for a form with no file field, required for one that has.
+
+    Two optional knobs for a form with a lot of fields, which would otherwise run off the
+    bottom of the screen: `box_class` widens the box (e.g. "max-w-2xl"), and `two_columns`
+    lays the fields out in two columns -- growing sideways rather than downwards. They are
+    meant to be used together; widening alone just makes a tall modal wide as well.
 {% endcomment %}
 {% trans "Save" as default_submit_label %}
 <dialog id="{{ modal_id }}" class="modal">
-    <div class="modal-box">
+    <div class="modal-box {{ box_class }}">
         <h3 class="text-lg font-bold">{{ title }}</h3>
         {% if blurb %}<p class="py-2 text-sm opacity-70">{{ blurb }}</p>{% endif %}
         <form method="post" action="{{ action_url }}" id="{{ modal_id }}-form" enctype="multipart/form-data">
