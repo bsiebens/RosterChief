@@ -307,6 +307,44 @@ season-scoped** (§5.1): it gains a `season` FK and sign-up / fee-status fields,
 is one member's affiliation for one season (`unique_together (club, member, season)`). This
 is the record the `MEMBER` role and shop fulfilment key off of (§3.4, §5.7).
 
+### `billing` — what the platform charges a club
+
+**Deliberately NOT club-scoped, and the only app that isn't.** `shop` (§5.7) is a club charging
+its *members* — tenant data, owned by the club. `billing` is RosterChief charging the *club*:
+platform-owned, never visible to a club user except as the one notice described below. Nothing
+here inherits `ClubScopedModel` — these rows reference a `Club`, they are not owned by one, and a
+tenant-scoped manager would be exactly the wrong default.
+
+**`Plan`** — a duration and three clocks, named for what they measure *from*, which is the easy
+thing to get wrong: `duration_months` (period length, from its start), `renewal_lead_days` (how far
+*before* a period starts its invoice is raised), `grace_days` (how long *after* a period starts it
+may stay unpaid). Two `CheckConstraint`s keep them coherent. `is_trial` marks a plan offered as a
+trial; a trial's length is simply its own `duration_months`.
+
+**`PlanPrice`** — a dated price (`active_from`). A rate change is a new row, never an edit, so
+every period already opened keeps what it was billed at.
+
+**`Subscription`** — one per club (`OneToOneField`): its current `plan`, `auto_renew`,
+`auto_archive`, and the trial pair (`trial_ends_at` + `post_trial_plan`, constrained to be set
+together or not at all).
+
+**`Due`** — one billing period for one club, and **the snapshot boundary**. `plan`, `amount`,
+`period_end` and `grace_until` are all frozen when the period opens and never read back through
+the plan at display time: raise a price or edit a plan's grace and last year's invoice must still
+say what was actually charged. Storing the computed *dates* rather than the plan's *numbers* is
+what buys that.
+
+**`DuePayment`** / **`Invoice`** — money received against a due (several may land on one), and the
+gapless per-year invoice number. The PDF itself is rendered on demand from the `Due` snapshot;
+only the number is stored.
+
+All lifecycle changes go through `billing/services/` — `dues.py` (open, renew, pay, waive,
+archive), `notices.py` (the one club-facing warning), `reminders.py` (its email). Never through
+the models directly: a `Due` whose `amount_paid` disagrees with its payments is a wrong invoice.
+
+**`BILLING.md` is the authoritative document for this app** — the lifecycle, the worked timelines,
+and the migration hazards live there rather than here.
+
 ---
 
 ## 5. Planned models (design)

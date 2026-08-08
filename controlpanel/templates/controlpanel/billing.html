@@ -4,12 +4,12 @@
 {% block heading %}Billing{% endblock heading %}
 
 {% block actions %}
-    <button class="btn btn-primary gap-2" type="button" onclick="document.getElementById('tier_create_modal').showModal()">{% lucide "plus" size=16 %} New plan</button>
+    <button class="btn btn-primary gap-2" type="button" onclick="document.getElementById('plan_create_modal').showModal()">{% lucide "plus" size=16 %} New plan</button>
 {% endblock actions %}
 
 {% block panel %}
-    {% url 'controlpanel:tier_create' as tier_create_url %}
-    {% include "controlpanel/_modal_form.html" with modal_id="tier_create_modal" title="New plan" form=tier_form action_url=tier_create_url submit_label="Create plan" submit_icon="plus" %}
+    {% url 'controlpanel:plan_create' as plan_create_url %}
+    {% include "controlpanel/_modal_form.html" with modal_id="plan_create_modal" title="New plan" form=plan_form action_url=plan_create_url submit_label="Create plan" submit_icon="plus" %}
 
     <div class="card mb-6 bg-base-100 shadow">
         <div class="card-body">
@@ -25,23 +25,34 @@
                     <thead>
                         <tr>
                             <th>Plan</th>
+                            <th>Clocks</th>
                             <th class="text-right">Clubs</th>
                             <th>Prices</th>
                             <th></th>
                         </tr>
                     </thead>
                     <tbody>
-                        {% for tier in tiers %}
+                        {% for plan in plans %}
                             <tr>
                                 <td>
-                                    <div class="font-medium">{{ tier.name }}</div>
-                                    {% if not tier.is_active %}<span class="badge badge-ghost badge-xs">Retired</span>{% endif %}
-                                    {% if tier.description %}
-                                        <div class="text-xs opacity-60">{{ tier.description }}</div>{% endif %}
+                                    <div class="font-medium">{{ plan.name }}</div>
+                                    {% if plan.is_trial %}<span class="badge badge-info badge-xs">Trial</span>{% endif %}
+                                    {% if not plan.is_active %}<span class="badge badge-ghost badge-xs">Retired</span>{% endif %}
+                                    {% if plan.description %}
+                                        <div class="text-xs opacity-60">{{ plan.description }}</div>{% endif %}
                                 </td>
-                                <td class="text-right tabular-nums">{{ tier.club_count }}</td>
+                                {% comment %}
+                                    Named for what each measures from, because that is the easy thing to
+                                    get wrong: grace runs from the period START, not its end.
+                                {% endcomment %}
+                                <td class="text-xs opacity-70 whitespace-nowrap">
+                                    <div>{{ plan.duration_months }} month{{ plan.duration_months|pluralize }} long</div>
+                                    <div>billed {{ plan.renewal_lead_days }}d before it starts</div>
+                                    <div>archived {{ plan.grace_days }}d after it starts</div>
+                                </td>
+                                <td class="text-right tabular-nums">{{ plan.club_count }}</td>
                                 <td>
-                                    {% for price in tier.prices.all %}
+                                    {% for price in plan.prices.all %}
                                         <div class="text-sm tabular-nums">
                                             €{{ price.amount|floatformat:2 }}
                                             <span class="opacity-60">from {{ price.active_from|date:"j M Y" }}</span>
@@ -52,13 +63,13 @@
                                     {% endfor %}
                                 </td>
                                 <td class="flex flex-row gap-2 justify-end">
-                                    <button class="btn btn-primary btn-sm btn-outline gap-1" type="button" onclick="document.getElementById('{{ tier.pk|dom_id:"tier_price_modal" }}').showModal()">{% lucide "euro" size=14 %} New price</button>
-                                    <button class="btn btn-outline btn-sm gap-1" type="button" onclick="document.getElementById('{{ tier.pk|dom_id:"tier_edit_modal" }}').showModal()">{% lucide "pencil" size=14 %} Edit</button>
+                                    <button class="btn btn-primary btn-sm btn-outline gap-1" type="button" onclick="document.getElementById('{{ plan.pk|dom_id:"plan_price_modal" }}').showModal()">{% lucide "euro" size=14 %} New price</button>
+                                    <button class="btn btn-outline btn-sm gap-1" type="button" onclick="document.getElementById('{{ plan.pk|dom_id:"plan_edit_modal" }}').showModal()">{% lucide "pencil" size=14 %} Edit</button>
                                 </td>
                             </tr>
                         {% empty %}
                             <tr>
-                                <td colspan="4" class="text-center opacity-60">No plans yet.</td>
+                                <td colspan="5" class="text-center opacity-60">No plans yet.</td>
                             </tr>
                         {% endfor %}
                     </tbody>
@@ -68,12 +79,12 @@
     </div>
 
     {% comment %} Dialogs live outside the table: <tbody> may only contain <tr> elements. {% endcomment %}
-    {% for tier in tiers %}
-        {% url 'controlpanel:tier_price_create' tier.pk as tier_price_url %}
-        {% include "controlpanel/_modal_form.html" with modal_id=tier.pk|dom_id:"tier_price_modal" title="New price — "|add:tier.name form=tier.price_form action_url=tier_price_url submit_label="Add price" submit_icon="euro" %}
+    {% for plan in plans %}
+        {% url 'controlpanel:plan_price_create' plan.pk as plan_price_url %}
+        {% include "controlpanel/_modal_form.html" with modal_id=plan.pk|dom_id:"plan_price_modal" title="New price — "|add:plan.name form=plan.price_form action_url=plan_price_url submit_label="Add price" submit_icon="euro" %}
 
-        {% url 'controlpanel:tier_update' tier.pk as tier_update_url %}
-        {% include "controlpanel/_modal_form.html" with modal_id=tier.pk|dom_id:"tier_edit_modal" title="Edit "|add:tier.name form=tier.edit_form action_url=tier_update_url submit_label="Save" submit_icon="check" %}
+        {% url 'controlpanel:plan_update' plan.pk as plan_update_url %}
+        {% include "controlpanel/_modal_form.html" with modal_id=plan.pk|dom_id:"plan_edit_modal" title="Edit "|add:plan.name form=plan.edit_form action_url=plan_update_url submit_label="Save" submit_icon="check" %}
     {% endfor %}
 
     <div class="card bg-base-100 shadow">
@@ -95,7 +106,7 @@
                             <tr>
                                 <td>
                                     <a class="link link-hover font-medium" href="{% url 'controlpanel:club_detail' due.club.pk %}">{{ due.club.name }}</a>
-                                    <div class="text-xs opacity-60">{{ due.tier.name }}</div>
+                                    <div class="text-xs opacity-60">{{ due.plan.name }}</div>
                                 </td>
                                 <td class="text-sm">
                                     {{ due.period_start|date:"j M Y" }} — {{ due.period_end|date:"j M Y" }}

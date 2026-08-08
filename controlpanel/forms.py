@@ -4,7 +4,7 @@ from django import forms
 from django.utils.translation import gettext_lazy as _
 from waffle import get_waffle_flag_model
 
-from billing.models import DuePayment, Subscription, Tier, TierPrice
+from billing.models import DuePayment, Plan, PlanPrice, Subscription
 from club.models import Club
 from events.models import Location
 
@@ -82,51 +82,61 @@ class FlagForm(forms.ModelForm):
         }
 
 
-class TierForm(forms.ModelForm):
+class PlanForm(forms.ModelForm):
     class Meta:
-        model = Tier
-        fields = ["name", "description", "is_active"]
+        model = Plan
+        fields = ["name", "description", "duration_months", "renewal_lead_days", "grace_days", "is_trial", "is_active"]
 
 
-class TierPriceForm(forms.ModelForm):
+class PlanPriceForm(forms.ModelForm):
     class Meta:
-        model = TierPrice
+        model = PlanPrice
         fields = ["active_from", "amount"]
         widgets = {"active_from": forms.DateInput(attrs={"type": "date"})}
-        help_texts = {"active_from": _("Periods opening on or after this date are billed at this amount. Existing periods keep the amount they were billed at.")}
+        help_texts = {
+            "active_from": _(
+                "Periods opening on or after this date are billed at this amount. Existing periods keep the amount "
+                "they were billed at — including any already issued during a plan's renewal lead window, so enter a "
+                "price change before that window opens."
+            )
+        }
 
 
 class SubscriptionForm(forms.ModelForm):
-    """Put a club on a tier. The first period opens when the subscription is created."""
+    """Put a club on a plan. The first period opens when the subscription is created."""
 
     start = forms.DateField(required=False, widget=forms.DateInput(attrs={"type": "date"}), label=_("First period starts"), help_text=_("Left blank, the period starts today."))
 
     class Meta:
         model = Subscription
-        fields = ["tier", "auto_renew", "auto_archive", "notes"]
+        fields = ["plan", "auto_renew", "auto_archive", "notes"]
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # An inactive tier still bills its existing subscriptions, but must not be picked up
-        # by a new one — which is the whole point of retiring a tier.
-        self.fields["tier"].queryset = Tier.objects.filter(is_active=True)
+        # An inactive plan still bills its existing subscriptions, but must not be picked up
+        # by a new one — which is the whole point of retiring a plan. Trial plans are excluded
+        # too: they are reached through the trial form, which converts them properly.
+        self.fields["plan"].queryset = Plan.objects.filter(is_active=True, is_trial=False)
 
 
 class TrialForm(forms.Form):
-    """Put a club with no subscription yet on a short trial that switches itself to
-    ``post_trial_tier`` automatically once it ends -- see billing.services.dues.start_trial."""
+    """Put a club with no subscription yet on a trial that switches itself to
+    ``post_trial_plan`` automatically once it ends -- see billing.services.dues.start_trial.
 
-    trial_tier = forms.ModelChoiceField(queryset=Tier.objects.none(), label=_("Trial tier"), help_text=_("What this club is billed on during the trial."))
-    post_trial_tier = forms.ModelChoiceField(queryset=Tier.objects.none(), label=_("Then switch to"), help_text=_("The plan it lands on automatically once the trial ends."))
-    trial_months = forms.IntegerField(min_value=1, initial=2, label=_("Trial length (months)"))
+    There is no length field: a trial's length is its plan's own ``duration_months``, so a
+    1-month and a 3-month trial are two plans rather than one plan plus a number typed here.
+    """
+
+    trial_plan = forms.ModelChoiceField(queryset=Plan.objects.none(), label=_("Trial plan"), help_text=_("What this club is billed on during the trial. Its length is the plan's own duration."))
+    post_trial_plan = forms.ModelChoiceField(queryset=Plan.objects.none(), label=_("Then switch to"), help_text=_("The plan it lands on automatically once the trial ends."))
     start = forms.DateField(required=False, widget=forms.DateInput(attrs={"type": "date"}), label=_("Trial starts"), help_text=_("Left blank, the trial starts today."))
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Same reasoning as SubscriptionForm: a retired tier keeps billing whoever is
+        # Same reasoning as SubscriptionForm: a retired plan keeps billing whoever is
         # already on it, but must not be offered for a new trial or a new plan either.
-        self.fields["trial_tier"].queryset = Tier.objects.filter(is_active=True)
-        self.fields["post_trial_tier"].queryset = Tier.objects.filter(is_active=True)
+        self.fields["trial_plan"].queryset = Plan.objects.filter(is_active=True, is_trial=True)
+        self.fields["post_trial_plan"].queryset = Plan.objects.filter(is_active=True, is_trial=False)
 
 
 class DuePaymentForm(forms.Form):

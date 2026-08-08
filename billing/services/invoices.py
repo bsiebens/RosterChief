@@ -1,6 +1,6 @@
 """Invoice PDFs.
 
-The PDF is rendered on demand from the Due's frozen snapshot (tier, amount, dates), so it
+The PDF is rendered on demand from the Due's frozen snapshot (plan, amount, dates), so it
 carries no state of its own beyond the number. Only the number is stored — an accountant
 reconciles against it, so it is allocated once, never recomputed.
 """

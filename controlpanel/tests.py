@@ -16,7 +16,7 @@ from django.urls import reverse
 from django.utils import timezone
 from waffle import get_waffle_flag_model, get_waffle_switch_model
 
-from billing.models import GRACE_DAYS, Due, Tier, TierPrice
+from billing.models import DEFAULT_GRACE_DAYS, Due, Plan, PlanPrice
 from billing.services import BillingError
 from billing.services.dues import record_payment, subscribe, waive
 from club.models import Club, ClubMembership, ClubRole, Season
@@ -278,7 +278,7 @@ class ClubHomeLocationTests(ControlPanelTestBase):
 
         self.assertNotContains(response, 'type="lazyselect"')
         self.assertContains(response, "Belgium")
-        self.assertContains(response, '<select')
+        self.assertContains(response, "<select")
 
     def test_the_club_detail_page_shows_the_home_location(self):
         self.set_home_location(name="Home Ground")
@@ -604,7 +604,7 @@ class NotifyTests(TestCase):
         self.assertEqual(LEVELS, {"s": messages.SUCCESS, "i": messages.INFO, "w": messages.WARNING, "e": messages.ERROR, "d": messages.DEBUG})
 
     def test_a_pipe_inside_the_body_is_preserved_intact(self):
-        # maxsplit=2 stops after the level and the title, so a "|" a club/tier/flag name
+        # maxsplit=2 stops after the level and the title, so a "|" a club/plan/flag name
         # might contain stays part of the body rather than truncating it.
         request, storage = self.request()
 
@@ -1265,11 +1265,11 @@ class PlatformDuesMetricTests(TestCase):
     def setUp(self):
         self.today = timezone.localdate()
         self.club = Club.objects.create(name="Ajax United")
-        self.tier = Tier.objects.create(name="Standard")
-        TierPrice.objects.create(tier=self.tier, active_from=self.today - datetime.timedelta(days=1200), amount=Decimal("500.00"))
+        self.plan = Plan.objects.create(name="Standard")
+        PlanPrice.objects.create(plan=self.plan, active_from=self.today - datetime.timedelta(days=1200), amount=Decimal("500.00"))
 
     def test_dues_owed_is_the_unpaid_balance_across_every_club(self):
-        subscribe(self.club, self.tier)
+        subscribe(self.club, self.plan)
         record_payment(self.club.dues.first(), Decimal("200.00"))
 
         self.assertEqual(platform_attention()["dues_owed"], Decimal("300.00"))
@@ -1277,18 +1277,20 @@ class PlatformDuesMetricTests(TestCase):
     def test_grace_and_overdue_are_counted_separately(self):
         in_grace = Club.objects.create(name="Grace FC")
         overdue = Club.objects.create(name="Overdue FC")
-        subscribe(in_grace, self.tier, start=self.today - datetime.timedelta(days=370))
-        subscribe(overdue, self.tier, start=self.today - datetime.timedelta(days=365 + GRACE_DAYS + 10))
+        # Grace runs from the period START now: a club a few days into an unpaid period is
+        # in grace, where under the old rule this meant one whose period had already ended.
+        subscribe(in_grace, self.plan, start=self.today - datetime.timedelta(days=5))
+        subscribe(overdue, self.plan, start=self.today - datetime.timedelta(days=DEFAULT_GRACE_DAYS + 10))
 
         attention = platform_attention()
 
         self.assertEqual(attention["dues_in_grace"], 1)
         self.assertEqual(attention["dues_overdue"], 1)
 
-    def test_clubs_on_no_tier_are_flagged(self):
+    def test_clubs_on_no_plan_are_flagged(self):
         self.assertEqual(platform_attention()["clubs_unbilled"], 1)
 
-        subscribe(self.club, self.tier)
+        subscribe(self.club, self.plan)
 
         self.assertEqual(platform_attention()["clubs_unbilled"], 0)
 
@@ -1296,14 +1298,14 @@ class PlatformDuesMetricTests(TestCase):
         # ~0 in normal running; a number here means the renewal cron has stopped.
         self.assertEqual(platform_attention()["renewals_pending"], 0)
 
-        subscribe(self.club, self.tier, start=self.today - datetime.timedelta(days=350))  # ends in 15 days
+        subscribe(self.club, self.plan, start=self.today - datetime.timedelta(days=350))  # ends in 15 days
 
         self.assertEqual(platform_attention()["renewals_pending"], 1)
 
     def test_the_dashboard_surfaces_pending_renewals(self):
         # The whole point of the KPI: a club about to go free is visible, though nothing is
         # owed yet, so no other figure on the page would show it.
-        subscribe(self.club, self.tier, start=self.today - datetime.timedelta(days=350))
+        subscribe(self.club, self.plan, start=self.today - datetime.timedelta(days=350))
         staff = User.objects.create_user(email="staff@example.com", password="pw-secret-123", is_staff=True)
         enrol_mfa(staff)
         self.client.force_login(staff)
@@ -1311,7 +1313,7 @@ class PlatformDuesMetricTests(TestCase):
         self.assertContains(self.client.get(reverse("controlpanel:dashboard")), "awaiting renewal")
 
     def test_platform_dues_and_club_shop_money_are_different_charts(self):
-        subscribe(self.club, self.tier)
+        subscribe(self.club, self.plan)
         record_payment(self.club.dues.first(), Decimal("500.00"))
 
         charts = platform_charts()
@@ -1320,16 +1322,16 @@ class PlatformDuesMetricTests(TestCase):
         self.assertEqual(charts["club_revenue"][-1]["value"], 0.0)  # never ours
 
     def test_the_health_table_carries_the_plan_and_what_is_owed(self):
-        subscribe(self.club, self.tier)
+        subscribe(self.club, self.plan)
 
         club = clubs_with_health().get(pk=self.club.pk)
 
-        self.assertEqual(club.tier_name, "Standard")
+        self.assertEqual(club.plan_name, "Standard")
         self.assertEqual(club.dues_owed, Decimal("500.00"))
 
     def test_a_fully_paid_club_shows_when_its_cover_ends(self):
         # The end of the current paid period is the day grace would start if nothing renews.
-        subscribe(self.club, self.tier)
+        subscribe(self.club, self.plan)
         due = self.club.dues.first()
         record_payment(due, due.amount)
 
@@ -1341,7 +1343,7 @@ class PlatformDuesMetricTests(TestCase):
     def test_a_waived_period_also_shows_its_cover_end(self):
         # Waived is settled too — the club is covered for that time, so its end date shows,
         # badged "waived" rather than "paid".
-        subscribe(self.club, self.tier)
+        subscribe(self.club, self.plan)
         due = self.club.dues.first()
         waive(due)
 
@@ -1351,58 +1353,58 @@ class PlatformDuesMetricTests(TestCase):
         self.assertEqual(club.covered_status, Due.Status.WAIVED)
 
     def test_a_club_that_owes_has_no_cover(self):
-        subscribe(self.club, self.tier)  # unpaid
+        subscribe(self.club, self.plan)  # unpaid
 
         club = clubs_with_health().get(pk=self.club.pk)
         self.assertIsNone(club.covered_until)
         self.assertIsNone(club.covered_status)
 
     def test_the_health_table_still_costs_one_query_with_billing_on_it(self):
-        subscribe(self.club, self.tier)
-        subscribe(Club.objects.create(name="Feyenoord"), self.tier)
+        subscribe(self.club, self.plan)
+        subscribe(Club.objects.create(name="Feyenoord"), self.plan)
 
         with self.assertNumQueries(1):
-            [(club.tier_name, club.dues_owed, club.outstanding) for club in clubs_with_health()]
+            [(club.plan_name, club.dues_owed, club.outstanding) for club in clubs_with_health()]
 
 
 class BillingPanelTests(ControlPanelTestBase):
     def setUp(self):
         super().setUp()
         self.today = timezone.localdate()
-        self.tier = Tier.objects.create(name="Standard")
-        TierPrice.objects.create(tier=self.tier, active_from=self.today - datetime.timedelta(days=1200), amount=Decimal("500.00"))
+        self.plan = Plan.objects.create(name="Standard")
+        PlanPrice.objects.create(plan=self.plan, active_from=self.today - datetime.timedelta(days=1200), amount=Decimal("500.00"))
 
-    def test_the_billing_page_lists_tiers_and_what_is_owed(self):
-        subscribe(self.club, self.tier)
+    def test_the_billing_page_lists_plans_and_what_is_owed(self):
+        subscribe(self.club, self.plan)
 
         response = self.client.get(reverse("controlpanel:billing"))
 
         self.assertContains(response, "Standard")
         self.assertContains(response, "500.00")
 
-    def test_a_tier_can_be_created_and_priced(self):
-        self.client.post(reverse("controlpanel:tier_create"), {"name": "Large", "description": "", "is_active": "on"})
-        tier = Tier.objects.get(name="Large")
+    def test_a_plan_can_be_created_and_priced(self):
+        self.client.post(reverse("controlpanel:plan_create"), {"name": "Large", "description": "", "is_active": "on", "duration_months": 12, "renewal_lead_days": 30, "grace_days": 30})
+        plan = Plan.objects.get(name="Large")
 
-        self.client.post(reverse("controlpanel:tier_price_create", args=[tier.pk]), {"active_from": self.today.isoformat(), "amount": "900.00"})
+        self.client.post(reverse("controlpanel:plan_price_create", args=[plan.pk]), {"active_from": self.today.isoformat(), "amount": "900.00"})
 
-        self.assertEqual(tier.price_on(self.today), Decimal("900.00"))
+        self.assertEqual(plan.price_on(self.today), Decimal("900.00"))
 
     def test_a_rate_change_does_not_rewrite_an_open_period(self):
-        subscribe(self.club, self.tier)
+        subscribe(self.club, self.plan)
 
-        self.client.post(reverse("controlpanel:tier_price_create", args=[self.tier.pk]), {"active_from": self.today.isoformat(), "amount": "900.00"})
+        self.client.post(reverse("controlpanel:plan_price_create", args=[self.plan.pk]), {"active_from": self.today.isoformat(), "amount": "900.00"})
 
         self.assertEqual(self.club.dues.first().amount, Decimal("500.00"))
 
     def test_subscribing_a_club_opens_its_first_period(self):
-        self.client.post(reverse("controlpanel:club_subscribe", args=[self.club.pk]), {"tier": self.tier.pk, "auto_archive": "on", "notes": ""})
+        self.client.post(reverse("controlpanel:club_subscribe", args=[self.club.pk]), {"plan": self.plan.pk, "auto_archive": "on", "notes": ""})
 
         self.assertEqual(self.club.dues.count(), 1)
-        self.assertEqual(self.club.subscription.tier, self.tier)
+        self.assertEqual(self.club.subscription.plan, self.plan)
 
     def test_a_payment_can_be_recorded_and_settles_the_due(self):
-        subscribe(self.club, self.tier)
+        subscribe(self.club, self.plan)
         due = self.club.dues.first()
 
         self.client.post(reverse("controlpanel:due_pay", args=[due.pk]), {"amount": "500.00", "method": "bank_transfer", "reference": "TRX-1", "paid_at": "", "note": ""})
@@ -1412,7 +1414,7 @@ class BillingPanelTests(ControlPanelTestBase):
         self.assertEqual(due.payments.first().recorded_by, self.staff)
 
     def test_a_part_payment_leaves_a_balance(self):
-        subscribe(self.club, self.tier)
+        subscribe(self.club, self.plan)
         due = self.club.dues.first()
 
         self.client.post(reverse("controlpanel:due_pay", args=[due.pk]), {"amount": "200.00", "method": "bank_transfer", "reference": "", "paid_at": "", "note": ""})
@@ -1422,7 +1424,7 @@ class BillingPanelTests(ControlPanelTestBase):
 
     def test_a_billing_error_is_shown_rather_than_raised(self):
         # A waived period cannot take a payment; the panel must say so, not 500.
-        subscribe(self.club, self.tier)
+        subscribe(self.club, self.plan)
         due = self.club.dues.first()
         self.client.post(reverse("controlpanel:due_waive", args=[due.pk]))
 
@@ -1431,7 +1433,7 @@ class BillingPanelTests(ControlPanelTestBase):
         self.assertContains(response, "cannot take a payment")
 
     def test_a_period_can_be_waived(self):
-        subscribe(self.club, self.tier)
+        subscribe(self.club, self.plan)
         due = self.club.dues.first()
 
         self.client.post(reverse("controlpanel:due_waive", args=[due.pk]))
@@ -1440,7 +1442,7 @@ class BillingPanelTests(ControlPanelTestBase):
         self.assertEqual(due.status, Due.Status.WAIVED)
 
     def test_opening_a_period_continues_from_the_last_one(self):
-        subscribe(self.club, self.tier, start=self.today - datetime.timedelta(days=400))
+        subscribe(self.club, self.plan, start=self.today - datetime.timedelta(days=400))
         first = self.club.dues.first()
 
         self.client.post(reverse("controlpanel:club_open_period", args=[self.club.pk]), {"start": ""})
@@ -1449,7 +1451,7 @@ class BillingPanelTests(ControlPanelTestBase):
         self.assertEqual(latest.period_start, first.period_end + datetime.timedelta(days=1))
 
     def test_reactivating_an_archived_club_restores_it(self):
-        subscribe(self.club, self.tier, start=self.today - datetime.timedelta(days=400))
+        subscribe(self.club, self.plan, start=self.today - datetime.timedelta(days=400))
         self.club.archive()
 
         self.client.post(reverse("controlpanel:club_open_period", args=[self.club.pk]), {"start": self.today.isoformat()})
@@ -1458,7 +1460,7 @@ class BillingPanelTests(ControlPanelTestBase):
         self.assertFalse(self.club.is_archived)
 
     def test_the_club_page_shows_the_plan_and_its_periods(self):
-        subscribe(self.club, self.tier)
+        subscribe(self.club, self.plan)
 
         response = self.client.get(reverse("controlpanel:club_detail", args=[self.club.pk]))
 
@@ -1466,7 +1468,7 @@ class BillingPanelTests(ControlPanelTestBase):
         self.assertContains(response, "INV-")
 
     def test_an_invoice_downloads_as_a_pdf(self):
-        subscribe(self.club, self.tier)
+        subscribe(self.club, self.plan)
         due = self.club.dues.first()
 
         with mock.patch("controlpanel.views.invoice_pdf", return_value=b"%PDF-1.7 fake"):
@@ -1477,7 +1479,7 @@ class BillingPanelTests(ControlPanelTestBase):
 
     def test_a_missing_pdf_library_is_reported_rather_than_a_500(self):
         # WeasyPrint needs native libs. Without them the button must explain itself.
-        subscribe(self.club, self.tier)
+        subscribe(self.club, self.plan)
         due = self.club.dues.first()
 
         with mock.patch("controlpanel.views.invoice_pdf", side_effect=BillingError("PDF rendering needs the native pango/cairo libraries.")):
@@ -1493,39 +1495,40 @@ class TrialPanelTests(ControlPanelTestBase):
     def setUp(self):
         super().setUp()
         self.today = timezone.localdate()
-        self.trial_tier = Tier.objects.create(name="Trial")
-        TierPrice.objects.create(tier=self.trial_tier, active_from=self.today - datetime.timedelta(days=1200), amount=Decimal("50.00"))
-        self.tier = Tier.objects.create(name="Standard")
-        TierPrice.objects.create(tier=self.tier, active_from=self.today - datetime.timedelta(days=1200), amount=Decimal("500.00"))
+        # A trial plan carries its own length; the form only offers plans flagged is_trial.
+        self.trial_plan = Plan.objects.create(name="Trial", is_trial=True, duration_months=2)
+        PlanPrice.objects.create(plan=self.trial_plan, active_from=self.today - datetime.timedelta(days=1200), amount=Decimal("50.00"))
+        self.plan = Plan.objects.create(name="Standard")
+        PlanPrice.objects.create(plan=self.plan, active_from=self.today - datetime.timedelta(days=1200), amount=Decimal("500.00"))
 
     def start_trial(self, **data):
-        data = {"trial_tier": self.trial_tier.pk, "post_trial_tier": self.tier.pk, "trial_months": 2, "start": ""} | data
+        data = {"trial_plan": self.trial_plan.pk, "post_trial_plan": self.plan.pk, "start": ""} | data
         return self.client.post(reverse("controlpanel:club_trial_start", args=[self.club.pk]), data)
 
     def test_starting_a_trial_opens_a_short_first_period(self):
         response = self.start_trial()
 
         self.assertRedirects(response, reverse("controlpanel:club_detail", args=[self.club.pk]))
-        self.assertEqual(self.club.subscription.tier, self.trial_tier)
-        self.assertEqual(self.club.subscription.post_trial_tier, self.tier)
+        self.assertEqual(self.club.subscription.plan, self.trial_plan)
+        self.assertEqual(self.club.subscription.post_trial_plan, self.plan)
         due = self.club.dues.first()
         self.assertTrue(due.is_trial)
         self.assertLess((due.period_end - due.period_start).days, 65)
 
     def test_a_club_already_subscribed_cannot_be_started_on_a_trial(self):
-        subscribe(self.club, self.tier)
+        subscribe(self.club, self.plan)
 
         response = self.client.post(
             reverse("controlpanel:club_trial_start", args=[self.club.pk]),
-            {"trial_tier": self.trial_tier.pk, "post_trial_tier": self.tier.pk, "trial_months": 2, "start": ""},
+            {"trial_plan": self.trial_plan.pk, "post_trial_plan": self.plan.pk, "start": ""},
             follow=True,
         )
 
         self.assertContains(response, "already subscribed")
         self.assertEqual(self.club.dues.count(), 1)
 
-    def test_an_invalid_trial_length_redirects_back_with_an_error(self):
-        response = self.client.post(reverse("controlpanel:club_trial_start", args=[self.club.pk]), {"trial_tier": self.trial_tier.pk, "post_trial_tier": self.tier.pk, "trial_months": 0, "start": ""}, follow=True)
+    def test_a_non_trial_plan_is_not_offered_as_the_trial(self):
+        response = self.client.post(reverse("controlpanel:club_trial_start", args=[self.club.pk]), {"trial_plan": self.plan.pk, "post_trial_plan": self.plan.pk, "start": ""}, follow=True)
 
         self.assertFalse(hasattr(self.club, "subscription"))
         self.assertTrue(response.context["messages"])
@@ -1538,36 +1541,36 @@ class TrialPanelTests(ControlPanelTestBase):
         self.assertContains(response, "On trial")
         self.assertContains(response, "Standard")
 
-    def test_manually_changing_tier_mid_trial_clears_the_trial(self):
+    def test_manually_changing_plan_mid_trial_clears_the_trial(self):
         self.start_trial()
-        other = Tier.objects.create(name="Other")
-        TierPrice.objects.create(tier=other, active_from=self.today - datetime.timedelta(days=1200), amount=Decimal("300.00"))
+        other = Plan.objects.create(name="Other")
+        PlanPrice.objects.create(plan=other, active_from=self.today - datetime.timedelta(days=1200), amount=Decimal("300.00"))
 
-        self.client.post(reverse("controlpanel:club_subscribe", args=[self.club.pk]), {"tier": other.pk, "auto_archive": "on", "notes": ""})
+        self.client.post(reverse("controlpanel:club_subscribe", args=[self.club.pk]), {"plan": other.pk, "auto_archive": "on", "notes": ""})
 
         self.club.refresh_from_db()
-        self.assertEqual(self.club.subscription.tier, other)
+        self.assertEqual(self.club.subscription.plan, other)
         self.assertIsNone(self.club.subscription.trial_ends_at)
-        self.assertIsNone(self.club.subscription.post_trial_tier)
+        self.assertIsNone(self.club.subscription.post_trial_plan)
 
 
 class BillingFormRenderTests(ControlPanelTestBase):
     def setUp(self):
         super().setUp()
         self.today = timezone.localdate()
-        self.tier = Tier.objects.create(name="Standard")
-        TierPrice.objects.create(tier=self.tier, active_from=self.today - datetime.timedelta(days=1200), amount=Decimal("500.00"))
+        self.plan = Plan.objects.create(name="Standard")
+        PlanPrice.objects.create(plan=self.plan, active_from=self.today - datetime.timedelta(days=1200), amount=Decimal("500.00"))
 
     def test_the_billing_forms_are_post_only(self):
         # Every one of these is reachable only through a modal on the billing or club
         # detail page: there is no standalone template to render on a GET.
-        subscribe(self.club, self.tier)
+        subscribe(self.club, self.plan)
         due = self.club.dues.first()
 
         for url in (
-            reverse("controlpanel:tier_create"),
-            reverse("controlpanel:tier_update", args=[self.tier.pk]),
-            reverse("controlpanel:tier_price_create", args=[self.tier.pk]),
+            reverse("controlpanel:plan_create"),
+            reverse("controlpanel:plan_update", args=[self.plan.pk]),
+            reverse("controlpanel:plan_price_create", args=[self.plan.pk]),
             reverse("controlpanel:club_subscribe", args=[self.club.pk]),
             reverse("controlpanel:club_open_period", args=[self.club.pk]),
             reverse("controlpanel:due_pay", args=[due.pk]),
@@ -1578,10 +1581,10 @@ class BillingFormRenderTests(ControlPanelTestBase):
         # Rejected input has nowhere to re-render — the modal that submitted it is on a
         # page this view no longer serves — so it must bounce back with an error message
         # rather than 500 or silently drop the submission.
-        subscribe(self.club, self.tier)
+        subscribe(self.club, self.plan)
         due = self.club.dues.first()
 
-        response = self.client.post(reverse("controlpanel:tier_create"), {"name": "", "description": "", "is_active": "on"}, follow=True)
+        response = self.client.post(reverse("controlpanel:plan_create"), {"name": "", "description": "", "is_active": "on"}, follow=True)
         self.assertRedirects(response, reverse("controlpanel:billing"))
         self.assertContains(response, "This field is required")
 
@@ -1590,7 +1593,7 @@ class BillingFormRenderTests(ControlPanelTestBase):
         self.assertContains(response, "Enter a number")
 
     def test_the_payment_modal_defaults_to_the_outstanding_balance(self):
-        subscribe(self.club, self.tier)
+        subscribe(self.club, self.plan)
         due = self.club.dues.first()
         record_payment(due, Decimal("200.00"))
         due.refresh_from_db()
@@ -1600,34 +1603,34 @@ class BillingFormRenderTests(ControlPanelTestBase):
         rendered_due = next(rendered for rendered in response.context["dues"] if rendered.pk == due.pk)
         self.assertEqual(rendered_due.payment_form.initial["amount"], Decimal("300.00"))
 
-    def test_a_tier_can_be_renamed(self):
-        self.client.post(reverse("controlpanel:tier_update", args=[self.tier.pk]), {"name": "Standard plus", "description": "", "is_active": "on"})
+    def test_a_plan_can_be_renamed(self):
+        self.client.post(reverse("controlpanel:plan_update", args=[self.plan.pk]), {"name": "Standard plus", "description": "", "is_active": "on", "duration_months": 12, "renewal_lead_days": 30, "grace_days": 30})
 
-        self.tier.refresh_from_db()
-        self.assertEqual(self.tier.name, "Standard plus")
+        self.plan.refresh_from_db()
+        self.assertEqual(self.plan.name, "Standard plus")
 
-    def test_changing_tier_leaves_the_open_period_alone(self):
+    def test_changing_plan_leaves_the_open_period_alone(self):
         # The current period keeps the amount it was issued at; the new rate bites next time.
-        subscribe(self.club, self.tier)
-        premium = Tier.objects.create(name="Premium")
-        TierPrice.objects.create(tier=premium, active_from=self.today, amount=Decimal("900.00"))
+        subscribe(self.club, self.plan)
+        premium = Plan.objects.create(name="Premium")
+        PlanPrice.objects.create(plan=premium, active_from=self.today, amount=Decimal("900.00"))
 
-        response = self.client.post(reverse("controlpanel:club_subscribe", args=[self.club.pk]), {"tier": premium.pk, "auto_archive": "on", "notes": ""}, follow=True)
+        response = self.client.post(reverse("controlpanel:club_subscribe", args=[self.club.pk]), {"plan": premium.pk, "auto_archive": "on", "notes": ""}, follow=True)
 
         self.club.refresh_from_db()
-        self.assertEqual(self.club.subscription.tier, premium)
+        self.assertEqual(self.club.subscription.plan, premium)
         self.assertEqual(self.club.dues.first().amount, Decimal("500.00"))
         self.assertContains(response, "keeps the amount it was billed at")
 
-    def test_subscribing_to_an_unpriced_tier_reports_itself(self):
-        unpriced = Tier.objects.create(name="Enterprise")
+    def test_subscribing_to_an_unpriced_plan_reports_itself(self):
+        unpriced = Plan.objects.create(name="Enterprise")
 
-        response = self.client.post(reverse("controlpanel:club_subscribe", args=[self.club.pk]), {"tier": unpriced.pk, "auto_archive": "on", "notes": ""}, follow=True)
+        response = self.client.post(reverse("controlpanel:club_subscribe", args=[self.club.pk]), {"plan": unpriced.pk, "auto_archive": "on", "notes": ""}, follow=True)
 
         self.assertContains(response, "no price in force")
 
     def test_billing_a_period_twice_reports_itself(self):
-        subscribe(self.club, self.tier)
+        subscribe(self.club, self.plan)
         start = self.club.dues.first().period_start
 
         response = self.client.post(reverse("controlpanel:club_open_period", args=[self.club.pk]), {"start": start.isoformat()}, follow=True)
@@ -1635,7 +1638,7 @@ class BillingFormRenderTests(ControlPanelTestBase):
         self.assertContains(response, "already billed")
 
     def test_waiving_a_paid_period_reports_itself(self):
-        subscribe(self.club, self.tier)
+        subscribe(self.club, self.plan)
         due = self.club.dues.first()
         record_payment(due, Decimal("500.00"))
 

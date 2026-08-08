@@ -10,7 +10,7 @@ from django.utils.formats import date_format
 from django.views.generic import CreateView, DetailView, FormView, ListView, TemplateView, UpdateView, View
 from waffle import get_waffle_flag_model, get_waffle_switch_model
 
-from billing.models import Due, Tier, TierPrice
+from billing.models import Due, Plan, PlanPrice
 from billing.services import BillingError
 from billing.services.dues import next_period_start, open_period, reactivate, record_payment, start_trial, subscribe, waive
 from billing.services.invoices import invoice_pdf, issue_invoice
@@ -18,7 +18,7 @@ from club.models import Club, ClubRole
 from events.models import Location
 from features.models import Maintenance
 
-from .forms import ClubAdminForm, ClubForm, DuePaymentForm, FlagForm, HomeLocationForm, MaintenanceForm, OpenPeriodForm, PlatformAdminForm, SubscriptionForm, TierForm, TierPriceForm, TrialForm
+from .forms import ClubAdminForm, ClubForm, DuePaymentForm, FlagForm, HomeLocationForm, MaintenanceForm, OpenPeriodForm, PlanForm, PlanPriceForm, PlatformAdminForm, SubscriptionForm, TrialForm
 from .messages import notify
 from .mixins import PlatformStaffRequiredMixin, PlatformSuperuserRequiredMixin, RedirectOnInvalidMixin
 from .services.admins import grant_club_admin, revoke_club_admin
@@ -130,7 +130,7 @@ class ClubDetailView(PlatformStaffRequiredMixin, DetailView):
 
         # Bound per-row so each due's "Add payment" modal can render its own form without
         # the template calling DuePaymentForm(initial=...) itself.
-        dues = list(self.object.dues.select_related("tier", "invoice").prefetch_related("payments"))
+        dues = list(self.object.dues.select_related("plan", "invoice").prefetch_related("payments"))
         for due in dues:
             if due.is_owing:
                 due.payment_form = DuePaymentForm(initial={"amount": due.balance})
@@ -138,6 +138,9 @@ class ClubDetailView(PlatformStaffRequiredMixin, DetailView):
         home_location = Location.objects.filter(club=self.object, is_home=True).first()
 
         return super().get_context_data(
+            # Drives the "archived but owes nothing -- reactivate?" prompt. Computed from the
+            # dues already fetched above rather than re-querying.
+            dues_settled=not any(due.is_owing for due in dues),
             home_location=home_location,
             home_location_form=HomeLocationForm(instance=home_location),
             nav="clubs",
@@ -388,7 +391,7 @@ class PlatformAdminRevokeView(PlatformSuperuserRequiredMixin, View):
 
 
 class BillingView(PlatformStaffRequiredMixin, TemplateView):
-    """Tiers and their prices, plus every period we are owed money for."""
+    """Plans and their prices, plus every period we are owed money for."""
 
     template_name = "controlpanel/billing.html"
 
@@ -396,76 +399,76 @@ class BillingView(PlatformStaffRequiredMixin, TemplateView):
         today = timezone.localdate()
 
         # Bound per-row so each "Edit" / "New price" modal can render its own form: the
-        # template can't call TierForm(instance=tier) itself, so the form rides along on
+        # template can't call PlanForm(instance=plan) itself, so the form rides along on
         # the object it belongs to.
-        tiers = list(Tier.objects.prefetch_related("prices").annotate(club_count=Count("subscriptions")))
-        for tier in tiers:
-            tier.edit_form = TierForm(instance=tier)
-            tier.price_form = TierPriceForm()
+        plans = list(Plan.objects.prefetch_related("prices").annotate(club_count=Count("subscriptions")))
+        for plan in plans:
+            plan.edit_form = PlanForm(instance=plan)
+            plan.price_form = PlanPriceForm()
 
-        owing = list(Due.objects.filter(status__in=Due.OWING).select_related("club", "tier").order_by("grace_until"))
+        owing = list(Due.objects.filter(status__in=Due.OWING).select_related("club", "plan").order_by("grace_until"))
         for due in owing:
             due.payment_form = DuePaymentForm(initial={"amount": due.balance})
 
         return super().get_context_data(
             nav="billing",
-            tiers=tiers,
-            tier_form=TierForm(),
+            plans=plans,
+            plan_form=PlanForm(),
             owing=owing,
             today=today,
             **kwargs,
         )
 
 
-class TierCreateView(PlatformStaffRequiredMixin, RedirectOnInvalidMixin, CreateView):
+class PlanCreateView(PlatformStaffRequiredMixin, RedirectOnInvalidMixin, CreateView):
     """Reachable only via the "New plan" modal on the billing page — POST-only, and there
     is no standalone template to render on GET or on a rejected submission."""
 
-    model = Tier
-    form_class = TierForm
+    model = Plan
+    form_class = PlanForm
     http_method_names = ["post"]
     invalid_redirect_url_name = "controlpanel:billing"
 
     def get_success_url(self):
-        notify(self.request, f"s|Plan created|Tier “{self.object}” created. Give it a price before billing anyone.")
+        notify(self.request, f"s|Plan created|Plan “{self.object}” created. Give it a price before billing anyone.")
         return reverse("controlpanel:billing")
 
 
-class TierUpdateView(PlatformStaffRequiredMixin, RedirectOnInvalidMixin, UpdateView):
-    """Reachable only via a tier's "Edit" modal on the billing page — POST-only, and there
+class PlanUpdateView(PlatformStaffRequiredMixin, RedirectOnInvalidMixin, UpdateView):
+    """Reachable only via a plan's "Edit" modal on the billing page — POST-only, and there
     is no standalone template to render on GET or on a rejected submission."""
 
-    model = Tier
-    form_class = TierForm
+    model = Plan
+    form_class = PlanForm
     http_method_names = ["post"]
     invalid_redirect_url_name = "controlpanel:billing"
 
     def get_success_url(self):
-        notify(self.request, f"s|Plan updated|Tier “{self.object}” updated.")
+        notify(self.request, f"s|Plan updated|Plan “{self.object}” updated.")
         return reverse("controlpanel:billing")
 
 
-class TierPriceCreateView(PlatformStaffRequiredMixin, RedirectOnInvalidMixin, CreateView):
+class PlanPriceCreateView(PlatformStaffRequiredMixin, RedirectOnInvalidMixin, CreateView):
     """A rate change is a new dated price, never an edit of the old one — periods already
     billed keep the amount they were billed at.
 
-    Reachable only via a tier's "New price" modal on the billing page — POST-only, and
+    Reachable only via a plan's "New price" modal on the billing page — POST-only, and
     there is no standalone template to render on GET or on a rejected submission.
     """
 
-    model = TierPrice
-    form_class = TierPriceForm
+    model = PlanPrice
+    form_class = PlanPriceForm
     http_method_names = ["post"]
     invalid_redirect_url_name = "controlpanel:billing"
 
     @property
-    def tier(self):
-        return get_object_or_404(Tier, pk=self.kwargs["pk"])
+    def plan(self):
+        return get_object_or_404(Plan, pk=self.kwargs["pk"])
 
     def form_valid(self, form):
-        form.instance.tier = self.tier
+        form.instance.plan = self.plan
         response = super().form_valid(form)
-        notify(self.request, f"s|Price added|{self.tier} is €{self.object.amount} for periods opening from {self.object.active_from}.")
+        notify(self.request, f"s|Price added|{self.plan} is €{self.object.amount} for periods opening from {self.object.active_from}.")
         return response
 
     def get_success_url(self):
@@ -473,7 +476,7 @@ class TierPriceCreateView(PlatformStaffRequiredMixin, RedirectOnInvalidMixin, Cr
 
 
 class SubscribeClubView(PlatformStaffRequiredMixin, RedirectOnInvalidMixin, FormView):
-    """Put a club on a tier, which opens its first period.
+    """Put a club on a plan, which opens its first period.
 
     Reachable only via the "Change plan" modal on the club detail page — POST-only, and
     there is no standalone template to render on GET or on a rejected submission.
@@ -502,22 +505,22 @@ class SubscribeClubView(PlatformStaffRequiredMixin, RedirectOnInvalidMixin, Form
         existing = getattr(club, "subscription", None)
         with suppress_billing_errors(self.request, title="Couldn't change plan"):
             if existing:
-                # Changing tier does not re-bill: the current period keeps the amount it was
+                # Changing plan does not re-bill: the current period keeps the amount it was
                 # issued at, and the new rate applies from the next one.
                 was_on_trial = existing.trial_ends_at is not None
                 subscription = form.save(commit=False)
                 subscription.club = club
                 if was_on_trial:
-                    # A manual tier change while on a trial is a deliberate override --
-                    # left in place, the trial fields would silently swap the tier again
+                    # A manual plan change while on a trial is a deliberate override --
+                    # left in place, the trial fields would silently swap the plan again
                     # later, onto a plan the admin didn't just choose.
                     subscription.trial_ends_at = None
-                    subscription.post_trial_tier = None
+                    subscription.post_trial_plan = None
                 subscription.save()
-                notify(self.request, f"s|Plan changed|{club} is now on {subscription.tier}. The current period keeps the amount it was billed at.")
+                notify(self.request, f"s|Plan changed|{club} is now on {subscription.plan}. The current period keeps the amount it was billed at.")
             else:
-                subscribe(club, form.cleaned_data["tier"], start=form.cleaned_data.get("start"), auto_archive=form.cleaned_data["auto_archive"], auto_renew=form.cleaned_data["auto_renew"])
-                notify(self.request, f"s|Billing started|{club} is on {form.cleaned_data['tier']}. Its first period is open.")
+                subscribe(club, form.cleaned_data["plan"], start=form.cleaned_data.get("start"), auto_archive=form.cleaned_data["auto_archive"], auto_renew=form.cleaned_data["auto_renew"])
+                notify(self.request, f"s|Billing started|{club} is on {form.cleaned_data['plan']}. Its first period is open.")
 
         return redirect("controlpanel:club_detail", pk=club.pk)
 
@@ -541,14 +544,14 @@ class ClubStartTrialView(PlatformStaffRequiredMixin, RedirectOnInvalidMixin, For
     def form_valid(self, form):
         club = self.club
         with suppress_billing_errors(self.request, title="Couldn't start trial"):
+            trial_plan = form.cleaned_data["trial_plan"]
             start_trial(
                 club,
-                form.cleaned_data["trial_tier"],
-                post_trial_tier=form.cleaned_data["post_trial_tier"],
-                trial_months=form.cleaned_data["trial_months"],
+                trial_plan,
+                post_trial_plan=form.cleaned_data["post_trial_plan"],
                 start=form.cleaned_data.get("start"),
             )
-            notify(self.request, f"s|Trial started|{club} is on a {form.cleaned_data['trial_months']}-month trial of {form.cleaned_data['trial_tier']}, then switches to {form.cleaned_data['post_trial_tier']}.")
+            notify(self.request, f"s|Trial started|{club} is on a {trial_plan.duration_months}-month trial of {trial_plan}, then switches to {form.cleaned_data['post_trial_plan']}.")
 
         return redirect("controlpanel:club_detail", pk=club.pk)
 
@@ -564,7 +567,7 @@ class RecordPaymentView(PlatformStaffRequiredMixin, RedirectOnInvalidMixin, Form
 
     @property
     def due(self):
-        return get_object_or_404(Due.objects.select_related("club", "tier"), pk=self.kwargs["pk"])
+        return get_object_or_404(Due.objects.select_related("club", "plan"), pk=self.kwargs["pk"])
 
     def get_invalid_redirect_kwargs(self):
         return {"pk": self.due.club_id}
@@ -627,7 +630,7 @@ class OpenPeriodView(PlatformStaffRequiredMixin, RedirectOnInvalidMixin, FormVie
 
 class InvoicePdfView(PlatformStaffRequiredMixin, View):
     def get(self, request, pk):
-        due = get_object_or_404(Due.objects.select_related("club", "tier", "invoice"), pk=pk)
+        due = get_object_or_404(Due.objects.select_related("club", "plan", "invoice"), pk=pk)
         invoice = issue_invoice(due)
         try:
             pdf = invoice_pdf(invoice)

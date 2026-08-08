@@ -1,0 +1,35 @@
+{% comment %}
+    What this club owes the platform, for its own admins.
+
+    `billing_notice` comes from management.context_processors.billing_notice, which returns
+    None for anyone who is not a club admin -- so this partial never needs to check that
+    itself. Included unconditionally by home.html, and by base.html only when the notice has
+    reached error level, so a final notice follows an admin onto every management page while
+    an early one stays on the dashboard.
+{% endcomment %}
+{% load i18n lucide %}
+
+{% if billing_notice %}
+    <div class="alert {% if billing_notice.level == 'error' %}alert-error{% elif billing_notice.level == 'warning' %}alert-warning{% else %}alert-info{% endif %} mb-6">
+        {% if billing_notice.level == 'error' %}
+            {% lucide "octagon-alert" size=20 %}
+        {% elif billing_notice.level == 'warning' %}
+            {% lucide "triangle-alert" size=20 %}
+        {% else %}
+            {% lucide "receipt-euro" size=20 %}
+        {% endif %}
+        <span>
+            {% blocktrans with amount=billing_notice.amount_outstanding %}Platform fees of €{{ amount }} are outstanding.{% endblocktrans %}
+
+            {% if billing_notice.will_archive %}
+                {% if billing_notice.days_until_archive < 0 %}
+                    {% trans "This club is now due to be archived. Pay to keep access." %}
+                {% else %}
+                    {% blocktrans count days=billing_notice.days_until_archive %}This club will be archived in {{ days }} day unless payment is received.{% plural %}This club will be archived in {{ days }} days unless payment is received.{% endblocktrans %}
+                {% endif %}
+            {% else %}
+                {% trans "Please settle it to keep your account in good standing." %}
+            {% endif %}
+        </span>
+    </div>
+{% endif %}

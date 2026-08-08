@@ -9,7 +9,7 @@ from django.utils.translation import gettext_lazy as _
 from django.utils.translation import ngettext
 from django.views.generic import CreateView, DetailView, FormView, ListView, TemplateView, UpdateView, View
 
-from billing.models import RENEWAL_LEAD_DAYS, Due
+from billing.models import Due
 from club.mixins import (
     ClubAdminRequiredMixin,
     ClubStaffRequiredMixin,
@@ -86,10 +86,13 @@ class HomeView(ClubStaffRequiredMixin, TemplateView):
         club, user = self.request.club, self.request.user
         subscription = getattr(club, "subscription", None)
 
+        # "Your period ends soon" is a different question from "you owe us money", and only
+        # worth raising when nothing is owed -- an unpaid club gets the billing notice from
+        # the context processor instead, which is louder and more urgent.
         billing_ends_at = None
-        if subscription is not None:
+        if subscription is not None and not club.dues.filter(status__in=Due.OWING).exists():
             latest_due = club.dues.exclude(status=Due.Status.CANCELLED).order_by("-period_end").first()
-            if latest_due is not None and 0 <= (latest_due.period_end - timezone.localdate()).days <= RENEWAL_LEAD_DAYS:
+            if latest_due is not None and 0 <= (latest_due.period_end - timezone.localdate()).days <= subscription.plan.renewal_lead_days:
                 billing_ends_at = latest_due.period_end
 
         upcoming_events = scoped_to_managed_teams(Event.objects.filter(club=club, start__gte=timezone.now()), user, club).order_by("start").prefetch_related("teams")[:5]

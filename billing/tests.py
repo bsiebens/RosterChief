@@ -4,64 +4,78 @@ from decimal import Decimal
 from io import StringIO
 from unittest import mock
 
+from django.core import mail
+from django.core.exceptions import ValidationError
 from django.core.management import call_command
 from django.core.management.base import CommandError
+from django.db.utils import IntegrityError
 from django.test import TestCase
 from django.utils import timezone
 
-from club.models import Club
+from authentication.models import User
+from club.models import Club, ClubRole
+from members.models import Member
 
-from .models import GRACE_DAYS, Due, Invoice, Subscription, Tier, TierPrice, add_one_year
+from .models import DEFAULT_DURATION_MONTHS, DEFAULT_GRACE_DAYS, DEFAULT_RENEWAL_LEAD_DAYS, Due, Invoice, Plan, PlanPrice, Subscription, add_months
 from .services import BillingError
 from .services.dues import archivable_clubs, dues_in_grace, dues_overdue, next_period_start, open_period, reactivate, record_payment, remove_payment, renew, start_trial, subscribe, subscriptions_due_for_renewal, waive
 from .services.invoices import invoice_pdf, issue_invoice, render_pdf
+from .services.notices import club_billing_notice
+from .services.reminders import admin_emails, reminders_to_send, send_reminder
 
 
 class BillingTestBase(TestCase):
     def setUp(self):
         self.today = timezone.localdate()
         self.club = Club.objects.create(name="Ajax United")
-        self.tier = Tier.objects.create(name="Standard")
+        self.plan = Plan.objects.create(name="Standard")
         # Priced well back, so a backdated (lapsed) period still has a price in force —
         # opening one before any price existed is refused, and rightly so.
-        TierPrice.objects.create(tier=self.tier, active_from=self.today - datetime.timedelta(days=1200), amount=Decimal("500.00"))
+        PlanPrice.objects.create(plan=self.plan, active_from=self.today - datetime.timedelta(days=1200), amount=Decimal("500.00"))
 
     def bill(self, start=None, club=None):
-        return open_period(club or self.club, start=start, tier=self.tier)
+        return open_period(club or self.club, start=start, plan=self.plan)
 
 
-class TierPriceTests(BillingTestBase):
+class PlanPriceTests(BillingTestBase):
     def test_the_price_in_force_is_the_latest_one_that_has_started(self):
-        TierPrice.objects.create(tier=self.tier, active_from=self.today, amount=Decimal("600.00"))
+        PlanPrice.objects.create(plan=self.plan, active_from=self.today, amount=Decimal("600.00"))
 
-        self.assertEqual(self.tier.price_on(self.today - datetime.timedelta(days=1)), Decimal("500.00"))
-        self.assertEqual(self.tier.price_on(self.today), Decimal("600.00"))
+        self.assertEqual(self.plan.price_on(self.today - datetime.timedelta(days=1)), Decimal("500.00"))
+        self.assertEqual(self.plan.price_on(self.today), Decimal("600.00"))
 
     def test_a_future_price_does_not_apply_yet(self):
-        TierPrice.objects.create(tier=self.tier, active_from=self.today + datetime.timedelta(days=30), amount=Decimal("600.00"))
+        PlanPrice.objects.create(plan=self.plan, active_from=self.today + datetime.timedelta(days=30), amount=Decimal("600.00"))
 
-        self.assertEqual(self.tier.price_on(self.today), Decimal("500.00"))
+        self.assertEqual(self.plan.price_on(self.today), Decimal("500.00"))
 
-    def test_a_tier_with_no_price_yet_cannot_be_billed(self):
+    def test_a_plan_with_no_price_yet_cannot_be_billed(self):
         # None must never be read as free.
-        empty = Tier.objects.create(name="Enterprise")
+        empty = Plan.objects.create(name="Enterprise")
 
         self.assertIsNone(empty.price_on(self.today))
 
         with self.assertRaises(BillingError):
-            open_period(self.club, tier=empty)
+            open_period(self.club, plan=empty)
 
 
 class PeriodTests(BillingTestBase):
-    def test_a_period_runs_a_rolling_year_with_a_grace_tail(self):
+    def test_a_period_runs_for_the_plans_duration(self):
         due = self.bill(start=datetime.date(2026, 3, 1))
 
         self.assertEqual(due.period_end, datetime.date(2027, 2, 28))
-        self.assertEqual(due.grace_until, due.period_end + datetime.timedelta(days=GRACE_DAYS))
+
+    def test_grace_is_measured_from_the_period_start_not_its_end(self):
+        # The whole point of the redesign: measured from the end, an annual club would get
+        # ~410 days of unpaid use before anything switched it off.
+        due = self.bill(start=datetime.date(2026, 3, 1))
+
+        self.assertEqual(due.grace_until, datetime.date(2026, 3, 1) + datetime.timedelta(days=DEFAULT_GRACE_DAYS))
+        self.assertLess(due.grace_until, due.period_end)
 
     def test_a_leap_day_period_does_not_explode(self):
         # 29 February has no counterpart in a common year.
-        self.assertEqual(add_one_year(datetime.date(2028, 2, 29)), datetime.date(2029, 2, 28))
+        self.assertEqual(add_months(datetime.date(2028, 2, 29), 12), datetime.date(2029, 2, 28))
 
     def test_the_next_period_continues_from_the_last_one(self):
         # Not from today: a club that pays two months late has still used those two months,
@@ -75,7 +89,7 @@ class PeriodTests(BillingTestBase):
 
     def test_the_amount_is_snapshotted_at_the_price_of_the_day(self):
         due = self.bill()
-        TierPrice.objects.create(tier=self.tier, active_from=self.today + datetime.timedelta(days=1), amount=Decimal("900.00"))
+        PlanPrice.objects.create(plan=self.plan, active_from=self.today + datetime.timedelta(days=1), amount=Decimal("900.00"))
         due.refresh_from_db()
 
         # Raising the rate must not rewrite what was already billed.
@@ -87,16 +101,16 @@ class PeriodTests(BillingTestBase):
         with self.assertRaises(BillingError):
             self.bill(start=self.today)
 
-    def test_a_club_with_no_tier_cannot_be_billed(self):
+    def test_a_club_with_no_plan_cannot_be_billed(self):
         with self.assertRaises(BillingError):
             open_period(Club.objects.create(name="Feyenoord"))
 
-    def test_subscribing_puts_a_club_on_a_tier_and_opens_a_period(self):
+    def test_subscribing_puts_a_club_on_a_plan_and_opens_a_period(self):
         club = Club.objects.create(name="Feyenoord")
 
-        subscribe(club, self.tier)
+        subscribe(club, self.plan)
 
-        self.assertEqual(Subscription.objects.get(club=club).tier, self.tier)
+        self.assertEqual(Subscription.objects.get(club=club).plan, self.plan)
         self.assertEqual(club.dues.count(), 1)
 
 
@@ -175,14 +189,23 @@ class PaymentTests(BillingTestBase):
 
 
 class GraceAndArchiveTests(BillingTestBase):
-    LAPSED = 365 + GRACE_DAYS + 10
+    LAPSED = DEFAULT_GRACE_DAYS + 10
 
-    def test_a_period_past_its_end_but_inside_grace_is_in_grace(self):
-        due = self.bill(start=self.today - datetime.timedelta(days=370))
+    def test_a_started_but_unpaid_period_inside_grace_is_in_grace(self):
+        # Grace runs from the period START now, so this is a period that began a few days
+        # ago and has not been paid -- not one that has already run its full length.
+        due = self.bill(start=self.today - datetime.timedelta(days=5))
 
         self.assertTrue(due.is_in_grace(self.today))
         self.assertFalse(due.is_overdue(self.today))
         self.assertIn(due, dues_in_grace(self.today))
+
+    def test_a_period_issued_ahead_of_its_start_is_not_yet_in_grace(self):
+        due = self.bill(start=self.today + datetime.timedelta(days=10))
+
+        self.assertTrue(due.is_issued_ahead(self.today))
+        self.assertFalse(due.is_in_grace(self.today))
+        self.assertFalse(due.is_overdue(self.today))
 
     def test_a_period_past_grace_is_overdue(self):
         due = self.bill(start=self.today - datetime.timedelta(days=self.LAPSED))
@@ -200,19 +223,19 @@ class GraceAndArchiveTests(BillingTestBase):
         self.assertNotIn(due, dues_overdue(self.today))
 
     def test_an_overdue_club_is_archivable(self):
-        subscribe(self.club, self.tier, start=self.today - datetime.timedelta(days=self.LAPSED))
+        subscribe(self.club, self.plan, start=self.today - datetime.timedelta(days=self.LAPSED))
 
         self.assertEqual(archivable_clubs(self.today).count(), 1)
 
     def test_a_club_that_opted_out_is_never_archived(self):
         # auto_archive off is how you stop a club you are negotiating with from being
         # switched off overnight.
-        subscribe(self.club, self.tier, start=self.today - datetime.timedelta(days=self.LAPSED), auto_archive=False)
+        subscribe(self.club, self.plan, start=self.today - datetime.timedelta(days=self.LAPSED), auto_archive=False)
 
         self.assertEqual(archivable_clubs(self.today).count(), 0)
 
     def test_an_already_archived_club_is_not_archived_again(self):
-        subscribe(self.club, self.tier, start=self.today - datetime.timedelta(days=self.LAPSED))
+        subscribe(self.club, self.plan, start=self.today - datetime.timedelta(days=self.LAPSED))
         self.club.archive()
 
         self.assertEqual(archivable_clubs(self.today).count(), 0)
@@ -221,7 +244,7 @@ class GraceAndArchiveTests(BillingTestBase):
 class ArchiveCommandTests(BillingTestBase):
     def setUp(self):
         super().setUp()
-        subscribe(self.club, self.tier, start=self.today - datetime.timedelta(days=365 + GRACE_DAYS + 10))
+        subscribe(self.club, self.plan, start=self.today - datetime.timedelta(days=DEFAULT_GRACE_DAYS + 10))
 
     def run_command(self, *args):
         out = StringIO()
@@ -253,9 +276,9 @@ class ArchiveCommandTests(BillingTestBase):
 class ReactivationTests(BillingTestBase):
     def setUp(self):
         super().setUp()
-        # Through subscribe(), not open_period(): reactivating reads the club's tier off its
+        # Through subscribe(), not open_period(): reactivating reads the club's plan off its
         # subscription, and a club billed without one cannot be re-billed later.
-        subscribe(self.club, self.tier, start=self.today - datetime.timedelta(days=400))
+        subscribe(self.club, self.plan, start=self.today - datetime.timedelta(days=400))
         self.first = self.club.dues.first()
         self.club.archive()
 
@@ -282,7 +305,7 @@ class InvoiceTests(BillingTestBase):
         # Unlike the shop's per-club order numbers: these are OUR invoices, and one sequence
         # covers every club we bill.
         first = self.bill(start=self.today).invoice
-        second = open_period(Club.objects.create(name="Feyenoord"), tier=self.tier).invoice
+        second = open_period(Club.objects.create(name="Feyenoord"), plan=self.plan).invoice
 
         year = timezone.now().year
         self.assertEqual(first.number, f"INV-{year}-00001")
@@ -330,12 +353,12 @@ class ModelStringTests(BillingTestBase):
         due = self.bill()
         payment = record_payment(due, Decimal("10.00"))
 
-        self.assertEqual(str(self.tier), "Standard")
-        self.assertIn("500.00", str(self.tier.prices.first()))
+        self.assertEqual(str(self.plan), "Standard")
+        self.assertIn("500.00", str(self.plan.prices.first()))
         self.assertIn("Ajax United", str(due))
         self.assertIn("10.00", str(payment))
         self.assertIn("INV-", str(due.invoice))
-        self.assertIn("Standard", str(subscribe(Club.objects.create(name="PSV"), self.tier)))
+        self.assertIn("Standard", str(subscribe(Club.objects.create(name="PSV"), self.plan)))
 
 
 class RenewalTests(BillingTestBase):
@@ -346,7 +369,7 @@ class RenewalTests(BillingTestBase):
     def ending_in(self, days, **kwargs):
         """A club whose current period ends `days` from now."""
         club = Club.objects.create(name=f"Club {days}")
-        subscribe(club, self.tier, start=self.today - datetime.timedelta(days=365 - days), **kwargs)
+        subscribe(club, self.plan, start=self.today - datetime.timedelta(days=365 - days), **kwargs)
         return club
 
     def test_a_club_nearing_its_end_date_is_picked_up(self):
@@ -395,7 +418,7 @@ class RenewalTests(BillingTestBase):
 
     def test_the_new_period_is_billed_at_the_price_in_force_then(self):
         club = self.ending_in(20)
-        TierPrice.objects.create(tier=self.tier, active_from=self.today, amount=Decimal("900.00"))
+        PlanPrice.objects.create(plan=self.plan, active_from=self.today, amount=Decimal("900.00"))
 
         due = renew(club.subscription)
 
@@ -427,15 +450,15 @@ class RenewalTests(BillingTestBase):
 
         self.assertEqual(club.dues.count(), 2)
 
-    def test_an_unpriced_tier_fails_loudly_without_stopping_the_others(self):
+    def test_an_unpriced_plan_fails_loudly_without_stopping_the_others(self):
         priced = self.ending_in(20)
         broken = Club.objects.create(name="Unpriced FC")
-        subscribe(broken, self.tier, start=self.today - datetime.timedelta(days=350))
+        subscribe(broken, self.plan, start=self.today - datetime.timedelta(days=350))
         # Its next period starts beyond the last price... by removing every price, it cannot bill.
-        TierPrice.objects.all().delete()
-        cheap = Tier.objects.create(name="Cheap")
-        TierPrice.objects.create(tier=cheap, active_from=self.today - datetime.timedelta(days=1200), amount=Decimal("100.00"))
-        priced.subscription.tier = cheap
+        PlanPrice.objects.all().delete()
+        cheap = Plan.objects.create(name="Cheap")
+        PlanPrice.objects.create(plan=cheap, active_from=self.today - datetime.timedelta(days=1200), amount=Decimal("100.00"))
+        priced.subscription.plan = cheap
         priced.subscription.save()
 
         with self.assertRaises(CommandError):
@@ -446,7 +469,7 @@ class RenewalTests(BillingTestBase):
 
     def test_a_subscription_with_no_period_at_all_is_renewed(self):
         club = Club.objects.create(name="Orphan FC")
-        Subscription.objects.create(club=club, tier=self.tier)
+        Subscription.objects.create(club=club, plan=self.plan)
 
         self.assertIn(club, [s.club for s in subscriptions_due_for_renewal()])
 
@@ -469,7 +492,7 @@ class RenewedButUnpaidTests(BillingTestBase):
         """A club on its first, PAID period — far enough back that a renewal from its end is
         itself already past grace, so only the renewal's payment state decides the outcome."""
         club = Club.objects.create(name="Renewed FC")
-        subscribe(club, self.tier, start=self.today - datetime.timedelta(days=800))
+        subscribe(club, self.plan, start=self.today - datetime.timedelta(days=800))
         first = club.dues.first()
         record_payment(first, first.amount)  # the FIRST period is settled; only the renewal is in question
         return club
@@ -498,66 +521,281 @@ class TrialTests(BillingTestBase):
 
     def setUp(self):
         super().setUp()
-        self.trial_tier = Tier.objects.create(name="Trial")
-        TierPrice.objects.create(tier=self.trial_tier, active_from=self.today - datetime.timedelta(days=1200), amount=Decimal("50.00"))
+        # A trial is a plan whose own duration_months IS the trial length -- there is no
+        # trial_months argument any more.
+        self.trial_plan = Plan.objects.create(name="Trial", duration_months=2, is_trial=True, grace_days=14, renewal_lead_days=7)
+        PlanPrice.objects.create(plan=self.trial_plan, active_from=self.today - datetime.timedelta(days=1200), amount=Decimal("50.00"))
 
     def test_start_trial_creates_a_short_trial_period(self):
-        due = start_trial(self.club, self.trial_tier, post_trial_tier=self.tier, trial_months=2)
+        due = start_trial(self.club, self.trial_plan, post_trial_plan=self.plan)
 
         subscription = self.club.subscription
-        self.assertEqual(subscription.tier, self.trial_tier)
-        self.assertEqual(subscription.post_trial_tier, self.tier)
+        self.assertEqual(subscription.plan, self.trial_plan)
+        self.assertEqual(subscription.post_trial_plan, self.plan)
         self.assertEqual(subscription.trial_ends_at, due.period_end)
         self.assertTrue(due.is_trial)
         # Roughly 2 months, nowhere near the standard ~1-year period.
         self.assertLess((due.period_end - due.period_start).days, 65)
 
     def test_start_trial_refuses_if_already_subscribed(self):
-        subscribe(self.club, self.tier)
+        subscribe(self.club, self.plan)
 
         with self.assertRaises(BillingError):
-            start_trial(self.club, self.trial_tier, post_trial_tier=self.tier, trial_months=2)
+            start_trial(self.club, self.trial_plan, post_trial_plan=self.plan)
 
-    def test_start_trial_refuses_a_non_positive_length(self):
-        with self.assertRaises(BillingError):
-            start_trial(self.club, self.trial_tier, post_trial_tier=self.tier, trial_months=0)
+    def test_the_trials_length_comes_from_its_plan(self):
+        due = start_trial(self.club, self.trial_plan, post_trial_plan=self.plan)
 
-    def test_renewing_after_the_trial_switches_to_the_post_trial_tier(self):
-        start_trial(self.club, self.trial_tier, post_trial_tier=self.tier, trial_months=2)
+        self.assertEqual(due.period_end, add_months(due.period_start, 2) - datetime.timedelta(days=1))
+
+    def test_renewing_after_the_trial_switches_to_the_post_trial_plan(self):
+        start_trial(self.club, self.trial_plan, post_trial_plan=self.plan)
 
         due = renew(self.club.subscription)
 
         self.club.refresh_from_db()
-        self.assertEqual(self.club.subscription.tier, self.tier)
+        self.assertEqual(self.club.subscription.plan, self.plan)
         self.assertIsNone(self.club.subscription.trial_ends_at)
-        self.assertIsNone(self.club.subscription.post_trial_tier)
-        self.assertEqual(due.tier, self.tier)
+        self.assertIsNone(self.club.subscription.post_trial_plan)
+        self.assertEqual(due.plan, self.plan)
         self.assertFalse(due.is_trial)
         self.assertEqual(due.amount, Decimal("500.00"))
 
-    def test_manually_opening_the_next_period_also_switches_tier(self):
+    def test_manually_opening_the_next_period_also_switches_plan(self):
         # Same conversion must fire via the control panel's "Open period" button, which
         # calls open_period() directly rather than renew().
-        start_trial(self.club, self.trial_tier, post_trial_tier=self.tier, trial_months=2)
+        start_trial(self.club, self.trial_plan, post_trial_plan=self.plan)
 
         open_period(self.club)
 
         self.club.refresh_from_db()
-        self.assertEqual(self.club.subscription.tier, self.tier)
+        self.assertEqual(self.club.subscription.plan, self.plan)
 
     def test_a_trial_nearing_its_end_is_picked_up_for_renewal(self):
-        start_trial(self.club, self.trial_tier, post_trial_tier=self.tier, trial_months=2, start=self.today - datetime.timedelta(days=50))
+        # Inside the TRIAL PLAN's own 7-day lead, not the 30-day one an annual plan uses:
+        # a 2-month trial renewed a month early would be renewed before it had begun.
+        start_trial(self.club, self.trial_plan, post_trial_plan=self.plan, start=self.today - datetime.timedelta(days=57))
 
         self.assertIn(self.club, [s.club for s in subscriptions_due_for_renewal()])
 
-    def test_a_zero_amount_trial_is_created_already_paid(self):
-        free_tier = Tier.objects.create(name="Free Trial")
-        TierPrice.objects.create(tier=free_tier, active_from=self.today - datetime.timedelta(days=1200), amount=Decimal("0.00"))
+    def test_a_trial_outside_its_own_lead_window_is_not_yet_renewed(self):
+        # Same trial 7 days earlier in its life: an annual plan's 30-day lead would have
+        # picked this up, and the per-plan lead is exactly what stops that.
+        start_trial(self.club, self.trial_plan, post_trial_plan=self.plan, start=self.today - datetime.timedelta(days=40))
 
-        due = start_trial(self.club, free_tier, post_trial_tier=self.tier, trial_months=2)
+        self.assertNotIn(self.club, [s.club for s in subscriptions_due_for_renewal()])
+
+    def test_a_zero_amount_trial_is_created_already_paid(self):
+        free_plan = Plan.objects.create(name="Free Trial")
+        PlanPrice.objects.create(plan=free_plan, active_from=self.today - datetime.timedelta(days=1200), amount=Decimal("0.00"))
+
+        due = start_trial(self.club, free_plan, post_trial_plan=self.plan)
 
         self.assertEqual(due.status, Due.Status.PAID)
         self.assertIsNotNone(due.paid_at)
         far_future = due.grace_until + datetime.timedelta(days=100)
         self.assertNotIn(due, dues_overdue(far_future))
         self.assertNotIn(self.club, [d.club for d in archivable_clubs(far_future)])
+
+
+class PlanClockTests(BillingTestBase):
+    """The three per-plan clocks, and the constraints that keep them sane -- see BILLING.md §3."""
+
+    def make_plan(self, **kwargs):
+        # A short plan cannot keep the annual defaults -- 30 days' lead on a 1-month period is
+        # exactly what the constraints forbid, so scale them down with the duration.
+        months = kwargs.get("duration_months", DEFAULT_DURATION_MONTHS)
+        defaults = {"name": f"Plan {Plan.objects.count()}", "renewal_lead_days": min(DEFAULT_RENEWAL_LEAD_DAYS, months * 7), "grace_days": min(DEFAULT_GRACE_DAYS, months * 14)}
+        plan = Plan.objects.create(**defaults | kwargs)
+        PlanPrice.objects.create(plan=plan, active_from=self.today - datetime.timedelta(days=1200), amount=Decimal("10.00"))
+        return plan
+
+    def test_a_monthly_plan_gets_a_one_month_period(self):
+        plan = self.make_plan(duration_months=1)
+
+        due = open_period(self.club, plan=plan, start=datetime.date(2026, 3, 1))
+
+        self.assertEqual(due.period_end, datetime.date(2026, 3, 31))
+
+    def test_a_quarterly_plan_gets_a_three_month_period(self):
+        plan = self.make_plan(duration_months=3)
+
+        due = open_period(self.club, plan=plan, start=datetime.date(2026, 3, 1))
+
+        self.assertEqual(due.period_end, datetime.date(2026, 5, 31))
+
+    def test_grace_days_are_per_plan(self):
+        plan = self.make_plan(duration_months=1, grace_days=14)
+
+        due = open_period(self.club, plan=plan, start=datetime.date(2026, 3, 1))
+
+        self.assertEqual(due.grace_until, datetime.date(2026, 3, 15))
+
+    def test_editing_a_plans_grace_does_not_move_an_open_period(self):
+        # grace_until is a stored snapshot for the same reason `amount` is: repricing the
+        # plan must not silently re-date an archiving already in flight.
+        plan = self.make_plan(grace_days=30)
+        due = open_period(self.club, plan=plan, start=self.today)
+        original = due.grace_until
+
+        plan.grace_days = 1
+        plan.save(update_fields=["grace_days"])
+        due.refresh_from_db()
+
+        self.assertEqual(due.grace_until, original)
+
+    def test_a_lead_longer_than_the_period_is_rejected(self):
+        with self.assertRaises(IntegrityError):
+            Plan.objects.create(name="Runaway", duration_months=1, renewal_lead_days=90)
+
+    def test_grace_longer_than_the_period_is_rejected(self):
+        with self.assertRaises(IntegrityError):
+            Plan.objects.create(name="Never archives", duration_months=1, grace_days=90)
+
+    def test_full_clean_reports_an_impossible_lead_as_a_form_error(self):
+        # Not an IntegrityError/500: a platform admin typing this into the plan form should
+        # be told which field is wrong.
+        plan = Plan(name="Runaway", duration_months=1, renewal_lead_days=90, grace_days=14)
+
+        with self.assertRaises(ValidationError) as caught:
+            plan.full_clean()
+
+        self.assertIn("renewal_lead_days", caught.exception.error_dict)
+
+    def test_renewal_lead_is_read_from_each_plan(self):
+        monthly = self.make_plan(duration_months=1, renewal_lead_days=7, grace_days=14)
+        club = Club.objects.create(name="Monthly FC")
+        # Period ends in 3 days: inside a 7-day lead, well outside an annual plan's 30.
+        subscribe(club, monthly, start=self.today - datetime.timedelta(days=27))
+
+        self.assertIn(club, [s.club for s in subscriptions_due_for_renewal()])
+
+    def test_an_explicit_lead_days_overrides_every_plan(self):
+        monthly = self.make_plan(duration_months=1, renewal_lead_days=1, grace_days=14)
+        club = Club.objects.create(name="Override FC")
+        subscribe(club, monthly, start=self.today - datetime.timedelta(days=20))
+
+        self.assertNotIn(club, [s.club for s in subscriptions_due_for_renewal()])
+        self.assertIn(club, [s.club for s in subscriptions_due_for_renewal(lead_days=30)])
+
+
+class BillingNoticeTests(BillingTestBase):
+    """What a club's own admins are told -- see billing/services/notices.py."""
+
+    def test_no_notice_when_nothing_is_owed(self):
+        due = self.bill()
+        record_payment(due, Decimal("500.00"))
+
+        self.assertIsNone(club_billing_notice(self.club, self.today))
+
+    def test_no_notice_for_a_club_that_was_never_billed(self):
+        self.assertIsNone(club_billing_notice(self.club, self.today))
+
+    def test_a_period_issued_ahead_of_its_start_is_only_informational(self):
+        self.bill(start=self.today + datetime.timedelta(days=10))
+
+        self.assertEqual(club_billing_notice(self.club, self.today).level, "info")
+
+    def test_an_unpaid_started_period_warns(self):
+        subscribe(self.club, self.plan, start=self.today - datetime.timedelta(days=1))
+
+        notice = club_billing_notice(self.club, self.today)
+
+        self.assertEqual(notice.level, "warning")
+        self.assertEqual(notice.amount_outstanding, Decimal("500.00"))
+        self.assertFalse(notice.is_urgent)
+
+    def test_the_last_week_before_archiving_is_urgent(self):
+        subscribe(self.club, self.plan, start=self.today - datetime.timedelta(days=DEFAULT_GRACE_DAYS - 2))
+
+        notice = club_billing_notice(self.club, self.today)
+
+        self.assertEqual(notice.level, "error")
+        self.assertTrue(notice.is_urgent)
+        self.assertEqual(notice.days_until_archive, 2)
+
+    def test_an_overdue_period_is_urgent_with_a_negative_countdown(self):
+        subscribe(self.club, self.plan, start=self.today - datetime.timedelta(days=DEFAULT_GRACE_DAYS + 5))
+
+        notice = club_billing_notice(self.club, self.today)
+
+        self.assertEqual(notice.level, "error")
+        self.assertLess(notice.days_until_archive, 0)
+
+    def test_auto_archive_off_still_reports_the_debt_but_promises_no_archiving(self):
+        subscribe(self.club, self.plan, start=self.today - datetime.timedelta(days=1), auto_archive=False)
+
+        notice = club_billing_notice(self.club, self.today)
+
+        self.assertEqual(notice.amount_outstanding, Decimal("500.00"))
+        self.assertFalse(notice.will_archive)
+
+    def test_the_soonest_archiving_due_is_the_one_reported(self):
+        self.bill(start=self.today - datetime.timedelta(days=1))
+        later = self.bill(start=self.today + datetime.timedelta(days=400))
+
+        self.assertNotEqual(club_billing_notice(self.club, self.today).due, later)
+
+
+class BillingReminderTests(BillingTestBase):
+    """Reminder emails -- see billing/services/reminders.py. Sent once per escalation
+    level, because the command is on a daily cron."""
+
+    def setUp(self):
+        super().setUp()
+        user = User.objects.create_user(email="admin@ajax.example", password="pw-secret-123")
+        member = Member.objects.create(user=user, first_name="Ada", last_name="Admin")
+        ClubRole.objects.create(club=self.club, member=member, role=ClubRole.Roles.ADMIN)
+        subscribe(self.club, self.plan, start=self.today - datetime.timedelta(days=1))
+        self.due = self.club.dues.first()
+
+    def test_a_reminder_goes_to_the_club_admins(self):
+        self.assertEqual(admin_emails(self.club), ["admin@ajax.example"])
+
+    def test_sending_records_the_level_and_fills_the_outbox(self):
+        notice = club_billing_notice(self.club, self.today)
+        send_reminder(self.club, notice, recipients=["admin@ajax.example"])
+
+        self.due.refresh_from_db()
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(self.due.last_reminder_level, notice.level)
+        self.assertIsNotNone(self.due.last_reminder_sent_at)
+
+    def test_a_second_run_at_the_same_level_sends_nothing(self):
+        notice = club_billing_notice(self.club, self.today)
+        send_reminder(self.club, notice, recipients=["admin@ajax.example"])
+        self.due.refresh_from_db()
+
+        results = reminders_to_send([self.club], self.today)
+
+        self.assertFalse(results[0].sent)
+        self.assertIn("already reminded", results[0].skipped_reason)
+
+    def test_an_escalation_gets_through(self):
+        send_reminder(self.club, club_billing_notice(self.club, self.today), recipients=["admin@ajax.example"])
+
+        # Far enough on that the same due is now urgent rather than merely a warning.
+        later = self.today + datetime.timedelta(days=DEFAULT_GRACE_DAYS)
+        results = reminders_to_send([self.club], later)
+
+        self.assertTrue(results[0].sent)
+        self.assertEqual(results[0].notice.level, "error")
+
+    def test_force_resends_at_the_same_level(self):
+        send_reminder(self.club, club_billing_notice(self.club, self.today), recipients=["admin@ajax.example"])
+        self.due.refresh_from_db()
+
+        self.assertTrue(reminders_to_send([self.club], self.today, force=True)[0].sent)
+
+    def test_a_club_with_no_reachable_admin_is_reported_not_skipped_silently(self):
+        ClubRole.objects.all().delete()
+
+        results = reminders_to_send([self.club], self.today)
+
+        self.assertFalse(results[0].sent)
+        self.assertIn("no club admin", results[0].skipped_reason)
+
+    def test_a_settled_club_produces_no_reminder(self):
+        record_payment(self.due, Decimal("500.00"))
+
+        self.assertEqual(reminders_to_send([self.club], self.today), [])

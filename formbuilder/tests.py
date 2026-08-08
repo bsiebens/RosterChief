@@ -127,7 +127,7 @@ class FieldChoicesTests(FormbuilderTestBase):
         self.assertEqual(field_choices(self.size), [("S", "S"), ("M", "M"), ("L", "L")])
 
     def test_dict_options(self):
-        field = Field.objects.create(form=self.form, key="tier", label="Tier", field_type=Field.FieldType.CHOICE, order=3, options=[{"value": "a", "label": "Gold"}, {"value": "b", "label": "Silver"}])
+        field = Field.objects.create(form=self.form, key="plan", label="Plan", field_type=Field.FieldType.CHOICE, order=3, options=[{"value": "a", "label": "Gold"}, {"value": "b", "label": "Silver"}])
 
         self.assertEqual(field_choices(field), [("a", "Gold"), ("b", "Silver")])
 

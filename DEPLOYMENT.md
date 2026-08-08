@@ -117,15 +117,22 @@ docker compose up -d --no-deps web
 
 ## Scheduled jobs
 
-Three commands need to run on a schedule. Put them on the **host**, not in a container, and on
+Four commands need to run on a schedule. Put them on the **host**, not in a container, and on
 **exactly one node** when you have several — three nodes archiving the same club is three
 emails to the same club.
 
 ```cron
+# Bill: remind club admins about outstanding platform fees. Dry-run by default, same as the
+# archive job below — this one mails paying customers, so --commit is opt-in. Reminders go
+# once per escalation level, not once per run, so a daily cron is not a daily email.
+0 5 * * *  cd /srv/rosterchief && docker compose run --rm web python manage.py send_billing_reminders --commit
+
 # Bill: archive clubs unpaid past their grace period.
 # Run it WITHOUT --commit for the first week and read the output. The flag exists because
 # this switches off paying customers: a bad clock or a bad cron should cost you an email,
-# not a morning of angry clubs.
+# not a morning of angry clubs. Since grace now runs from the period START rather than its
+# end (see BILLING.md §3), this job is load-bearing in a way it never used to be — a club
+# is archivable ~60 days after being invoiced, not ~410. Re-do the dry-run week.
 0 6 * * *  cd /srv/rosterchief && docker compose run --rm web python manage.py archive_overdue_clubs --commit
 
 # Events: extend recurring series so the calendar never runs dry.

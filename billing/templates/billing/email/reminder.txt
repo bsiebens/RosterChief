@@ -1,0 +1,14 @@
+{% load i18n %}{% blocktrans with club=club.name %}Hello,
+
+This is a reminder about the RosterChief platform fees for {{ club }}.{% endblocktrans %}
+
+{% blocktrans with amount=notice.amount_outstanding %}Outstanding: EUR {{ amount }}{% endblocktrans %}
+{% blocktrans with start=due.period_start|date:"j M Y" end=due.period_end|date:"j M Y" %}Period:      {{ start }} to {{ end }}{% endblocktrans %}
+{% if due.invoice %}{% blocktrans with number=due.invoice.number %}Invoice:     {{ number }}{% endblocktrans %}
+{% endif %}
+{% if notice.will_archive %}{% if notice.days_until_archive < 0 %}{% trans "This club is now past its payment deadline and is due to be archived. While archived, nobody can sign in and the club's site stops resolving. No data is deleted, and access is restored as soon as payment is received." %}{% else %}{% blocktrans count days=notice.days_until_archive %}If we do not receive payment within {{ days }} day, this club will be archived. While archived, nobody can sign in and the club's site stops resolving. No data is deleted.{% plural %}If we do not receive payment within {{ days }} days, this club will be archived. While archived, nobody can sign in and the club's site stops resolving. No data is deleted.{% endblocktrans %}{% endif %}{% else %}{% trans "Please settle this to keep your account in good standing." %}{% endif %}
+
+{% blocktrans with contact=billing_contact %}If you have already paid, or you think this is a mistake, reply to {{ contact }} and we will sort it out.{% endblocktrans %}
+
+{% trans "Thank you," %}
+{% trans "RosterChief" %}

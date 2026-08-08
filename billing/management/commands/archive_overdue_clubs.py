@@ -27,7 +27,7 @@ class Command(MaintenanceAwareCommand):
 
         for due in overdue:
             days = (today - due.grace_until).days
-            self.stdout.write(f"{due.club} — {due.tier}, {due.balance} owed, grace ended {due.grace_until} ({days} day{'s'[: days != 1]} ago)")
+            self.stdout.write(f"{due.club} — {due.plan}, {due.balance} owed, grace ended {due.grace_until} ({days} day{'s'[: days != 1]} ago)")
 
         if not options["commit"]:
             self.stdout.write(self.style.WARNING(f"\nDry run: {len(overdue)} club(s) would be archived. Re-run with --commit to do it."))

@@ -9,7 +9,6 @@ fires either. A missed renewal is silent, and silence is the expensive failure.
 
 from django.core.management.base import CommandError
 
-from billing.models import RENEWAL_LEAD_DAYS
 from billing.services import BillingError
 from billing.services.dues import renew, subscriptions_due_for_renewal
 from features.commands import MaintenanceAwareCommand
@@ -20,7 +19,7 @@ class Command(MaintenanceAwareCommand):
 
     def add_arguments(self, parser):
         parser.add_argument("--dry-run", action="store_true", help="Report what would be issued, and issue nothing.")
-        parser.add_argument("--lead-days", type=int, default=RENEWAL_LEAD_DAYS, help=f"Issue this many days before the period ends (default {RENEWAL_LEAD_DAYS}).")
+        parser.add_argument("--lead-days", type=int, default=None, help="Override every plan's own renewal lead. Left off, each plan uses its own.")
 
     def handle(self, *args, **options):
         due_for_renewal = subscriptions_due_for_renewal(lead_days=options["lead_days"])
@@ -34,13 +33,13 @@ class Command(MaintenanceAwareCommand):
             club = subscription.club
 
             if options["dry_run"]:
-                self.stdout.write(f"would renew {club} — {subscription.tier}, current period ends {subscription.latest_period_end or 'never opened'}")
+                self.stdout.write(f"would renew {club} — {subscription.plan}, current period ends {subscription.latest_period_end or 'never opened'}")
                 continue
 
             try:
                 due = renew(subscription)
             except BillingError as error:
-                # One unpriced tier must not stop every other club from being billed.
+                # One unpriced plan must not stop every other club from being billed.
                 failures.append(f"{club}: {error}")
                 self.stdout.write(self.style.ERROR(f"{club} — {error}"))
                 continue

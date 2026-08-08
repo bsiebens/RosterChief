@@ -25,9 +25,9 @@ urlpatterns = [
     path("features/switches/<int:pk>/toggle/", views.SwitchToggleView.as_view(), name="switch_toggle"),
     # Billing (platform charging the clubs)
     path("billing/", views.BillingView.as_view(), name="billing"),
-    path("billing/tiers/new/", views.TierCreateView.as_view(), name="tier_create"),
-    path("billing/tiers/<uuid:pk>/edit/", views.TierUpdateView.as_view(), name="tier_update"),
-    path("billing/tiers/<uuid:pk>/prices/new/", views.TierPriceCreateView.as_view(), name="tier_price_create"),
+    path("billing/plans/new/", views.PlanCreateView.as_view(), name="plan_create"),
+    path("billing/plans/<uuid:pk>/edit/", views.PlanUpdateView.as_view(), name="plan_update"),
+    path("billing/plans/<uuid:pk>/prices/new/", views.PlanPriceCreateView.as_view(), name="plan_price_create"),
     path("billing/dues/<uuid:pk>/pay/", views.RecordPaymentView.as_view(), name="due_pay"),
     path("billing/dues/<uuid:pk>/waive/", views.WaiveDueView.as_view(), name="due_waive"),
     path("billing/dues/<uuid:pk>/invoice.pdf", views.InvoicePdfView.as_view(), name="due_invoice"),

@@ -9,36 +9,37 @@ from django.db import transaction
 from django.db.models import DateField, OuterRef, Subquery, Sum
 from django.utils import timezone
 
-from billing.models import RENEWAL_LEAD_DAYS, ZERO, Due, DuePayment, Subscription, Tier, add_months
+from billing.models import ZERO, Due, DuePayment, Plan, Subscription, add_months
 from billing.services import BillingError
 from billing.services.invoices import issue_invoice
 
 
-def subscribe(club, tier: Tier, *, start: date | None = None, auto_archive: bool = True, auto_renew: bool = True) -> Subscription:
-    """Put a club on a tier and open its first period."""
-    subscription, _created = Subscription.objects.update_or_create(club=club, defaults={"tier": tier, "auto_archive": auto_archive, "auto_renew": auto_renew})
+def subscribe(club, plan: Plan, *, start: date | None = None, auto_archive: bool = True, auto_renew: bool = True) -> Subscription:
+    """Put a club on a plan and open its first period."""
+    subscription, _created = Subscription.objects.update_or_create(club=club, defaults={"plan": plan, "auto_archive": auto_archive, "auto_renew": auto_renew})
     open_period(club, start=start)
 
     return subscription
 
 
 @transaction.atomic
-def start_trial(club, trial_tier: Tier, *, post_trial_tier: Tier, trial_months: int, start: date | None = None, auto_renew: bool = True, auto_archive: bool = True) -> Due:
-    """Put a club on a short trial that switches itself to ``post_trial_tier`` the moment
-    the trial period is renewed -- see open_period()'s trial-conversion check.
+def start_trial(club, trial_plan: Plan, *, post_trial_plan: Plan, start: date | None = None, auto_renew: bool = True, auto_archive: bool = True) -> Due:
+    """Put a club on a trial that switches itself to ``post_trial_plan`` the moment the trial
+    period is renewed -- see open_period()'s trial-conversion check.
+
+    The trial's length is the trial plan's own ``duration_months``: a 1-month and a 3-month
+    trial are two plans, not one plan plus a number passed at the call site.
 
     Only for a club with no subscription yet -- converting an existing paying subscription
     into a trial is a different, deliberately unsupported operation for now.
     """
-    if trial_months <= 0:
-        raise BillingError("Trial length must be at least 1 month.")
     if getattr(club, "subscription", None) is not None:
         raise BillingError(f"{club} is already subscribed -- use Change plan instead.")
 
     start = start or next_period_start(club)
-    trial_end = add_months(start, trial_months) - timedelta(days=1)
+    trial_end = add_months(start, trial_plan.duration_months) - timedelta(days=1)
 
-    Subscription.objects.create(club=club, tier=trial_tier, trial_ends_at=trial_end, post_trial_tier=post_trial_tier, auto_renew=auto_renew, auto_archive=auto_archive)
+    Subscription.objects.create(club=club, plan=trial_plan, trial_ends_at=trial_end, post_trial_plan=post_trial_plan, auto_renew=auto_renew, auto_archive=auto_archive)
 
     return open_period(club, start=start, period_end=trial_end, is_trial=True)
 
@@ -57,34 +58,34 @@ def next_period_start(club, today: date | None = None) -> date:
 
 
 @transaction.atomic
-def open_period(club, *, start: date | None = None, tier: Tier | None = None, period_end: date | None = None, is_trial: bool = False) -> Due:
-    """Issue the next due for a club, snapshotting the tier and the price of the day."""
+def open_period(club, *, start: date | None = None, plan: Plan | None = None, period_end: date | None = None, is_trial: bool = False) -> Due:
+    """Issue the next due for a club, snapshotting the plan and the price of the day."""
     subscription = getattr(club, "subscription", None)
-    if tier is None:
+    if plan is None:
         if subscription is None:
-            raise BillingError(f"{club} has no tier: put it on a subscription before billing it.")
+            raise BillingError(f"{club} has no plan: put it on a subscription before billing it.")
         # A trial that has run its course: swap onto the pre-selected plan before billing
-        # the next period, rather than silently renewing the trial tier forever. Checked
+        # the next period, rather than silently renewing the trial plan forever. Checked
         # here (not in renew()) so it fires whether this period was opened by the renewal
         # command or by a platform admin clicking "Open period"/"Reactivate" by hand --
         # both call open_period() directly.
         if subscription.trial_ends_at is not None and (start or next_period_start(club)) > subscription.trial_ends_at:
-            subscription.tier = subscription.post_trial_tier
+            subscription.plan = subscription.post_trial_plan
             subscription.trial_ends_at = None
-            subscription.post_trial_tier = None
-            subscription.save(update_fields=["tier", "trial_ends_at", "post_trial_tier"])
-        tier = subscription.tier
+            subscription.post_trial_plan = None
+            subscription.save(update_fields=["plan", "trial_ends_at", "post_trial_plan"])
+        plan = subscription.plan
 
     start = start or next_period_start(club)
 
-    amount = tier.price_on(start)
+    amount = plan.price_on(start)
     if amount is None:
-        raise BillingError(f"{tier} has no price in force on {start:%d %b %Y}. Add one before opening the period.")
+        raise BillingError(f"{plan} has no price in force on {start:%d %b %Y}. Add one before opening the period.")
 
     if club.dues.filter(period_start=start).exists():
         raise BillingError(f"{club} is already billed for a period starting {start:%d %b %Y}.")
 
-    due = Due.objects.create(club=club, tier=tier, amount=amount, period_start=start, period_end=period_end, is_trial=is_trial)
+    due = Due.objects.create(club=club, plan=plan, amount=amount, period_start=start, period_end=period_end, is_trial=is_trial)
     if amount == ZERO:
         # Nothing is actually owed -- left at the default UNPAID, this would eventually
         # trip is_overdue() and get a free club archived for non-payment of nothing.
@@ -157,10 +158,14 @@ def owing_dues():
 
 
 def dues_in_grace(today: date | None = None):
-    """Period over, unpaid, not yet archivable."""
+    """Period started, unpaid, not yet archivable.
+
+    Bounded below by ``period_start``, not ``period_end``: grace now runs from the start of
+    the period, so a due is in grace *during* the period it covers, not after it.
+    """
     today = today or timezone.localdate()
 
-    return owing_dues().filter(period_end__lt=today, grace_until__gte=today)
+    return owing_dues().filter(period_start__lte=today, grace_until__gte=today)
 
 
 def dues_overdue(today: date | None = None):
@@ -176,7 +181,7 @@ def archivable_clubs(today: date | None = None):
     A club with auto_archive off is deliberately spared — that flag is how you keep a club
     you are negotiating with from being switched off overnight.
     """
-    return dues_overdue(today).filter(club__archived_at__isnull=True, club__subscription__auto_archive=True).select_related("club", "tier").order_by("club__name")
+    return dues_overdue(today).filter(club__archived_at__isnull=True, club__subscription__auto_archive=True).select_related("club", "plan").order_by("club__name")
 
 
 @transaction.atomic
@@ -191,27 +196,43 @@ def reactivate(club, *, start: date | None = None) -> Due:
     return open_period(club, start=start)
 
 
-def subscriptions_due_for_renewal(today: date | None = None, lead_days: int = RENEWAL_LEAD_DAYS):
+def subscriptions_due_for_renewal(today: date | None = None, lead_days: int | None = None):
     """Clubs whose next period should be issued now.
 
+    Each plan sets its own ``renewal_lead_days``: a single global lead is silently annual-only,
+    and on a 1-month plan a 30-day lead would issue the next period before the current one had
+    started. ``lead_days`` overrides every plan's own value — that is what makes a rehearsal or
+    a backfill possible, and it is what the command's --lead-days flag passes.
+
+    The per-plan comparison is done in Python rather than SQL. The function already
+    materialised its result as a list, and date arithmetic against a field value is not
+    portably expressible across SQLite and Postgres; at platform scale (tens to low hundreds of
+    clubs) this is one query plus a list walk.
+
     Idempotent by construction: a club that has just been renewed has a latest period ending a
-    year out, which is past the horizon, so it cannot be picked up twice. Running the job twice
-    a day is harmless.
+    full duration out, which is past its horizon, so it cannot be picked up twice. Running the
+    job twice a day is harmless.
 
     A subscription with no period at all (its only due was cancelled) counts too — a club on a
     plan and billed for nothing is the leak this whole job exists to close.
     """
     today = today or timezone.localdate()
-    horizon = today + timedelta(days=lead_days)
 
     latest_period_end = Subquery(
         Due.objects.filter(club=OuterRef("club")).exclude(status=Due.Status.CANCELLED).order_by("-period_end").values("period_end")[:1],
         output_field=DateField(),
     )
 
-    subscriptions = Subscription.objects.filter(auto_renew=True, club__archived_at__isnull=True).select_related("club", "tier").annotate(latest_period_end=latest_period_end).order_by("club__name")
+    subscriptions = Subscription.objects.filter(auto_renew=True, club__archived_at__isnull=True).select_related("club", "plan").annotate(latest_period_end=latest_period_end).order_by("club__name")
 
-    return [subscription for subscription in subscriptions if subscription.latest_period_end is None or subscription.latest_period_end <= horizon]
+    def is_due(subscription) -> bool:
+        if subscription.latest_period_end is None:
+            return True
+        lead = subscription.plan.renewal_lead_days if lead_days is None else lead_days
+
+        return subscription.latest_period_end <= today + timedelta(days=lead)
+
+    return [subscription for subscription in subscriptions if is_due(subscription)]
 
 
 def renew(subscription: Subscription) -> Due:

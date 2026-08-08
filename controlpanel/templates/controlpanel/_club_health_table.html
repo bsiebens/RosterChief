@@ -77,8 +77,8 @@
                     <td class="text-right tabular-nums">{{ club.upcoming_events }}</td>
 
                     <td class="text-right">
-                        {% if club.tier_name %}
-                            <span class="badge badge-accent">{{ club.tier_name|lower }}</span>
+                        {% if club.plan_name %}
+                            <span class="badge badge-accent">{{ club.plan_name|lower }}</span>
                         {% else %}
                             -
                         {% endif %}
@@ -87,7 +87,7 @@
                     <td class="text-right">
                         <div class="flex flex-row gap-2 items-center justify-end">
                             {% if not club.dues_owed %}
-                                {% if club.tier_name %}
+                                {% if club.plan_name %}
                                     {% comment %}
                                         Not owing and on a plan. covered_until is the settled period's end — the day
                                         grace would start if nothing renews — shown on its own row under the badge,

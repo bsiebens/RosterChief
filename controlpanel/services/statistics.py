@@ -84,7 +84,7 @@ def clubs_with_health(queryset=None, today=None, now=None):
             team_count=_subquery(Team.objects.all(), Count("pk"), IntegerField()),
             teams_managed=_subquery(Team.objects.filter(managed_this_season), Count("pk", distinct=True), IntegerField()),
             admin_count=_subquery(ClubRole.objects.filter(role=ClubRole.Roles.ADMIN), Count("pk"), IntegerField()),
-            tier_name=Subquery(Subscription.objects.filter(club=OuterRef("pk")).values("tier__name")[:1]),
+            plan_name=Subquery(Subscription.objects.filter(club=OuterRef("pk")).values("plan__name")[:1]),
             dues_owed=_subquery(Due.objects.filter(status__in=Due.OWING), Sum(F("amount") - F("amount_paid")), DecimalField(max_digits=10, decimal_places=2)),
             dues_grace_until=Subquery(Due.objects.filter(club=OuterRef("pk"), status__in=Due.OWING).order_by("grace_until").values("grace_until")[:1]),
             dues_period_end=Subquery(Due.objects.filter(club=OuterRef("pk"), status__in=Due.OWING).order_by("period_end").values("period_end")[:1]),

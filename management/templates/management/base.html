@@ -38,5 +38,16 @@
         {% include "management/_nav_items.html" %}
     </ul>
 
+    {% comment %}
+        A final billing notice follows the admin onto every management page -- but only at
+        error level (inside 7 days of archiving, or already past it). Shown from the moment
+        anything is owed it would sit on every screen for weeks and train people to ignore
+        the one week it matters. home.html includes the same partial at every level, hence
+        the guard here rather than inside the partial.
+    {% endcomment %}
+    {% if billing_notice.is_urgent and nav != "home" %}
+        {% include "management/_billing_notice.html" %}
+    {% endif %}
+
     {% block panel %}{% endblock panel %}
 {% endblock main %}

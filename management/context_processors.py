@@ -9,6 +9,7 @@ action rather than the whole section (``NewsAuthorRequiredMixin``/``can_add_news
 
 from waffle import flag_is_active
 
+from billing.services.notices import club_billing_notice
 from club.services.access import can_add_news, has_management_access, is_club_admin, is_coach_manager
 
 #: Every management URL name, mapped to the nav item it should light up --
@@ -121,6 +122,23 @@ def is_admin(request):
         return {"is_club_admin": False}
 
     return {"is_club_admin": is_club_admin(request.user, club)}
+
+
+def billing_notice(request):
+    """What this club owes the platform, for the club's own admins.
+
+    A context processor rather than view context because the notice has to be able to follow
+    an admin onto every management page once it turns urgent -- billing/base.html renders it
+    at error level only, and the home page renders it at every level.
+
+    Admins only: platform billing is none of an ordinary member's business, and the query is
+    skipped entirely for everyone else rather than fetched and hidden in the template.
+    """
+    club = getattr(request, "club", None)
+    if club is None or not request.user.is_authenticated or not is_club_admin(request.user, club):
+        return {"billing_notice": None}
+
+    return {"billing_notice": club_billing_notice(club)}
 
 
 def management_position(request):

@@ -15,8 +15,8 @@ from django.urls import NoReverseMatch, reverse
 from django.utils import timezone
 from waffle import get_waffle_flag_model
 
-from billing.models import Tier, TierPrice
-from billing.services.dues import subscribe
+from billing.models import Plan, PlanPrice
+from billing.services.dues import record_payment, subscribe
 from club.models import Club, ClubMembership, ClubRole, FeePayment, Season, Sponsor
 from events.models import Attendance, Competition, Event, EventSeries, Location, Opponent
 from events.services.rbihf_import import RBIHFImportError
@@ -1407,9 +1407,7 @@ class FamilyMembershipRoleUpdateTests(ManagementTestBase):
         self.assertRedirects(response, next_url)
 
     def test_ignores_an_unsafe_next_url(self):
-        response = self.club_post(
-            "family_membership_role_update", {"role": FamilyMembership.FamilyRole.GUARDIAN, "next": "https://evil.example.com/steal"}, self.family.pk, self.member.pk
-        )
+        response = self.club_post("family_membership_role_update", {"role": FamilyMembership.FamilyRole.GUARDIAN, "next": "https://evil.example.com/steal"}, self.family.pk, self.member.pk)
 
         self.assertRedirects(response, reverse("management:family_detail", args=[self.family.pk]))
 
@@ -1682,9 +1680,7 @@ class MembershipRecordPaymentTests(ManagementTestBase):
         super().setUp()
         self.client.force_login(self.admin_user)
         self.member = Member.objects.create(first_name="Owed", last_name="Fee")
-        self.membership = ClubMembership.objects.create(
-            club=self.club, member=self.member, season=self.season, status=ClubMembership.StatusChoices.PENDING, fee_status=ClubMembership.FeeStatus.UNPAID, fee_amount=Decimal("150.00")
-        )
+        self.membership = ClubMembership.objects.create(club=self.club, member=self.member, season=self.season, status=ClubMembership.StatusChoices.PENDING, fee_status=ClubMembership.FeeStatus.UNPAID, fee_amount=Decimal("150.00"))
 
     def test_recording_a_partial_payment(self):
         response = self.club_post("membership_record_payment", {"amount": "50.00", "method": FeePayment.Method.CASH, "reference": "R1"}, self.membership.pk)
@@ -1731,9 +1727,7 @@ class MembershipMarkFullyPaidTests(ManagementTestBase):
         super().setUp()
         self.client.force_login(self.admin_user)
         self.member = Member.objects.create(first_name="Owed", last_name="Fee")
-        self.membership = ClubMembership.objects.create(
-            club=self.club, member=self.member, season=self.season, status=ClubMembership.StatusChoices.PENDING, fee_status=ClubMembership.FeeStatus.UNPAID, fee_amount=Decimal("150.00")
-        )
+        self.membership = ClubMembership.objects.create(club=self.club, member=self.member, season=self.season, status=ClubMembership.StatusChoices.PENDING, fee_status=ClubMembership.FeeStatus.UNPAID, fee_amount=Decimal("150.00"))
 
     def test_settles_the_remaining_balance_in_one_click(self):
         response = self.club_post("membership_mark_fully_paid", {}, self.membership.pk)
@@ -2563,7 +2557,7 @@ class LocationOpponentManagementTests(ManagementTestBase):
 
         self.assertNotContains(response, 'type="lazyselect"')
         self.assertContains(response, "Belgium")
-        self.assertContains(response, '<select')
+        self.assertContains(response, "<select")
 
     def test_plain_staff_cannot_view_the_location_list(self):
         self.client.force_login(self.make_plain_staff())
@@ -2790,15 +2784,21 @@ class SponsorManagementTests(ManagementTestBase):
 class BillingEndingBannerTests(ManagementTestBase):
     """The club dashboard's "billing is about to stop" warning -- see
     management.views.HomeView and management/templates/management/home.html.
-    Admin-only, and only within RENEWAL_LEAD_DAYS of the current period ending."""
+    Admin-only, only within the plan's own renewal lead of the period ending, and only when
+    nothing is owed -- an unpaid club gets the louder billing notice instead."""
 
     def setUp(self):
         super().setUp()
-        self.tier = Tier.objects.create(name="Standard")
-        TierPrice.objects.create(tier=self.tier, active_from=self.season.start_date - datetime.timedelta(days=1200), amount=Decimal("500.00"))
+        self.plan = Plan.objects.create(name="Standard")
+        PlanPrice.objects.create(plan=self.plan, active_from=self.season.start_date - datetime.timedelta(days=1200), amount=Decimal("500.00"))
+
+    def settle(self):
+        """The "period ends soon" notice only shows when nothing is owed."""
+        record_payment(self.club.dues.first(), Decimal("500.00"))
 
     def test_admin_sees_the_banner_when_the_period_ends_soon(self):
-        subscribe(self.club, self.tier, start=timezone.localdate() - datetime.timedelta(days=350), auto_renew=False)
+        subscribe(self.club, self.plan, start=timezone.localdate() - datetime.timedelta(days=350), auto_renew=False)
+        self.settle()
         self.client.force_login(self.admin_user)
 
         response = self.club_get("home")
@@ -2806,7 +2806,8 @@ class BillingEndingBannerTests(ManagementTestBase):
         self.assertContains(response, "billing is about to stop")
 
     def test_admin_does_not_see_the_banner_when_the_period_is_not_ending_soon(self):
-        subscribe(self.club, self.tier, start=timezone.localdate())
+        subscribe(self.club, self.plan, start=timezone.localdate())
+        self.settle()
         self.client.force_login(self.admin_user)
 
         response = self.club_get("home")
@@ -2814,12 +2815,13 @@ class BillingEndingBannerTests(ManagementTestBase):
         self.assertNotContains(response, "billing is about to stop")
 
     def test_a_non_admin_manager_never_sees_the_banner(self):
-        subscribe(self.club, self.tier, start=timezone.localdate() - datetime.timedelta(days=350), auto_renew=False)
+        subscribe(self.club, self.plan, start=timezone.localdate() - datetime.timedelta(days=350), auto_renew=False)
         team = Team.objects.create(club=self.club, name="First Team", short_name="1st")
         position = Position.objects.create(club=self.club, name="Coach", short_name="C", staff_position=True, management_position=True)
         coach_user = User.objects.create_user(email="coach-banner@example.com", password="pw-secret-123")
         coach_member = Member.objects.create(user=coach_user, first_name="Cara", last_name="Coach")
         StaffAssignment.objects.create(team=team, member=coach_member, season=self.season, position=position)
+        self.settle()
         self.client.force_login(coach_user)
 
         response = self.club_get("home")
@@ -2835,7 +2837,8 @@ class BillingEndingBannerTests(ManagementTestBase):
         self.assertNotContains(response, "will renew automatically")
 
     def test_an_auto_renewing_club_gets_a_reassuring_banner_instead(self):
-        subscribe(self.club, self.tier, start=timezone.localdate() - datetime.timedelta(days=350), auto_renew=True)
+        subscribe(self.club, self.plan, start=timezone.localdate() - datetime.timedelta(days=350), auto_renew=True)
+        self.settle()
         self.client.force_login(self.admin_user)
 
         response = self.club_get("home")

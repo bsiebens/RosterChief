@@ -27,17 +27,31 @@
             </div>
         </div>
 
+        {% comment %}
+            Paying up does not un-archive a club on its own -- restoring is a deliberate act,
+            because a club can also be archived by hand for reasons that have nothing to do
+            with money. This is the prompt that makes the deliberate act one click away
+            instead of something you have to remember to go and check.
+        {% endcomment %}
+        {% if club.is_archived and dues_settled %}
+            <div class="alert alert-success alert-sm mb-2">
+                {% lucide "circle-check" size=16 %}
+                <span>This club is archived but owes nothing. Reactivating will restore access and open its next period.</span>
+            </div>
+        {% endif %}
+
         {% if not subscription %}
-            <p class="text-sm opacity-70">This club is not billed for anything. Put it on a tier to start.</p>
+            <p class="text-sm opacity-70">This club is not billed for anything. Put it on a plan to start.</p>
         {% else %}
             <p class="text-sm opacity-70">
-                On plan <strong>{{ subscription.tier.name }}</strong>.
+                On plan <strong>{{ subscription.plan.name }}</strong>.
                 {% if subscription.trial_ends_at %}
                     <span class="badge badge-info badge-sm gap-1">{% lucide "hourglass" size=12 %} Trial</span>
-                    On trial until {{ subscription.trial_ends_at|date:"j M Y" }}, then switches to <strong>{{ subscription.post_trial_tier.name }}</strong>.
+                    On trial until {{ subscription.trial_ends_at|date:"j M Y" }}, then switches to <strong>{{ subscription.post_trial_plan.name }}</strong>.
                 {% endif %}
+                {{ subscription.plan.duration_months }}-month periods, archived {{ subscription.plan.grace_days }} days after a period starts if unpaid.
                 {% if subscription.auto_renew %}
-                    Renews automatically 30 days before the period ends.
+                    Renews automatically {{ subscription.plan.renewal_lead_days }} days before the period ends.
                 {% else %}
                     <span class="badge badge-warning badge-sm">Auto-renew off</span> — you must open each period by hand, or this club uses the platform for free.
                 {% endif %}
@@ -64,7 +78,7 @@
                             <tr>
                                 <td>
                                     {{ due.period_start|date:"j M Y" }} — {{ due.period_end|date:"j M Y" }}
-                                    <div class="text-xs opacity-60">{{ due.tier.name }} · {{ due.invoice.number }} · grace to {{ due.grace_until|date:"j M Y" }}</div>
+                                    <div class="text-xs opacity-60">{{ due.plan.name }} · {{ due.invoice.number }} · grace to {{ due.grace_until|date:"j M Y" }}</div>
                                 </td>
                                 <td class="text-right tabular-nums">€{{ due.amount|floatformat:2 }}</td>
                                 <td class="text-right tabular-nums">€{{ due.amount_paid|floatformat:2 }}</td>
@@ -125,11 +139,11 @@
 </div>
 
 {% url 'controlpanel:club_subscribe' club.pk as subscribe_url %}
-{% include "controlpanel/_modal_form.html" with modal_id="subscription_modal" title=subscription|yesno:"Change plan,Start billing" form=subscription_form action_url=subscribe_url submit_label="Save plan" submit_icon="layers" blurb="Changing tier does not re-bill: the current period keeps the amount it was issued at, and the new rate applies from the next one." %}
+{% include "controlpanel/_modal_form.html" with modal_id="subscription_modal" title=subscription|yesno:"Change plan,Start billing" form=subscription_form action_url=subscribe_url submit_label="Save plan" submit_icon="layers" blurb="Changing plan does not re-bill: the current period keeps the amount it was issued at, and the new rate applies from the next one." %}
 
 {% if not subscription %}
     {% url 'controlpanel:club_trial_start' club.pk as trial_start_url %}
-    {% include "controlpanel/_modal_form.html" with modal_id="trial_modal" title="Start trial" form=trial_form action_url=trial_start_url submit_label="Start trial" submit_icon="hourglass" blurb="The trial period is billed like any other, on the trial tier you pick. It switches to the plan you pick here automatically the next time a period is opened after it ends -- no follow-up needed." %}
+    {% include "controlpanel/_modal_form.html" with modal_id="trial_modal" title="Start trial" form=trial_form action_url=trial_start_url submit_label="Start trial" submit_icon="hourglass" blurb="The trial period is billed like any other, on the trial plan you pick. It switches to the plan you pick here automatically the next time a period is opened after it ends -- no follow-up needed." %}
 {% endif %}
 
 {% if subscription %}

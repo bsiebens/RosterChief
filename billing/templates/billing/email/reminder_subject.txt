@@ -1,0 +1,1 @@
+{% load i18n %}{% if notice.level == 'error' %}{% blocktrans with club=club.name %}Action required: {{ club }} is about to be archived{% endblocktrans %}{% else %}{% blocktrans with club=club.name %}Platform fees are due for {{ club }}{% endblocktrans %}{% endif %}

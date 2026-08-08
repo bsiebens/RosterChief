@@ -8,7 +8,8 @@ and has never been documented there. Once this design is implemented, §4 (the m
 into `ARCHITECTURE.md` and this file keeps the lifecycle and operational detail, the same split
 `DEPLOYMENT.md` already has with the rest of the docs.
 
-Status: **proposed, not implemented.** Nothing in §4–§9 exists on disk yet.
+Status: **implemented.** The four decisions left open in §10 have been taken and are recorded
+there.
 
 ---
 
@@ -375,18 +376,31 @@ which is expected — but the annotations themselves need renaming, not just re-
 - `post_trial_plan` stays on `Subscription`, not on `Plan` — the same trial can convert to different
   paid plans for different clubs.
 
-**Still open — worth deciding before implementation:**
+**Resolved during implementation:**
 
-1. **Does full payment auto-restore an archived club?** Today `reactivate()` is explicit. Automatic
-   restoration is friendlier ("they paid, let them back in") but requires knowing the club was
-   archived *for non-payment* rather than by hand — which means an `archived_reason` field. The
-   cheap version is to leave it explicit and surface a prominent "Reactivate" action on any archived
-   club whose dues are now settled. Recommend the cheap version.
-2. **Banner placement.** `management/home.html` only, or persistent in `management/base.html`? Home
-   matches the request; base is harder to ignore in the final week.
-3. **Email reminders.** Out of scope here — the request is for an in-app warning — but a
-   `send_billing_reminders` command is the obvious follow-up, and the `BillingNotice` service in §6
-   is deliberately shaped so it could feed one without rework.
-4. **Online payment.** Entirely out of scope. Every payment is still recorded by hand by a platform
-   admin (`record_payment`). Worth knowing that the warning tells a club admin money is due while
-   giving them no way to pay it in-app.
+1. **Full payment does NOT auto-restore an archived club.** `reactivate()` stays an explicit
+   platform-admin action — a club can also be archived by hand for reasons that have nothing to do
+   with money, and an automatic restore would silently reverse that the next time a stray payment
+   was recorded. Instead, `_club_billing_card.html` shows a prominent prompt on any archived club
+   whose dues are settled, so the deliberate act is one click away. No `archived_reason` field was
+   needed.
+2. **The banner escalates.** `management/home.html` renders it at every level; `management/base.html`
+   repeats it on every *other* management page only once it reaches `error` (≤7 days, or overdue).
+   Shown from the moment anything is owed it would sit on every screen for weeks and train people to
+   ignore the one week that matters.
+3. **Email reminders are in.** `send_billing_reminders` (dry-run by default, `--commit` to send)
+   plus provider-agnostic SMTP settings read from the environment. Reminders go **once per
+   escalation level**, tracked on `Due.last_reminder_level`, because the command is on a daily cron
+   and a club that owes money for a month must not get thirty identical emails.
+4. **Online payment stays out of scope.** Every payment is still recorded by hand by a platform
+   admin (`record_payment`). The consequence is real and worth stating: the banner and the reminder
+   email both tell a club admin money is due while giving them no way to pay it in-app. They pay by
+   transfer; you record it.
+
+### The email default that will catch you out
+
+`EMAIL_BACKEND` defaults to the **console backend**, not SMTP. That is deliberate — Django's own
+default tries localhost:25 and raises `ConnectionRefused` on a box with no MTA — but it means a
+deployment that forgets `DJANGO_EMAIL_HOST` will watch `send_billing_reminders --commit` report
+success while no club hears anything. Set the mail variables in `.env.production` (see
+`.env.production.example`) before trusting the job.

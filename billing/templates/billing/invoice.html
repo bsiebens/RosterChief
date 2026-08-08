@@ -72,7 +72,7 @@
             <tbody>
                 <tr>
                     <td>
-                        <strong>{{ due.tier.name }}</strong> — platform subscription
+                        <strong>{{ due.plan.name }}</strong> — platform subscription
                         <div class="muted">{{ due.period_start|date:"j M Y" }} to {{ due.period_end|date:"j M Y" }}</div>
                     </td>
                     <td class="right">€{{ due.amount|floatformat:2 }}</td>

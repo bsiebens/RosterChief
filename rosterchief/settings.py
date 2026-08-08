@@ -194,6 +194,7 @@ TEMPLATES = [
                 "club.context_processors.branding",
                 "features.context_processors.maintenance",
                 "management.context_processors.is_admin",
+                "management.context_processors.billing_notice",
                 "management.context_processors.management_position",
                 "management.context_processors.management_link",
                 "management.context_processors.active_nav_section",
@@ -325,6 +326,29 @@ LOGGING = {
         "django.request": {"handlers": ["console"], "level": "ERROR", "propagate": False},
     },
 }
+
+
+# Email
+#
+# Provider-agnostic on purpose: everything is a plain SMTP setting read from the environment,
+# so any provider that speaks SMTP works without a code change. The console backend is the
+# DEFAULT rather than the dev-only branch -- a deployment that forgets to configure mail
+# should print billing reminders to the log, not raise ConnectionRefused against localhost:25
+# on a box with no MTA, which is what Django's own default does.
+EMAIL_BACKEND = config("DJANGO_EMAIL_BACKEND", default="django.core.mail.backends.console.EmailBackend")
+EMAIL_HOST = config("DJANGO_EMAIL_HOST", default="")
+EMAIL_PORT = config("DJANGO_EMAIL_PORT", default=587, cast=int)
+EMAIL_HOST_USER = config("DJANGO_EMAIL_HOST_USER", default="")
+EMAIL_HOST_PASSWORD = config("DJANGO_EMAIL_HOST_PASSWORD", default="")
+EMAIL_USE_TLS = config("DJANGO_EMAIL_USE_TLS", default=True, cast=bool)
+EMAIL_USE_SSL = config("DJANGO_EMAIL_USE_SSL", default=False, cast=bool)
+EMAIL_TIMEOUT = config("DJANGO_EMAIL_TIMEOUT", default=10, cast=int)
+
+DEFAULT_FROM_EMAIL = config("DJANGO_DEFAULT_FROM_EMAIL", default="RosterChief <noreply@rosterchief.app>")
+SERVER_EMAIL = config("DJANGO_SERVER_EMAIL", default=DEFAULT_FROM_EMAIL)
+
+#: Where a club admin is told to direct a billing question. Shown in reminder emails.
+BILLING_CONTACT_EMAIL = config("ROSTERCHIEF_BILLING_CONTACT_EMAIL", default=DEFAULT_FROM_EMAIL)
 
 
 # Phone numbers (django-phonenumber-field)
