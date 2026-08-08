@@ -404,3 +404,36 @@ default tries localhost:25 and raises `ConnectionRefused` on a box with no MTA �
 deployment that forgets `DJANGO_EMAIL_HOST` will watch `send_billing_reminders --commit` report
 success while no club hears anything. Set the mail variables in `.env.production` (see
 `.env.production.example`) before trusting the job.
+
+## 11. Addendum: deleting a plan
+
+Added after the initial implementation. `Due.plan` is `PROTECT` — a plan that has ever billed
+anyone can never truly be removed, on purpose: `amount`, `period_end` and `grace_until` are frozen
+on a `Due` precisely so a later change can't rewrite what was actually charged, and losing the plan
+link off an old `Due` would do exactly that to every historical invoice. "Delete" therefore means
+one of two things, chosen automatically (`billing/services/plans.py`):
+
+- **No `Due` ever referenced the plan** (created, never actually used to bill anyone) — the row is
+  removed outright.
+- **At least one `Due` references it** — soft-deleted instead: `Plan.deleted_at` is set and
+  `is_active` turned off. The row survives (so old invoices still say what they were billed under)
+  but is hidden from every picker and listing via `Plan.objects.visible()` — an opt-in queryset
+  method, same shape as `Club.objects.active()`, so the plain default manager stays unfiltered for
+  Django admin and anything reading historical data.
+
+Either way, every club **currently on the plan** is unsubscribed outright — its `Subscription` row
+is deleted, not just its `plan` field cleared. "No plan" was already a state the rest of the app
+fully understood (every billing view already handles `getattr(club, "subscription", None)` being
+`None`), so this reuses it rather than inventing a new one.
+
+One easy-to-miss second group: a club on a **different** plan, mid-trial, configured to convert to
+the plan being deleted (`Subscription.post_trial_plan`). Left alone, that club's trial would try to
+convert onto a plan that no longer exists (or has been hidden) the moment `open_period()`'s
+trial-conversion check next runs. Handled at delete time instead: that club's trial is ended
+(`trial_ends_at` and `post_trial_plan` both cleared, per the `CheckConstraint` that requires them
+set together or not at all), leaving it on the trial plan with no scheduled conversion until a
+platform admin picks a new one.
+
+The confirmation screen (`controlpanel/templates/controlpanel/plan_delete.html`) is a real page,
+not a modal like every other billing action — the whole point is naming exactly which clubs are
+affected, in both groups, and that list can be long.

@@ -37,6 +37,17 @@ def add_months(day: date, months: int) -> date:
     return day + relativedelta.relativedelta(months=months)
 
 
+class PlanQuerySet(models.QuerySet):
+    def visible(self):
+        """Excludes soft-deleted plans -- see billing.services.plans.delete_plan.
+
+        Opt-in, same shape as club.models.ClubManager.active(): the default manager stays
+        unfiltered (Django admin, and anything reading historical data, sees everything),
+        and every picker/listing a platform admin actually chooses from calls this.
+        """
+        return self.filter(deleted_at__isnull=True)
+
+
 class Plan(UUIDModel):
     """What a club is billed on: a duration, a set of clocks, and a dated price.
 
@@ -64,6 +75,14 @@ class Plan(UUIDModel):
         help_text=_("Offered as a trial rather than as a paid plan. A trial converts to the plan chosen on the subscription once it runs out."),
     )
 
+    # Not user-editable: set by billing.services.plans.delete_plan. Due.plan is PROTECT, so
+    # a plan that has ever billed anyone can never actually be removed -- deleting it hides
+    # it (and clears every club currently on it) instead, so past invoices still say what
+    # they were billed under. See that module's docstring for the full reasoning.
+    deleted_at = models.DateTimeField(_("deleted at"), null=True, blank=True, editable=False)
+
+    objects = PlanQuerySet.as_manager()
+
     class Meta:
         verbose_name = _("plan")
         verbose_name_plural = _("plans")
@@ -85,6 +104,10 @@ class Plan(UUIDModel):
 
     def __str__(self):
         return self.name
+
+    @property
+    def is_deleted(self) -> bool:
+        return self.deleted_at is not None
 
     def clean(self):
         """The same two invariants the CheckConstraints enforce, as form errors.

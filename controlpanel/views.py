@@ -7,6 +7,8 @@ from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.formats import date_format
+from django.utils.translation import gettext_lazy as _
+from django.utils.translation import ngettext
 from django.views.generic import CreateView, DetailView, FormView, ListView, TemplateView, UpdateView, View
 from waffle import get_waffle_flag_model, get_waffle_switch_model
 
@@ -14,6 +16,7 @@ from billing.models import Due, Plan, PlanPrice
 from billing.services import BillingError
 from billing.services.dues import next_period_start, open_period, reactivate, record_payment, start_trial, subscribe, waive
 from billing.services.invoices import invoice_pdf, issue_invoice
+from billing.services.plans import delete_plan, plan_deletion_impact
 from club.models import Club, ClubRole
 from events.models import Location
 from features.models import Maintenance
@@ -401,7 +404,7 @@ class BillingView(PlatformStaffRequiredMixin, TemplateView):
         # Bound per-row so each "Edit" / "New price" modal can render its own form: the
         # template can't call PlanForm(instance=plan) itself, so the form rides along on
         # the object it belongs to.
-        plans = list(Plan.objects.prefetch_related("prices").annotate(club_count=Count("subscriptions")))
+        plans = list(Plan.objects.visible().prefetch_related("prices").annotate(club_count=Count("subscriptions")))
         for plan in plans:
             plan.edit_form = PlanForm(instance=plan)
             plan.price_form = PlanPriceForm()
@@ -446,6 +449,53 @@ class PlanUpdateView(PlatformStaffRequiredMixin, RedirectOnInvalidMixin, UpdateV
     def get_success_url(self):
         notify(self.request, f"s|Plan updated|Plan “{self.object}” updated.")
         return reverse("controlpanel:billing")
+
+
+class PlanDeleteView(PlatformStaffRequiredMixin, TemplateView):
+    """Confirm-then-delete for a plan. Unlike every other billing action, this is a real
+    page rather than a modal: the whole point is naming exactly which clubs lose their plan
+    (or lose their trial's scheduled landing plan), and that list can be long -- see
+    billing.services.plans for what "delete" actually does to a plan with billing history.
+    """
+
+    template_name = "controlpanel/plan_delete.html"
+
+    @property
+    def plan(self):
+        return get_object_or_404(Plan, pk=self.kwargs["pk"])
+
+    def get(self, request, *args, **kwargs):
+        plan = self.plan
+        if plan.is_deleted:
+            notify(request, f"i|{_('Already deleted')}|" + _("“%(plan)s” has already been deleted.") % {"plan": plan.name})
+            return redirect("controlpanel:billing")
+        return super().get(request, *args, **kwargs)
+
+    def get_context_data(self, **kwargs):
+        return super().get_context_data(nav="billing", plan=self.plan, impact=plan_deletion_impact(self.plan), **kwargs)
+
+    def post(self, request, *args, **kwargs):
+        plan = self.plan
+        plan_name = plan.name
+        impact = delete_plan(plan)
+
+        if impact.will_hard_delete:
+            body = _("“%(plan)s” has been deleted.") % {"plan": plan_name}
+        else:
+            body = _("“%(plan)s” has been deleted. It has billing history, so it's hidden rather than removed — past invoices still show it.") % {"plan": plan_name}
+        notify(request, f"w|{_('Plan deleted')}|{body}")
+
+        if impact.unsubscribed_clubs:
+            count = len(impact.unsubscribed_clubs)
+            club_body = ngettext("%(count)d club now has no plan.", "%(count)d clubs now have no plan.", count) % {"count": count}
+            notify(request, f"w|{_('Clubs affected')}|{club_body}")
+
+        if impact.broken_trial_clubs:
+            count = len(impact.broken_trial_clubs)
+            trial_body = ngettext("%(count)d club's trial lost its scheduled plan and needs a new one picked.", "%(count)d clubs' trials lost their scheduled plan and need a new one picked.", count) % {"count": count}
+            notify(request, f"w|{_('Trials affected')}|{trial_body}")
+
+        return redirect("controlpanel:billing")
 
 
 class PlanPriceCreateView(PlatformStaffRequiredMixin, RedirectOnInvalidMixin, CreateView):

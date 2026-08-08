@@ -27,6 +27,7 @@ urlpatterns = [
     path("billing/", views.BillingView.as_view(), name="billing"),
     path("billing/plans/new/", views.PlanCreateView.as_view(), name="plan_create"),
     path("billing/plans/<uuid:pk>/edit/", views.PlanUpdateView.as_view(), name="plan_update"),
+    path("billing/plans/<uuid:pk>/delete/", views.PlanDeleteView.as_view(), name="plan_delete"),
     path("billing/plans/<uuid:pk>/prices/new/", views.PlanPriceCreateView.as_view(), name="plan_price_create"),
     path("billing/dues/<uuid:pk>/pay/", views.RecordPaymentView.as_view(), name="due_pay"),
     path("billing/dues/<uuid:pk>/waive/", views.WaiveDueView.as_view(), name="due_waive"),

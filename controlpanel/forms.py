@@ -126,7 +126,7 @@ class SubscriptionForm(forms.ModelForm):
         # An inactive plan still bills its existing subscriptions, but must not be picked up
         # by a new one — which is the whole point of retiring a plan. Trial plans are excluded
         # too: they are reached through the trial form, which converts them properly.
-        self.fields["plan"].queryset = Plan.objects.filter(is_active=True, is_trial=False)
+        self.fields["plan"].queryset = Plan.objects.visible().filter(is_active=True, is_trial=False)
 
 
 class TrialForm(forms.Form):
@@ -150,8 +150,8 @@ class TrialForm(forms.Form):
         super().__init__(*args, **kwargs)
         # Same reasoning as SubscriptionForm: a retired plan keeps billing whoever is
         # already on it, but must not be offered for a new trial or a new plan either.
-        self.fields["trial_plan"].queryset = Plan.objects.filter(is_active=True, is_trial=True)
-        self.fields["post_trial_plan"].queryset = Plan.objects.filter(is_active=True, is_trial=False)
+        self.fields["trial_plan"].queryset = Plan.objects.visible().filter(is_active=True, is_trial=True)
+        self.fields["post_trial_plan"].queryset = Plan.objects.visible().filter(is_active=True, is_trial=False)
 
 
 class DuePaymentForm(forms.Form):

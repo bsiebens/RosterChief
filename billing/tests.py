@@ -21,6 +21,7 @@ from .services import BillingError
 from .services.dues import archivable_clubs, dues_in_grace, dues_overdue, next_period_start, open_period, reactivate, record_payment, remove_payment, renew, start_trial, subscribe, subscriptions_due_for_renewal, waive
 from .services.invoices import invoice_pdf, issue_invoice, render_pdf
 from .services.notices import club_billing_notice
+from .services.plans import delete_plan, plan_deletion_impact
 from .services.reminders import admin_emails, reminders_to_send, send_reminder
 
 
@@ -835,3 +836,124 @@ class BillingReminderTests(BillingTestBase):
         record_payment(self.due, Decimal("500.00"))
 
         self.assertEqual(reminders_to_send([self.club], self.today), [])
+
+
+class PlanVisibilityTests(BillingTestBase):
+    """Plan.objects.visible() -- see PlanQuerySet."""
+
+    def test_a_plain_plan_is_visible(self):
+        self.assertIn(self.plan, Plan.objects.visible())
+
+    def test_a_soft_deleted_plan_is_excluded(self):
+        self.plan.deleted_at = timezone.now()
+        self.plan.save(update_fields=["deleted_at"])
+
+        self.assertNotIn(self.plan, Plan.objects.visible())
+
+    def test_the_default_manager_still_returns_a_soft_deleted_plan(self):
+        # Django admin, and anything reading historical data, must still be able to find it.
+        self.plan.deleted_at = timezone.now()
+        self.plan.save(update_fields=["deleted_at"])
+
+        self.assertIn(self.plan, Plan.objects.all())
+
+
+class PlanDeletionTests(BillingTestBase):
+    """billing.services.plans -- see its module docstring for the full reasoning."""
+
+    def test_a_never_billed_plan_is_hard_deleted(self):
+        unused = Plan.objects.create(name="Unused")
+
+        impact = delete_plan(unused)
+
+        self.assertTrue(impact.will_hard_delete)
+        self.assertFalse(Plan.objects.filter(pk=unused.pk).exists())
+
+    def test_a_plan_with_a_due_cannot_be_hard_deleted(self):
+        self.bill()
+
+        impact = delete_plan(self.plan)
+
+        self.assertFalse(impact.will_hard_delete)
+        self.assertTrue(Plan.objects.filter(pk=self.plan.pk).exists())
+
+    def test_a_cancelled_due_still_protects_the_plan(self):
+        # PROTECT does not care about the referencing row's own status -- a cancelled due is
+        # still a row, and financial history includes rows nobody expects to see again.
+        due = self.bill()
+        due.status = Due.Status.CANCELLED
+        due.save(update_fields=["status"])
+
+        impact = delete_plan(self.plan)
+
+        self.assertFalse(impact.will_hard_delete)
+
+    def test_soft_delete_marks_the_plan_inactive_and_deleted(self):
+        subscribe(self.club, self.plan)
+
+        delete_plan(self.plan)
+        self.plan.refresh_from_db()
+
+        self.assertTrue(self.plan.is_deleted)
+        self.assertFalse(self.plan.is_active)
+
+    def test_deleting_unsubscribes_the_club_entirely_rather_than_nulling_a_field(self):
+        subscribe(self.club, self.plan)
+
+        delete_plan(self.plan)
+
+        self.assertFalse(Subscription.objects.filter(club=self.club).exists())
+
+    def test_a_deleted_plans_historical_due_is_untouched(self):
+        subscribe(self.club, self.plan)
+        due = self.club.dues.first()
+        amount, period_end, grace_until = due.amount, due.period_end, due.grace_until
+
+        delete_plan(self.plan)
+        due.refresh_from_db()
+
+        self.assertEqual(due.plan_id, self.plan.pk)
+        self.assertEqual(due.amount, amount)
+        self.assertEqual(due.period_end, period_end)
+        self.assertEqual(due.grace_until, grace_until)
+
+    def test_a_club_not_on_the_plan_is_unaffected(self):
+        other_plan = Plan.objects.create(name="Other")
+        PlanPrice.objects.create(plan=other_plan, active_from=self.today - datetime.timedelta(days=1200), amount=Decimal("100.00"))
+        untouched = Club.objects.create(name="Untouched FC")
+        subscribe(untouched, other_plan)
+
+        delete_plan(self.plan)
+
+        self.assertTrue(Subscription.objects.filter(club=untouched, plan=other_plan).exists())
+
+    def test_a_trial_scheduled_to_convert_to_the_deleted_plan_is_cleared(self):
+        trial_plan = Plan.objects.create(name="Trial", is_trial=True, duration_months=2, renewal_lead_days=7, grace_days=14)
+        PlanPrice.objects.create(plan=trial_plan, active_from=self.today - datetime.timedelta(days=1200), amount=Decimal("0.00"))
+        club = Club.objects.create(name="Mid Trial FC")
+        start_trial(club, trial_plan, post_trial_plan=self.plan)
+
+        impact = delete_plan(self.plan)
+
+        self.assertEqual([c.pk for c in impact.broken_trial_clubs], [club.pk])
+        club.refresh_from_db()
+        subscription = club.subscription
+        self.assertEqual(subscription.plan, trial_plan)
+        self.assertIsNone(subscription.trial_ends_at)
+        self.assertIsNone(subscription.post_trial_plan)
+
+    def test_a_club_currently_on_the_plan_is_not_also_counted_as_a_broken_trial(self):
+        subscribe(self.club, self.plan)
+
+        impact = delete_plan(self.plan)
+
+        self.assertEqual(impact.unsubscribed_clubs, [self.club])
+        self.assertEqual(impact.broken_trial_clubs, [])
+
+    def test_plan_deletion_impact_is_read_only(self):
+        subscribe(self.club, self.plan)
+
+        plan_deletion_impact(self.plan)
+
+        self.assertTrue(Subscription.objects.filter(club=self.club).exists())
+        self.assertFalse(self.plan.is_deleted)

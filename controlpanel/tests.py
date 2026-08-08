@@ -16,9 +16,9 @@ from django.urls import reverse
 from django.utils import timezone
 from waffle import get_waffle_flag_model, get_waffle_switch_model
 
-from billing.models import DEFAULT_GRACE_DAYS, Due, Plan, PlanPrice
+from billing.models import DEFAULT_GRACE_DAYS, Due, Plan, PlanPrice, Subscription
 from billing.services import BillingError
-from billing.services.dues import record_payment, subscribe, waive
+from billing.services.dues import record_payment, start_trial, subscribe, waive
 from club.models import Club, ClubMembership, ClubRole, Season
 from events.models import Attendance, Event, Location
 from features.models import Maintenance
@@ -1660,6 +1660,121 @@ class BillingFormRenderTests(ControlPanelTestBase):
         response = self.client.post(reverse("controlpanel:due_waive", args=[due.pk]), follow=True)
 
         self.assertContains(response, "remove them before waiving")
+
+
+class PlanDeleteTests(ControlPanelTestBase):
+    """billing.services.plans and controlpanel.views.PlanDeleteView."""
+
+    def setUp(self):
+        super().setUp()
+        self.today = timezone.localdate()
+        self.plan = Plan.objects.create(name="Standard")
+        PlanPrice.objects.create(plan=self.plan, active_from=self.today - datetime.timedelta(days=1200), amount=Decimal("500.00"))
+
+    def test_a_never_used_plan_is_removed_completely(self):
+        unused = Plan.objects.create(name="Unused")
+
+        response = self.client.get(reverse("controlpanel:plan_delete", args=[unused.pk]))
+        self.assertTrue(response.context["impact"].will_hard_delete)
+
+        self.client.post(reverse("controlpanel:plan_delete", args=[unused.pk]))
+
+        self.assertFalse(Plan.objects.filter(pk=unused.pk).exists())
+
+    def test_a_plan_with_billing_history_is_hidden_not_removed(self):
+        subscribe(self.club, self.plan)
+
+        self.client.post(reverse("controlpanel:plan_delete", args=[self.plan.pk]))
+        self.plan.refresh_from_db()
+
+        self.assertTrue(Plan.objects.filter(pk=self.plan.pk).exists())
+        self.assertTrue(self.plan.is_deleted)
+        self.assertFalse(self.plan.is_active)
+        self.assertIsNotNone(self.plan.deleted_at)
+
+    def test_deleting_unsubscribes_every_club_currently_on_it(self):
+        other = Club.objects.create(name="Feyenoord")
+        subscribe(self.club, self.plan)
+        subscribe(other, self.plan)
+
+        response = self.client.get(reverse("controlpanel:plan_delete", args=[self.plan.pk]))
+        self.assertCountEqual([c.pk for c in response.context["impact"].unsubscribed_clubs], [self.club.pk, other.pk])
+        self.assertContains(response, "Ajax United")
+        self.assertContains(response, "Feyenoord")
+
+        self.client.post(reverse("controlpanel:plan_delete", args=[self.plan.pk]))
+
+        self.assertFalse(hasattr(self.club, "subscription") and Subscription.objects.filter(club=self.club).exists())
+        self.assertFalse(Subscription.objects.filter(club=other).exists())
+        # The club itself, and its billing history, are untouched.
+        self.assertTrue(Club.objects.filter(pk=self.club.pk).exists())
+        self.assertEqual(self.club.dues.first().plan, self.plan)
+
+    def test_the_amount_and_dates_on_a_deleted_plans_dues_are_unchanged(self):
+        # The whole reason a plan with history can't be hard-deleted: Due.plan, .amount,
+        # .period_end and .grace_until are frozen snapshots, and deleting the plan must not
+        # touch any of them.
+        subscribe(self.club, self.plan)
+        due = self.club.dues.first()
+        amount, period_end, grace_until = due.amount, due.period_end, due.grace_until
+
+        self.client.post(reverse("controlpanel:plan_delete", args=[self.plan.pk]))
+        due.refresh_from_db()
+
+        self.assertEqual(due.amount, amount)
+        self.assertEqual(due.period_end, period_end)
+        self.assertEqual(due.grace_until, grace_until)
+        self.assertEqual(due.plan_id, self.plan.pk)
+
+    def test_a_club_mid_trial_scheduled_to_convert_to_the_deleted_plan_is_flagged(self):
+        trial_plan = Plan.objects.create(name="Trial", is_trial=True, duration_months=2, renewal_lead_days=7, grace_days=14)
+        PlanPrice.objects.create(plan=trial_plan, active_from=self.today - datetime.timedelta(days=1200), amount=Decimal("0.00"))
+        start_trial(self.club, trial_plan, post_trial_plan=self.plan)
+
+        response = self.client.get(reverse("controlpanel:plan_delete", args=[self.plan.pk]))
+        self.assertEqual([c.pk for c in response.context["impact"].broken_trial_clubs], [self.club.pk])
+        # Not double-counted as "currently on this plan" -- it's still on the trial plan.
+        self.assertEqual(response.context["impact"].unsubscribed_clubs, [])
+
+        self.client.post(reverse("controlpanel:plan_delete", args=[self.plan.pk]))
+        self.club.refresh_from_db()
+        subscription = self.club.subscription
+
+        self.assertEqual(subscription.plan, trial_plan)
+        self.assertIsNone(subscription.trial_ends_at)
+        self.assertIsNone(subscription.post_trial_plan)
+
+    def test_a_deleted_plan_is_removed_from_the_billing_page(self):
+        subscribe(self.club, self.plan)
+        self.client.post(reverse("controlpanel:plan_delete", args=[self.plan.pk]))
+
+        response = self.client.get(reverse("controlpanel:billing"))
+
+        self.assertNotIn(self.plan, response.context["plans"])
+
+    def test_a_deleted_plan_cannot_be_picked_for_a_new_subscription(self):
+        other = Club.objects.create(name="Feyenoord")
+        subscribe(self.club, self.plan)
+        self.client.post(reverse("controlpanel:plan_delete", args=[self.plan.pk]))
+
+        response = self.client.get(reverse("controlpanel:club_detail", args=[other.pk]))
+
+        self.assertNotIn(self.plan, response.context["subscription_form"].fields["plan"].queryset)
+
+    def test_visiting_an_already_deleted_plan_redirects_with_a_message(self):
+        subscribe(self.club, self.plan)
+        self.client.post(reverse("controlpanel:plan_delete", args=[self.plan.pk]))
+
+        response = self.client.get(reverse("controlpanel:plan_delete", args=[self.plan.pk]), follow=True)
+
+        self.assertRedirects(response, reverse("controlpanel:billing"))
+        self.assertContains(response, "already been deleted")
+
+    def test_a_plan_with_no_clubs_reports_no_impact(self):
+        response = self.client.get(reverse("controlpanel:plan_delete", args=[self.plan.pk]))
+
+        self.assertFalse(response.context["impact"].has_impact)
+        self.assertContains(response, "No club is currently on this plan")
 
 
 class MaintenancePanelTests(ControlPanelTestBase):

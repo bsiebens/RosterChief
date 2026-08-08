@@ -319,7 +319,10 @@ tenant-scoped manager would be exactly the wrong default.
 thing to get wrong: `duration_months` (period length, from its start), `renewal_lead_days` (how far
 *before* a period starts its invoice is raised), `grace_days` (how long *after* a period starts it
 may stay unpaid). Two `CheckConstraint`s keep them coherent. `is_trial` marks a plan offered as a
-trial; a trial's length is simply its own `duration_months`.
+trial; a trial's length is simply its own `duration_months`. `deleted_at` is a soft-delete marker:
+`Due.plan` is `PROTECT`, so a plan that has ever billed anyone can't really be removed — "delete"
+hides it (`Plan.objects.visible()` excludes it) and unsubscribes every club currently on it instead;
+see `billing/services/plans.py` and `BILLING.md` §11.
 
 **`PlanPrice`** — a dated price (`active_from`). A rate change is a new row, never an edit, so
 every period already opened keeps what it was billed at.

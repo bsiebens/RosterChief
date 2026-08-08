@@ -65,6 +65,7 @@
                                 <td class="flex flex-row gap-2 justify-end">
                                     <button class="btn btn-primary btn-sm btn-outline gap-1" type="button" onclick="document.getElementById('{{ plan.pk|dom_id:"plan_price_modal" }}').showModal()">{% lucide "euro" size=14 %} New price</button>
                                     <button class="btn btn-outline btn-sm gap-1" type="button" onclick="document.getElementById('{{ plan.pk|dom_id:"plan_edit_modal" }}').showModal()">{% lucide "pencil" size=14 %} Edit</button>
+                                    <a class="btn btn-error btn-outline btn-sm gap-1" href="{% url 'controlpanel:plan_delete' plan.pk %}">{% lucide "trash-2" size=14 %} Delete</a>
                                 </td>
                             </tr>
                         {% empty %}

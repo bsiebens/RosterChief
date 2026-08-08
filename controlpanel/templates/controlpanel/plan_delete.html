@@ -1,0 +1,82 @@
+{% extends "controlpanel/base.html" %}
+{% load i18n lucide %}
+
+{% comment %}
+    Confirm-then-delete for a plan. A real page rather than a modal (unlike every other
+    billing action) because the whole point is naming exactly which clubs are affected, and
+    that list can be long. See billing.services.plans for what "delete" actually does.
+{% endcomment %}
+
+{% block heading %}{% blocktrans with plan=plan.name %}Delete “{{ plan }}”{% endblocktrans %}{% endblock heading %}
+
+{% block actions %}
+    <a class="btn btn-outline gap-2" href="{% url 'controlpanel:billing' %}">{% lucide "arrow-left" size=16 %} {% trans "Back to billing" %}</a>
+{% endblock actions %}
+
+{% block panel %}
+    <div class="card mb-6 bg-base-100 shadow">
+        <div class="card-body">
+            <h2 class="card-title text-base">{% lucide "triangle-alert" size=18 %} {% trans "This can't be undone" %}</h2>
+            {% if impact.will_hard_delete %}
+                <p class="text-sm opacity-70">{% blocktrans with plan=plan.name %}“{{ plan }}” has never billed anyone, so it will be removed completely.{% endblocktrans %}</p>
+            {% else %}
+                <p class="text-sm opacity-70">{% blocktrans with plan=plan.name %}“{{ plan }}” has billing history, so it will be hidden rather than removed — past invoices will still show what they were billed under.{% endblocktrans %}</p>
+            {% endif %}
+        </div>
+    </div>
+
+    {% if impact.unsubscribed_clubs %}
+        <div class="card mb-6 bg-base-100 shadow border-l-4 border-error">
+            <div class="card-body">
+                <h2 class="card-title text-base">
+                    {% lucide "building-2" size=18 %}
+                    {% blocktrans count counter=impact.unsubscribed_clubs|length %}{{ counter }} club is currently on this plan{% plural %}{{ counter }} clubs are currently on this plan{% endblocktrans %}
+                </h2>
+                <p class="text-sm opacity-70">{% trans "Deleting this plan removes their subscription outright — each shows as not billed for anything afterwards, the same as a club that was never put on a plan." %}</p>
+                <ul class="mt-2 divide-y divide-base-200">
+                    {% for club in impact.unsubscribed_clubs %}
+                        <li class="py-2 flex items-center justify-between">
+                            <a class="link link-hover font-medium" href="{% url 'controlpanel:club_detail' club.pk %}">{{ club.name }}</a>
+                            <span class="badge badge-error badge-outline gap-1">{% lucide "circle-x" size=12 %} {% trans "Loses this plan" %}</span>
+                        </li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
+    {% endif %}
+
+    {% if impact.broken_trial_clubs %}
+        <div class="card mb-6 bg-base-100 shadow border-l-4 border-warning">
+            <div class="card-body">
+                <h2 class="card-title text-base">
+                    {% lucide "hourglass" size=18 %}
+                    {% blocktrans count counter=impact.broken_trial_clubs|length %}{{ counter }} club's trial is scheduled to switch to this plan{% plural %}{{ counter }} clubs' trials are scheduled to switch to this plan{% endblocktrans %}
+                </h2>
+                <p class="text-sm opacity-70">{% trans "They stay on their current trial plan, but the scheduled switch is cancelled — pick a new plan for them before the trial ends." %}</p>
+                <ul class="mt-2 divide-y divide-base-200">
+                    {% for club in impact.broken_trial_clubs %}
+                        <li class="py-2 flex items-center justify-between">
+                            <a class="link link-hover font-medium" href="{% url 'controlpanel:club_detail' club.pk %}">{{ club.name }}</a>
+                            <span class="badge badge-warning badge-outline gap-1">{% lucide "octagon-alert" size=12 %} {% trans "Trial needs a new plan" %}</span>
+                        </li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
+    {% endif %}
+
+    {% if not impact.has_impact %}
+        <div class="alert alert-info mb-6">
+            {% lucide "info" size=20 %}
+            <span>{% trans "No club is currently on this plan, or has a trial scheduled to switch to it." %}</span>
+        </div>
+    {% endif %}
+
+    <form method="post" action="{% url 'controlpanel:plan_delete' plan.pk %}">
+        {% csrf_token %}
+        <div class="flex flex-row justify-end gap-2">
+            <a class="btn btn-outline gap-2" href="{% url 'controlpanel:billing' %}">{% lucide "x" size=16 %} {% trans "Cancel" %}</a>
+            <button class="btn btn-error gap-2" type="submit">{% lucide "trash-2" size=16 %} {% trans "Delete plan" %}</button>
+        </div>
+    </form>
+{% endblock panel %}
