@@ -140,6 +140,11 @@ class TrialForm(forms.Form):
     trial_plan = forms.ModelChoiceField(queryset=Plan.objects.none(), label=_("Trial plan"), help_text=_("What this club is billed on during the trial. Its length is the plan's own duration."))
     post_trial_plan = forms.ModelChoiceField(queryset=Plan.objects.none(), label=_("Then switch to"), help_text=_("The plan it lands on automatically once the trial ends."))
     start = forms.DateField(required=False, widget=forms.DateInput(attrs={"type": "date"}), label=_("Trial starts"), help_text=_("Left blank, the trial starts today."))
+    # Same two switches SubscriptionForm offers. Without them here a trial could only be
+    # started on the defaults, and the only way to change them afterwards is the "Change
+    # plan" modal -- which ends the trial as a side effect.
+    auto_renew = forms.BooleanField(required=False, initial=True, label=_("Auto renew"), help_text=_("Issue the next period automatically before this one ends."))
+    auto_archive = forms.BooleanField(required=False, initial=True, label=_("Auto archive"), help_text=_("Archive this club when a period goes unpaid past its grace period."))
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

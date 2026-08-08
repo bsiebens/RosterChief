@@ -550,6 +550,8 @@ class ClubStartTrialView(PlatformStaffRequiredMixin, RedirectOnInvalidMixin, For
                 trial_plan,
                 post_trial_plan=form.cleaned_data["post_trial_plan"],
                 start=form.cleaned_data.get("start"),
+                auto_renew=form.cleaned_data["auto_renew"],
+                auto_archive=form.cleaned_data["auto_archive"],
             )
             notify(self.request, f"s|Trial started|{club} is on a {trial_plan.duration_months}-month trial of {trial_plan}, then switches to {form.cleaned_data['post_trial_plan']}.")
 

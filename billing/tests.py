@@ -752,6 +752,42 @@ class BillingReminderTests(BillingTestBase):
     def test_a_reminder_goes_to_the_club_admins(self):
         self.assertEqual(admin_emails(self.club), ["admin@ajax.example"])
 
+    def make_overdue_club(self, name, *, auto_archive):
+        # A separate club rather than resubscribing self.club: open_period() caches
+        # club.subscription on the instance it's given, so calling subscribe() twice
+        # against the SAME Python object -- only possible by reusing one across two calls,
+        # never a real request -- would read the first call's now-stale cached subscription.
+        club = Club.objects.create(name=name)
+        user = User.objects.create_user(email=f"{name.lower()}@ajax.example", password="pw-secret-123")
+        member = Member.objects.create(user=user, first_name="A", last_name="Admin")
+        ClubRole.objects.create(club=club, member=member, role=ClubRole.Roles.ADMIN)
+        subscribe(club, self.plan, start=self.today - datetime.timedelta(days=DEFAULT_GRACE_DAYS + 5), auto_archive=auto_archive)
+        return club
+
+    def test_an_overdue_reminder_threatens_archiving_when_it_will_happen(self):
+        club = self.make_overdue_club("Archive On", auto_archive=True)
+
+        notice = club_billing_notice(club, self.today)
+        self.assertTrue(notice.will_archive)
+        send_reminder(club, notice, recipients=["archive-on@ajax.example"])
+
+        self.assertIn("about to be archived", mail.outbox[0].subject)
+        self.assertIn("archived", mail.outbox[0].body)
+
+    def test_an_overdue_reminder_does_not_threaten_archiving_when_auto_archive_is_off(self):
+        # This is the bug the two-column-modal review turned up: the subject branched only
+        # on notice.level, so a club that will NEVER be archived still got told it was
+        # "about to be archived" -- while the body correctly said otherwise.
+        club = self.make_overdue_club("Archive Off", auto_archive=False)
+
+        notice = club_billing_notice(club, self.today)
+        self.assertFalse(notice.will_archive)
+        send_reminder(club, notice, recipients=["archive-off@ajax.example"])
+
+        self.assertNotIn("about to be archived", mail.outbox[0].subject)
+        self.assertNotIn("archived", mail.outbox[0].body)
+        self.assertIn("good standing", mail.outbox[0].body)
+
     def test_sending_records_the_level_and_fills_the_outbox(self):
         notice = club_billing_notice(self.club, self.today)
         send_reminder(self.club, notice, recipients=["admin@ajax.example"])

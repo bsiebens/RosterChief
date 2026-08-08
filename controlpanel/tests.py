@@ -1502,7 +1502,10 @@ class TrialPanelTests(ControlPanelTestBase):
         PlanPrice.objects.create(plan=self.plan, active_from=self.today - datetime.timedelta(days=1200), amount=Decimal("500.00"))
 
     def start_trial(self, **data):
-        data = {"trial_plan": self.trial_plan.pk, "post_trial_plan": self.plan.pk, "start": ""} | data
+        # "on" for both, matching how a freshly opened modal actually renders: unbound,
+        # TrialForm's auto_renew/auto_archive are initial=True, so a real submission that
+        # never touches either checkbox posts them checked.
+        data = {"trial_plan": self.trial_plan.pk, "post_trial_plan": self.plan.pk, "start": "", "auto_renew": "on", "auto_archive": "on"} | data
         return self.client.post(reverse("controlpanel:club_trial_start", args=[self.club.pk]), data)
 
     def test_starting_a_trial_opens_a_short_first_period(self):
@@ -1540,6 +1543,18 @@ class TrialPanelTests(ControlPanelTestBase):
 
         self.assertContains(response, "On trial")
         self.assertContains(response, "Standard")
+
+    def test_a_trial_can_be_started_with_auto_archive_off(self):
+        # Same switch SubscriptionForm offers -- a trial must be able to opt out of
+        # auto-archiving too, not just a paid subscription.
+        self.start_trial(auto_archive="")
+
+        self.assertFalse(self.club.subscription.auto_archive)
+
+    def test_a_trial_defaults_to_auto_archive_on(self):
+        self.start_trial()
+
+        self.assertTrue(self.club.subscription.auto_archive)
 
     def test_manually_changing_plan_mid_trial_clears_the_trial(self):
         self.start_trial()
