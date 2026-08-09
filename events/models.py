@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.conf import settings
 from django.db import models
 from django.db.models import Q
@@ -86,6 +88,8 @@ class Event(ClubScopedModel):
     score_against = models.PositiveSmallIntegerField(_("score (opponent)"), null=True, blank=True)
     is_live = models.BooleanField(_("live"), default=False, help_text=_("The game is currently in progress."))
 
+    max_referees = models.PositiveSmallIntegerField(_("max referees"), default=2, help_text=_("How many referees can be assigned to this game. Only meaningful for home games -- ignored otherwise."))
+
     class Meta:
         verbose_name = _("event")
         verbose_name_plural = _("events")
@@ -170,6 +174,65 @@ class Attendance(UUIDModel):
 
     def __str__(self):
         return f"{self.event} - {self.member}"
+
+
+class EventReferee(UUIDModel):
+    """One referee assigned to one (home) game -- either a club member
+    (``member`` set) or an external referee logged by name only
+    (``external_name`` set, e.g. a federation-appointed referee the club
+    still needs to pay/log) -- never both, never neither. ``assigned_by`` is
+    required for now -- assignment is admin-only; a future self-service
+    sign-up would make it nullable to mean "the referee signed themself up"
+    rather than adding a parallel model. See events.services.referees for the
+    home-game gate, the ``Event.max_referees`` capacity ceiling, and the
+    (non-blocking) schedule conflict check.
+
+    ``fee``/``km``/``km_rate`` back the referee payment form (PDF export):
+    what the club owes this referee for this game, and the mileage rate used
+    to compute the travel portion -- snapshotted per assignment (not read
+    from a live club-wide setting) so a rate change later doesn't rewrite an
+    already-issued form's numbers.
+    """
+
+    event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="referees", verbose_name=_("event"))
+    member = models.ForeignKey(Member, on_delete=models.CASCADE, null=True, blank=True, related_name="referee_assignments", verbose_name=_("member"))
+    external_name = models.CharField(_("external referee name"), max_length=255, blank=True, help_text=_("For a referee who isn't a club member (e.g. federation-appointed) -- logged by name only."))
+    assigned_by = models.ForeignKey(Member, on_delete=models.SET_NULL, null=True, related_name="+", verbose_name=_("assigned by"))
+
+    fee = models.DecimalField(_("fee"), max_digits=8, decimal_places=2, default=Decimal("0.00"), blank=True)
+    km = models.DecimalField(_("kilometers"), max_digits=6, decimal_places=1, null=True, blank=True)
+    km_rate = models.DecimalField(_("rate per km"), max_digits=6, decimal_places=4, null=True, blank=True, help_text=_("Reimbursement rate per kilometer, e.g. 0.4230."))
+
+    class Meta:
+        verbose_name = _("event referee")
+        verbose_name_plural = _("event referees")
+        ordering = ["event", "member__last_name", "member__first_name"]
+        constraints = [
+            models.UniqueConstraint(fields=["event", "member"], name="unique_referee_per_event"),
+            models.CheckConstraint(
+                condition=(Q(member__isnull=False) & Q(external_name="")) | (Q(member__isnull=True) & ~Q(external_name="")),
+                name="event_referee_member_xor_external_name",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.event} - {self.display_name}"
+
+    @property
+    def display_name(self) -> str:
+        return str(self.member) if self.member_id else self.external_name
+
+    @property
+    def is_external(self) -> bool:
+        return self.member_id is None
+
+    @property
+    def km_total(self) -> Decimal:
+        return (self.km or Decimal("0")) * (self.km_rate or Decimal("0"))
+
+    @property
+    def total_payable(self) -> Decimal:
+        return (self.fee or Decimal("0")) + self.km_total
 
 
 class Competition(models.Model):

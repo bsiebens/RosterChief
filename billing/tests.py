@@ -334,6 +334,17 @@ class InvoiceTests(BillingTestBase):
         self.assertIn("200.00", html)  # paid
         self.assertIn("300.00", html)  # balance
 
+    def test_the_invoice_is_billed_to_the_clubs_legal_name_when_set(self):
+        self.club.legal_name = "Ajax United VZW"
+        self.club.save(update_fields=["legal_name"])
+        due = self.bill()
+
+        with mock.patch("billing.services.invoices.render_pdf", return_value=b"%PDF-fake") as renderer:
+            invoice_pdf(due.invoice)
+
+        html = renderer.call_args.args[0]
+        self.assertIn("Ajax United VZW", html)
+
     def test_the_pdf_library_is_only_needed_when_a_pdf_is_asked_for(self):
         # WeasyPrint binds to native pango/cairo. The app, the tests and every other page must
         # run without them; only this call may fail.

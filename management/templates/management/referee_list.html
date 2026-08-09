@@ -1,0 +1,60 @@
+{% extends "management/base.html" %}
+{% load i18n lucide %}
+
+{% block heading %}{% trans "Referees" %}{% endblock heading %}
+{% block subheading %}{% trans "Every club referee, their level, and whether their qualification is currently valid." %}{% endblock subheading %}
+
+{% block panel %}
+    <div class="card bg-base-100 shadow">
+        <div class="card-body">
+            <div class="overflow-x-auto">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>{% trans "Referee" %}</th>
+                            <th>{% trans "Level" %}</th>
+                            <th>{% trans "Can referee for" %}</th>
+                            <th>{% trans "Valid until" %}</th>
+                            <th>{% trans "Status" %}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for referee in referees %}
+                            <tr>
+                                <td><a class="link link-hover" href="{% url 'management:member_detail' referee.pk %}">{{ referee }}</a></td>
+                                <td>{{ referee.referee_profile.level|default:"—" }}</td>
+                                <td>
+                                    {% if referee.referee_profile.is_eligible %}
+                                        {% for team in referee.referee_profile.eligible_teams %}
+                                            <span class="badge badge-outline badge-sm">{{ team.name }}</span>
+                                        {% empty %}
+                                            <span class="opacity-40">—</span>
+                                        {% endfor %}
+                                    {% else %}
+                                        <span class="opacity-40">—</span>
+                                    {% endif %}
+                                </td>
+                                <td>{{ referee.referee_profile.valid_until|default:"—" }}</td>
+                                <td>
+                                    {% if referee.referee_profile.is_eligible %}
+                                        <span class="badge badge-success badge-sm">{% trans "Valid" %}</span>
+                                    {% elif not referee.referee_profile.level %}
+                                        <span class="badge badge-warning badge-sm">{% trans "No level" %}</span>
+                                    {% elif not referee.referee_profile.valid_until %}
+                                        <span class="badge badge-warning badge-sm">{% trans "No validity set" %}</span>
+                                    {% else %}
+                                        <span class="badge badge-error badge-sm">{% trans "Expired" %}</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                        {% empty %}
+                            <tr>
+                                <td colspan="5" class="text-center opacity-60">{% trans "No referees yet -- set a level and validity from a member's own page." %}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+{% endblock panel %}

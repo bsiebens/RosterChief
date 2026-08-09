@@ -26,6 +26,7 @@
                             <th>{% trans "Last name" %}</th>
                             <th>{% trans "First name" %}</th>
                             <th>{% trans "Email" %}</th>
+                            <th>{% trans "Family" %}</th>
                             <th>{% trans "Outcome" %}</th>
                         </tr>
                     </thead>
@@ -37,6 +38,14 @@
                                 <td>{{ result.raw.first_name }}</td>
                                 <td>{{ result.raw.email }}</td>
                                 <td>
+                                    {% if result.family_group %}
+                                        {{ result.family_group }}
+                                        {% if result.family_role %}<span class="badge badge-neutral badge-sm">{{ result.family_role|capfirst }}</span>{% endif %}
+                                    {% else %}
+                                        <span class="opacity-40">-</span>
+                                    {% endif %}
+                                </td>
+                                <td>
                                     {% if result.member %}
                                         <span class="badge badge-success badge-sm">{% trans "Will create" %}</span>
                                     {% else %}
@@ -47,7 +56,7 @@
                             </tr>
                         {% empty %}
                             <tr>
-                                <td colspan="5" class="text-center opacity-60">{% trans "No rows found in the uploaded file." %}</td>
+                                <td colspan="6" class="text-center opacity-60">{% trans "No rows found in the uploaded file." %}</td>
                             </tr>
                         {% endfor %}
                     </tbody>

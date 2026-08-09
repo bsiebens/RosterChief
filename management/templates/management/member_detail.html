@@ -1,5 +1,5 @@
 {% extends "management/base.html" %}
-{% load lucide ui i18n %}
+{% load lucide ui i18n static %}
 
 {% block heading %}{{ member.get_full_name }}{% endblock heading %}
 {% block subheading %}{{ member.contact_email }}{% endblock subheading %}
@@ -127,6 +127,66 @@
         </div>
     </div>
 
+    {% if referee_profile or is_club_admin %}
+        <div class="card bg-base-100 shadow mt-4">
+            <div class="card-body">
+                <div class="flex items-center justify-between">
+                    <h2 class="card-title text-base">{% lucide "flag" size=18 %} {% trans "Referee eligibility" %}</h2>
+                    {% if is_club_admin %}
+                        <button class="btn btn-outline btn-sm gap-2" type="button" onclick="document.getElementById('referee_eligibility_modal').showModal()">{% lucide "pencil" size=14 %} {% trans "Edit" %}</button>
+                    {% endif %}
+                </div>
+
+                {% if referee_profile and referee_profile.level %}
+                    <dl class="divide-y divide-base-200">
+                        <div class="flex items-center justify-between py-2">
+                            <dt class="text-sm opacity-70">{% trans "Level" %}</dt>
+                            <dd class="font-semibold">{{ referee_profile.level }}</dd>
+                        </div>
+                        <div class="flex items-center justify-between py-2">
+                            <dt class="text-sm opacity-70">{% trans "Valid until" %}</dt>
+                            <dd class="font-semibold flex items-center gap-2">
+                                {{ referee_profile.valid_until|default:"—" }}
+                                {% if referee_profile.is_currently_valid %}
+                                    <span class="badge badge-success badge-sm">{% trans "Valid" %}</span>
+                                {% elif referee_profile.valid_until %}
+                                    <span class="badge badge-error badge-sm">{% trans "Expired" %}</span>
+                                {% else %}
+                                    <span class="badge badge-warning badge-sm">{% trans "No validity set" %}</span>
+                                {% endif %}
+                            </dd>
+                        </div>
+                    </dl>
+
+                    {% if referee_profile.is_eligible %}
+                        <div class="text-xs font-semibold uppercase opacity-60 mt-2 mb-1">{% trans "Can referee for" %}</div>
+                        <div class="flex flex-wrap gap-2">
+                            {% for team in referee_profile.eligible_teams %}
+                                <span class="badge badge-outline">{{ team.name }}</span>
+                            {% empty %}
+                                <span class="text-sm opacity-60">{% trans "This level has no teams linked yet." %}</span>
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        <div class="alert alert-warning mt-2">
+                            {% lucide "triangle-alert" size=16 %}
+                            <span>{% trans "Not currently eligible to referee -- set or extend the validity date above to reinstate them." %}</span>
+                        </div>
+                    {% endif %}
+                {% else %}
+                    <p class="text-sm opacity-60">{% trans "Not eligible to referee for any team." %}</p>
+                {% endif %}
+            </div>
+        </div>
+
+        {% if is_club_admin %}
+            {% url 'management:member_referee_eligibility_update' member.pk as referee_eligibility_url %}
+            {% trans "Referee eligibility" as referee_eligibility_title %}
+            {% trans "Save" as save_label %}
+            {% include "controlpanel/_modal_form.html" with modal_id="referee_eligibility_modal" title=referee_eligibility_title form=referee_eligibility_form action_url=referee_eligibility_url submit_label=save_label submit_icon="save" %}
+        {% endif %}
+    {% endif %}
+
     {% trans "Add parent" as add_parent_label %}
     {% trans "Add child" as add_child_label %}
     {% trans "If this email has no account yet, one is created and they set a password via the reset link." as add_parent_blurb %}
@@ -184,3 +244,7 @@
         {% include "controlpanel/_modal_form.html" with modal_id="attach_family_modal" title=add_to_family_title form=attach_to_family_form action_url=attach_family_url submit_label=add_label submit_icon="user-plus" blurb=attach_family_blurb %}
     {% endif %}
 {% endblock panel %}
+
+{% block extra_body %}
+    <script src="{% static 'js/searchable-select.js' %}"></script>
+{% endblock extra_body %}

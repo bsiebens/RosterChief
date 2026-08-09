@@ -3,7 +3,7 @@ from django.db import models
 from django.utils.translation import gettext_lazy as _
 from phonenumber_field.modelfields import PhoneNumberField
 
-from rosterchief.base import UUIDModel
+from rosterchief.base import ClubScopedModel, UUIDModel
 
 
 class Family(UUIDModel):
@@ -99,3 +99,42 @@ class FamilyMembership(models.Model):
 
     def __str__(self):
         return f"{self.family} - {self.member} ({self.get_role_display()})"
+
+
+class Group(ClubScopedModel):
+    """An arbitrary named collection of members -- deliberately generic, not
+    team-shaped and not aware of any specific use: "all coaches", "all team
+    managers", an ad-hoc committee. A Team's roster is a separate, more
+    specific concept (teams.TeamMembership); nothing here assumes team
+    semantics. Referee eligibility (who can ref which team) is a member-level
+    fact (teams.RefereeProfile), not a Group concern -- Group carries no
+    referee-specific knowledge at all."""
+
+    name = models.CharField(_("name"), max_length=255)
+
+    class Meta:
+        verbose_name = _("group")
+        verbose_name_plural = _("groups")
+        ordering = ["name"]
+        constraints = [
+            models.UniqueConstraint(fields=["club", "name"], name="unique_group_name_per_club"),
+        ]
+
+    def __str__(self):
+        return self.name
+
+
+class GroupMembership(UUIDModel):
+    group = models.ForeignKey(Group, on_delete=models.CASCADE, related_name="memberships", verbose_name=_("group"))
+    member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="group_memberships", verbose_name=_("member"))
+
+    class Meta:
+        verbose_name = _("group membership")
+        verbose_name_plural = _("group memberships")
+        ordering = ["group", "member__last_name", "member__first_name"]
+        constraints = [
+            models.UniqueConstraint(fields=["group", "member"], name="unique_member_per_group"),
+        ]
+
+    def __str__(self):
+        return f"{self.group} - {self.member}"

@@ -1,5 +1,6 @@
 from django.db import models
 from django.db.models import Q
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 from club.models import Season
@@ -8,8 +9,19 @@ from rosterchief.base import ClubScopedModel, UUIDModel, validate_club_scope
 
 
 class Team(ClubScopedModel):
+    class RefereeManagement(models.TextChoices):
+        CLUB = "club", _("Club")
+        FEDERATION = "federation", _("Federation")
+
     name = models.CharField(_("name"), max_length=255)
     short_name = models.CharField(_("short name"), max_length=255)
+    referee_management = models.CharField(
+        _("referee management"),
+        max_length=20,
+        choices=RefereeManagement.choices,
+        default=RefereeManagement.CLUB,
+        help_text=_("Who arranges referees for this team's home games. Federation-managed teams are left out of the referee tools entirely -- no eligibility, no assignment, nothing to configure."),
+    )
 
     class Meta:
         verbose_name = _("team")
@@ -94,6 +106,78 @@ class TeamMembership(UUIDModel):
     def clean(self):
         club_id = self.team.club_id if self.team_id else None
         validate_club_scope(self, club_id, same_club_fields=("season", "position"))
+
+
+class RefereeLevel(ClubScopedModel):
+    """A club-defined referee qualification tier (e.g. "Regional", "National")
+    -- admin-managed, like Position, so a club can name and reorder its own
+    levels rather than picking from a fixed list. Owns which teams it
+    qualifies a referee for: eligibility is a property of the *level*, not of
+    the individual referee -- a club typically has a handful of levels, each
+    unlocking a tier of teams/competitions, rather than hand-picking teams per
+    referee."""
+
+    name = models.CharField(_("name"), max_length=255)
+    ordering = models.PositiveSmallIntegerField(_("ordering"), default=0, help_text=_("Lower numbers are listed first. Levels with the same number are ordered by name."))
+    teams = models.ManyToManyField(Team, related_name="referee_levels", blank=True, verbose_name=_("qualifies for"), help_text=_("Members holding this level can be assigned to referee these teams' home games."))
+
+    class Meta:
+        verbose_name = _("referee level")
+        verbose_name_plural = _("referee levels")
+        ordering = ["ordering", "name"]
+        constraints = [
+            models.UniqueConstraint(fields=["club", "name"], name="unique_referee_level_name_per_club"),
+        ]
+
+    def __str__(self):
+        return self.name
+
+
+class RefereeProfile(UUIDModel):
+    """Marks a member as a club referee: their level (which determines which
+    teams they're eligible for, via RefereeLevel.teams) and how long that
+    qualification is valid. A member-level fact, not a group-level one --
+    managed from the member's own page, unrelated to members.Group (which
+    stays a plain, opaque collection of people with no referee-specific
+    knowledge).
+
+    No level, or an expired/unset validity, both mean "not currently
+    eligible" -- see `is_currently_valid`/`eligible_teams` below, the single
+    definitions every consumer (the event assign panel, the team page, the
+    referees list) reads through, so "eligible" never drifts out of sync.
+    """
+
+    member = models.OneToOneField(Member, on_delete=models.CASCADE, related_name="referee_profile", verbose_name=_("member"))
+    level = models.ForeignKey(RefereeLevel, on_delete=models.PROTECT, null=True, blank=True, related_name="referees", verbose_name=_("level"))
+    valid_until = models.DateField(_("valid until"), null=True, blank=True, help_text=_("Once this date has passed, the referee is not eligible for assignment until it's extended."))
+
+    class Meta:
+        verbose_name = _("referee profile")
+        verbose_name_plural = _("referee profiles")
+        ordering = ["member__last_name", "member__first_name"]
+
+    def __str__(self):
+        return f"{self.member} (referee)"
+
+    @property
+    def is_currently_valid(self) -> bool:
+        """Whether the validity date itself hasn't passed -- independent of
+        whether a level is even set. Use `is_eligible` for the full gate."""
+        return self.valid_until is not None and self.valid_until >= timezone.localdate()
+
+    @property
+    def is_eligible(self) -> bool:
+        """The full gate consumed everywhere eligibility actually matters: a
+        level is set, and its validity hasn't passed."""
+        return self.level_id is not None and self.is_currently_valid
+
+    @property
+    def eligible_teams(self):
+        """Teams this profile currently qualifies for -- empty whenever it
+        isn't currently eligible, regardless of what level is set."""
+        if not self.is_eligible:
+            return Team.objects.none()
+        return self.level.teams.all()
 
 
 class StaffAssignment(UUIDModel):

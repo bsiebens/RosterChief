@@ -19,11 +19,17 @@
 {% if is_club_admin %}
     <li><a class="{% if nav == 'membership_list' %}menu-active{% endif %}" href="{% url 'management:membership_list' %}">{% lucide "wallet" size=16 %} {% trans "Memberships" %}</a></li>
     <li><a class="{% if nav == 'role_list' %}menu-active{% endif %}" href="{% url 'management:role_list' %}">{% lucide "shield-check" size=16 %} {% trans "Roles" %}</a></li>
+    <li><a class="{% if nav == 'group_list' %}menu-active{% endif %}" href="{% url 'management:group_list' %}">{% lucide "users-round" size=16 %} {% trans "Groups" %}</a></li>
 {% endif %}
 
 <li class="menu-title">{% trans "Teams" %}</li>
 <li><a class="{% if nav == 'team_list' %}menu-active{% endif %}" href="{% url 'management:team_list' %}">{% lucide "shirt" size=16 %} {% trans "Teams" %}</a></li>
 <li><a class="{% if nav == 'position_list' %}menu-active{% endif %}" href="{% url 'management:position_list' %}">{% lucide "tags" size=16 %} {% trans "Positions" %}</a></li>
+<li><a class="{% if nav == 'referee_list' %}menu-active{% endif %}" href="{% url 'management:referee_list' %}">{% lucide "flag" size=16 %} {% trans "Referees" %}</a></li>
+{% if is_club_admin %}
+    <li><a class="{% if nav == 'referee_management' %}menu-active{% endif %}" href="{% url 'management:referee_management' %}">{% lucide "calendar-check" size=16 %} {% trans "Referee management" %}</a></li>
+    <li><a class="{% if nav == 'referee_level_list' %}menu-active{% endif %}" href="{% url 'management:referee_level_list' %}">{% lucide "badge-check" size=16 %} {% trans "Referee levels" %}</a></li>
+{% endif %}
 
 <li class="menu-title">{% trans "News" %}</li>
 <li><a class="{% if nav == 'news_list' %}menu-active{% endif %}" href="{% url 'management:news_list' %}">{% lucide "newspaper" size=16 %} {% trans "News" %}</a></li>

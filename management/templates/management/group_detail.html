@@ -1,0 +1,51 @@
+{% extends "management/base.html" %}
+{% load i18n lucide ui %}
+
+{% block heading %}{{ group.name }}{% endblock heading %}
+
+{% block actions %}
+    <a class="btn btn-outline gap-2" href="{% url 'management:group_update' group.pk %}">{% lucide "pencil" size=16 %} {% trans "Edit" %}</a>
+{% endblock actions %}
+
+{% block panel %}
+    <div class="card bg-base-100 shadow">
+        <div class="card-body">
+            <div class="flex items-center justify-between">
+                <h2 class="card-title text-base">{% trans "Members" %}</h2>
+                <a class="btn btn-outline btn-sm gap-2" href="{% url 'management:group_bulk_add' group.pk %}">{% lucide "users" size=14 %} {% trans "Add multiple" %}</a>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>{% trans "Member" %}</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for membership in memberships %}
+                            <tr>
+                                <td><a class="link link-hover" href="{% url 'management:member_detail' membership.member.pk %}">{{ membership.member }}</a></td>
+                                <td class="text-right">
+                                    <button class="btn btn-sm btn-outline btn-error" type="button" onclick="document.getElementById('{{ membership.pk|dom_id:"remove_member_modal" }}').showModal()">{% lucide "user-minus" size=14 %} {% trans "Remove" %}</button>
+                                </td>
+                            </tr>
+                        {% empty %}
+                            <tr>
+                                <td colspan="2" class="text-center opacity-60">{% trans "No members yet." %}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    {% trans "Remove from group" as remove_member_title %}
+    {% trans "Remove" as remove_label %}
+    {% for membership in memberships %}
+        {% blocktrans with member=membership.member group_name=group.name asvar remove_member_body %}Remove {{ member }} from “{{ group_name }}”?{% endblocktrans %}
+        {% url 'management:group_member_remove' group.pk membership.pk as remove_member_url %}
+        {% include "controlpanel/_confirm_modal.html" with modal_id=membership.pk|dom_id:"remove_member_modal" title=remove_member_title body=remove_member_body action_url=remove_member_url submit_label=remove_label submit_icon="user-minus" %}
+    {% endfor %}
+{% endblock panel %}

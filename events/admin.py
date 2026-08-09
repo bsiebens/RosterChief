@@ -2,7 +2,7 @@ from django import forms
 from django.contrib import admin
 from django.utils.translation import gettext_lazy as _
 
-from .models import Attendance, Competition, Event, EventSeries, Location, Opponent
+from .models import Attendance, Competition, Event, EventReferee, EventSeries, Location, Opponent
 
 
 @admin.register(Opponent)
@@ -23,6 +23,12 @@ class AttendanceInline(admin.TabularInline):
     model = Attendance
     extra = 0
     raw_id_fields = ["member"]
+
+
+class EventRefereeInline(admin.TabularInline):
+    model = EventReferee
+    extra = 0
+    raw_id_fields = ["member", "assigned_by"]
 
 
 @admin.register(EventSeries)
@@ -52,7 +58,7 @@ class EventAdminForm(forms.ModelForm):
         fields = [
             "title", "kind", "season", "series", "detached", "cancelled", "teams", "invited_members", "excluded_members",
             "start", "end", "gathering", "deadline", "location", "opponent",
-            "competition", "external_game_id", "score_for", "score_against", "is_live",
+            "competition", "external_game_id", "score_for", "score_against", "is_live", "max_referees",
         ]
 
     def __init__(self, *args, **kwargs):
@@ -77,14 +83,14 @@ class EventAdmin(admin.ModelAdmin):
     search_fields = ["title"]
     date_hierarchy = "start"
     autocomplete_fields = ["season", "series", "location", "opponent", "teams", "invited_members", "excluded_members"]
-    inlines = [AttendanceInline]
+    inlines = [AttendanceInline, EventRefereeInline]
     fieldsets = [
         [None, {"fields": ["title", "kind", "season"]}],
         [_("Series"), {"fields": ["series", "detached", "cancelled"]}],
         [_("Audience"), {"fields": ["teams", "invited_members", "excluded_members"]}],
         [_("When"), {"fields": ["start", "end", "gathering", "deadline"]}],
         [_("Where"), {"fields": ["location", "opponent"]}],
-        [_("Game"), {"fields": ["competition", "external_game_id", "score_for", "score_against", "is_live"]}],
+        [_("Game"), {"fields": ["competition", "external_game_id", "score_for", "score_against", "is_live", "max_referees"]}],
     ]
 
 
@@ -102,3 +108,18 @@ class AttendanceAdmin(admin.ModelAdmin):
     list_filter = ["status", "showed_up", "event__kind"]
     search_fields = ["event__title", "member__first_name", "member__last_name"]
     raw_id_fields = ["event", "member"]
+
+
+@admin.register(EventReferee)
+class EventRefereeAdmin(admin.ModelAdmin):
+    list_display = ["event", "display_name", "fee", "km", "total_payable", "assigned_by"]
+    search_fields = ["event__title", "member__first_name", "member__last_name", "external_name"]
+    raw_id_fields = ["event", "member", "assigned_by"]
+
+    @admin.display(description=_("referee"))
+    def display_name(self, obj):
+        return obj.display_name
+
+    @admin.display(description=_("total payable"))
+    def total_payable(self, obj):
+        return obj.total_payable

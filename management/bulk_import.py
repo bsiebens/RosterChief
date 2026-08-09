@@ -15,14 +15,22 @@ from django.utils.translation import gettext_lazy as _
 from openpyxl.worksheet.datavalidation import DataValidation
 
 from club.models import ClubMembership
-from members.models import Member
+from members.models import FamilyMembership, Member
 
 from .forms import MemberForm
 
-TEMPLATE_COLUMNS = ["first_name", "last_name", "date_of_birth", "email", "phone", "emergency_phone", "license", "status", "fee_status"]
+TEMPLATE_COLUMNS = ["first_name", "last_name", "date_of_birth", "email", "phone", "emergency_phone", "license", "status", "fee_status", "family_group", "family_role"]
 REQUIRED_HEADER_COLUMNS = {"first_name", "last_name"}
 
-TEMPLATE_EXAMPLE_ROW = ["Alex", "Morgan", date(2012, 5, 14), "alex.morgan@example.com", "+32470123456", "+32470654321", "", ClubMembership.StatusChoices.ACTIVE, ClubMembership.FeeStatus.UNPAID]
+TEMPLATE_EXAMPLE_ROWS = [
+    # A standalone member -- no family link.
+    ["Alex", "Morgan", date(2012, 5, 14), "alex.morgan@example.com", "+32470123456", "+32470654321", "", ClubMembership.StatusChoices.ACTIVE, ClubMembership.FeeStatus.UNPAID, "", ""],
+    # A parent and child linked together: same family_group value, one row each.
+    # The child has no email of its own -- it gets a login only if given one via
+    # the "Grant login" action later, same as adding a family by hand.
+    ["Taylor", "Doe", "", "taylor.doe@example.com", "+32470654322", "", "", ClubMembership.StatusChoices.ACTIVE, ClubMembership.FeeStatus.UNPAID, "Doe family", FamilyMembership.FamilyRole.PARENT],
+    ["Jamie", "Doe", date(2014, 3, 2), "", "", "+32470654322", "", ClubMembership.StatusChoices.ACTIVE, ClubMembership.FeeStatus.UNPAID, "Doe family", FamilyMembership.FamilyRole.CHILD],
+]
 
 
 def build_member_import_template():
@@ -37,9 +45,10 @@ def build_member_import_template():
         cell.font = openpyxl.styles.Font(bold=True)
     sheet.freeze_panes = "A2"
 
-    sheet.append(TEMPLATE_EXAMPLE_ROW)
+    for example_row in TEMPLATE_EXAMPLE_ROWS:
+        sheet.append(example_row)
 
-    for column_name, choices in (("status", ClubMembership.StatusChoices), ("fee_status", ClubMembership.FeeStatus)):
+    for column_name, choices in (("status", ClubMembership.StatusChoices), ("fee_status", ClubMembership.FeeStatus), ("family_role", FamilyMembership.FamilyRole)):
         column_index = TEMPLATE_COLUMNS.index(column_name) + 1
         column_letter = sheet.cell(row=1, column=column_index).column_letter
         options = ",".join(choices.values)
@@ -128,7 +137,20 @@ def parse_member_import_rows(rows, club):
         membership_kwargs, status_fee_errors = _parse_membership_fields(raw)
         errors.extend(status_fee_errors)
 
-        results.append({"line_number": line_number, "raw": raw, "member": member if not errors else None, "membership_kwargs": membership_kwargs, "errors": errors})
+        family_group, family_role, family_errors = _parse_family_fields(raw)
+        errors.extend(family_errors)
+
+        results.append(
+            {
+                "line_number": line_number,
+                "raw": raw,
+                "member": member if not errors else None,
+                "membership_kwargs": membership_kwargs,
+                "family_group": family_group,
+                "family_role": family_role,
+                "errors": errors,
+            }
+        )
 
     return results
 
@@ -154,6 +176,32 @@ def _parse_membership_fields(raw):
         fee_status_value = ClubMembership.FeeStatus.UNPAID
 
     return {"license": license_number, "status": status_value, "fee_status": fee_status_value}, errors
+
+
+def _parse_family_fields(raw):
+    """family_group is a freeform label -- rows sharing the same non-blank value
+    (within this file only; it isn't matched against families already in the
+    club) are linked into one family. family_role decides whether the row gets a
+    login: PARENT/GUARDIAN do (via their email), CHILD/OTHER don't -- same as
+    registering a family by hand (see members.services.family)."""
+    errors = []
+    family_group = raw.get("family_group", "").strip()
+    family_role_raw = raw.get("family_role", "").strip()
+
+    if not family_group:
+        if family_role_raw:
+            errors.append(_("family_role given without a family_group."))
+        return "", None, errors
+
+    if not family_role_raw:
+        errors.append(_("family_role is required when family_group is set."))
+        return family_group, None, errors
+
+    family_role = _match_choice(family_role_raw, FamilyMembership.FamilyRole)
+    if family_role is None:
+        errors.append(_("Invalid family_role '%(value)s'.") % {"value": family_role_raw})
+
+    return family_group, family_role, errors
 
 
 def _match_choice(value, choices):

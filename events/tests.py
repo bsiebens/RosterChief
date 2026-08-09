@@ -1,4 +1,5 @@
 from datetime import timedelta
+from decimal import Decimal
 from io import StringIO
 
 from django.core.exceptions import ValidationError
@@ -10,10 +11,10 @@ from waffle import get_waffle_flag_model
 
 from club.models import Club, Season
 from members.models import Member
-from teams.models import Position, Team, TeamMembership
+from teams.models import Position, RefereeLevel, RefereeProfile, Team, TeamMembership
 
 from .admin import EventAdminForm
-from .models import Attendance, Competition, Event, EventSeries, Location, Opponent
+from .models import Attendance, Competition, Event, EventReferee, EventSeries, Location, Opponent
 from .services import (
     cancel_occurrence,
     detach_occurrence,
@@ -28,6 +29,7 @@ from .services import (
     team_no_shows,
 )
 from .services.rbihf_import import RBIHFImportError, apply_plan, build_plan, extract_team_id, parse_fixtures, suggested_location, suggested_opponent
+from .services.referees import RefereeAssignmentError, add_external_referee, assign_referee, conflicting_events, eligible_referees, needs_referee_management, remove_referee, set_referee_fee
 
 
 class EventsTestBase(TestCase):
@@ -893,3 +895,273 @@ class RBIHFImportPlanTests(EventsTestBase):
 
         self.assertEqual(result, {"created": 0, "updated": 0, "deleted": 1})
         self.assertFalse(Event.objects.filter(club=self.club, external_game_id="5002").exists())
+
+
+class EventRefereeModelTests(EventsTestBase):
+    def test_str(self):
+        event = self.make_event(title="Cup Final")
+        referee = Member.objects.create(first_name="Ref", last_name="Eree")
+        assignment = EventReferee.objects.create(event=event, member=referee, assigned_by=self.alice)
+
+        self.assertEqual(str(assignment), "Cup Final - Ref Eree")
+
+    def test_member_unique_per_event(self):
+        event = self.make_event()
+        referee = Member.objects.create(first_name="Ref", last_name="Eree")
+        EventReferee.objects.create(event=event, member=referee, assigned_by=self.alice)
+
+        with self.assertRaises(IntegrityError):
+            EventReferee.objects.create(event=event, member=referee, assigned_by=self.alice)
+
+    def test_max_referees_defaults_to_two(self):
+        event = self.make_event()
+        self.assertEqual(event.max_referees, 2)
+
+    def test_deleting_the_assigner_keeps_the_assignment(self):
+        event = self.make_event()
+        referee = Member.objects.create(first_name="Ref", last_name="Eree")
+        assignment = EventReferee.objects.create(event=event, member=referee, assigned_by=self.alice)
+
+        self.alice.delete()
+        assignment.refresh_from_db()
+
+        self.assertIsNone(assignment.assigned_by)
+        self.assertEqual(EventReferee.objects.filter(pk=assignment.pk).count(), 1)
+
+
+class RefereeServiceTests(EventsTestBase):
+    """events.services.referees -- eligibility (level + validity, derived via
+    RefereeProfile.eligible_teams), conflict detection (a soft warning, never
+    a block), and the max_referees hard ceiling."""
+
+    def setUp(self):
+        super().setUp()
+        self.home_ground = Location.objects.create(club=self.club, name="Home Ground", address="1 St", city="Town", zip_code="1000", country="BE", is_home=True)
+        self.away_ground = Location.objects.create(club=self.club, name="Away Ground", address="2 St", city="Town", zip_code="1000", country="BE")
+
+        self.level = RefereeLevel.objects.create(club=self.club, name="Regional")
+        self.level.teams.add(self.team)
+
+        self.referee = Member.objects.create(first_name="Ref", last_name="Eree")
+        self.referee_profile = self.make_eligible_profile(self.referee)
+
+    def make_eligible_profile(self, member, level=None):
+        return RefereeProfile.objects.create(member=member, level=level or self.level, valid_until=timezone.localdate() + timedelta(days=30))
+
+    def make_home_game(self, **kwargs):
+        kwargs.setdefault("kind", Event.EventKind.GAME)
+        kwargs.setdefault("location", self.home_ground)
+        kwargs.setdefault("teams", None)
+        teams = kwargs.pop("teams")
+        event = self.make_event(**kwargs)
+        event.teams.add(teams or self.team)
+        return event
+
+    def test_eligible_referees_returns_qualified_members_for_a_home_game(self):
+        game = self.make_home_game()
+
+        self.assertEqual(set(eligible_referees(game)), {self.referee})
+
+    def test_eligible_referees_empty_for_an_away_game(self):
+        game = self.make_home_game(location=self.away_ground)
+
+        self.assertEqual(set(eligible_referees(game)), set())
+
+    def test_needs_referee_management_true_for_a_club_managed_home_game(self):
+        game = self.make_home_game()
+        self.assertTrue(needs_referee_management(game))
+
+    def test_needs_referee_management_false_for_an_away_game(self):
+        game = self.make_home_game(location=self.away_ground)
+        self.assertFalse(needs_referee_management(game))
+
+    def test_needs_referee_management_false_for_a_federation_managed_team(self):
+        self.team.referee_management = Team.RefereeManagement.FEDERATION
+        self.team.save(update_fields=["referee_management"])
+        game = self.make_home_game()
+
+        self.assertFalse(needs_referee_management(game))
+
+    def test_eligible_referees_empty_for_a_federation_managed_team(self):
+        self.team.referee_management = Team.RefereeManagement.FEDERATION
+        self.team.save(update_fields=["referee_management"])
+        game = self.make_home_game()
+
+        self.assertEqual(set(eligible_referees(game)), set())
+
+    def test_assign_referee_rejects_a_federation_managed_team(self):
+        self.team.referee_management = Team.RefereeManagement.FEDERATION
+        self.team.save(update_fields=["referee_management"])
+        game = self.make_home_game()
+
+        with self.assertRaises(RefereeAssignmentError):
+            assign_referee(game, self.referee, assigned_by=self.alice)
+
+    def test_eligible_referees_empty_for_a_non_game_kind(self):
+        practice = self.make_event(kind=Event.EventKind.TRAINING, location=self.home_ground)
+        practice.teams.add(self.team)
+
+        self.assertEqual(set(eligible_referees(practice)), set())
+
+    def test_eligible_referees_excludes_someone_already_assigned(self):
+        game = self.make_home_game()
+        EventReferee.objects.create(event=game, member=self.referee, assigned_by=self.alice)
+
+        self.assertEqual(set(eligible_referees(game)), set())
+
+    def test_eligible_referees_ignores_someone_not_eligible_for_this_team(self):
+        other_team = Team.objects.create(club=self.club, name="Second Team", short_name="2nd")
+        unrelated_referee = Member.objects.create(first_name="Not", last_name="Eligible")
+        RefereeProfile.objects.create(member=unrelated_referee)  # no level set
+
+        game = self.make_home_game(teams=other_team)
+
+        self.assertEqual(set(eligible_referees(game)), set())
+
+    def test_eligible_referees_ignores_an_expired_profile(self):
+        expired_referee = Member.objects.create(first_name="Ex", last_name="Pired")
+        RefereeProfile.objects.create(member=expired_referee, level=self.level, valid_until=timezone.localdate() - timedelta(days=1))
+
+        game = self.make_home_game()
+
+        self.assertNotIn(expired_referee, set(eligible_referees(game)))
+
+    def test_conflicting_events_finds_an_overlapping_expected_attendance(self):
+        # Alice is on self.team's roster (EventsTestBase.setUp), so she's part
+        # of any event's effective audience that includes self.team.
+        game = self.make_home_game(start=self.future)
+        other_training = self.make_event(title="Other training", start=self.future, end=self.future + timedelta(hours=1))
+        other_training.teams.add(self.team)
+
+        conflicts = conflicting_events(self.alice, game)
+
+        self.assertIn(other_training, conflicts)
+
+    def test_conflicting_events_empty_when_nothing_overlaps(self):
+        game = self.make_home_game(start=self.future)
+        later = self.make_event(title="Much later", start=self.future + timedelta(days=5))
+        later.teams.add(self.team)
+
+        self.assertEqual(conflicting_events(self.alice, game), [])
+
+    def test_conflicting_events_assumes_a_duration_when_end_is_blank(self):
+        # Neither event has an explicit `end` -- the 2-hour assumed window
+        # (events.services.referees.ASSUMED_EVENT_DURATION) is what makes these
+        # two (30 minutes apart) overlap.
+        game = self.make_home_game(start=self.future)
+        nearby = self.make_event(title="Nearby", start=self.future + timedelta(minutes=30))
+        nearby.teams.add(self.team)
+
+        self.assertIn(nearby, conflicting_events(self.alice, game))
+
+    def test_conflicting_events_does_not_block_assignment(self):
+        # Soft warning only -- assign_referee succeeds regardless of conflicts.
+        game = self.make_home_game(start=self.future)
+        other_training = self.make_event(title="Other training", start=self.future, end=self.future + timedelta(hours=1))
+        other_training.teams.add(self.team)
+        self.assertTrue(conflicting_events(self.alice, game))
+
+        self.make_eligible_profile(self.alice)
+        assign_referee(game, self.alice, assigned_by=self.bob)
+
+        self.assertTrue(EventReferee.objects.filter(event=game, member=self.alice).exists())
+
+    def test_assign_referee_creates_the_row(self):
+        game = self.make_home_game()
+
+        assignment = assign_referee(game, self.referee, assigned_by=self.alice)
+
+        self.assertEqual(assignment.event, game)
+        self.assertEqual(assignment.member, self.referee)
+        self.assertEqual(assignment.assigned_by, self.alice)
+
+    def test_assign_referee_rejects_an_away_game(self):
+        game = self.make_home_game(location=self.away_ground)
+
+        with self.assertRaises(RefereeAssignmentError):
+            assign_referee(game, self.referee, assigned_by=self.alice)
+
+    def test_assign_referee_rejects_a_non_game(self):
+        practice = self.make_event(kind=Event.EventKind.TRAINING, location=self.home_ground)
+        practice.teams.add(self.team)
+
+        with self.assertRaises(RefereeAssignmentError):
+            assign_referee(practice, self.referee, assigned_by=self.alice)
+
+    def test_assign_referee_rejects_once_at_capacity(self):
+        game = self.make_home_game(max_referees=1)
+        assign_referee(game, self.referee, assigned_by=self.alice)
+        second_referee = Member.objects.create(first_name="Second", last_name="Ref")
+        self.make_eligible_profile(second_referee)
+
+        with self.assertRaises(RefereeAssignmentError):
+            assign_referee(game, second_referee, assigned_by=self.alice)
+
+        self.assertEqual(game.referees.count(), 1)
+
+    def test_assign_referee_rejects_the_same_member_twice(self):
+        game = self.make_home_game()
+        assign_referee(game, self.referee, assigned_by=self.alice)
+
+        with self.assertRaises(RefereeAssignmentError):
+            assign_referee(game, self.referee, assigned_by=self.alice)
+
+    def test_remove_referee_deletes_the_assignment(self):
+        game = self.make_home_game()
+        assignment = assign_referee(game, self.referee, assigned_by=self.alice)
+
+        remove_referee(assignment)
+
+        self.assertFalse(EventReferee.objects.filter(event=game, member=self.referee).exists())
+
+    def test_add_external_referee_creates_a_memberless_row(self):
+        game = self.make_home_game()
+
+        assignment = add_external_referee(game, "Guest Referee", assigned_by=self.alice)
+
+        self.assertIsNone(assignment.member)
+        self.assertEqual(assignment.external_name, "Guest Referee")
+        self.assertTrue(assignment.is_external)
+        self.assertEqual(assignment.display_name, "Guest Referee")
+
+    def test_add_external_referee_strips_the_name(self):
+        game = self.make_home_game()
+        assignment = add_external_referee(game, "  Guest Referee  ", assigned_by=self.alice)
+        self.assertEqual(assignment.external_name, "Guest Referee")
+
+    def test_add_external_referee_rejects_a_blank_name(self):
+        game = self.make_home_game()
+        with self.assertRaises(RefereeAssignmentError):
+            add_external_referee(game, "   ", assigned_by=self.alice)
+
+    def test_add_external_referee_counts_against_capacity(self):
+        game = self.make_home_game(max_referees=1)
+        add_external_referee(game, "Guest Referee", assigned_by=self.alice)
+
+        with self.assertRaises(RefereeAssignmentError):
+            assign_referee(game, self.referee, assigned_by=self.alice)
+
+    def test_add_external_referee_rejects_an_away_game(self):
+        game = self.make_home_game(location=self.away_ground)
+        with self.assertRaises(RefereeAssignmentError):
+            add_external_referee(game, "Guest Referee", assigned_by=self.alice)
+
+    def test_set_referee_fee_computes_totals(self):
+        game = self.make_home_game()
+        assignment = assign_referee(game, self.referee, assigned_by=self.alice)
+
+        set_referee_fee(assignment, fee=Decimal("25.00"), km=Decimal("40"), km_rate=Decimal("0.35"))
+
+        assignment.refresh_from_db()
+        self.assertEqual(assignment.km_total, Decimal("14.00"))
+        self.assertEqual(assignment.total_payable, Decimal("39.00"))
+
+    def test_set_referee_fee_without_km_has_no_km_total(self):
+        game = self.make_home_game()
+        assignment = assign_referee(game, self.referee, assigned_by=self.alice)
+
+        set_referee_fee(assignment, fee=Decimal("25.00"))
+
+        assignment.refresh_from_db()
+        self.assertEqual(assignment.km_total, Decimal("0"))
+        self.assertEqual(assignment.total_payable, Decimal("25.00"))

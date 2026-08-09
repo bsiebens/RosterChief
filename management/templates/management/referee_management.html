@@ -1,0 +1,99 @@
+{% extends "management/base.html" %}
+{% load i18n lucide ui %}
+
+{% block heading %}{% trans "Referee management" %}{% endblock heading %}
+{% block subheading %}{% trans "Every upcoming home game that needs a club-arranged referee." %}{% endblock subheading %}
+
+{% block panel %}
+    <div class="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div class="card bg-base-100 shadow border-l-4 border-info">
+            <div class="card-body p-4">
+                <div class="flex items-center gap-2 text-sm opacity-70 mb-3">{% lucide "calendar" size=16 %} {% trans "Games in view" %}</div>
+                <div class="text-4xl font-bold tabular-nums font-mono">{{ kpi_total }}</div>
+            </div>
+        </div>
+        <div class="card bg-base-100 shadow border-l-4 {% if kpi_no_referee %}border-error{% else %}border-success{% endif %}">
+            <div class="card-body p-4">
+                <div class="flex items-center gap-2 text-sm opacity-70 mb-3">{% lucide "circle-alert" size=16 %} {% trans "Without a referee" %}</div>
+                <div class="text-4xl font-bold tabular-nums font-mono">{{ kpi_no_referee }}</div>
+            </div>
+        </div>
+        <div class="card bg-base-100 shadow border-l-4 {% if kpi_understaffed %}border-warning{% else %}border-success{% endif %}">
+            <div class="card-body p-4">
+                <div class="flex items-center gap-2 text-sm opacity-70 mb-3">{% lucide "circle-dashed" size=16 %} {% trans "Partially staffed" %}</div>
+                <div class="text-4xl font-bold tabular-nums font-mono">{{ kpi_understaffed }}</div>
+            </div>
+        </div>
+        <div class="card bg-base-100 shadow border-l-4 border-success">
+            <div class="card-body p-4">
+                <div class="flex items-center gap-2 text-sm opacity-70 mb-3">{% lucide "circle-check" size=16 %} {% trans "Fully staffed" %}</div>
+                <div class="text-4xl font-bold tabular-nums font-mono">{{ kpi_fully_staffed }}</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="join mb-4 w-full flex-wrap">
+        <a href="?range=week" class="btn join-item flex-1 {% if range_choice == "week" %}btn-primary{% endif %}">{% trans "This week" %}</a>
+        <a href="?range=two_weeks" class="btn join-item flex-1 {% if range_choice == "two_weeks" %}btn-primary{% endif %}">{% trans "This + next week" %}</a>
+        <a href="?range=10" class="btn join-item flex-1 {% if range_choice == "10" %}btn-primary{% endif %}">{% trans "Next 10" %}</a>
+        <a href="?range=25" class="btn join-item flex-1 {% if range_choice == "25" %}btn-primary{% endif %}">{% trans "Next 25" %}</a>
+        <a href="?range=50" class="btn join-item flex-1 {% if range_choice == "50" %}btn-primary{% endif %}">{% trans "Next 50" %}</a>
+    </div>
+
+    {% regroup games by start.date as day_groups %}
+    {% for day in day_groups %}
+        <h3 class="font-semibold text-sm opacity-70 mt-4 mb-2">{{ day.grouper|date:"l j F" }}</h3>
+        <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 mb-2">
+            {% for game in day.list %}
+                <div class="card bg-base-100 shadow-sm border {% if not game.referee_rows %}border-error{% elif not game.referees_full %}border-warning{% else %}border-base-300{% endif %}">
+                    <div class="card-body p-4 gap-2">
+                        <a class="link link-hover font-semibold" href="{% url 'management:event_detail' game.pk %}">
+                            {% for team in game.teams.all %}{{ team.short_name }}{% if not forloop.last %}, {% endif %}{% endfor %}
+                            {% if game.opponent %}{% trans "vs" %} {{ game.opponent }}{% endif %}
+                        </a>
+                        <div class="text-xs opacity-70">{{ game.start|date:"H:i" }}{% if game.location %} — {{ game.location }}{% endif %}</div>
+                        <div class="text-xs">
+                            {% for referee in game.referee_rows %}
+                                <span class="badge badge-ghost badge-sm">{{ referee.display_name }}{% if referee.is_external %} ({% trans "ext." %}){% endif %}</span>
+                            {% empty %}
+                                <span class="opacity-60">{% trans "No referees assigned yet." %}</span>
+                            {% endfor %}
+                        </div>
+                        <div class="flex items-center justify-between">
+                            <span class="badge badge-sm {% if not game.referee_rows %}badge-error{% elif not game.referees_full %}badge-warning{% else %}badge-success{% endif %}">
+                                {{ game.referee_rows|length }} / {{ game.max_referees }}
+                            </span>
+                            <div class="flex gap-1">
+                                <a class="btn btn-xs btn-outline" href="{% url 'management:event_referee_form_pdf' game.pk %}">
+                                    {% lucide "file-down" size=12 %} {% trans "Referee form" %}
+                                </a>
+                                <button class="btn btn-xs btn-outline" type="button" onclick="document.getElementById('{{ game.pk|dom_id:"referee_game_modal" }}').showModal()">
+                                    {% lucide "flag" size=12 %} {% trans "Manage" %}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <dialog id="{{ game.pk|dom_id:"referee_game_modal" }}" class="modal">
+                    <div class="modal-box max-w-2xl">
+                        <form method="dialog"><button class="btn btn-sm btn-circle btn-ghost absolute right-2 top-2">✕</button></form>
+                        <h3 class="font-bold text-lg mb-1">
+                            {% for team in game.teams.all %}{{ team.short_name }}{% if not forloop.last %}, {% endif %}{% endfor %}
+                            {% if game.opponent %}{% trans "vs" %} {{ game.opponent }}{% endif %}
+                        </h3>
+                        <div class="text-sm opacity-70 mb-4">{{ game.start|date:"j M Y H:i" }}</div>
+                        {% include "management/_referee_assignment_panel.html" with event=game referees=game.referee_rows referee_candidates=game.referee_candidates referees_full=game.referees_full can_manage_referees=True next_url=request.get_full_path %}
+                    </div>
+                    <form method="dialog" class="modal-backdrop"><button>close</button></form>
+                </dialog>
+            {% endfor %}
+        </div>
+    {% empty %}
+        <div class="card bg-base-100 shadow">
+            <div class="card-body">
+                <p class="text-center opacity-60">{% trans "No upcoming home games need a club-arranged referee." %}</p>
+            </div>
+        </div>
+    {% endfor %}
+{% endblock panel %}

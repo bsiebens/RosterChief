@@ -1,0 +1,90 @@
+{% load i18n %}
+
+{% comment %}
+    Rendered by WeasyPrint -- modeled directly on the club's existing paper
+    referee payment form ("Leeg Document RefereesCompetitie25-26.pdf"): a
+    3-line header (club name/address), match details, referee names, a
+    payment sentence, a fee+km breakdown per referee, and blank signature
+    lines. Header uses club.official_name (legal_name if set, else name);
+    the payment sentence uses the plain club name -- the original document
+    does the same, using a longer legal form up top and a shorter one in the
+    body text.
+{% endcomment %}
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <title>{% trans "Referee form" %}</title>
+        <style>
+            @page {
+                size: A4;
+                margin: 25mm 20mm;
+                @bottom-center {
+                    content: "{{ club.name }} — {% trans "referee form" %} — " counter(page) " / " counter(pages);
+                    font-size: 8pt;
+                    color: #666;
+                }
+            }
+            body { font-family: sans-serif; font-size: 10.5pt; color: #111; line-height: 1.5; }
+            .header { text-align: center; margin-bottom: 14mm; }
+            .header div { margin: 0; }
+            .field { margin-bottom: 4mm; }
+            .field .label { display: inline-block; min-width: 32mm; }
+            .fill-line { display: block; border-bottom: 1px solid #333; min-height: 5mm; margin: 2mm 0 4mm; }
+            .section-title { margin: 8mm 0 2mm; }
+            .fee-row { border-bottom: 1px solid #333; padding-bottom: 1mm; margin-bottom: 4mm; min-height: 5mm; }
+            .signature-block { margin-top: 12mm; }
+            .signature-line { border-bottom: 1px solid #333; min-height: 16mm; margin-top: 2mm; }
+            .collected-line { margin-top: 12mm; }
+            .collected-line .fill { display: inline-block; border-bottom: 1px solid #333; min-width: 90mm; }
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            <div>{{ club.official_name }}</div>
+            {% if home_location %}
+                <div>{{ home_location.address }}</div>
+                <div>{{ home_location.zip_code }} {{ home_location.city }}</div>
+            {% endif %}
+        </div>
+
+        <div class="field">
+            <span class="label">{% trans "Regarding: Game" %}</span>
+            {% for team in event.teams.all %}{{ team.short_name }}{% if not forloop.last %}, {% endif %}{% endfor %}
+            {% if event.opponent %}{% trans "vs" %} {{ event.opponent }}{% endif %}
+            {% if event.external_game_id %}({% trans "ID" %}: {{ event.external_game_id }}){% endif %}
+        </div>
+        <div class="field"><span class="label">{% trans "Date" %}</span> {{ event.start|date:"j F Y" }}</div>
+        <div class="field"><span class="label">{% trans "Time" %}</span> {{ event.start|date:"H:i" }}</div>
+        <div class="field">
+            <span class="label">{% trans "Referee names" %}</span>
+            {% for referee in referees %}{{ referee.display_name }}{% if not forloop.last %}, {% endif %}{% empty %}—{% endfor %}
+        </div>
+        <div class="fill-line"></div>
+
+        <p>{% blocktrans with name=club.name %}{{ name }} pays the fee to the referee(s) for officiating the game mentioned above.{% endblocktrans %}</p>
+
+        <div class="section-title">{% trans "Referees and fee, plus any kilometers" %}</div>
+        {% for referee in referees %}
+            <div class="fee-row">
+                {{ referee.display_name }} —
+                {% blocktrans with fee=referee.fee %}fee: €{{ fee }}{% endblocktrans %}
+                {% if referee.km %}
+                    {% blocktrans with km=referee.km rate=referee.km_rate total=referee.km_total %}+ {{ km }} km × €{{ rate }}/km = €{{ total }}{% endblocktrans %}
+                {% endif %}
+                — {% blocktrans with total=referee.total_payable %}total: €{{ total }}{% endblocktrans %}
+            </div>
+        {% empty %}
+            <div class="fee-row"></div>
+        {% endfor %}
+
+        <div class="signature-block">
+            <div>{% trans "Referee signature" %}</div>
+            <div class="signature-line"></div>
+        </div>
+
+        <div class="collected-line">
+            {% trans "Collected by team manager" %}: <span class="fill">&nbsp;</span>
+        </div>
+    </body>
+</html>

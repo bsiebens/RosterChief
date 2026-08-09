@@ -27,7 +27,7 @@
 {% block heading %}{{ club.name }}{% endblock heading %}
 
 {% block subheading %}
-    {{ club.slug }}.rosterchief.app &middot; {{ club.get_sport_type_display }}
+    {{ club.slug }}.rosterchief.app &middot; {{ club.get_sport_type_display }}{% if club.legal_name %} &middot; {{ club.legal_name }}{% endif %}
     {% if club.is_archived %}
         <span class="badge badge-warning badge-sm ml-2">Archived</span>
     {% endif %}

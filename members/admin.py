@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.utils.translation import gettext_lazy as _
 
-from .models import Family, FamilyMembership, Member
+from .models import Family, FamilyMembership, Group, GroupMembership, Member
 
 
 # Register your models here.
@@ -60,3 +60,30 @@ class FamilyMembershipAdmin(admin.ModelAdmin):
     list_filter = ("role",)
     autocomplete_fields = ("family", "member")
     search_fields = ("family__name", "member__first_name", "member__last_name")
+
+
+class GroupMemberInline(admin.TabularInline):
+    """Members shown on the Group page."""
+
+    model = GroupMembership
+    extra = 1
+    autocomplete_fields = ("member",)
+
+
+@admin.register(Group)
+class GroupAdmin(admin.ModelAdmin):
+    list_display = ("name", "club", "member_count")
+    list_filter = ("club",)
+    search_fields = ("name",)
+    inlines = [GroupMemberInline]
+
+    @admin.display(description=_("members"))
+    def member_count(self, obj):
+        return obj.memberships.count()
+
+
+@admin.register(GroupMembership)
+class GroupMembershipAdmin(admin.ModelAdmin):
+    list_display = ("group", "member")
+    autocomplete_fields = ("group", "member")
+    search_fields = ("group__name", "member__first_name", "member__last_name")

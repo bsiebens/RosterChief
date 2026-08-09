@@ -128,6 +128,21 @@
             </div>
         </div>
     {% endif %}
+
+    {% if event.is_home_game and not referee_management_needed %}
+        <div class="alert alert-info mb-6">
+            {% lucide "info" size=20 %}
+            <span>{% trans "Referees for this game are managed by the federation, not the club." %}</span>
+        </div>
+    {% endif %}
+
+    {% if referee_management_needed %}
+        <div class="mb-6 card bg-base-100 shadow">
+            <div class="card-body">
+                {% include "management/_referee_assignment_panel.html" %}
+            </div>
+        </div>
+    {% endif %}
 {% endblock panel %}
 
 {% block extra_body %}

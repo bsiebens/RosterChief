@@ -15,6 +15,9 @@
                 here. Nothing is created yet: you'll see exactly what will be added
                 before anything is saved.{% endblocktrans %}
             </p>
+            <p class="text-sm opacity-70">
+                {% blocktrans %}To register a family, give matching rows the same <code>family_group</code> value (any label works, e.g. a surname) and set each row's <code>family_role</code>. A parent/guardian row with an email gets a login; a child row doesn't — grant one later from their member page if they need it.{% endblocktrans %}
+            </p>
 
             <form method="post" enctype="multipart/form-data">
                 {% csrf_token %}

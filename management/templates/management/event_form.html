@@ -49,22 +49,22 @@
                 <div id="game-details-section" class="game-only">
                     <div class="divider"></div>
                     <h3 class="text-lg font-semibold mb-3">{% trans "Game" %}</h3>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                         {% form_field form.competition %}
                         {% form_field form.external_game_id %}
-                    </div>
-                    {% if update_view %}
-                        {% comment %}
+                        {% form_field form.max_referees %}
+                        {% if update_view %}
+                            {% comment %}
                             Score/live status only exist to record once a game has
                             actually been created -- the add form leaves them out
                             entirely (see EventForm's editing=False path).
-                        {% endcomment %}
-                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            {% endcomment %}
+
                             {% form_field form.score_for %}
                             {% form_field form.score_against %}
                             {% form_field form.is_live %}
-                        </div>
-                    {% endif %}
+                        {% endif %}
+                    </div>
                 </div>
 
                 <div class="card-actions justify-start pt-2 mt-2">

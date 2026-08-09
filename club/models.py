@@ -39,6 +39,7 @@ class Club(UUIDModel):
         OTHER = "other", _("Other")
 
     name = models.CharField(_("name"), max_length=255)
+    legal_name = models.CharField(_("legal name"), max_length=255, blank=True, help_text=_("Full registered name (e.g. including a legal form like VZW/ASBL), used on official documents. Falls back to club name if blank."))
     slug = models.SlugField(_("slug"), max_length=255, unique=True, blank=True, help_text=_("Drives subdomain / path resolution (e.g. ajax-united.rosterchief.app)."))
 
     logo = models.FileField(
@@ -106,6 +107,12 @@ class Club(UUIDModel):
     @property
     def is_archived(self) -> bool:
         return self.archived_at is not None
+
+    @property
+    def official_name(self) -> str:
+        """The name official documents (e.g. the referee payment form) should
+        show -- `legal_name` when the club has set one, else the everyday `name`."""
+        return self.legal_name or self.name
 
     @property
     def initials(self) -> str:

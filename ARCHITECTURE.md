@@ -296,6 +296,27 @@ a `FamilyRole` (`parent` / `child` / `guardian` / `other`), `unique_together (fa
 member)`; `Family.guardians` / `Family.children` are role-derived querysets. Powers the
 "parents see their children's data" object-scope (§3.1).
 
+**`Group`** *(built)* + **`GroupMembership`** — a generic, tenant-scoped, **opaque** named
+collection of members: "all coaches", "all team managers", an ad-hoc committee. Deliberately
+minimal (`name` + a through-membership, same shape as `Family`/`FamilyMembership`) — it
+carries **no knowledge of any specific consumer** (not team-scoped, not referee-scoped, not
+anything-scoped). Any feature wanting to use "a named set of people" for something specific
+builds its own connective model elsewhere rather than teaching `Group` about that use case —
+see `teams.RefereeProfile` (§5.2), which deliberately does **not** go through `Group` even
+though an earlier draft of that feature did; referee eligibility is a fact about a *member*,
+not about group membership.
+
+```
+Group(ClubScopedModel)                # -> carries `club`
+  name  CharField
+  Meta: UniqueConstraint(club, name)
+
+GroupMembership(UUIDModel)            # club implied by group
+  group   FK Group (CASCADE, related_name="memberships")
+  member  FK Member (CASCADE, related_name="group_memberships")
+  Meta: UniqueConstraint(group, member)
+```
+
 ### `club`
 
 **`Club`** — **the tenant root** (§2.4). Currently just `name`; extend with `slug` (unique,
@@ -436,6 +457,56 @@ number — modeled by `TeamMembership`, exactly matching the domain note.
 - `StaffAssignment` drives the coach/manager object-scope (§3.1–3.2) — it *is* the "is a
   coach of this team" fact; no `ClubRole` mirrors it.
 
+**As built, `Team` also carries `referee_management`** (`TextChoices`: `club` | `federation`,
+default `club`) — whether the *club* arranges referees for this team's home games, or the
+*federation* does. A federation-managed team is left out of the referee tools **entirely**:
+no eligibility, no assignment, no entry on the referee management dashboard (§5.3) — see
+`events/services/referees.py::needs_referee_management(event)`, the single gate every
+referee-facing screen reads through.
+
+**`RefereeLevel`** *(built)* — a club-defined referee qualification tier ("Regional",
+"National", ...), admin-managed like `Position` (own name, own ordering, no fixed list).
+**Owns which teams it qualifies for** — eligibility is a property of the *level*, not of the
+individual referee: a club configures a handful of levels once, each unlocking a tier of
+teams, rather than hand-picking teams per referee.
+
+```
+RefereeLevel(ClubScopedModel)      # -> carries `club`
+  name      CharField
+  ordering  PositiveSmallIntegerField (default=0)
+  teams     M2M Team (blank=True, related_name="referee_levels")
+  Meta: UniqueConstraint(club, name); ordering = ["ordering", "name"]
+```
+
+**`RefereeProfile`** *(built)* — a **member-level** fact: which level this member holds and
+how long it's valid for. Which teams that translates to is *derived* (`eligible_teams`),
+never picked per member. Managed from the member's own page (`management`), read (not
+edited) from the team's own page too. Deliberately **not** routed through `members.Group` —
+eligibility is a property of a person, not of a group they might belong to; see the note on
+`Group` above for why an earlier draft that did this was reworked. It also deliberately does
+**not** put `teams` directly on the profile — a later draft of this feature did that too,
+before the levels-own-the-teams shape replaced it, matching how real officiating
+qualifications actually work (a certification tier unlocks a tier of competitions).
+
+```
+RefereeProfile(UUIDModel)          # club reachable via member -- Member itself has no club FK
+  member       OneToOneField members.Member (CASCADE, related_name="referee_profile")
+  level        FK RefereeLevel (PROTECT, null=True, blank=True, related_name="referees")
+  valid_until  DateField (null=True, blank=True)
+```
+
+- **`is_currently_valid`** (property): `valid_until` is set and hasn't passed — a pure date
+  check, independent of whether a level is even set.
+- **`is_eligible`** (property): the full gate every consumer reads through (the event assign
+  panel, the team page, the referees list) — `level` is set **and** `is_currently_valid`.
+  Once `valid_until` passes, `is_eligible` flips to `False` and the referee drops out of
+  every eligibility query until the date is extended; nothing else needs to change.
+- **`eligible_teams`** (property): `level.teams.all()` when `is_eligible`, else empty.
+- One `RefereeProfile` per member (`OneToOneField`) rather than a field bag on `Member`
+  itself, matching this file's general pattern of keeping `Member` a plain identity record
+  and hanging every role-specific fact off its own small table (`ClubMembership`,
+  `StaffAssignment`, `TeamMembership`, and now this).
+
 ### 5.3 `events`
 
 ```
@@ -469,6 +540,78 @@ row today — there's no check-in UI yet, only Django admin); a "no-show" is
 `status in (present, selected)` and `showed_up is False`, and is *never* inferred from
 a missing check-in. See `events/services/attendance.py::record_check_in` and
 `management/views.py::TeamDetailView`'s attendance panel.
+
+**As built, `Event` also carries `max_referees`** (`PositiveSmallIntegerField`, default
+`2`) and **`EventReferee`** *(built)* — referee sign-up/assignment for a **home game**
+only (`Event.is_home_game`), staff-assigned for now (self-service subscribe is a planned
+extension, §7). A referee row is either a club member **or** an externally-logged name
+(e.g. a federation-appointed referee the club still needs to pay), never both/neither, and
+carries its own payment snapshot:
+
+```
+EventReferee(UUIDModel)            # club implied by event
+  event         FK Event (CASCADE, related_name="referees")
+  member        FK Member (CASCADE, null=True, blank=True, related_name="referee_assignments")
+  external_name CharField (blank=True)   # set instead of member for a non-member referee
+  assigned_by   FK Member (SET_NULL, null=True, related_name="+")
+  fee           DecimalField (default 0.00)
+  km            DecimalField (null=True, blank=True)
+  km_rate       DecimalField (null=True, blank=True)   # snapshotted per assignment, not a
+                                                         # live club-wide setting
+  Meta: unique_together (event, member); CheckConstraint XOR(member, external_name)
+  display_name / is_external / km_total / total_payable   # computed properties
+```
+
+- **Eligibility** comes from `teams.RefereeProfile.is_eligible`/`eligible_teams` (§5.2): a
+  member is eligible to referee an event if their profile is currently eligible (a level is
+  set and its validity hasn't passed) and that level qualifies for one of the event's
+  `teams`. `events/services/referees.py::eligible_referees(event)` computes this, and is
+  empty for anything `needs_referee_management(event)` says no to — not a home game, or a
+  home game whose team(s) are all federation-managed (§5.2). External referees bypass
+  eligibility entirely (`add_external_referee`) — they're logged by name only, not vetted
+  against a level.
+- **Assignment is admin-only for now**, stricter than most event actions (a team
+  manager/coach can edit the event itself, but not the referee panel's assign/remove/fee
+  controls) — see `EventRefereeAssignView`/`EventRefereeRemoveView`/
+  `EventRefereeAddExternalView`/`EventRefereeFeeUpdateView` (all `ClubAdminRequiredMixin`)
+  and `EventDetailView`'s separate `can_manage_referees` flag. A team manager still **sees**
+  the panel (who's assigned, capacity, fees) — visibility and authority are deliberately
+  split here, same reasoning as §3's "coach visibility ≠ coach authority" for team rosters.
+- **The referee management dashboard** (`management:referee_management`, admin-only) is the
+  one-stop alternative to hunting through individual events: every upcoming home game
+  `needs_referee_management`, with inline assign/remove/add-external/fee-editing (posting to
+  the same views the event detail page uses, returning to the dashboard via a `next` param
+  rather than the event detail page). It leads with KPI tiles (games in view, without a
+  referee, partially staffed, fully staffed) and a button-based range filter (this
+  week/this+next week/next 10/25/50 — an ISO-week window for the calendar options, a flat
+  slice for the count ones), then lists games grouped by date as compact tiles; each tile's
+  "Manage" button opens a `<dialog>` with the full assign/remove/external/fee panel so the
+  list itself stays scannable. Both the dashboard and the event detail page share one
+  `_referee_assignment_panel.html` include so this UI never drifts out of sync between them.
+- **`max_referees` is a hard ceiling everywhere** — staff and external assignment included.
+  Enforced in `_lock_and_check_capacity()` (shared by `assign_referee()` and
+  `add_external_referee()`), which locks the `Event` row (`select_for_update`) for the
+  duration of the count-check + write so two admins assigning at the same moment can't both
+  squeeze past the ceiling.
+- **Schedule conflicts are a soft warning, never a block.** `conflicting_events(member,
+  event)` finds other events overlapping this one's time window where the member is part of
+  the expected audience (`effective_members`, reused from the attendance service above) — the
+  UI shows it (⚠ + tooltip on the assign control) but a human decides; an event with no
+  explicit `end` is assumed to run `ASSUMED_EVENT_DURATION` (2 hours) for this check only,
+  never written back to the event. External referees have no conflict check (no member to
+  check a schedule against).
+- **`assigned_by` is required for now** (admin-only assignment). A future self-service
+  sign-up would make it nullable to mean "the referee signed themself up" rather than adding
+  a parallel model — see §7.
+- **The referee payment form is a downloadable PDF** (`event_referee_form_pdf`,
+  `EventRefereeFormPdfView`, admin-only, WeasyPrint via `management/pdf.py`'s lazy-import
+  pattern), modeled directly on the club's existing paper form: game details, referee names,
+  a fee+km breakdown per referee, and blank signature lines (referee always; team manager
+  left blank — not reliably known at print time). The header uses `Club.official_name`
+  (`legal_name` if the club has set one, else plain `name` — §2.2) and the club's home
+  `Location` address; the body's payment sentence uses the plain `name` — mirroring the
+  original paper form, which itself uses a longer legal form up top and a shorter one in the
+  body text.
 
 ### 5.4 `news`, `pages`, `home` (public site / editorial)
 
@@ -789,9 +932,13 @@ User 1───<  Member  (FK, unique per club)      # User is GLOBAL — no clu
               │
               ├───< TeamMembership >─── Team ───> Season
               ├───< StaffAssignment >─── Team          (= "coach of this team", §3.2)
+              ├───< GroupMembership >─── Group          (opaque -- no team/referee link)
+              ├─1:1─ RefereeProfile ──> RefereeLevel >──< Team
+              │                         (profile's valid_until gates eligibility; level owns teams)
               │
               ├───< Attendance >─── Event ───> Season
               │                      └───> Team (nullable)
+              ├───< EventReferee >─── Event     (assigned_by another Member; home games only)
               │
               ├───< Submission >─── Form ───< Field    (Submission ──< Answer >── Field)
               │
@@ -863,6 +1010,12 @@ specified in **§8**.
   (checkout-date anchor, recommended, frozen total) or by *paying* before it (payment-date
   anchor, mutable total)? Doc implements checkout-date; confirm no club needs the literal
   "paid before date" semantics (§5.7.1).
+- **Referee self-service sign-up** — `EventReferee` (§5.3) is admin-assigned only for now
+  (a team manager/coach can see the panel but not use it); a referee cannot yet subscribe
+  themself to a game. Adding it later means making `assigned_by` nullable (null =
+  self-subscribed) and a permission mixin scoping a referee to their own eligible games — no
+  new model needed. Not built because this app has no self-service (member-facing) surface
+  of any kind yet; the first one deserves its own pass rather than riding along here.
 
 ---
 

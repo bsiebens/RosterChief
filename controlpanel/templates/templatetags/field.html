@@ -1,6 +1,6 @@
 {% load i18n %}
 
-<div class="w-full max-w-6xl {% if size_modifier %}lg:w-fit{% endif %}">
+<div class="w-full max-w-6xl {% if field_type == "checkbox" %}h-full flex flex-col justify-center{% endif %} {% if size_modifier %}lg:w-fit{% endif %}">
     <div class="flex flex-col gap-y-2">
         {% if show_label %}
             <div class="flex flex-row items-end min-h-6">

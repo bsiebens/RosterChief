@@ -1,0 +1,65 @@
+{% extends "management/base.html" %}
+{% load i18n lucide %}
+
+{% block heading %}{% trans "Add multiple members" %}{% endblock heading %}
+{% block subheading %}{{ group.name }}{% endblock subheading %}
+
+{% block panel %}
+    <form method="get" class="mb-4">
+        <div class="flex flex-row items-center gap-2">
+            <label class="input">
+                <span class="opacity-50">{% lucide "search" size=16 %}</span>
+                <input type="search" name="q" value="{{ search }}" placeholder="{% trans 'Search members ...' %}" class="input input-bordered">
+            </label>
+            <button class="btn btn-outline gap-2" type="submit">{% lucide "filter" size=16 %} {% trans "Filter" %}</button>
+        </div>
+    </form>
+
+    <form method="post">
+        {% csrf_token %}
+
+        <div class="card bg-base-100 shadow">
+            <div class="card-body">
+                <div class="flex items-center justify-between mb-2">
+                    <span class="text-sm opacity-70 font-semibold">
+                        {% blocktrans count counter=members|length %}{{ counter }} member{% plural %}{{ counter }} members{% endblocktrans %}
+                    </span>
+                    <button class="btn btn-primary btn-sm gap-2" type="submit">{% lucide "users" size=14 %} {% trans "Add selected" %}</button>
+                </div>
+
+                <div class="overflow-x-auto">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th></th>
+                                <th>{% trans "Member" %}</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for member in members %}
+                                <tr>
+                                    <td>
+                                        {% if member.already_in_group %}
+                                            <span class="badge badge-neutral badge-sm">{% trans "In group" %}</span>
+                                        {% else %}
+                                            <input type="checkbox" class="checkbox" name="member_{{ member.pk }}">
+                                        {% endif %}
+                                    </td>
+                                    <td>{{ member }}</td>
+                                </tr>
+                            {% empty %}
+                                <tr>
+                                    <td colspan="2" class="text-center opacity-60">{% trans "No members match this search." %}</td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div class="mt-4">
+            <a class="btn btn-outline gap-2" href="{% url 'management:group_detail' group.pk %}">{% lucide "arrow-left" size=16 %} {% trans "Back" %}</a>
+        </div>
+    </form>
+{% endblock panel %}

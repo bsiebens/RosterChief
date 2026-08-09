@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.utils.translation import gettext_lazy as _
 
-from .models import Position, StaffAssignment, Team, TeamMembership, TeamPhoto
+from .models import Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
 
 
 class TeamMembershipInline(admin.TabularInline):
@@ -29,8 +29,8 @@ class TeamPhotoInline(admin.TabularInline):
 
 @admin.register(Team)
 class TeamAdmin(admin.ModelAdmin):
-    list_display = ["name", "short_name", "club"]
-    list_filter = ["club"]
+    list_display = ["name", "short_name", "club", "referee_management"]
+    list_filter = ["club", "referee_management"]
     search_fields = ["name", "short_name"]
     inlines = [TeamMembershipInline, StaffAssignmentInline, TeamPhotoInline]
 
@@ -68,3 +68,28 @@ class StaffAssignmentAdmin(admin.ModelAdmin):
     list_filter = ["team", "season", "position"]
     search_fields = ["team__name", "member__first_name", "member__last_name"]
     raw_id_fields = ["member"]
+
+
+@admin.register(RefereeLevel)
+class RefereeLevelAdmin(admin.ModelAdmin):
+    list_display = ["name", "club", "ordering", "team_list"]
+    list_filter = ["club"]
+    search_fields = ["name"]
+    autocomplete_fields = ["teams"]
+    ordering = ["club", "ordering", "name"]
+
+    @admin.display(description=_("teams"))
+    def team_list(self, obj):
+        return ", ".join(team.name for team in obj.teams.all())
+
+
+@admin.register(RefereeProfile)
+class RefereeProfileAdmin(admin.ModelAdmin):
+    list_display = ["member", "level", "valid_until", "is_eligible"]
+    list_filter = ["level"]
+    search_fields = ["member__first_name", "member__last_name"]
+    autocomplete_fields = ["member"]
+
+    @admin.display(description=_("eligible"), boolean=True)
+    def is_eligible(self, obj):
+        return obj.is_eligible

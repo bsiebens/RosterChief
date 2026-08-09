@@ -4,11 +4,12 @@ from django.core.exceptions import ValidationError
 from django.db import IntegrityError
 from django.db.models import ProtectedError
 from django.test import TestCase
+from django.utils import timezone
 
 from club.models import Club, Season
 from members.models import Member
 
-from .models import Position, StaffAssignment, Team, TeamMembership, TeamPhoto
+from .models import Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
 
 
 class TeamsTestCase(TestCase):
@@ -38,6 +39,9 @@ class TeamModelTests(TeamsTestCase):
         Team.objects.create(club=other, name="First Team", short_name="1st")
 
         self.assertEqual(Team.objects.filter(name="First Team").count(), 2)
+
+    def test_referee_management_defaults_to_club(self):
+        self.assertEqual(self.team.referee_management, Team.RefereeManagement.CLUB)
 
 
 class PositionModelTests(TeamsTestCase):
@@ -188,3 +192,98 @@ class TeamPhotoModelTests(TeamsTestCase):
         self.team.delete()
 
         self.assertEqual(TeamPhoto.objects.count(), 0)
+
+
+class RefereeLevelModelTests(TeamsTestCase):
+    def test_str(self):
+        level = RefereeLevel.objects.create(club=self.club, name="Regional")
+        self.assertEqual(str(level), "Regional")
+
+    def test_name_is_unique_per_club(self):
+        RefereeLevel.objects.create(club=self.club, name="Regional")
+
+        with self.assertRaises(IntegrityError):
+            RefereeLevel.objects.create(club=self.club, name="Regional")
+
+    def test_same_name_allowed_in_another_club(self):
+        other = Club.objects.create(name="Rival FC", slug="rival-fc")
+        RefereeLevel.objects.create(club=self.club, name="Regional")
+
+        RefereeLevel.objects.create(club=other, name="Regional")
+
+        self.assertEqual(RefereeLevel.objects.filter(name="Regional").count(), 2)
+
+    def test_teams_starts_empty(self):
+        level = RefereeLevel.objects.create(club=self.club, name="Regional")
+        self.assertEqual(list(level.teams.all()), [])
+
+    def test_can_qualify_for_multiple_teams(self):
+        other_team = Team.objects.create(club=self.club, name="Second Team", short_name="2nd")
+        level = RefereeLevel.objects.create(club=self.club, name="Regional")
+
+        level.teams.set([self.team, other_team])
+
+        self.assertEqual(set(level.teams.all()), {self.team, other_team})
+
+    def test_team_reverse_accessor(self):
+        level = RefereeLevel.objects.create(club=self.club, name="Regional")
+        level.teams.add(self.team)
+
+        self.assertEqual(list(self.team.referee_levels.all()), [level])
+
+
+class RefereeProfileModelTests(TeamsTestCase):
+    def setUp(self):
+        super().setUp()
+        self.level = RefereeLevel.objects.create(club=self.club, name="Regional")
+        self.level.teams.add(self.team)
+
+    def test_str(self):
+        profile = RefereeProfile.objects.create(member=self.member)
+        self.assertEqual(str(profile), "Jane Doe (referee)")
+
+    def test_member_is_one_to_one(self):
+        RefereeProfile.objects.create(member=self.member)
+
+        with self.assertRaises(IntegrityError):
+            RefereeProfile.objects.create(member=self.member)
+
+    def test_no_level_is_never_eligible_even_with_a_future_validity(self):
+        profile = RefereeProfile.objects.create(member=self.member, valid_until=datetime.date(2099, 1, 1))
+        self.assertTrue(profile.is_currently_valid)  # the date itself is fine...
+        self.assertFalse(profile.is_eligible)  # ...but there's no level, so not eligible
+        self.assertEqual(list(profile.eligible_teams), [])
+
+    def test_no_validity_set_is_not_currently_valid_or_eligible(self):
+        profile = RefereeProfile.objects.create(member=self.member, level=self.level)
+        self.assertFalse(profile.is_currently_valid)
+        self.assertFalse(profile.is_eligible)
+        self.assertEqual(list(profile.eligible_teams), [])
+
+    def test_valid_until_today_is_currently_valid_and_eligible(self):
+        profile = RefereeProfile.objects.create(member=self.member, level=self.level, valid_until=timezone.localdate())
+        self.assertTrue(profile.is_currently_valid)
+        self.assertTrue(profile.is_eligible)
+
+    def test_valid_until_in_the_past_is_not_currently_valid_or_eligible(self):
+        profile = RefereeProfile.objects.create(member=self.member, level=self.level, valid_until=timezone.localdate() - datetime.timedelta(days=1))
+        self.assertFalse(profile.is_currently_valid)
+        self.assertFalse(profile.is_eligible)
+        self.assertEqual(list(profile.eligible_teams), [])
+
+    def test_eligible_teams_come_from_the_level_when_eligible(self):
+        profile = RefereeProfile.objects.create(member=self.member, level=self.level, valid_until=timezone.localdate() + datetime.timedelta(days=1))
+        self.assertEqual(list(profile.eligible_teams), [self.team])
+
+    def test_deleting_a_referenced_level_is_protected(self):
+        RefereeProfile.objects.create(member=self.member, level=self.level, valid_until=timezone.localdate())
+
+        with self.assertRaises(ProtectedError):
+            self.level.delete()
+
+    def test_deleting_the_member_deletes_the_profile(self):
+        profile = RefereeProfile.objects.create(member=self.member)
+
+        self.member.delete()
+
+        self.assertFalse(RefereeProfile.objects.filter(pk=profile.pk).exists())

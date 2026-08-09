@@ -1,0 +1,53 @@
+{% extends "management/base.html" %}
+{% load i18n lucide ui %}
+
+{% block heading %}{% trans "Groups" %}{% endblock heading %}
+{% block subheading %}{% trans "Named collections of members -- coaches, team managers, referee pools, committees..." %}{% endblock subheading %}
+
+{% block actions %}
+    <a class="btn btn-outline gap-2" href="{% url 'management:group_create' %}">{% lucide "plus" size=16 %} {% trans "New group" %}</a>
+{% endblock actions %}
+
+{% block panel %}
+    <div class="card bg-base-100 shadow">
+        <div class="card-body">
+            <div class="overflow-x-auto">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>{% trans "Name" %}</th>
+                            <th>{% trans "Members" %}</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for group in groups %}
+                            <tr>
+                                <td><a class="link link-hover" href="{% url 'management:group_detail' group.pk %}">{{ group.name }}</a></td>
+                                <td>{{ group.member_count }}</td>
+                                <td class="text-right">
+                                    <div class="flex justify-end gap-1">
+                                        <a class="btn btn-outline btn-sm" href="{% url 'management:group_update' group.pk %}" aria-label="{% trans 'Edit' %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</a>
+                                        <button class="btn btn-sm btn-outline btn-error" type="button" onclick="document.getElementById('{{ group.pk|dom_id:"group_delete_modal" }}').showModal()" aria-label="{% trans 'Delete' %}">{% lucide "trash-2" size=14 %} {% trans "Delete" %}</button>
+                                    </div>
+                                </td>
+                            </tr>
+                        {% empty %}
+                            <tr>
+                                <td colspan="3" class="text-center opacity-60">{% trans "No groups yet." %}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    {% trans "Delete group" as delete_group_title %}
+    {% trans "Delete" as delete_label %}
+    {% for group in groups %}
+        {% url 'management:group_delete' group.pk as group_delete_url %}
+        {% blocktrans with name=group.name asvar delete_group_body %}Delete “{{ name }}”? Its members are removed from it, and any teams it's linked to as a referee source lose that link. This cannot be undone.{% endblocktrans %}
+        {% include "controlpanel/_confirm_modal.html" with modal_id=group.pk|dom_id:"group_delete_modal" title=delete_group_title body=delete_group_body action_url=group_delete_url submit_label=delete_label submit_icon="trash-2" %}
+    {% endfor %}
+{% endblock panel %}

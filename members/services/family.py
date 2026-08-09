@@ -18,17 +18,22 @@ def find_member_by_email(email):
     return Member.objects.filter(user__email__iexact=email).first()
 
 
-def get_or_create_login_member(email, first_name="", last_name=""):
-    """Find or create the Member behind ``email``, creating a User (no usable
-    password -- they set one via the reset-link flow) the first time we see them.
-    Mirrors controlpanel.services.admins.grant_club_admin.
-    """
+def get_or_create_login_user(email):
+    """Find or create the User behind ``email`` -- no usable password, they set
+    one via the reset-link flow the first time we see them. Mirrors
+    controlpanel.services.admins.grant_club_admin."""
     email = email.lower()
     user, user_created = User.objects.get_or_create(email=email, defaults={"is_active": True})
     if user_created:
         user.set_unusable_password()
         user.save(update_fields=["password"])
+    return user, user_created
 
+
+def get_or_create_login_member(email, first_name="", last_name=""):
+    """Find or create the Member behind ``email``, creating a User the first time
+    we see them."""
+    user, _ = get_or_create_login_user(email)
     member, _ = Member.objects.get_or_create(user=user, defaults={"first_name": first_name, "last_name": last_name})
     return member
 

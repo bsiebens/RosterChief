@@ -1,0 +1,90 @@
+{% load i18n lucide ui %}
+{% comment %}
+    Shared by the event detail page and the referee management dashboard --
+    context: event, referees (EventReferee rows, each with a .fee_form when
+    can_manage_referees), referee_candidates, referees_full,
+    can_manage_referees, and an optional next_url to return to after a POST
+    (defaults to the event detail page when blank).
+{% endcomment %}
+<div class="flex items-center justify-between">
+    <h2 class="card-title text-base">
+        {% lucide "flag" size=18 %} {% trans "Referees" %}
+        <span class="badge badge-sm {% if referees_full %}badge-neutral{% else %}badge-outline{% endif %}">
+            {{ referees|length }} / {{ event.max_referees }}
+        </span>
+    </h2>
+    {% if can_manage_referees %}
+        <a class="btn btn-outline btn-sm gap-1" href="{% url 'management:event_referee_form_pdf' event.pk %}">{% lucide "file-down" size=12 %} {% trans "Referee form (PDF)" %}</a>
+    {% endif %}
+</div>
+<ul class="divide-y divide-base-200">
+    {% for referee in referees %}
+        <li class="flex items-center justify-between py-2 gap-2">
+            <span>
+                {{ referee.display_name }}
+                {% if referee.is_external %}<span class="badge badge-neutral badge-xs">{% trans "External" %}</span>{% endif %}
+                {% if referee.assigned_by %}<span class="text-xs opacity-60">— {% blocktrans with name=referee.assigned_by %}assigned by {{ name }}{% endblocktrans %}</span>{% endif %}
+                {% if referee.total_payable %}<span class="text-xs opacity-60">— {% blocktrans with total=referee.total_payable %}€{{ total }} due{% endblocktrans %}</span>{% endif %}
+            </span>
+            {% if can_manage_referees %}
+                <div class="flex gap-1 shrink-0">
+                    <button class="btn btn-xs btn-outline" type="button" onclick="document.getElementById('{{ referee.pk|dom_id:"referee_fee_modal" }}').showModal()">{% lucide "euro" size=12 %} {% trans "Fee" %}</button>
+                    <form method="post" action="{% url 'management:event_referee_remove' event.pk referee.pk %}">
+                        {% csrf_token %}
+                        {% if next_url %}<input type="hidden" name="next" value="{{ next_url }}">{% endif %}
+                        <button class="btn btn-xs btn-outline btn-error gap-1" type="submit">{% lucide "x" size=12 %} {% trans "Remove" %}</button>
+                    </form>
+                </div>
+            {% endif %}
+        </li>
+    {% empty %}
+        <li class="py-2 text-sm opacity-60">{% trans "No referees assigned yet." %}</li>
+    {% endfor %}
+</ul>
+
+{% if can_manage_referees %}
+    {% if referees_full %}
+        <p class="text-sm opacity-60 mt-2">{% trans "This game already has its maximum number of referees." %}</p>
+    {% else %}
+        {% if referee_candidates %}
+            <form method="post" action="{% url 'management:event_referee_assign' event.pk %}" class="mt-2 flex flex-wrap items-center gap-2">
+                {% csrf_token %}
+                {% if next_url %}<input type="hidden" name="next" value="{{ next_url }}">{% endif %}
+                <select name="member" class="select select-bordered select-sm">
+                    {% for candidate in referee_candidates %}
+                        <option value="{{ candidate.pk }}" {% if candidate.has_conflict %}title="{% blocktrans with events=candidate.conflict_titles %}Also expected at: {{ events }}{% endblocktrans %}"{% endif %}>
+                            {{ candidate }}{% if candidate.has_conflict %} ⚠{% endif %}
+                        </option>
+                    {% endfor %}
+                </select>
+                <button class="btn btn-outline btn-sm gap-2" type="submit">{% lucide "user-plus" size=14 %} {% trans "Assign" %}</button>
+            </form>
+            <p class="text-xs opacity-60 mt-1">{% trans "⚠ = also expected at another event around this time -- shown as a warning, not blocked." %}</p>
+        {% else %}
+            <p class="text-sm opacity-60 mt-2">
+                {% trans "No eligible referees for this team yet." %}
+                <a class="link" href="{% url 'management:referee_level_list' %}">{% trans "Link a referee level to this team." %}</a>
+            </p>
+        {% endif %}
+
+        <form method="post" action="{% url 'management:event_referee_add_external' event.pk %}" class="mt-2 flex flex-wrap items-center gap-2">
+            {% csrf_token %}
+            {% if next_url %}<input type="hidden" name="next" value="{{ next_url }}">{% endif %}
+            <input type="text" name="name" class="input input-bordered input-sm" placeholder="{% trans 'External referee name' %}">
+            <button class="btn btn-outline btn-sm gap-2" type="submit">{% lucide "user-plus" size=14 %} {% trans "Add external" %}</button>
+        </form>
+    {% endif %}
+{% endif %}
+
+{% if can_manage_referees %}
+    {% trans "Referee fee" as fee_title %}
+    {% trans "Save" as save_label %}
+    {% with encoded_next=next_url|urlencode %}
+        {% for referee in referees %}
+            {% url 'management:event_referee_fee_update' event.pk referee.pk as fee_action_url %}
+            {% with fee_action_url=fee_action_url|add:"?next="|add:encoded_next %}
+                {% include "controlpanel/_modal_form.html" with modal_id=referee.pk|dom_id:"referee_fee_modal" title=fee_title form=referee.fee_form action_url=fee_action_url submit_label=save_label submit_icon="save" %}
+            {% endwith %}
+        {% endfor %}
+    {% endwith %}
+{% endif %}

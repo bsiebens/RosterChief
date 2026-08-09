@@ -6,14 +6,15 @@ from django.contrib.auth import get_user_model
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
-from club.models import ClubMembership, ClubRole, FeePayment, Season, Sponsor
+from club.models import ClubMembership, ClubRole, FeePayment, Sponsor
 from club.services.access import is_club_admin, teams_managed_by
-from events.models import Competition, Event, EventSeries, Location, Opponent
+from events.models import Competition, Event, EventReferee, EventSeries, Location, Opponent
 from events.services.rbihf_import import RBIHFImportError, extract_team_id
-from members.models import Family, FamilyMembership, Member
+from members.models import Family, FamilyMembership, Group, Member
 from members.services.family import find_member_by_email
 from news.models import News
-from teams.models import Position, StaffAssignment, Team, TeamMembership, TeamPhoto
+from teams.models import Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
+from teams.services import eligible_roster_members
 
 from .recurrence_ui import FREQUENCY_CHOICES, WEEKDAY_CHOICES, build_rrule, parse_rrule
 
@@ -30,7 +31,7 @@ class MemberForm(forms.ModelForm):
 class TeamForm(forms.ModelForm):
     class Meta:
         model = Team
-        fields = ["name", "short_name"]
+        fields = ["name", "short_name", "referee_management"]
 
 
 class TeamPhotoForm(forms.ModelForm):
@@ -41,6 +42,74 @@ class TeamPhotoForm(forms.ModelForm):
     class Meta:
         model = TeamPhoto
         fields = ["image"]
+
+
+class GroupForm(forms.ModelForm):
+    """A generic named collection of members -- nothing team- or
+    referee-specific here; see MemberRefereeEligibilityForm for that."""
+
+    class Meta:
+        model = Group
+        fields = ["name"]
+
+
+class RefereeLevelForm(forms.ModelForm):
+    class Meta:
+        model = RefereeLevel
+        fields = ["name", "ordering", "teams"]
+        widgets = {"teams": forms.SelectMultiple(attrs={"data-searchable": "true", "data-search-placeholder": _("Type a team to search...")})}
+
+    def __init__(self, *args, club=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["teams"].queryset = Team.objects.filter(club=club)
+
+
+class MemberRefereeEligibilityForm(forms.ModelForm):
+    """This member's referee level and how long it's valid for -- edited from
+    the member's own page (teams.RefereeProfile), get-or-created on save.
+    Which teams that translates to is derived entirely from the level
+    (RefereeLevel.teams), not picked here -- see RefereeProfile.eligible_teams."""
+
+    class Meta:
+        model = RefereeProfile
+        fields = ["level", "valid_until"]
+        widgets = {"valid_until": forms.DateInput(attrs={"type": "date"})}
+
+    def __init__(self, *args, club=None, member=None, **kwargs):
+        instance = RefereeProfile.objects.filter(member=member).first() if member is not None else None
+        super().__init__(*args, instance=instance, **kwargs)
+        # UUIDModel PKs get their default at construction time (not at save()),
+        # so a brand-new instance already has a non-None pk -- "is this new"
+        # can't be read off self.instance.pk. Setting member here (rather than
+        # in save()) means it's already correct before validation runs too.
+        if instance is None:
+            self.instance.member = member
+        self.fields["level"].queryset = RefereeLevel.objects.filter(club=club)
+        self.fields["level"].required = False
+        self.fields["level"].empty_label = _("— no level (not eligible) —")
+
+
+class ExternalRefereeForm(forms.Form):
+    """Log a non-member referee (federation-appointed, most often) by name
+    only -- see events.services.referees.add_external_referee."""
+
+    name = forms.CharField(label=_("Referee name"))
+
+
+class EventRefereeFeeForm(forms.ModelForm):
+    """One referee assignment's payment details -- see
+    events.services.referees.set_referee_fee. `km`/`km_rate` are left blank
+    (not defaulted to 0) whenever no travel was logged, so the PDF export can
+    tell "no kilometers" from "zero kilometers claimed"."""
+
+    class Meta:
+        model = EventReferee
+        fields = ["fee", "km", "km_rate"]
+        widgets = {
+            "fee": forms.NumberInput(attrs={"step": "0.01", "min": "0"}),
+            "km": forms.NumberInput(attrs={"step": "0.1", "min": "0"}),
+            "km_rate": forms.NumberInput(attrs={"step": "any", "min": "0"}),
+        }
 
 
 class TeamMembershipForm(forms.ModelForm):
@@ -56,13 +125,11 @@ class TeamMembershipForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         self.team = team
         self.season = season
-        # Eligible to be added regardless of which season's roster is being edited
-        # (the team detail page's season switcher can be pointed at an older
-        # season): active this season or the next one, not lapsed/pending/cancelled
-        # or active only in some other season.
-        today = timezone.localdate()
-        eligible_seasons = [s for s in (Season.covering(club, today), Season.next_after(club, today)) if s is not None]
-        members = Member.objects.filter(member_of__club=club, member_of__season__in=eligible_seasons, member_of__status=ClubMembership.StatusChoices.ACTIVE).distinct()
+        # eligible_roster_members already covers "active this season or the next
+        # one, not lapsed/pending/cancelled or active only in some other season" --
+        # eligible regardless of which season's roster is being edited (the team
+        # detail page's season switcher can be pointed at an older season).
+        members = eligible_roster_members(club)
         if team is not None and season is not None:
             # Already on this team's roster this season -- offering them again
             # would just fail the unique_member_per_team_per_season constraint.
@@ -99,9 +166,7 @@ class StaffAssignmentForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         # See TeamMembershipForm for why current-or-next-season: eligible to be
         # assigned regardless of which season's staff list is being edited.
-        today = timezone.localdate()
-        eligible_seasons = [s for s in (Season.covering(club, today), Season.next_after(club, today)) if s is not None]
-        members = Member.objects.filter(member_of__club=club, member_of__season__in=eligible_seasons, member_of__status=ClubMembership.StatusChoices.ACTIVE).distinct()
+        members = eligible_roster_members(club)
         if team is not None and season is not None:
             taken = StaffAssignment.objects.filter(team=team, season=season).exclude(pk=self.instance.pk).values_list("member_id", flat=True)
             members = members.exclude(pk__in=taken)
@@ -194,7 +259,7 @@ _AUDIENCE_WIDGETS = {
 class EventForm(EventAudienceFormMixin, forms.ModelForm):
     class Meta:
         model = Event
-        fields = ["title", "kind", "teams", "invited_members", "excluded_members", "location", "opponent", "start", "end", "gathering", "deadline", "competition", "external_game_id", "score_for", "score_against", "is_live"]
+        fields = ["title", "kind", "teams", "invited_members", "excluded_members", "location", "opponent", "start", "end", "gathering", "deadline", "competition", "external_game_id", "score_for", "score_against", "is_live", "max_referees"]
         widgets = {
             "start": forms.DateTimeInput(attrs={"type": "datetime-local"}),
             "end": forms.DateTimeInput(attrs={"type": "datetime-local"}),
@@ -202,6 +267,7 @@ class EventForm(EventAudienceFormMixin, forms.ModelForm):
             "deadline": forms.DateTimeInput(attrs={"type": "datetime-local"}),
             "score_for": forms.NumberInput(attrs={"min": 0}),
             "score_against": forms.NumberInput(attrs={"min": 0}),
+            "max_referees": forms.NumberInput(attrs={"min": 1}),
             **_AUDIENCE_WIDGETS,
         }
 

@@ -15,8 +15,9 @@
                     </div>
                 {% endfor %}
 
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {% form_field form.name %}
+                    {% form_field form.legal_name %}
                     {% form_field form.slug %}
                     {% form_field form.sport_type %}
                 </div>

@@ -28,3 +28,8 @@ def render_pdf(html: str) -> bytes:
 def membership_list_pdf(context: dict) -> bytes:
     html = render_to_string("management/membership_list_pdf.html", context)
     return render_pdf(html)
+
+
+def event_referee_form_pdf(context: dict) -> bytes:
+    html = render_to_string("management/event_referee_form_pdf.html", context)
+    return render_pdf(html)

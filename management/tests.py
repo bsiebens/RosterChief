@@ -18,16 +18,16 @@ from waffle import get_waffle_flag_model
 from billing.models import Plan, PlanPrice
 from billing.services.dues import record_payment, subscribe
 from club.models import Club, ClubMembership, ClubRole, FeePayment, Season, Sponsor
-from events.models import Attendance, Competition, Event, EventSeries, Location, Opponent
+from events.models import Attendance, Competition, Event, EventReferee, EventSeries, Location, Opponent
 from events.services.rbihf_import import RBIHFImportError
 from events.services.recurrence import detach_occurrence, generate_occurrences
 from management.bulk_import import TEMPLATE_COLUMNS
 from management.pdf import PDFExportError, render_pdf
 from management.recurrence_ui import build_rrule, describe_rrule, parse_rrule
-from members.models import Family, FamilyMembership, Member
+from members.models import Family, FamilyMembership, Group, GroupMembership, Member
 from news.models import News, NewsPhoto
 from shop.models import Order
-from teams.models import Position, StaffAssignment, Team, TeamMembership, TeamPhoto
+from teams.models import Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
 
 User = get_user_model()
 
@@ -261,10 +261,16 @@ class TeamManagementTests(ManagementTestBase):
         self.assertNotContains(response, "Rival Team")
 
     def test_creating_a_team(self):
-        response = self.club_post("team_create", {"name": "U15", "short_name": "U15"})
+        response = self.club_post("team_create", {"name": "U15", "short_name": "U15", "referee_management": "club"})
 
         team = Team.objects.get(club=self.club, name="U15")
         self.assertRedirects(response, reverse("management:team_detail", args=[team.pk]))
+
+    def test_creating_a_federation_managed_team(self):
+        self.club_post("team_create", {"name": "U15", "short_name": "U15", "referee_management": "federation"})
+
+        team = Team.objects.get(club=self.club, name="U15")
+        self.assertEqual(team.referee_management, Team.RefereeManagement.FEDERATION)
 
     def test_deleting_a_team(self):
         team = Team.objects.create(club=self.club, name="U16", short_name="U16")
@@ -520,6 +526,243 @@ class TeamRosterStaffTests(ManagementTestBase):
         self.assertFalse(StaffAssignment.objects.filter(pk=assignment.pk).exists())
 
 
+class TeamBulkAddTests(ManagementTestBase):
+    """Adding many people to a team's roster/staff in one submit -- see
+    management.views.TeamBulkAddView."""
+
+    def setUp(self):
+        super().setUp()
+        self.team = Team.objects.create(club=self.club, name="First Team", short_name="1st")
+        self.other_team = Team.objects.create(club=self.club, name="Second Team", short_name="2nd")
+        self.player_position = Position.objects.create(club=self.club, name="Forward", short_name="FW", staff_position=False)
+        self.coach_position = Position.objects.create(club=self.club, name="Head Coach", short_name="HC", staff_position=True, management_position=True)
+
+        self.player = Member.objects.create(first_name="Peter", last_name="Player")
+        ClubMembership.objects.create(club=self.club, member=self.player, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        self.other_player = Member.objects.create(first_name="Olly", last_name="Other")
+        ClubMembership.objects.create(club=self.club, member=self.other_player, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+
+    def make_team_coach(self, team, email="coach-bulk@example.com"):
+        coach_user = User.objects.create_user(email=email, password="pw-secret-123")
+        coach_member = Member.objects.create(user=coach_user, first_name="Cara", last_name="Coach")
+        StaffAssignment.objects.create(team=team, member=coach_member, season=self.season, position=self.coach_position)
+        return coach_user
+
+    def test_the_page_lists_eligible_members_and_flags_who_is_already_on(self):
+        TeamMembership.objects.create(team=self.team, season=self.season, member=self.player, position=self.player_position)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("team_bulk_add", self.team.pk, self.season.pk)
+
+        self.assertContains(response, "Peter Player")
+        self.assertContains(response, "Olly Other")
+        self.assertContains(response, "On roster")
+
+    def test_a_lapsed_member_is_not_listed(self):
+        lapsed = Member.objects.create(first_name="Lex", last_name="Lapsed")
+        ClubMembership.objects.create(club=self.club, member=lapsed, season=self.season, status=ClubMembership.StatusChoices.LAPSED)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("team_bulk_add", self.team.pk, self.season.pk)
+
+        self.assertNotContains(response, "Lex Lapsed")
+
+    def test_admin_can_add_two_players_in_one_submit(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post(
+            "team_bulk_add",
+            {
+                f"player_{self.player.pk}": "on",
+                f"player_position_{self.player.pk}": str(self.player_position.pk),
+                f"jersey_{self.player.pk}": "9",
+                f"player_{self.other_player.pk}": "on",
+                f"player_position_{self.other_player.pk}": str(self.player_position.pk),
+            },
+            self.team.pk,
+            self.season.pk,
+        )
+
+        self.assertRedirects(response, f"{reverse('management:team_detail', args=[self.team.pk])}?season={self.season.pk}")
+        self.assertEqual(TeamMembership.objects.filter(team=self.team, season=self.season).count(), 2)
+        self.assertEqual(TeamMembership.objects.get(team=self.team, member=self.player).jersey_number, 9)
+
+    def test_a_member_can_be_added_as_both_player_and_staff_at_once(self):
+        self.client.force_login(self.admin_user)
+
+        self.club_post(
+            "team_bulk_add",
+            {
+                f"player_{self.player.pk}": "on",
+                f"player_position_{self.player.pk}": str(self.player_position.pk),
+                f"staff_{self.player.pk}": "on",
+                f"staff_position_{self.player.pk}": str(self.coach_position.pk),
+            },
+            self.team.pk,
+            self.season.pk,
+        )
+
+        self.assertTrue(TeamMembership.objects.filter(team=self.team, season=self.season, member=self.player).exists())
+        self.assertTrue(StaffAssignment.objects.filter(team=self.team, season=self.season, member=self.player).exists())
+
+    def test_a_clashing_jersey_number_is_skipped_without_a_500(self):
+        TeamMembership.objects.create(team=self.team, season=self.season, member=self.player, position=self.player_position, jersey_number=7)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post(
+            "team_bulk_add",
+            {
+                f"player_{self.other_player.pk}": "on",
+                f"player_position_{self.other_player.pk}": str(self.player_position.pk),
+                f"jersey_{self.other_player.pk}": "7",
+            },
+            self.team.pk,
+            self.season.pk,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(TeamMembership.objects.filter(team=self.team, season=self.season, member=self.other_player).exists())
+
+    def test_a_member_already_on_the_roster_cannot_be_re_added_via_a_crafted_post(self):
+        TeamMembership.objects.create(team=self.team, season=self.season, member=self.player, position=self.player_position)
+        self.client.force_login(self.admin_user)
+
+        self.club_post(
+            "team_bulk_add",
+            {f"player_{self.player.pk}": "on", f"player_position_{self.player.pk}": str(self.player_position.pk)},
+            self.team.pk,
+            self.season.pk,
+        )
+
+        self.assertEqual(TeamMembership.objects.filter(team=self.team, season=self.season, member=self.player).count(), 1)
+
+    def test_a_lapsed_member_cannot_be_added_via_a_crafted_post(self):
+        lapsed = Member.objects.create(first_name="Lex", last_name="Lapsed")
+        ClubMembership.objects.create(club=self.club, member=lapsed, season=self.season, status=ClubMembership.StatusChoices.LAPSED)
+        self.client.force_login(self.admin_user)
+
+        self.club_post(
+            "team_bulk_add",
+            {f"player_{lapsed.pk}": "on", f"player_position_{lapsed.pk}": str(self.player_position.pk)},
+            self.team.pk,
+            self.season.pk,
+        )
+
+        self.assertFalse(TeamMembership.objects.filter(team=self.team, season=self.season, member=lapsed).exists())
+
+    def test_a_different_teams_coach_cannot_bulk_add(self):
+        self.client.force_login(self.make_team_coach(self.other_team))
+
+        response = self.club_post(
+            "team_bulk_add",
+            {f"player_{self.player.pk}": "on", f"player_position_{self.player.pk}": str(self.player_position.pk)},
+            self.team.pk,
+            self.season.pk,
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+
+class GroupManagementTests(ManagementTestBase):
+    """Generic named collections of members -- see management.views.Group* and
+    management.forms.GroupForm. Deliberately has no team/referee knowledge at
+    all; see MemberRefereeEligibilityTests for that (teams.RefereeProfile)."""
+
+    def setUp(self):
+        super().setUp()
+        self.team = Team.objects.create(club=self.club, name="First Team", short_name="1st")
+        self.other_team = Team.objects.create(club=self.club, name="Second Team", short_name="2nd")
+        self.member = Member.objects.create(first_name="Peter", last_name="Player")
+        ClubMembership.objects.create(club=self.club, member=self.member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+
+    def make_non_admin_coach(self, email="coach-groups@example.com"):
+        coach_user = User.objects.create_user(email=email, password="pw-secret-123")
+        coach_member = Member.objects.create(user=coach_user, first_name="Cara", last_name="Coach")
+        position = Position.objects.create(club=self.club, name="Head Coach", short_name="HC", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=self.team, member=coach_member, season=self.season, position=position)
+        return coach_user
+
+    def test_list_is_admin_only(self):
+        self.client.force_login(self.make_non_admin_coach())
+        self.assertEqual(self.club_get("group_list").status_code, 403)
+
+    def test_admin_can_create_a_group(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("group_create", {"name": "Referees"})
+
+        group = Group.objects.get(club=self.club, name="Referees")
+        self.assertRedirects(response, reverse("management:group_detail", args=[group.pk]))
+
+    def test_editing_a_group_renames_it(self):
+        self.client.force_login(self.admin_user)
+        group = Group.objects.create(club=self.club, name="Old name")
+
+        self.club_post("group_update", {"name": "New name"}, group.pk)
+
+        group.refresh_from_db()
+        self.assertEqual(group.name, "New name")
+
+    def test_deleting_a_group_removes_it(self):
+        self.client.force_login(self.admin_user)
+        group = Group.objects.create(club=self.club, name="Doomed")
+
+        self.club_post("group_delete", {}, group.pk)
+
+        self.assertFalse(Group.objects.filter(pk=group.pk).exists())
+
+    def test_bulk_add_lists_eligible_members_and_flags_existing_ones(self):
+        group = Group.objects.create(club=self.club, name="Referees")
+        GroupMembership.objects.create(group=group, member=self.member)
+        other_member = Member.objects.create(first_name="Olly", last_name="Other")
+        ClubMembership.objects.create(club=self.club, member=other_member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("group_bulk_add", group.pk)
+
+        self.assertContains(response, "In group")
+        self.assertContains(response, "Olly Other")
+
+    def test_bulk_add_adds_selected_members(self):
+        group = Group.objects.create(club=self.club, name="Referees")
+        other_member = Member.objects.create(first_name="Olly", last_name="Other")
+        ClubMembership.objects.create(club=self.club, member=other_member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("group_bulk_add", {f"member_{self.member.pk}": "on", f"member_{other_member.pk}": "on"}, group.pk)
+
+        self.assertRedirects(response, reverse("management:group_detail", args=[group.pk]))
+        self.assertEqual(GroupMembership.objects.filter(group=group).count(), 2)
+
+    def test_bulk_add_cannot_re_add_an_existing_member_via_a_crafted_post(self):
+        group = Group.objects.create(club=self.club, name="Referees")
+        GroupMembership.objects.create(group=group, member=self.member)
+        self.client.force_login(self.admin_user)
+
+        self.club_post("group_bulk_add", {f"member_{self.member.pk}": "on"}, group.pk)
+
+        self.assertEqual(GroupMembership.objects.filter(group=group, member=self.member).count(), 1)
+
+    def test_removing_a_member_deletes_the_membership(self):
+        group = Group.objects.create(club=self.club, name="Referees")
+        membership = GroupMembership.objects.create(group=group, member=self.member)
+        self.client.force_login(self.admin_user)
+
+        self.club_post("group_member_remove", {}, group.pk, membership.pk)
+
+        self.assertFalse(GroupMembership.objects.filter(pk=membership.pk).exists())
+
+    def test_groups_are_scoped_to_the_club(self):
+        other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
+        other_group = Group.objects.create(club=other_club, name="Rival Referees")
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("group_list")
+
+        self.assertNotContains(response, "Rival Referees")
+        self.assertEqual(self.club_get("group_detail", other_group.pk).status_code, 404)
+
+
 ONE_PIXEL_PNG = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
 
 
@@ -657,6 +900,135 @@ class PositionManagementTests(ManagementTestBase):
         self.assertEqual(response.status_code, 200)
         self.assertFalse(Position.objects.filter(club=self.club, name="Bad").exists())
         self.assertFormError(response.context["form"], "management_position", "A management position must also be a staff position.")
+
+
+class RefereeLevelManagementTests(ManagementTestBase):
+    """Admin-managed referee qualification tiers -- see
+    management.views.RefereeLevel* and teams.RefereeLevel."""
+
+    def setUp(self):
+        super().setUp()
+        self.team = Team.objects.create(club=self.club, name="First Team", short_name="1st")
+        self.other_team = Team.objects.create(club=self.club, name="Second Team", short_name="2nd")
+
+    def make_non_admin_coach(self, email="coach-levels@example.com"):
+        coach_user = User.objects.create_user(email=email, password="pw-secret-123")
+        coach_member = Member.objects.create(user=coach_user, first_name="Cara", last_name="Coach")
+        position = Position.objects.create(club=self.club, name="Head Coach", short_name="HC", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=self.team, member=coach_member, season=self.season, position=position)
+        return coach_user
+
+    def test_list_is_visible_to_any_staff(self):
+        RefereeLevel.objects.create(club=self.club, name="Regional")
+        self.client.force_login(self.make_non_admin_coach())
+
+        response = self.club_get("referee_level_list")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Regional")
+
+    def test_create_is_admin_only(self):
+        self.client.force_login(self.make_non_admin_coach())
+
+        response = self.club_post("referee_level_create", {"name": "Regional", "ordering": 0, "teams": []})
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_admin_can_create_a_level_with_teams(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("referee_level_create", {"name": "Regional", "ordering": 0, "teams": [str(self.team.pk), str(self.other_team.pk)]})
+
+        level = RefereeLevel.objects.get(club=self.club, name="Regional")
+        self.assertRedirects(response, reverse("management:referee_level_list"))
+        self.assertEqual(set(level.teams.all()), {self.team, self.other_team})
+
+    def test_admin_can_update_a_levels_teams(self):
+        level = RefereeLevel.objects.create(club=self.club, name="Regional")
+        level.teams.add(self.team)
+        self.client.force_login(self.admin_user)
+
+        self.club_post("referee_level_update", {"name": "Regional", "ordering": 0, "teams": [str(self.other_team.pk)]}, level.pk)
+
+        self.assertEqual(set(level.teams.all()), {self.other_team})
+
+    def test_list_scoped_to_the_club(self):
+        other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
+        RefereeLevel.objects.create(club=other_club, name="Rival Level")
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("referee_level_list")
+
+        self.assertNotContains(response, "Rival Level")
+
+
+class RefereeListViewTests(ManagementTestBase):
+    """The club-wide referee overview -- see management.views.RefereeListView."""
+
+    def setUp(self):
+        super().setUp()
+        self.team = Team.objects.create(club=self.club, name="First Team", short_name="1st")
+        self.level = RefereeLevel.objects.create(club=self.club, name="Regional")
+        self.level.teams.add(self.team)
+        self.member = Member.objects.create(first_name="Ref", last_name="Eree")
+        ClubMembership.objects.create(club=self.club, member=self.member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        self.client.force_login(self.admin_user)
+
+    def test_lists_a_valid_referee_with_level_and_teams(self):
+        RefereeProfile.objects.create(member=self.member, level=self.level, valid_until=timezone.localdate() + datetime.timedelta(days=30))
+
+        response = self.club_get("referee_list")
+
+        self.assertContains(response, "Ref Eree")
+        self.assertContains(response, "Regional")
+        self.assertContains(response, "First Team")
+        self.assertContains(response, "Valid")
+
+    def test_shows_expired_status(self):
+        RefereeProfile.objects.create(member=self.member, level=self.level, valid_until=timezone.localdate() - datetime.timedelta(days=1))
+
+        response = self.club_get("referee_list")
+
+        self.assertContains(response, "Expired")
+
+    def test_shows_no_level_status(self):
+        RefereeProfile.objects.create(member=self.member, valid_until=timezone.localdate() + datetime.timedelta(days=30))
+
+        response = self.club_get("referee_list")
+
+        self.assertContains(response, "No level")
+
+    def test_shows_no_validity_set_status(self):
+        RefereeProfile.objects.create(member=self.member, level=self.level)
+
+        response = self.club_get("referee_list")
+
+        self.assertContains(response, "No validity set")
+
+    def test_a_member_with_no_referee_profile_is_not_listed(self):
+        other_member = Member.objects.create(first_name="Not", last_name="Referee")
+        ClubMembership.objects.create(club=self.club, member=other_member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+
+        response = self.club_get("referee_list")
+
+        self.assertNotContains(response, "Not Referee")
+
+    def test_visible_to_any_staff(self):
+        coach_user = User.objects.create_user(email="coach-reflist@example.com", password="pw-secret-123")
+        coach_member = Member.objects.create(user=coach_user, first_name="Cara", last_name="Coach")
+        coach_position = Position.objects.create(club=self.club, name="Head Coach", short_name="HC", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=self.team, member=coach_member, season=self.season, position=coach_position)
+        RefereeProfile.objects.create(member=self.member, level=self.level, valid_until=timezone.localdate() + datetime.timedelta(days=30))
+        # Give the coach visibility into self.member too (members_visible_to
+        # scopes a non-admin to teams they're staffed on).
+        player_position = Position.objects.create(club=self.club, name="Forward", short_name="FW")
+        TeamMembership.objects.create(team=self.team, member=self.member, season=self.season, position=player_position)
+        self.client.force_login(coach_user)
+
+        response = self.club_get("referee_list")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Ref Eree")
 
 
 class ClubRoleManagementTests(ManagementTestBase):
@@ -995,6 +1367,138 @@ class MemberGrantLoginTests(ManagementTestBase):
         self.assertEqual(response.status_code, 403)
         self.child.refresh_from_db()
         self.assertIsNone(self.child.user)
+
+
+class MemberRefereeEligibilityTests(ManagementTestBase):
+    """A member's referee level and validity, set from their own page -- see
+    management.views.MemberRefereeEligibilityUpdateView and
+    teams.RefereeProfile. Eligible teams are derived from the level
+    (teams.RefereeLevel), not picked here. Deliberately unrelated to
+    members.Group."""
+
+    def setUp(self):
+        super().setUp()
+        self.team = Team.objects.create(club=self.club, name="First Team", short_name="1st")
+        self.other_team = Team.objects.create(club=self.club, name="Second Team", short_name="2nd")
+        self.level = RefereeLevel.objects.create(club=self.club, name="Regional")
+        self.level.teams.add(self.team, self.other_team)
+        self.member = Member.objects.create(first_name="Ref", last_name="Eree")
+        ClubMembership.objects.create(club=self.club, member=self.member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        self.future_date = timezone.localdate() + datetime.timedelta(days=30)
+
+    def test_member_page_shows_not_eligible_for_any_team_by_default(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("member_detail", self.member.pk)
+
+        self.assertContains(response, "Not eligible to referee for any team.")
+
+    def test_admin_can_set_level_and_validity_for_a_member_with_no_profile_yet(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("member_referee_eligibility_update", {"level": str(self.level.pk), "valid_until": self.future_date.isoformat()}, self.member.pk)
+
+        self.assertRedirects(response, reverse("management:member_detail", args=[self.member.pk]))
+        profile = RefereeProfile.objects.get(member=self.member)
+        self.assertEqual(profile.level, self.level)
+        self.assertEqual(profile.valid_until, self.future_date)
+        self.assertEqual(set(profile.eligible_teams), {self.team, self.other_team})
+
+    def test_admin_can_update_an_existing_profile(self):
+        other_level = RefereeLevel.objects.create(club=self.club, name="National")
+        profile = RefereeProfile.objects.create(member=self.member, level=self.level, valid_until=self.future_date)
+        self.client.force_login(self.admin_user)
+
+        self.club_post("member_referee_eligibility_update", {"level": str(other_level.pk), "valid_until": self.future_date.isoformat()}, self.member.pk)
+
+        profile.refresh_from_db()
+        self.assertEqual(profile.level, other_level)
+
+    def test_admin_can_clear_the_level_to_make_someone_ineligible(self):
+        profile = RefereeProfile.objects.create(member=self.member, level=self.level, valid_until=self.future_date)
+        self.client.force_login(self.admin_user)
+
+        self.club_post("member_referee_eligibility_update", {"level": "", "valid_until": self.future_date.isoformat()}, self.member.pk)
+
+        profile.refresh_from_db()
+        self.assertIsNone(profile.level)
+        self.assertFalse(profile.is_eligible)
+
+    def test_member_page_shows_eligible_teams_when_valid(self):
+        RefereeProfile.objects.create(member=self.member, level=self.level, valid_until=self.future_date)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("member_detail", self.member.pk)
+
+        self.assertContains(response, "First Team")
+
+    def test_member_page_shows_a_warning_once_expired(self):
+        RefereeProfile.objects.create(member=self.member, level=self.level, valid_until=timezone.localdate() - datetime.timedelta(days=1))
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("member_detail", self.member.pk)
+
+        self.assertContains(response, "Not currently eligible to referee")
+        self.assertNotContains(response, "First Team")
+
+    def test_team_page_lists_eligible_referees(self):
+        RefereeProfile.objects.create(member=self.member, level=self.level, valid_until=self.future_date)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("team_detail", self.team.pk)
+
+        self.assertContains(response, "Ref Eree")
+
+    def test_team_page_excludes_an_expired_referee(self):
+        # "Ref Eree" alone also matches the (unrelated) add-player/assign-staff
+        # dropdowns, which list every active club member regardless of referee
+        # status -- assert on the eligible-referees panel's own empty state.
+        RefereeProfile.objects.create(member=self.member, level=self.level, valid_until=timezone.localdate() - datetime.timedelta(days=1))
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("team_detail", self.team.pk)
+
+        self.assertContains(response, "No one yet.")
+
+    def test_team_page_shows_a_federation_note_instead_of_eligible_referees(self):
+        RefereeProfile.objects.create(member=self.member, level=self.level, valid_until=self.future_date)
+        self.team.referee_management = Team.RefereeManagement.FEDERATION
+        self.team.save(update_fields=["referee_management"])
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("team_detail", self.team.pk)
+
+        self.assertContains(response, "managed by the federation")
+        self.assertNotContains(response, "No one yet.")
+
+    def test_non_admin_gets_403(self):
+        coach_user = User.objects.create_user(email="coach-referee-elig@example.com", password="pw-secret-123")
+        coach_member = Member.objects.create(user=coach_user, first_name="Cara", last_name="Coach")
+        position = Position.objects.create(club=self.club, name="Head Coach", short_name="HC", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=self.team, member=coach_member, season=self.season, position=position)
+        self.client.force_login(coach_user)
+
+        response = self.club_post("member_referee_eligibility_update", {"level": str(self.level.pk), "valid_until": self.future_date.isoformat()}, self.member.pk)
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(RefereeProfile.objects.filter(member=self.member).exists())
+
+    def test_non_admin_does_not_see_the_edit_button(self):
+        coach_user = User.objects.create_user(email="coach-referee-elig2@example.com", password="pw-secret-123")
+        coach_member = Member.objects.create(user=coach_user, first_name="Cara", last_name="Coach")
+        coach_position = Position.objects.create(club=self.club, name="Head Coach", short_name="HC", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=self.team, member=coach_member, season=self.season, position=coach_position)
+        # Puts self.member within the coach's visibility (members_visible_to) so
+        # the response is a real 200 -- otherwise "not contains" would trivially
+        # pass on a 404 for the wrong reason.
+        player_position = Position.objects.create(club=self.club, name="Forward", short_name="FW")
+        TeamMembership.objects.create(team=self.team, member=self.member, season=self.season, position=player_position)
+        self.client.force_login(coach_user)
+
+        response = self.club_get("member_detail", self.member.pk)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, reverse("management:member_referee_eligibility_update", args=[self.member.pk]))
 
 
 class MemberFamilyAttachDetachTests(ManagementTestBase):
@@ -2128,6 +2632,54 @@ class MemberBulkImportTests(ManagementTestBase):
 
         self.assertEqual(response.status_code, 403)
 
+    def test_a_family_group_links_a_parent_and_child_and_grants_the_parent_a_login(self):
+        upload = make_import_workbook(
+            [
+                ["Taylor", "Doe", "", "taylor.doe@example.com", "", "", "", "", "", "Doe family", "parent"],
+                ["Jamie", "Doe", "2014-03-02", "", "", "", "", "", "", "Doe family", "child"],
+            ]
+        )
+        self.club_post("member_import", {"file": upload})
+
+        self.club_post("member_import_confirm", {})
+
+        parent = Member.objects.get(email="taylor.doe@example.com")
+        child = Member.objects.get(first_name="Jamie", last_name="Doe")
+        self.assertIsNotNone(parent.user_id)
+        self.assertTrue(User.objects.filter(email="taylor.doe@example.com").exists())
+        self.assertIsNone(child.user_id)
+        family = Family.objects.get(memberships__member=parent)
+        self.assertEqual(family, Family.objects.get(memberships__member=child))
+        self.assertEqual(FamilyMembership.objects.get(family=family, member=parent).role, FamilyMembership.FamilyRole.PARENT)
+        self.assertEqual(FamilyMembership.objects.get(family=family, member=child).role, FamilyMembership.FamilyRole.CHILD)
+
+    def test_family_role_without_a_group_is_an_error(self):
+        upload = make_import_workbook([["Odd", "Row", "", "odd.row@example.com", "", "", "", "", "", "", "parent"]])
+
+        response = self.club_post("member_import", {"file": upload})
+
+        result = response.context["results"][0]
+        self.assertIsNone(result["member"])
+        self.assertTrue(any("family_group" in error.lower() for error in result["errors"]))
+
+    def test_family_group_without_a_role_is_an_error(self):
+        upload = make_import_workbook([["Odd", "Row", "", "odd.row2@example.com", "", "", "", "", "", "Odd family", ""]])
+
+        response = self.club_post("member_import", {"file": upload})
+
+        result = response.context["results"][0]
+        self.assertIsNone(result["member"])
+        self.assertTrue(any("family_role" in error.lower() for error in result["errors"]))
+
+    def test_a_standalone_row_is_not_linked_to_any_family(self):
+        upload = make_import_workbook([["Solo", "Standalone", "", "solo@example.com", "", "", "", "", "", "", ""]])
+        self.club_post("member_import", {"file": upload})
+
+        self.club_post("member_import_confirm", {})
+
+        member = Member.objects.get(email="solo@example.com")
+        self.assertFalse(FamilyMembership.objects.filter(member=member).exists())
+
 
 class NewsManagementTests(ManagementTestBase):
     def setUp(self):
@@ -2906,6 +3458,7 @@ class EventManagementTests(ManagementTestBase):
             "end": "",
             "gathering": "",
             "deadline": "",
+            "max_referees": "2",
         }
         data.update(overrides)
         return data
@@ -3358,6 +3911,530 @@ class EventDetailDisplayTests(ManagementTestBase):
         self.assertRedirects(redirect, reverse("management:event_detail", args=[game.pk]))
         self.assertNotContains(response, "No competition data source is configured yet")
         self.assertContains(response, "is not enabled for this club")
+
+
+class EventRefereeManagementTests(ManagementTestBase):
+    """Assigning/removing referees from the event detail page's Referees
+    panel -- home games only, see management.views.EventRefereeAssignView/
+    EventRefereeRemoveView and events.services.referees."""
+
+    def setUp(self):
+        super().setUp()
+        self.team = Team.objects.create(club=self.club, name="First Team", short_name="1st")
+        self.home_ground = Location.objects.create(club=self.club, name="Home Ground", address="1 St", city="Town", zip_code="1000", country="BE", is_home=True)
+        self.away_ground = Location.objects.create(club=self.club, name="Away Ground", address="2 St", city="Town", zip_code="1000", country="BE")
+
+        self.level = RefereeLevel.objects.create(club=self.club, name="Regional")
+        self.level.teams.add(self.team)
+
+        self.referee = Member.objects.create(first_name="Ref", last_name="Eree")
+        ClubMembership.objects.create(club=self.club, member=self.referee, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        self.referee_profile = RefereeProfile.objects.create(member=self.referee, level=self.level, valid_until=timezone.localdate() + datetime.timedelta(days=30))
+
+    def make_coach(self, team, email="coach-referees@example.com"):
+        coach_user = User.objects.create_user(email=email, password="pw-secret-123")
+        coach_member = Member.objects.create(user=coach_user, first_name="Cara", last_name="Coach")
+        position = Position.objects.create(club=self.club, name="Head Coach", short_name="HC", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=team, member=coach_member, season=self.season, position=position)
+        return coach_user
+
+    def make_game(self, **kwargs):
+        kwargs.setdefault("title", "Cup game")
+        kwargs.setdefault("kind", Event.EventKind.GAME)
+        kwargs.setdefault("location", self.home_ground)
+        kwargs.setdefault("start", timezone.now() + datetime.timedelta(days=1))
+        event = Event.objects.create(club=self.club, **kwargs)
+        event.teams.add(self.team)
+        return event
+
+    def test_the_referees_panel_only_shows_for_a_home_game(self):
+        # "Referees" alone also matches the nav link on every page -- assert on
+        # text unique to the panel itself.
+        home_game = self.make_game()
+        away_game = self.make_game(title="Away game", location=self.away_ground)
+        self.client.force_login(self.admin_user)
+
+        self.assertContains(self.club_get("event_detail", home_game.pk), "No referees assigned yet.")
+        self.assertNotContains(self.club_get("event_detail", away_game.pk), "No referees assigned yet.")
+
+    def test_the_referees_panel_is_replaced_by_a_note_for_a_federation_managed_team(self):
+        self.team.referee_management = Team.RefereeManagement.FEDERATION
+        self.team.save(update_fields=["referee_management"])
+        home_game = self.make_game()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("event_detail", home_game.pk)
+
+        self.assertNotContains(response, "No referees assigned yet.")
+        self.assertContains(response, "managed by the federation")
+
+    def test_cannot_assign_a_referee_to_a_federation_managed_teams_game(self):
+        self.team.referee_management = Team.RefereeManagement.FEDERATION
+        self.team.save(update_fields=["referee_management"])
+        game = self.make_game()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("event_referee_assign", {"member": str(self.referee.pk)}, game.pk)
+
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(EventReferee.objects.filter(event=game).exists())
+
+    def test_a_teams_own_coach_gets_403_assigning_a_referee(self):
+        # Admin-only for now, even for the coach who manages this team --
+        # see management.views.EventRefereeAssignView.
+        game = self.make_game()
+        self.client.force_login(self.make_coach(self.team))
+
+        response = self.club_post("event_referee_assign", {"member": str(self.referee.pk)}, game.pk)
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(EventReferee.objects.filter(event=game, member=self.referee).exists())
+
+    def test_a_teams_own_coach_gets_403_removing_a_referee(self):
+        game = self.make_game()
+        assignment = EventReferee.objects.create(event=game, member=self.referee, assigned_by=self.admin_member)
+        self.client.force_login(self.make_coach(self.team))
+
+        response = self.club_post("event_referee_remove", {}, game.pk, assignment.pk)
+
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(EventReferee.objects.filter(event=game, member=self.referee).exists())
+
+    def test_a_teams_coach_sees_the_referees_panel_but_not_the_assign_or_remove_controls(self):
+        game = self.make_game()
+        assignment = EventReferee.objects.create(event=game, member=self.referee, assigned_by=self.admin_member)
+        self.client.force_login(self.make_coach(self.team))
+
+        response = self.club_get("event_detail", game.pk)
+
+        # The panel itself, and who's assigned, are still visible...
+        self.assertContains(response, "Ref Eree")
+        self.assertContains(response, "1 / 2")
+        # ...but not the controls to change it.
+        self.assertNotContains(response, reverse("management:event_referee_assign", args=[game.pk]))
+        self.assertNotContains(response, reverse("management:event_referee_remove", args=[game.pk, assignment.pk]))
+
+    def test_admin_can_assign_an_eligible_referee(self):
+        game = self.make_game()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("event_referee_assign", {"member": str(self.referee.pk)}, game.pk)
+
+        self.assertRedirects(response, reverse("management:event_detail", args=[game.pk]))
+        self.assertTrue(EventReferee.objects.filter(event=game, member=self.referee).exists())
+
+    def test_assigning_records_which_admin_assigned_them(self):
+        game = self.make_game()
+        self.client.force_login(self.admin_user)
+
+        self.club_post("event_referee_assign", {"member": str(self.referee.pk)}, game.pk)
+
+        assignment = EventReferee.objects.get(event=game, member=self.referee)
+        self.assertEqual(assignment.assigned_by, self.admin_member)
+
+    def test_cannot_assign_beyond_max_referees(self):
+        game = self.make_game(max_referees=1)
+        second_referee = Member.objects.create(first_name="Second", last_name="Ref")
+        RefereeProfile.objects.create(member=second_referee, level=self.level, valid_until=timezone.localdate() + datetime.timedelta(days=30))
+        self.client.force_login(self.admin_user)
+        self.club_post("event_referee_assign", {"member": str(self.referee.pk)}, game.pk)
+
+        response = self.club_post("event_referee_assign", {"member": str(second_referee.pk)}, game.pk)
+
+        self.assertRedirects(response, reverse("management:event_detail", args=[game.pk]))
+        self.assertEqual(EventReferee.objects.filter(event=game).count(), 1)
+
+    def test_cannot_assign_a_referee_to_an_away_game(self):
+        # eligible_referees() is already empty for a non-home game, so the
+        # attempted member isn't found at all -- same 404 as any other
+        # crafted POST naming someone who isn't a legitimate candidate.
+        game = self.make_game(location=self.away_ground)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("event_referee_assign", {"member": str(self.referee.pk)}, game.pk)
+
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(EventReferee.objects.filter(event=game).exists())
+
+    def test_cannot_assign_someone_not_eligible_via_a_crafted_post(self):
+        game = self.make_game()
+        ineligible = Member.objects.create(first_name="Not", last_name="Eligible")
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("event_referee_assign", {"member": str(ineligible.pk)}, game.pk)
+
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(EventReferee.objects.filter(event=game).exists())
+
+    def test_a_different_teams_coach_cannot_assign_a_referee(self):
+        other_team = Team.objects.create(club=self.club, name="Second Team", short_name="2nd")
+        game = self.make_game()
+        self.client.force_login(self.make_coach(other_team))
+
+        response = self.club_post("event_referee_assign", {"member": str(self.referee.pk)}, game.pk)
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_can_remove_an_assigned_referee(self):
+        game = self.make_game()
+        assignment = EventReferee.objects.create(event=game, member=self.referee, assigned_by=self.admin_member)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("event_referee_remove", {}, game.pk, assignment.pk)
+
+        self.assertRedirects(response, reverse("management:event_detail", args=[game.pk]))
+        self.assertFalse(EventReferee.objects.filter(event=game, member=self.referee).exists())
+
+    def test_conflict_warning_shown_but_does_not_block_the_assign_control(self):
+        # The referee is also on this team's roster and expected at an
+        # overlapping training -- shown as a warning, still selectable.
+        position = Position.objects.create(club=self.club, name="Forward", short_name="FW")
+        TeamMembership.objects.create(team=self.team, member=self.referee, season=self.season, position=position)
+        game = self.make_game(start=timezone.now() + datetime.timedelta(days=1))
+        clashing_training = Event.objects.create(club=self.club, title="Clashing training", kind=Event.EventKind.TRAINING, start=game.start, end=game.start + datetime.timedelta(hours=1))
+        clashing_training.teams.add(self.team)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("event_detail", game.pk)
+
+        self.assertContains(response, "⚠")
+        self.assertContains(response, f'value="{self.referee.pk}"')
+
+    def test_admin_can_add_an_external_referee(self):
+        game = self.make_game()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("event_referee_add_external", {"name": "Guest Referee"}, game.pk)
+
+        self.assertRedirects(response, reverse("management:event_detail", args=[game.pk]))
+        assignment = EventReferee.objects.get(event=game, external_name="Guest Referee")
+        self.assertIsNone(assignment.member)
+
+    def test_adding_an_external_referee_with_a_blank_name_is_rejected(self):
+        game = self.make_game()
+        self.client.force_login(self.admin_user)
+
+        self.club_post("event_referee_add_external", {"name": "  "}, game.pk)
+
+        self.assertFalse(EventReferee.objects.filter(event=game).exists())
+
+    def test_a_coach_gets_403_adding_an_external_referee(self):
+        game = self.make_game()
+        self.client.force_login(self.make_coach(self.team))
+
+        response = self.club_post("event_referee_add_external", {"name": "Guest Referee"}, game.pk)
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_event_detail_page_shows_an_external_referee(self):
+        game = self.make_game()
+        EventReferee.objects.create(event=game, external_name="Guest Referee", assigned_by=self.admin_member)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("event_detail", game.pk)
+
+        self.assertContains(response, "Guest Referee")
+        self.assertContains(response, "External")
+
+    def test_admin_can_set_a_referees_fee(self):
+        game = self.make_game()
+        assignment = EventReferee.objects.create(event=game, member=self.referee, assigned_by=self.admin_member)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("event_referee_fee_update", {"fee": "25.00", "km": "40", "km_rate": "0.35"}, game.pk, assignment.pk)
+
+        self.assertRedirects(response, reverse("management:event_detail", args=[game.pk]))
+        assignment.refresh_from_db()
+        self.assertEqual(assignment.fee, Decimal("25.00"))
+        self.assertEqual(assignment.total_payable, Decimal("39.00"))
+
+    def test_a_km_rate_with_more_than_two_decimals_is_accepted(self):
+        # e.g. a per-km rate of €0.083 -- the km_rate input must not be pinned
+        # to money-style step="0.01" the way the fee field is.
+        game = self.make_game()
+        assignment = EventReferee.objects.create(event=game, member=self.referee, assigned_by=self.admin_member)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("event_referee_fee_update", {"fee": "0", "km": "40", "km_rate": "0.083"}, game.pk, assignment.pk)
+
+        self.assertRedirects(response, reverse("management:event_detail", args=[game.pk]))
+        assignment.refresh_from_db()
+        self.assertEqual(assignment.km_rate, Decimal("0.083"))
+
+    def test_event_detail_page_shows_the_total_due_once_a_fee_is_set(self):
+        game = self.make_game()
+        EventReferee.objects.create(event=game, member=self.referee, assigned_by=self.admin_member, fee=Decimal("25.00"))
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("event_detail", game.pk)
+
+        self.assertContains(response, "25.00")
+
+    def test_a_coach_gets_403_setting_a_fee(self):
+        game = self.make_game()
+        assignment = EventReferee.objects.create(event=game, member=self.referee, assigned_by=self.admin_member)
+        self.client.force_login(self.make_coach(self.team))
+
+        response = self.club_post("event_referee_fee_update", {"fee": "25.00"}, game.pk, assignment.pk)
+
+        self.assertEqual(response.status_code, 403)
+
+
+class EventRefereeFormPdfTests(ManagementTestBase):
+    """Downloadable referee payment form -- see management.views.EventRefereeFormPdfView,
+    modeled on the club's existing paper form."""
+
+    def setUp(self):
+        super().setUp()
+        self.team = Team.objects.create(club=self.club, name="First Team", short_name="1st")
+        self.home_ground = Location.objects.create(club=self.club, name="Home Ground", address="1 St", city="Town", zip_code="1000", country="BE", is_home=True)
+        self.referee = Member.objects.create(first_name="Ref", last_name="Eree")
+        ClubMembership.objects.create(club=self.club, member=self.referee, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+
+    def make_coach(self, team, email="coach-refpdf@example.com"):
+        coach_user = User.objects.create_user(email=email, password="pw-secret-123")
+        coach_member = Member.objects.create(user=coach_user, first_name="Cara", last_name="Coach")
+        position = Position.objects.create(club=self.club, name="Head Coach", short_name="HC", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=team, member=coach_member, season=self.season, position=position)
+        return coach_user
+
+    def make_game(self, **kwargs):
+        kwargs.setdefault("title", "Cup game")
+        kwargs.setdefault("kind", Event.EventKind.GAME)
+        kwargs.setdefault("location", self.home_ground)
+        kwargs.setdefault("start", timezone.now() + datetime.timedelta(days=1))
+        event = Event.objects.create(club=self.club, **kwargs)
+        event.teams.add(self.team)
+        return event
+
+    def test_downloads_as_a_pdf(self):
+        game = self.make_game()
+        self.client.force_login(self.admin_user)
+
+        with mock.patch("management.views.event_referee_form_pdf", return_value=b"%PDF-fake") as renderer:
+            response = self.club_get("event_referee_form_pdf", game.pk)
+
+        self.assertEqual(response["Content-Type"], "application/pdf")
+        self.assertIn(".pdf", response["Content-Disposition"])
+        self.assertEqual(response.content, b"%PDF-fake")
+        renderer.assert_called_once()
+
+    def test_uses_the_clubs_legal_name_and_home_location_when_set(self):
+        self.club.legal_name = "Ajax United VZW"
+        self.club.save(update_fields=["legal_name"])
+        game = self.make_game()
+        EventReferee.objects.create(event=game, member=self.referee, assigned_by=self.admin_member, fee=Decimal("25.00"), km=Decimal("40"), km_rate=Decimal("0.35"))
+        self.client.force_login(self.admin_user)
+
+        with mock.patch("management.views.event_referee_form_pdf", return_value=b"%PDF-fake") as renderer:
+            self.club_get("event_referee_form_pdf", game.pk)
+
+        context = renderer.call_args[0][0]
+        self.assertEqual(context["club"].official_name, "Ajax United VZW")
+        self.assertEqual(context["home_location"], self.home_ground)
+        self.assertEqual(list(context["referees"]), [EventReferee.objects.get(event=game)])
+
+    def test_a_missing_pdf_library_is_reported_rather_than_a_500(self):
+        game = self.make_game()
+        self.client.force_login(self.admin_user)
+
+        with mock.patch("management.views.event_referee_form_pdf", side_effect=PDFExportError("PDF rendering needs the native pango/cairo libraries.")):
+            response = self.club_get("event_referee_form_pdf", game.pk)
+        response = self.client.get(response.url, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, "pango")
+
+    def test_a_coach_gets_403(self):
+        game = self.make_game()
+        self.client.force_login(self.make_coach(self.team))
+
+        response = self.club_get("event_referee_form_pdf", game.pk)
+
+        self.assertEqual(response.status_code, 403)
+
+
+class RefereeManagementDashboardTests(ManagementTestBase):
+    """The admin-only one-stop view of upcoming home games needing a
+    club-arranged referee -- see management.views.RefereeManagementDashboardView."""
+
+    def setUp(self):
+        super().setUp()
+        self.team = Team.objects.create(club=self.club, name="First Team", short_name="1st")
+        self.federation_team = Team.objects.create(club=self.club, name="Federation Team", short_name="Fed", referee_management=Team.RefereeManagement.FEDERATION)
+        self.home_ground = Location.objects.create(club=self.club, name="Home Ground", address="1 St", city="Town", zip_code="1000", country="BE", is_home=True)
+        self.away_ground = Location.objects.create(club=self.club, name="Away Ground", address="2 St", city="Town", zip_code="1000", country="BE")
+
+        self.level = RefereeLevel.objects.create(club=self.club, name="Regional")
+        self.level.teams.add(self.team)
+        self.referee = Member.objects.create(first_name="Ref", last_name="Eree")
+        ClubMembership.objects.create(club=self.club, member=self.referee, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        RefereeProfile.objects.create(member=self.referee, level=self.level, valid_until=timezone.localdate() + datetime.timedelta(days=30))
+
+    def make_coach(self, team, email="coach-refdash@example.com"):
+        coach_user = User.objects.create_user(email=email, password="pw-secret-123")
+        coach_member = Member.objects.create(user=coach_user, first_name="Cara", last_name="Coach")
+        position = Position.objects.create(club=self.club, name="Head Coach", short_name="HC", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=team, member=coach_member, season=self.season, position=position)
+        return coach_user
+
+    def make_game(self, team=None, **kwargs):
+        kwargs.setdefault("title", "Cup game")
+        kwargs.setdefault("kind", Event.EventKind.GAME)
+        kwargs.setdefault("location", self.home_ground)
+        kwargs.setdefault("start", timezone.now() + datetime.timedelta(days=1))
+        event = Event.objects.create(club=self.club, **kwargs)
+        event.teams.add(team or self.team)
+        return event
+
+    def test_is_admin_only(self):
+        self.client.force_login(self.make_coach(self.team))
+        self.assertEqual(self.club_get("referee_management").status_code, 403)
+
+    def test_lists_an_upcoming_club_managed_home_game(self):
+        game = self.make_game()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("referee_management")
+
+        self.assertContains(response, reverse("management:event_detail", args=[game.pk]))
+
+    def test_each_game_tile_links_straight_to_the_referee_form_pdf(self):
+        game = self.make_game()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("referee_management")
+
+        self.assertContains(response, reverse("management:event_referee_form_pdf", args=[game.pk]))
+
+    def test_the_game_tile_shows_assigned_referee_names(self):
+        game = self.make_game()
+        EventReferee.objects.create(event=game, member=self.referee, assigned_by=self.admin_member)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("referee_management")
+
+        self.assertContains(response, str(self.referee))
+
+    def test_excludes_a_federation_managed_teams_game(self):
+        game = self.make_game(team=self.federation_team)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("referee_management")
+
+        self.assertNotContains(response, reverse("management:event_detail", args=[game.pk]))
+
+    def test_excludes_an_away_game(self):
+        game = self.make_game(location=self.away_ground)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("referee_management")
+
+        self.assertNotContains(response, reverse("management:event_detail", args=[game.pk]))
+
+    def test_excludes_a_past_game(self):
+        game = self.make_game(start=timezone.now() - datetime.timedelta(days=1))
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("referee_management")
+
+        self.assertNotContains(response, reverse("management:event_detail", args=[game.pk]))
+
+    def test_excludes_a_cancelled_game(self):
+        game = self.make_game(cancelled=True)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("referee_management")
+
+        self.assertNotContains(response, reverse("management:event_detail", args=[game.pk]))
+
+    def test_an_out_of_range_value_falls_back_to_the_default(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("referee_management")
+        response_with_bad_range = self.client.get(f"{reverse('management:referee_management')}?range=bogus", HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.context["range_choice"], "10")
+        self.assertEqual(response_with_bad_range.context["range_choice"], "10")
+
+    def test_a_valid_range_is_honoured(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.client.get(f"{reverse('management:referee_management')}?range=25", HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.context["range_choice"], "25")
+
+    def test_the_week_range_excludes_a_game_beyond_this_week(self):
+        today = timezone.localdate()
+        end_of_this_week = today + datetime.timedelta(days=6 - today.weekday())
+        game_this_week = self.make_game(start=timezone.now() + datetime.timedelta(minutes=5))
+        game_next_week = self.make_game(start=timezone.make_aware(datetime.datetime.combine(end_of_this_week + datetime.timedelta(days=1), datetime.time(10, 0))))
+        self.client.force_login(self.admin_user)
+
+        response = self.client.get(f"{reverse('management:referee_management')}?range=week", HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, reverse("management:event_detail", args=[game_this_week.pk]))
+        self.assertNotContains(response, reverse("management:event_detail", args=[game_next_week.pk]))
+
+    def test_kpis_count_games_by_referee_staffing(self):
+        self.make_game()
+        partially_staffed = self.make_game()
+        EventReferee.objects.create(event=partially_staffed, member=self.referee, assigned_by=self.admin_member)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("referee_management")
+
+        self.assertEqual(response.context["kpi_total"], 2)
+        self.assertEqual(response.context["kpi_no_referee"], 1)
+        self.assertEqual(response.context["kpi_understaffed"], 1)
+        self.assertEqual(response.context["kpi_fully_staffed"], 0)
+
+    def test_an_assigned_referee_gets_a_fee_form_for_the_dashboard_modal(self):
+        game = self.make_game()
+        EventReferee.objects.create(event=game, member=self.referee, assigned_by=self.admin_member)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("referee_management")
+
+        self.assertContains(response, 'name="fee"')
+
+    def test_assigning_from_the_dashboard_redirects_back_to_the_dashboard(self):
+        game = self.make_game()
+        self.client.force_login(self.admin_user)
+
+        response = self.client.post(
+            reverse("management:event_referee_assign", args=[game.pk]),
+            {"member": str(self.referee.pk), "next": reverse("management:referee_management")},
+            HTTP_HOST="ajax-united.rosterchief.app",
+        )
+
+        self.assertRedirects(response, reverse("management:referee_management"))
+        self.assertTrue(EventReferee.objects.filter(event=game, member=self.referee).exists())
+
+    def test_removing_from_the_dashboard_redirects_back_to_the_dashboard(self):
+        game = self.make_game()
+        assignment = EventReferee.objects.create(event=game, member=self.referee, assigned_by=self.admin_member)
+        self.client.force_login(self.admin_user)
+
+        response = self.client.post(
+            reverse("management:event_referee_remove", args=[game.pk, assignment.pk]),
+            {"next": reverse("management:referee_management")},
+            HTTP_HOST="ajax-united.rosterchief.app",
+        )
+
+        self.assertRedirects(response, reverse("management:referee_management"))
+        self.assertFalse(EventReferee.objects.filter(event=game, member=self.referee).exists())
+
+    def test_an_unsafe_next_is_ignored(self):
+        game = self.make_game()
+        self.client.force_login(self.admin_user)
+
+        response = self.client.post(
+            reverse("management:event_referee_assign", args=[game.pk]),
+            {"member": str(self.referee.pk), "next": "https://evil.example.com/"},
+            HTTP_HOST="ajax-united.rosterchief.app",
+        )
+
+        self.assertRedirects(response, reverse("management:event_detail", args=[game.pk]))
 
 
 class FeatureGatedSectionsTests(ManagementTestBase):

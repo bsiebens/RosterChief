@@ -15,7 +15,7 @@ from django.utils import timezone
 from authentication.models import User
 from club.models import Club, ClubMembership, Season
 from members.admin import FamilyAdmin
-from members.models import Family, FamilyMembership, Member
+from members.models import Family, FamilyMembership, Group, GroupMembership, Member
 from members.services import MemberImportResult
 
 
@@ -209,6 +209,62 @@ class FamilyMembershipModelTests(TestCase):
         self.assertTrue(Member.objects.filter(pk=member.pk).exists())
 
 
+class GroupModelTests(TestCase):
+    def setUp(self):
+        self.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+
+    def test_str_returns_name(self):
+        group = Group.objects.create(club=self.club, name="Coaches")
+        self.assertEqual(str(group), "Coaches")
+
+    def test_name_is_unique_per_club(self):
+        Group.objects.create(club=self.club, name="Coaches")
+
+        with self.assertRaises(IntegrityError):
+            Group.objects.create(club=self.club, name="Coaches")
+
+    def test_same_name_allowed_in_another_club(self):
+        other = Club.objects.create(name="Rival FC", slug="rival-fc")
+        Group.objects.create(club=self.club, name="Coaches")
+
+        Group.objects.create(club=other, name="Coaches")
+
+        self.assertEqual(Group.objects.filter(name="Coaches").count(), 2)
+
+
+class GroupMembershipModelTests(TestCase):
+    def setUp(self):
+        self.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        self.group = Group.objects.create(club=self.club, name="Referees")
+        self.member = Member.objects.create(first_name="Ref", last_name="Eree")
+
+    def test_str(self):
+        membership = GroupMembership.objects.create(group=self.group, member=self.member)
+        self.assertEqual(str(membership), "Referees - Ref Eree")
+
+    def test_member_unique_per_group(self):
+        GroupMembership.objects.create(group=self.group, member=self.member)
+
+        with self.assertRaises(IntegrityError):
+            GroupMembership.objects.create(group=self.group, member=self.member)
+
+    def test_same_member_can_join_multiple_groups(self):
+        other_group = Group.objects.create(club=self.club, name="Coaches")
+        GroupMembership.objects.create(group=self.group, member=self.member)
+
+        GroupMembership.objects.create(group=other_group, member=self.member)
+
+        self.assertEqual(self.member.group_memberships.count(), 2)
+
+    def test_deleting_group_cascades_to_memberships(self):
+        GroupMembership.objects.create(group=self.group, member=self.member)
+
+        self.group.delete()
+
+        self.assertFalse(GroupMembership.objects.exists())
+        self.assertTrue(Member.objects.filter(pk=self.member.pk).exists())
+
+
 class FamilyAdminTests(TestCase):
     def test_member_count_reflects_memberships(self):
         family = Family.objects.create(name="The Smiths")
@@ -241,6 +297,8 @@ class AdminSmokeTests(TestCase):
             ("members", "member"),
             ("members", "family"),
             ("members", "familymembership"),
+            ("members", "group"),
+            ("members", "groupmembership"),
         ):
             with self.subTest(model=model):
                 response = self.client.get(f"/admin/{app_label}/{model}/")

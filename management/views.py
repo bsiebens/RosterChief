@@ -1,3 +1,6 @@
+from datetime import timedelta
+
+from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import Count, ProtectedError, Q
 from django.http import HttpResponse
@@ -27,18 +30,20 @@ from club.services.fees import mark_as_paid, record_payment, remaining_balance
 from controlpanel.messages import notify
 from controlpanel.mixins import RedirectOnInvalidMixin
 from controlpanel.services.statistics import club_attention, club_charts, club_statistics
-from events.models import Attendance, Event, EventSeries, Location, Opponent
+from events.models import Attendance, Event, EventReferee, EventSeries, Location, Opponent
 from events.services.attendance import player_attendance_rankings, players_who_missed_recent_practices, team_attendance_rate, team_no_shows
 from events.services.competitions import CompetitionFetchError, fetch_game_info
 from events.services.rbihf_import import RBIHFImportError, apply_plan, build_plan, extract_team_id, fetch_html
 from events.services.recurrence import cancel_occurrence, detach_occurrence, generate_occurrences, propagate_series
+from events.services.referees import RefereeAssignmentError, add_external_referee, assign_referee, conflicting_events, eligible_referees, needs_referee_management, remove_referee, set_referee_fee
 from formbuilder.models import Form as FormBuilderForm
 from formbuilder.models import Submission
-from members.models import Family, FamilyMembership, Member
-from members.services.family import add_child_to_family, add_parent_to_family, attach_to_family, detach_from_family, grant_login, register_family
+from members.models import Family, FamilyMembership, Group, GroupMembership, Member
+from members.services.family import add_child_to_family, add_parent_to_family, attach_to_family, detach_from_family, get_or_create_login_user, grant_login, register_family
 from news.models import News, NewsPhoto
 from shop.models import Discount, Invoice, Order, Product
-from teams.models import Position, StaffAssignment, Team, TeamMembership, TeamPhoto
+from teams.models import Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
+from teams.services import eligible_roster_members
 
 from .bulk_import import build_member_import_template, parse_member_import_rows, read_member_import_workbook
 from .forms import (
@@ -48,12 +53,16 @@ from .forms import (
     ClubMembershipForm,
     ClubRoleAssignForm,
     EventForm,
+    EventRefereeFeeForm,
     EventSeriesForm,
+    ExternalRefereeForm,
     FamilyCreateForm,
     GrantLoginForm,
+    GroupForm,
     LocationForm,
     MemberForm,
     MemberImportUploadForm,
+    MemberRefereeEligibilityForm,
     NewsForm,
     NewsPhotoUploadForm,
     NewsPublishForm,
@@ -61,13 +70,14 @@ from .forms import (
     PositionForm,
     RBIHFImportForm,
     RecordFeePaymentForm,
+    RefereeLevelForm,
     SponsorForm,
     StaffAssignmentForm,
     TeamForm,
     TeamMembershipForm,
     TeamPhotoForm,
 )
-from .pdf import PDFExportError, membership_list_pdf
+from .pdf import PDFExportError, event_referee_form_pdf, membership_list_pdf
 from .recurrence_ui import describe_rrule
 
 
@@ -476,12 +486,31 @@ class MemberImportConfirmView(ClubAdminRequiredMixin, View):
         season = current_season(request.club)
 
         created = 0
+        families_by_group = {}
         with transaction.atomic():
             for result in results:
                 member = result["member"]
                 if member is None:
                     continue
+
+                family_role = result["family_role"]
+                if family_role in (FamilyMembership.FamilyRole.PARENT, FamilyMembership.FamilyRole.GUARDIAN) and member.email:
+                    # Give the parent/guardian a login before saving, same as
+                    # registering a family by hand -- get_or_create_login_user
+                    # reuses an existing account for that email rather than
+                    # risking a duplicate.
+                    member.user, _unused = get_or_create_login_user(member.email)
+
                 member.save()
+
+                family_group = result["family_group"]
+                if family_group:
+                    family = families_by_group.get(family_group)
+                    if family is None:
+                        family = Family.objects.create()
+                        families_by_group[family_group] = family
+                    FamilyMembership.objects.create(family=family, member=member, role=family_role)
+
                 if season is not None:
                     ClubMembership.objects.create(club=request.club, member=member, season=season, signed_up_at=timezone.localdate(), **result["membership_kwargs"])
                 created += 1
@@ -585,6 +614,9 @@ class MemberDetailView(ClubStaffRequiredMixin, DetailView):
         family_scoped_members = visible.filter(family_memberships__family_id__in=my_family_ids).distinct()
         family_groups, _ = group_by_family(family_scoped_members)
 
+        is_admin = is_club_admin(self.request.user, self.request.club)
+        referee_profile = RefereeProfile.objects.filter(member=self.object).select_related("level").first()
+
         return super().get_context_data(
             family_groups=family_groups,
             family_role_choices=FamilyMembership.FamilyRole.choices,
@@ -597,6 +629,8 @@ class MemberDetailView(ClubStaffRequiredMixin, DetailView):
             # signal the Personal information card uses to decide whether to show parent
             # contact numbers at all.
             guardians=self.object.guardians,
+            referee_profile=referee_profile,
+            referee_eligibility_form=MemberRefereeEligibilityForm(club=self.request.club, member=self.object) if is_admin else None,
             **kwargs,
         )
 
@@ -620,6 +654,31 @@ class MemberAttachToFamilyView(ClubAdminRequiredMixin, RedirectOnInvalidMixin, F
         family = attach_to_family(member, role=form.cleaned_data["role"], family=form.cleaned_data["family"])
         body = _("“%(member)s” is now part of %(family)s.") % {"member": member, "family": family}
         notify(self.request, f"s|{_('Added to family')}|{body}")
+        return redirect("management:member_detail", pk=member.pk)
+
+
+class MemberRefereeEligibilityUpdateView(ClubAdminRequiredMixin, RedirectOnInvalidMixin, FormView):
+    """Reachable only via the "Referee eligibility" modal on a member's page --
+    which teams' home games this member can be assigned to referee
+    (teams.RefereeProfile). Admin-only, same as Roles/Positions/Groups."""
+
+    form_class = MemberRefereeEligibilityForm
+    http_method_names = ["post"]
+    invalid_redirect_url_name = "management:member_detail"
+
+    def get_invalid_redirect_kwargs(self):
+        return {"pk": self.kwargs["pk"]}
+
+    def get_member(self):
+        return get_object_or_404(members_visible_to(self.request.user, self.request.club), pk=self.kwargs["pk"])
+
+    def get_form_kwargs(self):
+        return super().get_form_kwargs() | {"club": self.request.club, "member": self.get_member()}
+
+    def form_valid(self, form):
+        member = self.get_member()
+        form.save()
+        notify(self.request, f"s|{_('Referee eligibility updated')}|" + _("Updated which teams “%(member)s” can referee for.") % {"member": member})
         return redirect("management:member_detail", pk=member.pk)
 
 
@@ -847,6 +906,13 @@ class TeamDetailView(ClubStaffRequiredMixin, DetailView):
             bottom_attenders=bottom_attenders,
             missed_practices=missed_practices,
             no_shows=no_shows,
+            # None (not an empty queryset) signals "federation-managed" to the
+            # template, distinct from "club-managed, nobody eligible yet".
+            eligible_referees=(
+                Member.objects.filter(referee_profile__level__teams=team, referee_profile__valid_until__gte=timezone.localdate()).order_by("last_name", "first_name")
+                if team.referee_management == Team.RefereeManagement.CLUB
+                else None
+            ),
             **kwargs,
         )
 
@@ -1025,6 +1091,131 @@ class TeamStaffRemoveView(TeamManagerRequiredMixin, View):
         body = _("“%(member)s” removed from staff.") % {"member": member}
         notify(request, f"w|{_('Staff removed')}|{body}")
         return redirect(f"{reverse('management:team_detail', args=[pk])}?season={season_id}")
+
+
+class TeamBulkAddView(TeamManagerRequiredMixin, View):
+    """Add many people to a team's roster and/or staff in one go -- the one-by-one
+    modals (TeamRosterAddView / TeamStaffAddView) don't scale past a handful of
+    names. Every eligible member gets an independent "add as player" and "add as
+    staff" pair of controls, so one person can be added as both in a single submit
+    (a playing coach, most often).
+
+    Same eligibility rule as the single-add forms (eligible_roster_members: active
+    -- i.e. paid -- for this club this season or next), enforced server-side
+    regardless of what the client submits.
+    """
+
+    template_name = "management/team_bulk_add.html"
+
+    def get_team(self):
+        return get_object_or_404(Team.objects.filter(club=self.request.club), pk=self.kwargs["pk"])
+
+    def get_season(self):
+        return get_object_or_404(Season.objects.filter(club=self.request.club), pk=self.kwargs["season_pk"])
+
+    def get_context_data(self, **kwargs):
+        team = self.get_team()
+        season = self.get_season()
+        club = self.request.club
+
+        members = eligible_roster_members(club).order_by("last_name", "first_name")
+        search = self.request.GET.get("q", "").strip()
+        if search:
+            members = members.filter(Q(first_name__icontains=search) | Q(last_name__icontains=search))
+
+        rostered = set(TeamMembership.objects.filter(team=team, season=season).values_list("member_id", flat=True))
+        staffed = set(StaffAssignment.objects.filter(team=team, season=season).values_list("member_id", flat=True))
+        members = list(members)
+        for member in members:
+            member.already_player = member.pk in rostered
+            member.already_staff = member.pk in staffed
+
+        return {
+            "team": team,
+            "season": season,
+            "members": members,
+            "search": search,
+            "player_positions": Position.objects.filter(club=club, staff_position=False),
+            "staff_positions": Position.objects.filter(club=club, staff_position=True),
+            **kwargs,
+        }
+
+    def get(self, request, *args, **kwargs):
+        return render(request, self.template_name, self.get_context_data())
+
+    def post(self, request, *args, **kwargs):
+        team = self.get_team()
+        season = self.get_season()
+        club = self.request.club
+
+        rostered = set(TeamMembership.objects.filter(team=team, season=season).values_list("member_id", flat=True))
+        staffed = set(StaffAssignment.objects.filter(team=team, season=season).values_list("member_id", flat=True))
+        used_jerseys = set(TeamMembership.objects.filter(team=team, season=season, jersey_number__isnull=False).values_list("jersey_number", flat=True))
+        player_positions = {str(position.pk): position for position in Position.objects.filter(club=club, staff_position=False)}
+        staff_positions = {str(position.pk): position for position in Position.objects.filter(club=club, staff_position=True)}
+
+        players_added = staff_added = 0
+        errors = []
+
+        # Recomputed server-side from eligible_roster_members, never from client
+        # input -- a submitted member id that isn't actually eligible (lapsed
+        # between page load and submit, say) is silently skipped rather than
+        # trusted.
+        for member in eligible_roster_members(club):
+            key = str(member.pk)
+
+            if member.pk not in rostered and request.POST.get(f"player_{key}"):
+                position = player_positions.get(request.POST.get(f"player_position_{key}", ""))
+                if position is None:
+                    errors.append(_("%(member)s: choose a position to add them as a player.") % {"member": member})
+                else:
+                    jersey_raw = request.POST.get(f"jersey_{key}", "").strip()
+                    jersey_number, jersey_error = None, False
+                    if jersey_raw:
+                        try:
+                            jersey_number = int(jersey_raw)
+                        except ValueError:
+                            jersey_error = True
+                            errors.append(_("%(member)s: jersey number must be a whole number.") % {"member": member})
+
+                    if not jersey_error:
+                        if jersey_number is not None and jersey_number in used_jerseys:
+                            errors.append(_("%(member)s: jersey #%(number)s is already taken this season.") % {"member": member, "number": jersey_number})
+                        else:
+                            membership = TeamMembership(team=team, season=season, member=member, position=position, jersey_number=jersey_number)
+                            try:
+                                membership.full_clean()
+                                membership.save()
+                            except (ValidationError, IntegrityError):
+                                errors.append(_("%(member)s: could not be added as a player -- please check the details and try again.") % {"member": member})
+                            else:
+                                players_added += 1
+                                if jersey_number is not None:
+                                    used_jerseys.add(jersey_number)
+
+            if member.pk not in staffed and request.POST.get(f"staff_{key}"):
+                position = staff_positions.get(request.POST.get(f"staff_position_{key}", ""))
+                if position is None:
+                    errors.append(_("%(member)s: choose a position to add them as staff.") % {"member": member})
+                else:
+                    assignment = StaffAssignment(team=team, season=season, member=member, position=position)
+                    try:
+                        assignment.full_clean()
+                        assignment.save()
+                    except (ValidationError, IntegrityError):
+                        errors.append(_("%(member)s: could not be assigned as staff -- please check the details and try again.") % {"member": member})
+                    else:
+                        staff_added += 1
+
+        if players_added or staff_added:
+            body = _("%(players)s added as player(s), %(staff)s added as staff.") % {"players": players_added, "staff": staff_added}
+            notify(request, f"s|{_('Team updated')}|{body}")
+        for error in errors:
+            notify(request, f"e|{_('Could not add')}|{error}")
+        if not players_added and not staff_added and not errors:
+            notify(request, f"i|{_('Nothing to add')}|{_('No one was selected.')}")
+
+        return redirect(f"{reverse('management:team_detail', args=[team.pk])}?season={season.pk}")
 
 
 class TeamPhotoSetView(TeamManagerRequiredMixin, FormView):
@@ -1315,6 +1506,200 @@ class PositionUpdateView(ClubAdminRequiredMixin, UpdateView):
         return super().get_context_data(update_view=True, **kwargs)
 
 
+class RefereeLevelListView(ClubStaffRequiredMixin, ListView):
+    """Visible to any staff, same reasoning as PositionListView; creating/
+    editing a level is admin-only."""
+
+    template_name = "management/referee_level_list.html"
+    context_object_name = "levels"
+
+    def get_queryset(self):
+        return RefereeLevel.objects.filter(club=self.request.club).prefetch_related("teams")
+
+
+class RefereeLevelCreateView(ClubAdminRequiredMixin, CreateView):
+    model = RefereeLevel
+    form_class = RefereeLevelForm
+    template_name = "management/referee_level_form.html"
+
+    def get_form_kwargs(self):
+        return super().get_form_kwargs() | {"club": self.request.club}
+
+    def form_valid(self, form):
+        form.instance.club = self.request.club
+        response = super().form_valid(form)
+        body = _("“%(level)s” created.") % {"level": self.object}
+        notify(self.request, f"s|{_('Referee level created')}|{body}")
+        return response
+
+    def get_success_url(self):
+        return reverse("management:referee_level_list")
+
+
+class RefereeLevelUpdateView(ClubAdminRequiredMixin, UpdateView):
+    model = RefereeLevel
+    form_class = RefereeLevelForm
+    template_name = "management/referee_level_form.html"
+
+    def get_queryset(self):
+        return RefereeLevel.objects.filter(club=self.request.club)
+
+    def get_form_kwargs(self):
+        return super().get_form_kwargs() | {"club": self.request.club}
+
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        body = _("“%(level)s” updated.") % {"level": self.object}
+        notify(self.request, f"s|{_('Referee level updated')}|{body}")
+        return response
+
+    def get_success_url(self):
+        return reverse("management:referee_level_list")
+
+    def get_context_data(self, **kwargs):
+        return super().get_context_data(update_view=True, **kwargs)
+
+
+class RefereeListView(ClubStaffRequiredMixin, ListView):
+    """Every referee in the club, at a glance: level, eligible teams, validity
+    -- see teams.RefereeProfile. Read-only; editing happens on the member's
+    own page (MemberRefereeEligibilityUpdateView)."""
+
+    template_name = "management/referee_list.html"
+    context_object_name = "referees"
+
+    def get_queryset(self):
+        members = members_visible_to(self.request.user, self.request.club).filter(referee_profile__isnull=False)
+        return members.select_related("referee_profile", "referee_profile__level").prefetch_related("referee_profile__level__teams").order_by("last_name", "first_name")
+
+
+# --- Groups: a generic named collection of members (all coaches, all team managers,
+# a referee pool, ...) -- admin-only, like Positions/Roles above -------------------
+
+
+class GroupListView(ClubAdminRequiredMixin, ListView):
+    template_name = "management/group_list.html"
+    context_object_name = "groups"
+
+    def get_queryset(self):
+        return Group.objects.filter(club=self.request.club).annotate(member_count=Count("memberships", distinct=True))
+
+
+class GroupCreateView(ClubAdminRequiredMixin, CreateView):
+    model = Group
+    form_class = GroupForm
+    template_name = "management/group_form.html"
+
+    def form_valid(self, form):
+        form.instance.club = self.request.club
+        response = super().form_valid(form)
+        body = _("“%(group)s” created.") % {"group": self.object}
+        notify(self.request, f"s|{_('Group created')}|{body}")
+        return response
+
+    def get_success_url(self):
+        return reverse("management:group_detail", args=[self.object.pk])
+
+
+class GroupUpdateView(ClubAdminRequiredMixin, UpdateView):
+    model = Group
+    form_class = GroupForm
+    template_name = "management/group_form.html"
+
+    def get_queryset(self):
+        return Group.objects.filter(club=self.request.club)
+
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        body = _("“%(group)s” updated.") % {"group": self.object}
+        notify(self.request, f"s|{_('Group updated')}|{body}")
+        return response
+
+    def get_success_url(self):
+        return reverse("management:group_detail", args=[self.object.pk])
+
+    def get_context_data(self, **kwargs):
+        return super().get_context_data(update_view=True, **kwargs)
+
+
+class GroupDeleteView(ClubAdminRequiredMixin, View):
+    def post(self, request, pk):
+        group = get_object_or_404(Group.objects.filter(club=request.club), pk=pk)
+        name = str(group)
+        group.delete()
+        notify(request, f"w|{_('Group deleted')}|" + _("“%(group)s” deleted.") % {"group": name})
+        return redirect("management:group_list")
+
+
+class GroupDetailView(ClubAdminRequiredMixin, DetailView):
+    template_name = "management/group_detail.html"
+    context_object_name = "group"
+
+    def get_queryset(self):
+        return Group.objects.filter(club=self.request.club)
+
+    def get_context_data(self, **kwargs):
+        return super().get_context_data(
+            memberships=GroupMembership.objects.filter(group=self.object).select_related("member"),
+            **kwargs,
+        )
+
+
+class GroupBulkAddView(ClubAdminRequiredMixin, View):
+    """Add many members to a group in one go -- mirrors TeamBulkAddView's
+    checkbox-table pattern, minus the player/staff split (group membership has
+    no per-member attributes)."""
+
+    template_name = "management/group_bulk_add.html"
+
+    def get_group(self):
+        return get_object_or_404(Group.objects.filter(club=self.request.club), pk=self.kwargs["pk"])
+
+    def get_context_data(self, **kwargs):
+        group = self.get_group()
+        members = members_visible_to(self.request.user, self.request.club).order_by("last_name", "first_name")
+        search = self.request.GET.get("q", "").strip()
+        if search:
+            members = members.filter(Q(first_name__icontains=search) | Q(last_name__icontains=search))
+
+        existing_ids = set(GroupMembership.objects.filter(group=group).values_list("member_id", flat=True))
+        members = list(members)
+        for member in members:
+            member.already_in_group = member.pk in existing_ids
+
+        return {"group": group, "members": members, "search": search, **kwargs}
+
+    def get(self, request, *args, **kwargs):
+        return render(request, self.template_name, self.get_context_data())
+
+    def post(self, request, *args, **kwargs):
+        group = self.get_group()
+        existing_ids = set(GroupMembership.objects.filter(group=group).values_list("member_id", flat=True))
+
+        added = 0
+        for member in members_visible_to(request.user, request.club):
+            if member.pk not in existing_ids and request.POST.get(f"member_{member.pk}"):
+                GroupMembership.objects.create(group=group, member=member)
+                added += 1
+
+        if added:
+            notify(request, f"s|{_('Group updated')}|" + _("%(count)s member(s) added to “%(group)s”.") % {"count": added, "group": group})
+        else:
+            notify(request, f"i|{_('Nothing to add')}|{_('No one was selected.')}")
+
+        return redirect("management:group_detail", pk=group.pk)
+
+
+class GroupMemberRemoveView(ClubAdminRequiredMixin, View):
+    def post(self, request, pk, membership_pk):
+        group = get_object_or_404(Group.objects.filter(club=request.club), pk=pk)
+        membership = get_object_or_404(GroupMembership.objects.filter(group=group), pk=membership_pk)
+        member = membership.member
+        membership.delete()
+        notify(request, f"w|{_('Removed from group')}|" + _("“%(member)s” removed from “%(group)s”.") % {"member": member, "group": group})
+        return redirect("management:group_detail", pk=group.pk)
+
+
 # --- News: draft/edit is broad (any coach_manager/editor/admin), but only EDITOR/ADMIN
 # may publish -- the release flow the news app exists for ---------------------------
 
@@ -1596,10 +1981,251 @@ class EventDetailView(ClubStaffRequiredMixin, DetailView):
         # per-status sections, so there's exactly one query, not two.
         attendance_groups = [{"value": value, "label": label, "rows": rows_by_status.get(value, [])} for value, label in Attendance.AttendanceStatus.choices]
 
+        # Admin-only for now, unlike can_manage's other actions (edit, fetch info, ...) --
+        # a team manager/coach still sees the Referees panel (who's assigned, capacity),
+        # just not the assign/remove controls. See EventRefereeAssignView/RemoveView.
+        can_manage_referees = is_club_admin(user, club)
+
+        referee_management_needed = needs_referee_management(event)
+        referees = []
+        referee_candidates = []
+        referees_full = False
+        if referee_management_needed:
+            referees = list(event.referees.select_related("member", "assigned_by").order_by("member__last_name", "member__first_name"))
+            referees_full = len(referees) >= event.max_referees
+            if can_manage_referees:
+                for referee in referees:
+                    referee.fee_form = EventRefereeFeeForm(instance=referee)
+            if can_manage_referees and not referees_full:
+                for candidate in eligible_referees(event):
+                    conflicts = conflicting_events(candidate, event)
+                    candidate.has_conflict = bool(conflicts)
+                    candidate.conflict_titles = ", ".join(conflict.title for conflict in conflicts)
+                    referee_candidates.append(candidate)
+
         return super().get_context_data(
             can_manage=can_manage,
+            can_manage_referees=can_manage_referees,
+            referee_management_needed=referee_management_needed,
             attendance_groups=attendance_groups,
             has_attendance_rows=any(group["rows"] for group in attendance_groups),
+            referees=referees,
+            referee_candidates=referee_candidates,
+            referees_full=referees_full,
+            **kwargs,
+        )
+
+
+def _redirect_next_or(request, fallback_url):
+    """`next` (POST body, or the query string -- the fee-edit modal posts to a
+    plain action_url with no room to inject a hidden field, so it carries
+    `next` there instead) if it's safe to redirect to, else `fallback_url`.
+    Lets the same assign/remove/fee endpoints be posted to from more than one
+    page (the event detail page, and the referee management dashboard) and
+    return the visitor to wherever they actually came from."""
+    next_url = request.POST.get("next") or request.GET.get("next")
+    if next_url and url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}, require_https=request.is_secure()):
+        return redirect(next_url)
+    return redirect(fallback_url)
+
+
+class EventRefereeAssignView(ClubAdminRequiredMixin, View):
+    """Reachable via the assign control on the event detail page's Referees
+    panel, or the referee management dashboard -- POST-only, no standalone
+    template. Admin-only for now (unlike most event actions, which a team
+    manager can also do) -- see EventDetailView's can_manage_referees; team
+    managers/coaches still see the panel, just not the assign/remove
+    controls."""
+
+    def get_event(self):
+        return get_object_or_404(Event.objects.filter(club=self.request.club), pk=self.kwargs["pk"])
+
+    def post(self, request, pk):
+        event = self.get_event()
+        member = get_object_or_404(eligible_referees(event), pk=request.POST.get("member"))
+        assigned_by = Member.objects.filter(user=request.user).first()
+
+        try:
+            assign_referee(event, member, assigned_by=assigned_by)
+        except RefereeAssignmentError as error:
+            notify(request, f"e|{_('Could not assign referee')}|{error}")
+        else:
+            notify(request, f"s|{_('Referee assigned')}|" + _("“%(member)s” will referee this game.") % {"member": member})
+
+        return _redirect_next_or(request, reverse("management:event_detail", args=[event.pk]))
+
+
+class EventRefereeRemoveView(ClubAdminRequiredMixin, View):
+    def get_event(self):
+        return get_object_or_404(Event.objects.filter(club=self.request.club), pk=self.kwargs["pk"])
+
+    def post(self, request, pk, referee_pk):
+        event = self.get_event()
+        referee = get_object_or_404(EventReferee.objects.filter(event=event), pk=referee_pk)
+        name = referee.display_name
+        remove_referee(referee)
+        notify(request, f"w|{_('Referee removed')}|" + _("“%(name)s” is no longer refereeing this game.") % {"name": name})
+        return _redirect_next_or(request, reverse("management:event_detail", args=[event.pk]))
+
+
+class EventRefereeAddExternalView(ClubAdminRequiredMixin, View):
+    """Log a non-member referee (federation-appointed, most often) against a
+    game -- reachable from the same Referees panel as EventRefereeAssignView,
+    on both the event detail page and the referee management dashboard."""
+
+    def get_event(self):
+        return get_object_or_404(Event.objects.filter(club=self.request.club), pk=self.kwargs["pk"])
+
+    def post(self, request, pk):
+        event = self.get_event()
+        form = ExternalRefereeForm(request.POST)
+        fallback = _redirect_next_or(request, reverse("management:event_detail", args=[event.pk]))
+
+        if not form.is_valid():
+            notify(request, f"e|{_('Could not add referee')}|{_('A name is required.')}")
+            return fallback
+
+        assigned_by = Member.objects.filter(user=request.user).first()
+        try:
+            add_external_referee(event, form.cleaned_data["name"], assigned_by=assigned_by)
+        except RefereeAssignmentError as error:
+            notify(request, f"e|{_('Could not add referee')}|{error}")
+        else:
+            notify(request, f"s|{_('Referee added')}|" + _("“%(name)s” will referee this game.") % {"name": form.cleaned_data["name"]})
+
+        return fallback
+
+
+class EventRefereeFeeUpdateView(ClubAdminRequiredMixin, FormView):
+    """Set one referee assignment's fee/km/rate -- reachable via the "Fee"
+    modal on the Referees panel. POST-only, no standalone template. Not
+    RedirectOnInvalidMixin: that redirects to a fixed url name, but this view
+    (like the assign/remove ones) needs to honour the next-aware fallback so
+    it works from both the event detail page and the dashboard."""
+
+    form_class = EventRefereeFeeForm
+    http_method_names = ["post"]
+
+    def get_event(self):
+        return get_object_or_404(Event.objects.filter(club=self.request.club), pk=self.kwargs["pk"])
+
+    def get_referee(self):
+        return get_object_or_404(EventReferee.objects.filter(event=self.get_event()), pk=self.kwargs["referee_pk"])
+
+    def get_fallback(self):
+        return _redirect_next_or(self.request, reverse("management:event_detail", args=[self.kwargs["pk"]]))
+
+    def get_form_kwargs(self):
+        return super().get_form_kwargs() | {"instance": self.get_referee()}
+
+    def form_invalid(self, form):
+        for error in form.errors.values():
+            notify(self.request, f"e|{_('Could not update fee')}|{' '.join(error)}")
+        return self.get_fallback()
+
+    def form_valid(self, form):
+        referee = self.get_referee()
+        set_referee_fee(referee, fee=form.cleaned_data["fee"], km=form.cleaned_data["km"], km_rate=form.cleaned_data["km_rate"])
+        notify(self.request, f"s|{_('Fee updated')}|" + _("Updated the fee for “%(name)s”.") % {"name": referee.display_name})
+        return self.get_fallback()
+
+
+class EventRefereeFormPdfView(ClubAdminRequiredMixin, View):
+    """Downloadable PDF of the referee payment form for one game, modeled on
+    the club's existing paper form -- club header (legal name if set, else
+    plain name; address from the club's home Location, not this specific
+    event's, so the form still reads right even if called from a page where
+    the event's own location happens to be blank) plus this game's details,
+    referees and their fee/km breakdown, and blank signature lines."""
+
+    def get(self, request, pk):
+        event = get_object_or_404(Event.objects.filter(club=request.club).prefetch_related("teams", "referees__member"), pk=pk)
+        home_location = Location.objects.filter(club=request.club, is_home=True).first()
+        context = {"club": request.club, "event": event, "referees": list(event.referees.all()), "home_location": home_location}
+
+        try:
+            pdf = event_referee_form_pdf(context)
+        except PDFExportError as error:
+            notify(request, f"e|{_('PDF unavailable')}|{error}")
+            return redirect(reverse("management:event_detail", args=[event.pk]))
+
+        response = HttpResponse(pdf, content_type="application/pdf")
+        response["Content-Disposition"] = f'attachment; filename="referee-form-{event.pk}.pdf"'
+        return response
+
+
+class RefereeManagementDashboardView(ClubAdminRequiredMixin, TemplateView):
+    """One-stop admin view of every upcoming home game that needs a
+    club-arranged referee (federation-managed teams never appear here, see
+    events.services.referees.needs_referee_management), with inline
+    assign/remove -- posts to the same EventRefereeAssignView/RemoveView the
+    event detail page uses, via the shared _referee_assignment_panel include,
+    and returns here afterwards rather than to the event detail page.
+
+    The `range` GET param picks either a calendar window ("week"/"two_weeks",
+    both anchored on the ISO week so "this week" always means Mon-Sun of the
+    current week regardless of what weekday it is today) or a flat count of
+    upcoming games -- buttons in the template, not a dropdown, since there
+    are only a handful of sensible choices."""
+
+    template_name = "management/referee_management.html"
+    RANGE_CHOICES = ["week", "two_weeks", "10", "25", "50"]
+    DEFAULT_RANGE = "10"
+
+    def get_range(self):
+        value = self.request.GET.get("range", self.DEFAULT_RANGE)
+        return value if value in self.RANGE_CHOICES else self.DEFAULT_RANGE
+
+    def get_context_data(self, **kwargs):
+        club = self.request.club
+        range_choice = self.get_range()
+
+        queryset = (
+            Event.objects.filter(club=club, kind=Event.EventKind.GAME, cancelled=False, location__is_home=True, start__gte=timezone.now(), teams__referee_management=Team.RefereeManagement.CLUB)
+            .distinct()
+            .select_related("location", "opponent")
+            .prefetch_related("teams", "referees__member", "referees__assigned_by")
+            .order_by("start")
+        )
+
+        if range_choice in ("week", "two_weeks"):
+            today = timezone.localdate()
+            end_of_this_week = today + timedelta(days=6 - today.weekday())
+            end_date = end_of_this_week + timedelta(days=7) if range_choice == "two_weeks" else end_of_this_week
+            games = list(queryset.filter(start__date__lte=end_date))
+        else:
+            games = list(queryset[: int(range_choice)])
+
+        kpi_no_referee = 0
+        kpi_understaffed = 0
+        kpi_fully_staffed = 0
+
+        for game in games:
+            game.referee_rows = list(game.referees.all())
+            for referee in game.referee_rows:
+                referee.fee_form = EventRefereeFeeForm(instance=referee)
+            game.referees_full = len(game.referee_rows) >= game.max_referees
+            game.referee_candidates = []
+            if not game.referee_rows:
+                kpi_no_referee += 1
+            elif not game.referees_full:
+                kpi_understaffed += 1
+            else:
+                kpi_fully_staffed += 1
+            if not game.referees_full:
+                for candidate in eligible_referees(game):
+                    conflicts = conflicting_events(candidate, game)
+                    candidate.has_conflict = bool(conflicts)
+                    candidate.conflict_titles = ", ".join(conflict.title for conflict in conflicts)
+                    game.referee_candidates.append(candidate)
+
+        return super().get_context_data(
+            games=games,
+            range_choice=range_choice,
+            kpi_total=len(games),
+            kpi_no_referee=kpi_no_referee,
+            kpi_understaffed=kpi_understaffed,
+            kpi_fully_staffed=kpi_fully_staffed,
             **kwargs,
         )
 
