@@ -541,6 +541,18 @@ row today — there's no check-in UI yet, only Django admin); a "no-show" is
 a missing check-in. See `events/services/attendance.py::record_check_in` and
 `management/views.py::TeamDetailView`'s attendance panel.
 
+**As built, a GAME-kind `Event` defaults its own `end`** — `Event.save()` sets
+`end = start + events.models.ASSUMED_EVENT_DURATION` (2 hours) whenever a game is saved
+with no explicit `end`, and never overwrites one that's already set. Other event kinds are
+untouched — `end` stays blank for them unless explicitly given one. The public games API
+(`events/api.py`, `GET /games/upcoming/`) reads through this: it returns every non-cancelled
+game/tournament that **hasn't finished yet** (`end` — explicit, defaulted, or, for the rare
+un-saved-since / non-GAME row still lacking one, `start` within the assumed window — is at or
+after now), not just ones that haven't started, so a game already in progress keeps showing up
+until its window closes; `GameOut.end` is always populated the same way, and `status` treats
+"started but before its (assumed) end, not flagged `is_live`" as `"live"` too, so a game
+`/games/upcoming/` still lists never turns around and calls itself `"finished"`.
+
 **As built, `Event` also carries `max_referees`** (`PositiveSmallIntegerField`, default
 `2`) and **`EventReferee`** *(built)* — referee sign-up/assignment for a **home game**
 only (`Event.is_home_game`), staff-assigned for now (self-service subscribe is a planned
@@ -597,9 +609,11 @@ EventReferee(UUIDModel)            # club implied by event
   event)` finds other events overlapping this one's time window where the member is part of
   the expected audience (`effective_members`, reused from the attendance service above) — the
   UI shows it (⚠ + tooltip on the assign control) but a human decides; an event with no
-  explicit `end` is assumed to run `ASSUMED_EVENT_DURATION` (2 hours) for this check only,
-  never written back to the event. External referees have no conflict check (no member to
-  check a schedule against).
+  explicit `end` is assumed to run `events.models.ASSUMED_EVENT_DURATION` (2 hours) for this
+  check. External referees have no conflict check (no member to check a schedule against).
+  `ASSUMED_EVENT_DURATION` is also what `Event.save()` writes into `end` for a GAME with none
+  set (below) — the *other* event kinds still leave `end` blank rather than defaulting it, so
+  this read-time fallback still matters for them.
 - **`assigned_by` is required for now** (admin-only assignment). A future self-service
   sign-up would make it nullable to mean "the referee signed themself up" rather than adding
   a parallel model — see §7.

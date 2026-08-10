@@ -21,21 +21,16 @@ only (still counts against Event.max_referees, still capacity-checked), for
 e.g. a federation-appointed referee the club still needs to pay.
 """
 
-import datetime
 from decimal import Decimal
 
 from django.db import transaction
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
-from events.models import Event, EventReferee
+from events.models import ASSUMED_EVENT_DURATION, Event, EventReferee
 from events.services.attendance import effective_members
 from members.models import Member
 from teams.models import Team
-
-# Used only to give an event with no explicit `end` a time window for the
-# overlap check below -- never written back to the event itself.
-ASSUMED_EVENT_DURATION = datetime.timedelta(hours=2)
 
 
 class RefereeAssignmentError(Exception):

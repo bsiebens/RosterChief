@@ -94,6 +94,32 @@ class EventModelTests(EventsTestBase):
         self.assertFalse(game_with_no_location.is_home_game)
         self.assertFalse(training_at_home_ground.is_home_game)
 
+    def test_a_game_with_no_end_gets_a_two_hour_default_on_save(self):
+        game = self.make_event(kind=Event.EventKind.GAME, start=self.future)
+
+        self.assertEqual(game.end, self.future + timedelta(hours=2))
+
+    def test_an_explicit_end_is_not_overridden(self):
+        explicit_end = self.future + timedelta(hours=5)
+
+        game = self.make_event(kind=Event.EventKind.GAME, start=self.future, end=explicit_end)
+
+        self.assertEqual(game.end, explicit_end)
+
+    def test_a_non_game_event_is_left_with_no_end(self):
+        training = self.make_event(kind=Event.EventKind.TRAINING, start=self.future)
+
+        self.assertIsNone(training.end)
+
+    def test_re_saving_a_game_does_not_move_its_end(self):
+        game = self.make_event(kind=Event.EventKind.GAME, start=self.future)
+        original_end = game.end
+
+        game.title = "Renamed"
+        game.save()
+
+        self.assertEqual(game.end, original_end)
+
 
 class CompetitionModelTests(EventsTestBase):
     def test_sport_type_defaults_to_other(self):

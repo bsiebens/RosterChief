@@ -356,6 +356,32 @@ class GamesApiTests(ApiTestBase):
 
         self.assertEqual(self.api_get("/games/upcoming/").json(), [])
 
+    def test_upcoming_includes_a_game_already_in_progress(self):
+        # Started 30 minutes ago, no explicit end -- the assumed 2h window
+        # means it isn't finished yet, so it must still show up.
+        self.make_game(start=timezone.now() - datetime.timedelta(minutes=30))
+
+        games = self.api_get("/games/upcoming/").json()
+
+        self.assertEqual(len(games), 1)
+        self.assertEqual(games[0]["status"], "live")
+
+    def test_upcoming_excludes_a_game_past_its_explicit_end(self):
+        game = self.make_game(start=timezone.now() - datetime.timedelta(hours=3))
+        game.end = timezone.now() - datetime.timedelta(hours=1)
+        game.save()
+
+        self.assertEqual(self.api_get("/games/upcoming/").json(), [])
+
+    def test_the_response_includes_an_end_time(self):
+        game = self.make_game()
+
+        end = self.api_get("/games/upcoming/").json()[0]["end"]
+
+        # JSON round-trips to millisecond precision -- compare with a small
+        # tolerance rather than an exact microsecond match.
+        self.assertLess(abs((datetime.datetime.fromisoformat(end) - game.end).total_seconds()), 1)
+
     def test_upcoming_includes_tournaments(self):
         self.make_game(kind=Event.EventKind.TOURNAMENT)
 

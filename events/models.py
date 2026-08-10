@@ -1,3 +1,4 @@
+import datetime
 from decimal import Decimal
 
 from django.conf import settings
@@ -10,6 +11,11 @@ from club.models import Club, Season
 from members.models import Member
 from rosterchief.base import ClubScopedModel, UUIDModel, validate_club_scope
 from teams.models import Team
+
+#: How long a game is assumed to run when no explicit `end` is given -- set on
+#: GAME events at save time (Event.save() below), and reused as a read-time-only
+#: fallback for other event kinds by events.services.referees.event_window().
+ASSUMED_EVENT_DURATION = datetime.timedelta(hours=2)
 
 
 class Opponent(ClubScopedModel):
@@ -100,6 +106,11 @@ class Event(ClubScopedModel):
 
     def clean(self):
         validate_club_scope(self, self.club_id, same_club_fields=("season", "location", "opponent"))
+
+    def save(self, *args, **kwargs):
+        if self.kind == self.EventKind.GAME and self.end is None:
+            self.end = self.start + ASSUMED_EVENT_DURATION
+        super().save(*args, **kwargs)
 
     @property
     def is_home_game(self) -> bool:

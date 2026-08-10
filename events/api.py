@@ -16,7 +16,7 @@ from api.errors import require_club
 from club.services.access import current_season
 from teams.models import Team
 
-from .models import Event
+from .models import ASSUMED_EVENT_DURATION, Event
 
 router = Router(tags=["games"])
 
@@ -49,6 +49,7 @@ class TeamRefOut(Schema):
 class GameOut(Schema):
     id: uuid.UUID
     start: datetime
+    end: datetime
     location: LocationOut | None
     home_team: TeamRefOut | None
     away_team: TeamRefOut | None
@@ -82,10 +83,19 @@ def _to_game_out(event, request, club, team=None) -> GameOut:
         home_team, away_team = opponent_ref, team_ref
         home_score, away_score = event.score_against, event.score_for
 
+    now = timezone.now()
+    effective_end = event.end or (event.start + ASSUMED_EVENT_DURATION)
+
     if event.is_live:
         status = "live"
-    elif event.start > timezone.now():
+    elif event.start > now:
         status = "upcoming"
+    elif effective_end > now:
+        # Started, not manually flagged live, but our own assumed/explicit
+        # window says it isn't over yet -- matches list_upcoming_games'
+        # "not finished" inclusion below, so a game returned there never
+        # turns around and calls itself "finished".
+        status = "live"
     else:
         status = "finished"
 
@@ -96,6 +106,7 @@ def _to_game_out(event, request, club, team=None) -> GameOut:
     return GameOut(
         id=event.pk,
         start=event.start,
+        end=effective_end,
         location=location,
         home_team=home_team,
         away_team=away_team,
@@ -109,11 +120,20 @@ def _to_game_out(event, request, club, team=None) -> GameOut:
 
 @router.get("/games/upcoming/", response=list[GameOut], summary="Upcoming games")
 def list_upcoming_games(request, count: int = DEFAULT_UPCOMING_COUNT):
-    """The next `count` non-cancelled upcoming games and tournaments, club-wide."""
+    """The next `count` non-cancelled games and tournaments that aren't finished
+    yet, club-wide -- a game already in progress (started, not yet past its
+    explicit or assumed end) still counts, not just ones that haven't started."""
     club = require_club(request)
     count = max(1, min(count, MAX_UPCOMING_COUNT))
+    now = timezone.now()
 
-    events = Event.objects.filter(club=club, kind__in=UPCOMING_KINDS, cancelled=False, start__gte=timezone.now()).select_related("opponent", "location").prefetch_related("teams").order_by("start")[:count]
+    events = (
+        Event.objects.filter(club=club, kind__in=UPCOMING_KINDS, cancelled=False)
+        .filter(Q(end__gte=now) | Q(end__isnull=True, start__gte=now - ASSUMED_EVENT_DURATION))
+        .select_related("opponent", "location")
+        .prefetch_related("teams")
+        .order_by("start")[:count]
+    )
 
     return [_to_game_out(event, request, club) for event in events]
 

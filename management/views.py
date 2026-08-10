@@ -78,7 +78,7 @@ from .forms import (
     TeamMembershipForm,
     TeamPhotoForm,
 )
-from .pdf import PDFExportError, event_referee_form_pdf, membership_list_pdf
+from .pdf import PDFExportError, event_referee_form_pdf, membership_list_pdf, referee_form_colors
 from .recurrence_ui import describe_rrule
 
 
@@ -2143,7 +2143,7 @@ class EventRefereeFormPdfView(ClubAdminRequiredMixin, View):
         event = get_object_or_404(Event.objects.filter(club=request.club).prefetch_related("teams", "referees__member"), pk=pk)
         home_location = Location.objects.filter(club=request.club, is_home=True).first()
         referees = list(event.referees.all())
-        context = {"club": request.club, "event": event, "referees": referees, "home_location": home_location, "grand_total": sum((referee.total_payable for referee in referees), Decimal("0"))}
+        context = {"club": request.club, "event": event, "referees": referees, "home_location": home_location, "grand_total": sum((referee.total_payable for referee in referees), Decimal("0"))} | referee_form_colors(request.club)
 
         try:
             pdf = event_referee_form_pdf(context)

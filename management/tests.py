@@ -23,7 +23,7 @@ from events.models import Attendance, Competition, Event, EventReferee, EventSer
 from events.services.rbihf_import import RBIHFImportError
 from events.services.recurrence import detach_occurrence, generate_occurrences
 from management.bulk_import import TEMPLATE_COLUMNS
-from management.pdf import PDFExportError, render_pdf
+from management.pdf import PDFExportError, _tint_with_white, referee_form_colors, render_pdf
 from management.recurrence_ui import build_rrule, describe_rrule, parse_rrule
 from members.models import Family, FamilyMembership, Group, GroupMembership, Member
 from news.models import News, NewsPhoto
@@ -3526,6 +3526,30 @@ class EventManagementTests(ManagementTestBase):
         self.assertRedirects(response, reverse("management:event_detail", args=[event.pk]))
         self.assertEqual(event.location, location)
 
+    def test_the_location_dropdown_shows_the_city(self):
+        Location.objects.create(club=self.club, name="Sportcentrum", address="Straat 1", city="Mechelen", zip_code="2800", country="BE")
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("event_create")
+
+        self.assertContains(response, "Sportcentrum — Mechelen")
+
+    def test_the_location_dropdown_adds_the_country_when_not_belgium(self):
+        Location.objects.create(club=self.club, name="Rival Hall", address="Rue 2", city="Lille", zip_code="59000", country="FR")
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("event_create")
+
+        self.assertContains(response, "Rival Hall — Lille, France")
+
+    def test_the_location_field_is_searchable(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("event_create")
+
+        self.assertContains(response, 'name="location"')
+        self.assertContains(response, "data-searchable")
+
     def test_the_new_event_forms_competition_dropdown_shows_every_competition_regardless_of_flag(self):
         # Unlike the Django-admin form, this dropdown isn't filtered by whether the
         # competition's flag is active for the club -- see management.forms.EventForm
@@ -4322,18 +4346,45 @@ class EventRefereeFormPdfTests(ManagementTestBase):
         self.club.save(update_fields=["primary_color", "secondary_color"])
         game = self.make_game()
 
-        html = render_to_string("management/event_referee_form_pdf.html", {"club": self.club, "event": game, "referees": [], "home_location": self.home_ground, "grand_total": Decimal("0")})
+        html = render_to_string("management/event_referee_form_pdf.html", {"club": self.club, "event": game, "referees": [], "home_location": self.home_ground, "grand_total": Decimal("0"), **referee_form_colors(self.club)})
 
         self.assertIn("--accent: #0f766e", html)
-        self.assertIn("--accent-secondary: #f59e0b", html)
 
     def test_the_pdf_falls_back_to_default_colours_when_unset(self):
         game = self.make_game()
 
-        html = render_to_string("management/event_referee_form_pdf.html", {"club": self.club, "event": game, "referees": [], "home_location": self.home_ground, "grand_total": Decimal("0")})
+        html = render_to_string("management/event_referee_form_pdf.html", {"club": self.club, "event": game, "referees": [], "home_location": self.home_ground, "grand_total": Decimal("0"), **referee_form_colors(self.club)})
 
         self.assertIn("--accent: #3730a3", html)
-        self.assertIn("--accent-secondary: #be185d", html)
+
+    def test_the_info_card_background_is_not_left_to_unsupported_css(self):
+        # WeasyPrint doesn't support color-mix() -- the background must be a
+        # plain computed hex value baked into the template, or the card
+        # silently renders with no background at all.
+        game = self.make_game()
+
+        html = render_to_string("management/event_referee_form_pdf.html", {"club": self.club, "event": game, "referees": [], "home_location": self.home_ground, "grand_total": Decimal("0"), **referee_form_colors(self.club)})
+
+        self.assertNotIn("color-mix(", html)
+        self.assertIn("--info-card-bg: #", html)
+
+    def test_the_info_card_falls_back_to_secondary_when_primary_is_near_white(self):
+        self.club.primary_color = "#ffffff"
+        self.club.secondary_color = "#f59e0b"
+        self.club.save(update_fields=["primary_color", "secondary_color"])
+
+        colors = referee_form_colors(self.club)
+
+        self.assertEqual(colors["accent_color"], "#ffffff")
+        self.assertNotEqual(colors["info_card_color"], "#ffffff")
+
+    def test_the_info_card_uses_primary_when_it_is_not_near_black_or_white(self):
+        self.club.primary_color = "#0f766e"
+        self.club.save(update_fields=["primary_color"])
+
+        colors = referee_form_colors(self.club)
+
+        self.assertEqual(colors["info_card_color"], _tint_with_white("#0f766e"))
 
     def test_a_missing_pdf_library_is_reported_rather_than_a_500(self):
         game = self.make_game()

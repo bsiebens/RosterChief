@@ -226,6 +226,17 @@ class SponsorForm(forms.ModelForm):
         return cleaned
 
 
+def _location_label(location) -> str:
+    """"Name — City" for the location picker, plus the country when it isn't
+    Belgium (the club's home country and, in practice, nearly every location
+    a club will ever add) -- lets an admin tell two same-named venues apart,
+    or spot an away trip abroad, straight from the dropdown."""
+    label = f"{location.name} — {location.city}"
+    if location.country.code != "BE":
+        label += f", {location.country.name}"
+    return label
+
+
 class EventAudienceFormMixin:
     """Shared club/user-scoped audience fields for EventForm and EventSeriesForm:
     teams restricted to the ones the requester manages (all of them for an
@@ -238,6 +249,7 @@ class EventAudienceFormMixin:
         self.user = user
         self.fields["teams"].queryset = Team.objects.filter(club=club) if is_club_admin(user, club) else teams_managed_by(user, club)
         self.fields["location"].queryset = Location.objects.filter(club=club)
+        self.fields["location"].label_from_instance = _location_label
         self.fields["opponent"].queryset = Opponent.objects.filter(club=club)
         members = Member.objects.filter(member_of__club=club).distinct()
         self.fields["invited_members"].queryset = members
@@ -253,6 +265,7 @@ _AUDIENCE_WIDGETS = {
     "teams": forms.SelectMultiple(attrs={"data-searchable": "true", "data-search-placeholder": _("Type a team to search...")}),
     "invited_members": forms.SelectMultiple(attrs={"data-searchable": "true", "data-search-placeholder": _("Type a name to search...")}),
     "excluded_members": forms.SelectMultiple(attrs={"data-searchable": "true", "data-search-placeholder": _("Type a name to search...")}),
+    "location": forms.Select(attrs={"data-searchable": "true", "data-search-placeholder": _("Type a name or city to search...")}),
 }
 
 

@@ -25,9 +25,8 @@
                 }
             }
             :root {
-                --accent: {{ club.primary_color|default:"#3730a3" }};
-                --accent-secondary: {{ club.secondary_color|default:"#be185d" }};
-                --accent-soft: color-mix(in srgb, var(--accent-secondary) 14%, white);
+                --accent: {{ accent_color }};
+                --info-card-bg: {{ info_card_color }};
                 --ink: #16181d; --muted: #6b7280; --line: #d8dae0;
             }
             * { box-sizing: border-box; }
@@ -40,7 +39,7 @@
             .header .doc-title .kicker { font-size: 8pt; letter-spacing: 1pt; text-transform: uppercase; color: var(--muted); }
             .header .doc-title .title { font-size: 14pt; font-weight: 700; margin-top: 1mm; }
 
-            .info-card { background: var(--accent-soft); border-radius: 3mm; padding: 5mm 6mm; margin-bottom: 7mm; }
+            .info-card { background: var(--info-card-bg); border-radius: 3mm; padding: 5mm 6mm; margin-bottom: 7mm; }
             .info-grid { display: flex; flex-wrap: wrap; gap: 4mm 10mm; }
             .info-grid .item { min-width: 45mm; }
             .info-grid .item.wide { flex: 1 1 100%; min-width: 100%; }
