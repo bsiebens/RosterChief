@@ -1,4 +1,5 @@
 from datetime import timedelta
+from decimal import Decimal
 
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
@@ -2141,7 +2142,8 @@ class EventRefereeFormPdfView(ClubAdminRequiredMixin, View):
     def get(self, request, pk):
         event = get_object_or_404(Event.objects.filter(club=request.club).prefetch_related("teams", "referees__member"), pk=pk)
         home_location = Location.objects.filter(club=request.club, is_home=True).first()
-        context = {"club": request.club, "event": event, "referees": list(event.referees.all()), "home_location": home_location}
+        referees = list(event.referees.all())
+        context = {"club": request.club, "event": event, "referees": referees, "home_location": home_location, "grand_total": sum((referee.total_payable for referee in referees), Decimal("0"))}
 
         try:
             pdf = event_referee_form_pdf(context)

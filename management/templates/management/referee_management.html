@@ -54,7 +54,7 @@
                         <div class="text-xs opacity-70">{{ game.start|date:"H:i" }}{% if game.location %} — {{ game.location }}{% endif %}</div>
                         <div class="text-xs">
                             {% for referee in game.referee_rows %}
-                                <span class="badge badge-ghost badge-sm">{{ referee.display_name }}{% if referee.is_external %} ({% trans "ext." %}){% endif %}</span>
+                                <span class="badge badge-primary badge-sm">{{ referee.display_name }}{% if referee.is_external %} ({% trans "ext." %}){% endif %}</span>
                             {% empty %}
                                 <span class="opacity-60">{% trans "No referees assigned yet." %}</span>
                             {% endfor %}

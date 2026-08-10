@@ -24,6 +24,7 @@
                         name="{{ field.html_name }}"
                         value="{% if field.widget_type == "date" or field.widget_type == "datetime" %}{% if field.value|date:"c"|default:"" != "" %}{{ field.value|date:"c"|default:"" }}{% else %}{{ field.value|default:"" }}{% endif %}{% else %}{% if field.value == None %}{{ field.value|default:"" }}{% else %}{{ field.value }}{% endif %}{% endif %}"
                         {% if show_placeholder %}placeholder="{{ field.label|capfirst }}"{% endif %}
+                        {% for attr, value in field.field.widget.attrs.items %}{% if attr != "type" %}{{ attr }}="{{ value }}" {% endif %}{% endfor %}
                 />
 
             {% elif field_type == "checkbox" %}

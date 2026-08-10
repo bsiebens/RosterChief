@@ -11,6 +11,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.messages.storage.base import Message
 from django.contrib.messages.storage.fallback import FallbackStorage
 from django.core.cache import cache
+from django.template.loader import render_to_string
 from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -50,7 +51,7 @@ from .services.statistics import (
     teams_without_a_manager,
     unrostered_members,
 )
-from .templatetags.ui import as_alert, daisy, excluded, field_icon
+from .templatetags.ui import as_alert, daisy, excluded, field_icon, form_field
 
 User = get_user_model()
 Flag = get_waffle_flag_model()
@@ -690,6 +691,20 @@ class FieldRenderingTests(TestCase):
         rendered = str(daisy(self.field(forms.CharField(required=True), errors=True)))
 
         self.assertIn("input-error", rendered)
+
+    def test_the_form_field_tag_carries_widget_attrs_onto_the_input(self):
+        # Regression: the "input" branch of templatetags/field.html rendered type/
+        # class/name/value/placeholder only, silently dropping every other widget
+        # attr (step, min, ...) -- e.g. NumberInput(attrs={"step": "any"}) never
+        # reached the page, so a decimal-only field like a per-km rate couldn't be
+        # typed at all. See form_field in controlpanel/templatetags/ui.py.
+        bound_field = self.field(forms.DecimalField(widget=forms.NumberInput(attrs={"step": "any", "min": "0"})), "rate")
+
+        html = render_to_string("templatetags/field.html", form_field(bound_field))
+
+        self.assertIn('step="any"', html)
+        self.assertIn('min="0"', html)
+        self.assertEqual(html.count('type="number"'), 1)
 
 
 class LoginFormRenderingTests(TestCase):

@@ -1,14 +1,13 @@
 {% load i18n %}
 
 {% comment %}
-    Rendered by WeasyPrint -- modeled directly on the club's existing paper
-    referee payment form ("Leeg Document RefereesCompetitie25-26.pdf"): a
-    3-line header (club name/address), match details, referee names, a
-    payment sentence, a fee+km breakdown per referee, and blank signature
-    lines. Header uses club.official_name (legal_name if set, else name);
-    the payment sentence uses the plain club name -- the original document
-    does the same, using a longer legal form up top and a shorter one in the
-    body text.
+    Rendered by WeasyPrint -- modeled on the club's existing paper referee
+    payment form ("Leeg Document RefereesCompetitie25-26.pdf"): club header,
+    match details, referee names, a payment sentence, a fee+km breakdown per
+    referee, and blank signature lines. Header uses club.official_name
+    (legal_name if set, else name); the payment sentence uses the plain club
+    name -- the original document does the same, using a longer legal form up
+    top and a shorter one in the body text.
 {% endcomment %}
 <!DOCTYPE html>
 <html lang="en">
@@ -18,69 +17,135 @@
         <style>
             @page {
                 size: A4;
-                margin: 25mm 20mm;
+                margin: 20mm 18mm;
                 @bottom-center {
                     content: "{{ club.name }} — {% trans "referee form" %} — " counter(page) " / " counter(pages);
                     font-size: 8pt;
-                    color: #666;
+                    color: #8a8a8a;
                 }
             }
-            body { font-family: sans-serif; font-size: 10.5pt; color: #111; line-height: 1.5; }
-            .header { text-align: center; margin-bottom: 14mm; }
-            .header div { margin: 0; }
-            .field { margin-bottom: 4mm; }
-            .field .label { display: inline-block; min-width: 32mm; }
-            .fill-line { display: block; border-bottom: 1px solid #333; min-height: 5mm; margin: 2mm 0 4mm; }
-            .section-title { margin: 8mm 0 2mm; }
-            .fee-row { border-bottom: 1px solid #333; padding-bottom: 1mm; margin-bottom: 4mm; min-height: 5mm; }
-            .signature-block { margin-top: 12mm; }
-            .signature-line { border-bottom: 1px solid #333; min-height: 16mm; margin-top: 2mm; }
-            .collected-line { margin-top: 12mm; }
-            .collected-line .fill { display: inline-block; border-bottom: 1px solid #333; min-width: 90mm; }
+            :root { --accent: #3730a3; --accent-soft: #eef0fc; --ink: #16181d; --muted: #6b7280; --line: #d8dae0; }
+            * { box-sizing: border-box; }
+            body { font-family: sans-serif; font-size: 10pt; color: var(--ink); line-height: 1.45; }
+
+            .header { display: flex; justify-content: space-between; align-items: flex-start; padding-bottom: 5mm; border-bottom: 2.5pt solid var(--accent); margin-bottom: 8mm; }
+            .header .club-name { font-size: 16pt; font-weight: 700; color: var(--accent); margin: 0 0 1mm; }
+            .header .club-address { font-size: 9pt; color: var(--muted); }
+            .header .doc-title { text-align: right; }
+            .header .doc-title .kicker { font-size: 8pt; letter-spacing: 1pt; text-transform: uppercase; color: var(--muted); }
+            .header .doc-title .title { font-size: 14pt; font-weight: 700; margin-top: 1mm; }
+
+            .info-card { background: var(--accent-soft); border-radius: 3mm; padding: 5mm 6mm; margin-bottom: 7mm; }
+            .info-grid { display: flex; flex-wrap: wrap; gap: 4mm 10mm; }
+            .info-grid .item { min-width: 45mm; }
+            .info-grid .item.wide { flex: 1 1 100%; min-width: 100%; }
+            .info-label { font-size: 7.5pt; letter-spacing: 0.5pt; text-transform: uppercase; color: var(--muted); margin-bottom: 0.5mm; }
+            .info-value { font-size: 10.5pt; font-weight: 600; }
+
+            .note { font-size: 9.5pt; color: var(--muted); margin: 0 0 7mm; }
+
+            .section-title { font-size: 8pt; letter-spacing: 0.5pt; text-transform: uppercase; color: var(--accent); font-weight: 700; margin: 0 0 2mm; }
+
+            table.fees { width: 100%; border-collapse: collapse; margin-bottom: 9mm; }
+            table.fees th { text-align: left; font-size: 7.5pt; letter-spacing: 0.5pt; text-transform: uppercase; color: var(--muted); border-bottom: 1pt solid var(--line); padding: 2mm 2mm 1.5mm 0; }
+            table.fees td { padding: 2.5mm 2mm 2.5mm 0; border-bottom: 0.75pt solid var(--line); vertical-align: top; }
+            table.fees td.amount, table.fees th.amount { text-align: right; }
+            table.fees tr.empty td { color: var(--muted); font-style: italic; }
+            .badge-external { display: inline-block; font-size: 7pt; color: var(--accent); background: var(--accent-soft); border-radius: 2mm; padding: 0.3mm 1.5mm; margin-left: 1.5mm; }
+            table.fees tr.total td { border-bottom: none; border-top: 1.5pt solid var(--ink); font-weight: 700; padding-top: 3mm; }
+
+            .signatures { display: flex; gap: 8mm; margin-top: 4mm; }
+            .sign-box { flex: 1; }
+            .sign-box .info-label { margin-bottom: 2mm; }
+            .sign-box .box { border: 0.75pt solid var(--line); border-radius: 2mm; min-height: 24mm; }
+            .collected-line { margin-top: 8mm; font-size: 9.5pt; }
+            .collected-line .fill { display: inline-block; border-bottom: 0.75pt solid var(--line); min-width: 90mm; }
         </style>
     </head>
     <body>
         <div class="header">
-            <div>{{ club.official_name }}</div>
-            {% if home_location %}
-                <div>{{ home_location.address }}</div>
-                <div>{{ home_location.zip_code }} {{ home_location.city }}</div>
-            {% endif %}
+            <div>
+                <div class="club-name">{{ club.official_name }}</div>
+                {% if home_location %}
+                    <div class="club-address">{{ home_location.address }}</div>
+                    <div class="club-address">{{ home_location.zip_code }} {{ home_location.city }}</div>
+                {% endif %}
+            </div>
+            <div class="doc-title">
+                <div class="kicker">{% trans "Referee payment form" %}</div>
+                <div class="title">{{ event.start|date:"j F Y" }}</div>
+            </div>
         </div>
 
-        <div class="field">
-            <span class="label">{% trans "Regarding: Game" %}</span>
-            {% for team in event.teams.all %}{{ team.short_name }}{% if not forloop.last %}, {% endif %}{% endfor %}
-            {% if event.opponent %}{% trans "vs" %} {{ event.opponent }}{% endif %}
-            {% if event.external_game_id %}({% trans "ID" %}: {{ event.external_game_id }}){% endif %}
+        <div class="info-card">
+            <div class="info-grid">
+                <div class="item wide">
+                    <div class="info-label">{% trans "Game" %}</div>
+                    <div class="info-value">
+                        {% for team in event.teams.all %}{{ team.short_name }}{% if not forloop.last %}, {% endif %}{% endfor %}
+                        {% if event.opponent %}{% trans "vs" %} {{ event.opponent }}{% endif %}
+                        {% if event.external_game_id %}<span style="color: var(--muted); font-weight: 400;">({% trans "ID" %}: {{ event.external_game_id }})</span>{% endif %}
+                    </div>
+                </div>
+                <div class="item">
+                    <div class="info-label">{% trans "Date" %}</div>
+                    <div class="info-value">{{ event.start|date:"j F Y" }}</div>
+                </div>
+                <div class="item">
+                    <div class="info-label">{% trans "Time" %}</div>
+                    <div class="info-value">{{ event.start|date:"H:i" }}</div>
+                </div>
+                <div class="item wide">
+                    <div class="info-label">{% trans "Referee names" %}</div>
+                    <div class="info-value">
+                        {% for referee in referees %}{{ referee.display_name }}{% if not forloop.last %}, {% endif %}{% empty %}—{% endfor %}
+                    </div>
+                </div>
+            </div>
         </div>
-        <div class="field"><span class="label">{% trans "Date" %}</span> {{ event.start|date:"j F Y" }}</div>
-        <div class="field"><span class="label">{% trans "Time" %}</span> {{ event.start|date:"H:i" }}</div>
-        <div class="field">
-            <span class="label">{% trans "Referee names" %}</span>
-            {% for referee in referees %}{{ referee.display_name }}{% if not forloop.last %}, {% endif %}{% empty %}—{% endfor %}
-        </div>
-        <div class="fill-line"></div>
 
-        <p>{% blocktrans with name=club.name %}{{ name }} pays the fee to the referee(s) for officiating the game mentioned above.{% endblocktrans %}</p>
+        <p class="note">{% blocktrans with name=club.name %}{{ name }} pays the fee to the referee(s) for officiating the game mentioned above.{% endblocktrans %}</p>
 
         <div class="section-title">{% trans "Referees and fee, plus any kilometers" %}</div>
-        {% for referee in referees %}
-            <div class="fee-row">
-                {{ referee.display_name }} —
-                {% blocktrans with fee=referee.fee %}fee: €{{ fee }}{% endblocktrans %}
-                {% if referee.km %}
-                    {% blocktrans with km=referee.km rate=referee.km_rate total=referee.km_total %}+ {{ km }} km × €{{ rate }}/km = €{{ total }}{% endblocktrans %}
+        <table class="fees">
+            <thead>
+                <tr>
+                    <th>{% trans "Referee" %}</th>
+                    <th class="amount">{% trans "Fee" %}</th>
+                    <th class="amount">{% trans "Kilometers" %}</th>
+                    <th class="amount">{% trans "Rate" %}</th>
+                    <th class="amount">{% trans "Total" %}</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for referee in referees %}
+                    <tr>
+                        <td>
+                            {{ referee.display_name }}
+                            {% if referee.is_external %}<span class="badge-external">{% trans "External" %}</span>{% endif %}
+                        </td>
+                        <td class="amount">€{{ referee.fee|floatformat:2 }}</td>
+                        <td class="amount">{% if referee.km %}{{ referee.km }} km{% else %}—{% endif %}</td>
+                        <td class="amount">{% if referee.km %}€{{ referee.km_rate }}{% else %}—{% endif %}</td>
+                        <td class="amount">€{{ referee.total_payable|floatformat:2 }}</td>
+                    </tr>
+                {% empty %}
+                    <tr class="empty"><td colspan="5">{% trans "No referees assigned yet." %}</td></tr>
+                {% endfor %}
+                {% if referees %}
+                    <tr class="total">
+                        <td colspan="4">{% trans "Total to pay" %}</td>
+                        <td class="amount">€{{ grand_total|floatformat:2 }}</td>
+                    </tr>
                 {% endif %}
-                — {% blocktrans with total=referee.total_payable %}total: €{{ total }}{% endblocktrans %}
-            </div>
-        {% empty %}
-            <div class="fee-row"></div>
-        {% endfor %}
+            </tbody>
+        </table>
 
-        <div class="signature-block">
-            <div>{% trans "Referee signature" %}</div>
-            <div class="signature-line"></div>
+        <div class="signatures">
+            <div class="sign-box">
+                <div class="info-label">{% trans "Referee signature" %}</div>
+                <div class="box"></div>
+            </div>
         </div>
 
         <div class="collected-line">
