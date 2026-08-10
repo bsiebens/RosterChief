@@ -10,6 +10,7 @@ from allauth.mfa.models import Authenticator
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.template.loader import render_to_string
 from django.test import TestCase, override_settings
 from django.urls import NoReverseMatch, reverse
 from django.utils import timezone
@@ -2726,6 +2727,44 @@ class NewsManagementTests(ManagementTestBase):
         self.assertRedirects(response, reverse("management:news_detail", args=[item.pk]))
         self.assertEqual(item.status, News.Status.DRAFT)
 
+    def test_an_english_translation_can_be_added_alongside_the_original(self):
+        self.client.force_login(self.make_coach_manager())
+
+        self.club_post(
+            "news_create",
+            {"title": "Seizoensstart", "title_en": "Season kickoff", "body": "We beginnen het seizoen.", "body_en": "We're starting the season.", "visibility": News.Visibility.INTERNAL, "teams": [str(self.team.pk)]},
+        )
+
+        item = News.objects.get(club=self.club, title="Seizoensstart")
+        self.assertEqual(item.title_en, "Season kickoff")
+        self.assertEqual(item.body_en, "We're starting the season.")
+
+    def test_the_english_translation_is_optional(self):
+        self.client.force_login(self.make_coach_manager())
+
+        response = self.club_post("news_create", {"title": "Seizoensstart", "body": "We beginnen het seizoen.", "visibility": News.Visibility.INTERNAL, "teams": [str(self.team.pk)]})
+
+        item = News.objects.get(club=self.club, title="Seizoensstart")
+        self.assertRedirects(response, reverse("management:news_detail", args=[item.pk]))
+        self.assertEqual(item.title_en, "")
+
+    def test_detail_page_shows_the_english_translation_when_set(self):
+        item = News.objects.create(club=self.club, title="Seizoensstart", body="We beginnen het seizoen.", title_en="Season kickoff", body_en="We're starting the season.")
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("news_detail", item.pk)
+
+        self.assertContains(response, "Season kickoff")
+        self.assertContains(response, "We&#x27;re starting the season.")
+
+    def test_detail_page_hides_the_english_section_when_not_translated(self):
+        item = News.objects.create(club=self.club, title="Seizoensstart", body="We beginnen het seizoen.")
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("news_detail", item.pk)
+
+        self.assertNotContains(response, ">English<")
+
     def test_plain_staff_cannot_create_news(self):
         self.client.force_login(self.make_plain_staff())
 
@@ -4170,6 +4209,18 @@ class EventRefereeManagementTests(ManagementTestBase):
 
         self.assertContains(response, "25.00")
 
+    def test_the_total_due_is_shown_with_at_most_two_decimals(self):
+        # A per-km rate like 0.083 pushes the raw total to 3+ decimals -- the
+        # "due" summary must still round to money-style 2.
+        game = self.make_game()
+        EventReferee.objects.create(event=game, member=self.referee, assigned_by=self.admin_member, fee=Decimal("25.00"), km=Decimal("40"), km_rate=Decimal("0.083"))
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("event_detail", game.pk)
+
+        self.assertContains(response, "28.32 due")
+        self.assertNotContains(response, "28.320")
+
     def test_a_coach_gets_403_setting_a_fee(self):
         game = self.make_game()
         assignment = EventReferee.objects.create(event=game, member=self.referee, assigned_by=self.admin_member)
@@ -4233,6 +4284,56 @@ class EventRefereeFormPdfTests(ManagementTestBase):
         self.assertEqual(context["club"].official_name, "Ajax United VZW")
         self.assertEqual(context["home_location"], self.home_ground)
         self.assertEqual(list(context["referees"]), [EventReferee.objects.get(event=game)])
+
+    def test_the_grand_total_sums_every_referees_total_payable(self):
+        game = self.make_game()
+        other_referee = Member.objects.create(first_name="Other", last_name="Ref")
+        ClubMembership.objects.create(club=self.club, member=other_referee, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        EventReferee.objects.create(event=game, member=self.referee, assigned_by=self.admin_member, fee=Decimal("25.00"), km=Decimal("40"), km_rate=Decimal("0.083"))
+        EventReferee.objects.create(event=game, member=other_referee, assigned_by=self.admin_member, fee=Decimal("20.00"))
+        self.client.force_login(self.admin_user)
+
+        with mock.patch("management.views.event_referee_form_pdf", return_value=b"%PDF-fake") as renderer:
+            self.club_get("event_referee_form_pdf", game.pk)
+
+        self.assertEqual(renderer.call_args[0][0]["grand_total"], Decimal("48.320"))
+
+    def test_the_external_referee_pill_is_not_rendered(self):
+        game = self.make_game()
+        EventReferee.objects.create(event=game, external_name="Guest Referee", assigned_by=self.admin_member)
+
+        html = render_to_string("management/event_referee_form_pdf.html", {"club": self.club, "event": game, "referees": list(game.referees.all()), "home_location": self.home_ground, "grand_total": Decimal("0")})
+
+        self.assertIn("Guest Referee", html)
+        self.assertNotIn("External", html)
+
+    def test_amounts_render_with_at_most_two_decimals(self):
+        game = self.make_game()
+        EventReferee.objects.create(event=game, member=self.referee, assigned_by=self.admin_member, fee=Decimal("25.00"), km=Decimal("40"), km_rate=Decimal("0.083"))
+
+        html = render_to_string("management/event_referee_form_pdf.html", {"club": self.club, "event": game, "referees": list(game.referees.all()), "home_location": self.home_ground, "grand_total": Decimal("28.320")})
+
+        self.assertIn("€28.32<", html)
+        self.assertNotIn("28.320", html)
+
+    def test_the_pdf_uses_the_clubs_colours_when_set(self):
+        self.club.primary_color = "#0f766e"
+        self.club.secondary_color = "#f59e0b"
+        self.club.save(update_fields=["primary_color", "secondary_color"])
+        game = self.make_game()
+
+        html = render_to_string("management/event_referee_form_pdf.html", {"club": self.club, "event": game, "referees": [], "home_location": self.home_ground, "grand_total": Decimal("0")})
+
+        self.assertIn("--accent: #0f766e", html)
+        self.assertIn("--accent-secondary: #f59e0b", html)
+
+    def test_the_pdf_falls_back_to_default_colours_when_unset(self):
+        game = self.make_game()
+
+        html = render_to_string("management/event_referee_form_pdf.html", {"club": self.club, "event": game, "referees": [], "home_location": self.home_ground, "grand_total": Decimal("0")})
+
+        self.assertIn("--accent: #3730a3", html)
+        self.assertIn("--accent-secondary: #be185d", html)
 
     def test_a_missing_pdf_library_is_reported_rather_than_a_500(self):
         game = self.make_game()

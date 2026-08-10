@@ -37,11 +37,21 @@ class NewsPhotoOut(Schema):
 
 
 class NewsItemOut(Schema):
+    """Both languages come back in one object -- title_nl/body_nl/excerpt_nl are
+    the club's own-language text as authored; title_en/body_en/excerpt_en are the
+    English text, falling back to the nl content when no translation was added
+    (News.effective_title_en/effective_body_en) -- so these three are never blank,
+    even for a news item nobody has translated yet. The consumer picks whichever
+    it needs."""
+
     id: uuid.UUID
-    title: str
+    title_nl: str
+    title_en: str
     slug: str
-    excerpt: str
-    body: str
+    excerpt_nl: str
+    excerpt_en: str
+    body_nl: str
+    body_en: str
     published_at: datetime
     teams: list[str]
     photos: list[NewsPhotoOut]
@@ -66,10 +76,13 @@ def _visible_news(club):
 def _to_news_item_out(item, request) -> NewsItemOut:
     return NewsItemOut(
         id=item.pk,
-        title=item.title,
+        title_nl=item.title,
+        title_en=item.effective_title_en,
         slug=item.slug,
-        excerpt=render_body_excerpt(item.body, words=EXCERPT_WORDS),
-        body=render_body_html(item.body),
+        excerpt_nl=render_body_excerpt(item.body, words=EXCERPT_WORDS),
+        excerpt_en=render_body_excerpt(item.effective_body_en, words=EXCERPT_WORDS),
+        body_nl=render_body_html(item.body),
+        body_en=render_body_html(item.effective_body_en),
         published_at=item.published_at,
         teams=[team.name for team in item.teams.all()],
         photos=[NewsPhotoOut(url=request.build_absolute_uri(photo.image.url), is_main=photo.is_main, ordering=photo.ordering) for photo in item.photos.all()],

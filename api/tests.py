@@ -103,7 +103,7 @@ class NewsApiTests(ApiTestBase):
     def test_excerpt_is_a_truncated_prefix_of_the_body(self):
         self.make_news(body=" ".join(f"word{i}" for i in range(80)))
 
-        excerpt = self.api_get("/news/").json()["results"][0]["excerpt"]
+        excerpt = self.api_get("/news/").json()["results"][0]["excerpt_nl"]
 
         self.assertTrue(excerpt.startswith("word0 word1"))
         self.assertTrue(excerpt.endswith("…"))
@@ -112,7 +112,7 @@ class NewsApiTests(ApiTestBase):
     def test_excerpt_is_unchanged_when_the_body_is_already_short(self):
         item = self.make_news(body="Short body.")
 
-        excerpt = self.api_get("/news/").json()["results"][0]["excerpt"]
+        excerpt = self.api_get("/news/").json()["results"][0]["excerpt_nl"]
 
         self.assertEqual(excerpt, item.body)
 
@@ -144,7 +144,7 @@ class NewsApiTests(ApiTestBase):
     def test_body_markdown_is_rendered_to_html(self):
         self.make_news(body="## Big win\n\nWe beat **Rivals FC** 4-2. [Full report](https://example.com).")
 
-        body = self.api_get("/news/").json()["results"][0]["body"]
+        body = self.api_get("/news/").json()["results"][0]["body_nl"]
 
         self.assertIn("<h2>Big win</h2>", body)
         self.assertIn("<strong>Rivals FC</strong>", body)
@@ -154,14 +154,14 @@ class NewsApiTests(ApiTestBase):
     def test_body_markdown_a_single_newline_becomes_a_line_break(self):
         self.make_news(body="Line one\nLine two")
 
-        body = self.api_get("/news/").json()["results"][0]["body"]
+        body = self.api_get("/news/").json()["results"][0]["body_nl"]
 
         self.assertIn("Line one<br", body)
 
     def test_body_html_strips_a_script_tag(self):
         self.make_news(body="Hello<script>alert('xss')</script>world")
 
-        body = self.api_get("/news/").json()["results"][0]["body"]
+        body = self.api_get("/news/").json()["results"][0]["body_nl"]
 
         self.assertNotIn("<script", body)
         self.assertNotIn("alert(", body)
@@ -169,25 +169,45 @@ class NewsApiTests(ApiTestBase):
     def test_body_html_strips_an_event_handler_attribute(self):
         self.make_news(body='<img src="x" onerror="alert(1)">')
 
-        body = self.api_get("/news/").json()["results"][0]["body"]
+        body = self.api_get("/news/").json()["results"][0]["body_nl"]
 
         self.assertNotIn("onerror", body)
 
     def test_body_html_strips_a_javascript_url(self):
         self.make_news(body="[click me](javascript:alert(1))")
 
-        body = self.api_get("/news/").json()["results"][0]["body"]
+        body = self.api_get("/news/").json()["results"][0]["body_nl"]
 
         self.assertNotIn("javascript:", body)
 
     def test_excerpt_strips_markdown_syntax(self):
         self.make_news(body="**Bold** and a [link](https://example.com) and # not a heading here")
 
-        excerpt = self.api_get("/news/").json()["results"][0]["excerpt"]
+        excerpt = self.api_get("/news/").json()["results"][0]["excerpt_nl"]
 
         self.assertNotIn("**", excerpt)
         self.assertNotIn("[link]", excerpt)
         self.assertNotIn("<", excerpt)
+
+    def test_english_falls_back_to_the_original_when_not_translated(self):
+        self.make_news(title="Seizoensstart", body="We beginnen het seizoen.")
+
+        result = self.api_get("/news/").json()["results"][0]
+
+        self.assertEqual(result["title_en"], "Seizoensstart")
+        self.assertIn("We beginnen het seizoen.", result["body_en"])
+        self.assertEqual(result["excerpt_en"], result["excerpt_nl"])
+
+    def test_english_is_used_when_translated(self):
+        self.make_news(title="Seizoensstart", title_en="Season kickoff", body="We beginnen het seizoen.", body_en="We're starting the season.")
+
+        result = self.api_get("/news/").json()["results"][0]
+
+        self.assertEqual(result["title_nl"], "Seizoensstart")
+        self.assertEqual(result["title_en"], "Season kickoff")
+        self.assertIn("We beginnen het seizoen.", result["body_nl"])
+        self.assertIn("We're starting the season.", result["body_en"])
+        self.assertNotEqual(result["excerpt_en"], result["excerpt_nl"])
 
 
 class TeamsApiTests(ApiTestBase):

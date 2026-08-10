@@ -73,6 +73,29 @@ class NewsModelTests(TestCase):
         self.assertEqual(item.status, News.Status.DRAFT)
         self.assertIsNone(item.published_at)
 
+    def test_effective_english_falls_back_to_the_original_when_blank(self):
+        item = News.objects.create(club=self.club, title="Seizoensstart", body="We beginnen het seizoen.")
+
+        self.assertEqual(item.effective_title_en, "Seizoensstart")
+        self.assertEqual(item.effective_body_en, "We beginnen het seizoen.")
+
+    def test_effective_english_uses_its_own_text_when_set(self):
+        item = News.objects.create(club=self.club, title="Seizoensstart", body="We beginnen het seizoen.", title_en="Season kickoff", body_en="We're starting the season.")
+
+        self.assertEqual(item.effective_title_en, "Season kickoff")
+        self.assertEqual(item.effective_body_en, "We're starting the season.")
+
+    def test_effective_english_stays_current_after_the_original_changes(self):
+        # Read-time fallback, not copy-on-save: editing the Dutch text later must
+        # not leave a stale English "copy" behind.
+        item = News.objects.create(club=self.club, title="Seizoensstart", body="We beginnen het seizoen.")
+
+        item.title, item.body = "Nieuwe titel", "Nieuwe tekst."
+        item.save(update_fields=["title", "body"])
+
+        self.assertEqual(item.effective_title_en, "Nieuwe titel")
+        self.assertEqual(item.effective_body_en, "Nieuwe tekst.")
+
 
 class NewsPhotoModelTests(TestCase):
     def setUp(self):

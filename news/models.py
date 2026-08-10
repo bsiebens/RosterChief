@@ -34,6 +34,10 @@ class News(ClubScopedModel):
             "shown as plain text here in the control panel."
         ),
     )
+
+    title_en = models.CharField(_("title (English)"), max_length=255, blank=True, help_text=_("Optional. Falls back to the title above when left blank."))
+    body_en = models.TextField(_("body (English)"), blank=True, help_text=_("Optional. Supports the same Markdown as the body above. Falls back to the body above when left blank."))
+
     teams = models.ManyToManyField(Team, related_name="news_items", blank=True, verbose_name=_("teams"), help_text=_("Leave empty for club-wide news."))
 
     visibility = models.CharField(_("visibility"), max_length=10, choices=Visibility.choices, default=Visibility.INTERNAL)
@@ -60,6 +64,19 @@ class News(ClubScopedModel):
     def unpublish(self):
         self.status, self.published_at = self.Status.DRAFT, None
         self.save(update_fields=["status", "published_at"])
+
+    @property
+    def effective_title_en(self) -> str:
+        """The English title to show -- `title_en` when the editor set one,
+        else the Dutch `title`. Computed on read rather than copied into
+        `title_en` at save time, so editing the Dutch title later keeps this
+        current instead of leaving a stale English copy behind."""
+        return self.title_en or self.title
+
+    @property
+    def effective_body_en(self) -> str:
+        """See `effective_title_en` -- same fallback, for the body."""
+        return self.body_en or self.body
 
     @property
     def is_scheduled(self):

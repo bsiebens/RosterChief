@@ -522,10 +522,11 @@ class NewsForm(forms.ModelForm):
 
     class Meta:
         model = News
-        fields = ["title", "teams", "visibility", "body"]
+        fields = ["title", "title_en", "teams", "visibility", "body", "body_en"]
         widgets = {
             "teams": forms.SelectMultiple(attrs={"data-searchable": "true", "data-search-placeholder": _("Type to filter teams...")}),
             "body": forms.Textarea(attrs={"rows": 8}),
+            "body_en": forms.Textarea(attrs={"rows": 8}),
         }
 
     def __init__(self, *args, club=None, **kwargs):

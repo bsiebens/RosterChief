@@ -622,6 +622,8 @@ team-tagged instead of categorised, with a two-step release flow rather than a b
 ```
 news.News(ClubScopedModel)         # -> carries `club`
   title, slug (SlugField, auto from title), body (TextField)
+  title_en    CharField (blank) -- optional English translation of `title`
+  body_en     TextField (blank) -- optional English translation of `body`
   teams       M2M teams.Team (blank -- empty means club-wide)
   visibility  CharField (TextChoices: internal | external | both)
   status      CharField (TextChoices: draft | published)
@@ -665,9 +667,23 @@ home.HomeConfig(ClubScopedModel)   # one row PER CLUB: featured articles/teams, 
   club person, not a raw login; `SET_NULL` so deleting a member doesn't erase their posts.
 - `slug`s back clean public URLs and feed `search`; they are **unique per club** (§2.4), so
   two clubs can both have `/news/season-kickoff`. Resolve within the request's club.
-- `visibility` (internal/external/both) is stored and enforced nowhere yet — no
-  member-facing reading page or public API exists. Both are later work; the field is
-  there so they don't need a backfill when they land.
+- `visibility` (internal/external/both) is enforced by the public read-only API
+  (`news/api.py`, mounted under `api/`) — only `external`/`both` items, published and
+  past their release date, are ever returned. No member-facing internal reading page
+  exists yet; that's later work.
+- **`title`/`body` are Dutch (the club's own language, and the only one required);
+  `title_en`/`body_en` are an optional English translation**, both left blank by
+  default. Nothing computes or stores a fallback — `News.effective_title_en` /
+  `effective_body_en` resolve it on read (`title_en or title`), so translating a Dutch
+  edit later never leaves a stale English copy behind, and every existing row gets
+  correct fallback behaviour with no backfill. The public API always returns both
+  languages in one call (`title_nl`/`body_nl`/`excerpt_nl` alongside
+  `title_en`/`body_en`/`excerpt_en`, the latter three via the `effective_*` properties
+  so they're never blank) — no `?lang=` param, the consumer picks what it needs. The
+  control panel's news form lays the two languages out in side-by-side columns
+  (`management/templates/management/news_form.html`); the detail page only shows an
+  "English" section when a translation was actually added, not the fallback-filled
+  text under a second heading.
 - `NewsPhoto.image` / hero images use `ImageField` → **media storage must be configured**
   (§8). If page/news trees grow, consider a tree library later — start flat.
 

@@ -24,7 +24,7 @@
                 {{ referee.display_name }}
                 {% if referee.is_external %}<span class="badge badge-neutral badge-xs">{% trans "External" %}</span>{% endif %}
                 {% if referee.assigned_by %}<span class="text-xs opacity-60">— {% blocktrans with name=referee.assigned_by %}assigned by {{ name }}{% endblocktrans %}</span>{% endif %}
-                {% if referee.total_payable %}<span class="text-xs opacity-60">— {% blocktrans with total=referee.total_payable %}€{{ total }} due{% endblocktrans %}</span>{% endif %}
+                {% if referee.total_payable %}<span class="text-xs opacity-60">— {% blocktrans with total=referee.total_payable|floatformat:2 %}€{{ total }} due{% endblocktrans %}</span>{% endif %}
             </span>
             {% if can_manage_referees %}
                 <div class="flex gap-1 shrink-0">

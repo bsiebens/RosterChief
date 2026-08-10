@@ -12,7 +12,7 @@ class NewsPhotoInline(admin.TabularInline):
 class NewsAdmin(admin.ModelAdmin):
     list_display = ["title", "club", "status", "visibility", "created_by"]
     list_filter = ["club", "status", "visibility"]
-    search_fields = ["title"]
+    search_fields = ["title", "title_en"]
     raw_id_fields = ["created_by"]
     inlines = [NewsPhotoInline]
 

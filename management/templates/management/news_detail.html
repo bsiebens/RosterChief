@@ -41,6 +41,16 @@
         </div>
     </div>
 
+    {% if news_item.title_en or news_item.body_en %}
+        <div class="card bg-base-100 shadow mt-4">
+            <div class="card-body">
+                <h2 class="card-title text-base">{% trans "English" %}</h2>
+                {% if news_item.title_en %}<p class="font-semibold">{{ news_item.title_en }}</p>{% endif %}
+                {% if news_item.body_en %}<p class="whitespace-pre-line">{{ news_item.body_en }}</p>{% endif %}
+            </div>
+        </div>
+    {% endif %}
+
     <div class="card bg-base-100 shadow mt-4">
         <div class="card-body">
             <div class="flex items-center justify-between">
