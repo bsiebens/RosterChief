@@ -1,0 +1,13 @@
+{% load i18n %}{% blocktrans with name=parent_first_name %}Hello {{ name }},{% endblocktrans %}
+
+{% blocktrans with club=club.name child=child %}{{ club }} has confirmed that you're {{ child }}'s parent or guardian, and your account is ready.{% endblocktrans %}
+
+{% trans "Set your password here:" %}
+{{ set_password_url }}
+{% blocktrans %}That link is for you alone — please don't forward it.{% endblocktrans %}
+
+{% blocktrans %}Once you're signed in you'll see the children linked to you.{% endblocktrans %}
+{% if club.contact_email %}
+{% blocktrans with email=club.contact_email %}Something not right? Reply to this note or write to {{ email }}.{% endblocktrans %}
+{% endif %}
+{% blocktrans with club=club.name %}— {{ club }}{% endblocktrans %}

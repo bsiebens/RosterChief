@@ -8,6 +8,7 @@ from unittest import mock
 import openpyxl
 from allauth.mfa.models import Authenticator
 from django.contrib.auth import get_user_model
+from django.core import mail
 from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.template.loader import render_to_string
@@ -1389,27 +1390,38 @@ class ParentClaimViewTests(ManagementTestBase):
         payload.update(overrides)
         return payload
 
-    def submit(self, **overrides):
-        return self.client.post(reverse("members:parent_claim"), self.claim_payload(**overrides), HTTP_HOST="ajax-united.rosterchief.app")
+    def submit(self, *, follow=False, **overrides):
+        return self.client.post(reverse("members:parent_claim"), self.claim_payload(**overrides), HTTP_HOST="ajax-united.rosterchief.app", follow=follow)
 
     def test_the_claim_form_is_reachable_without_signing_in(self):
         response = self.client.get(reverse("members:parent_claim"), HTTP_HOST="ajax-united.rosterchief.app")
 
         self.assertEqual(response.status_code, 200)
 
-    def test_submitting_records_a_pending_claim(self):
+    def test_submitting_records_a_pending_claim_and_redirects_back_with_a_flash(self):
         response = self.submit()
 
-        self.assertEqual(response.status_code, 200)
+        # fetch_redirect_response=False: assertRedirects' own probe GET would
+        # otherwise consume the one-shot flash before the assertion below gets to see it.
+        self.assertRedirects(response, reverse("members:parent_claim"), fetch_redirect_response=False)
         self.assertEqual(ParentClaim.objects.filter(club=self.club, status=ParentClaim.Status.PENDING).count(), 1)
+        page = self.client.get(reverse("members:parent_claim"), HTTP_HOST="ajax-united.rosterchief.app")
+        self.assertContains(page, "Request received")
 
-    def test_an_unmatched_claim_looks_exactly_like_a_matched_one(self):
+    def test_an_unmatched_claim_flashes_the_same_message_as_a_matched_one(self):
         # The page must not tell an anonymous submitter which children exist.
-        matched = self.submit()
-        unmatched = self.submit(child_first_name="Nobody", child_last_name="Here", parent_email="other@example.com")
+        matched = self.submit(follow=True)
+        unmatched = self.submit(child_first_name="Nobody", child_last_name="Here", parent_email="other@example.com", follow=True)
 
-        self.assertEqual(matched.status_code, unmatched.status_code)
-        self.assertEqual(matched.content, unmatched.content)
+        self.assertEqual([str(m) for m in matched.context["messages"]], [str(m) for m in unmatched.context["messages"]])
+
+    def test_the_flash_mentions_the_clubs_contact_email_when_set(self):
+        self.club.contact_email = "info@ajax-united.example.com"
+        self.club.save(update_fields=["contact_email"])
+
+        response = self.submit(follow=True)
+
+        self.assertContains(response, "info@ajax-united.example.com")
 
     def test_submitting_creates_no_account(self):
         # A public form that made a User per submission would be a spam magnet;
@@ -1453,6 +1465,49 @@ class ParentClaimViewTests(ManagementTestBase):
         self.assertEqual(ClubMembership.objects.get(club=self.club, member=parent).kind, ClubMembership.Kind.GUARDIAN)
         claim.refresh_from_db()
         self.assertEqual(claim.status, ParentClaim.Status.APPROVED)
+
+    def test_approving_emails_the_parent_a_working_set_password_link(self):
+        self.submit()
+        claim = ParentClaim.objects.get(club=self.club)
+        self.client.force_login(self.admin_user)
+
+        self.club_post("parent_claim_approve", {"child": str(self.child.pk)}, claim.pk)
+
+        self.assertEqual(len(mail.outbox), 1)
+        sent = mail.outbox[0]
+        self.assertEqual(sent.to, ["taylor.doe@example.com"])
+        self.assertIn("Jamie", sent.body)
+
+        [reset_path] = [line for line in sent.body.splitlines() if "/accounts/password/reset/key/" in line]
+        parent = Member.objects.get(user__email="taylor.doe@example.com")
+        self.assertFalse(parent.user.has_usable_password())
+        response = self.client.get(reset_path.strip(), HTTP_HOST="ajax-united.rosterchief.app", follow=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "password1")
+
+    def test_the_email_mentions_the_clubs_contact_email_when_set(self):
+        self.club.contact_email = "info@ajax-united.example.com"
+        self.club.save(update_fields=["contact_email"])
+        self.submit()
+        claim = ParentClaim.objects.get(club=self.club)
+        self.client.force_login(self.admin_user)
+
+        self.club_post("parent_claim_approve", {"child": str(self.child.pk)}, claim.pk)
+
+        self.assertIn("info@ajax-united.example.com", mail.outbox[0].body)
+
+    def test_a_send_failure_still_leaves_the_claim_linked(self):
+        self.submit()
+        claim = ParentClaim.objects.get(club=self.club)
+        self.client.force_login(self.admin_user)
+
+        with mock.patch("members.services.claims.send_mail", side_effect=OSError("smtp down")):
+            response = self.club_post("parent_claim_approve", {"child": str(self.child.pk)}, claim.pk)
+
+        self.assertRedirects(response, reverse("management:parent_claim_list"))
+        claim.refresh_from_db()
+        self.assertEqual(claim.status, ParentClaim.Status.APPROVED)
+        self.assertTrue(Member.objects.filter(user__email="taylor.doe@example.com").exists())
 
     def test_approving_without_choosing_a_child_changes_nothing(self):
         self.submit()

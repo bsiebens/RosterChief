@@ -14,7 +14,7 @@ from .services.admins import find_member_by_email
 class ClubForm(forms.ModelForm):
     class Meta:
         model = Club
-        fields = ["name", "legal_name", "slug", "sport_type", "logo", "primary_color", "secondary_color", "season_start", "season_duration_months"]
+        fields = ["name", "legal_name", "contact_email", "slug", "sport_type", "logo", "primary_color", "secondary_color", "season_start", "season_duration_months"]
         help_texts = {"slug": _("Drives the club's subdomain. Left blank, it is derived from the name.")}
         # Deliberately a text input, not <input type="color">: a colour picker cannot
         # express "no colour" -- it would submit #000000 for every club that never

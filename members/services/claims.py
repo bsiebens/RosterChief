@@ -12,13 +12,22 @@ must never confirm whether a given child exists -- so it takes free text and
 matches nothing itself.
 """
 
+from allauth.account.forms import default_token_generator
+from allauth.account.utils import user_pk_to_url_str
+from django.conf import settings
+from django.contrib.auth import get_user_model
+from django.core.mail import send_mail
 from django.db import transaction
 from django.db.models import Exists, OuterRef, Q
+from django.template.loader import render_to_string
+from django.urls import reverse
 from django.utils import timezone
 
 from club.models import ClubMembership
 from members.models import Family, FamilyMembership, Member, ParentClaim
 from members.services.family import add_parent_to_family
+
+User = get_user_model()
 
 #: Suggestions are ranked, never auto-applied -- an exact name-and-birthday match
 #: is still only a suggestion, because the whole point of the queue is that a
@@ -139,3 +148,36 @@ def reject_claim(claim, *, reviewed_by=None, note=""):
     claim.note = note
     claim.save(update_fields=["status", "reviewed_by", "reviewed_at", "note"])
     return claim
+
+
+def send_claim_approved_email(claim, *, child, request=None):
+    """Tell the parent their account is ready, with a link that sets their password.
+
+    A real one-time link rather than "go to the reset page and type your email":
+    the account was created for them with no usable password, so being told to
+    "reset" something they never had reads as an error. Built with allauth's own
+    token generator so it lands in the same flow the login page would send them
+    to, rather than a second, parallel one that could drift out of step with it.
+
+    Never fatal: an approved claim is a real link in the database whether or not
+    the mail leaves the building, and losing that link because a mail server was
+    briefly unreachable would be far worse than a parent needing a nudge.
+    """
+    user = User.objects.filter(email__iexact=claim.parent_email).first()
+    if user is None:
+        return False
+
+    path = reverse("account_reset_password_from_key", kwargs={"uidb36": user_pk_to_url_str(user), "key": default_token_generator.make_token(user)})
+    set_password_url = request.build_absolute_uri(path) if request is not None else path
+
+    context = {"club": claim.club, "child": child, "parent_first_name": claim.parent_first_name, "set_password_url": set_password_url}
+    subject = " ".join(render_to_string("members/email/claim_approved_subject.txt", context).split())
+    body = render_to_string("members/email/claim_approved.txt", context).strip() + "\n"
+
+    try:
+        send_mail(subject, body, settings.DEFAULT_FROM_EMAIL, [claim.parent_email], fail_silently=False)
+    except OSError:
+        # Anything the mail backend raises for an unreachable server or a refused
+        # connection. The link stands; the club can resend from the queue.
+        return False
+    return True

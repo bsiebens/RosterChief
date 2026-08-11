@@ -450,6 +450,22 @@ ClubMembership(ClubScopedModel)      # -> carries `club`
   afterwards; approving a claim is not the place to decide it. They then get a password-reset
   link and a minimal "my family" page (`members/views.py::MyFamilyView`) — the seam a real
   parent portal would grow from.
+- **`Club.contact_email`** *(built)* — the club's own public address, set from the control
+  panel next to `legal_name`. Shown to the parent both in the submission flash and in the
+  approval email, as somewhere to write if something's wrong — falls back to nothing shown at
+  all when unset, same pattern as `legal_name`/`official_name`.
+- **The flash after submitting is worded and timed to reveal nothing.** Sent *before* any
+  lookup happens, from a fixed string that never varies with whether a matching child was
+  actually found (`members/views.py::ParentClaimView.form_valid`) — a message that differed
+  would be exactly the enumeration channel free-text matching was built to avoid.
+- **Approval emails a real one-time set-password link**, built with allauth's own token
+  generator (`default_token_generator`/`user_pk_to_url_str`) so it lands in the same flow the
+  login page's own reset would send them to, rather than a second, parallel one that could
+  drift out of step with it. Sending is never allowed to fail the approval — the family link
+  and the guardian row are real either way, and a briefly unreachable mail server must not
+  cost the parent their place in the queue; the admin sees a distinct warning message
+  (`management/views.py::ParentClaimApproveView`) telling them the email didn't go and to have
+  the parent use "Forgot your password?" instead.
 - **Why a field and not a separate model.** Everything that answers "is this person attached
   to this club" already reads through `ClubMembership` — tenancy scoping, group membership,
   the club-wide event audience — and a second kind of link would need a parallel path through

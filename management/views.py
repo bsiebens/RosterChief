@@ -40,7 +40,7 @@ from formbuilder.models import Form as FormBuilderForm
 from formbuilder.models import Submission
 from members.forms import ClaimReviewForm
 from members.models import Family, FamilyMembership, Group, GroupMembership, Member, ParentClaim
-from members.services.claims import ClaimError, approve_claim, children_awaiting_a_parent, reject_claim, suggested_children
+from members.services.claims import ClaimError, approve_claim, children_awaiting_a_parent, reject_claim, send_claim_approved_email, suggested_children
 from members.services.family import add_child_to_family, add_parent_to_family, attach_to_family, detach_from_family, get_or_create_login_user, grant_login, register_family
 from news.models import News, NewsPhoto
 from shop.models import Discount, Invoice, Order, Product
@@ -1487,8 +1487,16 @@ class ParentClaimApproveView(ClubAdminRequiredMixin, View):
         except ClaimError as error:
             notify(request, f"e|{_('Could not approve')}|{error}")
         else:
-            body = _("“%(parent)s” is now linked to %(child)s and can set up their login.") % {"parent": claim.parent_name, "child": form.cleaned_data["child"]}
-            notify(request, f"s|{_('Claim approved')}|{body}")
+            child = form.cleaned_data["child"]
+            emailed = send_claim_approved_email(claim, child=child, request=request)
+            if emailed:
+                body = _("“%(parent)s” is now linked to %(child)s. They've been emailed a link to set their password.") % {"parent": claim.parent_name, "child": child}
+                notify(request, f"s|{_('Claim approved')}|{body}")
+            else:
+                # The link is made either way -- say so plainly rather than letting
+                # the club assume the parent has been told.
+                body = _("“%(parent)s” is now linked to %(child)s, but the email could not be sent. Ask them to use “Forgot your password?” on the sign-in page.") % {"parent": claim.parent_name, "child": child}
+                notify(request, f"w|{_('Claim approved, email not sent')}|{body}")
         return redirect("management:parent_claim_list")
 
 

@@ -6,9 +6,11 @@ staff, and ClubStaffRequiredMixin would (rightly) turn them away.
 
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.http import Http404
-from django.shortcuts import render
+from django.shortcuts import redirect
+from django.utils.translation import gettext_lazy as _
 from django.views.generic import FormView, TemplateView
 
+from controlpanel.messages import notify
 from members.forms import ParentClaimForm
 from members.models import FamilyMembership, Member
 from members.services.claims import submit_claim
@@ -39,7 +41,17 @@ class ParentClaimView(ClubScopedPublicMixin, FormView):
 
     def form_valid(self, form):
         submit_claim(self.request.club, **form.cleaned_data)
-        return render(self.request, "members/parent_claim_submitted.html", {"club": self.request.club})
+
+        club = self.request.club
+        title = _("Request received")
+        body = _("%(club)s will check this against their records. If it matches, you'll get an email with a link to set your password.") % {"club": club.name}
+        if club.contact_email:
+            body += " " + _("Any questions, write to %(email)s.") % {"email": club.contact_email}
+        # Worded identically whether or not that child exists, and sent before any
+        # lookup happens at all -- a message that differed would tell an anonymous
+        # submitter which children the club has.
+        notify(self.request, f"s|{title}|{body}")
+        return redirect("members:parent_claim")
 
 
 class MyFamilyView(ClubScopedPublicMixin, LoginRequiredMixin, TemplateView):

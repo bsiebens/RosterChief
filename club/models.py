@@ -41,6 +41,11 @@ class Club(UUIDModel):
     name = models.CharField(_("name"), max_length=255)
     legal_name = models.CharField(_("legal name"), max_length=255, blank=True, help_text=_("Full registered name (e.g. including a legal form like VZW/ASBL), used on official documents. Falls back to club name if blank."))
     slug = models.SlugField(_("slug"), max_length=255, unique=True, blank=True, help_text=_("Drives subdomain / path resolution (e.g. ajax-united.rosterchief.app)."))
+    contact_email = models.EmailField(
+        _("contact email"),
+        blank=True,
+        help_text=_("The club's public address, shown to people the club writes to or asks to get in touch -- e.g. a parent claiming a child. Falls back to nothing being shown at all, so it's worth setting."),
+    )
 
     logo = models.FileField(
         _("logo"),
