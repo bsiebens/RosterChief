@@ -27,7 +27,7 @@
                                 <td>{{ group.member_count }}</td>
                                 <td class="text-right">
                                     <div class="flex justify-end gap-1">
-                                        <a class="btn btn-outline btn-sm" href="{% url 'management:group_update' group.pk %}" aria-label="{% trans 'Edit' %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</a>
+                                        <a class="btn btn-outline btn-sm" href="{% url 'management:group_detail' group.pk %}" aria-label="{% trans 'Edit' %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</a>
                                         <button class="btn btn-sm btn-outline btn-error" type="button" onclick="document.getElementById('{{ group.pk|dom_id:"group_delete_modal" }}').showModal()" aria-label="{% trans 'Delete' %}">{% lucide "trash-2" size=14 %} {% trans "Delete" %}</button>
                                     </div>
                                 </td>

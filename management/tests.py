@@ -824,6 +824,19 @@ class GroupManagementTests(ManagementTestBase):
         self.client.force_login(self.make_non_admin_coach())
         self.assertEqual(self.club_get("group_list").status_code, 403)
 
+    def test_the_lists_edit_button_goes_to_the_group_page_not_straight_to_the_form(self):
+        # Same as Teams: Edit lands on the overview, which is where the members
+        # live, and offers its own Edit for the rename form. The list pages that
+        # do jump straight to a form (Locations, Opponents, Sponsors, Positions,
+        # Referee levels) have no detail page to land on at all.
+        group = Group.objects.create(club=self.club, name="Referees")
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("group_list")
+
+        self.assertContains(response, reverse("management:group_detail", args=[group.pk]))
+        self.assertNotContains(response, reverse("management:group_update", args=[group.pk]))
+
     def test_admin_can_create_a_group(self):
         self.client.force_login(self.admin_user)
 
