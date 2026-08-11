@@ -466,6 +466,26 @@ ClubMembership(ClubScopedModel)      # -> carries `club`
   cost the parent their place in the queue; the admin sees a distinct warning message
   (`management/views.py::ParentClaimApproveView`) telling them the email didn't go and to have
   the parent use "Forgot your password?" instead.
+- **A signed-in parent claiming a second child links, never duplicates.**
+  `ParentClaim.submitted_by_user` (nullable FK to `authentication.User`) records who was
+  actually logged in when a claim was submitted — kept separate from the free-text
+  `parent_email`/name fields, which stay exactly as typed as the admin's audit trail even when
+  they drift from the account. When set, `members/views.py::ParentClaimView` drops the parent
+  fields from the form entirely (shown as read-only "submitting as…" text, not just pre-filled
+  inputs — a disabled input doesn't even submit, and a pre-filled-but-editable one still lets a
+  typo through) and populates them server-side from the `Member` instead of trusting POST data.
+  On approval, `members/services/claims.py::approve_claim` resolves the parent via that FK
+  (never re-derived from email) and, if they already belong to a `Family`, moves the newly
+  claimed child's `FamilyMembership` onto *that* family rather than leaving them split across
+  two households — the child's now-empty solo family is cleaned up the same way
+  `members/services/family.py::detach_from_family` already does elsewhere. No existing family →
+  falls back to the original behaviour of joining the child's own family. This is the one place
+  a parent, once they exist, is the anchor for "one household," not the child.
+- **The "already dealt with" history is scoped to the current season.** Last season's approved
+  and rejected claims are real history but not something a club needs staring at year after
+  year, so `management/views.py::ParentClaimListView` filters `reviewed` to
+  `reviewed_at__date__gte=` the current season's start (empty, not erroring, when there's no
+  current season) rather than dropping the section outright.
 - **Why a field and not a separate model.** Everything that answers "is this person attached
   to this club" already reads through `ClubMembership` — tenancy scoping, group membership,
   the club-wide event audience — and a second kind of link would need a parallel path through
@@ -483,6 +503,26 @@ ClubMembership(ClubScopedModel)      # -> carries `club`
   weed guardians out would take those people with it. Pass `include_guardians=True` where the
   page is about a *person* rather than about members — a guardian's own detail page, editing
   them, the group pickers, or a family page (whose parents are the whole point).
+- **The members list makes the member/guardian split visible instead of silent.**
+  `management/views.py::MemberListView` reads `?kind=member|guardian|both` (default `member`,
+  unchanged from before this filter existed) — without it, a guardian was simply absent from
+  the page with nothing explaining why, which read as a bug rather than the intended "guardians
+  aren't members" design. `management/views.py::FamilyListView` (`management:family_list`) is
+  the complementary household-first view: one row per family, its parents/guardians in one
+  column and its children in another, with the family name and a separate "Edit" action both
+  landing on `family_detail` — matching the "Edit goes to the overview, not a bare rename form"
+  convention the Groups list already established.
+- **List views are paginated** (`MemberListView`, `EventListView`, `TeamListView`,
+  `GroupListView`, `NewsListView`, `FamilyListView`; `paginate_by = 25`) through one shared
+  `management/templates/management/_pagination.html` partial, using Django's `{% querystring %}`
+  tag so a page link preserves whatever `?q=`/`?kind=`/etc. filter is active rather than
+  resetting it.
+- **The sidebar surfaces two counts that would otherwise require opening the page to see**:
+  pending parent claims, and games in the next 10 with no referee assigned (the latter shares
+  its query with `RefereeManagementDashboardView`'s own KPI, factored out so the two can't drift
+  apart). Both are admin-gated the same way the rest of that nav section is, and both render
+  `0` explicitly rather than hiding the badge — the point is to make "nothing outstanding" just
+  as visible as "something needs attention," not to declutter the zero case away.
 - One row per member **per season** — sign-up and fee payment are tracked independently
   each season. `unique_together` moves from `(club, member)` → `(club, member, season)`
   (a data migration must backfill existing rows with the current season).
@@ -1244,7 +1284,27 @@ Two ways to use **Resend** (resend.com), no third-party SDK either way:
   `RESEND_API_KEY=…`) posts each message straight to Resend's `/emails` endpoint via `requests`
   (already a dependency, so no new one needed for this). Handles plain text, the HTML
   alternative on an `EmailMultiAlternatives`, cc/bcc/reply-to, and base64-encoded attachments;
-  `fail_silently` is honoured the same way Django's own backends honour it.
+  `fail_silently` is honoured the same way Django's own backends honour it. Confirmed against
+  Resend's own docs: `POST /emails` accepts `html` alongside `text` (and will derive `text` from
+  `html` if only the former is given), so this backend needed no changes to carry the HTML
+  templates below.
+- **HTML email templates** *(built)*. `templates/email/_base.html` is the one shared shell
+  (inline styles only, ~600px single-column table — email clients strip `<style>` blocks and
+  ignore linked stylesheets, so daisyUI/Tailwind's compiled CSS is irrelevant here) with a
+  `{% include "email/_button.html" %}` for a styled CTA link. Every HTML email extends it and
+  supplies a plain-text sibling — `members/services/claims.py::send_claim_approved_email` builds
+  an `EmailMultiAlternatives` from `claim_approved.txt` + `claim_approved.html`
+  (`.attach_alternative(html, "text/html")`), the same never-fail-the-caller contract as before
+  (`except OSError: return False`). `club/templatetags/club_email.py::absolute_media_url` turns
+  `Club.logo` (a relative `FileSystemStorage` URL) into something an inbox can actually fetch,
+  by resolving it against the `request` carried in the template context.
+- **allauth's password-reset email is overridden**, not left at its default plain text —
+  `templates/account/email/password_reset_key_message.html` sits next to allauth's own
+  `.txt` at the path its `render_mail` already looks for (no Python-side override needed;
+  allauth auto-attaches a same-named `.html` as the HTML alternative). Branches on whether a
+  `club` is in context (a reset requested from a club subdomain gets that club's branding) and
+  falls back to a plain RosterChief wordmark otherwise (the platform-level login has no club to
+  brand it with).
 
 ---
 
