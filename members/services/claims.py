@@ -65,13 +65,18 @@ def children_awaiting_a_parent(club):
     ).distinct()
 
 
-def submit_claim(club, *, parent_first_name, parent_last_name, parent_email, child_first_name, child_last_name, child_date_of_birth):
+def submit_claim(club, *, parent_first_name, parent_last_name, parent_email, child_first_name, child_last_name, child_date_of_birth, submitted_by_user=None):
     """Record a claim from the public form. Deliberately does not check whether
     the child exists: the form is public, so telling the submitter either way
     would turn it into a way to enumerate the club's children. Everything is
-    judged by a human afterwards."""
+    judged by a human afterwards.
+
+    ``submitted_by_user`` is the signed-in account submitting a second (or
+    later) claim -- e.g. a parent already linked to one child, claiming a
+    sibling. ``None`` for the common case of an anonymous public submission."""
     return ParentClaim.objects.create(
         club=club,
+        submitted_by_user=submitted_by_user if submitted_by_user is not None and submitted_by_user.is_authenticated else None,
         parent_first_name=parent_first_name.strip(),
         parent_last_name=parent_last_name.strip(),
         parent_email=parent_email.strip().lower(),
@@ -117,17 +122,47 @@ def approve_claim(claim, *, child, season, reviewed_by=None):
     if not claim.is_pending:
         raise ClaimError("This claim has already been dealt with.")
 
-    family = child.family_memberships.first()
-    if family is None:
+    child_membership = child.family_memberships.first()
+    if child_membership is None:
         raise ClaimError("That child is not in a family, so there is nothing to join.")
+    child_family = child_membership.family
+
+    # A signed-in submitter's account is authoritative for who the parent is --
+    # resolved straight off the FK, never re-derived from the free-text
+    # parent_email, so a second claim from the same parent can never fork off a
+    # duplicate User/Member even if the typed email drifted from their login one.
+    parent = Member.objects.filter(user=claim.submitted_by_user).first() if claim.submitted_by_user_id else None
+    existing_membership = parent.family_memberships.first() if parent is not None else None
+
+    if existing_membership is not None and existing_membership.family_id != child_family.pk:
+        # The parent already has a household on file -- most often because this
+        # is a second (or third) child of theirs being claimed. A parent who
+        # already exists as a Member is the anchor for "one household" from
+        # then on: the child's own solo family (created for them on import, see
+        # families_awaiting_a_parent above) merges into the parent's existing
+        # family, rather than the two staying split across separate Family
+        # rows or the parent forking into a fresh family alongside their other
+        # child. The child's now-empty solo family is cleaned up the same way
+        # members.services.family.detach_from_family already does elsewhere.
+        family = existing_membership.family
+        child_membership.family = family
+        child_membership.save(update_fields=["family"])
+        if not child_family.memberships.exists():
+            child_family.delete()
+    else:
+        # No existing household to anchor to (a brand new parent, or one whose
+        # only family link is this very child) -- fall back to the original
+        # behaviour of joining the child's own family.
+        family = child_family
 
     add_parent_to_family(
         claim.club,
         season,
-        family.family,
+        family,
         email=claim.parent_email,
         first_name=claim.parent_first_name,
         last_name=claim.parent_last_name,
+        parent=parent,
     )
 
     claim.status = ParentClaim.Status.APPROVED

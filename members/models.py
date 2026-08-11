@@ -131,6 +131,15 @@ class ParentClaim(ClubScopedModel):
     parent_last_name = models.CharField(_("parent last name"), max_length=150)
     parent_email = models.EmailField(_("parent email"))
 
+    # The signed-in account that submitted this claim, if any -- e.g. a parent
+    # already linked to one child, claiming a second. Distinct from parent_email
+    # above: that stays free text kept verbatim as the evidence an admin judged,
+    # while this is the authoritative "is this actually you" signal, set from
+    # request.user and never taken from anything the client could fake. Null for
+    # an anonymous public submission, which is the common case for a family's
+    # first claim.
+    submitted_by_user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="submitted_parent_claims", verbose_name=_("submitted by"))
+
     # What the parent typed, kept verbatim even after the claim is matched -- it is
     # the evidence the admin judged, and a later dispute needs to see it unchanged.
     child_first_name = models.CharField(_("child first name"), max_length=150)

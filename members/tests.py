@@ -806,3 +806,72 @@ class ParentClaimTests(TestCase):
 
         with self.assertRaises(ClaimError):
             approve_claim(claim, child=self.child, season=self.season)
+
+    def test_submit_claim_records_the_signed_in_submitter(self):
+        user = User.objects.create_user(email="taylor.doe@example.com", password="x")
+
+        claim = self.make_claim(submitted_by_user=user)
+
+        self.assertEqual(claim.submitted_by_user, user)
+
+    def test_submit_claim_leaves_the_submitter_blank_for_an_anonymous_submission(self):
+        claim = self.make_claim()
+
+        self.assertIsNone(claim.submitted_by_user)
+
+    def test_approving_a_second_claim_from_a_known_parent_merges_into_their_existing_family(self):
+        # A parent claiming a second (or third) child of theirs: the child's own
+        # solo family (created for them on import) must merge into the family
+        # the parent already belongs to, not sit alongside it in a second row.
+        first_claim = self.make_claim()
+        approve_claim(first_claim, child=self.child, season=self.season)
+        parent_user = User.objects.get(email="taylor.doe@example.com")
+        parent = Member.objects.get(user=parent_user)
+
+        second_child = Member.objects.create(first_name="Robin", last_name="Doe", date_of_birth=datetime.date(2016, 5, 1))
+        ClubMembership.objects.create(club=self.club, member=second_child, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        second_family = Family.objects.create()
+        FamilyMembership.objects.create(family=second_family, member=second_child, role=FamilyMembership.FamilyRole.CHILD)
+        second_claim = self.make_claim(
+            child_first_name="Robin",
+            child_last_name="Doe",
+            child_date_of_birth=datetime.date(2016, 5, 1),
+            submitted_by_user=parent_user,
+        )
+
+        approve_claim(second_claim, child=second_child, season=self.season)
+
+        # Exactly one account and one household with both children.
+        self.assertEqual(User.objects.filter(email="taylor.doe@example.com").count(), 1)
+        self.assertEqual(Member.objects.filter(user=parent_user).count(), 1)
+        family = FamilyMembership.objects.get(member=parent).family
+        self.assertCountEqual(family.children, [self.child, second_child])
+        self.assertFalse(Family.objects.filter(pk=second_family.pk).exists())
+        # Still a guardian on the second child's enrolment too, not a member.
+        self.assertEqual(ClubMembership.objects.get(club=self.club, member=parent).kind, ClubMembership.Kind.GUARDIAN)
+
+    def test_approving_falls_back_to_the_childs_family_when_the_parent_has_none_yet(self):
+        # A known account with no family link at all (e.g. login granted without
+        # ever being attached to a family) -- nothing to anchor to, so this
+        # behaves exactly like the original, family-less flow.
+        user = User.objects.create_user(email="taylor.doe@example.com", password="x")
+        parent = Member.objects.create(user=user, first_name="Taylor", last_name="Doe")
+        claim = self.make_claim(submitted_by_user=user)
+
+        approve_claim(claim, child=self.child, season=self.season)
+
+        self.assertEqual(FamilyMembership.objects.get(member=parent).family, self.family)
+        self.assertEqual(Member.objects.filter(user=user).count(), 1)
+
+    def test_approving_uses_the_authenticated_members_account_even_if_the_typed_email_differs(self):
+        # submitted_by_user is authoritative -- a stale or mistyped parent_email
+        # must never fork off a second User/Member for someone already known.
+        user = User.objects.create_user(email="real.taylor@example.com", password="x")
+        parent = Member.objects.create(user=user, first_name="Taylor", last_name="Doe")
+        claim = self.make_claim(parent_email="typo.taylor@example.com", submitted_by_user=user)
+
+        approve_claim(claim, child=self.child, season=self.season)
+
+        self.assertEqual(Member.objects.filter(first_name="Taylor", last_name="Doe").count(), 1)
+        self.assertFalse(User.objects.filter(email="typo.taylor@example.com").exists())
+        self.assertEqual(FamilyMembership.objects.get(member=parent).family, self.family)
