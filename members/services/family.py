@@ -133,12 +133,20 @@ def add_child_to_family(club, season, family, *, first_name, last_name, date_of_
 
 
 @transaction.atomic
-def add_parent_to_family(club, season, family, *, email, first_name="", last_name="", parent_is_member=False):
+def add_parent_to_family(club, season, family, *, email="", first_name="", last_name="", parent_is_member=False, parent=None):
     """A family that needs one more parent/guardian registered. A guardian
-    unless ``parent_is_member`` says they belong to the club in their own right."""
-    parent = get_or_create_login_member(email, first_name, last_name)
-    # get_or_create, not create: re-adding an email already on this family (a typo'd
-    # re-submit, say) must not trip unique_member_per_family.
+    unless ``parent_is_member`` says they belong to the club in their own right.
+
+    ``parent`` lets a caller that already knows the Member (e.g.
+    members.services.claims.approve_claim, once a claim carries a signed-in
+    submitter) attach them directly instead of resolving ``email`` again --
+    authoritative when the caller has it, and the only way to guarantee no
+    second User/Member is ever created for the same person.
+    """
+    if parent is None:
+        parent = get_or_create_login_member(email, first_name, last_name)
+    # get_or_create, not create: re-adding a parent already on this family (a typo'd
+    # re-submit, or a second claim that merged into it) must not trip unique_member_per_family.
     FamilyMembership.objects.get_or_create(family=family, member=parent, defaults={"role": FamilyMembership.FamilyRole.PARENT})
     _enrol(club, season, parent, kind=ClubMembership.Kind.MEMBER if parent_is_member else ClubMembership.Kind.GUARDIAN)
 

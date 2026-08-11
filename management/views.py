@@ -38,7 +38,7 @@ from events.services.recurrence import cancel_occurrence, detach_occurrence, gen
 from events.services.referees import RefereeAssignmentError, add_external_referee, assign_referee, conflicting_events, eligible_referees, needs_referee_management, remove_referee, set_referee_fee
 from formbuilder.models import Form as FormBuilderForm
 from formbuilder.models import Submission
-from members.forms import ClaimReviewForm
+from members.forms import ClaimRejectForm, ClaimReviewForm
 from members.models import Family, FamilyMembership, Group, GroupMembership, Member, ParentClaim
 from members.services.claims import ClaimError, approve_claim, children_awaiting_a_parent, reject_claim, send_claim_approved_email, suggested_children
 from members.services.family import add_child_to_family, add_parent_to_family, attach_to_family, detach_from_family, get_or_create_login_user, grant_login, register_family
@@ -1459,12 +1459,20 @@ class ParentClaimListView(ClubAdminRequiredMixin, ListView):
         pending = [claim for claim in claims if claim.is_pending]
         for claim in pending:
             candidates = suggested_children(claim)
-            claim.review_form = ClaimReviewForm(candidates=Member.objects.filter(pk__in=[child.pk for child in candidates]))
+            initial = {"child": candidates[0].pk} if candidates else None
+            claim.review_form = ClaimReviewForm(candidates=Member.objects.filter(pk__in=[child.pk for child in candidates]), initial=initial)
             claim.has_candidates = bool(candidates)
+            claim.reject_form = ClaimRejectForm()
+
+        # Last season's history is clutter, not context -- only what was reviewed
+        # within the club's current season stays in view. No current season (a
+        # club between seasons) means nothing qualifies, rather than erroring.
+        season = current_season(self.request.club)
+        reviewed = self.get_queryset().exclude(status=ParentClaim.Status.PENDING).filter(reviewed_at__date__gte=season.start_date) if season is not None else ParentClaim.objects.none()
 
         return super().get_context_data(
             pending=pending,
-            reviewed=[claim for claim in claims if not claim.is_pending],
+            reviewed=reviewed,
             awaiting_a_parent=children_awaiting_a_parent(self.request.club).order_by("last_name", "first_name"),
             **kwargs,
         )

@@ -20,11 +20,17 @@
                     {% endfor %}
 
                     <h2 class="font-semibold text-sm mt-2">{% trans "About you" %}</h2>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {% form_field form.parent_first_name %}
-                        {% form_field form.parent_last_name %}
-                    </div>
-                    {% form_field form.parent_email %}
+                    {% if locked_member %}
+                        <p class="text-sm bg-base-200 rounded-box px-3 py-2">
+                            {% blocktrans with name=locked_member.get_full_name email=locked_member.contact_email %}Submitting as: {{ name }} ({{ email }}){% endblocktrans %}
+                        </p>
+                    {% else %}
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {% form_field form.parent_first_name %}
+                            {% form_field form.parent_last_name %}
+                        </div>
+                        {% form_field form.parent_email %}
+                    {% endif %}
 
                     <h2 class="font-semibold text-sm mt-4">{% trans "About your child" %}</h2>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">

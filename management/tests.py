@@ -1576,6 +1576,151 @@ class ParentClaimViewTests(ManagementTestBase):
 
         self.assertContains(response, "Jamie Doe")
 
+    def test_the_child_dropdown_is_searchable_and_the_top_match_is_preselected(self):
+        self.submit()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("parent_claim_list")
+
+        self.assertContains(response, 'data-searchable="true"')
+        html = response.content.decode()
+        select_tag = html[html.index("<select") : html.index("</select>", html.index("<select"))]
+        self.assertIn(f'value="{self.child.pk}" selected', select_tag)
+
+    def test_a_reject_modal_exists_for_each_pending_claim(self):
+        self.submit()
+        claim = ParentClaim.objects.get(club=self.club)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("parent_claim_list")
+
+        self.assertContains(response, f'id="claim_reject_modal_{claim.pk}"')
+        self.assertContains(response, f"document.getElementById('claim_reject_modal_{claim.pk}').showModal()")
+
+    def test_the_history_section_shows_a_claim_reviewed_this_season(self):
+        self.submit()
+        claim = ParentClaim.objects.get(club=self.club)
+        self.client.force_login(self.admin_user)
+        self.club_post("parent_claim_approve", {"child": str(self.child.pk)}, claim.pk)
+
+        response = self.club_get("parent_claim_list")
+
+        self.assertContains(response, "Already dealt with")
+        self.assertContains(response, "taylor.doe@example.com")
+
+    def test_the_history_section_hides_a_claim_reviewed_last_season(self):
+        self.submit()
+        claim = ParentClaim.objects.get(club=self.club)
+        self.client.force_login(self.admin_user)
+        self.club_post("parent_claim_approve", {"child": str(self.child.pk)}, claim.pk)
+        claim.refresh_from_db()
+        claim.reviewed_at = timezone.make_aware(datetime.datetime.combine(self.season.start_date - datetime.timedelta(days=1), datetime.time()))
+        claim.save(update_fields=["reviewed_at"])
+
+        response = self.club_get("parent_claim_list")
+
+        self.assertNotContains(response, "Already dealt with")
+
+    def test_the_history_section_is_empty_without_a_current_season(self):
+        self.submit()
+        claim = ParentClaim.objects.get(club=self.club)
+        self.client.force_login(self.admin_user)
+        self.club_post("parent_claim_approve", {"child": str(self.child.pk)}, claim.pk)
+        # Push the season into the future rather than deleting it -- ClubMembership.season
+        # is PROTECT, and the club being between seasons is the scenario under test,
+        # not the absence of any Season row at all.
+        future_start = timezone.localdate() + datetime.timedelta(days=100)
+        self.season.start_date = future_start
+        self.season.end_date = future_start + datetime.timedelta(days=300)
+        self.season.save(update_fields=["start_date", "end_date"])
+
+        response = self.club_get("parent_claim_list")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "Already dealt with")
+
+    def test_a_signed_in_parent_sees_locked_read_only_fields_instead_of_blank_inputs(self):
+        # Re-typing name/email risks a typo forking off a second account -- the
+        # fields are shown read-only rather than editable-but-pre-filled.
+        user = User.objects.create_user(email="already.parent@example.com", password="pw-secret-123")
+        Member.objects.create(user=user, first_name="Already", last_name="Parent")
+        self.client.force_login(user)
+
+        response = self.client.get(reverse("members:parent_claim"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, "Submitting as")
+        self.assertContains(response, "Already Parent")
+        self.assertContains(response, "already.parent@example.com")
+        self.assertNotContains(response, 'name="parent_first_name"')
+        self.assertNotContains(response, 'name="parent_last_name"')
+        self.assertNotContains(response, 'name="parent_email"')
+
+    def test_a_signed_in_parents_claim_reuses_their_account_and_ignores_posted_parent_fields(self):
+        user = User.objects.create_user(email="already.parent@example.com", password="pw-secret-123")
+        Member.objects.create(user=user, first_name="Already", last_name="Parent")
+        self.client.force_login(user)
+
+        response = self.client.post(
+            reverse("members:parent_claim"),
+            {
+                # Even if a tampered request smuggled these in, the fields don't
+                # exist on the locked form and the view never reads POST for them.
+                "parent_first_name": "Someone",
+                "parent_last_name": "Else",
+                "parent_email": "not-me@example.com",
+                "child_first_name": "Jamie",
+                "child_last_name": "Doe",
+                "child_date_of_birth": "2014-03-02",
+            },
+            HTTP_HOST="ajax-united.rosterchief.app",
+        )
+
+        self.assertEqual(response.status_code, 302)
+        claim = ParentClaim.objects.get(club=self.club, child_first_name="Jamie")
+        self.assertEqual(claim.submitted_by_user, user)
+        self.assertEqual(claim.parent_first_name, "Already")
+        self.assertEqual(claim.parent_last_name, "Parent")
+        self.assertEqual(claim.parent_email, "already.parent@example.com")
+        self.assertFalse(User.objects.filter(email="not-me@example.com").exists())
+
+    def test_an_anonymous_submission_has_no_linked_user(self):
+        self.submit()
+
+        claim = ParentClaim.objects.get(club=self.club)
+
+        self.assertIsNone(claim.submitted_by_user)
+
+    def test_a_second_claim_from_a_signed_in_parent_merges_the_new_child_into_their_existing_family(self):
+        self.submit()
+        first_claim = ParentClaim.objects.get(club=self.club)
+        self.client.force_login(self.admin_user)
+        self.club_post("parent_claim_approve", {"child": str(self.child.pk)}, first_claim.pk)
+
+        parent_user = User.objects.get(email="taylor.doe@example.com")
+        second_child = Member.objects.create(first_name="Robin", last_name="Doe", date_of_birth=datetime.date(2016, 5, 1))
+        ClubMembership.objects.create(club=self.club, member=second_child, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        second_family = Family.objects.create()
+        FamilyMembership.objects.create(family=second_family, member=second_child, role=FamilyMembership.FamilyRole.CHILD)
+
+        self.client.force_login(parent_user)
+        self.client.post(
+            reverse("members:parent_claim"),
+            {"child_first_name": "Robin", "child_last_name": "Doe", "child_date_of_birth": "2016-05-01"},
+            HTTP_HOST="ajax-united.rosterchief.app",
+        )
+        second_claim = ParentClaim.objects.get(club=self.club, child_first_name="Robin")
+
+        self.client.force_login(self.admin_user)
+        self.club_post("parent_claim_approve", {"child": str(second_child.pk)}, second_claim.pk)
+
+        # One account, one household with both children -- not a parent split
+        # across two Family rows, and not a duplicate User/Member.
+        self.assertEqual(User.objects.filter(email="taylor.doe@example.com").count(), 1)
+        parent = Member.objects.get(user=parent_user)
+        family = FamilyMembership.objects.get(member=parent).family
+        self.assertCountEqual(family.children, [self.child, second_child])
+        self.assertFalse(Family.objects.filter(pk=second_family.pk).exists())
+
 
 class GuardianViewTests(ManagementTestBase):
     """How a guardian -- a parent attached to the club only through their child --

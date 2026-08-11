@@ -34,13 +34,42 @@ class ParentClaimView(ClubScopedPublicMixin, FormView):
     It always reports the same thing back, whether or not the child was found:
     the response must not tell an anonymous submitter which children the club
     has. What actually happens next is decided by an admin.
+
+    A signed-in parent claiming a second child (a sibling, most often) gets
+    their "about you" fields locked to read-only text instead of blank inputs
+    -- typing their name/email again risks a typo forking off a second
+    User/Member instead of reusing theirs, and approval also uses this to
+    merge the new child into the family they and their first child already
+    belong to (see members.services.claims.approve_claim).
     """
 
     template_name = "members/parent_claim.html"
     form_class = ParentClaimForm
 
+    def get_member(self):
+        if not self.request.user.is_authenticated:
+            return None
+        return Member.objects.filter(user=self.request.user).first()
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs["lock_parent_fields"] = self.get_member() is not None
+        return kwargs
+
+    def get_context_data(self, **kwargs):
+        return super().get_context_data(locked_member=self.get_member(), **kwargs)
+
     def form_valid(self, form):
-        submit_claim(self.request.club, **form.cleaned_data)
+        data = dict(form.cleaned_data)
+        member = self.get_member()
+        if member is not None:
+            # Never trust the client for this -- the fields aren't even in the
+            # submitted form when locked. Pulled straight from the account
+            # that's actually signed in.
+            data["parent_first_name"] = member.first_name
+            data["parent_last_name"] = member.last_name
+            data["parent_email"] = member.contact_email
+        submit_claim(self.request.club, submitted_by_user=self.request.user if self.request.user.is_authenticated else None, **data)
 
         club = self.request.club
         title = _("Request received")
