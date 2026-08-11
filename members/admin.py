@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.utils.translation import gettext_lazy as _
 
-from .models import Family, FamilyMembership, Group, GroupMembership, Member
+from .models import Family, FamilyMembership, Group, GroupMembership, Member, ParentClaim
 
 
 # Register your models here.
@@ -87,3 +87,17 @@ class GroupMembershipAdmin(admin.ModelAdmin):
     list_display = ("group", "member")
     autocomplete_fields = ("group", "member")
     search_fields = ("group__name", "member__first_name", "member__last_name")
+
+
+@admin.register(ParentClaim)
+class ParentClaimAdmin(admin.ModelAdmin):
+    """Read-mostly: approving belongs in the club's own review queue
+    (management.views.ParentClaimListView), which links the family and creates the
+    account as one atomic step. Flipping `status` here would leave a claim marked
+    approved with nothing actually linked."""
+
+    list_display = ("parent_name", "claimed_child_name", "club", "status", "reviewed_by", "created")
+    list_filter = ("club", "status")
+    search_fields = ("parent_first_name", "parent_last_name", "parent_email", "child_first_name", "child_last_name")
+    raw_id_fields = ("child", "reviewed_by")
+    readonly_fields = ("created", "modified")

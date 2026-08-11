@@ -1,3 +1,4 @@
+import datetime
 import tempfile
 from datetime import date, timedelta
 from io import StringIO
@@ -5,6 +6,7 @@ from pathlib import Path
 
 from allauth.mfa.models import Authenticator
 from django.contrib.admin.sites import AdminSite
+from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db import IntegrityError
@@ -15,8 +17,9 @@ from django.utils import timezone
 from authentication.models import User
 from club.models import Club, ClubMembership, Season
 from members.admin import FamilyAdmin
-from members.models import Family, FamilyMembership, Group, GroupMembership, Member
+from members.models import Family, FamilyMembership, Group, GroupMembership, Member, ParentClaim
 from members.services import MemberImportResult
+from members.services.claims import ClaimError, approve_claim, children_awaiting_a_parent, reject_claim, submit_claim, suggested_children
 
 
 class MemberModelTests(TestCase):
@@ -683,3 +686,123 @@ class MemberImportResultTests(TestCase):
     def test_successful_rows_sums_created_and_updated(self):
         result = MemberImportResult(created_members=2, updated_members=3)
         self.assertEqual(result.successful_rows, 5)
+
+
+class ParentClaimTests(TestCase):
+    """The onboarding path for a club that arrives with a list of children and no
+    parent records -- see members.services.claims."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        today = timezone.localdate()
+        cls.season = Season.objects.create(club=cls.club, start_date=today, end_date=today + datetime.timedelta(days=300))
+
+        # An imported child: no login, and a family of their own with nobody on it.
+        cls.child = Member.objects.create(first_name="Jamie", last_name="Doe", date_of_birth=datetime.date(2014, 3, 2))
+        ClubMembership.objects.create(club=cls.club, member=cls.child, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
+        cls.family = Family.objects.create()
+        FamilyMembership.objects.create(family=cls.family, member=cls.child, role=FamilyMembership.FamilyRole.CHILD)
+
+    def make_claim(self, **overrides):
+        details = {
+            "parent_first_name": "Taylor",
+            "parent_last_name": "Doe",
+            "parent_email": "taylor.doe@example.com",
+            "child_first_name": "Jamie",
+            "child_last_name": "Doe",
+            "child_date_of_birth": datetime.date(2014, 3, 2),
+        }
+        details.update(overrides)
+        return submit_claim(self.club, **details)
+
+    def test_a_child_with_no_parent_is_on_the_worklist(self):
+        self.assertIn(self.child, children_awaiting_a_parent(self.club))
+
+    def test_a_child_who_has_a_parent_is_not(self):
+        parent = Member.objects.create(first_name="Taylor", last_name="Doe")
+        FamilyMembership.objects.create(family=self.family, member=parent, role=FamilyMembership.FamilyRole.PARENT)
+
+        self.assertNotIn(self.child, children_awaiting_a_parent(self.club))
+
+    def test_submitting_records_a_pending_claim_without_matching_anything(self):
+        # The form is public, so it must not resolve the child -- doing so would
+        # let an anonymous submitter test which children the club has.
+        claim = self.make_claim(child_last_name="Nonexistent")
+
+        self.assertTrue(claim.is_pending)
+        self.assertIsNone(claim.child)
+
+    def test_suggestions_rank_the_real_child_first(self):
+        claim = self.make_claim()
+
+        self.assertEqual(suggested_children(claim)[0], self.child)
+
+    def test_suggestions_never_include_a_child_who_already_has_a_parent(self):
+        parent = Member.objects.create(first_name="Existing", last_name="Doe")
+        FamilyMembership.objects.create(family=self.family, member=parent, role=FamilyMembership.FamilyRole.PARENT)
+        claim = self.make_claim()
+
+        self.assertEqual(suggested_children(claim), [])
+
+    def test_approving_links_the_parent_as_a_guardian(self):
+        claim = self.make_claim()
+
+        approve_claim(claim, child=self.child, season=self.season)
+
+        parent = Member.objects.get(user__email="taylor.doe@example.com")
+        self.assertEqual(FamilyMembership.objects.get(family=self.family, member=parent).role, FamilyMembership.FamilyRole.PARENT)
+        # A guardian, not a member: they hold the login but owe no fee and are
+        # not counted in the club's roll.
+        self.assertEqual(ClubMembership.objects.get(club=self.club, member=parent).kind, ClubMembership.Kind.GUARDIAN)
+
+    def test_approving_gives_the_parent_an_unusable_password_to_reset(self):
+        claim = self.make_claim()
+
+        approve_claim(claim, child=self.child, season=self.season)
+
+        user = get_user_model().objects.get(email="taylor.doe@example.com")
+        self.assertFalse(user.has_usable_password())
+
+    def test_approving_closes_the_claim_and_records_the_match(self):
+        claim = self.make_claim()
+
+        approve_claim(claim, child=self.child, season=self.season)
+
+        claim.refresh_from_db()
+        self.assertEqual(claim.status, ParentClaim.Status.APPROVED)
+        self.assertEqual(claim.child, self.child)
+        self.assertIsNotNone(claim.reviewed_at)
+
+    def test_an_approved_child_leaves_the_worklist(self):
+        claim = self.make_claim()
+
+        approve_claim(claim, child=self.child, season=self.season)
+
+        # The state is the shape of the data, so it corrects itself rather than
+        # needing a flag cleared.
+        self.assertNotIn(self.child, children_awaiting_a_parent(self.club))
+
+    def test_a_claim_cannot_be_approved_twice(self):
+        claim = self.make_claim()
+        approve_claim(claim, child=self.child, season=self.season)
+
+        with self.assertRaises(ClaimError):
+            approve_claim(claim, child=self.child, season=self.season)
+
+    def test_rejecting_records_the_reason_and_links_nobody(self):
+        claim = self.make_claim()
+
+        reject_claim(claim, note="Not on our records.")
+
+        claim.refresh_from_db()
+        self.assertEqual(claim.status, ParentClaim.Status.REJECTED)
+        self.assertEqual(claim.note, "Not on our records.")
+        self.assertFalse(Member.objects.filter(user__email="taylor.doe@example.com").exists())
+
+    def test_a_rejected_claim_cannot_then_be_approved(self):
+        claim = self.make_claim()
+        reject_claim(claim)
+
+        with self.assertRaises(ClaimError):
+            approve_claim(claim, child=self.child, season=self.season)

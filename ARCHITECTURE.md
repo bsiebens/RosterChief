@@ -423,6 +423,33 @@ ClubMembership(ClubScopedModel)      # -> carries `club`
   a parent exactly like the child, so every parent counted as a member — a data migration
   reclassifies them, deliberately skipping anyone who plays, is on a team's staff, or holds
   an elevated ClubRole.
+- **Onboarding a legacy roster: `members.ParentClaim`** *(built)*. The migration path for a
+  club that arrives with a list of children and no parent records at all. Children import
+  without logins, each into a **family of their own** — that shape *is* the "nobody is
+  responsible for this child" state (`members/services/claims.py::families_awaiting_a_parent`),
+  so there is no flag to drift out of step with reality, and the family drops off the worklist
+  by itself the moment a parent joins it. `family_role=child` with a blank `family_group` is
+  what asks for it; any other lone role is still a mistake in the file.
+- **Verification is a human decision, deliberately.** A parent submits a public form
+  (`/claim/`) with the child's name and date of birth as **free text — no search, no
+  autocomplete, no confirmation of whether the child was found**, because the page is
+  reachable without logging in and anything that resolved the child would turn it into a way
+  to enumerate the club's children. An admin matches it from a queue against a shortlist that
+  only ever contains children with nobody on file, so approving can never quietly re-parent a
+  child who already has one. The alternatives were rejected: a claim code needs a delivery
+  channel the club may not have, and matching on name plus birthday hands out someone else's
+  child to whoever guesses a birthday.
+- **The claim form is also the registration.** Open self-registration is closed
+  (`club.views.signup_closed` shadows `account_signup` rather than removing the route, so the
+  URL name allauth's own templates reverse still resolves). Accounts are created by an admin,
+  by the family-registration form, or on claim approval — never by a stranger, which also
+  keeps the review queue from being a spam target. The account is created **on approval**, not
+  on submission, so a public form can't fill the user table.
+- **An approved parent lands as a guardian**, with the login and the family link but no
+  membership and no fee. If they also play, an admin flips `kind` on their membership
+  afterwards; approving a claim is not the place to decide it. They then get a password-reset
+  link and a minimal "my family" page (`members/views.py::MyFamilyView`) — the seam a real
+  parent portal would grow from.
 - **Why a field and not a separate model.** Everything that answers "is this person attached
   to this club" already reads through `ClubMembership` — tenancy scoping, group membership,
   the club-wide event audience — and a second kind of link would need a parallel path through

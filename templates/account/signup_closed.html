@@ -1,0 +1,20 @@
+{% extends "_base.html" %}
+{% load i18n lucide %}
+
+{% block head_title %}{% trans "Registration is closed" %}{% endblock head_title %}
+
+{% block main %}
+    <div class="flex justify-center">
+        <div class="card w-full max-w-xl bg-base-100 shadow">
+            <div class="card-body">
+                <h1 class="card-title">{% lucide "lock-keyhole" size=20 %} {% trans "Registration is closed" %}</h1>
+                <p>{% blocktrans %}Accounts here are set up by the club, not by signing up.{% endblocktrans %}</p>
+                <p class="text-sm opacity-70">{% blocktrans %}If your child plays at this club, use the link-my-child form. Otherwise ask the club to add you.{% endblocktrans %}</p>
+                <div class="card-actions pt-2">
+                    <a class="btn btn-primary gap-2" href="{% url 'members:parent_claim' %}">{% lucide "users" size=16 %} {% trans "Link me to my child" %}</a>
+                    <a class="btn btn-outline gap-2" href="{% url 'account_login' %}">{% lucide "log-in" size=16 %} {% trans "Sign in" %}</a>
+                </div>
+            </div>
+        </div>
+    </div>
+{% endblock main %}

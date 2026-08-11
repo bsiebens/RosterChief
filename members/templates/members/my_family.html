@@ -1,0 +1,27 @@
+{% extends "_club_base.html" %}
+{% load i18n lucide %}
+
+{% block head_title %}{% trans "My family" %}{% endblock head_title %}
+
+{% block main %}
+    <div class="flex justify-center">
+        <div class="card w-full max-w-xl bg-base-100 shadow">
+            <div class="card-body">
+                <h1 class="card-title">{% lucide "users" size=20 %} {% trans "My family" %}</h1>
+
+                <ul class="divide-y divide-base-200">
+                    {% for child in children %}
+                        <li class="py-2">
+                            <span class="font-semibold">{{ child }}</span>
+                            {% if child.date_of_birth %}<span class="text-sm opacity-70">— {{ child.date_of_birth|date:"j F Y" }}</span>{% endif %}
+                        </li>
+                    {% empty %}
+                        <li class="py-2 text-sm opacity-70">
+                            {% blocktrans %}Nobody is linked to you yet. If your child plays here, ask the club to link you.{% endblocktrans %}
+                        </li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
+    </div>
+{% endblock main %}

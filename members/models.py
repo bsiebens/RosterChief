@@ -101,6 +101,69 @@ class FamilyMembership(models.Model):
         return f"{self.family} - {self.member} ({self.get_role_display()})"
 
 
+class ParentClaim(ClubScopedModel):
+    """A parent asking to be linked to a child the club already has on file.
+
+    The migration path this exists for: a club arrives with a list of children
+    from a federation export and no parent records at all. The children are
+    imported without logins (each into a family of their own, see
+    members.services.claims.children_awaiting_a_parent), and parents come forward
+    afterwards.
+
+    Verification is a human decision, deliberately. The alternatives -- a claim
+    code, or matching on name and date of birth -- either need a delivery channel
+    the club may not have, or hand out someone else's child to whoever guesses a
+    birthday. The club already knows its own families, so an admin approving from
+    a queue is the only check that is actually worth anything.
+
+    The parent's details are held here as plain text rather than as a User: this
+    form is public, so creating an account per submission would let anyone fill
+    the table with them. The account is created on approval, by which point a
+    human has vouched for it.
+    """
+
+    class Status(models.TextChoices):
+        PENDING = "pending", _("pending")
+        APPROVED = "approved", _("approved")
+        REJECTED = "rejected", _("rejected")
+
+    parent_first_name = models.CharField(_("parent first name"), max_length=150)
+    parent_last_name = models.CharField(_("parent last name"), max_length=150)
+    parent_email = models.EmailField(_("parent email"))
+
+    # What the parent typed, kept verbatim even after the claim is matched -- it is
+    # the evidence the admin judged, and a later dispute needs to see it unchanged.
+    child_first_name = models.CharField(_("child first name"), max_length=150)
+    child_last_name = models.CharField(_("child last name"), max_length=150)
+    child_date_of_birth = models.DateField(_("child date of birth"))
+
+    status = models.CharField(_("status"), max_length=20, choices=Status.choices, default=Status.PENDING)
+    child = models.ForeignKey(Member, on_delete=models.SET_NULL, null=True, blank=True, related_name="parent_claims", verbose_name=_("matched child"), help_text=_("Set when an admin approves the claim -- the child it was matched to."))
+    reviewed_by = models.ForeignKey(Member, on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("reviewed by"))
+    reviewed_at = models.DateTimeField(_("reviewed at"), null=True, blank=True)
+    note = models.TextField(_("note"), blank=True, help_text=_("Why it was rejected, or anything worth recording about the decision."))
+
+    class Meta:
+        verbose_name = _("parent claim")
+        verbose_name_plural = _("parent claims")
+        ordering = ["-created"]
+
+    def __str__(self):
+        return f"{self.parent_first_name} {self.parent_last_name} -> {self.child_first_name} {self.child_last_name}"
+
+    @property
+    def is_pending(self) -> bool:
+        return self.status == self.Status.PENDING
+
+    @property
+    def claimed_child_name(self) -> str:
+        return f"{self.child_first_name} {self.child_last_name}".strip()
+
+    @property
+    def parent_name(self) -> str:
+        return f"{self.parent_first_name} {self.parent_last_name}".strip()
+
+
 class Group(ClubScopedModel):
     """An arbitrary named collection of members -- deliberately generic, not
     team-shaped and not aware of any specific use: "all coaches", "all team

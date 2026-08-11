@@ -16,7 +16,7 @@ from django.views.generic import RedirectView
 from django.views.static import serve
 
 from api.urls import api
-from club.views import root
+from club.views import root, signup_closed
 
 from .health import healthz
 
@@ -25,7 +25,13 @@ urlpatterns = [
     path("healthz", healthz, name="healthz"),
     path("admin/login/", RedirectView.as_view(pattern_name="account_login", query_string=True), name="admin_login_redirect"),
     path("admin/", admin.site.urls),
+    # Before allauth's own urls so it wins the match: self-registration is closed.
+    # Accounts are created by an admin, by the family-registration form, or by an
+    # approved parent claim (members/views.py) -- a club has no reason to let a
+    # stranger create one, and the claim queue would be the first thing to suffer.
+    path("accounts/signup/", signup_closed, name="account_signup"),
     path("accounts/", include("allauth.urls")),
+    path("", include("members.urls")),
     path("controlpanel/", include("controlpanel.urls")),
     path("manage/", include("management.urls")),
     path("api/v1/", api.urls),

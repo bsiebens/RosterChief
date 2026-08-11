@@ -38,7 +38,9 @@ from events.services.recurrence import cancel_occurrence, detach_occurrence, gen
 from events.services.referees import RefereeAssignmentError, add_external_referee, assign_referee, conflicting_events, eligible_referees, needs_referee_management, remove_referee, set_referee_fee
 from formbuilder.models import Form as FormBuilderForm
 from formbuilder.models import Submission
-from members.models import Family, FamilyMembership, Group, GroupMembership, Member
+from members.forms import ClaimReviewForm
+from members.models import Family, FamilyMembership, Group, GroupMembership, Member, ParentClaim
+from members.services.claims import ClaimError, approve_claim, children_awaiting_a_parent, reject_claim, suggested_children
 from members.services.family import add_child_to_family, add_parent_to_family, attach_to_family, detach_from_family, get_or_create_login_user, grant_login, register_family
 from news.models import News, NewsPhoto
 from shop.models import Discount, Invoice, Order, Product
@@ -515,6 +517,12 @@ class MemberImportConfirmView(ClubAdminRequiredMixin, View):
                         family = Family.objects.create()
                         families_by_group[family_group] = family
                     FamilyMembership.objects.create(family=family, member=member, role=family_role)
+                elif family_role == FamilyMembership.FamilyRole.CHILD:
+                    # A child with no family_group: nobody is on file for them yet.
+                    # A family of their own is what makes that state visible -- it's
+                    # what members.services.claims.families_awaiting_a_parent looks
+                    # for, and what an approved claim adds the parent to.
+                    FamilyMembership.objects.create(family=Family.objects.create(), member=member, role=family_role)
 
                 if season is not None:
                     ClubMembership.objects.create(club=request.club, member=member, season=season, signed_up_at=timezone.localdate(), **result["membership_kwargs"])
@@ -1430,6 +1438,71 @@ class FamilyAddParentView(ClubAdminRequiredMixin, RedirectOnInvalidMixin, FormVi
         body = _("“%(parent)s” added to %(family)s.") % {"parent": parent, "family": family}
         notify(self.request, f"s|{_('Parent registered')}|{body}")
         return redirect("management:family_detail", pk=family.pk)
+
+
+class ParentClaimListView(ClubAdminRequiredMixin, ListView):
+    """The review queue for parents asking to be linked to a child.
+
+    Approving is a human decision on purpose -- see members.models.ParentClaim.
+    Each pending claim is shown with what the parent typed *and* a shortlist of
+    children who have nobody on file, so the admin matches rather than searches.
+    """
+
+    template_name = "management/parent_claim_list.html"
+    context_object_name = "claims"
+
+    def get_queryset(self):
+        return ParentClaim.objects.filter(club=self.request.club).select_related("child", "reviewed_by")
+
+    def get_context_data(self, **kwargs):
+        claims = list(self.get_queryset())
+        pending = [claim for claim in claims if claim.is_pending]
+        for claim in pending:
+            candidates = suggested_children(claim)
+            claim.review_form = ClaimReviewForm(candidates=Member.objects.filter(pk__in=[child.pk for child in candidates]))
+            claim.has_candidates = bool(candidates)
+
+        return super().get_context_data(
+            pending=pending,
+            reviewed=[claim for claim in claims if not claim.is_pending],
+            awaiting_a_parent=children_awaiting_a_parent(self.request.club).order_by("last_name", "first_name"),
+            **kwargs,
+        )
+
+
+class ParentClaimApproveView(ClubAdminRequiredMixin, View):
+    """Link the claim's parent to the chosen child. The parent lands as a
+    guardian, not a member -- see members.services.claims.approve_claim."""
+
+    def post(self, request, pk):
+        claim = get_object_or_404(ParentClaim.objects.filter(club=request.club), pk=pk)
+        form = ClaimReviewForm(request.POST, candidates=children_awaiting_a_parent(request.club))
+        if not form.is_valid():
+            notify(request, f"e|{_('Could not approve')}|{_('Choose which child this claim refers to.')}")
+            return redirect("management:parent_claim_list")
+
+        reviewer = Member.objects.filter(user=request.user).first()
+        try:
+            approve_claim(claim, child=form.cleaned_data["child"], season=current_season(request.club), reviewed_by=reviewer)
+        except ClaimError as error:
+            notify(request, f"e|{_('Could not approve')}|{error}")
+        else:
+            body = _("“%(parent)s” is now linked to %(child)s and can set up their login.") % {"parent": claim.parent_name, "child": form.cleaned_data["child"]}
+            notify(request, f"s|{_('Claim approved')}|{body}")
+        return redirect("management:parent_claim_list")
+
+
+class ParentClaimRejectView(ClubAdminRequiredMixin, View):
+    def post(self, request, pk):
+        claim = get_object_or_404(ParentClaim.objects.filter(club=request.club), pk=pk)
+        reviewer = Member.objects.filter(user=request.user).first()
+        try:
+            reject_claim(claim, reviewed_by=reviewer, note=request.POST.get("note", "").strip())
+        except ClaimError as error:
+            notify(request, f"e|{_('Could not reject')}|{error}")
+        else:
+            notify(request, f"w|{_('Claim rejected')}|" + _("“%(parent)s” was not linked.") % {"parent": claim.parent_name})
+        return redirect("management:parent_claim_list")
 
 
 class PositionListView(ClubStaffRequiredMixin, ListView):

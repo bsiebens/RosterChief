@@ -25,7 +25,8 @@ from events.services.recurrence import detach_occurrence, generate_occurrences
 from management.bulk_import import TEMPLATE_COLUMNS
 from management.pdf import PDFExportError, _tint_with_white, referee_form_colors, render_pdf
 from management.recurrence_ui import build_rrule, describe_rrule, parse_rrule
-from members.models import Family, FamilyMembership, Group, GroupMembership, Member
+from members.models import Family, FamilyMembership, Group, GroupMembership, Member, ParentClaim
+from members.services.claims import children_awaiting_a_parent
 from news.models import News, NewsPhoto
 from shop.models import Order
 from teams.models import Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
@@ -1361,6 +1362,148 @@ class FamilyManagementTests(ManagementTestBase):
         self.club_post("family_add_parent", {"email": "new.parent@example.com", "first_name": "", "last_name": ""}, family.pk)
 
         self.assertEqual(family.guardians.count(), 1)
+
+
+class ParentClaimViewTests(ManagementTestBase):
+    """The public claim form and the admin review queue -- see
+    members.services.claims; the service-level guarantees live in
+    members.tests.ParentClaimTests."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.child = Member.objects.create(first_name="Jamie", last_name="Doe", date_of_birth=datetime.date(2014, 3, 2))
+        ClubMembership.objects.create(club=cls.club, member=cls.child, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
+        family = Family.objects.create()
+        FamilyMembership.objects.create(family=family, member=cls.child, role=FamilyMembership.FamilyRole.CHILD)
+
+    def claim_payload(self, **overrides):
+        payload = {
+            "parent_first_name": "Taylor",
+            "parent_last_name": "Doe",
+            "parent_email": "taylor.doe@example.com",
+            "child_first_name": "Jamie",
+            "child_last_name": "Doe",
+            "child_date_of_birth": "2014-03-02",
+        }
+        payload.update(overrides)
+        return payload
+
+    def submit(self, **overrides):
+        return self.client.post(reverse("members:parent_claim"), self.claim_payload(**overrides), HTTP_HOST="ajax-united.rosterchief.app")
+
+    def test_the_claim_form_is_reachable_without_signing_in(self):
+        response = self.client.get(reverse("members:parent_claim"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_submitting_records_a_pending_claim(self):
+        response = self.submit()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(ParentClaim.objects.filter(club=self.club, status=ParentClaim.Status.PENDING).count(), 1)
+
+    def test_an_unmatched_claim_looks_exactly_like_a_matched_one(self):
+        # The page must not tell an anonymous submitter which children exist.
+        matched = self.submit()
+        unmatched = self.submit(child_first_name="Nobody", child_last_name="Here", parent_email="other@example.com")
+
+        self.assertEqual(matched.status_code, unmatched.status_code)
+        self.assertEqual(matched.content, unmatched.content)
+
+    def test_submitting_creates_no_account(self):
+        # A public form that made a User per submission would be a spam magnet;
+        # the account is created on approval, once a human has vouched for it.
+        self.submit()
+
+        self.assertFalse(User.objects.filter(email="taylor.doe@example.com").exists())
+
+    def test_open_signup_is_closed(self):
+        response = self.client.get(reverse("account_signup"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_the_queue_is_admin_only(self):
+        coach_user = User.objects.create_user(email="coach-claims@example.com", password="pw-secret-123")
+        coach_member = Member.objects.create(user=coach_user, first_name="Cara", last_name="Coach")
+        team = Team.objects.create(club=self.club, name="First Team", short_name="1st")
+        position = Position.objects.create(club=self.club, name="Head Coach", short_name="HC", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=team, member=coach_member, season=self.season, position=position)
+        self.client.force_login(coach_user)
+
+        self.assertEqual(self.club_get("parent_claim_list").status_code, 403)
+
+    def test_the_queue_lists_a_pending_claim_and_the_unclaimed_child(self):
+        self.submit()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("parent_claim_list")
+
+        self.assertContains(response, "taylor.doe@example.com")
+        self.assertContains(response, "Jamie Doe")
+
+    def test_approving_links_the_parent_as_a_guardian(self):
+        self.submit()
+        claim = ParentClaim.objects.get(club=self.club)
+        self.client.force_login(self.admin_user)
+
+        self.club_post("parent_claim_approve", {"child": str(self.child.pk)}, claim.pk)
+
+        parent = Member.objects.get(user__email="taylor.doe@example.com")
+        self.assertEqual(ClubMembership.objects.get(club=self.club, member=parent).kind, ClubMembership.Kind.GUARDIAN)
+        claim.refresh_from_db()
+        self.assertEqual(claim.status, ParentClaim.Status.APPROVED)
+
+    def test_approving_without_choosing_a_child_changes_nothing(self):
+        self.submit()
+        claim = ParentClaim.objects.get(club=self.club)
+        self.client.force_login(self.admin_user)
+
+        self.club_post("parent_claim_approve", {}, claim.pk)
+
+        claim.refresh_from_db()
+        self.assertTrue(claim.is_pending)
+        self.assertFalse(User.objects.filter(email="taylor.doe@example.com").exists())
+
+    def test_a_child_who_already_has_a_parent_cannot_be_chosen(self):
+        # The shortlist is only ever children with nobody on file, so approving
+        # can never quietly re-parent a child who already has one.
+        other_child = Member.objects.create(first_name="Sam", last_name="Roe", date_of_birth=datetime.date(2013, 1, 1))
+        ClubMembership.objects.create(club=self.club, member=other_child, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        family = Family.objects.create()
+        FamilyMembership.objects.create(family=family, member=other_child, role=FamilyMembership.FamilyRole.CHILD)
+        existing_parent = Member.objects.create(first_name="Existing", last_name="Roe")
+        FamilyMembership.objects.create(family=family, member=existing_parent, role=FamilyMembership.FamilyRole.PARENT)
+        self.submit()
+        claim = ParentClaim.objects.get(club=self.club)
+        self.client.force_login(self.admin_user)
+
+        self.club_post("parent_claim_approve", {"child": str(other_child.pk)}, claim.pk)
+
+        claim.refresh_from_db()
+        self.assertTrue(claim.is_pending)
+
+    def test_rejecting_records_the_reason_and_links_nobody(self):
+        self.submit()
+        claim = ParentClaim.objects.get(club=self.club)
+        self.client.force_login(self.admin_user)
+
+        self.club_post("parent_claim_reject", {"note": "Not on our records."}, claim.pk)
+
+        claim.refresh_from_db()
+        self.assertEqual(claim.status, ParentClaim.Status.REJECTED)
+        self.assertFalse(User.objects.filter(email="taylor.doe@example.com").exists())
+
+    def test_the_parent_sees_their_child_after_approval(self):
+        self.submit()
+        claim = ParentClaim.objects.get(club=self.club)
+        self.client.force_login(self.admin_user)
+        self.club_post("parent_claim_approve", {"child": str(self.child.pk)}, claim.pk)
+
+        self.client.force_login(User.objects.get(email="taylor.doe@example.com"))
+        response = self.client.get(reverse("members:my_family"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, "Jamie Doe")
 
 
 class GuardianViewTests(ManagementTestBase):
@@ -3009,6 +3152,29 @@ class MemberBulkImportTests(ManagementTestBase):
 
         member = Member.objects.get(email="solo.blank@example.com")
         self.assertEqual(ClubMembership.objects.get(club=self.club, member=member).kind, ClubMembership.Kind.MEMBER)
+
+    def test_a_lone_child_row_gets_a_family_of_its_own(self):
+        # The migration case: children arrive with no parents on file. A family of
+        # one is what makes "nobody responsible for this child" visible -- see
+        # members.services.claims.families_awaiting_a_parent.
+        upload = make_import_workbook([["Jamie", "Lonechild", "2014-03-02", "", "", "", "", "", "", "", "child", ""]])
+        self.club_post("member_import", {"file": upload})
+
+        self.club_post("member_import_confirm", {})
+
+        child = Member.objects.get(first_name="Jamie", last_name="Lonechild")
+        self.assertIn(child, children_awaiting_a_parent(self.club))
+
+    def test_a_lone_parent_row_is_still_an_error(self):
+        # Only `child` is meaningful without a family_group; a parent with nobody
+        # to be a parent *of* is a mistake in the file.
+        upload = make_import_workbook([["Odd", "Loneparent", "", "odd.lone@example.com", "", "", "", "", "", "", "parent", ""]])
+
+        response = self.club_post("member_import", {"file": upload})
+
+        result = response.context["results"][0]
+        self.assertIsNone(result["member"])
+        self.assertTrue(any("family_group" in error for error in result["errors"]))
 
     def test_a_child_marked_as_a_guardian_is_an_error(self):
         # A child is the member the guardian is attached *to*.

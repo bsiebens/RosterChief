@@ -1,0 +1,43 @@
+{% extends "_club_base.html" %}
+{% load i18n lucide ui %}
+
+{% block head_title %}{% trans "Link me to my child" %}{% endblock head_title %}
+
+{% block main %}
+    <div class="flex justify-center">
+        <div class="card w-full max-w-xl bg-base-100 shadow">
+            <div class="card-body">
+                <h1 class="card-title">{% lucide "users" size=20 %} {% blocktrans with club=club.name %}Link me to my child at {{ club }}{% endblocktrans %}</h1>
+                <p class="text-sm opacity-70">
+                    {% blocktrans %}If your child already plays here, fill this in and the club will check it against their records. Once they confirm, you'll get an email to set up your login.{% endblocktrans %}
+                </p>
+
+                <form method="post" class="mt-2">
+                    {% csrf_token %}
+
+                    {% for error in form.non_field_errors %}
+                        <div class="alert alert-error my-2"><span>{{ error }}</span></div>
+                    {% endfor %}
+
+                    <h2 class="font-semibold text-sm mt-2">{% trans "About you" %}</h2>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {% form_field form.parent_first_name %}
+                        {% form_field form.parent_last_name %}
+                    </div>
+                    {% form_field form.parent_email %}
+
+                    <h2 class="font-semibold text-sm mt-4">{% trans "About your child" %}</h2>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {% form_field form.child_first_name %}
+                        {% form_field form.child_last_name %}
+                    </div>
+                    {% form_field form.child_date_of_birth %}
+
+                    <div class="card-actions justify-start pt-4">
+                        <button class="btn btn-primary gap-2" type="submit">{% lucide "send" size=16 %} {% trans "Send to the club" %}</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+{% endblock main %}

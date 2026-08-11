@@ -1,5 +1,5 @@
 from django.contrib.auth.mixins import LoginRequiredMixin
-from django.shortcuts import redirect
+from django.shortcuts import redirect, render
 from django.views.generic import TemplateView
 
 
@@ -21,3 +21,13 @@ def root(request):
         return redirect("controlpanel:dashboard")
 
     return ClubHomeView.as_view()(request)
+
+
+def signup_closed(request):
+    """Self-registration is closed -- see rosterchief/urls.py.
+
+    Shadows allauth's own signup route rather than removing it, so the
+    `account_signup` URL name every allauth template reverses still resolves and
+    the login page doesn't 500 looking for it.
+    """
+    return render(request, "account/signup_closed.html", status=403)

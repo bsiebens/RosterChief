@@ -211,8 +211,15 @@ def _parse_family_fields(raw):
     family_role_raw = raw.get("family_role", "").strip()
 
     if not family_group:
+        # family_role=child on its own is the migration case this exists for: a
+        # child the club holds with no parent on file yet. It gets a family of
+        # its own so there is something for a parent to join later -- see
+        # members.services.claims. Any other lone role is still a mistake.
         if family_role_raw:
-            errors.append(_("family_role given without a family_group."))
+            family_role = _match_choice(family_role_raw, FamilyMembership.FamilyRole)
+            if family_role == FamilyMembership.FamilyRole.CHILD:
+                return "", family_role, errors
+            errors.append(_("family_role given without a family_group. Only 'child' is allowed on its own, for a child whose parent will register later."))
         return "", None, errors
 
     if not family_role_raw:

@@ -12,6 +12,9 @@
                     You are signed in as <span class="font-semibold">{{ user.get_full_name|default:user.email }}</span>.
                 </p>
                 <p class="text-sm opacity-70">The club site lands here. For now this page exists so signing in has somewhere to go.</p>
+                <div class="card-actions pt-2">
+                    <a class="btn btn-outline btn-sm gap-2" href="{% url 'members:my_family' %}">{% lucide "users" size=14 %} My family</a>
+                </div>
             </div>
         </div>
     </div>

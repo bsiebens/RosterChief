@@ -251,8 +251,15 @@ class AuthFormRenderingTests(TestCase):
     def test_the_password_reset_form_renders_its_fields(self):
         self.assertContains(self.client.get(reverse("account_reset_password")), 'name="email"')
 
-    def test_the_signup_form_renders_its_fields(self):
-        self.assertContains(self.client.get(reverse("account_signup")), 'name="password1"')
+    def test_self_registration_is_closed(self):
+        # A club has no reason to let a stranger create an account: they're made by
+        # an admin, by the family-registration form, or by an approved parent claim
+        # (members/views.py). The route is shadowed rather than removed so that the
+        # `account_signup` name allauth's own templates reverse still resolves.
+        response = self.client.get(reverse("account_signup"))
+
+        self.assertEqual(response.status_code, 403)
+        self.assertNotContains(response, 'name="password1"', status_code=403)
 
 
 class TwoFactorPageTests(TestCase):
