@@ -18,11 +18,16 @@ from teams.models import Position, StaffAssignment, Team, TeamMembership, TeamPh
     ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "rival-fc.rosterchief.app", "testserver"],
 )
 class ApiTestBase(TestCase):
-    def setUp(self):
-        self.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+    # The tenant, its current season and its one team back every API test and are read
+    # only. The handful of tests that do change them (deleting the season, giving the
+    # club a logo) get their own copy from setUpTestData and are rolled back with the
+    # per-test transaction.
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
         today = timezone.localdate()
-        self.season = Season.objects.create(club=self.club, start_date=today - datetime.timedelta(days=30), end_date=today + datetime.timedelta(days=300))
-        self.team = Team.objects.create(club=self.club, name="First Team", short_name="1st")
+        cls.season = Season.objects.create(club=cls.club, start_date=today - datetime.timedelta(days=30), end_date=today + datetime.timedelta(days=300))
+        cls.team = Team.objects.create(club=cls.club, name="First Team", short_name="1st")
 
     def api_get(self, path, **params):
         return self.client.get(f"/api/v1{path}", params, HTTP_HOST="ajax-united.rosterchief.app")
@@ -211,11 +216,12 @@ class NewsApiTests(ApiTestBase):
 
 
 class TeamsApiTests(ApiTestBase):
-    def setUp(self):
-        super().setUp()
-        self.forward = Position.objects.create(club=self.club, name="Forward", short_name="FW", ordering=1)
-        self.defense = Position.objects.create(club=self.club, name="Defense", short_name="DF", ordering=2)
-        self.coach_position = Position.objects.create(club=self.club, name="Head Coach", short_name="HC", staff_position=True, management_position=True)
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.forward = Position.objects.create(club=cls.club, name="Forward", short_name="FW", ordering=1)
+        cls.defense = Position.objects.create(club=cls.club, name="Defense", short_name="DF", ordering=2)
+        cls.coach_position = Position.objects.create(club=cls.club, name="Head Coach", short_name="HC", staff_position=True, management_position=True)
 
     def test_list_teams(self):
         data = self.api_get("/teams/").json()
@@ -323,10 +329,11 @@ class TeamsApiTests(ApiTestBase):
 
 
 class GamesApiTests(ApiTestBase):
-    def setUp(self):
-        super().setUp()
-        self.home_location = Location.objects.create(club=self.club, name="Home Arena", address="1 St", city="Town", zip_code="1000", country="BE", is_home=True)
-        self.opponent = Opponent.objects.create(club=self.club, name="Rivals FC")
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.home_location = Location.objects.create(club=cls.club, name="Home Arena", address="1 St", city="Town", zip_code="1000", country="BE", is_home=True)
+        cls.opponent = Opponent.objects.create(club=cls.club, name="Rivals FC")
 
     def make_game(self, **overrides):
         defaults = {"club": self.club, "title": "Game", "kind": Event.EventKind.GAME, "start": timezone.now() + datetime.timedelta(days=1), "opponent": self.opponent}

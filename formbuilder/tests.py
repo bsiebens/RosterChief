@@ -22,12 +22,16 @@ from .services import (
 
 
 class FormbuilderTestBase(TestCase):
-    def setUp(self):
-        self.club = Club.objects.create(name="Ajax United", slug="ajax-united")
-        self.form = Form.objects.create(club=self.club, title="Sign-up", slug="sign-up")
-        self.name = Field.objects.create(form=self.form, key="name", label="Name", field_type=Field.FieldType.TEXT, required=True, order=1)
-        self.size = Field.objects.create(form=self.form, key="size", label="Shirt size", field_type=Field.FieldType.CHOICE, required=False, order=2, options=["S", "M", "L"])
-        self.member = Member.objects.create(first_name="Jane", last_name="Doe")
+    # One two-field form, shared by every test here. The tests that reconfigure it
+    # (closing the window, flipping login_required) mutate a per-test copy handed out
+    # by setUpTestData, and their saves roll back with the transaction.
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        cls.form = Form.objects.create(club=cls.club, title="Sign-up", slug="sign-up")
+        cls.name = Field.objects.create(form=cls.form, key="name", label="Name", field_type=Field.FieldType.TEXT, required=True, order=1)
+        cls.size = Field.objects.create(form=cls.form, key="size", label="Shirt size", field_type=Field.FieldType.CHOICE, required=False, order=2, options=["S", "M", "L"])
+        cls.member = Member.objects.create(first_name="Jane", last_name="Doe")
 
 
 class ModelTests(FormbuilderTestBase):

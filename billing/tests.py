@@ -26,13 +26,18 @@ from .services.reminders import admin_emails, reminders_to_send, send_reminder
 
 
 class BillingTestBase(TestCase):
-    def setUp(self):
-        self.today = timezone.localdate()
-        self.club = Club.objects.create(name="Ajax United")
-        self.plan = Plan.objects.create(name="Standard")
+    # setUpTestData, not setUp: the club and the priced plan are read-only scaffolding for
+    # every subclass, so they are built once per class. Django hands each test its own deep
+    # copy and rolls the database back afterwards, so the tests that archive the club or
+    # soft-delete the plan still start from a clean slate.
+    @classmethod
+    def setUpTestData(cls):
+        cls.today = timezone.localdate()
+        cls.club = Club.objects.create(name="Ajax United")
+        cls.plan = Plan.objects.create(name="Standard")
         # Priced well back, so a backdated (lapsed) period still has a price in force —
         # opening one before any price existed is refused, and rightly so.
-        PlanPrice.objects.create(plan=self.plan, active_from=self.today - datetime.timedelta(days=1200), amount=Decimal("500.00"))
+        PlanPrice.objects.create(plan=cls.plan, active_from=cls.today - datetime.timedelta(days=1200), amount=Decimal("500.00"))
 
     def bill(self, start=None, club=None):
         return open_period(club or self.club, start=start, plan=self.plan)
@@ -116,9 +121,10 @@ class PeriodTests(BillingTestBase):
 
 
 class PaymentTests(BillingTestBase):
-    def setUp(self):
-        super().setUp()
-        self.due = self.bill()
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.due = open_period(cls.club, plan=cls.plan)
 
     def test_a_part_payment_leaves_the_due_partially_paid(self):
         record_payment(self.due, Decimal("200.00"))
@@ -243,9 +249,10 @@ class GraceAndArchiveTests(BillingTestBase):
 
 
 class ArchiveCommandTests(BillingTestBase):
-    def setUp(self):
-        super().setUp()
-        subscribe(self.club, self.plan, start=self.today - datetime.timedelta(days=DEFAULT_GRACE_DAYS + 10))
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        subscribe(cls.club, cls.plan, start=cls.today - datetime.timedelta(days=DEFAULT_GRACE_DAYS + 10))
 
     def run_command(self, *args):
         out = StringIO()
@@ -275,13 +282,14 @@ class ArchiveCommandTests(BillingTestBase):
 
 
 class ReactivationTests(BillingTestBase):
-    def setUp(self):
-        super().setUp()
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
         # Through subscribe(), not open_period(): reactivating reads the club's plan off its
         # subscription, and a club billed without one cannot be re-billed later.
-        subscribe(self.club, self.plan, start=self.today - datetime.timedelta(days=400))
-        self.first = self.club.dues.first()
-        self.club.archive()
+        subscribe(cls.club, cls.plan, start=cls.today - datetime.timedelta(days=400))
+        cls.first = cls.club.dues.first()
+        cls.club.archive()
 
     def test_reactivating_continues_from_the_lapsed_period_by_default(self):
         due = reactivate(self.club)
@@ -531,12 +539,13 @@ class TrialTests(BillingTestBase):
     see billing.services.dues.start_trial and the trial-conversion check in
     open_period()."""
 
-    def setUp(self):
-        super().setUp()
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
         # A trial is a plan whose own duration_months IS the trial length -- there is no
         # trial_months argument any more.
-        self.trial_plan = Plan.objects.create(name="Trial", duration_months=2, is_trial=True, grace_days=14, renewal_lead_days=7)
-        PlanPrice.objects.create(plan=self.trial_plan, active_from=self.today - datetime.timedelta(days=1200), amount=Decimal("50.00"))
+        cls.trial_plan = Plan.objects.create(name="Trial", duration_months=2, is_trial=True, grace_days=14, renewal_lead_days=7)
+        PlanPrice.objects.create(plan=cls.trial_plan, active_from=cls.today - datetime.timedelta(days=1200), amount=Decimal("50.00"))
 
     def test_start_trial_creates_a_short_trial_period(self):
         due = start_trial(self.club, self.trial_plan, post_trial_plan=self.plan)
@@ -753,13 +762,14 @@ class BillingReminderTests(BillingTestBase):
     """Reminder emails -- see billing/services/reminders.py. Sent once per escalation
     level, because the command is on a daily cron."""
 
-    def setUp(self):
-        super().setUp()
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
         user = User.objects.create_user(email="admin@ajax.example", password="pw-secret-123")
         member = Member.objects.create(user=user, first_name="Ada", last_name="Admin")
-        ClubRole.objects.create(club=self.club, member=member, role=ClubRole.Roles.ADMIN)
-        subscribe(self.club, self.plan, start=self.today - datetime.timedelta(days=1))
-        self.due = self.club.dues.first()
+        ClubRole.objects.create(club=cls.club, member=member, role=ClubRole.Roles.ADMIN)
+        subscribe(cls.club, cls.plan, start=cls.today - datetime.timedelta(days=1))
+        cls.due = cls.club.dues.first()
 
     def test_a_reminder_goes_to_the_club_admins(self):
         self.assertEqual(admin_emails(self.club), ["admin@ajax.example"])

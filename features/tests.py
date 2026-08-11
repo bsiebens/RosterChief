@@ -17,15 +17,19 @@ User = get_user_model()
 
 
 class ClubScopedFlagTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        cls.other = Club.objects.create(name="Rival FC", slug="rival-fc")
+        cls.flag = Flag.objects.create(name="shop")
+
     def setUp(self):
         # waffle caches flags by name, and its cache is NOT rolled back with the
-        # test transaction -- a flag row recreated under the same name in the next
-        # test would otherwise be shadowed by the previous test's cached object.
+        # test transaction -- a flag row whose targeting changed in the previous
+        # test would otherwise be shadowed by that test's cached object. Has to
+        # stay per-test: it is the cache, not the rows, that leaks.
         cache.clear()
         self.addCleanup(cache.clear)
-        self.club = Club.objects.create(name="Ajax United", slug="ajax-united")
-        self.other = Club.objects.create(name="Rival FC", slug="rival-fc")
-        self.flag = Flag.objects.create(name="shop")
 
     def request_for(self, club):
         request = RequestFactory().get("/")
@@ -118,12 +122,17 @@ class ClubScopedFlagTests(TestCase):
     ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"],
 )
 class MaintenanceModeTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        cls.user = User.objects.create_user(email="root@example.com", password="pw-secret-123", is_staff=True)
+        Authenticator.objects.create(user=cls.user, type=Authenticator.Type.TOTP, data={"secret": "JBSWY3DPEHPK3PXP"})
+
     def setUp(self):
+        # Maintenance state lives in the shared cache, which no transaction rolls
+        # back -- each test has to start from a reopened platform.
         cache.clear()
         self.addCleanup(cache.clear)
-        self.club = Club.objects.create(name="Ajax United", slug="ajax-united")
-        self.user = User.objects.create_user(email="root@example.com", password="pw-secret-123", is_staff=True)
-        Authenticator.objects.create(user=self.user, type=Authenticator.Type.TOTP, data={"secret": "JBSWY3DPEHPK3PXP"})
 
     def club_get(self, path="/"):
         return self.client.get(path, HTTP_HOST="ajax-united.rosterchief.app")

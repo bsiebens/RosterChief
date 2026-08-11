@@ -208,6 +208,15 @@ TEMPLATES = [
 WSGI_APPLICATION = "rosterchief.wsgi.application"
 
 
+# Tests
+#
+# A custom runner, not extra settings: it swaps in a fast password hasher, the cached
+# template loader and a quiet django.request logger while the suite runs. Those belong
+# nowhere near a deployed process, and a runner is only ever instantiated by
+# `manage.py test` -- see rosterchief/test_runner.py for the full reasoning.
+TEST_RUNNER = "rosterchief.test_runner.RosterChiefTestRunner"
+
+
 # Database
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
 

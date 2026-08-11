@@ -13,17 +13,21 @@ from .models import Position, RefereeLevel, RefereeProfile, StaffAssignment, Tea
 
 
 class TeamsTestCase(TestCase):
-    def setUp(self):
-        self.club = Club.objects.create(name="Ajax United", slug="ajax-united")
-        self.season = Season.objects.create(
-            club=self.club,
+    # Shared read-only scaffolding for every teams test. The few that delete a fixture
+    # (member, team, season) get a per-test copy from setUpTestData and the rows come
+    # back with the transaction rollback.
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        cls.season = Season.objects.create(
+            club=cls.club,
             start_date=datetime.date(2026, 8, 1),
             end_date=datetime.date(2027, 5, 31),
         )
-        self.team = Team.objects.create(club=self.club, name="First Team", short_name="1st")
-        self.forward = Position.objects.create(club=self.club, name="Forward", short_name="FW")
-        self.coach = Position.objects.create(club=self.club, name="Head Coach", short_name="HC", staff_position=True)
-        self.member = Member.objects.create(first_name="Jane", last_name="Doe")
+        cls.team = Team.objects.create(club=cls.club, name="First Team", short_name="1st")
+        cls.forward = Position.objects.create(club=cls.club, name="Forward", short_name="FW")
+        cls.coach = Position.objects.create(club=cls.club, name="Head Coach", short_name="HC", staff_position=True)
+        cls.member = Member.objects.create(first_name="Jane", last_name="Doe")
 
 
 class TeamModelTests(TeamsTestCase):
@@ -127,12 +131,13 @@ class StaffAssignmentModelTests(TeamsTestCase):
 
 
 class RosterCleanTests(TeamsTestCase):
-    def setUp(self):
-        super().setUp()
-        self.other = Club.objects.create(name="Rival FC", slug="rival-fc")
-        self.other_season = Season.objects.create(club=self.other, start_date=datetime.date(2026, 8, 1), end_date=datetime.date(2027, 5, 31))
-        self.other_position = Position.objects.create(club=self.other, name="Forward", short_name="FW")
-        self.other_coach = Position.objects.create(club=self.other, name="Coach", short_name="C", staff_position=True)
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.other = Club.objects.create(name="Rival FC", slug="rival-fc")
+        cls.other_season = Season.objects.create(club=cls.other, start_date=datetime.date(2026, 8, 1), end_date=datetime.date(2027, 5, 31))
+        cls.other_position = Position.objects.create(club=cls.other, name="Forward", short_name="FW")
+        cls.other_coach = Position.objects.create(club=cls.other, name="Coach", short_name="C", staff_position=True)
 
     def test_teammembership_rejects_cross_club_season(self):
         entry = TeamMembership(team=self.team, member=self.member, season=self.other_season, position=self.forward)
@@ -154,6 +159,15 @@ class RosterCleanTests(TeamsTestCase):
         with self.assertRaises(ValidationError) as ctx:
             assignment.full_clean()
         self.assertIn("season", ctx.exception.error_dict)
+
+    def test_staffassignment_rejects_cross_club_position(self):
+        # The StaffAssignment half of test_teammembership_rejects_cross_club_position:
+        # clean() validates `position` as well as `season` against the team's club, and
+        # nothing exercised that branch -- `other_coach` was sitting unused waiting for it.
+        assignment = StaffAssignment(team=self.team, member=self.member, season=self.season, position=self.other_coach)
+        with self.assertRaises(ValidationError) as ctx:
+            assignment.full_clean()
+        self.assertIn("position", ctx.exception.error_dict)
 
     def test_staffassignment_accepts_same_club(self):
         StaffAssignment(team=self.team, member=self.member, season=self.season, position=self.coach).full_clean()
@@ -233,10 +247,11 @@ class RefereeLevelModelTests(TeamsTestCase):
 
 
 class RefereeProfileModelTests(TeamsTestCase):
-    def setUp(self):
-        super().setUp()
-        self.level = RefereeLevel.objects.create(club=self.club, name="Regional")
-        self.level.teams.add(self.team)
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.level = RefereeLevel.objects.create(club=cls.club, name="Regional")
+        cls.level.teams.add(cls.team)
 
     def test_str(self):
         profile = RefereeProfile.objects.create(member=self.member)

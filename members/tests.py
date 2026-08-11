@@ -19,7 +19,6 @@ from members.models import Family, FamilyMembership, Group, GroupMembership, Mem
 from members.services import MemberImportResult
 
 
-# Create your tests here.
 class MemberModelTests(TestCase):
     def test_str_and_name_helpers(self):
         member = Member.objects.create(first_name="John", last_name="Smith")
@@ -95,17 +94,19 @@ class FamilyNameOptionalTests(TestCase):
 
 
 class FamilyModelTests(TestCase):
-    def setUp(self):
-        self.family = Family.objects.create(name="The Smiths")
-        self.parent = Member.objects.create(first_name="Pat", last_name="Smith")
-        self.guardian = Member.objects.create(first_name="Gale", last_name="Smith")
-        self.child = Member.objects.create(first_name="Kim", last_name="Smith")
-        self.other = Member.objects.create(first_name="Ola", last_name="Smith")
+    @classmethod
+    def setUpTestData(cls):
+        # One family with a member in every role -- read-only for all four tests.
+        cls.family = Family.objects.create(name="The Smiths")
+        cls.parent = Member.objects.create(first_name="Pat", last_name="Smith")
+        cls.guardian = Member.objects.create(first_name="Gale", last_name="Smith")
+        cls.child = Member.objects.create(first_name="Kim", last_name="Smith")
+        cls.other = Member.objects.create(first_name="Ola", last_name="Smith")
 
-        FamilyMembership.objects.create(family=self.family, member=self.parent, role=FamilyMembership.FamilyRole.PARENT)
-        FamilyMembership.objects.create(family=self.family, member=self.guardian, role=FamilyMembership.FamilyRole.GUARDIAN)
-        FamilyMembership.objects.create(family=self.family, member=self.child, role=FamilyMembership.FamilyRole.CHILD)
-        FamilyMembership.objects.create(family=self.family, member=self.other, role=FamilyMembership.FamilyRole.OTHER)
+        FamilyMembership.objects.create(family=cls.family, member=cls.parent, role=FamilyMembership.FamilyRole.PARENT)
+        FamilyMembership.objects.create(family=cls.family, member=cls.guardian, role=FamilyMembership.FamilyRole.GUARDIAN)
+        FamilyMembership.objects.create(family=cls.family, member=cls.child, role=FamilyMembership.FamilyRole.CHILD)
+        FamilyMembership.objects.create(family=cls.family, member=cls.other, role=FamilyMembership.FamilyRole.OTHER)
 
     def test_str(self):
         self.assertEqual(str(self.family), "The Smiths")
@@ -210,8 +211,9 @@ class FamilyMembershipModelTests(TestCase):
 
 
 class GroupModelTests(TestCase):
-    def setUp(self):
-        self.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
 
     def test_str_returns_name(self):
         group = Group.objects.create(club=self.club, name="Coaches")
@@ -233,10 +235,11 @@ class GroupModelTests(TestCase):
 
 
 class GroupMembershipModelTests(TestCase):
-    def setUp(self):
-        self.club = Club.objects.create(name="Ajax United", slug="ajax-united")
-        self.group = Group.objects.create(club=self.club, name="Referees")
-        self.member = Member.objects.create(first_name="Ref", last_name="Eree")
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        cls.group = Group.objects.create(club=cls.club, name="Referees")
+        cls.member = Member.objects.create(first_name="Ref", last_name="Eree")
 
     def test_str(self):
         membership = GroupMembership.objects.create(group=self.group, member=self.member)
@@ -285,10 +288,14 @@ class AdminSmokeTests(TestCase):
     """Exercise the admin config end-to-end to catch misregistration
     (bad search_fields, autocomplete targets, fieldsets, custom forms)."""
 
-    def setUp(self):
-        self.admin = User.objects.create_superuser(email="root@example.com", password="pw-secret-123")
+    @classmethod
+    def setUpTestData(cls):
+        cls.admin = User.objects.create_superuser(email="root@example.com", password="pw-secret-123")
         # Staff must hold a second factor (RequireMFAMiddleware).
-        Authenticator.objects.create(user=self.admin, type=Authenticator.Type.TOTP, data={"secret": "JBSWY3DPEHPK3PXP"})
+        Authenticator.objects.create(user=cls.admin, type=Authenticator.Type.TOTP, data={"secret": "JBSWY3DPEHPK3PXP"})
+
+    def setUp(self):
+        # The test client is per-test, so the sign-in itself cannot be hoisted.
         self.client.force_login(self.admin)
 
     def test_changelists_load(self):
@@ -354,13 +361,14 @@ class AdminSmokeTests(TestCase):
 
 
 class ImportMembersCsvCommandTests(TestCase):
-    def setUp(self):
+    @classmethod
+    def setUpTestData(cls):
         # Memberships are season-scoped: the importer attaches each one to the
         # club's current season, so the target club needs one covering today.
-        self.club = Club.objects.create(name="City Swim Club")
+        cls.club = Club.objects.create(name="City Swim Club")
         today = timezone.localdate()
-        self.season = Season.objects.create(
-            club=self.club,
+        cls.season = Season.objects.create(
+            club=cls.club,
             start_date=today - timedelta(days=90),
             end_date=today + timedelta(days=275),
         )

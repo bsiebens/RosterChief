@@ -31,8 +31,9 @@ from .models import (
 
 
 class ProductSlugTests(TestCase):
-    def setUp(self):
-        self.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
 
     def test_slug_auto_populated_from_name(self):
         product = Product.objects.create(club=self.club, name="Home Jersey")
@@ -70,9 +71,10 @@ class ProductSlugTests(TestCase):
 
 
 class OpenCartConstraintTests(TestCase):
-    def setUp(self):
-        self.club = Club.objects.create(name="Ajax United", slug="ajax-united")
-        self.user = User.objects.create_user(email="shopper@example.com", password="pw")
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        cls.user = User.objects.create_user(email="shopper@example.com", password="pw")
 
     def test_only_one_open_cart_per_user_per_club(self):
         Cart.objects.create(club=self.club, user=self.user)
@@ -113,10 +115,11 @@ class CartItemTests(TestCase):
 
 
 class OrderNumberTests(TestCase):
-    def setUp(self):
-        self.club = Club.objects.create(name="Ajax United", slug="ajax-united")
-        self.member = Member.objects.create(first_name="Jane", last_name="Doe")
-        self.year = timezone.now().year
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        cls.member = Member.objects.create(first_name="Jane", last_name="Doe")
+        cls.year = timezone.now().year
 
     def make_order(self, **kwargs):
         kwargs.setdefault("club", self.club)
@@ -195,12 +198,13 @@ class OrderNumberTests(TestCase):
 
 
 class ShopEntitiesTestBase(TestCase):
-    def setUp(self):
-        self.club = Club.objects.create(name="Ajax United", slug="ajax-united")
-        self.member = Member.objects.create(first_name="Jane", last_name="Doe")
-        self.product = Product.objects.create(club=self.club, name="Home Jersey")
-        self.order = Order.objects.create(club=self.club, purchaser=self.member, total=Decimal("50.00"))
-        self.year = timezone.now().year
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        cls.member = Member.objects.create(first_name="Jane", last_name="Doe")
+        cls.product = Product.objects.create(club=cls.club, name="Home Jersey")
+        cls.order = Order.objects.create(club=cls.club, purchaser=cls.member, total=Decimal("50.00"))
+        cls.year = timezone.now().year
 
 
 class OrderLineTests(ShopEntitiesTestBase):
@@ -241,9 +245,10 @@ class DiscountTests(ShopEntitiesTestBase):
 
 
 class AppliedDiscountTests(ShopEntitiesTestBase):
-    def setUp(self):
-        super().setUp()
-        self.discount = Discount.objects.create(club=self.club, name="Sibling")
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.discount = Discount.objects.create(club=cls.club, name="Sibling")
 
     def apply(self, **kwargs):
         kwargs.setdefault("order", self.order)
@@ -311,15 +316,16 @@ class InvoiceTests(ShopEntitiesTestBase):
 
 
 class ClubScopeValidationTests(TestCase):
-    def setUp(self):
-        self.club = Club.objects.create(name="Ajax United", slug="ajax-united")
-        self.other = Club.objects.create(name="Rival FC", slug="rival-fc")
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        cls.other = Club.objects.create(name="Rival FC", slug="rival-fc")
         today = timezone.localdate()
-        self.season = Season.objects.create(club=self.club, start_date=today, end_date=today + timedelta(days=300))
-        self.other_season = Season.objects.create(club=self.other, start_date=today, end_date=today + timedelta(days=300))
-        self.member = Member.objects.create(first_name="Jane", last_name="Doe")
-        ClubMembership.objects.create(club=self.club, member=self.member, season=self.season)
-        self.stranger = Member.objects.create(first_name="Stray", last_name="Ger")
+        cls.season = Season.objects.create(club=cls.club, start_date=today, end_date=today + timedelta(days=300))
+        cls.other_season = Season.objects.create(club=cls.other, start_date=today, end_date=today + timedelta(days=300))
+        cls.member = Member.objects.create(first_name="Jane", last_name="Doe")
+        ClubMembership.objects.create(club=cls.club, member=cls.member, season=cls.season)
+        cls.stranger = Member.objects.create(first_name="Stray", last_name="Ger")
 
     def make_cart(self, club):
         user = User.objects.create_user(email=f"u-{club.slug}@example.com", password="pw")
@@ -442,12 +448,13 @@ class ClubScopeValidationTests(TestCase):
 
 
 class AdminScopingTests(TestCase):
-    def setUp(self):
-        self.club = Club.objects.create(name="Ajax United", slug="ajax-united")
-        self.other = Club.objects.create(name="Rival FC", slug="rival-fc")
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        cls.other = Club.objects.create(name="Rival FC", slug="rival-fc")
         today = timezone.localdate()
-        self.season = Season.objects.create(club=self.club, start_date=today, end_date=today + timedelta(days=300))
-        self.other_season = Season.objects.create(club=self.other, start_date=today, end_date=today + timedelta(days=300))
+        cls.season = Season.objects.create(club=cls.club, start_date=today, end_date=today + timedelta(days=300))
+        cls.other_season = Season.objects.create(club=cls.other, start_date=today, end_date=today + timedelta(days=300))
 
     def test_fk_dropdown_scoped_to_object_club(self):
         product = Product.objects.create(club=self.club, name="Jersey")

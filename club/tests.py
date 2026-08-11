@@ -87,10 +87,14 @@ def make_season(club, start_year=2026):
 
 
 class ClubMembershipModelTests(TestCase):
-    def setUp(self):
-        self.club = Club.objects.create(name="City Swim Club")
-        self.season = make_season(self.club)
-        self.member = Member.objects.create(
+    # setUpTestData, not setUp: these three are read-only scaffolding, built once per class
+    # instead of once per test. Django hands each test its own deep copy, and the database
+    # is rolled back after every one, so the tests that archive or delete them stay isolated.
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="City Swim Club")
+        cls.season = make_season(cls.club)
+        cls.member = Member.objects.create(
             first_name="Jane",
             last_name="Doe",
             email="jane@example.com",
@@ -241,9 +245,13 @@ class ClubSlugTests(TestCase):
     ALLOWED_HOSTS=[".rosterchief.app", ".example.com", ".example.org"],
 )
 class ClubTenantMiddlewareTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+
     def setUp(self):
         self.factory = RequestFactory()
-        self.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        # Bound to this instance's _capture, so it cannot be shared across tests.
         self.captured = {}
         self.middleware = ClubTenantMiddleware(self._capture)
 
@@ -331,8 +339,9 @@ class GetSubdomainTests(TestCase):
 
 
 class TenantContextTests(TestCase):
-    def setUp(self):
-        self.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
 
     def test_require_current_club_returns_active_club(self):
         with with_club(self.club):
@@ -351,10 +360,11 @@ class TenantContextTests(TestCase):
 
 
 class TenantScopedModelTests(TestCase):
-    def setUp(self):
-        self.club = Club.objects.create(name="Ajax United", slug="ajax-united")
-        self.other = Club.objects.create(name="Rival FC", slug="rival-fc")
-        self.dates = {
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        cls.other = Club.objects.create(name="Rival FC", slug="rival-fc")
+        cls.dates = {
             "start_date": datetime.date(2026, 8, 1),
             "end_date": datetime.date(2027, 5, 31),
         }
@@ -408,11 +418,12 @@ class TenantScopedModelTests(TestCase):
 
 
 class SeasonGetCurrentTests(TestCase):
-    def setUp(self):
-        self.club = Club.objects.create(name="Ajax United", slug="ajax-united")
-        self.other = Club.objects.create(name="Rival FC", slug="rival-fc")
-        self.season = Season.objects.create(
-            club=self.club,
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        cls.other = Club.objects.create(name="Rival FC", slug="rival-fc")
+        cls.season = Season.objects.create(
+            club=cls.club,
             start_date=datetime.date(2026, 8, 1),
             end_date=datetime.date(2027, 5, 31),
         )
@@ -465,10 +476,11 @@ class SeasonGetCurrentTests(TestCase):
 
 
 class SeasonNextAfterTests(TestCase):
-    def setUp(self):
-        self.club = Club.objects.create(name="Ajax United", slug="ajax-united")
-        self.current = Season.objects.create(club=self.club, start_date=datetime.date(2026, 8, 1), end_date=datetime.date(2027, 5, 31))
-        self.next_season = Season.objects.create(club=self.club, start_date=datetime.date(2027, 8, 1), end_date=datetime.date(2028, 5, 31))
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        cls.current = Season.objects.create(club=cls.club, start_date=datetime.date(2026, 8, 1), end_date=datetime.date(2027, 5, 31))
+        cls.next_season = Season.objects.create(club=cls.club, start_date=datetime.date(2027, 8, 1), end_date=datetime.date(2028, 5, 31))
 
     def test_returns_the_soonest_season_starting_after_the_date(self):
         self.assertEqual(Season.next_after(self.club, datetime.date(2026, 12, 25)), self.next_season)
@@ -484,8 +496,9 @@ class SeasonNextAfterTests(TestCase):
 
 
 class SponsorModelTests(TestCase):
-    def setUp(self):
-        self.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
 
     def test_str_returns_name(self):
         sponsor = Sponsor.objects.create(club=self.club, name="Acme Corp", start_date=datetime.date(2026, 1, 1))
@@ -519,11 +532,15 @@ class AdminRegistrationSmokeTests(TestCase):
     each changelist and add page to catch bad list_display / search_fields /
     fieldsets / autocomplete targets in any app's admin config."""
 
-    def setUp(self):
-        self.admin = get_user_model().objects.create_superuser(email="root@club.test", password="pw-secret-123")
+    @classmethod
+    def setUpTestData(cls):
+        cls.admin = get_user_model().objects.create_superuser(email="root@club.test", password="pw-secret-123")
         # Staff must hold a second factor (RequireMFAMiddleware), else they are
         # redirected to enrolment instead of reaching the admin.
-        Authenticator.objects.create(user=self.admin, type=Authenticator.Type.TOTP, data={"secret": "JBSWY3DPEHPK3PXP"})
+        Authenticator.objects.create(user=cls.admin, type=Authenticator.Type.TOTP, data={"secret": "JBSWY3DPEHPK3PXP"})
+
+    def setUp(self):
+        # The test client is per-test, so the session it carries has to be too.
         self.client.force_login(self.admin)
 
     def test_every_model_is_registered_in_admin(self):
@@ -552,8 +569,9 @@ class AdminRegistrationSmokeTests(TestCase):
 
 
 class ClubArchivingTests(TestCase):
-    def setUp(self):
-        self.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
 
     def test_a_new_club_is_active(self):
         self.assertFalse(self.club.is_archived)
@@ -601,8 +619,11 @@ class ArchivedClubTenancyTests(TestCase):
     """An archived club's subdomain must stop resolving — that is what makes
     archiving a real deactivation rather than a cosmetic flag."""
 
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+
     def setUp(self):
-        self.club = Club.objects.create(name="Ajax United", slug="ajax-united")
         self.middleware = ClubTenantMiddleware(lambda request: "response")
 
     def resolve(self):
@@ -635,13 +656,14 @@ class ClubRoleTests(TestCase):
 
 
 class ClubMembershipCleanTests(TestCase):
-    def setUp(self):
-        self.club = Club.objects.create(name="Ajax United", slug="ajax-united")
-        self.other = Club.objects.create(name="Rival FC", slug="rival-fc")
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        cls.other = Club.objects.create(name="Rival FC", slug="rival-fc")
         today = timezone.localdate()
-        self.season = Season.objects.create(club=self.club, start_date=today, end_date=today + datetime.timedelta(days=300))
-        self.other_season = Season.objects.create(club=self.other, start_date=today, end_date=today + datetime.timedelta(days=300))
-        self.member = Member.objects.create(first_name="Jane", last_name="Doe")
+        cls.season = Season.objects.create(club=cls.club, start_date=today, end_date=today + datetime.timedelta(days=300))
+        cls.other_season = Season.objects.create(club=cls.other, start_date=today, end_date=today + datetime.timedelta(days=300))
+        cls.member = Member.objects.create(first_name="Jane", last_name="Doe")
 
     def test_rejects_cross_club_season(self):
         membership = ClubMembership(club=self.club, member=self.member, season=self.other_season)
@@ -654,17 +676,21 @@ class ClubMembershipCleanTests(TestCase):
 
 
 class AccessServiceTests(TestCase):
-    def setUp(self):
-        self.club = Club.objects.create(name="Ajax United", slug="ajax-united")
-        self.other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
+    # The clubs, season, teams and positions are pure scaffolding here -- every test
+    # builds its *own* people and assignments on top of them -- so they are created once
+    # per class rather than 28 times over.
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        cls.other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
         today = timezone.localdate()
-        self.season = Season.objects.create(club=self.club, start_date=today, end_date=today + datetime.timedelta(days=300))
-        self.team = Team.objects.create(club=self.club, name="First Team", short_name="1st")
-        self.second_team = Team.objects.create(club=self.club, name="Second Team", short_name="2nd")
-        self.forward = Position.objects.create(club=self.club, name="Forward", short_name="FW")
+        cls.season = Season.objects.create(club=cls.club, start_date=today, end_date=today + datetime.timedelta(days=300))
+        cls.team = Team.objects.create(club=cls.club, name="First Team", short_name="1st")
+        cls.second_team = Team.objects.create(club=cls.club, name="Second Team", short_name="2nd")
+        cls.forward = Position.objects.create(club=cls.club, name="Forward", short_name="FW")
         # Management staff (coach / team manager) vs. non-management staff (e.g. physio).
-        self.coach_position = Position.objects.create(club=self.club, name="Head Coach", short_name="HC", staff_position=True, management_position=True)
-        self.physio_position = Position.objects.create(club=self.club, name="Physio", short_name="PH", staff_position=True, management_position=False)
+        cls.coach_position = Position.objects.create(club=cls.club, name="Head Coach", short_name="HC", staff_position=True, management_position=True)
+        cls.physio_position = Position.objects.create(club=cls.club, name="Physio", short_name="PH", staff_position=True, management_position=False)
 
     def make_user_member(self, email):
         user = get_user_model().objects.create_user(email=email, password="pw")
@@ -922,11 +948,12 @@ class AccessServiceTests(TestCase):
 
 
 class ClubRoleStatusSyncTests(TestCase):
-    def setUp(self):
-        self.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
         today = timezone.localdate()
-        self.season = Season.objects.create(club=self.club, start_date=today, end_date=today + datetime.timedelta(days=300))
-        self.member = Member.objects.create(first_name="Jane", last_name="Doe")
+        cls.season = Season.objects.create(club=cls.club, start_date=today, end_date=today + datetime.timedelta(days=300))
+        cls.member = Member.objects.create(first_name="Jane", last_name="Doe")
 
     def roles(self):
         return ClubRole.objects.filter(club=self.club, member=self.member)
@@ -1028,8 +1055,9 @@ class ClubRoleStatusSyncTests(TestCase):
 class BrandingTests(TestCase):
     """The auth screens are shared; only the skin they inherit differs per tenant."""
 
-    def setUp(self):
-        self.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
 
     def login_page(self, host):
         return self.client.get(reverse("account_login"), HTTP_HOST=host)
@@ -1103,8 +1131,9 @@ class Custom403PageTests(TestCase):
     error still looks like the app, not a bare Django error page, and the navbar
     (sign out, theme toggle, home link) stays reachable."""
 
-    def setUp(self):
-        self.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
 
     def test_a_club_subdomain_403_gets_the_club_skin(self):
         member = get_user_model().objects.create_user(email="member-403@example.com", password="pw-secret-123")
@@ -1155,9 +1184,10 @@ class ClubBrandingModelTests(TestCase):
     ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"],
 )
 class RootViewTests(TestCase):
-    def setUp(self):
-        self.club = Club.objects.create(name="Ajax United", slug="ajax-united")
-        self.user = get_user_model().objects.create_user(email="member@example.com", password="pw-secret-123")
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        cls.user = get_user_model().objects.create_user(email="member@example.com", password="pw-secret-123")
 
     def test_the_base_domain_hands_off_to_the_control_panel(self):
         response = self.client.get("/", HTTP_HOST="rosterchief.app")
@@ -1182,12 +1212,13 @@ class FeeServiceTests(TestCase):
     """club.services.fees -- record_payment/mark_as_paid/remaining_balance, the
     service layer behind the Memberships page's per-row payment actions."""
 
-    def setUp(self):
-        self.club = Club.objects.create(name="Ajax United", slug="ajax-united")
-        self.season = make_season(self.club)
-        self.member = Member.objects.create(first_name="Jane", last_name="Doe")
-        self.membership = ClubMembership.objects.create(
-            club=self.club, member=self.member, season=self.season, status=ClubMembership.StatusChoices.PENDING, fee_amount=Decimal("150.00")
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        cls.season = make_season(cls.club)
+        cls.member = Member.objects.create(first_name="Jane", last_name="Doe")
+        cls.membership = ClubMembership.objects.create(
+            club=cls.club, member=cls.member, season=cls.season, status=ClubMembership.StatusChoices.PENDING, fee_amount=Decimal("150.00")
         )
 
     def roles(self):
@@ -1286,8 +1317,11 @@ class SeasonStartEndTests(TestCase):
     season_start/season_duration_months drive them instead of a fixed Aug-May
     window."""
 
-    def setUp(self):
-        self.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+    # Every test here reassigns a field on its own copy of the club without saving it;
+    # setUpTestData's per-test deep copy is what keeps that from leaking sideways.
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
 
     def test_a_date_past_this_years_anchor_uses_this_year(self):
         self.club.season_start = datetime.date(2000, 8, 1)
@@ -1329,8 +1363,9 @@ class GenerateSeasonsTests(TestCase):
     """club.services.seasons.generate_seasons -- the service behind the
     generate_seasons management command."""
 
-    def setUp(self):
-        self.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
 
     def test_generates_a_season_covering_today(self):
         today = timezone.localdate()
@@ -1399,9 +1434,10 @@ class ResyncSeasonsTests(TestCase):
     match a club's current settings (e.g. left over from a since-changed
     season_start/season_duration_months)."""
 
-    def setUp(self):
-        self.club = Club.objects.create(name="Ajax United", slug="ajax-united")
-        self.until = timezone.localdate() + relativedelta(years=2)
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        cls.until = timezone.localdate() + relativedelta(years=2)
 
     def test_a_wrong_and_unreferenced_season_is_reported_as_removable(self):
         wrong = Season.objects.create(club=self.club, start_date=datetime.date(2020, 3, 1), end_date=datetime.date(2020, 9, 1))
@@ -1461,8 +1497,9 @@ class ResyncSeasonsTests(TestCase):
 
 
 class GenerateSeasonsCommandTests(TestCase):
-    def setUp(self):
-        self.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
 
     def test_default_years_is_two(self):
         call_command("generate_seasons", stdout=StringIO())

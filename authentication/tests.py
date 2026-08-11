@@ -145,8 +145,10 @@ class WebAuthnRelyingPartyTests(TestCase):
 
 
 class MFARequirementTests(TestCase):
-    def setUp(self):
-        self.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+    @classmethod
+    def setUpTestData(cls):
+        # Read-only for every test here: each one brings its own user and role.
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
 
     def make_user(self, email, **kwargs):
         return User.objects.create_user(email=email, password="pw-secret-123", **kwargs)
@@ -232,9 +234,6 @@ class AdminLoginRoutingTests(TestCase):
         # The original destination survives the hop (percent-encoded).
         self.assertEqual(parse_qs(redirect.query)["next"], ["/admin/"])
 
-    def test_allauth_login_page_loads(self):
-        self.assertEqual(self.client.get(reverse("account_login")).status_code, 200)
-
 
 class AuthFormRenderingTests(TestCase):
     """Every allauth form must actually render its fields.
@@ -257,9 +256,12 @@ class AuthFormRenderingTests(TestCase):
 
 
 class TwoFactorPageTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        enrol_mfa(User.objects.create_user(email="mfa@example.com", password="pw-secret-123"))
+
     def setUp(self):
-        user = User.objects.create_user(email="mfa@example.com", password="pw-secret-123")
-        enrol_mfa(user)
+        # The test client is per-test, so the sign-in itself cannot be hoisted.
         # Password accepted, second factor still owed: this is the 2FA challenge page.
         self.response = self.client.post(reverse("account_login"), {"login": "mfa@example.com", "password": "pw-secret-123"}, follow=True)
 
@@ -313,8 +315,11 @@ class MfaPageTests(TestCase):
     """Every MFA screen must render. They are built from allauth's `element` primitives,
     so styling lives in the element overrides rather than in eight page templates."""
 
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = User.objects.create_user(email="mfa@example.com", password="pw-secret-123")
+
     def setUp(self):
-        self.user = User.objects.create_user(email="mfa@example.com", password="pw-secret-123")
         # A real password login (not force_login) so allauth counts it as a recent
         # authentication and doesn't bounce the sensitive pages to reauthenticate.
         self.client.post(reverse("account_login"), {"login": "mfa@example.com", "password": "pw-secret-123"}, follow=True)
@@ -361,8 +366,11 @@ class ActionBarTests(TestCase):
     Keying the bar on it hid the button on exactly the pages that are nothing but a button.
     """
 
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = User.objects.create_user(email="mfa@example.com", password="pw-secret-123")
+
     def setUp(self):
-        self.user = User.objects.create_user(email="mfa@example.com", password="pw-secret-123")
         self.client.post(reverse("account_login"), {"login": "mfa@example.com", "password": "pw-secret-123"}, follow=True)
 
     def test_the_sign_out_page_has_its_button(self):
@@ -381,8 +389,11 @@ class ActionBarTests(TestCase):
 
 
 class SignOutPageTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = User.objects.create_user(email="mfa@example.com", password="pw-secret-123")
+
     def setUp(self):
-        self.user = User.objects.create_user(email="mfa@example.com", password="pw-secret-123")
         self.client.force_login(self.user)
         self.response = self.client.get(reverse("account_logout"))
 
@@ -407,8 +418,11 @@ class SignOutPageTests(TestCase):
 
 
 class ChangePasswordPageTests(TestCase):
-    def setUp(self):
+    @classmethod
+    def setUpTestData(cls):
         User.objects.create_user(email="mfa@example.com", password="pw-secret-123")
+
+    def setUp(self):
         self.client.post(reverse("account_login"), {"login": "mfa@example.com", "password": "pw-secret-123"}, follow=True)
         self.response = self.client.get(reverse("account_change_password"))
 
@@ -438,8 +452,11 @@ class MfaButtonIconTests(TestCase):
     ranked: View is primary, Download and Generate are outline. Generate throws away the
     codes you already have, so it must not read as the obvious thing to click."""
 
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = User.objects.create_user(email="mfa@example.com", password="pw-secret-123")
+
     def setUp(self):
-        self.user = User.objects.create_user(email="mfa@example.com", password="pw-secret-123")
         # Sign in *before* enrolling: a user who already holds a second factor is stopped at
         # the 2FA challenge and never reaches these pages.
         self.client.post(reverse("account_login"), {"login": "mfa@example.com", "password": "pw-secret-123"}, follow=True)

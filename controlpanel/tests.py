@@ -63,11 +63,19 @@ def enrol_mfa(user):
 
 
 class ControlPanelTestBase(TestCase):
-    def setUp(self):
-        self.club = Club.objects.create(name="Ajax United")
-        self.staff = User.objects.create_user(email="root@example.com", password="pw-secret-123", is_staff=True)
+    # setUpTestData, not setUp: the club and the signed-in staff account are read-only
+    # scaffolding for almost every test here, and hashing a password per test costs more
+    # than the rest of the suite put together. Django hands each test its own deep copy,
+    # so the handful of tests that do mutate self.club/self.staff stay isolated.
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United")
+        cls.staff = User.objects.create_user(email="root@example.com", password="pw-secret-123", is_staff=True)
         # Staff must hold a second factor, else RequireMFAMiddleware redirects.
-        enrol_mfa(self.staff)
+        enrol_mfa(cls.staff)
+
+    def setUp(self):
+        # The test client is per-test, so the session it carries has to be too.
         self.client.force_login(self.staff)
 
 
@@ -321,11 +329,12 @@ class ClubHomeLocationTests(ControlPanelTestBase):
 
 
 class StatisticsTests(TestCase):
-    def setUp(self):
-        self.club = Club.objects.create(name="Ajax United")
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United")
         today = timezone.localdate()
-        self.season = Season.objects.create(club=self.club, start_date=today, end_date=today)
-        self.member = Member.objects.create(first_name="Jane", last_name="Doe")
+        cls.season = Season.objects.create(club=cls.club, start_date=today, end_date=today)
+        cls.member = Member.objects.create(first_name="Jane", last_name="Doe")
 
     def groups_for(self, club):
         return {group["title"]: dict(group["stats"]) for group in club_statistics(club)}
@@ -413,9 +422,12 @@ class PlatformAdminAccessTests(ControlPanelTestBase):
 
 
 class PlatformAdminTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.root = User.objects.create_superuser(email="root@example.com", password="pw-secret-123")
+        enrol_mfa(cls.root)
+
     def setUp(self):
-        self.root = User.objects.create_superuser(email="root@example.com", password="pw-secret-123")
-        enrol_mfa(self.root)
         self.client.force_login(self.root)
 
     def test_superuser_sees_the_admins_section(self):
@@ -463,6 +475,8 @@ class PlatformAdminTests(TestCase):
 
     # --- guardrails: it must be impossible to lock the platform out of itself ---
     def test_cannot_revoke_your_own_access(self):
+        # Also the last-superuser guardrail's outer layer: root is the only superuser here,
+        # so the self-rule is what has to stop this, whoever is asking.
         response = self.client.post(reverse("controlpanel:admin_revoke", args=[self.root.pk]), follow=True)
 
         self.root.refresh_from_db()
@@ -480,6 +494,8 @@ class PlatformAdminTests(TestCase):
         self.assertTrue(self.root.is_superuser)
         self.assertContains(response, "cannot remove your own superuser rights")
 
+    # (test_last_superuser_rule_is_enforced_for_other_actors_too used to sit here; its body
+    # was byte-for-byte test_cannot_revoke_your_own_access, whose comment now carries the point.)
     def test_the_last_superuser_cannot_be_demoted(self):
         other = User.objects.create_superuser(email="other@example.com", password="pw-secret-123")
         # Now demote self is blocked by the self-rule; demote `other` is fine...
@@ -492,20 +508,19 @@ class PlatformAdminTests(TestCase):
         with self.assertRaises(PlatformAdminError):
             set_platform_access(other, self.root, is_staff=True, is_superuser=False)
 
-    def test_last_superuser_rule_is_enforced_for_other_actors_too(self):
-        response = self.client.post(reverse("controlpanel:admin_revoke", args=[self.root.pk]), follow=True)
-
-        self.root.refresh_from_db()
-        self.assertTrue(self.root.is_superuser)
-        self.assertContains(response, "cannot remove your own platform access")
-
 
 class FeatureViewTests(ControlPanelTestBase):
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.flag = Flag.objects.create(name="shop")
+
     def setUp(self):
         super().setUp()
+        # Waffle caches flag lookups process-wide, so a stale entry leaks straight into
+        # the next test -- clear it either side of every one.
         cache.clear()
         self.addCleanup(cache.clear)
-        self.flag = Flag.objects.create(name="shop")
 
     def test_features_page_lists_flags_and_switches(self):
         Switch.objects.create(name="maintenance", active=False)
@@ -717,9 +732,8 @@ class LoginFormRenderingTests(TestCase):
         self.assertNotContains(self.response, '<span class="label-text">Email</span>')
         self.assertContains(self.response, 'placeholder="Email address"')
 
-    def test_the_checkbox_keeps_its_visible_label(self):
-        self.assertContains(self.response, '<span class="label-text">Remember Me</span>')
-
+    # ("Remember Me" keeping its visible label is asserted by LoginLayoutTests below, which
+    # pins the same <span> *and* that only one element renders it — a strict superset.)
     def test_the_password_reset_link_is_spaced_and_addressable(self):
         # The input's aria-describedby points here; without the id it dangles.
         self.assertContains(self.response, 'id="id_password_helptext"')
@@ -770,9 +784,10 @@ class ExcludedFilterTests(TestCase):
 class PlatformAttentionTests(TestCase):
     """The numbers that are supposed to be zero."""
 
-    def setUp(self):
-        self.club = Club.objects.create(name="Ajax United")
-        self.today = timezone.localdate()
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United")
+        cls.today = timezone.localdate()
 
     def season(self, club, start, end):
         return Season.objects.create(club=club, start_date=start, end_date=end)
@@ -814,8 +829,9 @@ class PlatformAttentionTests(TestCase):
 
 
 class MfaPendingTests(TestCase):
-    def setUp(self):
-        self.club = Club.objects.create(name="Ajax United")
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United")
 
     def test_staff_without_a_second_factor_are_pending(self):
         user = User.objects.create_user(email="staff@example.com", password="pw-secret-123", is_staff=True)
@@ -869,10 +885,14 @@ class OnboardingFunnelTests(TestCase):
 
 
 class FlagAdoptionTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United")
+
     def setUp(self):
+        # Waffle's flag cache is process-wide and would otherwise leak into the next test.
         cache.clear()
         self.addCleanup(cache.clear)
-        self.club = Club.objects.create(name="Ajax United")
 
     def test_clubs_are_counted_per_flag(self):
         # Not an exact-list assertion: migration 0018 seeds real "CEHL"/"RBIHF"
@@ -892,10 +912,11 @@ class FlagAdoptionTests(TestCase):
 
 
 class PlatformChartTests(TestCase):
-    def setUp(self):
-        self.club = Club.objects.create(name="Ajax United")
-        self.season = Season.objects.create(club=self.club, start_date=timezone.localdate(), end_date=timezone.localdate() + datetime.timedelta(days=30))
-        self.member = Member.objects.create(first_name="Ada", last_name="Lovelace")
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United")
+        cls.season = Season.objects.create(club=cls.club, start_date=timezone.localdate(), end_date=timezone.localdate() + datetime.timedelta(days=30))
+        cls.member = Member.objects.create(first_name="Ada", last_name="Lovelace")
 
     def test_the_series_is_dense(self):
         # Zero-filled: a chart that skips empty months draws a smooth line over a month
@@ -956,11 +977,12 @@ class DashboardMetricsTests(ControlPanelTestBase):
 
 
 class ClubAttentionTests(TestCase):
-    def setUp(self):
-        self.club = Club.objects.create(name="Ajax United")
-        self.today = timezone.localdate()
-        self.season = Season.objects.create(club=self.club, start_date=self.today - datetime.timedelta(days=30), end_date=self.today + datetime.timedelta(days=300))
-        self.member = Member.objects.create(first_name="Ada", last_name="Lovelace")
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United")
+        cls.today = timezone.localdate()
+        cls.season = Season.objects.create(club=cls.club, start_date=cls.today - datetime.timedelta(days=30), end_date=cls.today + datetime.timedelta(days=300))
+        cls.member = Member.objects.create(first_name="Ada", last_name="Lovelace")
 
     def membership(self, member=None, season=None, **kwargs):
         return ClubMembership.objects.create(club=self.club, season=season or self.season, member=member or self.member, **kwargs)
@@ -1102,13 +1124,14 @@ class ClubDetailMetricsTests(ControlPanelTestBase):
 
 
 class NewMemberTests(TestCase):
-    def setUp(self):
-        self.club = Club.objects.create(name="Ajax United")
-        self.today = timezone.localdate()
-        self.previous = Season.objects.create(club=self.club, start_date=self.today - datetime.timedelta(days=400), end_date=self.today - datetime.timedelta(days=40))
-        self.season = Season.objects.create(club=self.club, start_date=self.today - datetime.timedelta(days=30), end_date=self.today + datetime.timedelta(days=300))
-        self.veteran = Member.objects.create(first_name="Ada", last_name="Lovelace")
-        self.rookie = Member.objects.create(first_name="Bob", last_name="Bobson")
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United")
+        cls.today = timezone.localdate()
+        cls.previous = Season.objects.create(club=cls.club, start_date=cls.today - datetime.timedelta(days=400), end_date=cls.today - datetime.timedelta(days=40))
+        cls.season = Season.objects.create(club=cls.club, start_date=cls.today - datetime.timedelta(days=30), end_date=cls.today + datetime.timedelta(days=300))
+        cls.veteran = Member.objects.create(first_name="Ada", last_name="Lovelace")
+        cls.rookie = Member.objects.create(first_name="Bob", last_name="Bobson")
 
     def membership(self, member, season, signed_up_at=None):
         return ClubMembership.objects.create(club=self.club, season=season, member=member, status=ClubMembership.StatusChoices.ACTIVE, signed_up_at=signed_up_at)
@@ -1164,11 +1187,12 @@ class NewMemberTests(TestCase):
 
 
 class ClubHealthTableTests(TestCase):
-    def setUp(self):
-        self.today = timezone.localdate()
-        self.club = Club.objects.create(name="Ajax United")
-        self.season = Season.objects.create(club=self.club, start_date=self.today - datetime.timedelta(days=30), end_date=self.today + datetime.timedelta(days=300))
-        self.member = Member.objects.create(first_name="Ada", last_name="Lovelace")
+    @classmethod
+    def setUpTestData(cls):
+        cls.today = timezone.localdate()
+        cls.club = Club.objects.create(name="Ajax United")
+        cls.season = Season.objects.create(club=cls.club, start_date=cls.today - datetime.timedelta(days=30), end_date=cls.today + datetime.timedelta(days=300))
+        cls.member = Member.objects.create(first_name="Ada", last_name="Lovelace")
 
     def health(self):
         return clubs_with_health().get(pk=self.club.pk)
@@ -1277,11 +1301,12 @@ class TemplateCommentTests(TestCase):
 class PlatformDuesMetricTests(TestCase):
     """What the clubs owe US — kept strictly apart from what members owe their clubs."""
 
-    def setUp(self):
-        self.today = timezone.localdate()
-        self.club = Club.objects.create(name="Ajax United")
-        self.plan = Plan.objects.create(name="Standard")
-        PlanPrice.objects.create(plan=self.plan, active_from=self.today - datetime.timedelta(days=1200), amount=Decimal("500.00"))
+    @classmethod
+    def setUpTestData(cls):
+        cls.today = timezone.localdate()
+        cls.club = Club.objects.create(name="Ajax United")
+        cls.plan = Plan.objects.create(name="Standard")
+        PlanPrice.objects.create(plan=cls.plan, active_from=cls.today - datetime.timedelta(days=1200), amount=Decimal("500.00"))
 
     def test_dues_owed_is_the_unpaid_balance_across_every_club(self):
         subscribe(self.club, self.plan)
@@ -1383,11 +1408,12 @@ class PlatformDuesMetricTests(TestCase):
 
 
 class BillingPanelTests(ControlPanelTestBase):
-    def setUp(self):
-        super().setUp()
-        self.today = timezone.localdate()
-        self.plan = Plan.objects.create(name="Standard")
-        PlanPrice.objects.create(plan=self.plan, active_from=self.today - datetime.timedelta(days=1200), amount=Decimal("500.00"))
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.today = timezone.localdate()
+        cls.plan = Plan.objects.create(name="Standard")
+        PlanPrice.objects.create(plan=cls.plan, active_from=cls.today - datetime.timedelta(days=1200), amount=Decimal("500.00"))
 
     def test_the_billing_page_lists_plans_and_what_is_owed(self):
         subscribe(self.club, self.plan)
@@ -1507,14 +1533,15 @@ class TrialPanelTests(ControlPanelTestBase):
     """The club detail page's "Start trial" modal -- see
     controlpanel.views.ClubStartTrialView / billing.services.dues.start_trial."""
 
-    def setUp(self):
-        super().setUp()
-        self.today = timezone.localdate()
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.today = timezone.localdate()
         # A trial plan carries its own length; the form only offers plans flagged is_trial.
-        self.trial_plan = Plan.objects.create(name="Trial", is_trial=True, duration_months=2)
-        PlanPrice.objects.create(plan=self.trial_plan, active_from=self.today - datetime.timedelta(days=1200), amount=Decimal("50.00"))
-        self.plan = Plan.objects.create(name="Standard")
-        PlanPrice.objects.create(plan=self.plan, active_from=self.today - datetime.timedelta(days=1200), amount=Decimal("500.00"))
+        cls.trial_plan = Plan.objects.create(name="Trial", is_trial=True, duration_months=2)
+        PlanPrice.objects.create(plan=cls.trial_plan, active_from=cls.today - datetime.timedelta(days=1200), amount=Decimal("50.00"))
+        cls.plan = Plan.objects.create(name="Standard")
+        PlanPrice.objects.create(plan=cls.plan, active_from=cls.today - datetime.timedelta(days=1200), amount=Decimal("500.00"))
 
     def start_trial(self, **data):
         # "on" for both, matching how a freshly opened modal actually renders: unbound,
@@ -1585,11 +1612,12 @@ class TrialPanelTests(ControlPanelTestBase):
 
 
 class BillingFormRenderTests(ControlPanelTestBase):
-    def setUp(self):
-        super().setUp()
-        self.today = timezone.localdate()
-        self.plan = Plan.objects.create(name="Standard")
-        PlanPrice.objects.create(plan=self.plan, active_from=self.today - datetime.timedelta(days=1200), amount=Decimal("500.00"))
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.today = timezone.localdate()
+        cls.plan = Plan.objects.create(name="Standard")
+        PlanPrice.objects.create(plan=cls.plan, active_from=cls.today - datetime.timedelta(days=1200), amount=Decimal("500.00"))
 
     def test_the_billing_forms_are_post_only(self):
         # Every one of these is reachable only through a modal on the billing or club
@@ -1680,11 +1708,12 @@ class BillingFormRenderTests(ControlPanelTestBase):
 class PlanDeleteTests(ControlPanelTestBase):
     """billing.services.plans and controlpanel.views.PlanDeleteView."""
 
-    def setUp(self):
-        super().setUp()
-        self.today = timezone.localdate()
-        self.plan = Plan.objects.create(name="Standard")
-        PlanPrice.objects.create(plan=self.plan, active_from=self.today - datetime.timedelta(days=1200), amount=Decimal("500.00"))
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.today = timezone.localdate()
+        cls.plan = Plan.objects.create(name="Standard")
+        PlanPrice.objects.create(plan=cls.plan, active_from=cls.today - datetime.timedelta(days=1200), amount=Decimal("500.00"))
 
     def test_a_never_used_plan_is_removed_completely(self):
         unused = Plan.objects.create(name="Unused")

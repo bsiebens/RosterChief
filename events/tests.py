@@ -33,21 +33,26 @@ from .services.referees import RefereeAssignmentError, add_external_referee, ass
 
 
 class EventsTestBase(TestCase):
-    def setUp(self):
-        self.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+    # One club, one current season, one two-player roster: shared by every events test
+    # and never edited in place. Tests that do change these rows (deleting Alice, flipping
+    # the team to federation-managed) are safe -- setUpTestData hands each test its own
+    # copy of the objects, and the surrounding transaction rolls the rows back.
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
         today = timezone.localdate()
-        self.season = Season.objects.create(
-            club=self.club,
+        cls.season = Season.objects.create(
+            club=cls.club,
             start_date=today - timedelta(days=30),
             end_date=today + timedelta(days=300),
         )
-        self.team = Team.objects.create(club=self.club, name="First Team", short_name="1st")
-        self.position = Position.objects.create(club=self.club, name="Forward", short_name="FW")
-        self.alice = Member.objects.create(first_name="Alice", last_name="Ash")
-        self.bob = Member.objects.create(first_name="Bob", last_name="Birch")
-        TeamMembership.objects.create(team=self.team, member=self.alice, season=self.season, position=self.position)
-        TeamMembership.objects.create(team=self.team, member=self.bob, season=self.season, position=self.position)
-        self.future = timezone.now() + timedelta(days=7)
+        cls.team = Team.objects.create(club=cls.club, name="First Team", short_name="1st")
+        cls.position = Position.objects.create(club=cls.club, name="Forward", short_name="FW")
+        cls.alice = Member.objects.create(first_name="Alice", last_name="Ash")
+        cls.bob = Member.objects.create(first_name="Bob", last_name="Birch")
+        TeamMembership.objects.create(team=cls.team, member=cls.alice, season=cls.season, position=cls.position)
+        TeamMembership.objects.create(team=cls.team, member=cls.bob, season=cls.season, position=cls.position)
+        cls.future = timezone.now() + timedelta(days=7)
 
     def make_event(self, **kwargs):
         kwargs.setdefault("club", self.club)
@@ -140,15 +145,16 @@ class EventAdminFormCompetitionTests(EventsTestBase):
     """`competition` is a plain CharField, but the admin should only ever offer
     competitions this club is actually allowed to use -- see events/admin.py."""
 
-    def setUp(self):
-        super().setUp()
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
         Flag = get_waffle_flag_model()
-        self.active_flag = Flag.objects.create(name="active-competition")
-        self.active_flag.clubs.add(self.club)
-        self.inactive_flag = Flag.objects.create(name="inactive-competition")
-        self.active_competition = Competition.objects.create(name="Active Cup", module="events.competition.active", flag=self.active_flag)
-        self.inactive_competition = Competition.objects.create(name="Inactive Cup", module="events.competition.inactive", flag=self.inactive_flag)
-        self.flagless_competition = Competition.objects.create(name="Flagless Cup", module="events.competition.flagless")
+        cls.active_flag = Flag.objects.create(name="active-competition")
+        cls.active_flag.clubs.add(cls.club)
+        cls.inactive_flag = Flag.objects.create(name="inactive-competition")
+        cls.active_competition = Competition.objects.create(name="Active Cup", module="events.competition.active", flag=cls.active_flag)
+        cls.inactive_competition = Competition.objects.create(name="Inactive Cup", module="events.competition.inactive", flag=cls.inactive_flag)
+        cls.flagless_competition = Competition.objects.create(name="Flagless Cup", module="events.competition.flagless")
 
     def test_a_flagless_competition_never_appears(self):
         form = EventAdminForm(instance=Event())
@@ -366,9 +372,10 @@ class RosterChangeSyncTests(EventsTestBase):
 
 
 class RecurrenceTestBase(EventsTestBase):
-    def setUp(self):
-        super().setUp()
-        self.anchor = (timezone.now() + timedelta(days=1)).replace(microsecond=0)
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.anchor = (timezone.now() + timedelta(days=1)).replace(microsecond=0)
 
     def make_series(self, **kwargs):
         kwargs.setdefault("club", self.club)
@@ -551,14 +558,15 @@ class ExtendSeriesCommandTests(RecurrenceTestBase):
 
 
 class EventClubScopeTests(EventsTestBase):
-    def setUp(self):
-        super().setUp()
-        self.other = Club.objects.create(name="Rival FC", slug="rival-fc")
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.other = Club.objects.create(name="Rival FC", slug="rival-fc")
         today = timezone.localdate()
-        self.other_season = Season.objects.create(club=self.other, start_date=today - timedelta(days=30), end_date=today + timedelta(days=300))
-        self.other_location = Location.objects.create(club=self.other, name="Arena", address="1 St", city="Town", zip_code="1000", country="BE")
-        self.other_opponent = Opponent.objects.create(club=self.other, name="Rivals")
-        self.other_team = Team.objects.create(club=self.other, name="First", short_name="1")
+        cls.other_season = Season.objects.create(club=cls.other, start_date=today - timedelta(days=30), end_date=today + timedelta(days=300))
+        cls.other_location = Location.objects.create(club=cls.other, name="Arena", address="1 St", city="Town", zip_code="1000", country="BE")
+        cls.other_opponent = Opponent.objects.create(club=cls.other, name="Rivals")
+        cls.other_team = Team.objects.create(club=cls.other, name="First", short_name="1")
 
     def test_event_rejects_cross_club_season(self):
         event = Event(club=self.club, title="Match", start=self.future, season=self.other_season)
@@ -797,10 +805,11 @@ class RBIHFExtractTeamIdTests(TestCase):
 
 
 class RBIHFImportPlanTests(EventsTestBase):
-    def setUp(self):
-        super().setUp()
-        self.home_location = Location.objects.create(club=self.club, name="Home Arena", address="1 St", city="Antwerp", zip_code="1000", country="BE", is_home=True)
-        self.away_location = Location.objects.create(club=self.club, name="Deurne Ice Hall", address="2 St", city="Deurne", zip_code="2100", country="BE")
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.home_location = Location.objects.create(club=cls.club, name="Home Arena", address="1 St", city="Antwerp", zip_code="1000", country="BE", is_home=True)
+        cls.away_location = Location.objects.create(club=cls.club, name="Deurne Ice Hall", address="2 St", city="Deurne", zip_code="2100", country="BE")
 
     def home_fixture_row(self, game_id="5002", date="2026-09-12"):
         return {"game_id": game_id, "date": date, "hour": "12:15", "venue": "Deurne", "home_id": RBIHF_TEAM_ID, "home_name": RBIHF_TEAM_NAME, "visit_id": "4464", "visit_name": "Amsterdam Tigers"}
@@ -1048,16 +1057,17 @@ class RefereeServiceTests(EventsTestBase):
     RefereeProfile.eligible_teams), conflict detection (a soft warning, never
     a block), and the max_referees hard ceiling."""
 
-    def setUp(self):
-        super().setUp()
-        self.home_ground = Location.objects.create(club=self.club, name="Home Ground", address="1 St", city="Town", zip_code="1000", country="BE", is_home=True)
-        self.away_ground = Location.objects.create(club=self.club, name="Away Ground", address="2 St", city="Town", zip_code="1000", country="BE")
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.home_ground = Location.objects.create(club=cls.club, name="Home Ground", address="1 St", city="Town", zip_code="1000", country="BE", is_home=True)
+        cls.away_ground = Location.objects.create(club=cls.club, name="Away Ground", address="2 St", city="Town", zip_code="1000", country="BE")
 
-        self.level = RefereeLevel.objects.create(club=self.club, name="Regional")
-        self.level.teams.add(self.team)
+        cls.level = RefereeLevel.objects.create(club=cls.club, name="Regional")
+        cls.level.teams.add(cls.team)
 
-        self.referee = Member.objects.create(first_name="Ref", last_name="Eree")
-        self.referee_profile = self.make_eligible_profile(self.referee)
+        cls.referee = Member.objects.create(first_name="Ref", last_name="Eree")
+        cls.referee_profile = RefereeProfile.objects.create(member=cls.referee, level=cls.level, valid_until=timezone.localdate() + timedelta(days=30))
 
     def make_eligible_profile(self, member, level=None):
         return RefereeProfile.objects.create(member=member, level=level or self.level, valid_until=timezone.localdate() + timedelta(days=30))
