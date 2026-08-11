@@ -1,0 +1,52 @@
+{% load i18n %}<!DOCTYPE html>
+{% comment %}
+    Shared shell for every transactional HTML email (the claim-approved parent
+    email, allauth's password-reset override, and anything after it). Deliberately
+    not a responsive email framework: a single ~600px table with generous padding
+    reads fine on a phone without media queries, and media queries are one of the
+    first things Outlook desktop and a lot of webmail strip anyway.
+
+    Everything is inline styles on table-based markup on purpose -- no <style>
+    block, no linked stylesheet (daisyUI/Tailwind's compiled CSS is a web asset,
+    not an email-safe one, and most inboxes strip a <style> block regardless).
+
+    Subclasses override `header`, `content` and `footer`; `preheader` is the
+    hidden preview-pane text most inboxes show next to the subject line.
+{% endcomment %}
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <meta http-equiv="X-UA-Compatible" content="IE=edge">
+        <title>{% block title %}{% endblock title %}</title>
+    </head>
+    <body style="margin:0; padding:0; background-color:#f3f4f6; font-family: Arial, Helvetica, sans-serif;">
+        <div style="display:none; max-height:0; max-width:0; overflow:hidden; opacity:0; mso-hide:all;">
+            {% block preheader %}{% endblock preheader %}
+        </div>
+
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f3f4f6;">
+            <tr>
+                <td align="center" style="padding: 24px 16px;">
+                    <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px; max-width:600px; background-color:#ffffff; border-radius:8px;">
+                        <tr>
+                            <td style="padding: 28px 40px; border-bottom: 1px solid #e5e7eb;">
+                                {% block header %}{% endblock header %}
+                            </td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 32px 40px; color:#1f2933; font-size:15px; line-height:1.6;">
+                                {% block content %}{% endblock content %}
+                            </td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 20px 40px 28px 40px; border-top: 1px solid #e5e7eb; color:#6b7280; font-size:12px; line-height:1.5;">
+                                {% block footer %}{% endblock footer %}
+                            </td>
+                        </tr>
+                    </table>
+                </td>
+            </tr>
+        </table>
+    </body>
+</html>
