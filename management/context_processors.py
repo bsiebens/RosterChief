@@ -11,6 +11,7 @@ from waffle import flag_is_active
 
 from billing.services.notices import club_billing_notice
 from club.services.access import can_add_news, has_management_access, is_club_admin, is_coach_manager
+from members.models import ParentClaim
 
 #: Every management URL name, mapped to the nav item it should light up --
 #: management/templates/management/_nav_items.html compares against this.
@@ -31,6 +32,7 @@ _NAV_SECTIONS = {
     "member_grant_login": "member_list",
     "member_referee_eligibility_update": "member_list",
     "member_detach_family": "member_list",
+    "family_list": "family_list",
     "family_create": "member_list",
     "family_detail": "member_list",
     "family_add_child": "member_list",
@@ -210,3 +212,30 @@ def news_permissions(request):
         return {"can_add_news": False}
 
     return {"can_add_news": can_add_news(request.user, club)}
+
+
+def sidebar_counters(request):
+    """Small always-visible counts next to two nav links that flag a queue
+    waiting on an admin: pending parent claims, and upcoming club-managed games
+    nobody's down to referee yet (management.views.games_missing_referees_count,
+    the same shape RefereeManagementDashboardView's own kpi_no_referee uses for
+    its default "next 10" range).
+
+    Admin-only, matching how _nav_items.html itself gates both links (`{% if
+    is_club_admin %}`) -- a coach never sees either link, so there's no reason
+    to run either query for them. Always an int when shown, never hidden at 0:
+    "the queue is empty" and "nobody checked" have to read differently.
+    """
+    club = getattr(request, "club", None)
+    if club is None or not request.user.is_authenticated or not is_club_admin(request.user, club):
+        return {"pending_parent_claims_count": None, "games_missing_referees_count": None}
+
+    # Imported here rather than at module level to keep this module's own import
+    # graph small -- management.views pulls in most of the app's models/services,
+    # none of which any other context processor here needs.
+    from management.views import RefereeManagementDashboardView, games_missing_referees_count
+
+    return {
+        "pending_parent_claims_count": ParentClaim.objects.filter(club=club, status=ParentClaim.Status.PENDING).count(),
+        "games_missing_referees_count": games_missing_referees_count(club, limit=int(RefereeManagementDashboardView.DEFAULT_RANGE)),
+    }

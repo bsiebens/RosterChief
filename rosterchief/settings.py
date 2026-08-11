@@ -200,6 +200,7 @@ TEMPLATES = [
                 "management.context_processors.active_nav_section",
                 "management.context_processors.news_permissions",
                 "management.context_processors.feature_sections",
+                "management.context_processors.sidebar_counters",
             ],
         },
     },

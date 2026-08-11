@@ -16,8 +16,14 @@
 
 <li class="menu-title">{% trans "People" %}</li>
 <li><a class="{% if nav == 'member_list' %}menu-active{% endif %}" href="{% url 'management:member_list' %}">{% lucide "users" size=16 %} {% trans "Members" %}</a></li>
+<li><a class="{% if nav == 'family_list' %}menu-active{% endif %}" href="{% url 'management:family_list' %}">{% lucide "home" size=16 %} {% trans "Families" %}</a></li>
 {% if is_club_admin %}
-    <li><a class="{% if nav == 'parent_claim_list' %}menu-active{% endif %}" href="{% url 'management:parent_claim_list' %}">{% lucide "inbox" size=16 %} {% trans "Parent claims" %}</a></li>
+    <li>
+        <a class="{% if nav == 'parent_claim_list' %}menu-active{% endif %}" href="{% url 'management:parent_claim_list' %}">
+            {% lucide "inbox" size=16 %} {% trans "Parent claims" %}
+            <span class="badge badge-sm ml-auto {% if pending_parent_claims_count %}badge-error{% else %}badge-neutral{% endif %}">{{ pending_parent_claims_count }}</span>
+        </a>
+    </li>
 {% endif %}
 {% if is_club_admin %}
     <li><a class="{% if nav == 'membership_list' %}menu-active{% endif %}" href="{% url 'management:membership_list' %}">{% lucide "wallet" size=16 %} {% trans "Memberships" %}</a></li>
@@ -30,7 +36,12 @@
 <li><a class="{% if nav == 'position_list' %}menu-active{% endif %}" href="{% url 'management:position_list' %}">{% lucide "tags" size=16 %} {% trans "Positions" %}</a></li>
 {% if is_club_admin %}
     <li><a class="{% if nav == 'referee_level_list' %}menu-active{% endif %}" href="{% url 'management:referee_level_list' %}">{% lucide "badge-check" size=16 %} {% trans "Referee levels" %}</a></li>
-    <li><a class="{% if nav == 'referee_management' %}menu-active{% endif %}" href="{% url 'management:referee_management' %}">{% lucide "calendar-check" size=16 %} {% trans "Referee management" %}</a></li>
+    <li>
+        <a class="{% if nav == 'referee_management' %}menu-active{% endif %}" href="{% url 'management:referee_management' %}">
+            {% lucide "calendar-check" size=16 %} {% trans "Referee management" %}
+            <span class="badge badge-sm ml-auto {% if games_missing_referees_count %}badge-error{% else %}badge-neutral{% endif %}">{{ games_missing_referees_count }}</span>
+        </a>
+    </li>
 {% endif %}
 <li><a class="{% if nav == 'referee_list' %}menu-active{% endif %}" href="{% url 'management:referee_list' %}">{% lucide "flag" size=16 %} {% trans "Referees" %}</a></li>
 

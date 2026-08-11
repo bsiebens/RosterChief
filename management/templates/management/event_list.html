@@ -80,6 +80,8 @@
         </div>
     </div>
 
+    {% include "management/_pagination.html" %}
+
     {% comment %} Dialogs live outside the table: <tbody> may only contain <tr> elements. {% endcomment %}
     {% for event in events %}
         {% if event.can_manage %}

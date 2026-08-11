@@ -25,7 +25,7 @@ from club.mixins import (
     TeamManagerRequiredMixin,
 )
 from club.models import ClubMembership, ClubRole, Season, Sponsor
-from club.services.access import can_edit_news, can_publish_news, current_season, groups_manageable_by, is_club_admin, members_visible_to, teams_managed_by, teams_staffed_by
+from club.services.access import _guardians_only, can_edit_news, can_publish_news, current_season, groups_manageable_by, is_club_admin, members_visible_to, teams_managed_by, teams_staffed_by
 from club.services.fees import mark_as_paid, record_payment, remaining_balance
 from controlpanel.messages import notify
 from controlpanel.mixins import RedirectOnInvalidMixin
@@ -183,16 +183,36 @@ class MemberListView(ClubStaffRequiredMixin, ListView):
 
     template_name = "management/member_list.html"
     context_object_name = "members"
+    paginate_by = 25
 
     def get_queryset(self):
-        members = members_visible_to(self.request.user, self.request.club)
+        # A guardian -- a parent linked to the club only through a child, no fee,
+        # not counted anywhere (see ClubMembership.Kind) -- simply doesn't show up
+        # here by default, with nothing on the page explaining why they seem to
+        # have vanished right after being added via "Add family"/"Add parent".
+        # ?kind= turns that silent exclusion into an explicit, visible choice:
+        # "member" (default) matches the page's original behaviour exactly,
+        # "guardian" flips it to show only the excluded guardians, "both" shows
+        # everyone. _guardians_only is intersected with members_visible_to (not
+        # queried club-wide on its own) so a non-admin still only ever sees
+        # guardians of someone already visible to them.
+        kind = self.request.GET.get("kind", "member")
+        if kind == "guardian":
+            members = members_visible_to(self.request.user, self.request.club, include_guardians=True).filter(pk__in=_guardians_only(self.request.club))
+        elif kind == "both":
+            members = members_visible_to(self.request.user, self.request.club, include_guardians=True)
+        else:
+            kind = "member"
+            members = members_visible_to(self.request.user, self.request.club)
+        self.selected_kind = kind
+
         search = self.request.GET.get("q", "").strip()
         if search:
             members = members.filter(first_name__icontains=search) | members.filter(last_name__icontains=search) | members.filter(email__icontains=search) | members.filter(user__email__icontains=search)
         return members.distinct()
 
     def get_context_data(self, **kwargs):
-        context = super().get_context_data(search=self.request.GET.get("q", ""), **kwargs)
+        context = super().get_context_data(search=self.request.GET.get("q", ""), selected_kind=self.selected_kind, **kwargs)
         members = list(context["members"])
 
         memberships = FamilyMembership.objects.filter(member__in=members).select_related("family")
@@ -794,6 +814,7 @@ class TeamListView(ClubStaffRequiredMixin, ListView):
 
     template_name = "management/team_list.html"
     context_object_name = "teams"
+    paginate_by = 25
 
     def get_queryset(self):
         club = self.request.club
@@ -803,10 +824,14 @@ class TeamListView(ClubStaffRequiredMixin, ListView):
             teams = teams.filter(name__icontains=search)
 
         season = current_season(club)
+        # Explicit, not just Team.Meta's default -- an annotate() that aggregates
+        # (the two Counts below) forces a GROUP BY, and Django doesn't apply a
+        # model's default ordering to a grouped query (QuerySet.ordered), which
+        # would otherwise make pagination's page split nondeterministic.
         return teams.annotate(
             player_count=Count("roster", filter=Q(roster__season=season), distinct=True),
             staff_count=Count("staff_assignments", filter=Q(staff_assignments__season=season), distinct=True),
-        )
+        ).order_by("name")
 
     def get_context_data(self, **kwargs):
         return super().get_context_data(search=self.request.GET.get("q", ""), **kwargs)
@@ -1335,6 +1360,39 @@ def families_of_club(club):
     return Family.objects.filter(memberships__member__member_of__club=club).distinct()
 
 
+class FamilyListView(ClubStaffRequiredMixin, ListView):
+    """One row per family -- parents/guardians in one column, children in
+    another -- for browsing what's on file rather than reaching a family only
+    by clicking through a member. Same visibility rule as FamilyDetailView's
+    own guardians/children (group_by_family over members_visible_to), so a
+    non-admin never sees a family, or a family-mate within one, they couldn't
+    already reach some other way; the family list itself is narrowed to only
+    families with at least one such visible member, rather than showing empty
+    rows for the rest."""
+
+    template_name = "management/family_list.html"
+    context_object_name = "families"
+    paginate_by = 25
+
+    def get_queryset(self):
+        visible = members_visible_to(self.request.user, self.request.club, include_guardians=True)
+        return families_of_club(self.request.club).filter(memberships__member__in=visible).distinct()
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        families = list(context["families"])
+
+        visible = members_visible_to(self.request.user, self.request.club, include_guardians=True)
+        groups, _ungrouped = group_by_family(visible.filter(family_memberships__family__in=families))
+        groups_by_family = {group["family"]: group for group in groups}
+        for family in families:
+            group = groups_by_family.get(family, {"guardians": [], "children": []})
+            family.guardians_display = group["guardians"]
+            family.children_display = group["children"]
+
+        return context | {"families": families}
+
+
 class FamilyCreateView(ClubAdminRequiredMixin, FormView):
     """One new family in one go: a parent (who gets a login) and a child (who
     doesn't) -- see members.services.family.register_family."""
@@ -1636,9 +1694,13 @@ class RefereeListView(ClubStaffRequiredMixin, ListView):
 class GroupListView(ClubAdminRequiredMixin, ListView):
     template_name = "management/group_list.html"
     context_object_name = "groups"
+    paginate_by = 25
 
     def get_queryset(self):
-        return Group.objects.filter(club=self.request.club).annotate(member_count=Count("memberships", distinct=True))
+        # order_by explicit for the same reason as TeamListView: the Count()
+        # annotation forces a GROUP BY, which Django doesn't apply the model's
+        # default ordering to -- pagination needs a real order to split on.
+        return Group.objects.filter(club=self.request.club).annotate(member_count=Count("memberships", distinct=True)).order_by("name")
 
 
 class GroupCreateView(ClubAdminRequiredMixin, CreateView):
@@ -1764,6 +1826,7 @@ class GroupMemberRemoveView(ClubAdminRequiredMixin, View):
 class NewsListView(ClubStaffRequiredMixin, ListView):
     template_name = "management/news_list.html"
     context_object_name = "news_items"
+    paginate_by = 25
 
     def get_queryset(self):
         return News.objects.filter(club=self.request.club).prefetch_related("teams")
@@ -1971,6 +2034,7 @@ class EventListView(ClubStaffRequiredMixin, ListView):
 
     template_name = "management/event_list.html"
     context_object_name = "events"
+    paginate_by = 25
 
     def get_queryset(self):
         club = self.request.club
@@ -2212,6 +2276,39 @@ class EventRefereeFormPdfView(ClubAdminRequiredMixin, View):
         return response
 
 
+def upcoming_games_needing_referee_management(club):
+    """Upcoming home games a club-arranged referee is needed for -- federation-
+    managed teams never appear here, see events.services.referees.needs_referee_management.
+
+    The base query behind RefereeManagementDashboardView's own list, factored out
+    so the nav's Referee management badge (games_missing_referees_count below,
+    used by management.context_processors.sidebar_counters) counts from exactly
+    the same set of games rather than a second, potentially-drifting definition
+    of "needs a referee"."""
+    return (
+        Event.objects.filter(
+            club=club,
+            kind=Event.EventKind.GAME,
+            cancelled=False,
+            location__is_home=True,
+            start__gte=timezone.now(),
+            teams__referee_management=Team.RefereeManagement.CLUB,
+        )
+        .distinct()
+        .order_by("start")
+    )
+
+
+def games_missing_referees_count(club, limit=10):
+    """How many of the next `limit` upcoming club-managed home games have nobody
+    assigned yet -- the same games RefereeManagementDashboardView's own
+    kpi_no_referee counts for its default "next 10" range, but via one annotated
+    query rather than the per-game referee_rows/eligible_referees loop the
+    dashboard builds for rendering (which a nav badge has no use for)."""
+    games = upcoming_games_needing_referee_management(club).annotate(referee_count=Count("referees", distinct=True))[:limit]
+    return sum(1 for game in games if game.referee_count == 0)
+
+
 class RefereeManagementDashboardView(ClubAdminRequiredMixin, TemplateView):
     """One-stop admin view of every upcoming home game that needs a
     club-arranged referee (federation-managed teams never appear here, see
@@ -2238,13 +2335,7 @@ class RefereeManagementDashboardView(ClubAdminRequiredMixin, TemplateView):
         club = self.request.club
         range_choice = self.get_range()
 
-        queryset = (
-            Event.objects.filter(club=club, kind=Event.EventKind.GAME, cancelled=False, location__is_home=True, start__gte=timezone.now(), teams__referee_management=Team.RefereeManagement.CLUB)
-            .distinct()
-            .select_related("location", "opponent")
-            .prefetch_related("teams", "referees__member", "referees__assigned_by")
-            .order_by("start")
-        )
+        queryset = upcoming_games_needing_referee_management(club).select_related("location", "opponent").prefetch_related("teams", "referees__member", "referees__assigned_by")
 
         if range_choice in ("week", "two_weeks"):
             today = timezone.localdate()

@@ -50,6 +50,8 @@
         </div>
     </div>
 
+    {% include "management/_pagination.html" %}
+
     {% if is_club_admin %}
         {% trans "Delete team" as delete_team_title %}
         {% trans "Delete" as delete_label %}

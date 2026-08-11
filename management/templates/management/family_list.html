@@ -1,0 +1,61 @@
+{% extends "management/base.html" %}
+{% load i18n lucide %}
+
+{% block heading %}{% trans "Families" %}{% endblock heading %}
+{% block subheading %}{% trans "Every household on file -- who their parents/guardians and children are." %}{% endblock subheading %}
+
+{% block actions %}
+    {% if is_club_admin %}
+        <a class="btn btn-outline gap-2" href="{% url 'management:family_create' %}">{% lucide "users" size=16 %} {% trans "Add family" %}</a>
+    {% endif %}
+{% endblock actions %}
+
+{% block panel %}
+    <div class="card bg-base-100 shadow">
+        <div class="card-body">
+            <div class="overflow-x-auto">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>{% trans "Family" %}</th>
+                            <th>{% trans "Parents / guardians" %}</th>
+                            <th>{% trans "Children" %}</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for family in families %}
+                            <tr>
+                                <td><a class="link link-hover font-semibold" href="{% url 'management:family_detail' family.pk %}">{{ family }}</a></td>
+                                <td>
+                                    {% for guardian in family.guardians_display %}
+                                        <a class="link link-hover" href="{% url 'management:member_detail' guardian.pk %}">{{ guardian }}</a>{% if not forloop.last %}, {% endif %}
+                                    {% empty %}
+                                        <span class="opacity-40">-</span>
+                                    {% endfor %}
+                                </td>
+                                <td>
+                                    {% for child in family.children_display %}
+                                        <a class="link link-hover" href="{% url 'management:member_detail' child.pk %}">{{ child }}</a>{% if not forloop.last %}, {% endif %}
+                                    {% empty %}
+                                        <span class="opacity-40">-</span>
+                                    {% endfor %}
+                                </td>
+                                <td class="text-right">
+                                    {# Same convention as Groups: "Edit" lands on the overview page, not a standalone rename form -- family_detail is where every family action (add parent/child, change role, remove) actually lives. #}
+                                    <a class="btn btn-outline btn-sm" href="{% url 'management:family_detail' family.pk %}" aria-label="{% trans 'Edit' %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</a>
+                                </td>
+                            </tr>
+                        {% empty %}
+                            <tr>
+                                <td colspan="4" class="text-center opacity-60">{% trans "No families yet." %}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    {% include "management/_pagination.html" %}
+{% endblock panel %}
