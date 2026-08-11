@@ -1454,6 +1454,22 @@ class ParentClaimViewTests(ManagementTestBase):
         self.assertContains(response, "taylor.doe@example.com")
         self.assertContains(response, "Jamie Doe")
 
+    def test_the_child_dropdown_matches_the_height_of_the_buttons_beside_it(self):
+        # Regression: ClaimReviewForm.child used to hardcode its own class=
+        # attrs, which rendered a second class="..." on the <select> alongside
+        # the one templatetags/field.html builds (including the size modifier)
+        # -- the two never merge, so select-sm silently never reached the page
+        # and the dropdown stood taller than the btn-sm/input-sm around it.
+        self.submit()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("parent_claim_list")
+
+        self.assertContains(response, "select-sm")
+        html = response.content.decode()
+        select_tag = html[html.index("<select") : html.index(">", html.index("<select"))]
+        self.assertEqual(select_tag.count('class="'), 1)
+
     def test_approving_links_the_parent_as_a_guardian(self):
         self.submit()
         claim = ParentClaim.objects.get(club=self.club)

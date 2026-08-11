@@ -27,18 +27,29 @@
                         </div>
                     </div>
 
-                    <div class="flex flex-wrap items-end gap-2 mt-4">
+                    {% comment %}
+                        size="small" + show_label=False on the dropdown: {% form_field %}
+                        defaults to daisyUI's medium control height, taller than the btn-sm/
+                        input-sm used by everything else in this row -- without it the
+                        dropdown stands out against the buttons either side of it.
+
+                        justify-between (rather than everything in one flex-wrap run) keeps
+                        Approve and Reject apart even as the row wraps on a narrow screen --
+                        Approve stays pinned left, Reject right, so the two are never one
+                        stray click apart the way adjacent buttons would be.
+                    {% endcomment %}
+                    <div class="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 mt-4">
                         {% if claim.has_candidates %}
-                            <form method="post" action="{% url 'management:parent_claim_approve' claim.pk %}" class="flex flex-wrap items-end gap-2">
+                            <form method="post" action="{% url 'management:parent_claim_approve' claim.pk %}" class="flex flex-wrap items-center gap-2">
                                 {% csrf_token %}
-                                <div class="min-w-64">{% form_field claim.review_form.child %}</div>
+                                <div class="min-w-64">{% form_field claim.review_form.child size="small" show_label=False %}</div>
                                 <button class="btn btn-primary btn-sm gap-2" type="submit">{% lucide "check" size=14 %} {% trans "Approve" %}</button>
                             </form>
                         {% else %}
                             <p class="text-sm opacity-70">{% trans "No child without a parent matches this. Check the spelling and the date of birth with them before rejecting." %}</p>
                         {% endif %}
 
-                        <form method="post" action="{% url 'management:parent_claim_reject' claim.pk %}" class="flex items-end gap-2">
+                        <form method="post" action="{% url 'management:parent_claim_reject' claim.pk %}" class="flex items-center gap-2">
                             {% csrf_token %}
                             <input type="text" name="note" class="input input-bordered input-sm" placeholder="{% trans 'Reason (optional)' %}">
                             <button class="btn btn-outline btn-error btn-sm gap-2" type="submit">{% lucide "x" size=14 %} {% trans "Reject" %}</button>

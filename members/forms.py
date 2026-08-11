@@ -29,7 +29,11 @@ class ClaimReviewForm(forms.Form):
     never quietly re-parent a child who already has one.
     """
 
-    child = forms.ModelChoiceField(queryset=None, label=_("Link to"), widget=forms.Select(attrs={"class": "select select-bordered w-full"}))
+    # No hardcoded "class" here -- templatetags/field.html's own select branch
+    # already builds the full class list (including the size modifier), and a
+    # class baked into the widget attrs would render a second, conflicting
+    # class="..." on the <select> alongside it rather than merging with it.
+    child = forms.ModelChoiceField(queryset=None, label=_("Link to"), widget=forms.Select())
 
     def __init__(self, *args, candidates=None, **kwargs):
         super().__init__(*args, **kwargs)
