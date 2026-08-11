@@ -19,17 +19,23 @@ from members.models import FamilyMembership, Member
 
 from .forms import MemberForm
 
-TEMPLATE_COLUMNS = ["first_name", "last_name", "date_of_birth", "email", "phone", "emergency_phone", "license", "status", "fee_status", "family_group", "family_role"]
+TEMPLATE_COLUMNS = ["first_name", "last_name", "date_of_birth", "email", "phone", "emergency_phone", "license", "status", "fee_status", "family_group", "family_role", "membership_kind"]
 REQUIRED_HEADER_COLUMNS = {"first_name", "last_name"}
 
 TEMPLATE_EXAMPLE_ROWS = [
     # A standalone member -- no family link.
-    ["Alex", "Morgan", date(2012, 5, 14), "alex.morgan@example.com", "+32470123456", "+32470654321", "", ClubMembership.StatusChoices.ACTIVE, ClubMembership.FeeStatus.UNPAID, "", ""],
+    ["Alex", "Morgan", date(2012, 5, 14), "alex.morgan@example.com", "+32470123456", "+32470654321", "", ClubMembership.StatusChoices.ACTIVE, ClubMembership.FeeStatus.UNPAID, "", "", ClubMembership.Kind.MEMBER],
     # A parent and child linked together: same family_group value, one row each.
     # The child has no email of its own -- it gets a login only if given one via
     # the "Grant login" action later, same as adding a family by hand.
-    ["Taylor", "Doe", "", "taylor.doe@example.com", "+32470654322", "", "", ClubMembership.StatusChoices.ACTIVE, ClubMembership.FeeStatus.UNPAID, "Doe family", FamilyMembership.FamilyRole.PARENT],
-    ["Jamie", "Doe", date(2014, 3, 2), "", "", "+32470654322", "", ClubMembership.StatusChoices.ACTIVE, ClubMembership.FeeStatus.UNPAID, "Doe family", FamilyMembership.FamilyRole.CHILD],
+    #
+    # membership_kind sits next to family_role because it answers the question
+    # family_role raises: this parent is a `guardian`, so they hold the login and
+    # can be contacted but don't count as a member and owe no fee. Put `member`
+    # there instead for a parent who also plays -- the two are independent, which
+    # is why it is its own column rather than inferred from family_role.
+    ["Taylor", "Doe", "", "taylor.doe@example.com", "+32470654322", "", "", ClubMembership.StatusChoices.ACTIVE, "", "Doe family", FamilyMembership.FamilyRole.PARENT, ClubMembership.Kind.GUARDIAN],
+    ["Jamie", "Doe", date(2014, 3, 2), "", "", "+32470654322", "", ClubMembership.StatusChoices.ACTIVE, ClubMembership.FeeStatus.UNPAID, "Doe family", FamilyMembership.FamilyRole.CHILD, ClubMembership.Kind.MEMBER],
 ]
 
 
@@ -48,7 +54,7 @@ def build_member_import_template():
     for example_row in TEMPLATE_EXAMPLE_ROWS:
         sheet.append(example_row)
 
-    for column_name, choices in (("status", ClubMembership.StatusChoices), ("fee_status", ClubMembership.FeeStatus), ("family_role", FamilyMembership.FamilyRole)):
+    for column_name, choices in (("membership_kind", ClubMembership.Kind), ("status", ClubMembership.StatusChoices), ("fee_status", ClubMembership.FeeStatus), ("family_role", FamilyMembership.FamilyRole)):
         column_index = TEMPLATE_COLUMNS.index(column_name) + 1
         column_letter = sheet.cell(row=1, column=column_index).column_letter
         options = ",".join(choices.values)
@@ -140,6 +146,12 @@ def parse_member_import_rows(rows, club):
         family_group, family_role, family_errors = _parse_family_fields(raw)
         errors.extend(family_errors)
 
+        # The two columns are otherwise independent -- a parent may or may not also
+        # be a member -- but a child is the member the guardian is attached *to*,
+        # so that particular combination is always a mistake.
+        if family_role == FamilyMembership.FamilyRole.CHILD and membership_kwargs["kind"] == ClubMembership.Kind.GUARDIAN:
+            errors.append(_("A child is always a member, so membership_kind cannot be 'guardian'."))
+
         results.append(
             {
                 "line_number": line_number,
@@ -159,6 +171,16 @@ def _parse_membership_fields(raw):
     errors = []
     license_number = raw.get("license", "").strip()
 
+    kind = raw.get("membership_kind", "").strip()
+    if kind:
+        kind_value = _match_choice(kind, ClubMembership.Kind)
+        if kind_value is None:
+            errors.append(_("Invalid membership_kind '%(value)s'.") % {"value": kind})
+    else:
+        # Blank means member: the overwhelmingly common row, and the value every
+        # file written before this column existed effectively carried.
+        kind_value = ClubMembership.Kind.MEMBER
+
     status = raw.get("status", "").strip()
     if status:
         status_value = _match_choice(status, ClubMembership.StatusChoices)
@@ -175,7 +197,7 @@ def _parse_membership_fields(raw):
     else:
         fee_status_value = ClubMembership.FeeStatus.UNPAID
 
-    return {"license": license_number, "status": status_value, "fee_status": fee_status_value}, errors
+    return {"kind": kind_value, "license": license_number, "status": status_value, "fee_status": fee_status_value}, errors
 
 
 def _parse_family_fields(raw):

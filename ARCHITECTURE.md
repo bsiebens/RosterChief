@@ -404,6 +404,7 @@ Season(ClubScopedModel)              # -> carries `club`
 ClubMembership(ClubScopedModel)      # -> carries `club`
   member       FK Member (CASCADE, related_name="club_memberships")
   season       FK Season (PROTECT, related_name="memberships")
+  kind         CharField (TextChoices: member | guardian)   # default member
   license      CharField (blank)        # federation license for that season
   status       CharField (TextChoices: pending | active | lapsed | cancelled)
   fee_status   CharField (TextChoices: unpaid | partial | paid | waived)
@@ -412,6 +413,33 @@ ClubMembership(ClubScopedModel)      # -> carries `club`
   Meta: unique_together (club, member, season); ordering = ["-season__start_date", ...]
 ```
 
+- **`kind` separates a member from a guardian** *(built)*. A guardian is a parent attached
+  to the club only through their child: they hold the login, can be contacted and can sit in
+  a Group, but they are **not a member** — no fee, absent from the member list, the fee list
+  and every member KPI (club + platform), and not eligible for a roster *or* a staff spot. A
+  parent who also plays or coaches is a `member` who happens to be a parent; the two facts
+  are independent, which is why this is its own field rather than being inferred from
+  `members.FamilyMembership.role`. Before this existed, `members/services/family.py` enrolled
+  a parent exactly like the child, so every parent counted as a member — a data migration
+  reclassifies them, deliberately skipping anyone who plays, is on a team's staff, or holds
+  an elevated ClubRole.
+- **Why a field and not a separate model.** Everything that answers "is this person attached
+  to this club" already reads through `ClubMembership` — tenancy scoping, group membership,
+  the club-wide event audience — and a second kind of link would need a parallel path through
+  all of it. What changes is only who *counts*.
+- **Guardians are carried forward across seasons.** Their tie to the club isn't really
+  seasonal (it lasts as long as the child is there) but it rides on a per-season row, so
+  `club/services/seasons.py::_carry_guardians_into` copies them when a season is created and
+  `members/services/family.py::carry_guardians_forward` covers a guardian added after later
+  seasons already existed. Copied from the *immediately preceding* season only, so a guardian
+  an admin deliberately removed stays removed rather than being resurrected from an old row.
+- **Excluding guardians is a subtraction, not a narrower filter.**
+  `club/services/access.py::members_visible_to` subtracts `_guardians_only(club)` rather than
+  matching only member-kind rows: a bare MEMBER `ClubRole` with no `ClubMembership` is a real
+  state (someone the club knows but hasn't signed up yet), and narrowing the role branch to
+  weed guardians out would take those people with it. Pass `include_guardians=True` where the
+  page is about a *person* rather than about members — a guardian's own detail page, editing
+  them, the group pickers, or a family page (whose parents are the whole point).
 - One row per member **per season** — sign-up and fee payment are tracked independently
   each season. `unique_together` moves from `(club, member)` → `(club, member, season)`
   (a data migration must backfill existing rows with the current season).

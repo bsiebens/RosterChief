@@ -7,7 +7,7 @@ from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.utils import timezone
 
-from club.models import ClubMembership
+from club.models import ClubMembership, Season
 from members.models import Family, FamilyMembership, Member
 
 User = get_user_model()
@@ -54,9 +54,16 @@ def grant_login(member, email):
     return user
 
 
-def _enrol(club, season, member):
+def _enrol(club, season, member, kind=ClubMembership.Kind.MEMBER):
     """Sign a member up for the club's current season, if there is one. The
-    implicit MEMBER role follows automatically (club/signals.py)."""
+    implicit MEMBER role follows automatically (club/signals.py).
+
+    ``kind=GUARDIAN`` attaches a parent to the club *as a parent* -- they hold
+    the login and can be reached, but they aren't a member, owe no fee and are
+    left out of every member list and count. A parent who also plays is enrolled
+    as a MEMBER instead; the two are not exclusive of each other in the family
+    graph, which records the parent relationship separately.
+    """
     if season is None:
         return None
 
@@ -64,15 +71,44 @@ def _enrol(club, season, member):
         club=club,
         member=member,
         season=season,
-        defaults={"status": ClubMembership.StatusChoices.ACTIVE, "signed_up_at": timezone.localdate()},
+        defaults={"kind": kind, "status": ClubMembership.StatusChoices.ACTIVE, "signed_up_at": timezone.localdate()},
     )
+    if kind == ClubMembership.Kind.GUARDIAN:
+        carry_guardians_forward(club, member, from_season=season)
     return membership
 
 
+def carry_guardians_forward(club, member, *, from_season):
+    """Give ``member`` a guardian row in every season of ``club`` at or after
+    ``from_season``.
+
+    A guardian's tie to the club isn't really seasonal -- it lasts as long as
+    their child is there -- but it rides on ClubMembership so that everything
+    already keying off that table (tenancy, groups, the event audience) keeps
+    working. The cost of that is a row per season, and without this a parent
+    would silently drop off the club at the next season boundary while their
+    child stayed enrolled. Seasons are generated well ahead of time
+    (club/services/seasons.py), so "every season from here on" is a real set,
+    not just the next one. Idempotent.
+    """
+    later_seasons = Season.objects.filter(club=club, start_date__gte=from_season.start_date).exclude(pk=from_season.pk)
+    for season in later_seasons:
+        ClubMembership.objects.get_or_create(
+            club=club,
+            member=member,
+            season=season,
+            defaults={"kind": ClubMembership.Kind.GUARDIAN, "status": ClubMembership.StatusChoices.ACTIVE, "signed_up_at": timezone.localdate()},
+        )
+
+
 @transaction.atomic
-def register_family(club, season, *, parent_email, parent_first_name, parent_last_name, child_first_name, child_last_name, child_date_of_birth=None):
+def register_family(club, season, *, parent_email, parent_first_name, parent_last_name, child_first_name, child_last_name, child_date_of_birth=None, parent_is_member=False):
     """Create a new family in one go: a parent (with a login) and a child
-    (without one), linked to each other and signed up for ``season``."""
+    (without one), linked to each other and signed up for ``season``.
+
+    The child is always a member; the parent is a guardian unless
+    ``parent_is_member`` says they play (or otherwise belong) in their own right.
+    """
     parent = get_or_create_login_member(parent_email, parent_first_name, parent_last_name)
     child = Member.objects.create(first_name=child_first_name, last_name=child_last_name, date_of_birth=child_date_of_birth)
 
@@ -80,7 +116,7 @@ def register_family(club, season, *, parent_email, parent_first_name, parent_las
     FamilyMembership.objects.create(family=family, member=parent, role=FamilyMembership.FamilyRole.PARENT)
     FamilyMembership.objects.create(family=family, member=child, role=FamilyMembership.FamilyRole.CHILD)
 
-    _enrol(club, season, parent)
+    _enrol(club, season, parent, kind=ClubMembership.Kind.MEMBER if parent_is_member else ClubMembership.Kind.GUARDIAN)
     _enrol(club, season, child)
 
     return family
@@ -97,13 +133,14 @@ def add_child_to_family(club, season, family, *, first_name, last_name, date_of_
 
 
 @transaction.atomic
-def add_parent_to_family(club, season, family, *, email, first_name="", last_name=""):
-    """A family that needs one more parent/guardian registered."""
+def add_parent_to_family(club, season, family, *, email, first_name="", last_name="", parent_is_member=False):
+    """A family that needs one more parent/guardian registered. A guardian
+    unless ``parent_is_member`` says they belong to the club in their own right."""
     parent = get_or_create_login_member(email, first_name, last_name)
     # get_or_create, not create: re-adding an email already on this family (a typo'd
     # re-submit, say) must not trip unique_member_per_family.
     FamilyMembership.objects.get_or_create(family=family, member=parent, defaults={"role": FamilyMembership.FamilyRole.PARENT})
-    _enrol(club, season, parent)
+    _enrol(club, season, parent, kind=ClubMembership.Kind.MEMBER if parent_is_member else ClubMembership.Kind.GUARDIAN)
 
     return parent
 

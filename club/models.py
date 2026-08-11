@@ -253,6 +253,10 @@ class Season(ClubScopedModel):
 
 
 class ClubMembership(ClubScopedModel):
+    class Kind(models.TextChoices):
+        MEMBER = "member", _("member")
+        GUARDIAN = "guardian", _("guardian")
+
     class StatusChoices(models.TextChoices):
         ACTIVE = "active", _("active")
         PENDING = "pending", _("pending")
@@ -267,6 +271,14 @@ class ClubMembership(ClubScopedModel):
 
     member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="member_of", verbose_name=_("member"))
     season = models.ForeignKey(Season, on_delete=models.PROTECT, related_name="memberships", verbose_name=_("season"))
+
+    kind = models.CharField(
+        _("kind"),
+        max_length=20,
+        choices=Kind.choices,
+        default=Kind.MEMBER,
+        help_text=_("A guardian is attached to the club only as a parent of a member -- they hold the login, but don't count as a member themselves and owe no fee. A parent who also plays is a member."),
+    )
 
     license = models.CharField(_("license"), max_length=250, blank=True)
     status = models.CharField(_("status"), max_length=250, choices=StatusChoices.choices, default=StatusChoices.PENDING)
@@ -289,8 +301,25 @@ class ClubMembership(ClubScopedModel):
     def __str__(self):
         return f"{self.club} - {self.member}"
 
+    @property
+    def is_guardian(self) -> bool:
+        """Attached to the club as a parent of a member, not as one themselves.
+
+        Guardians are deliberately kept as ClubMembership rows rather than given
+        their own model: everything that answers "is this person attached to this
+        club" (tenancy scoping, group membership, the event audience) already
+        reads through this table, and a second kind of link would need a parallel
+        path through all of it. What changes is only who *counts* -- the member
+        list, the fee list and every member KPI filter on ``kind``.
+        """
+        return self.kind == self.Kind.GUARDIAN
+
     def clean(self):
         validate_club_scope(self, self.club_id, same_club_fields=("season",))
+        # A guardian owes nothing -- they're not a member. Caught here rather than
+        # silently zeroed on save so a mistaken import row says so out loud.
+        if self.is_guardian and self.fee_amount:
+            raise ValidationError({"fee_amount": _("A guardian doesn't hold a membership, so they can't owe a fee.")})
 
 
 class FeePayment(UUIDModel):

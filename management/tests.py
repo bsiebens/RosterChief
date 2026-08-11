@@ -246,7 +246,7 @@ class MemberManagementTests(ManagementTestBase):
         # one combined submit, so its (required) fields must come along.
         self.club_post(
             "member_update",
-            {"first_name": "New", "last_name": "Name", "status": ClubMembership.StatusChoices.ACTIVE, "fee_status": ClubMembership.FeeStatus.UNPAID},
+            {"first_name": "New", "last_name": "Name", "kind": ClubMembership.Kind.MEMBER, "status": ClubMembership.StatusChoices.ACTIVE, "fee_status": ClubMembership.FeeStatus.UNPAID},
             member.pk,
         )
 
@@ -1363,6 +1363,95 @@ class FamilyManagementTests(ManagementTestBase):
         self.assertEqual(family.guardians.count(), 1)
 
 
+class GuardianViewTests(ManagementTestBase):
+    """How a guardian -- a parent attached to the club only through their child --
+    behaves across the management UI. See club.models.ClubMembership.Kind; the
+    model-level guarantees live in club.tests.GuardianMembershipTests."""
+
+    def family_payload(self, **overrides):
+        payload = {
+            "parent_first_name": "Pat",
+            "parent_last_name": "Parent",
+            "parent_email": "pat.parent@example.com",
+            "child_first_name": "Cody",
+            "child_last_name": "Child",
+            "child_date_of_birth": "2015-04-01",
+        }
+        payload.update(overrides)
+        return payload
+
+    def test_registering_a_family_makes_the_parent_a_guardian_and_the_child_a_member(self):
+        self.client.force_login(self.admin_user)
+
+        self.club_post("family_create", self.family_payload())
+
+        parent = Member.objects.get(first_name="Pat", last_name="Parent")
+        child = Member.objects.get(first_name="Cody", last_name="Child")
+        self.assertEqual(ClubMembership.objects.get(club=self.club, member=parent).kind, ClubMembership.Kind.GUARDIAN)
+        self.assertEqual(ClubMembership.objects.get(club=self.club, member=child).kind, ClubMembership.Kind.MEMBER)
+
+    def test_ticking_also_a_member_enrols_the_parent_as_one(self):
+        self.client.force_login(self.admin_user)
+
+        self.club_post("family_create", self.family_payload(parent_is_member="on"))
+
+        parent = Member.objects.get(first_name="Pat", last_name="Parent")
+        self.assertEqual(ClubMembership.objects.get(club=self.club, member=parent).kind, ClubMembership.Kind.MEMBER)
+
+    def test_a_guardian_is_absent_from_the_member_list(self):
+        self.client.force_login(self.admin_user)
+        self.club_post("family_create", self.family_payload())
+
+        response = self.club_get("member_list")
+
+        self.assertContains(response, "Cody Child")
+        self.assertNotContains(response, "Pat Parent")
+
+    def test_a_guardian_is_not_counted_in_the_membership_kpis(self):
+        # Measured as a delta, not an absolute: the base fixture's admin is a
+        # member too, and this is about what registering a family *adds*.
+        self.client.force_login(self.admin_user)
+        before = self.club_get("membership_list").context["kpi_total"]
+
+        self.club_post("family_create", self.family_payload())
+
+        after = self.club_get("membership_list").context["kpi_total"]
+        # The child only. A guardian owes nothing, so counting them would
+        # overstate the roll and everything derived from it.
+        self.assertEqual(after - before, 1)
+
+    def test_a_guardians_own_page_is_still_reachable(self):
+        # Excluded from the member *list*, not from the club: an admin has to be
+        # able to open them, edit them, and switch them to a member.
+        self.client.force_login(self.admin_user)
+        self.club_post("family_create", self.family_payload())
+        parent = Member.objects.get(first_name="Pat", last_name="Parent")
+
+        self.assertEqual(self.club_get("member_detail", parent.pk).status_code, 200)
+        self.assertEqual(self.club_get("member_update", parent.pk).status_code, 200)
+
+    def test_a_guardian_can_still_be_put_in_a_group(self):
+        # The stated exception: a parent may well sit on a committee.
+        self.client.force_login(self.admin_user)
+        self.club_post("family_create", self.family_payload())
+        parent = Member.objects.get(first_name="Pat", last_name="Parent")
+        group = Group.objects.create(club=self.club, name="Committee")
+
+        response = self.club_get("group_bulk_add", group.pk)
+
+        self.assertContains(response, str(parent.pk))
+
+    def test_a_guardian_is_not_offered_for_a_team_roster(self):
+        self.client.force_login(self.admin_user)
+        self.club_post("family_create", self.family_payload())
+        parent = Member.objects.get(first_name="Pat", last_name="Parent")
+        team = Team.objects.create(club=self.club, name="First Team", short_name="1st")
+
+        response = self.club_get("team_bulk_add", team.pk, self.season.pk)
+
+        self.assertNotContains(response, str(parent.pk))
+
+
 class MemberListFamilyColumnTests(ManagementTestBase):
     """The member list is one flat table -- family is a column (each member's family/
     role attached in Python, management.views.MemberListView), not a grouping."""
@@ -1878,6 +1967,7 @@ class MemberClubMembershipFormTests(ManagementTestBase):
             {
                 "first_name": "Fee",
                 "last_name": "Payer",
+                "kind": ClubMembership.Kind.MEMBER,
                 "license": "BE-9999",
                 "status": ClubMembership.StatusChoices.ACTIVE,
                 "fee_status": ClubMembership.FeeStatus.PAID,
@@ -1912,7 +2002,7 @@ class MemberClubMembershipFormTests(ManagementTestBase):
 
         response = self.club_post(
             "member_update",
-            {"first_name": "Unrostered", "last_name": "Member", "status": ClubMembership.StatusChoices.ACTIVE, "fee_status": ClubMembership.FeeStatus.PAID},
+            {"first_name": "Unrostered", "last_name": "Member", "kind": ClubMembership.Kind.MEMBER, "status": ClubMembership.StatusChoices.ACTIVE, "fee_status": ClubMembership.FeeStatus.PAID},
             member.pk,
         )
 
@@ -2892,6 +2982,52 @@ class MemberBulkImportTests(ManagementTestBase):
         self.assertEqual(family, Family.objects.get(memberships__member=child))
         self.assertEqual(FamilyMembership.objects.get(family=family, member=parent).role, FamilyMembership.FamilyRole.PARENT)
         self.assertEqual(FamilyMembership.objects.get(family=family, member=child).role, FamilyMembership.FamilyRole.CHILD)
+
+    def test_membership_kind_guardian_creates_a_guardian_not_a_member(self):
+        # Columns are positional; membership_kind is the last one.
+        upload = make_import_workbook(
+            [
+                ["Taylor", "Doe", "", "taylor.guardian@example.com", "", "", "", "", "", "Doe family", "parent", "guardian"],
+                ["Jamie", "Doe", "2014-03-02", "", "", "", "", "", "", "Doe family", "child", "member"],
+            ]
+        )
+        self.club_post("member_import", {"file": upload})
+
+        self.club_post("member_import_confirm", {})
+
+        parent = Member.objects.get(email="taylor.guardian@example.com")
+        child = Member.objects.get(first_name="Jamie", last_name="Doe")
+        self.assertEqual(ClubMembership.objects.get(club=self.club, member=parent).kind, ClubMembership.Kind.GUARDIAN)
+        self.assertEqual(ClubMembership.objects.get(club=self.club, member=child).kind, ClubMembership.Kind.MEMBER)
+
+    def test_a_blank_membership_kind_still_means_member(self):
+        # Every file written before the column existed carried this implicitly.
+        upload = make_import_workbook([["Solo", "Blankkind", "", "solo.blank@example.com", "", "", "", "", "", "", "", ""]])
+        self.club_post("member_import", {"file": upload})
+
+        self.club_post("member_import_confirm", {})
+
+        member = Member.objects.get(email="solo.blank@example.com")
+        self.assertEqual(ClubMembership.objects.get(club=self.club, member=member).kind, ClubMembership.Kind.MEMBER)
+
+    def test_a_child_marked_as_a_guardian_is_an_error(self):
+        # A child is the member the guardian is attached *to*.
+        upload = make_import_workbook([["Jamie", "Doe", "2014-03-02", "", "", "", "", "", "", "Doe family", "child", "guardian"]])
+
+        response = self.club_post("member_import", {"file": upload})
+
+        result = response.context["results"][0]
+        self.assertIsNone(result["member"])
+        self.assertTrue(any("child is always a member" in error.lower() for error in result["errors"]))
+
+    def test_an_invalid_membership_kind_is_reported(self):
+        upload = make_import_workbook([["Odd", "Kind", "", "odd.kind@example.com", "", "", "", "", "", "", "", "sponsor"]])
+
+        response = self.club_post("member_import", {"file": upload})
+
+        result = response.context["results"][0]
+        self.assertIsNone(result["member"])
+        self.assertTrue(any("membership_kind" in error for error in result["errors"]))
 
     def test_family_role_without_a_group_is_an_error(self):
         upload = make_import_workbook([["Odd", "Row", "", "odd.row@example.com", "", "", "", "", "", "", "parent"]])

@@ -14,4 +14,8 @@ def eligible_roster_members(club):
         member_of__club=club,
         member_of__season__in=eligible_seasons,
         member_of__status=ClubMembership.StatusChoices.ACTIVE,
+        # Guardians are attached to the club only as a parent of a member, so they
+        # are not eligible for a roster spot *or* a staff one. A parent who
+        # volunteers as a coach is a member of the club and marked as one.
+        member_of__kind=ClubMembership.Kind.MEMBER,
     ).distinct()

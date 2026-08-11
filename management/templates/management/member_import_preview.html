@@ -27,6 +27,7 @@
                             <th>{% trans "First name" %}</th>
                             <th>{% trans "Email" %}</th>
                             <th>{% trans "Family" %}</th>
+                            <th>{% trans "Joining as" %}</th>
                             <th>{% trans "Outcome" %}</th>
                         </tr>
                     </thead>
@@ -46,6 +47,18 @@
                                     {% endif %}
                                 </td>
                                 <td>
+                                    {% comment %}
+                                        A guardian holds the login for a child but is not a member:
+                                        no fee, and not counted in any member total. See
+                                        club.models.ClubMembership.Kind.
+                                    {% endcomment %}
+                                    {% if result.membership_kwargs.kind == "guardian" %}
+                                        <span class="badge badge-warning badge-sm">{% trans "Guardian" %}</span>
+                                    {% else %}
+                                        <span class="badge badge-neutral badge-sm">{% trans "Member" %}</span>
+                                    {% endif %}
+                                </td>
+                                <td>
                                     {% if result.member %}
                                         <span class="badge badge-success badge-sm">{% trans "Will create" %}</span>
                                     {% else %}
@@ -56,7 +69,7 @@
                             </tr>
                         {% empty %}
                             <tr>
-                                <td colspan="6" class="text-center opacity-60">{% trans "No rows found in the uploaded file." %}</td>
+                                <td colspan="7" class="text-center opacity-60">{% trans "No rows found in the uploaded file." %}</td>
                             </tr>
                         {% endfor %}
                     </tbody>

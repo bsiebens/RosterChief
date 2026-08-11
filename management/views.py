@@ -239,7 +239,9 @@ class MembershipListView(ClubAdminRequiredMixin, ListView):
         if season is None:
             return ClubMembership.objects.none()
 
-        memberships = ClubMembership.objects.filter(club=self.request.club, season=season).select_related("member").order_by("member__last_name", "member__first_name")
+        # kind=MEMBER: a guardian holds no membership and owes no fee, so they
+        # belong in neither this list nor the KPIs below it.
+        memberships = ClubMembership.objects.filter(club=self.request.club, season=season, kind=ClubMembership.Kind.MEMBER).select_related("member").order_by("member__last_name", "member__first_name")
 
         fee_status = self.request.GET.get("fee_status", "not_paid")
         if fee_status == "not_paid":
@@ -279,7 +281,7 @@ class MembershipListView(ClubAdminRequiredMixin, ListView):
 
         counts = {}
         if current is not None:
-            counts = {row["fee_status"]: row["count"] for row in ClubMembership.objects.filter(club=club, season=current).values("fee_status").annotate(count=Count("id"))}
+            counts = {row["fee_status"]: row["count"] for row in ClubMembership.objects.filter(club=club, season=current, kind=ClubMembership.Kind.MEMBER).values("fee_status").annotate(count=Count("id"))}
         paid = counts.get(ClubMembership.FeeStatus.PAID, 0)
         partial = counts.get(ClubMembership.FeeStatus.PARTIALLY_PAID, 0)
         unpaid = counts.get(ClubMembership.FeeStatus.UNPAID, 0)
@@ -569,7 +571,7 @@ class MemberUpdateView(ClubAdminRequiredMixin, View):
     template_name = "management/member_form.html"
 
     def get_member(self):
-        return get_object_or_404(members_visible_to(self.request.user, self.request.club), pk=self.kwargs["pk"])
+        return get_object_or_404(members_visible_to(self.request.user, self.request.club, include_guardians=True), pk=self.kwargs["pk"])
 
     def get_membership(self, member):
         season = current_season(self.request.club)
@@ -607,10 +609,10 @@ class MemberDetailView(ClubStaffRequiredMixin, DetailView):
     context_object_name = "member"
 
     def get_queryset(self):
-        return members_visible_to(self.request.user, self.request.club)
+        return members_visible_to(self.request.user, self.request.club, include_guardians=True)
 
     def get_context_data(self, **kwargs):
-        visible = members_visible_to(self.request.user, self.request.club)
+        visible = members_visible_to(self.request.user, self.request.club, include_guardians=True)
         my_family_ids = FamilyMembership.objects.filter(member=self.object).values_list("family_id", flat=True)
         family_scoped_members = visible.filter(family_memberships__family_id__in=my_family_ids).distinct()
         family_groups, _ = group_by_family(family_scoped_members)
@@ -647,11 +649,11 @@ class MemberAttachToFamilyView(ClubAdminRequiredMixin, RedirectOnInvalidMixin, F
         return {"pk": self.kwargs["pk"]}
 
     def get_form_kwargs(self):
-        member = get_object_or_404(members_visible_to(self.request.user, self.request.club), pk=self.kwargs["pk"])
+        member = get_object_or_404(members_visible_to(self.request.user, self.request.club, include_guardians=True), pk=self.kwargs["pk"])
         return super().get_form_kwargs() | {"club": self.request.club, "member": member}
 
     def form_valid(self, form):
-        member = get_object_or_404(members_visible_to(self.request.user, self.request.club), pk=self.kwargs["pk"])
+        member = get_object_or_404(members_visible_to(self.request.user, self.request.club, include_guardians=True), pk=self.kwargs["pk"])
         family = attach_to_family(member, role=form.cleaned_data["role"], family=form.cleaned_data["family"])
         body = _("“%(member)s” is now part of %(family)s.") % {"member": member, "family": family}
         notify(self.request, f"s|{_('Added to family')}|{body}")
@@ -671,7 +673,7 @@ class MemberRefereeEligibilityUpdateView(ClubAdminRequiredMixin, RedirectOnInval
         return {"pk": self.kwargs["pk"]}
 
     def get_member(self):
-        return get_object_or_404(members_visible_to(self.request.user, self.request.club), pk=self.kwargs["pk"])
+        return get_object_or_404(members_visible_to(self.request.user, self.request.club, include_guardians=True), pk=self.kwargs["pk"])
 
     def get_form_kwargs(self):
         return super().get_form_kwargs() | {"club": self.request.club, "member": self.get_member()}
@@ -697,7 +699,7 @@ class MemberGrantLoginView(ClubAdminRequiredMixin, RedirectOnInvalidMixin, FormV
         return {"pk": self.kwargs["pk"]}
 
     def form_valid(self, form):
-        member = get_object_or_404(members_visible_to(self.request.user, self.request.club), pk=self.kwargs["pk"])
+        member = get_object_or_404(members_visible_to(self.request.user, self.request.club, include_guardians=True), pk=self.kwargs["pk"])
         if member.user_id is not None:
             # Already has one -- the row's button shouldn't have been there at all;
             # a direct POST replay (e.g. a resubmitted form) is the only way here.
@@ -710,7 +712,7 @@ class MemberGrantLoginView(ClubAdminRequiredMixin, RedirectOnInvalidMixin, FormV
 
 class MemberDetachFromFamilyView(ClubAdminRequiredMixin, View):
     def post(self, request, pk, family_pk):
-        member = get_object_or_404(members_visible_to(request.user, request.club), pk=pk)
+        member = get_object_or_404(members_visible_to(request.user, request.club, include_guardians=True), pk=pk)
         family = get_object_or_404(Family, pk=family_pk, memberships__member=member)
         # detach_from_family may delete `family` itself (left empty) -- str() it first,
         # since Family.__str__ queries self.memberships, which needs a pk to still exist.
@@ -752,7 +754,7 @@ class FamilyMembershipRoleUpdateView(ClubAdminRequiredMixin, View):
 
 class MemberDeleteView(ClubAdminRequiredMixin, View):
     def post(self, request, pk):
-        member = get_object_or_404(members_visible_to(request.user, request.club), pk=pk)
+        member = get_object_or_404(members_visible_to(request.user, request.club, include_guardians=True), pk=pk)
         name = str(member)
         # FamilyMembership cascades away with the member -- note which families
         # they were in before that happens, so an emptied one can be cleaned up
@@ -1344,6 +1346,7 @@ class FamilyCreateView(ClubAdminRequiredMixin, FormView):
             child_first_name=cd["child_first_name"],
             child_last_name=cd["child_last_name"],
             child_date_of_birth=cd["child_date_of_birth"],
+            parent_is_member=cd["parent_is_member"],
         )
 
         if season is not None:
@@ -1372,7 +1375,7 @@ class FamilyDetailView(ClubStaffRequiredMixin, DetailView):
         return families_of_club(self.request.club)
 
     def get_context_data(self, **kwargs):
-        visible = members_visible_to(self.request.user, self.request.club)
+        visible = members_visible_to(self.request.user, self.request.club, include_guardians=True)
         members = visible.filter(family_memberships__family=self.object).distinct()
         # group_by_family scopes by member, not family -- a member visible here
         # because they're in *this* family can also belong to another one, in
@@ -1541,7 +1544,7 @@ class RefereeListView(ClubStaffRequiredMixin, ListView):
     context_object_name = "referees"
 
     def get_queryset(self):
-        members = members_visible_to(self.request.user, self.request.club).filter(referee_profile__isnull=False)
+        members = members_visible_to(self.request.user, self.request.club, include_guardians=True).filter(referee_profile__isnull=False)
         return members.select_related("referee_profile", "referee_profile__level").prefetch_related("referee_profile__level__teams").order_by("last_name", "first_name")
 
 
@@ -1629,7 +1632,7 @@ class GroupBulkAddView(ClubAdminRequiredMixin, View):
 
     def get_form_kwargs(self, group):
         existing_ids = set(GroupMembership.objects.filter(group=group).values_list("member_id", flat=True))
-        members = members_visible_to(self.request.user, self.request.club).order_by("last_name", "first_name")
+        members = members_visible_to(self.request.user, self.request.club, include_guardians=True).order_by("last_name", "first_name")
         # One member query for the whole formset -- see TeamBulkAddView.get_form_kwargs.
         member_choices = [("", "---------")] + [(member.pk, _("%(member)s — already in this group") % {"member": member} if member.pk in existing_ids else str(member)) for member in members]
 

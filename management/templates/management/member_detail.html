@@ -79,7 +79,23 @@
             <div class="card-body">
                 <h2 class="card-title text-base">{% lucide "id-card" size=18 %} {% trans "Club membership" %}</h2>
                 {% if current_membership %}
+                    {% if current_membership.is_guardian %}
+                        {% comment %}
+                            Stated plainly rather than left to be inferred from an empty
+                            fee: a guardian is deliberately missing from the member list
+                            and every member count, and someone looking at this page needs
+                            to know that is on purpose. See club.models.ClubMembership.Kind.
+                        {% endcomment %}
+                        <div class="alert alert-warning py-2 my-1">
+                            {% lucide "users" size=16 %}
+                            <span class="text-sm">{% trans "Guardian: attached to the club as a parent of a member. Holds the login, owes no fee, and is not counted as a member." %}</span>
+                        </div>
+                    {% endif %}
                     <dl class="divide-y divide-base-200">
+                        <div class="flex items-center justify-between py-2">
+                            <dt class="text-sm opacity-70">{% trans "Joined as" %}</dt>
+                            <dd class="font-semibold">{{ current_membership.get_kind_display|capfirst }}</dd>
+                        </div>
                         <div class="flex items-center justify-between py-2">
                             <dt class="text-sm opacity-70">{% trans "License" %}</dt>
                             <dd class="font-semibold">{{ current_membership.license|default:"-" }}</dd>
@@ -88,10 +104,12 @@
                             <dt class="text-sm opacity-70">{% trans "Status" %}</dt>
                             <dd class="font-semibold">{{ current_membership.get_status_display }}</dd>
                         </div>
-                        <div class="flex items-center justify-between py-2">
-                            <dt class="text-sm opacity-70">{% trans "Fee status" %}</dt>
-                            <dd class="font-semibold">{{ current_membership.get_fee_status_display }}</dd>
-                        </div>
+                        {% if not current_membership.is_guardian %}
+                            <div class="flex items-center justify-between py-2">
+                                <dt class="text-sm opacity-70">{% trans "Fee status" %}</dt>
+                                <dd class="font-semibold">{{ current_membership.get_fee_status_display }}</dd>
+                            </div>
+                        {% endif %}
                     </dl>
                 {% else %}
                     <p class="text-sm opacity-60">{% trans "Not rostered for the current season." %}</p>

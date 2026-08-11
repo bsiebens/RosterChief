@@ -46,10 +46,37 @@ def generate_seasons(club, until):
         end = _season_end(start, club)
         season, was_created = Season.objects.get_or_create(club=club, start_date=start, end_date=end)
         if was_created:
+            _carry_guardians_into(club, season)
             created.append(season)
         start = end + datetime.timedelta(days=1)
 
     return created
+
+
+def _carry_guardians_into(club, season):
+    """Copy the previous season's guardians into a season that has just been created.
+
+    The other half of members.services.family.carry_guardians_forward, which
+    covers a guardian added *after* the later seasons already existed. Between
+    them a parent keeps their tie to the club across every season boundary --
+    without which they would quietly drop off the club while their child stayed
+    enrolled, which is exactly the state a guardian exists to prevent.
+
+    Copied from the immediately preceding season, not from "any season ever", so
+    a guardian an admin deliberately removed stays removed rather than being
+    resurrected from an older row.
+    """
+    from club.models import ClubMembership
+
+    previous = Season.objects.filter(club=club, start_date__lt=season.start_date).order_by("-start_date").first()
+    if previous is None:
+        return
+
+    guardians = ClubMembership.objects.filter(club=club, season=previous, kind=ClubMembership.Kind.GUARDIAN)
+    ClubMembership.objects.bulk_create(
+        [ClubMembership(club=club, member_id=guardian.member_id, season=season, kind=ClubMembership.Kind.GUARDIAN, status=guardian.status, signed_up_at=guardian.signed_up_at) for guardian in guardians],
+        ignore_conflicts=True,
+    )
 
 
 def _expected_season_dates(club, until):

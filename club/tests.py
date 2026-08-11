@@ -19,6 +19,7 @@ from django.utils import timezone
 from events.models import Event
 from members.models import Family, FamilyMembership, Member
 from teams.models import Position, StaffAssignment, Team, TeamMembership
+from teams.services import eligible_roster_members
 
 from .models import Club, ClubMembership, ClubRole, FeePayment, Season, Sponsor, club_logo_path
 from .services.access import (
@@ -673,6 +674,94 @@ class ClubMembershipCleanTests(TestCase):
 
     def test_accepts_same_club_season(self):
         ClubMembership(club=self.club, member=self.member, season=self.season).full_clean()
+
+
+class GuardianMembershipTests(TestCase):
+    """A parent attached to the club only through their child -- see
+    ClubMembership.Kind. They hold the login and can be reached, but they are not
+    a member: no fee, absent from every member list and count, and not eligible
+    for a roster or staff spot."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        today = timezone.localdate()
+        cls.season = Season.objects.create(club=cls.club, start_date=today, end_date=today + datetime.timedelta(days=300))
+        cls.child = Member.objects.create(first_name="Jamie", last_name="Doe")
+        cls.parent = Member.objects.create(first_name="Taylor", last_name="Doe")
+        ClubMembership.objects.create(club=cls.club, member=cls.child, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
+        cls.guardianship = ClubMembership.objects.create(club=cls.club, member=cls.parent, season=cls.season, kind=ClubMembership.Kind.GUARDIAN, status=ClubMembership.StatusChoices.ACTIVE)
+
+        cls.admin_user = get_user_model().objects.create_user(email="guardian-admin@example.com", password="pw")
+        admin_member = Member.objects.create(user=cls.admin_user, first_name="Ada", last_name="Admin")
+        ClubRole.objects.create(club=cls.club, member=admin_member, role=ClubRole.Roles.ADMIN)
+
+    def test_a_guardian_is_not_a_visible_member(self):
+        visible = members_visible_to(self.admin_user, self.club)
+
+        self.assertIn(self.child, visible)
+        self.assertNotIn(self.parent, visible)
+
+    def test_a_guardian_is_visible_when_explicitly_asked_for(self):
+        # The group pickers and the person's own detail page ask for this: they're
+        # about a person, not about the member list.
+        visible = members_visible_to(self.admin_user, self.club, include_guardians=True)
+
+        self.assertIn(self.parent, visible)
+
+    def test_the_derived_member_role_does_not_leak_a_guardian_back_in(self):
+        # An active membership of any kind grants a MEMBER ClubRole (club/signals.py),
+        # so matching on "has any role in this club" would undo the exclusion.
+        self.assertTrue(ClubRole.objects.filter(club=self.club, member=self.parent, role=ClubRole.Roles.MEMBER).exists())
+        self.assertNotIn(self.parent, members_visible_to(self.admin_user, self.club))
+
+    def test_a_parent_who_also_plays_stays_a_member(self):
+        # Being a parent and being a member are independent; the family graph
+        # records the first, `kind` the second.
+        self.guardianship.kind = ClubMembership.Kind.MEMBER
+        self.guardianship.save(update_fields=["kind"])
+
+        self.assertIn(self.parent, members_visible_to(self.admin_user, self.club))
+
+    def test_a_guardian_who_is_also_on_a_roster_stays_visible(self):
+        # The guardian row alone would hide them; playing for a team must not be
+        # undone by their also being someone's parent.
+        team = Team.objects.create(club=self.club, name="First Team", short_name="1st")
+        position = Position.objects.create(club=self.club, name="Forward", short_name="FW")
+        TeamMembership.objects.create(team=team, member=self.parent, season=self.season, position=position)
+
+        self.assertIn(self.parent, members_visible_to(self.admin_user, self.club))
+
+    def test_a_guardian_is_not_eligible_for_a_roster_or_staff_spot(self):
+        self.assertIn(self.child, eligible_roster_members(self.club))
+        self.assertNotIn(self.parent, eligible_roster_members(self.club))
+
+    def test_a_guardian_cannot_owe_a_fee(self):
+        self.guardianship.fee_amount = Decimal("250.00")
+
+        with self.assertRaises(ValidationError) as ctx:
+            self.guardianship.full_clean()
+
+        self.assertIn("fee_amount", ctx.exception.error_dict)
+
+    def test_a_new_season_carries_guardians_forward(self):
+        # Their tie to the club isn't seasonal -- without this a parent silently
+        # drops off at the season boundary while their child stays enrolled.
+        generate_seasons(self.club, until=self.season.end_date + datetime.timedelta(days=400))
+
+        next_season = Season.objects.filter(club=self.club, start_date__gt=self.season.start_date).order_by("start_date").first()
+        self.assertIsNotNone(next_season)
+        self.assertTrue(ClubMembership.objects.filter(club=self.club, member=self.parent, season=next_season, kind=ClubMembership.Kind.GUARDIAN).exists())
+
+    def test_a_guardian_removed_from_the_latest_season_is_not_resurrected(self):
+        # Copied from the season immediately before, not from "any season ever",
+        # so a deliberate removal stays removed.
+        self.guardianship.delete()
+
+        generate_seasons(self.club, until=self.season.end_date + datetime.timedelta(days=400))
+
+        next_season = Season.objects.filter(club=self.club, start_date__gt=self.season.start_date).order_by("start_date").first()
+        self.assertFalse(ClubMembership.objects.filter(club=self.club, member=self.parent, season=next_season).exists())
 
 
 class AccessServiceTests(TestCase):

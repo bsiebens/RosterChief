@@ -707,6 +707,12 @@ class FamilyCreateForm(forms.Form):
     parent_last_name = forms.CharField(label=_("Parent last name"))
     parent_email = forms.EmailField(label=_("Parent email"), help_text=_("If this email has no account yet, one is created and they set a password via the reset link."))
 
+    parent_is_member = forms.BooleanField(
+        label=_("Parent is also a member"),
+        required=False,
+        help_text=_("Tick only if this parent belongs to the club in their own right (they play, or hold a membership). Left unticked they are a guardian: they hold the login and can be contacted, but owe no fee and are not counted as a member."),
+    )
+
     child_first_name = forms.CharField(label=_("Child first name"))
     child_last_name = forms.CharField(label=_("Child last name"))
     child_date_of_birth = forms.DateField(label=_("Child date of birth"), required=False, widget=forms.DateInput(attrs={"type": "date"}))
@@ -728,6 +734,11 @@ class AddParentForm(forms.Form):
     email = forms.EmailField(label=_("Email address"), help_text=_("If this email has no account yet, one is created and they set a password via the reset link."))
     first_name = forms.CharField(label=_("First name"), required=False)
     last_name = forms.CharField(label=_("Last name"), required=False)
+    parent_is_member = forms.BooleanField(
+        label=_("Also a member"),
+        required=False,
+        help_text=_("Tick only if this parent belongs to the club in their own right (they play, or hold a membership). Left unticked they are a guardian: they hold the login and can be contacted, but owe no fee and are not counted as a member."),
+    )
 
     def clean(self):
         cleaned = super().clean()
@@ -790,7 +801,7 @@ class ClubMembershipForm(forms.ModelForm):
 
     class Meta:
         model = ClubMembership
-        fields = ["license", "status", "fee_status", "fee_amount"]
+        fields = ["kind", "license", "status", "fee_status", "fee_amount"]
 
 
 class NewsForm(forms.ModelForm):

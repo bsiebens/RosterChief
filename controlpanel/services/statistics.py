@@ -41,7 +41,10 @@ def clubs_with_totals(queryset=None):
     """Clubs annotated with headline counts (one query, no N+1)."""
     clubs = Club.objects.all() if queryset is None else queryset
     return clubs.annotate(
-        member_count=Count("clubmemberships__member", distinct=True),
+        # Members only: a guardian is attached to the club as a parent of a member,
+        # not as one, so counting them would overstate every club's size (and the
+        # onboarding funnel's "with members" step).
+        member_count=Count("clubmemberships__member", filter=Q(clubmemberships__kind=ClubMembership.Kind.MEMBER), distinct=True),
         team_count=Count("teams", distinct=True),
         event_count=Count("events", distinct=True),
         admin_count=Count("clubroles", filter=Q(clubroles__role=ClubRole.Roles.ADMIN), distinct=True),
@@ -77,8 +80,8 @@ def clubs_with_health(queryset=None, today=None, now=None):
     return (
         clubs.annotate(
             has_season=Exists(Season.objects.filter(club=OuterRef("pk"), start_date__lte=today, end_date__gte=today)),
-            active_members=_subquery(ClubMembership.objects.filter(in_season, status=ClubMembership.StatusChoices.ACTIVE), Count("pk"), IntegerField()),
-            unpaid_members=_subquery(ClubMembership.objects.filter(in_season, fee_status=ClubMembership.FeeStatus.UNPAID), Count("pk"), IntegerField()),
+            active_members=_subquery(ClubMembership.objects.filter(in_season, kind=ClubMembership.Kind.MEMBER, status=ClubMembership.StatusChoices.ACTIVE), Count("pk"), IntegerField()),
+            unpaid_members=_subquery(ClubMembership.objects.filter(in_season, kind=ClubMembership.Kind.MEMBER, fee_status=ClubMembership.FeeStatus.UNPAID), Count("pk"), IntegerField()),
             outstanding=_subquery(Order.objects.filter(status__in=OWED_STATUSES), Sum("total"), DecimalField(max_digits=10, decimal_places=2)),
             upcoming_events=_subquery(Event.objects.filter(start__gte=now, start__lte=now + timedelta(days=DORMANT_DAYS)), Count("pk"), IntegerField()),
             team_count=_subquery(Team.objects.all(), Count("pk"), IntegerField()),
@@ -105,7 +108,7 @@ def platform_totals():
     return {
         "clubs": Club.objects.active().count(),
         "archived_clubs": Club.objects.archived().count(),
-        "members": Member.objects.count(),
+        "members": Member.objects.filter(member_of__kind=ClubMembership.Kind.MEMBER).distinct().count(),
         "admins": ClubRole.objects.filter(role=ClubRole.Roles.ADMIN).count(),
     }
 
@@ -264,12 +267,12 @@ def renewal_rate(club, season):
     if previous is None:
         return None
 
-    was_active = ClubMembership.objects.filter(club=club, season=previous, status=ClubMembership.StatusChoices.ACTIVE)
+    was_active = ClubMembership.objects.filter(club=club, season=previous, kind=ClubMembership.Kind.MEMBER, status=ClubMembership.StatusChoices.ACTIVE)
     total = was_active.count()
     if not total:
         return None
 
-    returned = ClubMembership.objects.filter(club=club, season=season, member__in=was_active.values("member")).count()
+    returned = ClubMembership.objects.filter(club=club, season=season, kind=ClubMembership.Kind.MEMBER, member__in=was_active.values("member")).count()
 
     return round(100 * returned / total)
 
@@ -284,7 +287,7 @@ def new_members(club, season):
     if season is None:
         return Member.objects.none()
 
-    seen_before = ClubMembership.objects.filter(club=club, season__start_date__lt=season.start_date).values("member")
+    seen_before = ClubMembership.objects.filter(club=club, season__start_date__lt=season.start_date, kind=ClubMembership.Kind.MEMBER).values("member")
 
     return Member.objects.filter(member_of__club=club, member_of__season=season).exclude(pk__in=seen_before).distinct()
 
@@ -301,7 +304,7 @@ def signup_split(club=None, months=MONTHS_OF_HISTORY):
     """
     start = (timezone.now() - relativedelta(months=months)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
-    memberships = ClubMembership.objects.all() if club is None else ClubMembership.objects.filter(club=club)
+    memberships = ClubMembership.objects.filter(kind=ClubMembership.Kind.MEMBER) if club is None else ClubMembership.objects.filter(club=club, kind=ClubMembership.Kind.MEMBER)
 
     first_season = {}
     for club_id, member_id, season_start in memberships.values_list("club_id", "member_id", "season__start_date"):
@@ -342,7 +345,7 @@ def unrostered_members(club, season):
 
     rostered = TeamMembership.objects.filter(team__club=club, season=season).values("member")
 
-    return Member.objects.filter(member_of__club=club, member_of__season=season, member_of__status=ClubMembership.StatusChoices.ACTIVE).exclude(pk__in=rostered).distinct()
+    return Member.objects.filter(member_of__club=club, member_of__season=season, member_of__kind=ClubMembership.Kind.MEMBER, member_of__status=ClubMembership.StatusChoices.ACTIVE).exclude(pk__in=rostered).distinct()
 
 
 def fee_aging(club):
@@ -389,7 +392,7 @@ def attendance_rates(club, season):
 def club_attention(club):
     """A club's own numbers that are supposed to be zero."""
     season = Season.covering(club, timezone.localdate())
-    memberships = ClubMembership.objects.filter(club=club)
+    memberships = ClubMembership.objects.filter(club=club, kind=ClubMembership.Kind.MEMBER)
 
     return {
         "season": season,
@@ -408,7 +411,7 @@ def club_attention(club):
 
 def club_charts(club):
     season = Season.covering(club, timezone.localdate())
-    memberships = ClubMembership.objects.filter(club=club, season=season) if season else ClubMembership.objects.none()
+    memberships = ClubMembership.objects.filter(club=club, season=season, kind=ClubMembership.Kind.MEMBER) if season else ClubMembership.objects.none()
 
     return {
         "signups": signup_split(club),
@@ -430,7 +433,7 @@ def club_statistics(club):
     season = Season.covering(club, timezone.localdate())
     now = timezone.now()
 
-    memberships = ClubMembership.objects.filter(club=club)
+    memberships = ClubMembership.objects.filter(club=club, kind=ClubMembership.Kind.MEMBER)
     events = Event.objects.filter(club=club)
     orders = Order.objects.filter(club=club)
 

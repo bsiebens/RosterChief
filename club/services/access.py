@@ -20,7 +20,7 @@ from django.db.models import Q, QuerySet
 from django.utils import timezone
 
 from authentication.models import User
-from club.models import Club, ClubRole, Season
+from club.models import Club, ClubMembership, ClubRole, Season
 from events.models import Event
 from members.models import FamilyMembership, Group, Member
 from teams.models import StaffAssignment, Team
@@ -114,15 +114,41 @@ def teams_staffed_by(user: User, club: Club) -> QuerySet[Team]:
     ).distinct()
 
 
-def members_visible_to(user: User, club: Club) -> QuerySet[Member]:
+def _guardians_only(club: Club) -> QuerySet[Member]:
+    """People whose *only* tie to ``club`` is being a parent of a member.
+
+    Subtracted rather than filtered out at the source, because a bare MEMBER
+    ClubRole with no ClubMembership is a real state -- someone the club knows
+    but hasn't signed up for a season yet -- and narrowing the role branch to
+    weed guardians out would take those people with it. Anyone who also holds a
+    real membership, plays, is on a team's staff or runs the club is a member
+    who happens to be a parent, and stays visible.
+    """
+    return Member.objects.filter(member_of__club=club, member_of__kind=ClubMembership.Kind.GUARDIAN).exclude(
+        Q(member_of__club=club, member_of__kind=ClubMembership.Kind.MEMBER)
+        | Q(team_memberships__team__club=club)
+        | Q(staff_assignments__team__club=club)
+        | Q(roles__club=club, roles__role__in=[ClubRole.Roles.ADMIN, ClubRole.Roles.EDITOR])
+    )
+
+
+def members_visible_to(user: User, club: Club, *, include_guardians: bool = False) -> QuerySet[Member]:
     """Members the user may see.
 
     ADMIN: everyone linked to the club (membership, roster, staff or role).
     Otherwise: themselves, their children, and the current-season players *and*
     staff of every team they're staffed on.
+
+    Guardians -- parents attached to the club only through a child, see
+    ``ClubMembership.Kind`` -- are **excluded by default**: they aren't members,
+    so they don't belong in a member list or any member count. Pass
+    ``include_guardians=True`` where the page is about a *person* rather than
+    about members: opening a guardian's own detail page, editing them, putting
+    them in a group, or showing a family (whose parents are the whole point).
     """
     if is_club_admin(user, club):
-        return Member.objects.filter(Q(member_of__club=club) | Q(team_memberships__team__club=club) | Q(staff_assignments__team__club=club) | Q(roles__club=club)).distinct()
+        attached = Member.objects.filter(Q(member_of__club=club) | Q(team_memberships__team__club=club) | Q(staff_assignments__team__club=club) | Q(roles__club=club)).distinct()
+        return attached if include_guardians else attached.exclude(pk__in=_guardians_only(club))
 
     me = Member.objects.filter(user=user).first()
     if me is None:
