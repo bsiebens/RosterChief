@@ -66,15 +66,21 @@ def make_season(club):
     ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "rival-fc.rosterchief.app", "testserver"],
 )
 class ManagementTestBase(TestCase):
-    def setUp(self):
-        self.club = Club.objects.create(name="Ajax United", slug="ajax-united")
-        self.season = make_season(self.club)
+    # setUpTestData, not setUp: the club/season/admin fixture is read-only for
+    # almost every test, so building it once per class (inside the class-wide
+    # transaction Django rolls back) instead of once per test saves the whole
+    # suite a lot of inserts and password hashes. Django hands each test its own
+    # deepcopy of these attributes, so a test that mutates one stays isolated.
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        cls.season = make_season(cls.club)
 
-        self.admin_user = User.objects.create_user(email="admin@example.com", password="pw-secret-123")
-        self.admin_member = Member.objects.create(user=self.admin_user, first_name="Ada", last_name="Admin")
-        ClubMembership.objects.create(club=self.club, member=self.admin_member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
-        ClubRole.objects.filter(club=self.club, member=self.admin_member).update(role=ClubRole.Roles.ADMIN)
-        enrol_mfa(self.admin_user)
+        cls.admin_user = User.objects.create_user(email="admin@example.com", password="pw-secret-123")
+        cls.admin_member = Member.objects.create(user=cls.admin_user, first_name="Ada", last_name="Admin")
+        ClubMembership.objects.create(club=cls.club, member=cls.admin_member, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
+        ClubRole.objects.filter(club=cls.club, member=cls.admin_member).update(role=ClubRole.Roles.ADMIN)
+        enrol_mfa(cls.admin_user)
 
     def club_get(self, name, *args):
         return self.client.get(reverse(f"management:{name}", args=args), HTTP_HOST="ajax-united.rosterchief.app")
@@ -309,20 +315,27 @@ class TeamRosterStaffTests(ManagementTestBase):
     """Roster/staff management folded into the team page -- see
     management.views.TeamDetailView and the TeamRoster*/TeamStaff* views."""
 
-    def setUp(self):
-        super().setUp()
-        self.team = Team.objects.create(club=self.club, name="First Team", short_name="1st")
-        self.other_team = Team.objects.create(club=self.club, name="Second Team", short_name="2nd")
-        self.player_position = Position.objects.create(club=self.club, name="Forward", short_name="FW", staff_position=False)
-        self.coach_position = Position.objects.create(club=self.club, name="Head Coach", short_name="HC", staff_position=True, management_position=True)
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.team = Team.objects.create(club=cls.club, name="First Team", short_name="1st")
+        cls.other_team = Team.objects.create(club=cls.club, name="Second Team", short_name="2nd")
+        cls.player_position = Position.objects.create(club=cls.club, name="Forward", short_name="FW", staff_position=False)
+        cls.coach_position = Position.objects.create(club=cls.club, name="Head Coach", short_name="HC", staff_position=True, management_position=True)
 
-        self.player = Member.objects.create(first_name="Peter", last_name="Player")
-        ClubMembership.objects.create(club=self.club, member=self.player, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        cls.player = Member.objects.create(first_name="Peter", last_name="Player")
+        ClubMembership.objects.create(club=cls.club, member=cls.player, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
 
-    def make_team_coach(self, team, email="coach-roster@example.com"):
+        # A coach for each team: "this team's coach may, that team's coach may not"
+        # is the whole point of this class, so both actors are standing fixtures.
+        cls.team_coach = cls.make_team_coach(cls.team, "coach-roster@example.com")
+        cls.other_team_coach = cls.make_team_coach(cls.other_team, "coach-roster-other@example.com")
+
+    @classmethod
+    def make_team_coach(cls, team, email):
         coach_user = User.objects.create_user(email=email, password="pw-secret-123")
         coach_member = Member.objects.create(user=coach_user, first_name="Cara", last_name="Coach")
-        StaffAssignment.objects.create(team=team, member=coach_member, season=self.season, position=self.coach_position)
+        StaffAssignment.objects.create(team=team, member=coach_member, season=cls.season, position=cls.coach_position)
         return coach_user
 
     def test_nav_no_longer_lists_roster_or_staff(self):
@@ -364,7 +377,7 @@ class TeamRosterStaffTests(ManagementTestBase):
         self.assertContains(other_response, "Peter Player")
 
     def test_a_teams_own_coach_can_add_a_player(self):
-        self.client.force_login(self.make_team_coach(self.team))
+        self.client.force_login(self.team_coach)
 
         response = self.club_post("team_roster_add", {"member": str(self.player.pk), "position": str(self.player_position.pk), "jersey_number": "9"}, self.team.pk, self.season.pk)
 
@@ -373,7 +386,7 @@ class TeamRosterStaffTests(ManagementTestBase):
         self.assertEqual(membership.jersey_number, 9)
 
     def test_a_different_teams_coach_cannot_add_a_player(self):
-        self.client.force_login(self.make_team_coach(self.other_team))
+        self.client.force_login(self.other_team_coach)
 
         response = self.club_post("team_roster_add", {"member": str(self.player.pk), "position": str(self.player_position.pk)}, self.team.pk, self.season.pk)
 
@@ -381,7 +394,7 @@ class TeamRosterStaffTests(ManagementTestBase):
         self.assertFalse(TeamMembership.objects.filter(team=self.team, season=self.season).exists())
 
     def test_a_different_teams_coach_can_still_view_the_team(self):
-        self.client.force_login(self.make_team_coach(self.other_team))
+        self.client.force_login(self.other_team_coach)
 
         response = self.club_get("team_detail", self.team.pk)
 
@@ -491,7 +504,7 @@ class TeamRosterStaffTests(ManagementTestBase):
         physio_position = Position.objects.create(club=self.club, name="Physio", short_name="PH", staff_position=True)
         physio = Member.objects.create(first_name="Pat", last_name="Physio")
         ClubMembership.objects.create(club=self.club, member=physio, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
-        self.client.force_login(self.make_team_coach(self.team))
+        self.client.force_login(self.team_coach)
 
         self.club_post("team_staff_add", {"member": str(physio.pk), "position": str(physio_position.pk)}, self.team.pk, self.season.pk)
 
@@ -512,7 +525,7 @@ class TeamRosterStaffTests(ManagementTestBase):
     def test_a_different_teams_coach_cannot_assign_staff(self):
         physio_position = Position.objects.create(club=self.club, name="Physio", short_name="PH", staff_position=True)
         physio = Member.objects.create(first_name="Pat", last_name="Physio")
-        self.client.force_login(self.make_team_coach(self.other_team))
+        self.client.force_login(self.other_team_coach)
 
         response = self.club_post("team_staff_add", {"member": str(physio.pk), "position": str(physio_position.pk)}, self.team.pk, self.season.pk)
 
@@ -529,37 +542,72 @@ class TeamRosterStaffTests(ManagementTestBase):
 
 class TeamBulkAddTests(ManagementTestBase):
     """Adding many people to a team's roster/staff in one submit -- see
-    management.views.TeamBulkAddView."""
+    management.views.TeamBulkAddView. One formset row per assignment; the
+    position picked decides whether the row means a roster entry or a staff
+    one, and one bad row rejects the whole submit rather than half-saving."""
 
-    def setUp(self):
-        super().setUp()
-        self.team = Team.objects.create(club=self.club, name="First Team", short_name="1st")
-        self.other_team = Team.objects.create(club=self.club, name="Second Team", short_name="2nd")
-        self.player_position = Position.objects.create(club=self.club, name="Forward", short_name="FW", staff_position=False)
-        self.coach_position = Position.objects.create(club=self.club, name="Head Coach", short_name="HC", staff_position=True, management_position=True)
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.team = Team.objects.create(club=cls.club, name="First Team", short_name="1st")
+        cls.other_team = Team.objects.create(club=cls.club, name="Second Team", short_name="2nd")
+        cls.player_position = Position.objects.create(club=cls.club, name="Forward", short_name="FW", staff_position=False)
+        cls.coach_position = Position.objects.create(club=cls.club, name="Head Coach", short_name="HC", staff_position=True, management_position=True)
 
-        self.player = Member.objects.create(first_name="Peter", last_name="Player")
-        ClubMembership.objects.create(club=self.club, member=self.player, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
-        self.other_player = Member.objects.create(first_name="Olly", last_name="Other")
-        ClubMembership.objects.create(club=self.club, member=self.other_player, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        cls.player = Member.objects.create(first_name="Peter", last_name="Player")
+        ClubMembership.objects.create(club=cls.club, member=cls.player, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
+        cls.other_player = Member.objects.create(first_name="Olly", last_name="Other")
+        ClubMembership.objects.create(club=cls.club, member=cls.other_player, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
+        # A third eligible player, so a submit can pair one perfectly valid row with
+        # one bad one -- see test_a_good_row_alongside_a_bad_one_is_not_saved_either.
+        cls.third_player = Member.objects.create(first_name="Tara", last_name="Third")
+        ClubMembership.objects.create(club=cls.club, member=cls.third_player, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
 
-    def make_team_coach(self, team, email="coach-bulk@example.com"):
-        coach_user = User.objects.create_user(email=email, password="pw-secret-123")
+        coach_user = User.objects.create_user(email="coach-bulk@example.com", password="pw-secret-123")
         coach_member = Member.objects.create(user=coach_user, first_name="Cara", last_name="Coach")
-        StaffAssignment.objects.create(team=team, member=coach_member, season=self.season, position=self.coach_position)
-        return coach_user
+        StaffAssignment.objects.create(team=cls.other_team, member=coach_member, season=cls.season, position=cls.coach_position)
+        cls.other_team_coach = coach_user
 
-    def test_the_page_lists_eligible_members_and_flags_who_is_already_on(self):
+    def bulk_data(self, *rows):
+        """A formset POST body: one dict per row, plus the management form."""
+        data = {"form-TOTAL_FORMS": str(len(rows)), "form-INITIAL_FORMS": "0", "form-MIN_NUM_FORMS": "0", "form-MAX_NUM_FORMS": "1000"}
+        for index, row in enumerate(rows):
+            for name, value in row.items():
+                data[f"form-{index}-{name}"] = value
+        return data
+
+    def row(self, member, position, jersey_number="", is_captain=False, is_alternate_captain=False):
+        row = {"member": str(member.pk), "position": str(position.pk), "jersey_number": str(jersey_number)}
+        # Unchecked boxes aren't submitted at all, so only add the key when set --
+        # sending "off" would still read as True to a Django BooleanField.
+        if is_captain:
+            row["is_captain"] = "on"
+        if is_alternate_captain:
+            row["is_alternate_captain"] = "on"
+        return row
+
+    def bulk_add(self, *rows):
+        return self.club_post("team_bulk_add", self.bulk_data(*rows), self.team.pk, self.season.pk)
+
+    def test_the_picker_offers_eligible_members_and_marks_who_is_already_on(self):
         TeamMembership.objects.create(team=self.team, season=self.season, member=self.player, position=self.player_position)
         self.client.force_login(self.admin_user)
 
         response = self.club_get("team_bulk_add", self.team.pk, self.season.pk)
 
-        self.assertContains(response, "Peter Player")
+        self.assertContains(response, "Peter Player — on roster")
         self.assertContains(response, "Olly Other")
-        self.assertContains(response, "On roster")
 
-    def test_a_lapsed_member_is_not_listed(self):
+    def test_the_position_picker_marks_staff_positions_for_the_jersey_toggle(self):
+        # PositionSelect stamps data-staff on staff options; bulk-add-rows.js reads
+        # it to grey out the jersey input, which a StaffAssignment has no field for.
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("team_bulk_add", self.team.pk, self.season.pk)
+
+        self.assertContains(response, "data-staff")
+
+    def test_a_lapsed_member_is_not_offered(self):
         lapsed = Member.objects.create(first_name="Lex", last_name="Lapsed")
         ClubMembership.objects.create(club=self.club, member=lapsed, season=self.season, status=ClubMembership.StatusChoices.LAPSED)
         self.client.force_login(self.admin_user)
@@ -571,95 +619,182 @@ class TeamBulkAddTests(ManagementTestBase):
     def test_admin_can_add_two_players_in_one_submit(self):
         self.client.force_login(self.admin_user)
 
-        response = self.club_post(
-            "team_bulk_add",
-            {
-                f"player_{self.player.pk}": "on",
-                f"player_position_{self.player.pk}": str(self.player_position.pk),
-                f"jersey_{self.player.pk}": "9",
-                f"player_{self.other_player.pk}": "on",
-                f"player_position_{self.other_player.pk}": str(self.player_position.pk),
-            },
-            self.team.pk,
-            self.season.pk,
-        )
+        response = self.bulk_add(self.row(self.player, self.player_position, 9), self.row(self.other_player, self.player_position))
 
         self.assertRedirects(response, f"{reverse('management:team_detail', args=[self.team.pk])}?season={self.season.pk}")
         self.assertEqual(TeamMembership.objects.filter(team=self.team, season=self.season).count(), 2)
         self.assertEqual(TeamMembership.objects.get(team=self.team, member=self.player).jersey_number, 9)
 
-    def test_a_member_can_be_added_as_both_player_and_staff_at_once(self):
+    def test_a_staff_position_creates_a_staff_assignment_not_a_roster_entry(self):
+        # The position is what picks the role -- there is no separate control.
         self.client.force_login(self.admin_user)
 
-        self.club_post(
-            "team_bulk_add",
-            {
-                f"player_{self.player.pk}": "on",
-                f"player_position_{self.player.pk}": str(self.player_position.pk),
-                f"staff_{self.player.pk}": "on",
-                f"staff_position_{self.player.pk}": str(self.coach_position.pk),
-            },
-            self.team.pk,
-            self.season.pk,
-        )
+        self.bulk_add(self.row(self.player, self.coach_position))
+
+        self.assertTrue(StaffAssignment.objects.filter(team=self.team, season=self.season, member=self.player).exists())
+        self.assertFalse(TeamMembership.objects.filter(team=self.team, season=self.season, member=self.player).exists())
+
+    def test_a_member_can_be_added_as_both_player_and_staff_via_two_rows(self):
+        self.client.force_login(self.admin_user)
+
+        self.bulk_add(self.row(self.player, self.player_position), self.row(self.player, self.coach_position))
 
         self.assertTrue(TeamMembership.objects.filter(team=self.team, season=self.season, member=self.player).exists())
         self.assertTrue(StaffAssignment.objects.filter(team=self.team, season=self.season, member=self.player).exists())
 
-    def test_a_clashing_jersey_number_is_skipped_without_a_500(self):
+    def test_a_jersey_number_on_a_staff_row_is_rejected(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.bulk_add(self.row(self.player, self.coach_position, 9))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(StaffAssignment.objects.filter(team=self.team, season=self.season).exists())
+
+    def test_a_jersey_clashing_with_an_existing_player_rejects_the_submit(self):
         TeamMembership.objects.create(team=self.team, season=self.season, member=self.player, position=self.player_position, jersey_number=7)
         self.client.force_login(self.admin_user)
 
-        response = self.club_post(
-            "team_bulk_add",
-            {
-                f"player_{self.other_player.pk}": "on",
-                f"player_position_{self.other_player.pk}": str(self.player_position.pk),
-                f"jersey_{self.other_player.pk}": "7",
-            },
-            self.team.pk,
-            self.season.pk,
+        response = self.bulk_add(self.row(self.other_player, self.player_position, 7))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "already taken")
+        self.assertFalse(TeamMembership.objects.filter(team=self.team, season=self.season, member=self.other_player).exists())
+        # All-or-nothing: nothing was saved, so the roster is untouched apart from
+        # the entry that was already there before the submit.
+        self.assertEqual(TeamMembership.objects.filter(team=self.team, season=self.season).count(), 1)
+
+    def test_a_good_row_alongside_a_bad_one_is_not_saved_either(self):
+        # The all-or-nothing guarantee proper: the other tests here submit rows that
+        # are either all bad or bad in pairs, so none of them would notice a valid
+        # row slipping through on its own. If it did, the re-rendered form would
+        # re-add it on the next submit.
+        TeamMembership.objects.create(team=self.team, season=self.season, member=self.player, position=self.player_position, jersey_number=7)
+        self.client.force_login(self.admin_user)
+
+        response = self.bulk_add(self.row(self.other_player, self.player_position, 7), self.row(self.third_player, self.player_position, 12))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(TeamMembership.objects.filter(team=self.team, season=self.season, member=self.third_player).exists())
+        self.assertEqual(TeamMembership.objects.filter(team=self.team, season=self.season).count(), 1)
+
+    def test_captaincy_is_saved(self):
+        self.client.force_login(self.admin_user)
+
+        self.bulk_add(
+            self.row(self.player, self.player_position, 9, is_captain=True),
+            self.row(self.other_player, self.player_position, 10, is_alternate_captain=True),
         )
 
-        self.assertEqual(response.status_code, 302)
-        self.assertFalse(TeamMembership.objects.filter(team=self.team, season=self.season, member=self.other_player).exists())
+        self.assertTrue(TeamMembership.objects.get(team=self.team, member=self.player).is_captain)
+        self.assertTrue(TeamMembership.objects.get(team=self.team, member=self.other_player).is_alternate_captain)
 
-    def test_a_member_already_on_the_roster_cannot_be_re_added_via_a_crafted_post(self):
+    def test_a_row_left_alone_is_neither_captain_nor_alternate(self):
+        self.client.force_login(self.admin_user)
+
+        self.bulk_add(self.row(self.player, self.player_position))
+
+        membership = TeamMembership.objects.get(team=self.team, member=self.player)
+        self.assertFalse(membership.is_captain)
+        self.assertFalse(membership.is_alternate_captain)
+
+    def test_captain_and_alternate_on_one_row_is_rejected(self):
+        # Contradictory rather than a club policy -- how many captains a team may
+        # have is deliberately left unconstrained, see TeamBulkAddRowForm.clean.
+        self.client.force_login(self.admin_user)
+
+        response = self.bulk_add(self.row(self.player, self.player_position, is_captain=True, is_alternate_captain=True))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "not both")
+        self.assertFalse(TeamMembership.objects.filter(team=self.team, season=self.season).exists())
+
+    def test_captaincy_on_a_staff_row_is_rejected(self):
+        # Captaincy lives on TeamMembership; a staff row becomes a StaffAssignment,
+        # which has no such field to put it in.
+        self.client.force_login(self.admin_user)
+
+        response = self.bulk_add(self.row(self.player, self.coach_position, is_captain=True))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "doesn&#x27;t apply to a staff position")
+        self.assertFalse(StaffAssignment.objects.filter(team=self.team, season=self.season, member=self.player).exists())
+
+    def test_two_captains_in_one_submit_are_allowed(self):
+        # Pins the deliberate absence of a rule: neither the model nor the
+        # single-add form limits a team to one captain, so bulk-add doesn't invent
+        # that limit either -- it would be bypassable by adding players one at a time.
+        self.client.force_login(self.admin_user)
+
+        self.bulk_add(
+            self.row(self.player, self.player_position, 9, is_captain=True),
+            self.row(self.other_player, self.player_position, 10, is_captain=True),
+        )
+
+        self.assertEqual(TeamMembership.objects.filter(team=self.team, season=self.season, is_captain=True).count(), 2)
+
+    def test_two_rows_claiming_the_same_jersey_are_rejected(self):
+        # Neither row clashes with anything already saved -- only with each other,
+        # which no single row can see. See BaseTeamBulkAddFormSet.clean.
+        self.client.force_login(self.admin_user)
+
+        response = self.bulk_add(self.row(self.player, self.player_position, 7), self.row(self.other_player, self.player_position, 7))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "more than one row")
+        self.assertEqual(TeamMembership.objects.filter(team=self.team, season=self.season).count(), 0)
+
+    def test_the_same_member_twice_in_the_same_role_is_rejected(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.bulk_add(self.row(self.player, self.player_position), self.row(self.player, self.player_position))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "listed twice")
+        self.assertEqual(TeamMembership.objects.filter(team=self.team, season=self.season).count(), 0)
+
+    def test_an_invalid_submit_re_renders_the_rows_that_were_typed(self):
+        # The whole point of all-or-nothing: nothing the user typed is lost.
+        TeamMembership.objects.create(team=self.team, season=self.season, member=self.player, position=self.player_position, jersey_number=7)
+        self.client.force_login(self.admin_user)
+
+        response = self.bulk_add(self.row(self.other_player, self.player_position, 7))
+
+        self.assertContains(response, f'value="{self.other_player.pk}" selected')
+
+    def test_a_member_already_on_the_roster_is_rejected(self):
         TeamMembership.objects.create(team=self.team, season=self.season, member=self.player, position=self.player_position)
         self.client.force_login(self.admin_user)
 
-        self.club_post(
-            "team_bulk_add",
-            {f"player_{self.player.pk}": "on", f"player_position_{self.player.pk}": str(self.player_position.pk)},
-            self.team.pk,
-            self.season.pk,
-        )
+        response = self.bulk_add(self.row(self.player, self.player_position))
 
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "already on this team&#x27;s roster")
         self.assertEqual(TeamMembership.objects.filter(team=self.team, season=self.season, member=self.player).count(), 1)
 
     def test_a_lapsed_member_cannot_be_added_via_a_crafted_post(self):
+        # Eligibility is recomputed from eligible_roster_members server-side, so a
+        # member id that was never offered fails the field's own queryset lookup.
         lapsed = Member.objects.create(first_name="Lex", last_name="Lapsed")
         ClubMembership.objects.create(club=self.club, member=lapsed, season=self.season, status=ClubMembership.StatusChoices.LAPSED)
         self.client.force_login(self.admin_user)
 
-        self.club_post(
-            "team_bulk_add",
-            {f"player_{lapsed.pk}": "on", f"player_position_{lapsed.pk}": str(self.player_position.pk)},
-            self.team.pk,
-            self.season.pk,
-        )
+        response = self.bulk_add(self.row(lapsed, self.player_position))
 
+        self.assertEqual(response.status_code, 200)
         self.assertFalse(TeamMembership.objects.filter(team=self.team, season=self.season, member=lapsed).exists())
 
-    def test_a_different_teams_coach_cannot_bulk_add(self):
-        self.client.force_login(self.make_team_coach(self.other_team))
+    def test_submitting_nothing_says_so_instead_of_adding(self):
+        self.client.force_login(self.admin_user)
 
-        response = self.club_post(
-            "team_bulk_add",
-            {f"player_{self.player.pk}": "on", f"player_position_{self.player.pk}": str(self.player_position.pk)},
-            self.team.pk,
-            self.season.pk,
-        )
+        response = self.club_post("team_bulk_add", self.bulk_data({}, {}), self.team.pk, self.season.pk)
+
+        self.assertRedirects(response, f"{reverse('management:team_detail', args=[self.team.pk])}?season={self.season.pk}")
+        self.assertEqual(TeamMembership.objects.filter(team=self.team, season=self.season).count(), 0)
+
+    def test_a_different_teams_coach_cannot_bulk_add(self):
+        self.client.force_login(self.other_team_coach)
+
+        response = self.bulk_add(self.row(self.player, self.player_position))
 
         self.assertEqual(response.status_code, 403)
 
@@ -669,12 +804,14 @@ class GroupManagementTests(ManagementTestBase):
     management.forms.GroupForm. Deliberately has no team/referee knowledge at
     all; see MemberRefereeEligibilityTests for that (teams.RefereeProfile)."""
 
-    def setUp(self):
-        super().setUp()
-        self.team = Team.objects.create(club=self.club, name="First Team", short_name="1st")
-        self.other_team = Team.objects.create(club=self.club, name="Second Team", short_name="2nd")
-        self.member = Member.objects.create(first_name="Peter", last_name="Player")
-        ClubMembership.objects.create(club=self.club, member=self.member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        # One team only -- groups are deliberately team-agnostic; the team exists
+        # solely so make_non_admin_coach has somewhere to be staffed.
+        cls.team = Team.objects.create(club=cls.club, name="First Team", short_name="1st")
+        cls.member = Member.objects.create(first_name="Peter", last_name="Player")
+        ClubMembership.objects.create(club=cls.club, member=cls.member, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
 
     def make_non_admin_coach(self, email="coach-groups@example.com"):
         coach_user = User.objects.create_user(email=email, password="pw-secret-123")
@@ -712,7 +849,14 @@ class GroupManagementTests(ManagementTestBase):
 
         self.assertFalse(Group.objects.filter(pk=group.pk).exists())
 
-    def test_bulk_add_lists_eligible_members_and_flags_existing_ones(self):
+    def bulk_data(self, *member_pks):
+        """A formset POST body: one row per member, plus the management form."""
+        data = {"form-TOTAL_FORMS": str(len(member_pks)), "form-INITIAL_FORMS": "0", "form-MIN_NUM_FORMS": "0", "form-MAX_NUM_FORMS": "1000"}
+        for index, member_pk in enumerate(member_pks):
+            data[f"form-{index}-member"] = str(member_pk)
+        return data
+
+    def test_bulk_add_offers_members_and_marks_the_ones_already_in(self):
         group = Group.objects.create(club=self.club, name="Referees")
         GroupMembership.objects.create(group=group, member=self.member)
         other_member = Member.objects.create(first_name="Olly", last_name="Other")
@@ -721,16 +865,16 @@ class GroupManagementTests(ManagementTestBase):
 
         response = self.club_get("group_bulk_add", group.pk)
 
-        self.assertContains(response, "In group")
+        self.assertContains(response, "already in this group")
         self.assertContains(response, "Olly Other")
 
-    def test_bulk_add_adds_selected_members(self):
+    def test_bulk_add_adds_the_members_in_the_rows(self):
         group = Group.objects.create(club=self.club, name="Referees")
         other_member = Member.objects.create(first_name="Olly", last_name="Other")
         ClubMembership.objects.create(club=self.club, member=other_member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
         self.client.force_login(self.admin_user)
 
-        response = self.club_post("group_bulk_add", {f"member_{self.member.pk}": "on", f"member_{other_member.pk}": "on"}, group.pk)
+        response = self.club_post("group_bulk_add", self.bulk_data(self.member.pk, other_member.pk), group.pk)
 
         self.assertRedirects(response, reverse("management:group_detail", args=[group.pk]))
         self.assertEqual(GroupMembership.objects.filter(group=group).count(), 2)
@@ -740,9 +884,30 @@ class GroupManagementTests(ManagementTestBase):
         GroupMembership.objects.create(group=group, member=self.member)
         self.client.force_login(self.admin_user)
 
-        self.club_post("group_bulk_add", {f"member_{self.member.pk}": "on"}, group.pk)
+        response = self.club_post("group_bulk_add", self.bulk_data(self.member.pk), group.pk)
 
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "already in this group")
         self.assertEqual(GroupMembership.objects.filter(group=group, member=self.member).count(), 1)
+
+    def test_bulk_add_rejects_the_same_member_listed_twice(self):
+        group = Group.objects.create(club=self.club, name="Referees")
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("group_bulk_add", self.bulk_data(self.member.pk, self.member.pk), group.pk)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "listed twice")
+        self.assertEqual(GroupMembership.objects.filter(group=group).count(), 0)
+
+    def test_bulk_add_with_no_rows_filled_in_adds_nothing(self):
+        group = Group.objects.create(club=self.club, name="Referees")
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("group_bulk_add", self.bulk_data("", ""), group.pk)
+
+        self.assertRedirects(response, reverse("management:group_detail", args=[group.pk]))
+        self.assertEqual(GroupMembership.objects.filter(group=group).count(), 0)
 
     def test_removing_a_member_deletes_the_membership(self):
         group = Group.objects.create(club=self.club, name="Referees")
@@ -775,24 +940,30 @@ class TeamPhotoTests(ManagementTestBase):
     """One photo per (team, season), uploaded from the team page -- see
     management.views.TeamPhotoSetView/TeamPhotoDeleteView."""
 
-    def setUp(self):
-        super().setUp()
-        self.team = Team.objects.create(club=self.club, name="First Team", short_name="1st")
-        self.other_team = Team.objects.create(club=self.club, name="Second Team", short_name="2nd")
-        self.coach_position = Position.objects.create(club=self.club, name="Head Coach", short_name="HC", staff_position=True, management_position=True)
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.team = Team.objects.create(club=cls.club, name="First Team", short_name="1st")
+        cls.other_team = Team.objects.create(club=cls.club, name="Second Team", short_name="2nd")
+        cls.coach_position = Position.objects.create(club=cls.club, name="Head Coach", short_name="HC", staff_position=True, management_position=True)
 
-    def make_team_coach(self, team, email="coach-photo@example.com"):
+        cls.team_coach = cls.make_team_coach(cls.team, "coach-photo@example.com")
+        cls.other_team_coach = cls.make_team_coach(cls.other_team, "coach-photo-other@example.com")
+
+        # A staff member on this team with a *non*-management position: allowed
+        # into the management app, but never offered the upload controls.
+        staff_user = User.objects.create_user(email="physio-photo@example.com", password="pw-secret-123")
+        staff_member = Member.objects.create(user=staff_user, first_name="Pat", last_name="Physio")
+        position = Position.objects.create(club=cls.club, name="Physio", short_name="PH", staff_position=True, management_position=False)
+        StaffAssignment.objects.create(team=cls.team, member=staff_member, season=cls.season, position=position)
+        cls.plain_staff = staff_user
+
+    @classmethod
+    def make_team_coach(cls, team, email):
         coach_user = User.objects.create_user(email=email, password="pw-secret-123")
         coach_member = Member.objects.create(user=coach_user, first_name="Cara", last_name="Coach")
-        StaffAssignment.objects.create(team=team, member=coach_member, season=self.season, position=self.coach_position)
+        StaffAssignment.objects.create(team=team, member=coach_member, season=cls.season, position=cls.coach_position)
         return coach_user
-
-    def make_plain_staff(self, email="physio-photo@example.com"):
-        staff_user = User.objects.create_user(email=email, password="pw-secret-123")
-        staff_member = Member.objects.create(user=staff_user, first_name="Pat", last_name="Physio")
-        position = Position.objects.create(club=self.club, name="Physio", short_name="PH", staff_position=True, management_position=False)
-        StaffAssignment.objects.create(team=self.team, member=staff_member, season=self.season, position=position)
-        return staff_user
 
     def test_uploading_creates_a_photo(self):
         self.client.force_login(self.admin_user)
@@ -815,7 +986,7 @@ class TeamPhotoTests(ManagementTestBase):
         self.assertIn("second", second.image.name)
 
     def test_a_different_teams_coach_cannot_upload(self):
-        self.client.force_login(self.make_team_coach(self.other_team))
+        self.client.force_login(self.other_team_coach)
 
         response = self.club_post("team_photo_set", {"image": make_image_file()}, self.team.pk, self.season.pk)
 
@@ -823,7 +994,7 @@ class TeamPhotoTests(ManagementTestBase):
         self.assertFalse(TeamPhoto.objects.filter(team=self.team).exists())
 
     def test_this_teams_coach_can_upload(self):
-        self.client.force_login(self.make_team_coach(self.team))
+        self.client.force_login(self.team_coach)
 
         response = self.club_post("team_photo_set", {"image": make_image_file()}, self.team.pk, self.season.pk)
 
@@ -858,7 +1029,7 @@ class TeamPhotoTests(ManagementTestBase):
 
     def test_upload_ui_is_hidden_from_a_plain_staff_member(self):
         TeamPhoto.objects.create(team=self.team, season=self.season, image=make_image_file())
-        self.client.force_login(self.make_plain_staff())
+        self.client.force_login(self.plain_staff)
 
         response = self.club_get("team_detail", self.team.pk)
 
@@ -907,10 +1078,11 @@ class RefereeLevelManagementTests(ManagementTestBase):
     """Admin-managed referee qualification tiers -- see
     management.views.RefereeLevel* and teams.RefereeLevel."""
 
-    def setUp(self):
-        super().setUp()
-        self.team = Team.objects.create(club=self.club, name="First Team", short_name="1st")
-        self.other_team = Team.objects.create(club=self.club, name="Second Team", short_name="2nd")
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.team = Team.objects.create(club=cls.club, name="First Team", short_name="1st")
+        cls.other_team = Team.objects.create(club=cls.club, name="Second Team", short_name="2nd")
 
     def make_non_admin_coach(self, email="coach-levels@example.com"):
         coach_user = User.objects.create_user(email=email, password="pw-secret-123")
@@ -966,13 +1138,17 @@ class RefereeLevelManagementTests(ManagementTestBase):
 class RefereeListViewTests(ManagementTestBase):
     """The club-wide referee overview -- see management.views.RefereeListView."""
 
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.team = Team.objects.create(club=cls.club, name="First Team", short_name="1st")
+        cls.level = RefereeLevel.objects.create(club=cls.club, name="Regional")
+        cls.level.teams.add(cls.team)
+        cls.member = Member.objects.create(first_name="Ref", last_name="Eree")
+        ClubMembership.objects.create(club=cls.club, member=cls.member, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
+
     def setUp(self):
         super().setUp()
-        self.team = Team.objects.create(club=self.club, name="First Team", short_name="1st")
-        self.level = RefereeLevel.objects.create(club=self.club, name="Regional")
-        self.level.teams.add(self.team)
-        self.member = Member.objects.create(first_name="Ref", last_name="Eree")
-        ClubMembership.objects.create(club=self.club, member=self.member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
         self.client.force_login(self.admin_user)
 
     def test_lists_a_valid_referee_with_level_and_teams(self):
@@ -1033,13 +1209,17 @@ class RefereeListViewTests(ManagementTestBase):
 
 
 class ClubRoleManagementTests(ManagementTestBase):
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.member = Member.objects.create(first_name="Future", last_name="Editor")
+        # An active membership already grants an implicit MEMBER role (club/signals.py) --
+        # granting EDITOR must promote that row, not insert a second one.
+        ClubMembership.objects.create(club=cls.club, member=cls.member, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
+
     def setUp(self):
         super().setUp()
         self.client.force_login(self.admin_user)
-        self.member = Member.objects.create(first_name="Future", last_name="Editor")
-        # An active membership already grants an implicit MEMBER role (club/signals.py) --
-        # granting EDITOR must promote that row, not insert a second one.
-        ClubMembership.objects.create(club=self.club, member=self.member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
 
     def test_granting_a_role_promotes_the_existing_membership_role(self):
         self.club_post("role_create", {"member": str(self.member.pk), "role": ClubRole.Roles.EDITOR})
@@ -1299,13 +1479,17 @@ class MemberGrantLoginTests(ManagementTestBase):
     """A login-less child getting their own account -- see
     members.services.family.grant_login and management.forms.GrantLoginForm."""
 
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.family = Family.objects.create()
+        cls.child = Member.objects.create(first_name="Cody", last_name="Kid")
+        FamilyMembership.objects.create(family=cls.family, member=cls.child, role=FamilyMembership.FamilyRole.CHILD)
+        ClubMembership.objects.create(club=cls.club, member=cls.child, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
+
     def setUp(self):
         super().setUp()
         self.client.force_login(self.admin_user)
-        self.family = Family.objects.create()
-        self.child = Member.objects.create(first_name="Cody", last_name="Kid")
-        FamilyMembership.objects.create(family=self.family, member=self.child, role=FamilyMembership.FamilyRole.CHILD)
-        ClubMembership.objects.create(club=self.club, member=self.child, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
 
     def test_family_page_offers_the_button_for_a_login_less_child(self):
         response = self.club_get("family_detail", self.family.pk)
@@ -1377,15 +1561,16 @@ class MemberRefereeEligibilityTests(ManagementTestBase):
     (teams.RefereeLevel), not picked here. Deliberately unrelated to
     members.Group."""
 
-    def setUp(self):
-        super().setUp()
-        self.team = Team.objects.create(club=self.club, name="First Team", short_name="1st")
-        self.other_team = Team.objects.create(club=self.club, name="Second Team", short_name="2nd")
-        self.level = RefereeLevel.objects.create(club=self.club, name="Regional")
-        self.level.teams.add(self.team, self.other_team)
-        self.member = Member.objects.create(first_name="Ref", last_name="Eree")
-        ClubMembership.objects.create(club=self.club, member=self.member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
-        self.future_date = timezone.localdate() + datetime.timedelta(days=30)
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.team = Team.objects.create(club=cls.club, name="First Team", short_name="1st")
+        cls.other_team = Team.objects.create(club=cls.club, name="Second Team", short_name="2nd")
+        cls.level = RefereeLevel.objects.create(club=cls.club, name="Regional")
+        cls.level.teams.add(cls.team, cls.other_team)
+        cls.member = Member.objects.create(first_name="Ref", last_name="Eree")
+        ClubMembership.objects.create(club=cls.club, member=cls.member, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
+        cls.future_date = timezone.localdate() + datetime.timedelta(days=30)
 
     def test_member_page_shows_not_eligible_for_any_team_by_default(self):
         self.client.force_login(self.admin_user)
@@ -1503,11 +1688,15 @@ class MemberRefereeEligibilityTests(ManagementTestBase):
 
 
 class MemberFamilyAttachDetachTests(ManagementTestBase):
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.standalone = Member.objects.create(first_name="Stan", last_name="Alone")
+        ClubMembership.objects.create(club=cls.club, member=cls.standalone, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
+
     def setUp(self):
         super().setUp()
         self.client.force_login(self.admin_user)
-        self.standalone = Member.objects.create(first_name="Stan", last_name="Alone")
-        ClubMembership.objects.create(club=self.club, member=self.standalone, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
 
     def test_attaching_to_a_new_family(self):
         response = self.club_post("member_attach_family", {"role": FamilyMembership.FamilyRole.PARENT, "family": ""}, self.standalone.pk)
@@ -1625,11 +1814,15 @@ class MemberFamilyAttachDetachTests(ManagementTestBase):
 
 
 class MemberDeleteTests(ManagementTestBase):
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.member = Member.objects.create(first_name="Doomed", last_name="Member")
+        ClubMembership.objects.create(club=cls.club, member=cls.member, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
+
     def setUp(self):
         super().setUp()
         self.client.force_login(self.admin_user)
-        self.member = Member.objects.create(first_name="Doomed", last_name="Member")
-        ClubMembership.objects.create(club=self.club, member=self.member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
 
     def test_deleting_a_member(self):
         response = self.club_post("member_delete", {}, self.member.pk)
@@ -1656,11 +1849,15 @@ class MemberDeleteTests(ManagementTestBase):
 
 
 class MemberClubMembershipFormTests(ManagementTestBase):
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.member = Member.objects.create(first_name="Fee", last_name="Payer")
+        cls.membership = ClubMembership.objects.create(club=cls.club, member=cls.member, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
+
     def setUp(self):
         super().setUp()
         self.client.force_login(self.admin_user)
-        self.member = Member.objects.create(first_name="Fee", last_name="Payer")
-        self.membership = ClubMembership.objects.create(club=self.club, member=self.member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
 
     def test_editing_a_member_also_updates_their_current_membership(self):
         response = self.club_post(
@@ -1753,16 +1950,20 @@ class FamilyDetailViewTests(ManagementTestBase):
     """The family overview page, reached by clicking a family's name -- there's no
     standalone "Families" nav entry or list."""
 
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.family = Family.objects.create()
+        cls.parent = Member.objects.create(first_name="Pat", last_name="Guardian")
+        cls.child = Member.objects.create(first_name="Cody", last_name="Kid")
+        FamilyMembership.objects.create(family=cls.family, member=cls.parent, role=FamilyMembership.FamilyRole.PARENT)
+        FamilyMembership.objects.create(family=cls.family, member=cls.child, role=FamilyMembership.FamilyRole.CHILD)
+        ClubMembership.objects.create(club=cls.club, member=cls.parent, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
+        ClubMembership.objects.create(club=cls.club, member=cls.child, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
+
     def setUp(self):
         super().setUp()
         self.client.force_login(self.admin_user)
-        self.family = Family.objects.create()
-        self.parent = Member.objects.create(first_name="Pat", last_name="Guardian")
-        self.child = Member.objects.create(first_name="Cody", last_name="Kid")
-        FamilyMembership.objects.create(family=self.family, member=self.parent, role=FamilyMembership.FamilyRole.PARENT)
-        FamilyMembership.objects.create(family=self.family, member=self.child, role=FamilyMembership.FamilyRole.CHILD)
-        ClubMembership.objects.create(club=self.club, member=self.parent, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
-        ClubMembership.objects.create(club=self.club, member=self.child, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
 
     def test_shows_every_member_of_the_family(self):
         response = self.club_get("family_detail", self.family.pk)
@@ -1832,13 +2033,17 @@ class FamilyDetailViewTests(ManagementTestBase):
 
 
 class FamilyMembershipRoleUpdateTests(ManagementTestBase):
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.family = Family.objects.create()
+        cls.member = Member.objects.create(first_name="Cody", last_name="Kid")
+        cls.membership = FamilyMembership.objects.create(family=cls.family, member=cls.member, role=FamilyMembership.FamilyRole.CHILD)
+        ClubMembership.objects.create(club=cls.club, member=cls.member, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
+
     def setUp(self):
         super().setUp()
         self.client.force_login(self.admin_user)
-        self.family = Family.objects.create()
-        self.member = Member.objects.create(first_name="Cody", last_name="Kid")
-        self.membership = FamilyMembership.objects.create(family=self.family, member=self.member, role=FamilyMembership.FamilyRole.CHILD)
-        ClubMembership.objects.create(club=self.club, member=self.member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
 
     def test_admin_can_change_the_role(self):
         response = self.club_post("family_membership_role_update", {"role": FamilyMembership.FamilyRole.GUARDIAN}, self.family.pk, self.member.pk)
@@ -1928,13 +2133,17 @@ class FamilyMembershipRoleUpdateTests(ManagementTestBase):
 
 
 class MembershipListViewTests(ManagementTestBase):
-    def setUp(self):
-        super().setUp()
-        self.client.force_login(self.admin_user)
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
         # The base class's own admin ClubMembership (fee_status defaults to UNPAID)
         # would otherwise pollute every count below -- ClubRole (not ClubMembership)
         # is what actually makes them an admin, so this is safe to drop.
-        ClubMembership.objects.filter(club=self.club, member=self.admin_member).delete()
+        ClubMembership.objects.filter(club=cls.club, member=cls.admin_member).delete()
+
+    def setUp(self):
+        super().setUp()
+        self.client.force_login(self.admin_user)
 
     def make_membership(self, first_name, last_name, *, status=ClubMembership.StatusChoices.ACTIVE, fee_status=ClubMembership.FeeStatus.UNPAID, season=None, license=""):
         member = Member.objects.create(first_name=first_name, last_name=last_name)
@@ -2092,11 +2301,15 @@ class MembershipListViewTests(ManagementTestBase):
 
 
 class MembershipMarkPaidTests(ManagementTestBase):
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.member = Member.objects.create(first_name="Owed", last_name="Fee")
+        cls.membership = ClubMembership.objects.create(club=cls.club, member=cls.member, season=cls.season, status=ClubMembership.StatusChoices.PENDING, fee_status=ClubMembership.FeeStatus.UNPAID)
+
     def setUp(self):
         super().setUp()
         self.client.force_login(self.admin_user)
-        self.member = Member.objects.create(first_name="Owed", last_name="Fee")
-        self.membership = ClubMembership.objects.create(club=self.club, member=self.member, season=self.season, status=ClubMembership.StatusChoices.PENDING, fee_status=ClubMembership.FeeStatus.UNPAID)
 
     def test_marking_paid_sets_active_and_paid(self):
         response = self.club_post("membership_mark_paid", {"membership_ids": [str(self.membership.pk)]})
@@ -2181,11 +2394,15 @@ class MembershipMarkPaidTests(ManagementTestBase):
 
 
 class MembershipRecordPaymentTests(ManagementTestBase):
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.member = Member.objects.create(first_name="Owed", last_name="Fee")
+        cls.membership = ClubMembership.objects.create(club=cls.club, member=cls.member, season=cls.season, status=ClubMembership.StatusChoices.PENDING, fee_status=ClubMembership.FeeStatus.UNPAID, fee_amount=Decimal("150.00"))
+
     def setUp(self):
         super().setUp()
         self.client.force_login(self.admin_user)
-        self.member = Member.objects.create(first_name="Owed", last_name="Fee")
-        self.membership = ClubMembership.objects.create(club=self.club, member=self.member, season=self.season, status=ClubMembership.StatusChoices.PENDING, fee_status=ClubMembership.FeeStatus.UNPAID, fee_amount=Decimal("150.00"))
 
     def test_recording_a_partial_payment(self):
         response = self.club_post("membership_record_payment", {"amount": "50.00", "method": FeePayment.Method.CASH, "reference": "R1"}, self.membership.pk)
@@ -2228,11 +2445,15 @@ class MembershipRecordPaymentTests(ManagementTestBase):
 
 
 class MembershipMarkFullyPaidTests(ManagementTestBase):
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.member = Member.objects.create(first_name="Owed", last_name="Fee")
+        cls.membership = ClubMembership.objects.create(club=cls.club, member=cls.member, season=cls.season, status=ClubMembership.StatusChoices.PENDING, fee_status=ClubMembership.FeeStatus.UNPAID, fee_amount=Decimal("150.00"))
+
     def setUp(self):
         super().setUp()
         self.client.force_login(self.admin_user)
-        self.member = Member.objects.create(first_name="Owed", last_name="Fee")
-        self.membership = ClubMembership.objects.create(club=self.club, member=self.member, season=self.season, status=ClubMembership.StatusChoices.PENDING, fee_status=ClubMembership.FeeStatus.UNPAID, fee_amount=Decimal("150.00"))
 
     def test_settles_the_remaining_balance_in_one_click(self):
         response = self.club_post("membership_mark_fully_paid", {}, self.membership.pk)
@@ -2322,11 +2543,15 @@ class RenderPdfTests(TestCase):
 
 
 class MembershipExportPdfTests(ManagementTestBase):
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.member = Member.objects.create(first_name="Print", last_name="Me")
+        ClubMembership.objects.create(club=cls.club, member=cls.member, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE, fee_status=ClubMembership.FeeStatus.UNPAID)
+
     def setUp(self):
         super().setUp()
         self.client.force_login(self.admin_user)
-        self.member = Member.objects.create(first_name="Print", last_name="Me")
-        ClubMembership.objects.create(club=self.club, member=self.member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE, fee_status=ClubMembership.FeeStatus.UNPAID)
 
     def test_downloads_as_a_pdf(self):
         with mock.patch("management.views.membership_list_pdf", return_value=b"%PDF-fake") as renderer:
@@ -2372,10 +2597,11 @@ class MembershipExportPdfTests(ManagementTestBase):
 
 
 class MemberListRowActionsTests(ManagementTestBase):
-    def setUp(self):
-        super().setUp()
-        self.member = Member.objects.create(first_name="Row", last_name="Actions")
-        ClubMembership.objects.create(club=self.club, member=self.member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.member = Member.objects.create(first_name="Row", last_name="Actions")
+        ClubMembership.objects.create(club=cls.club, member=cls.member, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
 
     def test_admin_sees_edit_and_delete_buttons(self):
         self.client.force_login(self.admin_user)
@@ -2683,31 +2909,30 @@ class MemberBulkImportTests(ManagementTestBase):
 
 
 class NewsManagementTests(ManagementTestBase):
-    def setUp(self):
-        super().setUp()
-        self.team = Team.objects.create(club=self.club, name="First Team", short_name="1st")
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.team = Team.objects.create(club=cls.club, name="First Team", short_name="1st")
 
-    def make_coach_manager(self, email="coach-news@example.com"):
-        coach_user = User.objects.create_user(email=email, password="pw-secret-123")
-        coach_member = Member.objects.create(user=coach_user, first_name="Cara", last_name="Coach")
-        position = Position.objects.create(club=self.club, name="Head Coach", short_name="HC", staff_position=True, management_position=True)
-        StaffAssignment.objects.create(team=self.team, member=coach_member, season=self.season, position=position)
-        return coach_user
+        # The three actors this class draws its lines between: a coach with a
+        # management position (may draft, may not publish), a plain staff member
+        # (may not touch news at all), and an EDITOR (may publish and may keep
+        # editing afterwards).
+        cls.coach_manager = User.objects.create_user(email="coach-news@example.com", password="pw-secret-123")
+        coach_member = Member.objects.create(user=cls.coach_manager, first_name="Cara", last_name="Coach")
+        coach_position = Position.objects.create(club=cls.club, name="Head Coach", short_name="HC", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=cls.team, member=coach_member, season=cls.season, position=coach_position)
 
-    def make_plain_staff(self, email="physio-news@example.com"):
-        staff_user = User.objects.create_user(email=email, password="pw-secret-123")
-        staff_member = Member.objects.create(user=staff_user, first_name="Pat", last_name="Physio")
-        position = Position.objects.create(club=self.club, name="Physio", short_name="PH", staff_position=True, management_position=False)
-        StaffAssignment.objects.create(team=self.team, member=staff_member, season=self.season, position=position)
-        return staff_user
+        cls.plain_staff = User.objects.create_user(email="physio-news@example.com", password="pw-secret-123")
+        staff_member = Member.objects.create(user=cls.plain_staff, first_name="Pat", last_name="Physio")
+        staff_position = Position.objects.create(club=cls.club, name="Physio", short_name="PH", staff_position=True, management_position=False)
+        StaffAssignment.objects.create(team=cls.team, member=staff_member, season=cls.season, position=staff_position)
 
-    def make_editor(self, email="editor-news@example.com"):
-        editor_user = User.objects.create_user(email=email, password="pw-secret-123")
-        editor_member = Member.objects.create(user=editor_user, first_name="Eve", last_name="Editor")
-        ClubMembership.objects.create(club=self.club, member=editor_member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
-        ClubRole.objects.filter(club=self.club, member=editor_member).update(role=ClubRole.Roles.EDITOR)
-        enrol_mfa(editor_user)  # ClubRole ADMIN/EDITOR requires a second factor; StaffAssignment-only doesn't.
-        return editor_user
+        cls.editor = User.objects.create_user(email="editor-news@example.com", password="pw-secret-123")
+        editor_member = Member.objects.create(user=cls.editor, first_name="Eve", last_name="Editor")
+        ClubMembership.objects.create(club=cls.club, member=editor_member, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
+        ClubRole.objects.filter(club=cls.club, member=editor_member).update(role=ClubRole.Roles.EDITOR)
+        enrol_mfa(cls.editor)  # ClubRole ADMIN/EDITOR requires a second factor; StaffAssignment-only doesn't.
 
     def test_list_is_scoped_to_the_club(self):
         other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
@@ -2719,7 +2944,7 @@ class NewsManagementTests(ManagementTestBase):
         self.assertNotContains(response, "Rival news")
 
     def test_a_coach_manager_can_create_a_draft(self):
-        self.client.force_login(self.make_coach_manager())
+        self.client.force_login(self.coach_manager)
 
         response = self.club_post("news_create", {"title": "Season Kickoff", "body": "Big news.", "visibility": News.Visibility.INTERNAL, "teams": [str(self.team.pk)]})
 
@@ -2728,7 +2953,7 @@ class NewsManagementTests(ManagementTestBase):
         self.assertEqual(item.status, News.Status.DRAFT)
 
     def test_an_english_translation_can_be_added_alongside_the_original(self):
-        self.client.force_login(self.make_coach_manager())
+        self.client.force_login(self.coach_manager)
 
         self.club_post(
             "news_create",
@@ -2740,7 +2965,7 @@ class NewsManagementTests(ManagementTestBase):
         self.assertEqual(item.body_en, "We're starting the season.")
 
     def test_the_english_translation_is_optional(self):
-        self.client.force_login(self.make_coach_manager())
+        self.client.force_login(self.coach_manager)
 
         response = self.club_post("news_create", {"title": "Seizoensstart", "body": "We beginnen het seizoen.", "visibility": News.Visibility.INTERNAL, "teams": [str(self.team.pk)]})
 
@@ -2766,7 +2991,7 @@ class NewsManagementTests(ManagementTestBase):
         self.assertNotContains(response, ">English<")
 
     def test_plain_staff_cannot_create_news(self):
-        self.client.force_login(self.make_plain_staff())
+        self.client.force_login(self.plain_staff)
 
         response = self.club_post("news_create", {"title": "Not allowed", "body": "Body.", "visibility": News.Visibility.INTERNAL})
 
@@ -2775,7 +3000,7 @@ class NewsManagementTests(ManagementTestBase):
 
     def test_coach_manager_cannot_publish(self):
         item = News.objects.create(club=self.club, title="Draft item", body="Body.")
-        self.client.force_login(self.make_coach_manager())
+        self.client.force_login(self.coach_manager)
 
         response = self.club_post("news_publish", {"published_at": "2026-08-10T10:00"}, item.pk)
 
@@ -2785,7 +3010,7 @@ class NewsManagementTests(ManagementTestBase):
 
     def test_editor_can_publish(self):
         item = News.objects.create(club=self.club, title="Draft item", body="Body.")
-        self.client.force_login(self.make_editor())
+        self.client.force_login(self.editor)
 
         self.club_post("news_publish", {"published_at": "2026-08-10T10:00"}, item.pk)
 
@@ -2794,7 +3019,7 @@ class NewsManagementTests(ManagementTestBase):
 
     def test_publishing_with_a_future_date_leaves_it_scheduled(self):
         item = News.objects.create(club=self.club, title="Draft item", body="Body.")
-        self.client.force_login(self.make_editor())
+        self.client.force_login(self.editor)
         future = timezone.now() + datetime.timedelta(days=7)
 
         self.club_post("news_publish", {"published_at": future.strftime("%Y-%m-%dT%H:%M")}, item.pk)
@@ -2804,7 +3029,7 @@ class NewsManagementTests(ManagementTestBase):
 
     def test_publishing_with_now_makes_it_live_immediately(self):
         item = News.objects.create(club=self.club, title="Draft item", body="Body.")
-        self.client.force_login(self.make_editor())
+        self.client.force_login(self.editor)
 
         self.club_post("news_publish", {"published_at": timezone.now().strftime("%Y-%m-%dT%H:%M")}, item.pk)
 
@@ -2814,7 +3039,7 @@ class NewsManagementTests(ManagementTestBase):
     def test_unpublishing_reverts_to_draft(self):
         item = News.objects.create(club=self.club, title="Live item", body="Body.")
         item.publish()
-        self.client.force_login(self.make_editor())
+        self.client.force_login(self.editor)
 
         self.club_post("news_unpublish", {}, item.pk)
 
@@ -2824,7 +3049,7 @@ class NewsManagementTests(ManagementTestBase):
 
     def test_a_coach_manager_can_edit_someone_elses_draft(self):
         item = News.objects.create(club=self.club, title="Old title", body="Body.")
-        self.client.force_login(self.make_coach_manager())
+        self.client.force_login(self.coach_manager)
 
         self.club_post("news_update", {"title": "New title", "body": "Body.", "visibility": News.Visibility.INTERNAL}, item.pk)
 
@@ -2834,7 +3059,7 @@ class NewsManagementTests(ManagementTestBase):
     def test_a_coach_manager_cannot_edit_once_published(self):
         item = News.objects.create(club=self.club, title="Old title", body="Body.")
         item.publish()
-        self.client.force_login(self.make_coach_manager())
+        self.client.force_login(self.coach_manager)
 
         response = self.club_post("news_update", {"title": "New title", "body": "Body.", "visibility": News.Visibility.INTERNAL}, item.pk)
 
@@ -2843,7 +3068,7 @@ class NewsManagementTests(ManagementTestBase):
     def test_an_editor_can_still_edit_once_published(self):
         item = News.objects.create(club=self.club, title="Old title", body="Body.")
         item.publish()
-        self.client.force_login(self.make_editor())
+        self.client.force_login(self.editor)
 
         self.club_post("news_update", {"title": "New title", "body": "Body.", "visibility": News.Visibility.INTERNAL}, item.pk)
 
@@ -2852,7 +3077,7 @@ class NewsManagementTests(ManagementTestBase):
 
     def test_uploading_multiple_photos_creates_one_per_file_and_marks_the_first_main(self):
         item = News.objects.create(club=self.club, title="Match report", body="Body.")
-        self.client.force_login(self.make_coach_manager())
+        self.client.force_login(self.coach_manager)
         images = [
             SimpleUploadedFile("one.jpg", b"fake-bytes-one", content_type="image/jpeg"),
             SimpleUploadedFile("two.jpg", b"fake-bytes-two", content_type="image/jpeg"),
@@ -2867,7 +3092,7 @@ class NewsManagementTests(ManagementTestBase):
         item = News.objects.create(club=self.club, title="Match report", body="Body.")
         first = NewsPhoto.objects.create(news_item=item, image=SimpleUploadedFile("one.jpg", b"one", content_type="image/jpeg"), is_main=True)
         second = NewsPhoto.objects.create(news_item=item, image=SimpleUploadedFile("two.jpg", b"two", content_type="image/jpeg"), is_main=False)
-        self.client.force_login(self.make_coach_manager())
+        self.client.force_login(self.coach_manager)
 
         self.club_post("news_photo_set_main", {}, item.pk, second.pk)
 
@@ -2880,7 +3105,7 @@ class NewsManagementTests(ManagementTestBase):
         item = News.objects.create(club=self.club, title="Match report", body="Body.")
         photo = NewsPhoto.objects.create(news_item=item, image=SimpleUploadedFile("one.jpg", b"one", content_type="image/jpeg"))
         photo_path = photo.image.path
-        self.client.force_login(self.make_coach_manager())
+        self.client.force_login(self.coach_manager)
 
         self.club_post("news_photo_delete", {}, item.pk, photo.pk)
 
@@ -2891,7 +3116,7 @@ class NewsManagementTests(ManagementTestBase):
         item = News.objects.create(club=self.club, title="Match report", body="Body.")
         main = NewsPhoto.objects.create(news_item=item, image=SimpleUploadedFile("one.jpg", b"one", content_type="image/jpeg"), is_main=True)
         other = NewsPhoto.objects.create(news_item=item, image=SimpleUploadedFile("two.jpg", b"two", content_type="image/jpeg"), is_main=False)
-        self.client.force_login(self.make_coach_manager())
+        self.client.force_login(self.coach_manager)
 
         self.club_post("news_photo_delete", {}, item.pk, main.pk)
 
@@ -2901,7 +3126,7 @@ class NewsManagementTests(ManagementTestBase):
     def test_deleting_the_only_photo_leaves_nothing_to_promote(self):
         item = News.objects.create(club=self.club, title="Match report", body="Body.")
         photo = NewsPhoto.objects.create(news_item=item, image=SimpleUploadedFile("one.jpg", b"one", content_type="image/jpeg"), is_main=True)
-        self.client.force_login(self.make_coach_manager())
+        self.client.force_login(self.coach_manager)
 
         response = self.club_post("news_photo_delete", {}, item.pk, photo.pk)
 
@@ -2910,7 +3135,7 @@ class NewsManagementTests(ManagementTestBase):
 
     def test_a_coach_manager_can_delete_a_draft(self):
         item = News.objects.create(club=self.club, title="Draft item", body="Body.")
-        self.client.force_login(self.make_coach_manager())
+        self.client.force_login(self.coach_manager)
 
         response = self.club_post("news_delete", {}, item.pk)
 
@@ -2920,7 +3145,7 @@ class NewsManagementTests(ManagementTestBase):
     def test_a_coach_manager_cannot_delete_once_published(self):
         item = News.objects.create(club=self.club, title="Live item", body="Body.")
         item.publish()
-        self.client.force_login(self.make_coach_manager())
+        self.client.force_login(self.coach_manager)
 
         response = self.club_post("news_delete", {}, item.pk)
 
@@ -2930,7 +3155,7 @@ class NewsManagementTests(ManagementTestBase):
     def test_an_editor_can_delete_once_published(self):
         item = News.objects.create(club=self.club, title="Live item", body="Body.")
         item.publish()
-        self.client.force_login(self.make_editor())
+        self.client.force_login(self.editor)
 
         self.club_post("news_delete", {}, item.pk)
 
@@ -2940,7 +3165,7 @@ class NewsManagementTests(ManagementTestBase):
         item = News.objects.create(club=self.club, title="Match report", body="Body.")
         photo = NewsPhoto.objects.create(news_item=item, image=SimpleUploadedFile("one.jpg", b"one", content_type="image/jpeg"))
         photo_path = photo.image.path
-        self.client.force_login(self.make_coach_manager())
+        self.client.force_login(self.coach_manager)
 
         self.club_post("news_delete", {}, item.pk)
 
@@ -2950,7 +3175,7 @@ class NewsManagementTests(ManagementTestBase):
     def test_the_edit_and_delete_buttons_are_hidden_once_published_for_a_coach_manager(self):
         item = News.objects.create(club=self.club, title="Live item", body="Body.")
         item.publish()
-        self.client.force_login(self.make_coach_manager())
+        self.client.force_login(self.coach_manager)
 
         response = self.club_get("news_list")
 
@@ -2961,13 +3186,14 @@ class TeamAttendancePanelTests(ManagementTestBase):
     """The attendance KPI panel on the team page -- see
     management.views.TeamDetailView and events.services.attendance."""
 
-    def setUp(self):
-        super().setUp()
-        self.team = Team.objects.create(club=self.club, name="First Team", short_name="1st")
-        self.position = Position.objects.create(club=self.club, name="Forward", short_name="FW", staff_position=False)
-        self.player = Member.objects.create(first_name="Peter", last_name="Player")
-        ClubMembership.objects.create(club=self.club, member=self.player, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
-        TeamMembership.objects.create(team=self.team, season=self.season, member=self.player, position=self.position)
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.team = Team.objects.create(club=cls.club, name="First Team", short_name="1st")
+        cls.position = Position.objects.create(club=cls.club, name="Forward", short_name="FW", staff_position=False)
+        cls.player = Member.objects.create(first_name="Peter", last_name="Player")
+        ClubMembership.objects.create(club=cls.club, member=cls.player, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
+        TeamMembership.objects.create(team=cls.team, season=cls.season, member=cls.player, position=cls.position)
 
     def make_past_training(self, days_ago=1):
         event = Event.objects.create(club=self.club, title="Practice", kind=Event.EventKind.TRAINING, season=self.season, start=timezone.now() - datetime.timedelta(days=days_ago))
@@ -3010,15 +3236,15 @@ class TeamAndPositionAccessTests(ManagementTestBase):
     positions -- see club.mixins.TeamManagerRequiredMixin and
     management.views.TeamListView/PositionListView."""
 
-    def setUp(self):
-        super().setUp()
-        self.own_team = Team.objects.create(club=self.club, name="First Team", short_name="1st")
-        self.other_team = Team.objects.create(club=self.club, name="Second Team", short_name="2nd")
-        self.manager_position = Position.objects.create(club=self.club, name="Head Coach", short_name="HC", staff_position=True, management_position=True)
-
-        self.coach_user = User.objects.create_user(email="coach3@example.com", password="pw-secret-123")
-        coach_member = Member.objects.create(user=self.coach_user, first_name="Cara", last_name="Coach")
-        StaffAssignment.objects.create(team=self.own_team, member=coach_member, season=self.season, position=self.manager_position)
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.own_team = Team.objects.create(club=cls.club, name="First Team", short_name="1st")
+        cls.other_team = Team.objects.create(club=cls.club, name="Second Team", short_name="2nd")
+        cls.manager_position = Position.objects.create(club=cls.club, name="Head Coach", short_name="HC", staff_position=True, management_position=True)
+        cls.coach_user = User.objects.create_user(email="coach3@example.com", password="pw-secret-123")
+        coach_member = Member.objects.create(user=cls.coach_user, first_name="Cara", last_name="Coach")
+        StaffAssignment.objects.create(team=cls.own_team, member=coach_member, season=cls.season, position=cls.manager_position)
 
     def test_a_coach_only_sees_their_own_team_in_the_list(self):
         self.client.force_login(self.coach_user)
@@ -3070,11 +3296,15 @@ class TeamAndPositionAccessTests(ManagementTestBase):
 class TeamListCountsTests(ManagementTestBase):
     """Player/staff counts on the team list -- see TeamListView.get_queryset."""
 
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.team = Team.objects.create(club=cls.club, name="First Team", short_name="1st")
+        cls.player_position = Position.objects.create(club=cls.club, name="Forward", short_name="FW", staff_position=False)
+        cls.coach_position = Position.objects.create(club=cls.club, name="Coach", short_name="C", staff_position=True, management_position=True)
+
     def setUp(self):
         super().setUp()
-        self.team = Team.objects.create(club=self.club, name="First Team", short_name="1st")
-        self.player_position = Position.objects.create(club=self.club, name="Forward", short_name="FW", staff_position=False)
-        self.coach_position = Position.objects.create(club=self.club, name="Coach", short_name="C", staff_position=True, management_position=True)
         self.client.force_login(self.admin_user)
 
     def test_counts_reflect_the_current_seasons_roster_and_staff(self):
@@ -3108,29 +3338,28 @@ class LocationOpponentManagementTests(ManagementTestBase):
     and management.views.LocationListView/OpponentListView (and their Create/Update/Delete
     siblings)."""
 
-    def setUp(self):
-        super().setUp()
-        self.team = Team.objects.create(club=self.club, name="First Team", short_name="1st")
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.team = Team.objects.create(club=cls.club, name="First Team", short_name="1st")
 
-    def make_coach_manager(self, email="coach-loc@example.com"):
-        coach_user = User.objects.create_user(email=email, password="pw-secret-123")
-        coach_member = Member.objects.create(user=coach_user, first_name="Cara", last_name="Coach")
-        position = Position.objects.create(club=self.club, name="Head Coach", short_name="HC", staff_position=True, management_position=True)
-        StaffAssignment.objects.create(team=self.team, member=coach_member, season=self.season, position=position)
-        return coach_user
+        # The two actors either side of the line this class draws: a management
+        # position (allowed) and a plain staff position (refused).
+        cls.coach_manager = User.objects.create_user(email="coach-loc@example.com", password="pw-secret-123")
+        coach_member = Member.objects.create(user=cls.coach_manager, first_name="Cara", last_name="Coach")
+        coach_position = Position.objects.create(club=cls.club, name="Head Coach", short_name="HC", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=cls.team, member=coach_member, season=cls.season, position=coach_position)
 
-    def make_plain_staff(self, email="physio-loc@example.com"):
-        staff_user = User.objects.create_user(email=email, password="pw-secret-123")
-        staff_member = Member.objects.create(user=staff_user, first_name="Pat", last_name="Physio")
-        position = Position.objects.create(club=self.club, name="Physio", short_name="PH", staff_position=True, management_position=False)
-        StaffAssignment.objects.create(team=self.team, member=staff_member, season=self.season, position=position)
-        return staff_user
+        cls.plain_staff = User.objects.create_user(email="physio-loc@example.com", password="pw-secret-123")
+        staff_member = Member.objects.create(user=cls.plain_staff, first_name="Pat", last_name="Physio")
+        staff_position = Position.objects.create(club=cls.club, name="Physio", short_name="PH", staff_position=True, management_position=False)
+        StaffAssignment.objects.create(team=cls.team, member=staff_member, season=cls.season, position=staff_position)
 
     # --- Locations ---------------------------------------------------------
 
     def test_a_management_position_can_view_the_location_list(self):
         Location.objects.create(club=self.club, name="Main Field", address="1 St", city="Town", zip_code="1000", country="BE")
-        self.client.force_login(self.make_coach_manager())
+        self.client.force_login(self.coach_manager)
 
         response = self.club_get("location_list")
 
@@ -3142,7 +3371,7 @@ class LocationOpponentManagementTests(ManagementTestBase):
         # the form_field templatetag didn't recognise -- it fell through to the
         # "input" case and rendered a plain <input type="lazyselect"> (i.e. a
         # broken text box), not a <select>.
-        self.client.force_login(self.make_coach_manager())
+        self.client.force_login(self.coach_manager)
 
         response = self.club_get("location_create")
 
@@ -3151,12 +3380,12 @@ class LocationOpponentManagementTests(ManagementTestBase):
         self.assertContains(response, "<select")
 
     def test_plain_staff_cannot_view_the_location_list(self):
-        self.client.force_login(self.make_plain_staff())
+        self.client.force_login(self.plain_staff)
 
         self.assertEqual(self.club_get("location_list").status_code, 403)
 
     def test_a_management_position_can_create_a_location(self):
-        self.client.force_login(self.make_coach_manager())
+        self.client.force_login(self.coach_manager)
 
         response = self.club_post("location_create", {"name": "New Field", "address": "2 St", "city": "Town", "zip_code": "1000", "country": "BE"})
 
@@ -3164,7 +3393,7 @@ class LocationOpponentManagementTests(ManagementTestBase):
         self.assertTrue(Location.objects.filter(club=self.club, name="New Field").exists())
 
     def test_plain_staff_cannot_create_a_location(self):
-        self.client.force_login(self.make_plain_staff())
+        self.client.force_login(self.plain_staff)
 
         response = self.club_post("location_create", {"name": "New Field", "address": "2 St", "city": "Town", "zip_code": "1000", "country": "BE"})
 
@@ -3173,7 +3402,7 @@ class LocationOpponentManagementTests(ManagementTestBase):
 
     def test_a_management_position_can_edit_a_location(self):
         location = Location.objects.create(club=self.club, name="Old name", address="1 St", city="Town", zip_code="1000", country="BE")
-        self.client.force_login(self.make_coach_manager())
+        self.client.force_login(self.coach_manager)
 
         self.club_post("location_update", {"name": "New name", "address": "1 St", "city": "Town", "zip_code": "1000", "country": "BE"}, location.pk)
 
@@ -3182,7 +3411,7 @@ class LocationOpponentManagementTests(ManagementTestBase):
 
     def test_a_management_position_can_delete_a_location(self):
         location = Location.objects.create(club=self.club, name="Doomed", address="1 St", city="Town", zip_code="1000", country="BE")
-        self.client.force_login(self.make_coach_manager())
+        self.client.force_login(self.coach_manager)
 
         response = self.club_post("location_delete", {}, location.pk)
 
@@ -3210,7 +3439,7 @@ class LocationOpponentManagementTests(ManagementTestBase):
 
     def test_a_management_position_can_view_the_opponent_list(self):
         Opponent.objects.create(club=self.club, name="Rivals FC")
-        self.client.force_login(self.make_coach_manager())
+        self.client.force_login(self.coach_manager)
 
         response = self.club_get("opponent_list")
 
@@ -3218,12 +3447,12 @@ class LocationOpponentManagementTests(ManagementTestBase):
         self.assertContains(response, "Rivals FC")
 
     def test_plain_staff_cannot_view_the_opponent_list(self):
-        self.client.force_login(self.make_plain_staff())
+        self.client.force_login(self.plain_staff)
 
         self.assertEqual(self.club_get("opponent_list").status_code, 403)
 
     def test_a_management_position_can_create_an_opponent_with_a_logo(self):
-        self.client.force_login(self.make_coach_manager())
+        self.client.force_login(self.coach_manager)
         # Opponent.logo is a real ImageField (unlike NewsPhoto.image, set outside any
         # ModelForm) -- Django's ImageField.clean() runs it through Pillow, so this
         # needs to actually decode as an image, not just carry an image/png header.
@@ -3238,7 +3467,7 @@ class LocationOpponentManagementTests(ManagementTestBase):
 
     def test_a_management_position_can_delete_an_opponent(self):
         opponent = Opponent.objects.create(club=self.club, name="Doomed FC")
-        self.client.force_login(self.make_coach_manager())
+        self.client.force_login(self.coach_manager)
 
         response = self.club_post("opponent_delete", {}, opponent.pk)
 
@@ -3247,7 +3476,7 @@ class LocationOpponentManagementTests(ManagementTestBase):
 
     def test_plain_staff_cannot_delete_an_opponent(self):
         opponent = Opponent.objects.create(club=self.club, name="Safe FC")
-        self.client.force_login(self.make_plain_staff())
+        self.client.force_login(self.plain_staff)
 
         response = self.club_post("opponent_delete", {}, opponent.pk)
 
@@ -3260,16 +3489,22 @@ class SponsorManagementTests(ManagementTestBase):
     management position can maintain (see club.mixins.ClubAdminRequiredMixin
     and management.views.Sponsor*View)."""
 
-    def setUp(self):
-        super().setUp()
-        self.team = Team.objects.create(club=self.club, name="First Team", short_name="1st")
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.team = Team.objects.create(club=cls.club, name="First Team", short_name="1st")
 
-    def make_coach_manager(self, email="coach-sponsor@example.com"):
-        coach_user = User.objects.create_user(email=email, password="pw-secret-123")
-        coach_member = Member.objects.create(user=coach_user, first_name="Cara", last_name="Coach")
-        position = Position.objects.create(club=self.club, name="Head Coach", short_name="HC", staff_position=True, management_position=True)
-        StaffAssignment.objects.create(team=self.team, member=coach_member, season=self.season, position=position)
-        return coach_user
+        # Neither of these may touch sponsors -- a management position is enough
+        # for Location/Opponent but not here, and plain staff never qualifies.
+        cls.coach_manager = User.objects.create_user(email="coach-sponsor@example.com", password="pw-secret-123")
+        coach_member = Member.objects.create(user=cls.coach_manager, first_name="Cara", last_name="Coach")
+        coach_position = Position.objects.create(club=cls.club, name="Head Coach", short_name="HC", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=cls.team, member=coach_member, season=cls.season, position=coach_position)
+
+        cls.plain_staff = User.objects.create_user(email="physio-sponsor@example.com", password="pw-secret-123")
+        staff_member = Member.objects.create(user=cls.plain_staff, first_name="Pat", last_name="Physio")
+        staff_position = Position.objects.create(club=cls.club, name="Physio", short_name="PH", staff_position=True, management_position=False)
+        StaffAssignment.objects.create(team=cls.team, member=staff_member, season=cls.season, position=staff_position)
 
     def sponsor_data(self, **overrides):
         data = {"name": "Acme Corp", "url": "https://acme.example.com", "start_date": "2026-01-01", "end_date": ""}
@@ -3286,12 +3521,12 @@ class SponsorManagementTests(ManagementTestBase):
         self.assertContains(response, "Acme Corp")
 
     def test_a_management_position_cannot_view_the_sponsor_list(self):
-        self.client.force_login(self.make_coach_manager())
+        self.client.force_login(self.coach_manager)
 
         self.assertEqual(self.club_get("sponsor_list").status_code, 403)
 
     def test_plain_staff_cannot_view_the_sponsor_list(self):
-        self.client.force_login(self.make_plain_staff())
+        self.client.force_login(self.plain_staff)
 
         self.assertEqual(self.club_get("sponsor_list").status_code, 403)
 
@@ -3305,7 +3540,7 @@ class SponsorManagementTests(ManagementTestBase):
         self.assertTrue(sponsor.logo)
 
     def test_a_management_position_cannot_create_a_sponsor(self):
-        self.client.force_login(self.make_coach_manager())
+        self.client.force_login(self.coach_manager)
 
         response = self.club_post("sponsor_create", self.sponsor_data())
 
@@ -3333,7 +3568,7 @@ class SponsorManagementTests(ManagementTestBase):
 
     def test_plain_staff_cannot_edit_a_sponsor(self):
         sponsor = Sponsor.objects.create(club=self.club, name="Acme Corp", start_date=datetime.date(2026, 1, 1))
-        self.client.force_login(self.make_plain_staff())
+        self.client.force_login(self.plain_staff)
 
         response = self.club_post("sponsor_update", self.sponsor_data(), sponsor.pk)
 
@@ -3350,7 +3585,7 @@ class SponsorManagementTests(ManagementTestBase):
 
     def test_plain_staff_cannot_delete_a_sponsor(self):
         sponsor = Sponsor.objects.create(club=self.club, name="Safe Corp", start_date=datetime.date(2026, 1, 1))
-        self.client.force_login(self.make_plain_staff())
+        self.client.force_login(self.plain_staff)
 
         response = self.club_post("sponsor_delete", {}, sponsor.pk)
 
@@ -3361,15 +3596,8 @@ class SponsorManagementTests(ManagementTestBase):
         self.client.force_login(self.admin_user)
         self.assertContains(self.club_get("home"), "Sponsors")
 
-        self.client.force_login(self.make_coach_manager())
+        self.client.force_login(self.coach_manager)
         self.assertNotContains(self.club_get("home"), "Sponsors")
-
-    def make_plain_staff(self, email="physio-sponsor@example.com"):
-        staff_user = User.objects.create_user(email=email, password="pw-secret-123")
-        staff_member = Member.objects.create(user=staff_user, first_name="Pat", last_name="Physio")
-        position = Position.objects.create(club=self.club, name="Physio", short_name="PH", staff_position=True, management_position=False)
-        StaffAssignment.objects.create(team=self.team, member=staff_member, season=self.season, position=position)
-        return staff_user
 
 
 class BillingEndingBannerTests(ManagementTestBase):
@@ -3378,10 +3606,11 @@ class BillingEndingBannerTests(ManagementTestBase):
     Admin-only, only within the plan's own renewal lead of the period ending, and only when
     nothing is owed -- an unpaid club gets the louder billing notice instead."""
 
-    def setUp(self):
-        super().setUp()
-        self.plan = Plan.objects.create(name="Standard")
-        PlanPrice.objects.create(plan=self.plan, active_from=self.season.start_date - datetime.timedelta(days=1200), amount=Decimal("500.00"))
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.plan = Plan.objects.create(name="Standard")
+        PlanPrice.objects.create(plan=cls.plan, active_from=cls.season.start_date - datetime.timedelta(days=1200), amount=Decimal("500.00"))
 
     def settle(self):
         """The "period ends soon" notice only shows when nothing is owed."""
@@ -3465,24 +3694,24 @@ class EventManagementTests(ManagementTestBase):
     club-wide, since an event's teams field is M2M: a manager of at least one
     of an event's current teams can edit it, see club.mixins.EventManagerRequiredMixin."""
 
-    def setUp(self):
-        super().setUp()
-        self.own_team = Team.objects.create(club=self.club, name="First Team", short_name="1st")
-        self.other_team = Team.objects.create(club=self.club, name="Second Team", short_name="2nd")
-        self.coach_position = Position.objects.create(club=self.club, name="Head Coach", short_name="HC", staff_position=True, management_position=True)
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.own_team = Team.objects.create(club=cls.club, name="First Team", short_name="1st")
+        cls.other_team = Team.objects.create(club=cls.club, name="Second Team", short_name="2nd")
+        cls.coach_position = Position.objects.create(club=cls.club, name="Head Coach", short_name="HC", staff_position=True, management_position=True)
 
-    def make_coach(self, team, email="coach-events@example.com"):
-        coach_user = User.objects.create_user(email=email, password="pw-secret-123")
-        coach_member = Member.objects.create(user=coach_user, first_name="Cara", last_name="Coach")
-        StaffAssignment.objects.create(team=team, member=coach_member, season=self.season, position=self.coach_position)
-        return coach_user
+        # Manager of own_team only -- "may for my team, may not for theirs" is the
+        # line nearly every test here checks, so it's a standing fixture.
+        cls.own_team_coach = User.objects.create_user(email="coach-events@example.com", password="pw-secret-123")
+        coach_member = Member.objects.create(user=cls.own_team_coach, first_name="Cara", last_name="Coach")
+        StaffAssignment.objects.create(team=cls.own_team, member=coach_member, season=cls.season, position=cls.coach_position)
 
-    def make_plain_staff(self, email="physio-events@example.com"):
-        staff_user = User.objects.create_user(email=email, password="pw-secret-123")
-        staff_member = Member.objects.create(user=staff_user, first_name="Pat", last_name="Physio")
-        position = Position.objects.create(club=self.club, name="Physio", short_name="PH", staff_position=True, management_position=False)
-        StaffAssignment.objects.create(team=self.own_team, member=staff_member, season=self.season, position=position)
-        return staff_user
+        # Staff, but with no management position anywhere: reaches the app, manages nothing.
+        cls.plain_staff = User.objects.create_user(email="physio-events@example.com", password="pw-secret-123")
+        staff_member = Member.objects.create(user=cls.plain_staff, first_name="Pat", last_name="Physio")
+        staff_position = Position.objects.create(club=cls.club, name="Physio", short_name="PH", staff_position=True, management_position=False)
+        StaffAssignment.objects.create(team=cls.own_team, member=staff_member, season=cls.season, position=staff_position)
 
     def make_group_member(self, group, email="committee-events@example.com"):
         # Staff (so they can reach the management app at all -- ClubStaffRequiredMixin
@@ -3516,7 +3745,7 @@ class EventManagementTests(ManagementTestBase):
         return data
 
     def test_a_team_manager_can_create_an_event_for_their_own_team(self):
-        self.client.force_login(self.make_coach(self.own_team))
+        self.client.force_login(self.own_team_coach)
 
         response = self.club_post("event_create", self.event_data())
 
@@ -3531,7 +3760,7 @@ class EventManagementTests(ManagementTestBase):
         # which runs after full_clean()) -- so a same-club location falsely
         # failed as "must belong to the same club". See EventCreateView.get_form_kwargs.
         location = Location.objects.create(club=self.club, name="Home Ground", address="1 St", city="Town", zip_code="1000", country="BE")
-        self.client.force_login(self.make_coach(self.own_team))
+        self.client.force_login(self.own_team_coach)
 
         response = self.club_post("event_create", self.event_data(location=str(location.pk)))
 
@@ -3592,7 +3821,7 @@ class EventManagementTests(ManagementTestBase):
         self.assertFalse(Event.objects.filter(title="Training").exists())
 
     def test_club_wide_is_not_offered_to_a_non_admin(self):
-        self.client.force_login(self.make_coach(self.own_team))
+        self.client.force_login(self.own_team_coach)
 
         response = self.club_get("event_create")
 
@@ -3601,7 +3830,7 @@ class EventManagementTests(ManagementTestBase):
     def test_a_non_admin_cannot_force_a_club_wide_event(self):
         # club_wide isn't in the form for a non-admin, so even a forged POST
         # value must not slip through as a create-time claim.
-        self.client.force_login(self.make_coach(self.own_team))
+        self.client.force_login(self.own_team_coach)
 
         response = self.club_post("event_create", self.event_data(teams=[], club_wide="on"))
 
@@ -3644,39 +3873,29 @@ class EventManagementTests(ManagementTestBase):
         # per-club gate actually lives).
         Competition.objects.create(name="Active Cup", module="events.competition.active")
         Competition.objects.create(name="Inactive Cup", module="events.competition.inactive")
-        self.client.force_login(self.make_coach(self.own_team))
+        self.client.force_login(self.own_team_coach)
 
         response = self.club_get("event_create")
 
         self.assertContains(response, "Active Cup")
         self.assertContains(response, "Inactive Cup")
 
-    def test_creating_a_game_with_a_competition_selected(self):
-        Competition.objects.create(name="Regional Cup", module="events.competition.regional")
-        self.client.force_login(self.make_coach(self.own_team))
-
-        response = self.club_post("event_create", self.event_data(kind="game", competition="Regional Cup"))
-
-        event = Event.objects.get(title="Training")
-        self.assertRedirects(response, reverse("management:event_detail", args=[event.pk]))
-        self.assertEqual(event.competition, "Regional Cup")
-
     def test_a_team_manager_cannot_create_an_event_for_a_team_they_dont_manage(self):
-        self.client.force_login(self.make_coach(self.own_team))
+        self.client.force_login(self.own_team_coach)
 
         self.club_post("event_create", self.event_data(teams=[str(self.other_team.pk)]))
 
         self.assertFalse(Event.objects.filter(title="Training").exists())
 
     def test_a_plain_staff_member_gets_403_creating_an_event(self):
-        self.client.force_login(self.make_plain_staff())
+        self.client.force_login(self.plain_staff)
 
         response = self.club_post("event_create", self.event_data())
 
         self.assertEqual(response.status_code, 403)
 
     def test_a_plain_staff_member_can_still_view_the_event_list(self):
-        self.client.force_login(self.make_plain_staff())
+        self.client.force_login(self.plain_staff)
 
         self.assertEqual(self.club_get("event_list").status_code, 200)
 
@@ -3685,7 +3904,7 @@ class EventManagementTests(ManagementTestBase):
         own_event.teams.add(self.own_team)
         other_event = Event.objects.create(club=self.club, title="Other event", start=timezone.now() + datetime.timedelta(days=2))
         other_event.teams.add(self.other_team)
-        self.client.force_login(self.make_coach(self.own_team))
+        self.client.force_login(self.own_team_coach)
 
         response = self.club_get("event_list")
 
@@ -3701,7 +3920,7 @@ class EventManagementTests(ManagementTestBase):
         other_event = Event.objects.create(club=self.club, title="Other event", start=timezone.now() + datetime.timedelta(days=2))
         other_event.teams.add(self.other_team)
         Event.objects.create(club=self.club, title="AGM", start=timezone.now() + datetime.timedelta(days=3))
-        self.client.force_login(self.make_coach(self.own_team))
+        self.client.force_login(self.own_team_coach)
 
         response = self.club_get("event_list")
 
@@ -3724,7 +3943,7 @@ class EventManagementTests(ManagementTestBase):
     def test_a_manager_cannot_open_another_teams_event_by_url(self):
         other_event = Event.objects.create(club=self.club, title="Other event", start=timezone.now() + datetime.timedelta(days=2))
         other_event.teams.add(self.other_team)
-        self.client.force_login(self.make_coach(self.own_team))
+        self.client.force_login(self.own_team_coach)
 
         response = self.club_get("event_detail", other_event.pk)
 
@@ -3735,7 +3954,7 @@ class EventManagementTests(ManagementTestBase):
         own_event.teams.add(self.own_team)
         other_event = Event.objects.create(club=self.club, title="Other event", start=timezone.now() + datetime.timedelta(days=2))
         other_event.teams.add(self.other_team)
-        self.client.force_login(self.make_coach(self.own_team))
+        self.client.force_login(self.own_team_coach)
 
         response = self.club_get("home")
 
@@ -3743,7 +3962,7 @@ class EventManagementTests(ManagementTestBase):
         self.assertNotContains(response, "Other event")
 
     def test_a_team_less_event_is_refused_for_a_non_admin(self):
-        self.client.force_login(self.make_coach(self.own_team))
+        self.client.force_login(self.own_team_coach)
 
         self.club_post("event_create", self.event_data(teams=[]))
 
@@ -3759,7 +3978,7 @@ class EventManagementTests(ManagementTestBase):
     def test_a_manager_of_one_team_cannot_edit_an_event_for_another_team(self):
         event = Event.objects.create(club=self.club, title="Other's event", start=timezone.now() + datetime.timedelta(days=1))
         event.teams.add(self.other_team)
-        self.client.force_login(self.make_coach(self.own_team))
+        self.client.force_login(self.own_team_coach)
 
         response = self.club_get("event_update", event.pk)
 
@@ -3768,7 +3987,7 @@ class EventManagementTests(ManagementTestBase):
     def test_a_manager_can_edit_their_own_teams_event(self):
         event = Event.objects.create(club=self.club, title="My event", start=timezone.now() + datetime.timedelta(days=1))
         event.teams.add(self.own_team)
-        self.client.force_login(self.make_coach(self.own_team))
+        self.client.force_login(self.own_team_coach)
 
         self.club_post("event_update", self.event_data(title="Renamed"), event.pk)
 
@@ -3778,7 +3997,7 @@ class EventManagementTests(ManagementTestBase):
     def test_deleting_a_one_off_event_deletes_it(self):
         event = Event.objects.create(club=self.club, title="Gone", start=timezone.now() + datetime.timedelta(days=1))
         event.teams.add(self.own_team)
-        self.client.force_login(self.make_coach(self.own_team))
+        self.client.force_login(self.own_team_coach)
 
         self.club_post("event_delete", {}, event.pk)
 
@@ -3790,7 +4009,7 @@ class EventManagementTests(ManagementTestBase):
         # test_the_add_form_has_no_score_or_live_fields below), so posting them
         # here has no effect.
         Competition.objects.create(name="Regional Cup", module="events.competition.regional")
-        self.client.force_login(self.make_coach(self.own_team))
+        self.client.force_login(self.own_team_coach)
 
         self.club_post("event_create", self.event_data(kind="game", competition="Regional Cup", external_game_id="ext-42", score_for="3", score_against="1", is_live="on"))
 
@@ -3802,7 +4021,7 @@ class EventManagementTests(ManagementTestBase):
         self.assertFalse(game.is_live)
 
     def test_the_add_form_has_no_score_or_live_fields(self):
-        self.client.force_login(self.make_coach(self.own_team))
+        self.client.force_login(self.own_team_coach)
 
         response = self.club_get("event_create")
 
@@ -3814,7 +4033,7 @@ class EventManagementTests(ManagementTestBase):
         Competition.objects.create(name="Regional Cup", module="events.competition.regional")
         game = Event.objects.create(club=self.club, title="Cup game", kind=Event.EventKind.GAME, start=timezone.now() + datetime.timedelta(days=1))
         game.teams.add(self.own_team)
-        self.client.force_login(self.make_coach(self.own_team))
+        self.client.force_login(self.own_team_coach)
 
         response = self.club_get("event_update", game.pk)
         self.assertContains(response, 'name="score_for"')
@@ -3835,16 +4054,23 @@ class EventManagementTests(ManagementTestBase):
 class EventSeriesManagementTests(ManagementTestBase):
     """EventSeries CRUD + occurrence lifecycle actions (cancel/detach/stop)."""
 
-    def setUp(self):
-        super().setUp()
-        self.team = Team.objects.create(club=self.club, name="First Team", short_name="1st")
-        self.other_team = Team.objects.create(club=self.club, name="Second Team", short_name="2nd")
-        self.coach_position = Position.objects.create(club=self.club, name="Head Coach", short_name="HC", staff_position=True, management_position=True)
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.team = Team.objects.create(club=cls.club, name="First Team", short_name="1st")
+        cls.other_team = Team.objects.create(club=cls.club, name="Second Team", short_name="2nd")
+        cls.coach_position = Position.objects.create(club=cls.club, name="Head Coach", short_name="HC", staff_position=True, management_position=True)
 
-    def make_coach(self, team, email="coach-series@example.com"):
+        # A manager of each team: the series is created by the first, and the
+        # second is the "different team's manager" the access checks refuse.
+        cls.team_coach = cls.make_coach(cls.team, "coach-series@example.com")
+        cls.other_team_coach = cls.make_coach(cls.other_team, "other-coach@example.com")
+
+    @classmethod
+    def make_coach(cls, team, email):
         coach_user = User.objects.create_user(email=email, password="pw-secret-123")
         coach_member = Member.objects.create(user=coach_user, first_name="Cara", last_name="Coach")
-        StaffAssignment.objects.create(team=team, member=coach_member, season=self.season, position=self.coach_position)
+        StaffAssignment.objects.create(team=team, member=coach_member, season=cls.season, position=cls.coach_position)
         return coach_user
 
     def series_data(self, **overrides):
@@ -3878,7 +4104,7 @@ class EventSeriesManagementTests(ManagementTestBase):
         # Same regression as EventManagementTests' equivalent -- EventSeries.clean()
         # has the same self.club_id-is-still-None-at-validation-time problem.
         location = Location.objects.create(club=self.club, name="Home Ground", address="1 St", city="Town", zip_code="1000", country="BE")
-        self.client.force_login(self.make_coach(self.team))
+        self.client.force_login(self.team_coach)
 
         response = self.club_post("event_series_create", self.series_data(location=str(location.pk)))
 
@@ -3887,7 +4113,7 @@ class EventSeriesManagementTests(ManagementTestBase):
         self.assertEqual(series.location, location)
 
     def test_creating_a_series_generates_occurrences_immediately(self):
-        self.client.force_login(self.make_coach(self.team))
+        self.client.force_login(self.team_coach)
 
         series = self.create_series()
 
@@ -3918,7 +4144,7 @@ class EventSeriesManagementTests(ManagementTestBase):
         self.assertTrue(occurrence.club_wide)
 
     def test_editing_a_series_propagates_to_future_occurrences_but_not_a_detached_one(self):
-        self.client.force_login(self.make_coach(self.team))
+        self.client.force_login(self.team_coach)
         series = self.create_series()
         detached = series.occurrences.filter(start__gte=timezone.now()).order_by("start").first()
         other = series.occurrences.exclude(pk=detached.pk).filter(start__gte=timezone.now()).first()
@@ -3932,7 +4158,7 @@ class EventSeriesManagementTests(ManagementTestBase):
         self.assertEqual(other.title, "Renamed training")
 
     def test_cancelling_an_occurrence_records_an_excluded_date_not_a_raw_delete(self):
-        self.client.force_login(self.make_coach(self.team))
+        self.client.force_login(self.team_coach)
         series = self.create_series()
         occurrence = series.occurrences.order_by("start").first()
         start_iso = occurrence.start.isoformat()
@@ -3944,7 +4170,7 @@ class EventSeriesManagementTests(ManagementTestBase):
         self.assertIn(start_iso, series.excluded_dates)
 
     def test_cancelling_with_keep_record_marks_it_cancelled_instead_of_deleting(self):
-        self.client.force_login(self.make_coach(self.team))
+        self.client.force_login(self.team_coach)
         series = self.create_series()
         occurrence = series.occurrences.order_by("start").first()
 
@@ -3954,7 +4180,7 @@ class EventSeriesManagementTests(ManagementTestBase):
         self.assertTrue(occurrence.cancelled)
 
     def test_stop_repeating_prevents_new_occurrences_without_touching_existing_ones(self):
-        self.client.force_login(self.make_coach(self.team))
+        self.client.force_login(self.team_coach)
         series = self.create_series()
         count_before = series.occurrences.count()
 
@@ -3965,25 +4191,25 @@ class EventSeriesManagementTests(ManagementTestBase):
         self.assertEqual(series.occurrences.count(), count_before)
 
     def test_a_manager_of_a_different_team_cannot_edit_the_series(self):
-        self.client.force_login(self.make_coach(self.team))
+        self.client.force_login(self.team_coach)
         series = self.create_series()
-        self.client.force_login(self.make_coach(self.other_team, email="other-coach@example.com"))
+        self.client.force_login(self.other_team_coach)
 
         response = self.club_get("event_series_update", series.pk)
 
         self.assertEqual(response.status_code, 403)
 
     def test_a_manager_of_a_different_team_cannot_view_the_series_either(self):
-        self.client.force_login(self.make_coach(self.team))
+        self.client.force_login(self.team_coach)
         series = self.create_series()
-        self.client.force_login(self.make_coach(self.other_team, email="other-coach2@example.com"))
+        self.client.force_login(self.other_team_coach)
 
         response = self.club_get("event_series_detail", series.pk)
 
         self.assertEqual(response.status_code, 404)
 
     def test_deleting_a_series_deletes_its_occurrences(self):
-        self.client.force_login(self.make_coach(self.team))
+        self.client.force_login(self.team_coach)
         series = self.create_series()
         occurrence_ids = list(series.occurrences.values_list("pk", flat=True))
 
@@ -3998,13 +4224,17 @@ class EventDetailDisplayTests(ManagementTestBase):
     stub -- see management.views.EventDetailView/EventFetchGameInfoView and
     events.services.competitions.fetch_game_info."""
 
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.team = Team.objects.create(club=cls.club, name="First Team", short_name="1st")
+        cls.position = Position.objects.create(club=cls.club, name="Forward", short_name="FW")
+        cls.player = Member.objects.create(first_name="Peter", last_name="Player")
+        ClubMembership.objects.create(club=cls.club, member=cls.player, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
+        TeamMembership.objects.create(team=cls.team, season=cls.season, member=cls.player, position=cls.position)
+
     def setUp(self):
         super().setUp()
-        self.team = Team.objects.create(club=self.club, name="First Team", short_name="1st")
-        self.position = Position.objects.create(club=self.club, name="Forward", short_name="FW")
-        self.player = Member.objects.create(first_name="Peter", last_name="Player")
-        ClubMembership.objects.create(club=self.club, member=self.player, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
-        TeamMembership.objects.create(team=self.team, season=self.season, member=self.player, position=self.position)
         self.client.force_login(self.admin_user)
 
     def make_event(self, **kwargs):
@@ -4092,24 +4322,28 @@ class EventRefereeManagementTests(ManagementTestBase):
     panel -- home games only, see management.views.EventRefereeAssignView/
     EventRefereeRemoveView and events.services.referees."""
 
-    def setUp(self):
-        super().setUp()
-        self.team = Team.objects.create(club=self.club, name="First Team", short_name="1st")
-        self.home_ground = Location.objects.create(club=self.club, name="Home Ground", address="1 St", city="Town", zip_code="1000", country="BE", is_home=True)
-        self.away_ground = Location.objects.create(club=self.club, name="Away Ground", address="2 St", city="Town", zip_code="1000", country="BE")
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.team = Team.objects.create(club=cls.club, name="First Team", short_name="1st")
+        cls.home_ground = Location.objects.create(club=cls.club, name="Home Ground", address="1 St", city="Town", zip_code="1000", country="BE", is_home=True)
+        cls.away_ground = Location.objects.create(club=cls.club, name="Away Ground", address="2 St", city="Town", zip_code="1000", country="BE")
+        cls.level = RefereeLevel.objects.create(club=cls.club, name="Regional")
+        cls.level.teams.add(cls.team)
+        cls.referee = Member.objects.create(first_name="Ref", last_name="Eree")
+        ClubMembership.objects.create(club=cls.club, member=cls.referee, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
+        RefereeProfile.objects.create(member=cls.referee, level=cls.level, valid_until=timezone.localdate() + datetime.timedelta(days=30))
 
-        self.level = RefereeLevel.objects.create(club=self.club, name="Regional")
-        self.level.teams.add(self.team)
+        cls.coach_position = Position.objects.create(club=cls.club, name="Head Coach", short_name="HC", staff_position=True, management_position=True)
+        # Manages this team, which still isn't enough to touch referees -- that's
+        # admin-only, so this actor recurs throughout the 403 checks below.
+        cls.team_coach = cls.make_coach(cls.team, "coach-referees@example.com")
 
-        self.referee = Member.objects.create(first_name="Ref", last_name="Eree")
-        ClubMembership.objects.create(club=self.club, member=self.referee, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
-        self.referee_profile = RefereeProfile.objects.create(member=self.referee, level=self.level, valid_until=timezone.localdate() + datetime.timedelta(days=30))
-
-    def make_coach(self, team, email="coach-referees@example.com"):
+    @classmethod
+    def make_coach(cls, team, email):
         coach_user = User.objects.create_user(email=email, password="pw-secret-123")
         coach_member = Member.objects.create(user=coach_user, first_name="Cara", last_name="Coach")
-        position = Position.objects.create(club=self.club, name="Head Coach", short_name="HC", staff_position=True, management_position=True)
-        StaffAssignment.objects.create(team=team, member=coach_member, season=self.season, position=position)
+        StaffAssignment.objects.create(team=team, member=coach_member, season=cls.season, position=cls.coach_position)
         return coach_user
 
     def make_game(self, **kwargs):
@@ -4157,7 +4391,7 @@ class EventRefereeManagementTests(ManagementTestBase):
         # Admin-only for now, even for the coach who manages this team --
         # see management.views.EventRefereeAssignView.
         game = self.make_game()
-        self.client.force_login(self.make_coach(self.team))
+        self.client.force_login(self.team_coach)
 
         response = self.club_post("event_referee_assign", {"member": str(self.referee.pk)}, game.pk)
 
@@ -4167,7 +4401,7 @@ class EventRefereeManagementTests(ManagementTestBase):
     def test_a_teams_own_coach_gets_403_removing_a_referee(self):
         game = self.make_game()
         assignment = EventReferee.objects.create(event=game, member=self.referee, assigned_by=self.admin_member)
-        self.client.force_login(self.make_coach(self.team))
+        self.client.force_login(self.team_coach)
 
         response = self.club_post("event_referee_remove", {}, game.pk, assignment.pk)
 
@@ -4177,7 +4411,7 @@ class EventRefereeManagementTests(ManagementTestBase):
     def test_a_teams_coach_sees_the_referees_panel_but_not_the_assign_or_remove_controls(self):
         game = self.make_game()
         assignment = EventReferee.objects.create(event=game, member=self.referee, assigned_by=self.admin_member)
-        self.client.force_login(self.make_coach(self.team))
+        self.client.force_login(self.team_coach)
 
         response = self.club_get("event_detail", game.pk)
 
@@ -4243,7 +4477,7 @@ class EventRefereeManagementTests(ManagementTestBase):
     def test_a_different_teams_coach_cannot_assign_a_referee(self):
         other_team = Team.objects.create(club=self.club, name="Second Team", short_name="2nd")
         game = self.make_game()
-        self.client.force_login(self.make_coach(other_team))
+        self.client.force_login(self.make_coach(other_team, "coach-referees-other@example.com"))
 
         response = self.club_post("event_referee_assign", {"member": str(self.referee.pk)}, game.pk)
 
@@ -4294,7 +4528,7 @@ class EventRefereeManagementTests(ManagementTestBase):
 
     def test_a_coach_gets_403_adding_an_external_referee(self):
         game = self.make_game()
-        self.client.force_login(self.make_coach(self.team))
+        self.client.force_login(self.team_coach)
 
         response = self.club_post("event_referee_add_external", {"name": "Guest Referee"}, game.pk)
 
@@ -4359,7 +4593,7 @@ class EventRefereeManagementTests(ManagementTestBase):
     def test_a_coach_gets_403_setting_a_fee(self):
         game = self.make_game()
         assignment = EventReferee.objects.create(event=game, member=self.referee, assigned_by=self.admin_member)
-        self.client.force_login(self.make_coach(self.team))
+        self.client.force_login(self.team_coach)
 
         response = self.club_post("event_referee_fee_update", {"fee": "25.00"}, game.pk, assignment.pk)
 
@@ -4370,12 +4604,13 @@ class EventRefereeFormPdfTests(ManagementTestBase):
     """Downloadable referee payment form -- see management.views.EventRefereeFormPdfView,
     modeled on the club's existing paper form."""
 
-    def setUp(self):
-        super().setUp()
-        self.team = Team.objects.create(club=self.club, name="First Team", short_name="1st")
-        self.home_ground = Location.objects.create(club=self.club, name="Home Ground", address="1 St", city="Town", zip_code="1000", country="BE", is_home=True)
-        self.referee = Member.objects.create(first_name="Ref", last_name="Eree")
-        ClubMembership.objects.create(club=self.club, member=self.referee, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.team = Team.objects.create(club=cls.club, name="First Team", short_name="1st")
+        cls.home_ground = Location.objects.create(club=cls.club, name="Home Ground", address="1 St", city="Town", zip_code="1000", country="BE", is_home=True)
+        cls.referee = Member.objects.create(first_name="Ref", last_name="Eree")
+        ClubMembership.objects.create(club=cls.club, member=cls.referee, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
 
     def make_coach(self, team, email="coach-refpdf@example.com"):
         coach_user = User.objects.create_user(email=email, password="pw-secret-123")
@@ -4520,18 +4755,18 @@ class RefereeManagementDashboardTests(ManagementTestBase):
     """The admin-only one-stop view of upcoming home games needing a
     club-arranged referee -- see management.views.RefereeManagementDashboardView."""
 
-    def setUp(self):
-        super().setUp()
-        self.team = Team.objects.create(club=self.club, name="First Team", short_name="1st")
-        self.federation_team = Team.objects.create(club=self.club, name="Federation Team", short_name="Fed", referee_management=Team.RefereeManagement.FEDERATION)
-        self.home_ground = Location.objects.create(club=self.club, name="Home Ground", address="1 St", city="Town", zip_code="1000", country="BE", is_home=True)
-        self.away_ground = Location.objects.create(club=self.club, name="Away Ground", address="2 St", city="Town", zip_code="1000", country="BE")
-
-        self.level = RefereeLevel.objects.create(club=self.club, name="Regional")
-        self.level.teams.add(self.team)
-        self.referee = Member.objects.create(first_name="Ref", last_name="Eree")
-        ClubMembership.objects.create(club=self.club, member=self.referee, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
-        RefereeProfile.objects.create(member=self.referee, level=self.level, valid_until=timezone.localdate() + datetime.timedelta(days=30))
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.team = Team.objects.create(club=cls.club, name="First Team", short_name="1st")
+        cls.federation_team = Team.objects.create(club=cls.club, name="Federation Team", short_name="Fed", referee_management=Team.RefereeManagement.FEDERATION)
+        cls.home_ground = Location.objects.create(club=cls.club, name="Home Ground", address="1 St", city="Town", zip_code="1000", country="BE", is_home=True)
+        cls.away_ground = Location.objects.create(club=cls.club, name="Away Ground", address="2 St", city="Town", zip_code="1000", country="BE")
+        cls.level = RefereeLevel.objects.create(club=cls.club, name="Regional")
+        cls.level.teams.add(cls.team)
+        cls.referee = Member.objects.create(first_name="Ref", last_name="Eree")
+        ClubMembership.objects.create(club=cls.club, member=cls.referee, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
+        RefereeProfile.objects.create(member=cls.referee, level=cls.level, valid_until=timezone.localdate() + datetime.timedelta(days=30))
 
     def make_coach(self, team, email="coach-refdash@example.com"):
         coach_user = User.objects.create_user(email=email, password="pw-secret-123")
@@ -4817,11 +5052,15 @@ class RBIHFImportViewTests(ManagementTestBase):
     events/tests.py; these exercise the views end to end via a mocked
     fetch_html, never touching the network."""
 
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.team = Team.objects.create(club=cls.club, name="First Team", short_name="1st")
+
     def setUp(self):
         super().setUp()
         cache.clear()
         self.addCleanup(cache.clear)
-        self.team = Team.objects.create(club=self.club, name="First Team", short_name="1st")
 
     def activate_flag(self):
         # "RBIHF" is already seeded (migration 0018 links it to the Competition

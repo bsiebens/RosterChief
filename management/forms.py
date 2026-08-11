@@ -174,6 +174,230 @@ class StaffAssignmentForm(forms.ModelForm):
         self.fields["position"].queryset = Position.objects.filter(club=club, staff_position=True)
 
 
+class PositionSelect(forms.Select):
+    """Marks staff positions in the DOM (``data-staff``) so a bulk-add row's
+    jersey-number input can disable itself for them -- a jersey number is
+    meaningless on a StaffAssignment, which has no such field."""
+
+    def create_option(self, name, value, *args, **kwargs):
+        option = super().create_option(name, value, *args, **kwargs)
+        position = getattr(value, "instance", None)
+        if position is not None and position.staff_position:
+            option["attrs"]["data-staff"] = "1"
+        return option
+
+
+class GroupedPositionChoiceField(forms.ModelChoiceField):
+    """Positions split into "Player positions" / "Staff positions" optgroups.
+
+    Which group a position sits in is exactly what tells the bulk-add view
+    whether a row means a ``TeamMembership`` or a ``StaffAssignment``
+    (``Position.staff_position``) -- so the row needs no separate "player or
+    staff?" control that could drift out of step with the position picked.
+    """
+
+    widget = PositionSelect
+
+    def _get_choices(self):
+        if hasattr(self, "_choices"):
+            return self._choices
+
+        iterator = self.iterator(self)
+        player, staff = [], []
+        for value, label in iterator:
+            if value == "":
+                continue  # the empty label is yielded separately below
+            target = staff if getattr(value, "instance", None) is not None and value.instance.staff_position else player
+            target.append((value, label))
+
+        grouped = []
+        if self.empty_label is not None:
+            grouped.append(("", self.empty_label))
+        if player:
+            grouped.append((_("Player positions"), player))
+        if staff:
+            grouped.append((_("Staff positions"), staff))
+        return grouped
+
+    choices = property(_get_choices, forms.ChoiceField.choices.fset)
+
+
+def bulk_add_member_label(member, *, rostered_ids, staffed_ids):
+    """"Peter Player — on roster" for the bulk-add member picker.
+
+    Already-assigned members stay selectable rather than being filtered out:
+    someone already on the roster as a player can still legitimately be added
+    as staff (a playing coach), so what's "taken" depends on the position the
+    row ends up picking. The label is the hint; the row's own clean() is what
+    actually refuses a true duplicate.
+    """
+    marks = []
+    if member.pk in rostered_ids:
+        marks.append(_("on roster"))
+    if member.pk in staffed_ids:
+        marks.append(_("on staff"))
+    if not marks:
+        return str(member)
+    # Not itself a translatable message -- just a separator between the member's
+    # name and the already-translated markers.
+    return f"{member} — {', '.join(str(mark) for mark in marks)}"
+
+
+class TeamBulkAddRowForm(forms.Form):
+    """One row of the team bulk-add page: who, in what position, and (players
+    only) their jersey number and captaincy.
+
+    Rows replace the old "every eligible member gets a table row" layout, which
+    doesn't survive a club with a hundred-plus members. `member` is a searchable
+    select (static ``choices``, not the field's own lazy queryset iterator, so a
+    twenty-row formset doesn't re-query the member list twenty times over).
+    """
+
+    member = forms.ModelChoiceField(
+        queryset=Member.objects.none(),
+        label=_("Member"),
+        widget=forms.Select(attrs={"class": "select select-bordered w-full", "data-searchable": "true", "data-search-placeholder": _("Type a name to search...")}),
+    )
+    position = GroupedPositionChoiceField(
+        queryset=Position.objects.none(),
+        label=_("Position"),
+        widget=PositionSelect(attrs={"class": "select select-bordered w-full position-select"}),
+    )
+    jersey_number = forms.IntegerField(
+        required=False,
+        min_value=0,
+        label=_("Jersey #"),
+        widget=forms.NumberInput(attrs={"class": "input input-bordered w-full player-only", "min": "0"}),
+    )
+    # Player-only, same as jersey_number -- "player-only" marks them for the
+    # row script, which greys them out when a staff position is picked.
+    is_captain = forms.BooleanField(required=False, label=_("Captain"), widget=forms.CheckboxInput(attrs={"class": "checkbox player-only"}))
+    is_alternate_captain = forms.BooleanField(required=False, label=_("Alternate"), widget=forms.CheckboxInput(attrs={"class": "checkbox player-only"}))
+
+    def __init__(self, *args, club=None, team=None, season=None, member_choices=None, position_queryset=None, rostered_ids=frozenset(), staffed_ids=frozenset(), **kwargs):
+        super().__init__(*args, **kwargs)
+        self.team = team
+        self.season = season
+        self.rostered_ids = rostered_ids
+        self.staffed_ids = staffed_ids
+
+        self.fields["member"].queryset = eligible_roster_members(club)
+        if member_choices is not None:
+            self.fields["member"].choices = member_choices
+
+        self.fields["position"].queryset = position_queryset if position_queryset is not None else Position.objects.filter(club=club)
+
+    def clean(self):
+        cleaned = super().clean()
+        member, position = cleaned.get("member"), cleaned.get("position")
+        if member is None or position is None:
+            return cleaned
+
+        if position.staff_position:
+            # A staff row becomes a StaffAssignment, which has no jersey number
+            # and no captaincy -- both belong to TeamMembership only.
+            if member.pk in self.staffed_ids:
+                self.add_error("member", _("%(member)s is already on this team's staff for this season.") % {"member": member})
+            if cleaned.get("jersey_number") is not None:
+                self.add_error("jersey_number", _("A jersey number doesn't apply to a staff position."))
+            if cleaned.get("is_captain"):
+                self.add_error("is_captain", _("Captaincy doesn't apply to a staff position."))
+            if cleaned.get("is_alternate_captain"):
+                self.add_error("is_alternate_captain", _("Captaincy doesn't apply to a staff position."))
+            return cleaned
+
+        if member.pk in self.rostered_ids:
+            self.add_error("member", _("%(member)s is already on this team's roster for this season.") % {"member": member})
+
+        # Contradictory rather than a club policy: an alternate captain is by
+        # definition not the captain. How *many* captains a team may have isn't
+        # constrained anywhere (not by the model, not by the single-add form),
+        # so this row deliberately doesn't invent that rule either.
+        if cleaned.get("is_captain") and cleaned.get("is_alternate_captain"):
+            self.add_error("is_alternate_captain", _("Someone can be captain or alternate captain, not both."))
+
+        jersey_number = cleaned.get("jersey_number")
+        if jersey_number is not None and self.team is not None and self.season is not None:
+            if TeamMembership.objects.filter(team=self.team, season=self.season, jersey_number=jersey_number).exists():
+                self.add_error("jersey_number", _("Jersey #%(number)s is already taken on this team this season.") % {"number": jersey_number})
+        return cleaned
+
+
+class BaseTeamBulkAddFormSet(forms.BaseFormSet):
+    """Cross-row checks the individual rows can't see: the same person twice,
+    or two rows claiming one jersey number. Per-row checks (already assigned,
+    jersey already taken by an *existing* roster entry) live on the row form."""
+
+    def clean(self):
+        super().clean()
+        if any(self.errors):
+            return
+
+        seen_assignments, seen_jerseys = set(), set()
+        for form in self.forms:
+            member, position = form.cleaned_data.get("member"), form.cleaned_data.get("position")
+            if member is None or position is None:
+                continue
+
+            assignment = (member.pk, bool(position.staff_position))
+            if assignment in seen_assignments:
+                form.add_error("member", _("%(member)s is listed twice for the same kind of position.") % {"member": member})
+            seen_assignments.add(assignment)
+
+            jersey_number = form.cleaned_data.get("jersey_number")
+            if jersey_number is None or position.staff_position:
+                continue
+            if jersey_number in seen_jerseys:
+                form.add_error("jersey_number", _("Jersey #%(number)s is claimed by more than one row.") % {"number": jersey_number})
+            seen_jerseys.add(jersey_number)
+
+
+TeamBulkAddFormSet = forms.formset_factory(TeamBulkAddRowForm, formset=BaseTeamBulkAddFormSet, extra=3)
+
+
+class GroupBulkAddRowForm(forms.Form):
+    """One row of the group bulk-add page -- just who. Group membership carries
+    no per-member attributes, so there's nothing else to fill in."""
+
+    member = forms.ModelChoiceField(
+        queryset=Member.objects.none(),
+        label=_("Member"),
+        widget=forms.Select(attrs={"class": "select select-bordered w-full", "data-searchable": "true", "data-search-placeholder": _("Type a name to search...")}),
+    )
+
+    def __init__(self, *args, member_queryset=None, member_choices=None, existing_ids=frozenset(), **kwargs):
+        super().__init__(*args, **kwargs)
+        self.existing_ids = existing_ids
+        self.fields["member"].queryset = member_queryset if member_queryset is not None else Member.objects.none()
+        if member_choices is not None:
+            self.fields["member"].choices = member_choices
+
+    def clean_member(self):
+        member = self.cleaned_data["member"]
+        if member.pk in self.existing_ids:
+            raise forms.ValidationError(_("%(member)s is already in this group.") % {"member": member})
+        return member
+
+
+class BaseGroupBulkAddFormSet(forms.BaseFormSet):
+    def clean(self):
+        super().clean()
+        if any(self.errors):
+            return
+
+        seen = set()
+        for form in self.forms:
+            member = form.cleaned_data.get("member")
+            if member is None:
+                continue
+            if member.pk in seen:
+                form.add_error("member", _("%(member)s is listed twice.") % {"member": member})
+            seen.add(member.pk)
+
+
+GroupBulkAddFormSet = forms.formset_factory(GroupBulkAddRowForm, formset=BaseGroupBulkAddFormSet, extra=3)
+
+
 class PositionForm(forms.ModelForm):
     class Meta:
         model = Position

@@ -1,7 +1,6 @@
 from datetime import timedelta
 from decimal import Decimal
 
-from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import Count, ProtectedError, Q
 from django.http import HttpResponse
@@ -59,6 +58,7 @@ from .forms import (
     ExternalRefereeForm,
     FamilyCreateForm,
     GrantLoginForm,
+    GroupBulkAddFormSet,
     GroupForm,
     LocationForm,
     MemberForm,
@@ -74,9 +74,11 @@ from .forms import (
     RefereeLevelForm,
     SponsorForm,
     StaffAssignmentForm,
+    TeamBulkAddFormSet,
     TeamForm,
     TeamMembershipForm,
     TeamPhotoForm,
+    bulk_add_member_label,
 )
 from .pdf import PDFExportError, event_referee_form_pdf, membership_list_pdf, referee_form_colors
 from .recurrence_ui import describe_rrule
@@ -1091,13 +1093,21 @@ class TeamStaffRemoveView(TeamManagerRequiredMixin, View):
 class TeamBulkAddView(TeamManagerRequiredMixin, View):
     """Add many people to a team's roster and/or staff in one go -- the one-by-one
     modals (TeamRosterAddView / TeamStaffAddView) don't scale past a handful of
-    names. Every eligible member gets an independent "add as player" and "add as
-    staff" pair of controls, so one person can be added as both in a single submit
-    (a playing coach, most often).
+    names.
 
-    Same eligibility rule as the single-add forms (eligible_roster_members: active
-    -- i.e. paid -- for this club this season or next), enforced server-side
-    regardless of what the client submits.
+    One row per assignment: pick a person (searchable), pick a position, and the
+    *position* decides what the row means -- a staff-flagged Position becomes a
+    StaffAssignment, anything else a TeamMembership with an optional jersey
+    number. Someone joining as both a player and staff (a playing coach) is two
+    rows. Rows are added client-side from the formset's ``empty_form``; the
+    earlier layout gave *every* eligible member a table row, which a club with a
+    hundred-plus members can't realistically use.
+
+    All-or-nothing: one bad row re-renders the page with every row the user typed
+    still filled in and the offending field flagged, rather than saving the good
+    rows and silently dropping the rest. Eligibility is recomputed server-side
+    from eligible_roster_members -- a submitted member id that isn't actually
+    eligible fails the field's own queryset lookup, never reaching the database.
     """
 
     template_name = "management/team_bulk_add.html"
@@ -1108,108 +1118,75 @@ class TeamBulkAddView(TeamManagerRequiredMixin, View):
     def get_season(self):
         return get_object_or_404(Season.objects.filter(club=self.request.club), pk=self.kwargs["season_pk"])
 
-    def get_context_data(self, **kwargs):
-        team = self.get_team()
-        season = self.get_season()
+    def get_form_kwargs(self, team, season):
         club = self.request.club
+        rostered_ids = set(TeamMembership.objects.filter(team=team, season=season).values_list("member_id", flat=True))
+        staffed_ids = set(StaffAssignment.objects.filter(team=team, season=season).values_list("member_id", flat=True))
 
+        # Built once here rather than per row: a ModelChoiceField re-runs its own
+        # queryset for every form in the formset, so a twenty-row submit would
+        # otherwise mean twenty full member queries.
         members = eligible_roster_members(club).order_by("last_name", "first_name")
-        search = self.request.GET.get("q", "").strip()
-        if search:
-            members = members.filter(Q(first_name__icontains=search) | Q(last_name__icontains=search))
-
-        rostered = set(TeamMembership.objects.filter(team=team, season=season).values_list("member_id", flat=True))
-        staffed = set(StaffAssignment.objects.filter(team=team, season=season).values_list("member_id", flat=True))
-        members = list(members)
-        for member in members:
-            member.already_player = member.pk in rostered
-            member.already_staff = member.pk in staffed
+        member_choices = [("", "---------")] + [(member.pk, bulk_add_member_label(member, rostered_ids=rostered_ids, staffed_ids=staffed_ids)) for member in members]
 
         return {
+            "club": club,
             "team": team,
             "season": season,
-            "members": members,
-            "search": search,
-            "player_positions": Position.objects.filter(club=club, staff_position=False),
-            "staff_positions": Position.objects.filter(club=club, staff_position=True),
-            **kwargs,
+            "member_choices": member_choices,
+            "position_queryset": Position.objects.filter(club=club),
+            "rostered_ids": rostered_ids,
+            "staffed_ids": staffed_ids,
         }
 
+    def render_form(self, request, team, season, formset):
+        return render(request, self.template_name, {"team": team, "season": season, "formset": formset})
+
     def get(self, request, *args, **kwargs):
-        return render(request, self.template_name, self.get_context_data())
+        team, season = self.get_team(), self.get_season()
+        formset = TeamBulkAddFormSet(form_kwargs=self.get_form_kwargs(team, season))
+        return self.render_form(request, team, season, formset)
 
     def post(self, request, *args, **kwargs):
-        team = self.get_team()
-        season = self.get_season()
-        club = self.request.club
+        team, season = self.get_team(), self.get_season()
+        formset = TeamBulkAddFormSet(request.POST, form_kwargs=self.get_form_kwargs(team, season))
 
-        rostered = set(TeamMembership.objects.filter(team=team, season=season).values_list("member_id", flat=True))
-        staffed = set(StaffAssignment.objects.filter(team=team, season=season).values_list("member_id", flat=True))
-        used_jerseys = set(TeamMembership.objects.filter(team=team, season=season, jersey_number__isnull=False).values_list("jersey_number", flat=True))
-        player_positions = {str(position.pk): position for position in Position.objects.filter(club=club, staff_position=False)}
-        staff_positions = {str(position.pk): position for position in Position.objects.filter(club=club, staff_position=True)}
+        if not formset.is_valid():
+            notify(request, f"e|{_('Could not add')}|{_('Some rows need attention -- see the errors below.')}")
+            return self.render_form(request, team, season, formset)
+
+        rows = [form.cleaned_data for form in formset.forms if form.cleaned_data.get("member") and form.cleaned_data.get("position")]
+        if not rows:
+            notify(request, f"i|{_('Nothing to add')}|{_('No one was selected.')}")
+            return redirect(f"{reverse('management:team_detail', args=[team.pk])}?season={season.pk}")
 
         players_added = staff_added = 0
-        errors = []
-
-        # Recomputed server-side from eligible_roster_members, never from client
-        # input -- a submitted member id that isn't actually eligible (lapsed
-        # between page load and submit, say) is silently skipped rather than
-        # trusted.
-        for member in eligible_roster_members(club):
-            key = str(member.pk)
-
-            if member.pk not in rostered and request.POST.get(f"player_{key}"):
-                position = player_positions.get(request.POST.get(f"player_position_{key}", ""))
-                if position is None:
-                    errors.append(_("%(member)s: choose a position to add them as a player.") % {"member": member})
-                else:
-                    jersey_raw = request.POST.get(f"jersey_{key}", "").strip()
-                    jersey_number, jersey_error = None, False
-                    if jersey_raw:
-                        try:
-                            jersey_number = int(jersey_raw)
-                        except ValueError:
-                            jersey_error = True
-                            errors.append(_("%(member)s: jersey number must be a whole number.") % {"member": member})
-
-                    if not jersey_error:
-                        if jersey_number is not None and jersey_number in used_jerseys:
-                            errors.append(_("%(member)s: jersey #%(number)s is already taken this season.") % {"member": member, "number": jersey_number})
-                        else:
-                            membership = TeamMembership(team=team, season=season, member=member, position=position, jersey_number=jersey_number)
-                            try:
-                                membership.full_clean()
-                                membership.save()
-                            except ValidationError, IntegrityError:
-                                errors.append(_("%(member)s: could not be added as a player -- please check the details and try again.") % {"member": member})
-                            else:
-                                players_added += 1
-                                if jersey_number is not None:
-                                    used_jerseys.add(jersey_number)
-
-            if member.pk not in staffed and request.POST.get(f"staff_{key}"):
-                position = staff_positions.get(request.POST.get(f"staff_position_{key}", ""))
-                if position is None:
-                    errors.append(_("%(member)s: choose a position to add them as staff.") % {"member": member})
-                else:
-                    assignment = StaffAssignment(team=team, season=season, member=member, position=position)
-                    try:
-                        assignment.full_clean()
-                        assignment.save()
-                    except ValidationError, IntegrityError:
-                        errors.append(_("%(member)s: could not be assigned as staff -- please check the details and try again.") % {"member": member})
-                    else:
+        try:
+            with transaction.atomic():
+                for row in rows:
+                    if row["position"].staff_position:
+                        StaffAssignment.objects.create(team=team, season=season, member=row["member"], position=row["position"])
                         staff_added += 1
+                    else:
+                        TeamMembership.objects.create(
+                            team=team,
+                            season=season,
+                            member=row["member"],
+                            position=row["position"],
+                            jersey_number=row.get("jersey_number"),
+                            is_captain=row.get("is_captain", False),
+                            is_alternate_captain=row.get("is_alternate_captain", False),
+                        )
+                        players_added += 1
+        except IntegrityError:
+            # Someone else claimed a jersey number, or added the same person, between
+            # validation and the write. The atomic block means nothing was saved, so
+            # hand the whole form back rather than reporting a half-finished add.
+            notify(request, f"e|{_('Could not add')}|{_('Someone changed this team while you were filling in the form. Nothing was saved -- please check the rows and try again.')}")
+            return self.render_form(request, team, season, formset)
 
-        if players_added or staff_added:
-            body = _("%(players)s added as player(s), %(staff)s added as staff.") % {"players": players_added, "staff": staff_added}
-            notify(request, f"s|{_('Team updated')}|{body}")
-        for error in errors:
-            notify(request, f"e|{_('Could not add')}|{error}")
-        if not players_added and not staff_added and not errors:
-            notify(request, f"i|{_('Nothing to add')}|{_('No one was selected.')}")
-
+        body = _("%(players)s added as player(s), %(staff)s added as staff.") % {"players": players_added, "staff": staff_added}
+        notify(request, f"s|{_('Team updated')}|{body}")
         return redirect(f"{reverse('management:team_detail', args=[team.pk])}?season={season.pk}")
 
 
@@ -1642,46 +1619,47 @@ class GroupDetailView(ClubAdminRequiredMixin, DetailView):
 
 class GroupBulkAddView(ClubAdminRequiredMixin, View):
     """Add many members to a group in one go -- mirrors TeamBulkAddView's
-    checkbox-table pattern, minus the player/staff split (group membership has
-    no per-member attributes)."""
+    searchable-row formset, minus the position/jersey columns (group membership
+    carries no per-member attributes)."""
 
     template_name = "management/group_bulk_add.html"
 
     def get_group(self):
         return get_object_or_404(Group.objects.filter(club=self.request.club), pk=self.kwargs["pk"])
 
-    def get_context_data(self, **kwargs):
-        group = self.get_group()
-        members = members_visible_to(self.request.user, self.request.club).order_by("last_name", "first_name")
-        search = self.request.GET.get("q", "").strip()
-        if search:
-            members = members.filter(Q(first_name__icontains=search) | Q(last_name__icontains=search))
-
+    def get_form_kwargs(self, group):
         existing_ids = set(GroupMembership.objects.filter(group=group).values_list("member_id", flat=True))
-        members = list(members)
-        for member in members:
-            member.already_in_group = member.pk in existing_ids
+        members = members_visible_to(self.request.user, self.request.club).order_by("last_name", "first_name")
+        # One member query for the whole formset -- see TeamBulkAddView.get_form_kwargs.
+        member_choices = [("", "---------")] + [(member.pk, _("%(member)s — already in this group") % {"member": member} if member.pk in existing_ids else str(member)) for member in members]
 
-        return {"group": group, "members": members, "search": search, **kwargs}
+        return {"member_queryset": members, "member_choices": member_choices, "existing_ids": existing_ids}
+
+    def render_form(self, request, group, formset):
+        return render(request, self.template_name, {"group": group, "formset": formset})
 
     def get(self, request, *args, **kwargs):
-        return render(request, self.template_name, self.get_context_data())
+        group = self.get_group()
+        formset = GroupBulkAddFormSet(form_kwargs=self.get_form_kwargs(group))
+        return self.render_form(request, group, formset)
 
     def post(self, request, *args, **kwargs):
         group = self.get_group()
-        existing_ids = set(GroupMembership.objects.filter(group=group).values_list("member_id", flat=True))
+        formset = GroupBulkAddFormSet(request.POST, form_kwargs=self.get_form_kwargs(group))
 
-        added = 0
-        for member in members_visible_to(request.user, request.club):
-            if member.pk not in existing_ids and request.POST.get(f"member_{member.pk}"):
-                GroupMembership.objects.create(group=group, member=member)
-                added += 1
+        if not formset.is_valid():
+            notify(request, f"e|{_('Could not add')}|{_('Some rows need attention -- see the errors below.')}")
+            return self.render_form(request, group, formset)
 
-        if added:
-            notify(request, f"s|{_('Group updated')}|" + _("%(count)s member(s) added to “%(group)s”.") % {"count": added, "group": group})
-        else:
+        members = [form.cleaned_data["member"] for form in formset.forms if form.cleaned_data.get("member")]
+        if not members:
             notify(request, f"i|{_('Nothing to add')}|{_('No one was selected.')}")
+            return redirect("management:group_detail", pk=group.pk)
 
+        with transaction.atomic():
+            GroupMembership.objects.bulk_create([GroupMembership(group=group, member=member) for member in members])
+
+        notify(request, f"s|{_('Group updated')}|" + _("%(count)s member(s) added to “%(group)s”.") % {"count": len(members), "group": group})
         return redirect("management:group_detail", pk=group.pk)
 
 

@@ -1,0 +1,32 @@
+{% load i18n lucide %}
+{% comment %}
+    One row of the team bulk-add formset. Rendered both for the rows already in
+    the formset and (with __prefix__ placeholders) into the <template> the "Add
+    row" button clones from -- so the two can never drift apart.
+{% endcomment %}
+<tr class="bulk-add-row">
+    <td>
+        {{ form.member }}
+        {% for error in form.member.errors %}<p class="text-xs text-error mt-1">{{ error }}</p>{% endfor %}
+        {% for error in form.non_field_errors %}<p class="text-xs text-error mt-1">{{ error }}</p>{% endfor %}
+    </td>
+    <td>
+        {{ form.position }}
+        {% for error in form.position.errors %}<p class="text-xs text-error mt-1">{{ error }}</p>{% endfor %}
+    </td>
+    <td class="w-24">
+        {{ form.jersey_number }}
+        {% for error in form.jersey_number.errors %}<p class="text-xs text-error mt-1">{{ error }}</p>{% endfor %}
+    </td>
+    <td class="w-16 text-center">
+        {{ form.is_captain }}
+        {% for error in form.is_captain.errors %}<p class="text-xs text-error mt-1">{{ error }}</p>{% endfor %}
+    </td>
+    <td class="w-16 text-center">
+        {{ form.is_alternate_captain }}
+        {% for error in form.is_alternate_captain.errors %}<p class="text-xs text-error mt-1">{{ error }}</p>{% endfor %}
+    </td>
+    <td class="w-12">
+        <button class="btn btn-ghost btn-sm remove-row" type="button" aria-label="{% trans 'Remove this row' %}" title="{% trans 'Remove this row' %}">{% lucide "x" size=16 %}</button>
+    </td>
+</tr>

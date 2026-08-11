@@ -1,98 +1,56 @@
 {% extends "management/base.html" %}
-{% load i18n lucide %}
+{% load i18n lucide static %}
 
 {% block heading %}{% trans "Add multiple people" %}{% endblock heading %}
 {% block subheading %}{{ team.name }}{% endblock subheading %}
 
 {% block panel %}
-    <form method="get" class="mb-4">
-        <div class="flex flex-row items-center gap-2">
-            <label class="input">
-                <span class="opacity-50">{% lucide "search" size=16 %}</span>
-                <input type="search" name="q" value="{{ search }}" placeholder="{% trans 'Search members ...' %}" class="input input-bordered">
-            </label>
-            <button class="btn btn-outline gap-2" type="submit">{% lucide "filter" size=16 %} {% trans "Filter" %}</button>
-        </div>
-    </form>
-
     <form method="post">
         {% csrf_token %}
+        {{ formset.management_form }}
 
         <div class="card bg-base-100 shadow">
             <div class="card-body">
-                <div class="flex items-center justify-between mb-2">
-                    <span class="text-sm opacity-70 font-semibold">
-                        {% blocktrans count counter=members|length %}{{ counter }} eligible member{% plural %}{{ counter }} eligible members{% endblocktrans %}
-                    </span>
-                    <button class="btn btn-primary btn-sm gap-2" type="submit">{% lucide "users" size=14 %} {% trans "Add selected" %}</button>
-                </div>
                 <p class="text-sm opacity-70 mb-2">
-                    {% blocktrans %}Only members who are active (paid up) for this club this season or next are eligible. Tick "Player" and/or "Staff" for anyone you want to add -- both at once works too (a playing coach, say).{% endblocktrans %}
+                    {% blocktrans %}Only members who are active (paid up) for this club this season or next can be added. The position you pick decides the role: a staff position adds them to the staff, any other position adds them to the roster. To add someone as both a player and staff, give them two rows.{% endblocktrans %}
                 </p>
 
-                <div class="overflow-x-auto">
-                    <table class="table">
-                        <thead>
-                            <tr>
-                                <th>{% trans "Member" %}</th>
-                                <th>{% trans "Player" %}</th>
-                                <th>{% trans "Position" %}</th>
-                                <th>{% trans "Jersey #" %}</th>
-                                <th>{% trans "Staff" %}</th>
-                                <th>{% trans "Position" %}</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for member in members %}
-                                <tr>
-                                    <td>{{ member }}</td>
-                                    <td>
-                                        {% if member.already_player %}
-                                            <span class="badge badge-neutral badge-sm">{% trans "On roster" %}</span>
-                                        {% else %}
-                                            <input type="checkbox" class="checkbox player-checkbox" name="player_{{ member.pk }}" data-member="{{ member.pk }}">
-                                        {% endif %}
-                                    </td>
-                                    <td>
-                                        {% if not member.already_player %}
-                                            <select name="player_position_{{ member.pk }}" class="select select-bordered select-sm player-position" data-member="{{ member.pk }}" disabled>
-                                                <option value="">{% trans "—" %}</option>
-                                                {% for position in player_positions %}
-                                                    <option value="{{ position.pk }}">{{ position.name }}</option>
-                                                {% endfor %}
-                                            </select>
-                                        {% endif %}
-                                    </td>
-                                    <td>
-                                        {% if not member.already_player %}
-                                            <input type="number" min="0" name="jersey_{{ member.pk }}" class="input input-bordered input-sm w-20 player-jersey" data-member="{{ member.pk }}" disabled>
-                                        {% endif %}
-                                    </td>
-                                    <td>
-                                        {% if member.already_staff %}
-                                            <span class="badge badge-neutral badge-sm">{% trans "On staff" %}</span>
-                                        {% else %}
-                                            <input type="checkbox" class="checkbox staff-checkbox" name="staff_{{ member.pk }}" data-member="{{ member.pk }}">
-                                        {% endif %}
-                                    </td>
-                                    <td>
-                                        {% if not member.already_staff %}
-                                            <select name="staff_position_{{ member.pk }}" class="select select-bordered select-sm staff-position" data-member="{{ member.pk }}" disabled>
-                                                <option value="">{% trans "—" %}</option>
-                                                {% for position in staff_positions %}
-                                                    <option value="{{ position.pk }}">{{ position.name }}</option>
-                                                {% endfor %}
-                                            </select>
-                                        {% endif %}
-                                    </td>
-                                </tr>
-                            {% empty %}
-                                <tr>
-                                    <td colspan="6" class="text-center opacity-60">{% trans "No eligible members match this search." %}</td>
-                                </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
+                {% for error in formset.non_form_errors %}
+                    <div class="alert alert-error my-2">
+                        <span>{{ error }}</span>
+                    </div>
+                {% endfor %}
+
+                {% comment %}
+                    Deliberately not wrapped in the usual overflow-x-auto: that makes a
+                    scroll container, which clips the member picker's absolutely
+                    positioned dropdown for every row but the first couple.
+                {% endcomment %}
+                <table class="table w-full">
+                    <thead>
+                        <tr>
+                            <th>{% trans "Member" %}</th>
+                            <th>{% trans "Position" %}</th>
+                            <th>{% trans "Jersey #" %}</th>
+                            <th class="text-center">{% trans "Captain" %}</th>
+                            <th class="text-center">{% trans "Alternate" %}</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody id="bulk-add-rows" data-prefix="{{ formset.prefix }}">
+                        {% for form in formset %}
+                            {% include "management/_team_bulk_add_row.html" with form=form %}
+                        {% endfor %}
+                    </tbody>
+                </table>
+
+                <template id="bulk-add-row-template">
+                    {% include "management/_team_bulk_add_row.html" with form=formset.empty_form %}
+                </template>
+
+                <div class="flex flex-wrap items-center gap-2 mt-2">
+                    <button class="btn btn-outline btn-sm gap-2" type="button" id="add-row">{% lucide "plus" size=14 %} {% trans "Add another row" %}</button>
+                    <button class="btn btn-primary btn-sm gap-2" type="submit">{% lucide "users" size=14 %} {% trans "Add to team" %}</button>
                 </div>
             </div>
         </div>
@@ -104,22 +62,6 @@
 {% endblock panel %}
 
 {% block extra_body %}
-    <script>
-        (() => {
-            const pairs = [
-                {checkboxClass: "player-checkbox", fieldClasses: ["player-position", "player-jersey"]},
-                {checkboxClass: "staff-checkbox", fieldClasses: ["staff-position"]},
-            ];
-
-            pairs.forEach(({checkboxClass, fieldClasses}) => {
-                document.querySelectorAll(`.${checkboxClass}`).forEach((checkbox) => {
-                    const memberId = checkbox.dataset.member;
-                    const fields = fieldClasses.flatMap((cls) => Array.from(document.querySelectorAll(`.${cls}[data-member="${memberId}"]`)));
-                    checkbox.addEventListener("change", () => {
-                        fields.forEach((field) => { field.disabled = !checkbox.checked; });
-                    });
-                });
-            });
-        })();
-    </script>
+    <script src="{% static 'js/searchable-select.js' %}"></script>
+    <script src="{% static 'js/bulk-add-rows.js' %}"></script>
 {% endblock extra_body %}

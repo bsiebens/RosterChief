@@ -1,0 +1,15 @@
+{% load i18n lucide %}
+{% comment %}
+    One row of the group bulk-add formset -- see _team_bulk_add_row.html for why
+    this is a partial (rendered both for real rows and into the clone template).
+{% endcomment %}
+<tr class="bulk-add-row">
+    <td>
+        {{ form.member }}
+        {% for error in form.member.errors %}<p class="text-xs text-error mt-1">{{ error }}</p>{% endfor %}
+        {% for error in form.non_field_errors %}<p class="text-xs text-error mt-1">{{ error }}</p>{% endfor %}
+    </td>
+    <td class="w-12">
+        <button class="btn btn-ghost btn-sm remove-row" type="button" aria-label="{% trans 'Remove this row' %}" title="{% trans 'Remove this row' %}">{% lucide "x" size=16 %}</button>
+    </td>
+</tr>

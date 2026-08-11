@@ -456,6 +456,32 @@ number — modeled by `TeamMembership`, exactly matching the domain note.
   extra tenancy field is needed on the constraint.
 - `StaffAssignment` drives the coach/manager object-scope (§3.1–3.2) — it *is* the "is a
   coach of this team" fact; no `ClubRole` mirrors it.
+- **Bulk add is a row formset, not a table of every member** (`TeamBulkAddView`, and the same
+  shape for groups in `GroupBulkAddView`). Each row picks one person from a searchable select
+  and one `Position`; the *position* decides what the row means — `Position.staff_position`
+  true ⇒ a `StaffAssignment`, otherwise a `TeamMembership` with an optional jersey number and
+  captain/alternate-captain flags — so there's no separate "player or staff?" control that
+  could disagree with the position picked. Jersey number and captaincy exist only on
+  `TeamMembership`, so a staff row rejects them (and the row script greys them out, keyed off
+  the `data-staff` marker `PositionSelect` stamps on staff options). Captain *and* alternate
+  captain on one row is refused as self-contradictory, but how many captains a team may have
+  is left alone: neither the model nor the single-add form constrains it, and inventing the
+  rule in one entry path only would be worse than not having it.
+  A playing coach is simply two rows. Rows are cloned client-side from the formset's
+  `empty_form` (`static/js/bulk-add-rows.js`); removing one deletes the node and deliberately
+  leaves `TOTAL_FORMS` alone, since Django reads a form whose fields are absent from the POST
+  as an unchanged extra and skips it — safe, unlike re-indexing live inputs. The earlier
+  design rendered *every* eligible member as a table row, which a club with a hundred-plus
+  members can't use, and its search was a GET round-trip that discarded anything already
+  ticked. **All-or-nothing on submit**: one bad row re-renders the page with every row still
+  filled in and the offending field flagged, rather than saving the good rows and losing the
+  rest (a partial save is far more costly when the rows were typed by hand). Cross-row checks
+  no single row can see — the same person twice, two rows claiming one jersey — live on the
+  formset's `clean()`; per-row checks (already assigned, jersey already taken by an existing
+  entry) live on the row form. Eligibility is never trusted from the POST: the member field's
+  queryset is `eligible_roster_members`, so an id that was never offered fails its own lookup.
+  The member `choices` are built once in the view and assigned onto each row's field —
+  a `ModelChoiceField` otherwise re-runs its queryset per form, i.e. once per row.
 
 **As built, `Team` also carries `referee_management`** (`TextChoices`: `club` | `federation`,
 default `club`) — whether the *club* arranges referees for this team's home games, or the

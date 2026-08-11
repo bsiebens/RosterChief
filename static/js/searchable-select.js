@@ -11,6 +11,12 @@
  */
 (() => {
     function enhance(select) {
+        // Rows added after page load (see team_bulk_add.html) are enhanced on
+        // demand via window.enhanceSearchableSelect, so a select can be handed
+        // here twice -- without this it would grow a second search input.
+        if (select.dataset.searchableReady === "1") return;
+        select.dataset.searchableReady = "1";
+
         const isMultiple = select.multiple;
         const options = Array.from(select.options).filter((option) => option.value !== "");
 
@@ -152,6 +158,11 @@
             if (selected) input.value = selected.text;
         }
     }
+
+    // Exposed for forms that clone new rows in after this initial sweep has run
+    // (the bulk-add pages) -- the sweep below only ever sees what's already in
+    // the DOM, and a <template>'s inert content is deliberately not matched.
+    window.enhanceSearchableSelect = enhance;
 
     document.querySelectorAll("select[data-searchable]").forEach(enhance);
 })();
