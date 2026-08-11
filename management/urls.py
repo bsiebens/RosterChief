@@ -24,6 +24,7 @@ urlpatterns = [
     path("members/<uuid:pk>/grant-login/", views.MemberGrantLoginView.as_view(), name="member_grant_login"),
     path("members/<uuid:pk>/referee-eligibility/", views.MemberRefereeEligibilityUpdateView.as_view(), name="member_referee_eligibility_update"),
     path("members/<uuid:pk>/detach-family/<uuid:family_pk>/", views.MemberDetachFromFamilyView.as_view(), name="member_detach_family"),
+    path("families/", views.FamilyListView.as_view(), name="family_list"),
     path("families/new/", views.FamilyCreateView.as_view(), name="family_create"),
     path("families/<uuid:pk>/", views.FamilyDetailView.as_view(), name="family_detail"),
     path("families/<uuid:pk>/add-child/", views.FamilyAddChildView.as_view(), name="family_add_child"),

@@ -1,0 +1,32 @@
+{% load i18n lucide %}
+
+{% comment %}
+    Shared pager for every paginated management list (see paginate_by on
+    MemberListView/EventListView/TeamListView/GroupListView/NewsListView/
+    FamilyListView) -- {% include %} this once rather than duplicating prev/next
+    markup per template. Expects the standard ListView pagination context
+    (page_obj/paginator/is_paginated); renders nothing on an unpaginated page.
+
+    {% querystring %} (built-in since Django 5.1) rebuilds the current query
+    string with just `page` overridden, so an active ?q=/?kind=/?season= filter
+    survives a page link instead of being dropped.
+{% endcomment %}
+{% if is_paginated %}
+    <div class="mt-4 flex flex-wrap items-center justify-between gap-2">
+        <span class="text-sm opacity-60">
+            {% blocktrans with number=page_obj.number total=paginator.num_pages %}Page {{ number }} of {{ total }}{% endblocktrans %}
+        </span>
+        <div class="join">
+            {% if page_obj.has_previous %}
+                <a href="{% querystring page=page_obj.previous_page_number %}" class="btn btn-sm join-item">{% lucide "chevron-left" size=14 %} {% trans "Previous" %}</a>
+            {% else %}
+                <span class="btn btn-sm join-item btn-disabled">{% lucide "chevron-left" size=14 %} {% trans "Previous" %}</span>
+            {% endif %}
+            {% if page_obj.has_next %}
+                <a href="{% querystring page=page_obj.next_page_number %}" class="btn btn-sm join-item">{% trans "Next" %} {% lucide "chevron-right" size=14 %}</a>
+            {% else %}
+                <span class="btn btn-sm join-item btn-disabled">{% trans "Next" %} {% lucide "chevron-right" size=14 %}</span>
+            {% endif %}
+        </div>
+    </div>
+{% endif %}

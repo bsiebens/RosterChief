@@ -13,16 +13,34 @@
 {% endblock actions %}
 
 {% block panel %}
-    <form method="get" class="mb-4 flex gap-2">
+    <form method="get" class="mb-2 flex flex-wrap items-center gap-2">
         <label class="input">
             <span class="opacity-50">{% lucide "search" size=16 %}</span>
             <input type="search" name="q" value="{{ search }}" placeholder="{% trans 'Search members ...' %}" class="input input-bordered w-full max-w-xs">
         </label>
+        {% if selected_kind != "member" %}<input type="hidden" name="kind" value="{{ selected_kind }}">{% endif %}
         <button class="btn btn-outline gap-2" type="submit">{% lucide "search" size=16 %} {% trans "Search" %}</button>
         {% if search %}
             <a class="btn gap-2" href="{% url "management:member_list" %}">{% lucide "x" size=16 %} {% trans "Clear filter" %}</a>
         {% endif %}
     </form>
+
+    {% comment %}
+        Guardians -- parents attached to the club only through a child -- have no
+        fee and aren't counted as members, so members_visible_to() leaves them out
+        of the default list entirely. Without this filter that's silent: a parent
+        just registered via "Add family"/"Add parent" simply doesn't appear here,
+        with nothing on the page explaining why. ?kind= makes the exclusion an
+        explicit, reversible choice instead.
+    {% endcomment %}
+    <div class="mb-4 flex flex-wrap items-center gap-2">
+        <div class="join">
+            <a href="{% querystring kind=None page=None %}" class="btn btn-sm join-item {% if selected_kind == "member" %}btn-primary{% endif %}">{% trans "Members" %}</a>
+            <a href="{% querystring kind="guardian" page=None %}" class="btn btn-sm join-item {% if selected_kind == "guardian" %}btn-primary{% endif %}">{% trans "Guardians" %}</a>
+            <a href="{% querystring kind="both" page=None %}" class="btn btn-sm join-item {% if selected_kind == "both" %}btn-primary{% endif %}">{% trans "Both" %}</a>
+        </div>
+        <span class="text-xs opacity-60">{% trans "Guardians are parents linked only through a child -- no fee, not counted as a member." %}</span>
+    </div>
 
     <div class="card bg-base-100 shadow">
         <div class="card-body">
@@ -89,6 +107,8 @@
             </div>
         </div>
     </div>
+
+    {% include "management/_pagination.html" %}
 
     {% if is_club_admin %}
         {% trans "Delete member" as delete_member_title %}

@@ -43,6 +43,8 @@
         </div>
     </div>
 
+    {% include "management/_pagination.html" %}
+
     {% trans "Delete group" as delete_group_title %}
     {% trans "Delete" as delete_label %}
     {% for group in groups %}

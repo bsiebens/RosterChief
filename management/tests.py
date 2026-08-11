@@ -3848,7 +3848,10 @@ class TeamListCountsTests(ManagementTestBase):
 
         response = self.club_get("team_list")
 
-        team = response.context["teams"].get(pk=self.team.pk)
+        # Not .get(pk=...): the team list is now paginated, and a Page's
+        # object_list is a sliced queryset -- Django refuses to .filter()/.get()
+        # a queryset once it's been sliced.
+        team = next(t for t in response.context["teams"] if t.pk == self.team.pk)
         self.assertEqual(team.player_count, 2)
         self.assertEqual(team.staff_count, 1)
 
@@ -3859,7 +3862,7 @@ class TeamListCountsTests(ManagementTestBase):
 
         response = self.club_get("team_list")
 
-        team = response.context["teams"].get(pk=self.team.pk)
+        team = next(t for t in response.context["teams"] if t.pk == self.team.pk)
         self.assertEqual(team.player_count, 0)
 
 
@@ -5743,3 +5746,279 @@ class RBIHFImportViewTests(ManagementTestBase):
 
         self.assertContains(response, "already up to date")
         self.assertEqual(Event.objects.filter(club=self.club, external_game_id="5002").count(), 1)
+
+
+class MemberListKindFilterTests(ManagementTestBase):
+    """?kind= on the member list -- see MemberListView.get_queryset. "member"
+    (the default) matches the page's original guardian-excluding behaviour;
+    "guardian" and "both" turn that exclusion into an explicit, reversible
+    choice instead of a parent silently disappearing after being registered."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.family = Family.objects.create()
+        cls.parent = Member.objects.create(first_name="Pat", last_name="Guardian")
+        cls.child = Member.objects.create(first_name="Cody", last_name="Kid")
+        FamilyMembership.objects.create(family=cls.family, member=cls.parent, role=FamilyMembership.FamilyRole.PARENT)
+        FamilyMembership.objects.create(family=cls.family, member=cls.child, role=FamilyMembership.FamilyRole.CHILD)
+        ClubMembership.objects.create(club=cls.club, member=cls.parent, season=cls.season, kind=ClubMembership.Kind.GUARDIAN, status=ClubMembership.StatusChoices.ACTIVE)
+        ClubMembership.objects.create(club=cls.club, member=cls.child, season=cls.season, kind=ClubMembership.Kind.MEMBER, status=ClubMembership.StatusChoices.ACTIVE)
+
+    def setUp(self):
+        super().setUp()
+        self.client.force_login(self.admin_user)
+
+    def get(self, kind=None):
+        url = reverse("management:member_list")
+        if kind is not None:
+            url += f"?kind={kind}"
+        return self.client.get(url, HTTP_HOST="ajax-united.rosterchief.app")
+
+    def test_default_excludes_the_guardian(self):
+        response = self.get()
+
+        self.assertContains(response, "Cody Kid")
+        self.assertNotContains(response, "Pat Guardian")
+        self.assertEqual(response.context["selected_kind"], "member")
+
+    def test_kind_guardian_shows_only_the_guardian(self):
+        response = self.get("guardian")
+
+        self.assertContains(response, "Pat Guardian")
+        self.assertNotContains(response, "Cody Kid")
+
+    def test_kind_both_shows_everyone(self):
+        response = self.get("both")
+
+        self.assertContains(response, "Pat Guardian")
+        self.assertContains(response, "Cody Kid")
+
+    def test_an_unrecognised_kind_falls_back_to_the_default(self):
+        response = self.get("bogus")
+
+        self.assertNotContains(response, "Pat Guardian")
+        self.assertEqual(response.context["selected_kind"], "member")
+
+    def test_a_non_admins_guardian_view_stays_within_their_own_visibility(self):
+        # _guardians_only(club) is club-wide -- it's intersected with
+        # members_visible_to() so a non-admin only ever sees guardians of
+        # someone already visible to them, never every guardian in the club.
+        coach_user = User.objects.create_user(email="coach-kind@example.com", password="pw-secret-123")
+        coach_member = Member.objects.create(user=coach_user, first_name="Cara", last_name="Coach")
+        team = Team.objects.create(club=self.club, name="U9", short_name="U9")
+        position = Position.objects.create(club=self.club, name="Coach-kind", short_name="CK", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=team, member=coach_member, season=self.season, position=position)
+        self.client.force_login(coach_user)
+
+        response = self.get("both")
+
+        self.assertNotContains(response, "Pat Guardian")
+
+
+class FamilyListViewTests(ManagementTestBase):
+    """The dedicated Families page -- one row per family, parents/guardians and
+    children in separate columns, with the family name and a per-row "Edit"
+    action both landing on family_detail (the same overview-page convention
+    the Groups list uses for its own Edit button, not a standalone form)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.family = Family.objects.create(name="The Smiths")
+        cls.parent = Member.objects.create(first_name="Pat", last_name="Smith")
+        cls.child = Member.objects.create(first_name="Cody", last_name="Smith")
+        FamilyMembership.objects.create(family=cls.family, member=cls.parent, role=FamilyMembership.FamilyRole.PARENT)
+        FamilyMembership.objects.create(family=cls.family, member=cls.child, role=FamilyMembership.FamilyRole.CHILD)
+        ClubMembership.objects.create(club=cls.club, member=cls.parent, season=cls.season, kind=ClubMembership.Kind.GUARDIAN, status=ClubMembership.StatusChoices.ACTIVE)
+        ClubMembership.objects.create(club=cls.club, member=cls.child, season=cls.season, kind=ClubMembership.Kind.MEMBER, status=ClubMembership.StatusChoices.ACTIVE)
+
+    def setUp(self):
+        super().setUp()
+        self.client.force_login(self.admin_user)
+
+    def test_lists_the_family_with_parents_and_children_columns(self):
+        response = self.club_get("family_list")
+
+        self.assertContains(response, "The Smiths")
+        self.assertContains(response, "Pat Smith")
+        self.assertContains(response, "Cody Smith")
+
+    def test_the_family_name_and_edit_action_both_link_to_family_detail(self):
+        response = self.club_get("family_list")
+
+        detail_url = reverse("management:family_detail", args=[self.family.pk])
+        self.assertContains(response, f'href="{detail_url}"', count=2)
+
+    def test_a_family_from_another_club_is_excluded(self):
+        other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
+        other_season = make_season(other_club)
+        other_family = Family.objects.create()
+        other_member = Member.objects.create(first_name="Other", last_name="Kid")
+        ClubMembership.objects.create(club=other_club, member=other_member, season=other_season, status=ClubMembership.StatusChoices.ACTIVE)
+        FamilyMembership.objects.create(family=other_family, member=other_member, role=FamilyMembership.FamilyRole.CHILD)
+
+        response = self.club_get("family_list")
+
+        self.assertNotContains(response, "Other Kid")
+
+    def test_the_families_nav_link_is_reachable(self):
+        response = self.club_get("home")
+
+        self.assertContains(response, reverse("management:family_list"))
+
+    def test_a_non_admin_only_sees_families_they_have_a_reason_to(self):
+        # Same visibility rule as FamilyDetailView: a coach with no tie to this
+        # family shouldn't learn it exists just by opening the Families list.
+        coach_user = User.objects.create_user(email="coach-fam@example.com", password="pw-secret-123")
+        coach_member = Member.objects.create(user=coach_user, first_name="Cara", last_name="Coach")
+        team = Team.objects.create(club=self.club, name="U11", short_name="U11")
+        position = Position.objects.create(club=self.club, name="Coach-fam", short_name="CF", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=team, member=coach_member, season=self.season, position=position)
+        self.client.force_login(coach_user)
+
+        response = self.club_get("family_list")
+
+        self.assertNotContains(response, "The Smiths")
+
+
+class SidebarCounterTests(ManagementTestBase):
+    """The nav's two admin-only badges -- pending parent claims, and upcoming
+    club-managed games nobody's down to referee yet. See
+    management.context_processors.sidebar_counters."""
+
+    def make_pending_claim(self):
+        return ParentClaim.objects.create(
+            club=self.club,
+            parent_first_name="Pat",
+            parent_last_name="Parent",
+            parent_email="pat-claim@example.com",
+            child_first_name="Cody",
+            child_last_name="Child",
+            child_date_of_birth=datetime.date(2015, 1, 1),
+        )
+
+    def make_home_game(self, referee=None):
+        team = Team.objects.create(club=self.club, name="First Team", short_name="1st")
+        home_ground = Location.objects.create(club=self.club, name="Home Ground", address="1 St", city="Town", zip_code="1000", country="BE", is_home=True)
+        event = Event.objects.create(club=self.club, title="Cup game", kind=Event.EventKind.GAME, location=home_ground, start=timezone.now() + datetime.timedelta(days=1))
+        event.teams.add(team)
+        if referee is not None:
+            EventReferee.objects.create(event=event, member=referee, assigned_by=self.admin_member)
+        return event
+
+    def test_zero_is_shown_explicitly_when_nothing_is_pending(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("home")
+
+        self.assertEqual(response.context["pending_parent_claims_count"], 0)
+        self.assertEqual(response.context["games_missing_referees_count"], 0)
+
+    def test_counts_reflect_a_pending_claim_and_an_unrefereed_game(self):
+        self.make_pending_claim()
+        self.make_home_game()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("home")
+
+        self.assertEqual(response.context["pending_parent_claims_count"], 1)
+        self.assertEqual(response.context["games_missing_referees_count"], 1)
+
+    def test_a_refereed_game_does_not_count(self):
+        referee = Member.objects.create(first_name="Ref", last_name="Eree")
+        ClubMembership.objects.create(club=self.club, member=referee, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        self.make_home_game(referee=referee)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("home")
+
+        self.assertEqual(response.context["games_missing_referees_count"], 0)
+
+    def test_an_already_reviewed_claim_does_not_count(self):
+        claim = self.make_pending_claim()
+        claim.status = ParentClaim.Status.APPROVED
+        claim.save(update_fields=["status"])
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("home")
+
+        self.assertEqual(response.context["pending_parent_claims_count"], 0)
+
+    def test_a_non_admin_gets_no_counters_and_no_badge_links(self):
+        coach_user = User.objects.create_user(email="coach-badge@example.com", password="pw-secret-123")
+        coach_member = Member.objects.create(user=coach_user, first_name="Cara", last_name="Coach")
+        team = Team.objects.create(club=self.club, name="U10", short_name="U10")
+        position = Position.objects.create(club=self.club, name="Coach-badge", short_name="CB", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=team, member=coach_member, season=self.season, position=position)
+        self.client.force_login(coach_user)
+
+        response = self.club_get("home")
+
+        self.assertIsNone(response.context["pending_parent_claims_count"])
+        self.assertIsNone(response.context["games_missing_referees_count"])
+        self.assertNotContains(response, reverse("management:parent_claim_list"))
+        self.assertNotContains(response, reverse("management:referee_management"))
+
+
+class ManagementListPaginationTests(ManagementTestBase):
+    """paginate_by on the six paginated lists (MemberListView/EventListView/
+    TeamListView/GroupListView/NewsListView/FamilyListView) and the shared
+    management/_pagination.html pager. Exercised with a patched-down page size
+    rather than dozens of fixture rows."""
+
+    def setUp(self):
+        super().setUp()
+        self.client.force_login(self.admin_user)
+
+    def make_members(self, count, last_name="Match"):
+        members = []
+        for i in range(count):
+            member = Member.objects.create(first_name=f"Search{i}", last_name=last_name)
+            ClubMembership.objects.create(club=self.club, member=member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+            members.append(member)
+        return members
+
+    def test_page_2_shows_different_rows_than_page_1(self):
+        self.make_members(5)
+
+        with mock.patch("management.views.MemberListView.paginate_by", 2):
+            page1 = self.client.get(reverse("management:member_list") + "?q=Match", HTTP_HOST="ajax-united.rosterchief.app")
+            page2 = self.client.get(reverse("management:member_list") + "?q=Match&page=2", HTTP_HOST="ajax-united.rosterchief.app")
+
+        page1_ids = {member.pk for member in page1.context["members"]}
+        page2_ids = {member.pk for member in page2.context["members"]}
+        self.assertEqual(len(page1_ids), 2)
+        self.assertEqual(len(page2_ids), 2)
+        self.assertEqual(page1_ids & page2_ids, set())
+
+    def test_a_pagination_link_preserves_the_search_query_string(self):
+        self.make_members(5)
+
+        with mock.patch("management.views.MemberListView.paginate_by", 2):
+            response = self.client.get(reverse("management:member_list") + "?q=Match", HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, "q=Match&amp;page=2")
+
+    def test_family_list_pagination_is_wired_and_shows_a_page_count(self):
+        for i in range(3):
+            family = Family.objects.create()
+            member = Member.objects.create(first_name=f"Fam{i}", last_name="Ily")
+            FamilyMembership.objects.create(family=family, member=member, role=FamilyMembership.FamilyRole.CHILD)
+            ClubMembership.objects.create(club=self.club, member=member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+
+        with mock.patch("management.views.FamilyListView.paginate_by", 2):
+            response = self.club_get("family_list")
+
+        self.assertTrue(response.context["is_paginated"])
+        self.assertContains(response, "Page 1 of 2")
+
+    def test_event_team_group_news_lists_are_all_wired_for_pagination(self):
+        # A lighter "is it wired" check for the remaining four -- MemberListView
+        # and FamilyListView above already cover the actual pager mechanics
+        # (page split + query-string preservation), which is shared markup
+        # (_pagination.html) and shared ListView machinery (paginate_by), not
+        # something that differs meaningfully per view.
+        for name in ["event_list", "team_list", "group_list", "news_list"]:
+            response = self.club_get(name)
+            self.assertIsNotNone(response.context["paginator"], name)

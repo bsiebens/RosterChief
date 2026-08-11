@@ -64,6 +64,8 @@
         </div>
     </div>
 
+    {% include "management/_pagination.html" %}
+
     {% trans "Delete news item" as delete_news_title %}
     {% trans "Delete" as delete_label %}
     {% for news_item in news_items %}
