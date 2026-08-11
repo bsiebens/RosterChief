@@ -29,6 +29,7 @@ class Team(ClubScopedModel):
         constraints = [
             models.UniqueConstraint(fields=["club", "name"], name="unique_team_name_per_club"),
         ]
+        ordering = ["name"]
 
     def __str__(self):
         return self.name

@@ -335,6 +335,12 @@ LOGGING = {
 # DEFAULT rather than the dev-only branch -- a deployment that forgets to configure mail
 # should print billing reminders to the log, not raise ConnectionRefused against localhost:25
 # on a box with no MTA, which is what Django's own default does.
+#
+# Resend (resend.com) works either way: point DJANGO_EMAIL_BACKEND at Django's own SMTP
+# backend with Resend's SMTP relay credentials, or set it to rosterchief.mail.ResendEmailBackend
+# to send through Resend's HTTP API instead (see that module) -- set RESEND_API_KEY either way.
+# Every Django-sent email (allauth's password reset included, since it goes through
+# django.core.mail like everything else) follows whichever backend is configured here.
 EMAIL_BACKEND = config("DJANGO_EMAIL_BACKEND", default="django.core.mail.backends.console.EmailBackend")
 EMAIL_HOST = config("DJANGO_EMAIL_HOST", default="")
 EMAIL_PORT = config("DJANGO_EMAIL_PORT", default=587, cast=int)
@@ -343,6 +349,10 @@ EMAIL_HOST_PASSWORD = config("DJANGO_EMAIL_HOST_PASSWORD", default="")
 EMAIL_USE_TLS = config("DJANGO_EMAIL_USE_TLS", default=True, cast=bool)
 EMAIL_USE_SSL = config("DJANGO_EMAIL_USE_SSL", default=False, cast=bool)
 EMAIL_TIMEOUT = config("DJANGO_EMAIL_TIMEOUT", default=10, cast=int)
+
+#: Only read by rosterchief.mail.ResendEmailBackend -- irrelevant for the SMTP backend
+#: (which would use EMAIL_HOST_PASSWORD, e.g. Resend's own SMTP relay, instead).
+RESEND_API_KEY = config("RESEND_API_KEY", default="")
 
 DEFAULT_FROM_EMAIL = config("DJANGO_DEFAULT_FROM_EMAIL", default="RosterChief <noreply@rosterchief.app>")
 SERVER_EMAIL = config("DJANGO_SERVER_EMAIL", default=DEFAULT_FROM_EMAIL)

@@ -26,7 +26,7 @@ from club.mixins import (
     TeamManagerRequiredMixin,
 )
 from club.models import ClubMembership, ClubRole, Season, Sponsor
-from club.services.access import can_edit_news, can_publish_news, current_season, is_club_admin, members_visible_to, teams_managed_by, teams_staffed_by
+from club.services.access import can_edit_news, can_publish_news, current_season, groups_manageable_by, is_club_admin, members_visible_to, teams_managed_by, teams_staffed_by
 from club.services.fees import mark_as_paid, record_payment, remaining_balance
 from controlpanel.messages import notify
 from controlpanel.mixins import RedirectOnInvalidMixin
@@ -261,12 +261,12 @@ class MembershipListView(ClubAdminRequiredMixin, ListView):
             # family that has an explicit name of "Smith" or that includes anyone
             # surnamed Smith, not just a member literally named Smith themself.
             memberships = (
-                    memberships.filter(member__first_name__icontains=search)
-                    | memberships.filter(member__last_name__icontains=search)
-                    | memberships.filter(member__email__icontains=search)
-                    | memberships.filter(member__user__email__icontains=search)
-                    | memberships.filter(member__family_memberships__family__name__icontains=search)
-                    | memberships.filter(member__family_memberships__family__memberships__member__last_name__icontains=search)
+                memberships.filter(member__first_name__icontains=search)
+                | memberships.filter(member__last_name__icontains=search)
+                | memberships.filter(member__email__icontains=search)
+                | memberships.filter(member__user__email__icontains=search)
+                | memberships.filter(member__family_memberships__family__name__icontains=search)
+                | memberships.filter(member__family_memberships__family__memberships__member__last_name__icontains=search)
             )
 
         return memberships.distinct()
@@ -348,7 +348,7 @@ class MembershipMarkPaidView(ClubAdminRequiredMixin, View):
                 mark_as_paid(membership, recorded_by=request.user)
                 count += 1
 
-        notify(request, f"s|{_('Marked as paid')}|{_('%(count)d membership(s) updated.') % {'count': count} }")
+        notify(request, f"s|{_('Marked as paid')}|{_('%(count)d membership(s) updated.') % {'count': count}}")
 
         next_url = request.POST.get("next")
         if next_url and url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}, require_https=request.is_secure()):
@@ -573,9 +573,7 @@ class MemberUpdateView(ClubAdminRequiredMixin, View):
         season = current_season(self.request.club)
         if season is None:
             return None
-        return ClubMembership.objects.filter(club=self.request.club, member=member, season=season).first() or ClubMembership(
-            club=self.request.club, member=member, season=season, signed_up_at=timezone.localdate()
-        )
+        return ClubMembership.objects.filter(club=self.request.club, member=member, season=season).first() or ClubMembership(club=self.request.club, member=member, season=season, signed_up_at=timezone.localdate())
 
     def render_form(self, member, form, membership_form):
         return render(self.request, self.template_name, {"object": member, "update_view": True, "form": form, "membership_form": membership_form})
@@ -596,7 +594,7 @@ class MemberUpdateView(ClubAdminRequiredMixin, View):
             form.save()
             if membership_form is not None:
                 membership_form.save()
-            notify(request, f"s|{_('Member updated')}|{_('“%(member)s” updated.') % {'member': member} }")
+            notify(request, f"s|{_('Member updated')}|{_('“%(member)s” updated.') % {'member': member}}")
             return redirect("management:member_detail", pk=member.pk)
 
         return self.render_form(member, form, membership_form)
@@ -701,10 +699,10 @@ class MemberGrantLoginView(ClubAdminRequiredMixin, RedirectOnInvalidMixin, FormV
         if member.user_id is not None:
             # Already has one -- the row's button shouldn't have been there at all;
             # a direct POST replay (e.g. a resubmitted form) is the only way here.
-            notify(self.request, f"w|{_('Already has a login')}|{_('“%(member)s” can already sign in.') % {'member': member} }")
+            notify(self.request, f"w|{_('Already has a login')}|{_('“%(member)s” can already sign in.') % {'member': member}}")
         else:
             grant_login(member, form.cleaned_data["email"])
-            notify(self.request, f"s|{_('Login granted')}|{_('“%(member)s” can now sign in.') % {'member': member} }")
+            notify(self.request, f"s|{_('Login granted')}|{_('“%(member)s” can now sign in.') % {'member': member}}")
         return redirect("management:member_detail", pk=member.pk)
 
 
@@ -909,11 +907,7 @@ class TeamDetailView(ClubStaffRequiredMixin, DetailView):
             no_shows=no_shows,
             # None (not an empty queryset) signals "federation-managed" to the
             # template, distinct from "club-managed, nobody eligible yet".
-            eligible_referees=(
-                Member.objects.filter(referee_profile__level__teams=team, referee_profile__valid_until__gte=timezone.localdate()).order_by("last_name", "first_name")
-                if team.referee_management == Team.RefereeManagement.CLUB
-                else None
-            ),
+            eligible_referees=(Member.objects.filter(referee_profile__level__teams=team, referee_profile__valid_until__gte=timezone.localdate()).order_by("last_name", "first_name") if team.referee_management == Team.RefereeManagement.CLUB else None),
             **kwargs,
         )
 
@@ -1187,7 +1181,7 @@ class TeamBulkAddView(TeamManagerRequiredMixin, View):
                             try:
                                 membership.full_clean()
                                 membership.save()
-                            except (ValidationError, IntegrityError):
+                            except ValidationError, IntegrityError:
                                 errors.append(_("%(member)s: could not be added as a player -- please check the details and try again.") % {"member": member})
                             else:
                                 players_added += 1
@@ -1203,7 +1197,7 @@ class TeamBulkAddView(TeamManagerRequiredMixin, View):
                     try:
                         assignment.full_clean()
                         assignment.save()
-                    except (ValidationError, IntegrityError):
+                    except ValidationError, IntegrityError:
                         errors.append(_("%(member)s: could not be assigned as staff -- please check the details and try again.") % {"member": member})
                     else:
                         staff_added += 1
@@ -2234,9 +2228,10 @@ class RefereeManagementDashboardView(ClubAdminRequiredMixin, TemplateView):
 
 class EventCreateView(ClubStaffRequiredMixin, CreateView):
     """Broader than EventManagerRequiredMixin's own gate (no object yet to check
-    teams against): anyone managing at least one team, or an admin. EventForm
-    itself then restricts *which* teams a non-admin can pick and requires at
-    least one, so a team-less/club-wide event stays admin-only."""
+    teams/groups against): anyone managing at least one team, belonging to at
+    least one group, or an admin. EventForm itself then restricts *which*
+    teams/groups a non-admin can pick and requires at least one, so a
+    club-wide event stays admin-only."""
 
     model = Event
     form_class = EventForm
@@ -2244,7 +2239,7 @@ class EventCreateView(ClubStaffRequiredMixin, CreateView):
 
     def test_func(self):
         user, club = self.request.user, self.request.club
-        return is_club_admin(user, club) or teams_managed_by(user, club).exists()
+        return is_club_admin(user, club) or teams_managed_by(user, club).exists() or groups_manageable_by(user, club).exists()
 
     def get_form_kwargs(self):
         # Event.clean() rejects a location/opponent from another club by comparing
@@ -2274,6 +2269,9 @@ class EventUpdateView(EventManagerRequiredMixin, UpdateView):
     def get_teams(self):
         return get_object_or_404(Event.objects.filter(club=self.request.club), pk=self.kwargs["pk"]).teams.all()
 
+    def get_groups(self):
+        return get_object_or_404(Event.objects.filter(club=self.request.club), pk=self.kwargs["pk"]).groups.all()
+
     def get_form_kwargs(self):
         return super().get_form_kwargs() | {"club": self.request.club, "user": self.request.user, "editing": True}
 
@@ -2301,6 +2299,9 @@ class EventDeleteView(EventManagerRequiredMixin, View):
     def get_teams(self):
         return self.get_event().teams.all()
 
+    def get_groups(self):
+        return self.get_event().groups.all()
+
     def post(self, request, pk):
         event = self.get_event()
         title = str(event)
@@ -2324,6 +2325,9 @@ class EventDetachView(EventManagerRequiredMixin, View):
     def get_teams(self):
         return self.get_event().teams.all()
 
+    def get_groups(self):
+        return self.get_event().groups.all()
+
     def post(self, request, pk):
         event = self.get_event()
         detach_occurrence(event)
@@ -2344,6 +2348,9 @@ class EventFetchGameInfoView(EventManagerRequiredMixin, View):
 
     def get_teams(self):
         return self.get_event().teams.all()
+
+    def get_groups(self):
+        return self.get_event().groups.all()
 
     def post(self, request, pk):
         event = self.get_event()
@@ -2460,7 +2467,7 @@ class EventSeriesCreateView(ClubStaffRequiredMixin, CreateView):
 
     def test_func(self):
         user, club = self.request.user, self.request.club
-        return is_club_admin(user, club) or teams_managed_by(user, club).exists()
+        return is_club_admin(user, club) or teams_managed_by(user, club).exists() or groups_manageable_by(user, club).exists()
 
     def get_form_kwargs(self):
         # Same reasoning as EventCreateView: EventSeries.clean() needs a real
@@ -2491,6 +2498,9 @@ class EventSeriesUpdateView(EventManagerRequiredMixin, UpdateView):
 
     def get_teams(self):
         return get_object_or_404(EventSeries.objects.filter(club=self.request.club), pk=self.kwargs["pk"]).teams.all()
+
+    def get_groups(self):
+        return get_object_or_404(EventSeries.objects.filter(club=self.request.club), pk=self.kwargs["pk"]).groups.all()
 
     def get_form_kwargs(self):
         return super().get_form_kwargs() | {"club": self.request.club, "user": self.request.user}
@@ -2526,6 +2536,9 @@ class EventSeriesDeleteView(EventManagerRequiredMixin, View):
     def get_teams(self):
         return self.get_series().teams.all()
 
+    def get_groups(self):
+        return self.get_series().groups.all()
+
     def post(self, request, pk):
         series = self.get_series()
         title = str(series)
@@ -2545,6 +2558,9 @@ class EventSeriesStopView(EventManagerRequiredMixin, View):
     def get_teams(self):
         return self.get_series().teams.all()
 
+    def get_groups(self):
+        return self.get_series().groups.all()
+
     def post(self, request, pk):
         series = self.get_series()
         series.until = timezone.now()
@@ -2559,6 +2575,9 @@ class EventSeriesGenerateView(EventManagerRequiredMixin, View):
 
     def get_teams(self):
         return self.get_series().teams.all()
+
+    def get_groups(self):
+        return self.get_series().groups.all()
 
     def post(self, request, pk):
         series = self.get_series()

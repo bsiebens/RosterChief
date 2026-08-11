@@ -52,12 +52,14 @@ def apply_template(series, event):
     event.title = series.title
     event.location = series.location
     event.opponent = series.opponent
+    event.club_wide = series.club_wide
     event.end = event.start + series.duration if series.duration is not None else None
     event.gathering = event.start - series.gathering_offset if series.gathering_offset is not None else None
     event.deadline = event.start - series.deadline_offset if series.deadline_offset is not None else None
     event.save()
 
     event.teams.set(series.teams.all())
+    event.groups.set(series.groups.all())
     event.invited_members.set(series.invited_members.all())
     event.excluded_members.set(series.excluded_members.all())
 

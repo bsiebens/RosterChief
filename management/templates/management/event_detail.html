@@ -65,6 +65,16 @@
                         <dt class="text-sm opacity-70">{% trans "Teams" %}</dt>
                         <dd>{% for team in event.teams.all %}{{ team.name }}{% if not forloop.last %}, {% endif %}{% empty %}—{% endfor %}</dd>
                     </div>
+                    <div class="flex items-center justify-between py-2">
+                        <dt class="text-sm opacity-70">{% trans "Groups" %}</dt>
+                        <dd>{% for group in event.groups.all %}{{ group.name }}{% if not forloop.last %}, {% endif %}{% empty %}—{% endfor %}</dd>
+                    </div>
+                    {% if event.club_wide %}
+                        <div class="flex items-center justify-between py-2">
+                            <dt class="text-sm opacity-70">{% trans "Audience" %}</dt>
+                            <dd><span class="badge badge-primary">{% trans "Whole club" %}</span></dd>
+                        </div>
+                    {% endif %}
                 </dl>
             </div>
         </div>

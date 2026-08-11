@@ -2,7 +2,9 @@ from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from django.http import Http404
 from waffle import flag_is_active
 
-from .services.access import can_add_news, can_edit_news, can_publish_news, has_management_access, is_club_admin, is_coach_manager, teams_managed_by
+from members.models import Group
+
+from .services.access import can_add_news, can_edit_news, can_publish_news, groups_manageable_by, has_management_access, is_club_admin, is_coach_manager, teams_managed_by
 
 
 class ClubStaffRequiredMixin(LoginRequiredMixin, UserPassesTestMixin):
@@ -74,20 +76,31 @@ class TeamManagerRequiredMixin(ClubStaffRequiredMixin):
 
 
 class EventManagerRequiredMixin(ClubStaffRequiredMixin):
-    """Admin, or a manager of at least one of this event's/series' *current*
-    teams. ``self.get_teams()`` must return the Team queryset/iterable the
-    view acts on (e.g. ``self.get_object().teams.all()``) before ``test_func``
-    runs. Events/series aren't single-team like a roster entry -- ``teams`` is
-    M2M, so authority is "manages at least one", not "manages the one"."""
+    """Admin, a manager of at least one of this event's/series' *current*
+    teams, or a member of at least one of its groups. ``self.get_teams()``
+    must return the Team queryset/iterable the view acts on (e.g.
+    ``self.get_object().teams.all()``) before ``test_func`` runs; override
+    ``get_groups()`` the same way for a view whose object can carry groups
+    (it defaults to none, so most subclasses only need get_teams()). Events/
+    series aren't single-team/-group like a roster entry -- both are M2M, so
+    authority is "belongs to at least one", not "belongs to the one". A
+    club_wide event has no equivalent membership claim to check -- it's
+    admin-only to create in the first place (EventForm), so the plain
+    is_club_admin check below already covers it."""
 
     def get_teams(self):
         raise NotImplementedError("Subclasses must return the Teams this view acts on.")
+
+    def get_groups(self):
+        return Group.objects.none()
 
     def test_func(self):
         user, club = self.request.user, self.request.club
         if is_club_admin(user, club):
             return True
-        return teams_managed_by(user, club).filter(pk__in=self.get_teams().values_list("pk", flat=True)).exists()
+        if teams_managed_by(user, club).filter(pk__in=self.get_teams().values_list("pk", flat=True)).exists():
+            return True
+        return groups_manageable_by(user, club).filter(pk__in=self.get_groups().values_list("pk", flat=True)).exists()
 
 
 class ManagementPositionRequiredMixin(ClubStaffRequiredMixin):

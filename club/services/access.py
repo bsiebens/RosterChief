@@ -22,7 +22,7 @@ from django.utils import timezone
 from authentication.models import User
 from club.models import Club, ClubRole, Season
 from events.models import Event
-from members.models import FamilyMembership, Member
+from members.models import FamilyMembership, Group, Member
 from teams.models import StaffAssignment, Team
 
 #: Derived (never stored) roles.
@@ -90,6 +90,15 @@ def teams_managed_by(user: User, club: Club) -> QuerySet[Team]:
         staff_assignments__position__management_position=True,
         staff_assignments__season=current_season(club),
     ).distinct()
+
+
+def groups_manageable_by(user: User, club: Club) -> QuerySet[Group]:
+    """Groups the user may schedule an event for: all for an ADMIN, else only
+    the ones they're themselves a member of -- unlike Team, Group has no
+    manager/owner concept, so membership is the only claim there is to check."""
+    if is_club_admin(user, club):
+        return Group.objects.filter(club=club)
+    return Group.objects.filter(club=club, memberships__member__user=user).distinct()
 
 
 def teams_staffed_by(user: User, club: Club) -> QuerySet[Team]:

@@ -7,7 +7,7 @@ from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 from club.models import ClubMembership, ClubRole, FeePayment, Sponsor
-from club.services.access import is_club_admin, teams_managed_by
+from club.services.access import groups_manageable_by, is_club_admin, teams_managed_by
 from events.models import Competition, Event, EventReferee, EventSeries, Location, Opponent
 from events.services.rbihf_import import RBIHFImportError, extract_team_id
 from members.models import Family, FamilyMembership, Group, Member
@@ -240,29 +240,47 @@ def _location_label(location) -> str:
 class EventAudienceFormMixin:
     """Shared club/user-scoped audience fields for EventForm and EventSeriesForm:
     teams restricted to the ones the requester manages (all of them for an
-    admin), and a non-admin must pick at least one -- a team-less/club-wide
-    event (e.g. an AGM) has no team-manager claim to anchor it to, so that's
-    admin-only."""
+    admin), groups restricted to the ones the requester belongs to (all of them
+    for an admin -- Group has no manager/owner concept the way Team does, so
+    membership is the only claim there is), and a non-admin must pick at least
+    one team or group -- a club-wide event (e.g. an AGM) has no such claim to
+    anchor it to, so `club_wide` stays admin-only (the field doesn't even exist
+    on the form otherwise)."""
 
     def scope_audience_fields(self, club, user):
         self.club = club
         self.user = user
-        self.fields["teams"].queryset = Team.objects.filter(club=club) if is_club_admin(user, club) else teams_managed_by(user, club)
+        self.fields["teams"].queryset = teams_managed_by(user, club)
+        self.fields["groups"].queryset = groups_manageable_by(user, club)
         self.fields["location"].queryset = Location.objects.filter(club=club)
         self.fields["location"].label_from_instance = _location_label
         self.fields["opponent"].queryset = Opponent.objects.filter(club=club)
         members = Member.objects.filter(member_of__club=club).distinct()
         self.fields["invited_members"].queryset = members
         self.fields["excluded_members"].queryset = members
+        if not is_club_admin(user, club):
+            del self.fields["club_wide"]
 
-    def clean_teams_requires_one_for_non_admins(self, cleaned):
+    def clean_audience_requires_a_claim_for_non_admins(self, cleaned):
+        if is_club_admin(self.user, self.club):
+            return
         teams = cleaned.get("teams")
-        if teams is not None and not teams.exists() and not is_club_admin(self.user, self.club):
-            self.add_error("teams", _("Select at least one of your teams, or ask an admin to create a club-wide event."))
+        groups = cleaned.get("groups")
+        if not (teams is not None and teams.exists()) and not (groups is not None and groups.exists()):
+            self.add_error(None, _("Select at least one of your teams or groups, or ask an admin to create a club-wide event."))
+
+    def clean_club_wide_excludes_teams_and_groups(self, cleaned):
+        if not cleaned.get("club_wide"):
+            return
+        teams = cleaned.get("teams")
+        groups = cleaned.get("groups")
+        if (teams is not None and teams.exists()) or (groups is not None and groups.exists()):
+            self.add_error("club_wide", _("A whole-club event can't also list specific teams or groups -- clear them, or turn this off."))
 
 
 _AUDIENCE_WIDGETS = {
     "teams": forms.SelectMultiple(attrs={"data-searchable": "true", "data-search-placeholder": _("Type a team to search...")}),
+    "groups": forms.SelectMultiple(attrs={"data-searchable": "true", "data-search-placeholder": _("Type a group to search...")}),
     "invited_members": forms.SelectMultiple(attrs={"data-searchable": "true", "data-search-placeholder": _("Type a name to search...")}),
     "excluded_members": forms.SelectMultiple(attrs={"data-searchable": "true", "data-search-placeholder": _("Type a name to search...")}),
     "location": forms.Select(attrs={"data-searchable": "true", "data-search-placeholder": _("Type a name or city to search...")}),
@@ -272,7 +290,27 @@ _AUDIENCE_WIDGETS = {
 class EventForm(EventAudienceFormMixin, forms.ModelForm):
     class Meta:
         model = Event
-        fields = ["title", "kind", "teams", "invited_members", "excluded_members", "location", "opponent", "start", "end", "gathering", "deadline", "competition", "external_game_id", "score_for", "score_against", "is_live", "max_referees"]
+        fields = [
+            "title",
+            "kind",
+            "teams",
+            "groups",
+            "club_wide",
+            "invited_members",
+            "excluded_members",
+            "location",
+            "opponent",
+            "start",
+            "end",
+            "gathering",
+            "deadline",
+            "competition",
+            "external_game_id",
+            "score_for",
+            "score_against",
+            "is_live",
+            "max_referees",
+        ]
         widgets = {
             "start": forms.DateTimeInput(attrs={"type": "datetime-local"}),
             "end": forms.DateTimeInput(attrs={"type": "datetime-local"}),
@@ -308,7 +346,8 @@ class EventForm(EventAudienceFormMixin, forms.ModelForm):
 
     def clean(self):
         cleaned = super().clean()
-        self.clean_teams_requires_one_for_non_admins(cleaned)
+        self.clean_audience_requires_a_claim_for_non_admins(cleaned)
+        self.clean_club_wide_excludes_teams_and_groups(cleaned)
         return cleaned
 
 
@@ -357,7 +396,7 @@ class EventSeriesForm(EventAudienceFormMixin, forms.ModelForm):
 
     class Meta:
         model = EventSeries
-        fields = ["title", "kind", "dtstart", "until", "teams", "invited_members", "excluded_members", "location", "opponent"]
+        fields = ["title", "kind", "dtstart", "until", "teams", "groups", "club_wide", "invited_members", "excluded_members", "location", "opponent"]
         widgets = {
             "dtstart": forms.DateTimeInput(attrs={"type": "datetime-local"}),
             "until": forms.DateTimeInput(attrs={"type": "datetime-local"}),
@@ -390,7 +429,8 @@ class EventSeriesForm(EventAudienceFormMixin, forms.ModelForm):
 
     def clean(self):
         cleaned = super().clean()
-        self.clean_teams_requires_one_for_non_admins(cleaned)
+        self.clean_audience_requires_a_claim_for_non_admins(cleaned)
+        self.clean_club_wide_excludes_teams_and_groups(cleaned)
 
         if cleaned.get("advanced_rrule"):
             return cleaned  # the advanced field wins outright; nothing else to check

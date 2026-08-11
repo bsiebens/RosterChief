@@ -8,7 +8,7 @@ from django.utils.translation import gettext_lazy as _
 from django_countries.fields import CountryField
 
 from club.models import Club, Season
-from members.models import Member
+from members.models import Group, Member
 from rosterchief.base import ClubScopedModel, UUIDModel, validate_club_scope
 from teams.models import Team
 
@@ -69,6 +69,8 @@ class Event(ClubScopedModel):
     cancelled = models.BooleanField(_("cancelled"), default=False)
 
     teams = models.ManyToManyField(Team, related_name="scheduled_events", blank=True, verbose_name=_("teams"))
+    groups = models.ManyToManyField(Group, related_name="scheduled_events", blank=True, verbose_name=_("groups"), help_text=_("Invite every current member of these groups."))
+    club_wide = models.BooleanField(_("whole club"), default=False, help_text=_("Invite every active club member for this event's season, instead of specific teams/groups. Can't be combined with teams or groups."))
     invited_members = models.ManyToManyField(Member, related_name="invited_to_events", blank=True, verbose_name=_("invited members"))
     excluded_members = models.ManyToManyField(Member, related_name="excluded_from_events", blank=True, verbose_name=_("excluded members"))
     season = models.ForeignKey(Season, on_delete=models.SET_NULL, related_name="events", null=True, blank=True, verbose_name=_("season"), help_text=_("Season whose team rosters define the audience; derived from the start date when left blank."))
@@ -138,6 +140,8 @@ class EventSeries(ClubScopedModel):
     location = models.ForeignKey(Location, on_delete=models.SET_NULL, related_name="event_series", null=True, blank=True, verbose_name=_("location"))
     opponent = models.ForeignKey(Opponent, on_delete=models.SET_NULL, related_name="event_series", null=True, blank=True, verbose_name=_("opponent"))
     teams = models.ManyToManyField(Team, related_name="event_series", blank=True, verbose_name=_("teams"))
+    groups = models.ManyToManyField(Group, related_name="event_series", blank=True, verbose_name=_("groups"), help_text=_("Invite every current member of these groups."))
+    club_wide = models.BooleanField(_("whole club"), default=False, help_text=_("Invite every active club member for each occurrence's season, instead of specific teams/groups. Can't be combined with teams or groups."))
     invited_members = models.ManyToManyField(Member, related_name="invited_to_event_series", blank=True, verbose_name=_("invited members"))
     excluded_members = models.ManyToManyField(Member, related_name="excluded_from_event_series", blank=True, verbose_name=_("excluded members"))
 

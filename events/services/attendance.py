@@ -1,15 +1,18 @@
 """Keep an event's attendance rows in sync with its effective audience.
 
 The audience of an event is the union of the current rosters of its ``teams``
-(for the event's season) plus any individually ``invited_members``, minus any
-``excluded_members``. Attendance rows are reconciled against that set, but only
-for events that are still in the future — history is never rewritten.
+(for the event's season) and the current members of its ``groups``, plus any
+individually ``invited_members``, minus any ``excluded_members`` -- or, for a
+``club_wide`` event, every member with an ACTIVE ClubMembership for the
+event's season instead of teams/groups (the two are mutually exclusive, see
+EventForm/EventSeriesForm). Attendance rows are reconciled against that set,
+but only for events that are still in the future — history is never rewritten.
 """
 
 from django.db.models import Count, Q
 from django.utils import timezone
 
-from club.models import Season
+from club.models import ClubMembership, Season
 from events.models import Attendance, Event
 from members.models import Member
 from teams.models import TeamMembership
@@ -24,13 +27,22 @@ def resolve_season(event):
 
 def effective_members(event):
     """Return the ``Member`` queryset invited to ``event``."""
-    member_ids: set = set()
-
     season = resolve_season(event)
-    if season is not None:
-        team_ids = list(event.teams.values_list("id", flat=True))
-        if team_ids:
-            member_ids.update(TeamMembership.objects.filter(team_id__in=team_ids, season=season).values_list("member_id", flat=True))
+
+    if event.club_wide:
+        member_ids = set()
+        if season is not None:
+            member_ids.update(ClubMembership.objects.filter(club=event.club, season=season, status=ClubMembership.StatusChoices.ACTIVE).values_list("member_id", flat=True))
+    else:
+        member_ids = set()
+        if season is not None:
+            team_ids = list(event.teams.values_list("id", flat=True))
+            if team_ids:
+                member_ids.update(TeamMembership.objects.filter(team_id__in=team_ids, season=season).values_list("member_id", flat=True))
+
+        group_ids = list(event.groups.values_list("id", flat=True))
+        if group_ids:
+            member_ids.update(Member.objects.filter(group_memberships__group_id__in=group_ids).values_list("id", flat=True))
 
     member_ids.update(event.invited_members.values_list("id", flat=True))
     member_ids.difference_update(event.excluded_members.values_list("id", flat=True))

@@ -3484,6 +3484,19 @@ class EventManagementTests(ManagementTestBase):
         StaffAssignment.objects.create(team=self.own_team, member=staff_member, season=self.season, position=position)
         return staff_user
 
+    def make_group_member(self, group, email="committee-events@example.com"):
+        # Staff (so they can reach the management app at all -- ClubStaffRequiredMixin
+        # excludes a plain MEMBER-only club member entirely), but NOT a team manager of
+        # anything: a non-management StaffAssignment on an unrelated team, so
+        # teams_managed_by(this user) is empty and the group claim is what's really
+        # being tested, isolated from any team-manager claim.
+        member_user = User.objects.create_user(email=email, password="pw-secret-123")
+        member = Member.objects.create(user=member_user, first_name="Gale", last_name="Group")
+        physio_position = Position.objects.create(club=self.club, name="Committee Physio", short_name="CP", staff_position=True, management_position=False)
+        StaffAssignment.objects.create(team=self.other_team, member=member, season=self.season, position=physio_position)
+        GroupMembership.objects.create(group=group, member=member)
+        return member_user
+
     def event_data(self, **overrides):
         data = {
             "title": "Training",
@@ -3549,6 +3562,80 @@ class EventManagementTests(ManagementTestBase):
 
         self.assertContains(response, 'name="location"')
         self.assertContains(response, "data-searchable")
+
+    def test_a_group_member_can_create_an_event_for_their_own_group(self):
+        group = Group.objects.create(club=self.club, name="Committee")
+        self.client.force_login(self.make_group_member(group))
+
+        response = self.club_post("event_create", self.event_data(teams=[], groups=[str(group.pk)]))
+
+        event = Event.objects.get(title="Training")
+        self.assertRedirects(response, reverse("management:event_detail", args=[event.pk]))
+        self.assertIn(group, event.groups.all())
+
+    def test_a_group_member_cannot_pick_a_group_they_do_not_belong_to(self):
+        own_group = Group.objects.create(club=self.club, name="Committee")
+        other_group = Group.objects.create(club=self.club, name="Other Committee")
+        self.client.force_login(self.make_group_member(own_group))
+
+        response = self.club_post("event_create", self.event_data(teams=[], groups=[str(other_group.pk)]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Event.objects.filter(title="Training").exists())
+
+    def test_a_non_admin_with_neither_team_nor_group_is_rejected(self):
+        self.client.force_login(self.make_group_member(Group.objects.create(club=self.club, name="Committee")))
+
+        response = self.club_post("event_create", self.event_data(teams=[], groups=[]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Event.objects.filter(title="Training").exists())
+
+    def test_club_wide_is_not_offered_to_a_non_admin(self):
+        self.client.force_login(self.make_coach(self.own_team))
+
+        response = self.club_get("event_create")
+
+        self.assertNotContains(response, 'name="club_wide"')
+
+    def test_a_non_admin_cannot_force_a_club_wide_event(self):
+        # club_wide isn't in the form for a non-admin, so even a forged POST
+        # value must not slip through as a create-time claim.
+        self.client.force_login(self.make_coach(self.own_team))
+
+        response = self.club_post("event_create", self.event_data(teams=[], club_wide="on"))
+
+        self.assertEqual(response.status_code, 200)
+        event = Event.objects.filter(title="Training").first()
+        self.assertIsNone(event)
+
+    def test_an_admin_can_schedule_a_club_wide_event(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("event_create", self.event_data(teams=[], club_wide="on"))
+
+        event = Event.objects.get(title="Training")
+        self.assertRedirects(response, reverse("management:event_detail", args=[event.pk]))
+        self.assertTrue(event.club_wide)
+
+    def test_club_wide_cannot_be_combined_with_teams(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("event_create", self.event_data(club_wide="on"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Event.objects.filter(title="Training").exists())
+
+    def test_a_group_member_who_is_not_a_team_manager_can_edit_their_group_event(self):
+        group = Group.objects.create(club=self.club, name="Committee")
+        member_user = self.make_group_member(group)
+        self.client.force_login(member_user)
+        self.club_post("event_create", self.event_data(teams=[], groups=[str(group.pk)]))
+        event = Event.objects.get(title="Training")
+
+        response = self.club_get("event_update", event.pk)
+
+        self.assertEqual(response.status_code, 200)
 
     def test_the_new_event_forms_competition_dropdown_shows_every_competition_regardless_of_flag(self):
         # Unlike the Django-admin form, this dropdown isn't filtered by whether the
@@ -3805,6 +3892,30 @@ class EventSeriesManagementTests(ManagementTestBase):
         series = self.create_series()
 
         self.assertTrue(series.occurrences.exists())
+
+    def test_a_group_member_can_create_a_series_for_their_own_group(self):
+        group = Group.objects.create(club=self.club, name="Committee")
+        member_user = User.objects.create_user(email="committee-series@example.com", password="pw-secret-123")
+        member = Member.objects.create(user=member_user, first_name="Gale", last_name="Group")
+        physio_position = Position.objects.create(club=self.club, name="Series Physio", short_name="SP", staff_position=True, management_position=False)
+        StaffAssignment.objects.create(team=self.other_team, member=member, season=self.season, position=physio_position)
+        GroupMembership.objects.create(group=group, member=member)
+        self.client.force_login(member_user)
+
+        response = self.club_post("event_series_create", self.series_data(teams=[], groups=[str(group.pk)]))
+
+        series = EventSeries.objects.get(title="Weekly training")
+        self.assertRedirects(response, reverse("management:event_series_detail", args=[series.pk]))
+        self.assertIn(group, series.groups.all())
+
+    def test_generated_occurrences_copy_groups_and_club_wide(self):
+        self.client.force_login(self.admin_user)
+        series = EventSeries.objects.create(club=self.club, title="AGM", kind=Event.EventKind.MEETING, dtstart=timezone.now() + datetime.timedelta(days=1), rrule="FREQ=WEEKLY;COUNT=1", club_wide=True)
+
+        generate_occurrences(series)
+
+        occurrence = series.occurrences.get()
+        self.assertTrue(occurrence.club_wide)
 
     def test_editing_a_series_propagates_to_future_occurrences_but_not_a_detached_one(self):
         self.client.force_login(self.make_coach(self.team))

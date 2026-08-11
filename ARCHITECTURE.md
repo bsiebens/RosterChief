@@ -541,6 +541,34 @@ row today — there's no check-in UI yet, only Django admin); a "no-show" is
 a missing check-in. See `events/services/attendance.py::record_check_in` and
 `management/views.py::TeamDetailView`'s attendance panel.
 
+**As built, an `Event`'s (and `EventSeries`') audience is teams + groups + invited/excluded
+members, or the whole club** — `teams` (existing) sits alongside `groups`
+(`M2M members.Group`, blank) and `club_wide` (`BooleanField`, default `False`). All three
+feed `events/services/attendance.py::effective_members`: teams contribute their
+season-scoped roster, groups contribute *every current* `GroupMembership` (Group has no
+season concept, unlike Team, so this isn't season-scoped the way a team roster is), and
+`invited_members`/`excluded_members` still layer on top/subtract as before — **unless**
+`club_wide` is set, which replaces teams+groups with every member holding an ACTIVE
+`ClubMembership` for the event's season instead (`invited_members`/`excluded_members` still
+apply on top of that too). `club_wide` can't be combined with `teams`/`groups` — enforced in
+`EventForm`/`EventSeriesForm.clean()` (`clean_club_wide_excludes_teams_and_groups`), not the
+DB (an M2M can't be checked from a `CheckConstraint`, and can't be validated in `Event.clean()`
+either — M2M state isn't available until the row has a PK). `events/signals.py` re-syncs a
+group's future events on `GroupMembership` change, and a club_wide event's future rows on
+`ClubMembership` change, the same way a `TeamMembership` change already re-syncs team events.
+- **Authorization**: `club.services.access.groups_manageable_by(user, club)` mirrors
+  `teams_managed_by` — every group for an ADMIN, else only the ones the user is themselves a
+  `GroupMembership` of (Group has no manager/owner concept the way Team does via
+  `StaffAssignment`, so membership is the only claim there is). A non-admin must select at
+  least one team they manage **or** group they belong to when creating/editing an event
+  (`EventAudienceFormMixin.clean_audience_requires_a_claim_for_non_admins`) — `club_wide`
+  itself stays admin-only (the field is removed from the form entirely for anyone else, not
+  just rejected on submit). `club.mixins.EventManagerRequiredMixin` (gates edit/delete/detach/
+  etc. on an *existing* event/series) checks the same two claims via `get_teams()`/
+  `get_groups()` (the latter defaults to none, so a view that never deals with groups doesn't
+  need to override it) — without this, a non-admin who created a group-only event via the
+  broader create-time gate would immediately be locked out of managing what they just made.
+
 **As built, a GAME-kind `Event` defaults its own `end`** — `Event.save()` sets
 `end = start + events.models.ASSUMED_EVENT_DURATION` (2 hours) whenever a game is saved
 with no explicit `end`, and never overwrites one that's already set. Other event kinds are
@@ -1104,6 +1132,22 @@ Setup:
 - **Payment gateway** (only if online payments): provider SDK (e.g. `mollie-api-python` or
   `stripe`) + webhook endpoint that creates/confirms `Payment`s (§5.7).
 - **Excel export** for form reporting beyond CSV: `openpyxl`.
+
+### 8.5 Email — SMTP or Resend *(built)*
+
+Every Django-sent email — allauth's password reset, `send_billing_reminders`, anything else
+that goes through `django.core.mail` — follows whichever `EMAIL_BACKEND` is configured; no
+per-feature wiring. Console backend by default (§ "Email" in `settings.py`), so a deployment
+that forgets to configure mail prints to the log instead of raising against `localhost:25`.
+
+Two ways to use **Resend** (resend.com), no third-party SDK either way:
+- **SMTP relay, zero code**: point the stock `django.core.mail.backends.smtp.EmailBackend` at
+  `smtp.resend.com` with `resend` as the username and the API key as the password.
+- **HTTP API**: `rosterchief.mail.ResendEmailBackend` (`DJANGO_EMAIL_BACKEND=rosterchief.mail.ResendEmailBackend`,
+  `RESEND_API_KEY=…`) posts each message straight to Resend's `/emails` endpoint via `requests`
+  (already a dependency, so no new one needed for this). Handles plain text, the HTML
+  alternative on an `EmailMultiAlternatives`, cc/bcc/reply-to, and base64-encoded attachments;
+  `fail_silently` is honoured the same way Django's own backends honour it.
 
 ---
 

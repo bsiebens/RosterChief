@@ -36,12 +36,12 @@ class EventSeriesAdmin(admin.ModelAdmin):
     list_display = ["title", "kind", "rrule", "dtstart", "until", "generated_until", "club"]
     list_filter = ["kind", "club"]
     search_fields = ["title"]
-    autocomplete_fields = ["location", "opponent", "teams", "invited_members", "excluded_members"]
+    autocomplete_fields = ["location", "opponent", "teams", "groups", "invited_members", "excluded_members"]
     fieldsets = [
         [None, {"fields": ["title", "kind"]}],
         [_("Recurrence"), {"fields": ["rrule", "dtstart", "until", "excluded_dates", "generated_until"]}],
         [_("Timing"), {"fields": ["duration", "gathering_offset", "deadline_offset"]}],
-        [_("Audience"), {"fields": ["teams", "invited_members", "excluded_members"]}],
+        [_("Audience"), {"fields": ["teams", "groups", "club_wide", "invited_members", "excluded_members"]}],
         [_("Where"), {"fields": ["location", "opponent"]}],
     ]
 
@@ -56,7 +56,7 @@ class EventAdminForm(forms.ModelForm):
     class Meta:
         model = Event
         fields = [
-            "title", "kind", "season", "series", "detached", "cancelled", "teams", "invited_members", "excluded_members",
+            "title", "kind", "season", "series", "detached", "cancelled", "teams", "groups", "club_wide", "invited_members", "excluded_members",
             "start", "end", "gathering", "deadline", "location", "opponent",
             "competition", "external_game_id", "score_for", "score_against", "is_live", "max_referees",
         ]
@@ -82,12 +82,12 @@ class EventAdmin(admin.ModelAdmin):
     list_filter = ["kind", "club", "teams", "detached", "cancelled"]
     search_fields = ["title"]
     date_hierarchy = "start"
-    autocomplete_fields = ["season", "series", "location", "opponent", "teams", "invited_members", "excluded_members"]
+    autocomplete_fields = ["season", "series", "location", "opponent", "teams", "groups", "invited_members", "excluded_members"]
     inlines = [AttendanceInline, EventRefereeInline]
     fieldsets = [
         [None, {"fields": ["title", "kind", "season"]}],
         [_("Series"), {"fields": ["series", "detached", "cancelled"]}],
-        [_("Audience"), {"fields": ["teams", "invited_members", "excluded_members"]}],
+        [_("Audience"), {"fields": ["teams", "groups", "club_wide", "invited_members", "excluded_members"]}],
         [_("When"), {"fields": ["start", "end", "gathering", "deadline"]}],
         [_("Where"), {"fields": ["location", "opponent"]}],
         [_("Game"), {"fields": ["competition", "external_game_id", "score_for", "score_against", "is_live", "max_referees"]}],

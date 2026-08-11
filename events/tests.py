@@ -9,8 +9,8 @@ from django.test import TestCase
 from django.utils import timezone
 from waffle import get_waffle_flag_model
 
-from club.models import Club, Season
-from members.models import Member
+from club.models import Club, ClubMembership, Season
+from members.models import Group, GroupMembership, Member
 from teams.models import Position, RefereeLevel, RefereeProfile, Team, TeamMembership
 
 from .admin import EventAdminForm
@@ -202,6 +202,55 @@ class EffectiveMembersTests(EventsTestBase):
 
         self.assertEqual(event.attendances.count(), 0)
 
+    def test_group_members_are_included(self):
+        carol = Member.objects.create(first_name="Carol", last_name="Cedar")
+        group = Group.objects.create(club=self.club, name="Committee")
+        GroupMembership.objects.create(group=group, member=carol)
+        event = self.make_event()
+        event.groups.set([group])
+
+        self.assertEqual(self.attendee_ids(event), {carol.id})
+
+    def test_teams_and_groups_combine(self):
+        carol = Member.objects.create(first_name="Carol", last_name="Cedar")
+        group = Group.objects.create(club=self.club, name="Committee")
+        GroupMembership.objects.create(group=group, member=carol)
+        event = self.make_event()
+        event.teams.set([self.team])
+        event.groups.set([group])
+
+        self.assertEqual(self.attendee_ids(event), {self.alice.id, self.bob.id, carol.id})
+
+    def test_club_wide_includes_every_active_member_this_season(self):
+        carol = Member.objects.create(first_name="Carol", last_name="Cedar")
+        ClubMembership.objects.create(club=self.club, member=carol, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        lapsed = Member.objects.create(first_name="Len", last_name="Lapsed")
+        ClubMembership.objects.create(club=self.club, member=lapsed, season=self.season, status=ClubMembership.StatusChoices.LAPSED)
+        event = self.make_event(club_wide=True)
+
+        self.assertEqual(self.attendee_ids(event), {carol.id})
+
+    def test_club_wide_ignores_teams_and_groups(self):
+        # Teams/groups can be left populated on the row without affecting the
+        # audience -- validation (EventForm) is what keeps editors from doing
+        # this in the UI, but effective_members itself just ignores them.
+        carol = Member.objects.create(first_name="Carol", last_name="Cedar")
+        ClubMembership.objects.create(club=self.club, member=carol, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        event = self.make_event(club_wide=True)
+        event.teams.set([self.team])
+
+        self.assertEqual(self.attendee_ids(event), {carol.id})
+
+    def test_club_wide_still_honours_invited_and_excluded(self):
+        carol = Member.objects.create(first_name="Carol", last_name="Cedar")
+        ClubMembership.objects.create(club=self.club, member=carol, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        dave = Member.objects.create(first_name="Dave", last_name="Dogwood")
+        event = self.make_event(club_wide=True)
+        event.invited_members.set([dave])
+        event.excluded_members.set([carol])
+
+        self.assertEqual(self.attendee_ids(event), {dave.id})
+
 
 class AttendanceSyncTests(EventsTestBase):
     def test_setting_teams_creates_attendance_for_roster(self):
@@ -266,6 +315,45 @@ class RosterChangeSyncTests(EventsTestBase):
         TeamMembership.objects.get(team=self.team, member=self.alice).delete()
 
         self.assertNotIn(self.alice.id, self.attendee_ids(event))
+
+    def test_adding_a_group_member_syncs_future_events(self):
+        group = Group.objects.create(club=self.club, name="Committee")
+        event = self.make_event()
+        event.groups.set([group])
+        carol = Member.objects.create(first_name="Carol", last_name="Cedar")
+
+        GroupMembership.objects.create(group=group, member=carol)
+
+        self.assertIn(carol.id, self.attendee_ids(event))
+
+    def test_removing_a_group_member_syncs_future_events(self):
+        group = Group.objects.create(club=self.club, name="Committee")
+        carol = Member.objects.create(first_name="Carol", last_name="Cedar")
+        membership = GroupMembership.objects.create(group=group, member=carol)
+        event = self.make_event()
+        event.groups.set([group])
+
+        membership.delete()
+
+        self.assertNotIn(carol.id, self.attendee_ids(event))
+
+    def test_a_new_active_club_membership_syncs_future_club_wide_events(self):
+        event = self.make_event(club_wide=True)
+        carol = Member.objects.create(first_name="Carol", last_name="Cedar")
+
+        ClubMembership.objects.create(club=self.club, member=carol, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+
+        self.assertIn(carol.id, self.attendee_ids(event))
+
+    def test_a_club_membership_lapsing_syncs_future_club_wide_events(self):
+        carol = Member.objects.create(first_name="Carol", last_name="Cedar")
+        membership = ClubMembership.objects.create(club=self.club, member=carol, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        event = self.make_event(club_wide=True)
+
+        membership.status = ClubMembership.StatusChoices.LAPSED
+        membership.save()
+
+        self.assertNotIn(carol.id, self.attendee_ids(event))
 
     def test_roster_change_leaves_past_events_untouched(self):
         past = self.make_event(start=timezone.now() - timedelta(days=1))

@@ -1,11 +1,14 @@
 import importlib
 from unittest import mock
 
+import requests
+from django.core.mail import EmailMessage, EmailMultiAlternatives
 from django.db.utils import OperationalError
 from django.test import SimpleTestCase, override_settings
 from django.urls import Resolver404, clear_url_caches, resolve, reverse
 
 from . import urls
+from .mail import ResendEmailBackend
 
 
 class BrowserReloadUrlTests(SimpleTestCase):
@@ -86,3 +89,106 @@ class HealthCheckTests(SimpleTestCase):
         # container is unhealthy forever — which is exactly how the first deploy failed.
         for host in ("127.0.0.1", "localhost"):
             self.assertEqual(self.client.get(reverse("healthz"), HTTP_HOST=host).status_code, 200, host)
+
+
+@override_settings(RESEND_API_KEY="test-key")
+class ResendEmailBackendTests(SimpleTestCase):
+    def ok_response(self):
+        response = mock.Mock()
+        response.raise_for_status.return_value = None
+        return response
+
+    def test_sends_a_plain_text_message(self):
+        message = EmailMessage("Subject", "Body text.", "from@example.com", ["to@example.com"])
+
+        with mock.patch("rosterchief.mail.requests.Session.post", return_value=self.ok_response()) as post:
+            sent = ResendEmailBackend().send_messages([message])
+
+        self.assertEqual(sent, 1)
+        payload = post.call_args.kwargs["json"]
+        self.assertEqual(payload["from"], "from@example.com")
+        self.assertEqual(payload["to"], ["to@example.com"])
+        self.assertEqual(payload["subject"], "Subject")
+        self.assertEqual(payload["text"], "Body text.")
+        self.assertNotIn("html", payload)
+
+    def test_uses_a_bearer_token_from_settings(self):
+        message = EmailMessage("Subject", "Body.", "from@example.com", ["to@example.com"])
+
+        with mock.patch("rosterchief.mail.requests.Session.post", return_value=self.ok_response()) as post:
+            ResendEmailBackend().send_messages([message])
+
+        self.assertEqual(post.call_args.kwargs["headers"]["Authorization"], "Bearer test-key")
+
+    def test_includes_the_html_alternative(self):
+        message = EmailMultiAlternatives("Subject", "Plain body.", "from@example.com", ["to@example.com"])
+        message.attach_alternative("<p>HTML body.</p>", "text/html")
+
+        with mock.patch("rosterchief.mail.requests.Session.post", return_value=self.ok_response()) as post:
+            ResendEmailBackend().send_messages([message])
+
+        self.assertEqual(post.call_args.kwargs["json"]["html"], "<p>HTML body.</p>")
+
+    def test_cc_bcc_and_reply_to_are_included(self):
+        message = EmailMessage("Subject", "Body.", "from@example.com", ["to@example.com"], cc=["cc@example.com"], bcc=["bcc@example.com"], reply_to=["reply@example.com"])
+
+        with mock.patch("rosterchief.mail.requests.Session.post", return_value=self.ok_response()) as post:
+            ResendEmailBackend().send_messages([message])
+
+        payload = post.call_args.kwargs["json"]
+        self.assertEqual(payload["cc"], ["cc@example.com"])
+        self.assertEqual(payload["bcc"], ["bcc@example.com"])
+        self.assertEqual(payload["reply_to"], ["reply@example.com"])
+
+    def test_attachments_are_base64_encoded(self):
+        message = EmailMessage("Subject", "Body.", "from@example.com", ["to@example.com"])
+        message.attach("notes.txt", "hello world", "text/plain")
+
+        with mock.patch("rosterchief.mail.requests.Session.post", return_value=self.ok_response()) as post:
+            ResendEmailBackend().send_messages([message])
+
+        [attachment] = post.call_args.kwargs["json"]["attachments"]
+        self.assertEqual(attachment["filename"], "notes.txt")
+        self.assertEqual(attachment["content"], "aGVsbG8gd29ybGQ=")
+
+    def test_sends_each_message_in_a_batch(self):
+        messages = [EmailMessage("A", "Body.", "from@example.com", ["a@example.com"]), EmailMessage("B", "Body.", "from@example.com", ["b@example.com"])]
+
+        with mock.patch("rosterchief.mail.requests.Session.post", return_value=self.ok_response()) as post:
+            sent = ResendEmailBackend().send_messages(messages)
+
+        self.assertEqual(sent, 2)
+        self.assertEqual(post.call_count, 2)
+
+    @override_settings(RESEND_API_KEY="")
+    def test_a_missing_api_key_raises_by_default(self):
+        with self.assertRaises(ValueError):
+            ResendEmailBackend().send_messages([EmailMessage("Subject", "Body.", "from@example.com", ["to@example.com"])])
+
+    @override_settings(RESEND_API_KEY="")
+    def test_a_missing_api_key_is_silent_when_fail_silently(self):
+        sent = ResendEmailBackend(fail_silently=True).send_messages([EmailMessage("Subject", "Body.", "from@example.com", ["to@example.com"])])
+
+        self.assertEqual(sent, 0)
+
+    def test_a_failed_request_raises_by_default(self):
+        message = EmailMessage("Subject", "Body.", "from@example.com", ["to@example.com"])
+
+        with mock.patch("rosterchief.mail.requests.Session.post", side_effect=requests.ConnectionError("down")):
+            with self.assertRaises(requests.ConnectionError):
+                ResendEmailBackend().send_messages([message])
+
+    def test_a_failed_request_is_silent_when_fail_silently(self):
+        message = EmailMessage("Subject", "Body.", "from@example.com", ["to@example.com"])
+
+        with mock.patch("rosterchief.mail.requests.Session.post", side_effect=requests.ConnectionError("down")):
+            sent = ResendEmailBackend(fail_silently=True).send_messages([message])
+
+        self.assertEqual(sent, 0)
+
+    def test_no_messages_is_a_no_op(self):
+        with mock.patch("rosterchief.mail.requests.Session.post") as post:
+            sent = ResendEmailBackend().send_messages([])
+
+        self.assertEqual(sent, 0)
+        post.assert_not_called()
