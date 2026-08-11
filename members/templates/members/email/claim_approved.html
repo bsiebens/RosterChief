@@ -1,0 +1,58 @@
+{% extends "email/_base.html" %}
+{% load i18n club_email %}
+
+{% comment %}
+    HTML sibling of claim_approved.txt -- same content, same context (club,
+    child, parent_first_name, set_password_url), just laid out for an inbox
+    instead of a terminal. Kept in lockstep with the .txt version by hand:
+    there's no single source the two are generated from, so a change to one
+    reads as incomplete without the other.
+{% endcomment %}
+
+{% block title %}{% blocktrans with club=club.name %}Your {{ club }} account is ready{% endblocktrans %}{% endblock title %}
+
+{% block preheader %}{% blocktrans with club=club.name %}{{ club }} has confirmed you're a parent or guardian -- set your password to sign in.{% endblocktrans %}{% endblock preheader %}
+
+{% block header %}
+    {% absolute_media_url club.logo as logo_url %}
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+        <tr>
+            <td valign="middle">
+                {% if club.logo %}
+                    <img src="{{ logo_url }}" alt="{{ club.name }}" width="48" height="48" style="display:block; width:48px; height:48px; border-radius:24px; object-fit:contain; background-color:#f3f4f6;">
+                {% else %}
+                    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="48" style="width:48px;">
+                        <tr>
+                            <td align="center" valign="middle" width="48" height="48" bgcolor="{{ club.secondary_color|default:"#ec4899" }}" style="width:48px; height:48px; border-radius:24px; background-color:{{ club.secondary_color|default:"#ec4899" }}; color:{{ club.secondary_content_color|default:"#ffffff" }}; font-family: Arial, Helvetica, sans-serif; font-size:16px; font-weight:bold;">
+                                {{ club.initials }}
+                            </td>
+                        </tr>
+                    </table>
+                {% endif %}
+            </td>
+            <td style="padding-left:14px;" valign="middle">
+                <span style="font-family: Arial, Helvetica, sans-serif; font-size:18px; font-weight:bold; color:#111827;">{{ club.name }}</span>
+            </td>
+        </tr>
+    </table>
+{% endblock header %}
+
+{% block content %}
+    <p style="margin:0 0 16px 0;">{% blocktrans with name=parent_first_name %}Hello {{ name }},{% endblocktrans %}</p>
+
+    <p style="margin:0 0 20px 0;">{% blocktrans with club=club.name child=child %}{{ club }} has confirmed that you're {{ child }}'s parent or guardian, and your account is ready.{% endblocktrans %}</p>
+
+    {% trans "Set your password" as set_password_label %}
+    {% include "email/_button.html" with href=set_password_url label=set_password_label bg=club.primary_color|default:"#4f46e5" fg=club.primary_content_color|default:"#ffffff" %}
+
+    <p style="margin:0 0 16px 0; font-size:13px; color:#6b7280;">{% trans "That link is for you alone — please don't forward it." %}</p>
+
+    <p style="margin:0;">{% trans "Once you're signed in you'll see the children linked to you." %}</p>
+{% endblock content %}
+
+{% block footer %}
+    {% if club.contact_email %}
+        <p style="margin:0 0 8px 0;">{% blocktrans with email=club.contact_email %}Something not right? Reply to this note or write to {{ email }}.{% endblocktrans %}</p>
+    {% endif %}
+    <p style="margin:0;">{% blocktrans with club=club.name %}— {{ club }}{% endblocktrans %}</p>
+{% endblock footer %}

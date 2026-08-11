@@ -1,5 +1,6 @@
 import re
 import uuid
+from types import SimpleNamespace
 from urllib.parse import parse_qs, urlparse
 
 from allauth.core import context
@@ -7,8 +8,10 @@ from allauth.mfa.models import Authenticator
 from allauth.mfa.recovery_codes.internal.auth import RecoveryCodes
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import AnonymousUser
+from django.core import mail
 from django.db import IntegrityError
 from django.http import HttpResponse
+from django.template.loader import render_to_string
 from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse
 
@@ -260,6 +263,65 @@ class AuthFormRenderingTests(TestCase):
 
         self.assertEqual(response.status_code, 403)
         self.assertNotContains(response, 'name="password1"', status_code=403)
+
+
+@override_settings(
+    ROSTERCHIEF_BASE_DOMAIN="rosterchief.app",
+    ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"],
+)
+class PasswordResetEmailTests(TestCase):
+    """allauth auto-attaches templates/account/email/password_reset_key_message.html
+    as an HTML alternative next to its own .txt body -- see
+    allauth.account.adapter.DefaultAccountAdapter.render_mail, which looks for
+    "<prefix>_message.<ext>" for ext in [TEMPLATE_EXTENSION ("html", unset here), "txt"].
+    No Python override needed; this only exercises the template."""
+
+    def test_the_html_email_carries_the_clubs_branding_on_a_club_subdomain(self):
+        Club.objects.create(name="Ajax United", slug="ajax-united")
+        User.objects.create_user(email="parent@example.com", password="pw-secret-123")
+
+        response = self.client.post(reverse("account_reset_password"), {"email": "parent@example.com"}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(len(mail.outbox), 1)
+        [(html_body, mimetype)] = mail.outbox[0].alternatives
+        self.assertEqual(mimetype, "text/html")
+        self.assertIn("Ajax United", html_body)
+        self.assertIn("/accounts/password/reset/key/", html_body)
+
+    def test_the_html_email_falls_back_to_rosterchief_branding_off_a_club_subdomain(self):
+        # The base domain has no tenant, e.g. a platform control-panel user
+        # resetting their own password -- club.context_processors.branding
+        # leaves `club` unset there, so the template must not assume one.
+        User.objects.create_user(email="admin@example.com", password="pw-secret-123")
+
+        self.client.post(reverse("account_reset_password"), {"email": "admin@example.com"})
+
+        self.assertEqual(len(mail.outbox), 1)
+        [(html_body, mimetype)] = mail.outbox[0].alternatives
+        self.assertEqual(mimetype, "text/html")
+        # The wordmark splits "Chief" into its own <span> for the sky-blue accent
+        # (matching templates/_platform_base.html), so the two halves aren't
+        # contiguous text in the raw HTML -- check for both rather than the
+        # combined word.
+        self.assertIn("Roster", html_body)
+        self.assertIn("Chief", html_body)
+
+    def test_the_password_reset_key_html_template_renders_directly(self):
+        # Mirrors authentication.tests.AuthFormRenderingTests' direct-render
+        # style: exercises the template's own branching (club vs. none, logo
+        # vs. initials) without going through the full request/email pipeline.
+        club = Club.objects.create(name="Ajax United", slug="ajax-united", primary_color="#1e40af")
+
+        with_club = render_to_string("account/email/password_reset_key_message.html", {"club": club, "password_reset_url": "https://ajax-united.rosterchief.app/accounts/password/reset/key/abc-def/"})
+        self.assertIn("Ajax United", with_club)
+        self.assertIn("AU", with_club)  # initials fallback: no logo set
+        self.assertIn("https://ajax-united.rosterchief.app/accounts/password/reset/key/abc-def/", with_club)
+
+        without_club = render_to_string("account/email/password_reset_key_message.html", {"club": None, "password_reset_url": "https://rosterchief.app/accounts/password/reset/key/abc-def/", "current_site": SimpleNamespace(name="rosterchief.app")})
+        self.assertIn("Roster", without_club)
+        self.assertIn("Chief", without_club)
+        self.assertIn("https://rosterchief.app/accounts/password/reset/key/abc-def/", without_club)
 
 
 class TwoFactorPageTests(TestCase):

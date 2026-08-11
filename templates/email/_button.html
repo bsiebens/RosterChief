@@ -1,0 +1,18 @@
+{% comment %}
+    A single call-to-action button, table-wrapped so it centres reliably in
+    Outlook desktop (which ignores margin: 0 auto on a bare <a>). Include with:
+
+        {% include "email/_button.html" with href=set_password_url label=_("Set your password") bg="#0ea5e9" fg="#ffffff" %}
+
+    `bg`/`fg` are plain hex strings (already resolved -- e.g. club.primary_color
+    with a fallback), not template logic, so this stays a dumb, reusable snippet.
+{% endcomment %}
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin: 8px 0 24px 0;">
+    <tr>
+        <td align="center" bgcolor="{{ bg }}" style="border-radius:6px; background-color:{{ bg }};">
+            <a href="{{ href }}" style="display:inline-block; padding:12px 28px; font-family: Arial, Helvetica, sans-serif; font-size:15px; font-weight:bold; color:{{ fg }}; text-decoration:none; border-radius:6px;">
+                {{ label }}
+            </a>
+        </td>
+    </tr>
+</table>

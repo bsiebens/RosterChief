@@ -16,7 +16,7 @@ from allauth.account.forms import default_token_generator
 from allauth.account.utils import user_pk_to_url_str
 from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.core.mail import send_mail
+from django.core.mail import EmailMultiAlternatives
 from django.db import transaction
 from django.db.models import Exists, OuterRef, Q
 from django.template.loader import render_to_string
@@ -205,12 +205,20 @@ def send_claim_approved_email(claim, *, child, request=None):
     path = reverse("account_reset_password_from_key", kwargs={"uidb36": user_pk_to_url_str(user), "key": default_token_generator.make_token(user)})
     set_password_url = request.build_absolute_uri(path) if request is not None else path
 
-    context = {"club": claim.club, "child": child, "parent_first_name": claim.parent_first_name, "set_password_url": set_password_url}
+    # "request" rides along in the context (not used by the .txt template, only
+    # by the .html one's {% absolute_media_url %} tag) so the club's logo -- if
+    # it has one -- renders as an absolute URL an inbox can actually fetch, the
+    # same way set_password_url above is made absolute.
+    context = {"club": claim.club, "child": child, "parent_first_name": claim.parent_first_name, "set_password_url": set_password_url, "request": request}
     subject = " ".join(render_to_string("members/email/claim_approved_subject.txt", context).split())
-    body = render_to_string("members/email/claim_approved.txt", context).strip() + "\n"
+    text_body = render_to_string("members/email/claim_approved.txt", context).strip() + "\n"
+    html_body = render_to_string("members/email/claim_approved.html", context)
+
+    message = EmailMultiAlternatives(subject, text_body, settings.DEFAULT_FROM_EMAIL, [claim.parent_email])
+    message.attach_alternative(html_body, "text/html")
 
     try:
-        send_mail(subject, body, settings.DEFAULT_FROM_EMAIL, [claim.parent_email], fail_silently=False)
+        message.send(fail_silently=False)
     except OSError:
         # Anything the mail backend raises for an unreachable server or a refused
         # connection. The link stands; the club can resend from the queue.

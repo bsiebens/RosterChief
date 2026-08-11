@@ -1501,6 +1501,21 @@ class ParentClaimViewTests(ManagementTestBase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "password1")
 
+    def test_the_email_carries_an_html_alternative_alongside_the_plain_text(self):
+        self.submit()
+        claim = ParentClaim.objects.get(club=self.club)
+        self.client.force_login(self.admin_user)
+
+        self.club_post("parent_claim_approve", {"child": str(self.child.pk)}, claim.pk)
+
+        sent = mail.outbox[0]
+        [(html_body, mimetype)] = sent.alternatives
+        self.assertEqual(mimetype, "text/html")
+        self.assertIn("Jamie", html_body)
+        self.assertIn(self.club.name, html_body)
+        [reset_path] = [line for line in sent.body.splitlines() if "/accounts/password/reset/key/" in line]
+        self.assertIn(reset_path.strip(), html_body)
+
     def test_the_email_mentions_the_clubs_contact_email_when_set(self):
         self.club.contact_email = "info@ajax-united.example.com"
         self.club.save(update_fields=["contact_email"])
@@ -1517,7 +1532,7 @@ class ParentClaimViewTests(ManagementTestBase):
         claim = ParentClaim.objects.get(club=self.club)
         self.client.force_login(self.admin_user)
 
-        with mock.patch("members.services.claims.send_mail", side_effect=OSError("smtp down")):
+        with mock.patch("members.services.claims.EmailMultiAlternatives.send", side_effect=OSError("smtp down")):
             response = self.club_post("parent_claim_approve", {"child": str(self.child.pk)}, claim.pk)
 
         self.assertRedirects(response, reverse("management:parent_claim_list"))
