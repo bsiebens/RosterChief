@@ -23,7 +23,7 @@
                 {% else %}
                     <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="48" style="width:48px;">
                         <tr>
-                            <td align="center" valign="middle" width="48" height="48" bgcolor="{{ club.secondary_color|default:"#ec4899" }}" style="width:48px; height:48px; border-radius:24px; background-color:{{ club.secondary_color|default:"#ec4899" }}; color:{{ club.secondary_content_color|default:"#ffffff" }}; font-family: Arial, Helvetica, sans-serif; font-size:16px; font-weight:bold;">
+                            <td align="center" valign="middle" width="48" height="48" bgcolor="{{ club.secondary_color|default:"#ec4899" }}" style="width:48px; height:48px; border-radius:24px; background-color:{{ club.secondary_color|default:"#ec4899" }}; color:{{ club.secondary_color|default:"#ec4899"|contrast_color }}; font-family: Arial, Helvetica, sans-serif; font-size:16px; font-weight:bold;">
                                 {{ club.initials }}
                             </td>
                         </tr>
@@ -43,7 +43,7 @@
     <p style="margin:0 0 20px 0;">{% blocktrans with club=club.name child=child %}{{ club }} has confirmed that you're {{ child }}'s parent or guardian, and your account is ready.{% endblocktrans %}</p>
 
     {% trans "Set your password" as set_password_label %}
-    {% include "email/_button.html" with href=set_password_url label=set_password_label bg=club.primary_color|default:"#4f46e5" fg=club.primary_content_color|default:"#ffffff" %}
+    {% include "email/_button.html" with href=set_password_url label=set_password_label bg=club.primary_color|default:"#4f46e5" fg=club.primary_color|default:"#4f46e5"|contrast_color %}
 
     <p style="margin:0 0 16px 0; font-size:13px; color:#6b7280;">{% trans "That link is for you alone — please don't forward it." %}</p>
 

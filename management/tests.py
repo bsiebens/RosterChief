@@ -1516,6 +1516,21 @@ class ParentClaimViewTests(ManagementTestBase):
         [reset_path] = [line for line in sent.body.splitlines() if "/accounts/password/reset/key/" in line]
         self.assertIn(reset_path.strip(), html_body)
 
+    def test_the_initials_badge_text_contrasts_against_the_fallback_colour(self):
+        # self.club has no secondary_color set, so the badge falls back to
+        # #ec4899 -- white text on that (the old hardcoded default) reads
+        # far worse than black (contrast_color("#ec4899") == "#000000"), see
+        # club/templatetags/club_email.py::contrast_color.
+        self.submit()
+        claim = ParentClaim.objects.get(club=self.club)
+        self.client.force_login(self.admin_user)
+
+        self.club_post("parent_claim_approve", {"child": str(self.child.pk)}, claim.pk)
+
+        [(html_body, _mimetype)] = mail.outbox[0].alternatives
+        self.assertIn("background-color:#ec4899", html_body)
+        self.assertIn("color:#000000", html_body)
+
     def test_the_email_mentions_the_clubs_contact_email_when_set(self):
         self.club.contact_email = "info@ajax-united.example.com"
         self.club.save(update_fields=["contact_email"])

@@ -1258,6 +1258,17 @@ class ClubBrandingModelTests(TestCase):
     def test_no_colour_means_no_contrast_colour(self):
         self.assertEqual(Club(primary_color="").primary_content_color, "")
 
+    def test_contrast_color_filter_matches_the_same_algorithm(self):
+        # HTML emails apply this to a literal fallback background (e.g.
+        # club.secondary_color|default:"#ec4899") rather than a club's own
+        # colour, so it can't be exercised through primary_content_color --
+        # but it must still agree with it for a colour a club actually set.
+        from club.templatetags.club_email import contrast_color
+
+        self.assertEqual(contrast_color("#ec4899"), Club(secondary_color="#ec4899").secondary_content_color)
+        self.assertEqual(contrast_color("#fef08a"), "#000000")
+        self.assertEqual(contrast_color("#1e40af"), "#ffffff")
+
     def test_a_colour_must_be_a_hex_value(self):
         club = Club(name="Ajax United", primary_color="blue")
 

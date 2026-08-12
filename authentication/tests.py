@@ -318,6 +318,27 @@ class PasswordResetEmailTests(TestCase):
         self.assertIn("AU", with_club)  # initials fallback: no logo set
         self.assertIn("https://ajax-united.rosterchief.app/accounts/password/reset/key/abc-def/", with_club)
 
+    def test_the_initials_badge_text_contrasts_against_the_fallback_colour(self):
+        # Club has no secondary_color, so the badge falls back to #ec4899 --
+        # black text (contrast_color("#ec4899")) reads far better on it than
+        # the white the template used to hardcode. See
+        # club/templatetags/club_email.py::contrast_color.
+        club = Club.objects.create(name="Ajax United", slug="ajax-united")
+
+        rendered = render_to_string("account/email/password_reset_key_message.html", {"club": club, "password_reset_url": "https://ajax-united.rosterchief.app/accounts/password/reset/key/abc-def/"})
+
+        self.assertIn("background-color:#ec4899", rendered)
+        self.assertIn("color:#000000", rendered)
+
+    def test_the_reset_button_text_contrasts_against_the_no_club_fallback_colour(self):
+        # No club at all (the base-domain flow) -- the button falls back to
+        # #0ea5e9, RosterChief's own sky blue, which also needs black text
+        # for a passing contrast ratio, not the white previously hardcoded.
+        rendered = render_to_string("account/email/password_reset_key_message.html", {"club": None, "password_reset_url": "https://rosterchief.app/accounts/password/reset/key/abc-def/", "current_site": None})
+
+        self.assertIn("background-color:#0ea5e9", rendered)
+        self.assertIn("color:#000000", rendered)
+
         without_club = render_to_string("account/email/password_reset_key_message.html", {"club": None, "password_reset_url": "https://rosterchief.app/accounts/password/reset/key/abc-def/", "current_site": SimpleNamespace(name="rosterchief.app")})
         self.assertIn("Roster", without_club)
         self.assertIn("Chief", without_club)
