@@ -1376,10 +1376,20 @@ class FamilyListView(ClubStaffRequiredMixin, ListView):
 
     def get_queryset(self):
         visible = members_visible_to(self.request.user, self.request.club, include_guardians=True)
+
+        # ?q= matches a first or last name of any member on the family --
+        # parent/guardian or child alike, since the person being searched for
+        # could be either. Narrowing the already-visible set first (rather than
+        # filtering families on a second, independent membership join) means a
+        # match still respects the same visibility rule as the unfiltered list.
+        search = self.request.GET.get("q", "").strip()
+        if search:
+            visible = visible.filter(Q(first_name__icontains=search) | Q(last_name__icontains=search))
+
         return families_of_club(self.request.club).filter(memberships__member__in=visible).distinct()
 
     def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
+        context = super().get_context_data(search=self.request.GET.get("q", ""), **kwargs)
         families = list(context["families"])
 
         visible = members_visible_to(self.request.user, self.request.club, include_guardians=True)

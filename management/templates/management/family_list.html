@@ -11,6 +11,17 @@
 {% endblock actions %}
 
 {% block panel %}
+    <form method="get" class="mb-2 flex flex-wrap items-center gap-2">
+        <label class="input">
+            <span class="opacity-50">{% lucide "search" size=16 %}</span>
+            <input type="search" name="q" value="{{ search }}" placeholder="{% trans 'Search by parent or child name ...' %}" class="input input-bordered w-full max-w-xs">
+        </label>
+        <button class="btn btn-outline gap-2" type="submit">{% lucide "search" size=16 %} {% trans "Search" %}</button>
+        {% if search %}
+            <a class="btn gap-2" href="{% url "management:family_list" %}">{% lucide "x" size=16 %} {% trans "Clear filter" %}</a>
+        {% endif %}
+    </form>
+
     <div class="card bg-base-100 shadow">
         <div class="card-body">
             <div class="overflow-x-auto">

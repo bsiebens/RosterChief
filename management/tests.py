@@ -5896,6 +5896,45 @@ class FamilyListViewTests(ManagementTestBase):
 
         self.assertNotContains(response, "The Smiths")
 
+    def test_search_matches_a_parents_name(self):
+        response = self.client.get(reverse("management:family_list") + "?q=Pat", HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, "The Smiths")
+
+    def test_search_matches_a_childs_name(self):
+        response = self.client.get(reverse("management:family_list") + "?q=Cody", HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, "The Smiths")
+
+    def test_search_matches_a_last_name(self):
+        response = self.client.get(reverse("management:family_list") + "?q=Smith", HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, "The Smiths")
+
+    def test_search_with_no_match_excludes_the_family(self):
+        response = self.client.get(reverse("management:family_list") + "?q=Nobody", HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertNotContains(response, "The Smiths")
+
+    def test_search_term_is_kept_in_the_input(self):
+        response = self.client.get(reverse("management:family_list") + "?q=Pat", HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, 'value="Pat"')
+
+    def test_search_still_respects_visibility(self):
+        # A search term matching someone real must not surface a family the
+        # requester otherwise has no reason to see.
+        coach_user = User.objects.create_user(email="coach-fam2@example.com", password="pw-secret-123")
+        coach_member = Member.objects.create(user=coach_user, first_name="Cara", last_name="Coach")
+        team = Team.objects.create(club=self.club, name="U12", short_name="U12")
+        position = Position.objects.create(club=self.club, name="Coach-fam2", short_name="CF2", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=team, member=coach_member, season=self.season, position=position)
+        self.client.force_login(coach_user)
+
+        response = self.client.get(reverse("management:family_list") + "?q=Pat", HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertNotContains(response, "The Smiths")
+
 
 class SidebarCounterTests(ManagementTestBase):
     """The nav's two admin-only badges -- pending parent claims, and upcoming
