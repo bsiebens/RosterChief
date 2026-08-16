@@ -18,11 +18,20 @@
 
         <div>
             {% if field_type == "input" %}
+                {% comment %}
+                    datetime -> minute precision (Y-m-d\TH:i), not "c": a <input type=datetime-local>
+                    with no `step` attribute defaults to whole-minute granularity, and a
+                    pre-filled value carrying seconds (e.g. NewsPublishForm's `initial=timezone.now`,
+                    live to the second) violates that step. Chrome quietly tolerates the
+                    mismatch; Safari enforces it and refuses to submit the field at all,
+                    with no server-side validation error to explain why -- the fix has to be
+                    not sending a value more precise than the field claims to accept.
+                {% endcomment %}
                 <input
                         type="{% if field.widget_type == "regionalphonenumber" %}tel{% elif field.widget_type == "datetime" %}datetime-local{% else %}{{ field.widget_type }}{% endif %}"
                         class="input w-full {% if field.errors %}input-error text-error{% endif %} {% if size_modifier %}input-{{ size_modifier }}{% endif %}"
                         name="{{ field.html_name }}"
-                        value="{% if field.widget_type == "date" or field.widget_type == "datetime" %}{% if field.value|date:"c"|default:"" != "" %}{{ field.value|date:"c"|default:"" }}{% else %}{{ field.value|default:"" }}{% endif %}{% else %}{% if field.value == None %}{{ field.value|default:"" }}{% else %}{{ field.value }}{% endif %}{% endif %}"
+                        value="{% if field.widget_type == "datetime" %}{% if field.value|date:"Y-m-d\TH:i"|default:"" != "" %}{{ field.value|date:"Y-m-d\TH:i"|default:"" }}{% else %}{{ field.value|default:"" }}{% endif %}{% elif field.widget_type == "date" %}{% if field.value|date:"c"|default:"" != "" %}{{ field.value|date:"c"|default:"" }}{% else %}{{ field.value|default:"" }}{% endif %}{% else %}{% if field.value == None %}{{ field.value|default:"" }}{% else %}{{ field.value }}{% endif %}{% endif %}"
                         {% if show_placeholder %}placeholder="{{ field.label|capfirst }}"{% endif %}
                         {% for attr, value in field.field.widget.attrs.items %}{% if attr != "type" %}{{ attr }}="{{ value }}" {% endif %}{% endfor %}
                 />
