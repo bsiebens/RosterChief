@@ -14,7 +14,7 @@
     <div class="card bg-base-100 shadow">
         <div class="card-body">
             <div class="overflow-x-auto">
-                <table class="table">
+                <table class="table table-cards">
                     <thead>
                         <tr>
                             <th>{% trans "Ordering" %}</th>
@@ -26,9 +26,9 @@
                     <tbody>
                         {% for level in levels %}
                             <tr>
-                                <td>{{ level.ordering }}</td>
-                                <td>{{ level.name }}</td>
-                                <td>
+                                <td data-label="{% trans 'Ordering' %}">{{ level.ordering }}</td>
+                                <td class="font-semibold">{{ level.name }}</td>
+                                <td data-label="{% trans 'Qualifies for' %}">
                                     {% for team in level.teams.all %}
                                         <span class="badge badge-outline badge-sm">{{ team.name }}</span>
                                     {% empty %}

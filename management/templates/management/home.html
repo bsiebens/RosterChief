@@ -96,53 +96,45 @@
     <div class="mb-6 grid gap-4 lg:grid-cols-2">
         <div class="card bg-base-100 shadow">
             <div class="card-body">
-                <div class="flex items-center justify-between">
+                <div class="flex flex-wrap items-center justify-between gap-2">
                     <h2 class="card-title text-base">{% lucide "calendar" size=18 %} {% trans "Upcoming events" %}</h2>
                     <a class="btn btn-outline btn-sm gap-2" href="{% url 'management:event_list' %}">{% lucide "arrow-right" size=14 %} {% trans "View all" %}</a>
                 </div>
-                <div class="overflow-x-auto">
-                    <table class="table">
-                        <tbody>
-                            {% for event in upcoming_events %}
-                                <tr>
-                                    <td class="whitespace-nowrap">{{ event.start|date:"D j M, H:i" }}</td>
-                                    <td>{{ event.title }}</td>
-                                    <td>{{ event.get_kind_display }}</td>
-                                    <td>{% for team in event.teams.all %}{{ team.short_name }}{% if not forloop.last %}, {% endif %}{% empty %}—{% endfor %}</td>
-                                </tr>
-                            {% empty %}
-                                <tr>
-                                    <td class="text-center opacity-60">{% trans "Nothing scheduled." %}</td>
-                                </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
+                <ul class="divide-y divide-base-200">
+                    {% for event in upcoming_events %}
+                        <li class="flex flex-col gap-1 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+                            <div class="min-w-0">
+                                <div class="truncate font-semibold">{{ event.title }}</div>
+                                <div class="truncate text-xs opacity-60">
+                                    {{ event.get_kind_display }}
+                                    {% for team in event.teams.all %}&middot; {{ team.short_name }}{% if not forloop.last %}, {% endif %}{% endfor %}
+                                </div>
+                            </div>
+                            <div class="shrink-0 whitespace-nowrap text-sm opacity-70">{{ event.start|date:"D j M, H:i" }}</div>
+                        </li>
+                    {% empty %}
+                        <li class="py-2 text-center text-sm opacity-60">{% trans "Nothing scheduled." %}</li>
+                    {% endfor %}
+                </ul>
             </div>
         </div>
 
         <div class="card bg-base-100 shadow">
             <div class="card-body">
-                <div class="flex items-center justify-between">
+                <div class="flex flex-wrap items-center justify-between gap-2">
                     <h2 class="card-title text-base">{% lucide "newspaper" size=18 %} {% trans "News" %}</h2>
                     <a class="btn btn-outline btn-sm gap-2" href="{% url 'management:news_list' %}">{% lucide "arrow-right" size=14 %} {% trans "View all" %}</a>
                 </div>
-                <div class="overflow-x-auto">
-                    <table class="table">
-                        <tbody>
-                            {% for news_item in published_news %}
-                                <tr>
-                                    <td class="whitespace-nowrap">{{ news_item.published_at|date:"D j M" }}</td>
-                                    <td><a class="link link-hover" href="{% url 'management:news_detail' news_item.pk %}">{{ news_item.title }}</a></td>
-                                </tr>
-                            {% empty %}
-                                <tr>
-                                    <td class="text-center opacity-60">{% trans "Nothing published yet." %}</td>
-                                </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
+                <ul class="divide-y divide-base-200">
+                    {% for news_item in published_news %}
+                        <li class="flex flex-col gap-1 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+                            <a class="link link-hover truncate font-semibold" href="{% url 'management:news_detail' news_item.pk %}">{{ news_item.title }}</a>
+                            <span class="shrink-0 whitespace-nowrap text-sm opacity-70">{{ news_item.published_at|date:"D j M" }}</span>
+                        </li>
+                    {% empty %}
+                        <li class="py-2 text-center text-sm opacity-60">{% trans "Nothing published yet." %}</li>
+                    {% endfor %}
+                </ul>
             </div>
         </div>
     </div>

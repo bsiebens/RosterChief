@@ -13,7 +13,7 @@
     <div class="card bg-base-100 shadow">
         <div class="card-body">
             <div class="overflow-x-auto">
-                <table class="table">
+                <table class="table table-cards">
                     <thead>
                         <tr>
                             <th>{% trans "Name" %}</th>
@@ -26,10 +26,10 @@
                     <tbody>
                         {% for team in teams %}
                             <tr>
-                                <td><a class="link link-hover" href="{% url 'management:team_detail' team.pk %}">{{ team.name }}</a></td>
-                                <td>{{ team.short_name }}</td>
-                                <td>{{ team.player_count }}</td>
-                                <td>{{ team.staff_count }}</td>
+                                <td><a class="link link-hover font-semibold" href="{% url 'management:team_detail' team.pk %}">{{ team.name }}</a></td>
+                                <td data-label="{% trans 'Short name' %}">{{ team.short_name }}</td>
+                                <td data-label="{% trans 'Players' %}">{{ team.player_count }}</td>
+                                <td data-label="{% trans 'Staff' %}">{{ team.staff_count }}</td>
                                 <td class="text-right">
                                     {% if is_club_admin %}
                                         <div class="flex justify-end gap-1">

@@ -11,6 +11,15 @@
     {% block section_title %}{% trans "Management" %}{% endblock section_title %}
 {% endblock head_title %}
 
+{% block nav_toggle %}
+    <button class="btn btn-ghost btn-square lg:hidden" type="button" onclick="document.getElementById('mobile_nav_modal').showModal()" aria-label="{% trans 'Menu' %}">
+        {% lucide "menu" size=20 %}
+    </button>
+{% endblock nav_toggle %}
+
+{% comment %} Kept in the navbar itself only at `lg`+, where there's no hamburger drawer to hold them instead -- see the comment on `nav_icons_class` in _base.html. {% endcomment %}
+{% block nav_icons_class %}hidden items-center lg:flex{% endblock nav_icons_class %}
+
 {% block menu %}
     <aside class="hidden w-64 shrink-0 overflow-y-auto border-r border-base-300 bg-base-100 lg:block">
         <ul class="menu w-full gap-1 p-3 mt-4">
@@ -20,7 +29,40 @@
 {% endblock menu %}
 
 {% block main %}
-    <div class="mb-6 flex flex-wrap flex-row items-center justify-between gap-3">
+    {# Below `lg` the sidebar is hidden and {% block nav_toggle %} above opens this instead. #}
+    <dialog id="mobile_nav_modal" class="modal modal-start lg:hidden">
+        <div class="modal-box h-full max-h-none w-72 max-w-[85vw] rounded-none p-0">
+            <div class="flex items-center justify-between border-b border-base-300 p-3">
+                <span class="font-roboto text-lg font-bold tracking-wider">{% trans "Menu" %}</span>
+                <form method="dialog">
+                    <button class="btn btn-ghost btn-square btn-sm" aria-label="{% trans 'Close' %}">{% lucide "x" size=18 %}</button>
+                </form>
+            </div>
+            <ul class="menu w-full gap-1 p-3">
+                <li>
+                    <button type="button" data-theme-toggle>
+                        <span data-theme-icon="light" class="hidden items-center gap-3">{% lucide "sun" size=16 %} {% trans "Light theme" %}</span>
+                        <span data-theme-icon="dark" class="hidden items-center gap-3">{% lucide "moon" size=16 %} {% trans "Dark theme" %}</span>
+                        <span data-theme-icon="auto" class="hidden items-center gap-3">{% lucide "sun-moon" size=16 %} {% trans "Auto theme" %}</span>
+                    </button>
+                </li>
+                {% if has_management_access %}
+                    <li><a href="{% url "management:home" %}">{% lucide "layout-dashboard" size=16 %} {% trans "Management" %}</a></li>
+                {% endif %}
+                {% if user.is_superuser %}
+                    <li><a href="{% url "admin:index" %}">{% lucide "shield-cog" size=16 %} {% trans "Django admin" %}</a></li>
+                {% endif %}
+                <li class="menu-title">{% trans "Navigation" %}</li>
+                {% include "management/_nav_items.html" %}
+            </ul>
+        </div>
+        <form method="dialog" class="modal-backdrop">
+            <button>{% trans "close" %}</button>
+        </form>
+    </dialog>
+
+    {# flex-col below `sm`: title over a full-width, stacked column of action buttons reads far better on a phone than the same row wrapping mid-button. #}
+    <div class="mb-6 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
         <div class="flex flex-col gap-2 grow">
             <h1 class="text-3xl font-bold">
                 {% block heading %}{% trans "Management" %}{% endblock heading %}
@@ -28,15 +70,10 @@
             <span class="text-sm text-base-content/50">{% block subheading %}{% endblock subheading %}</span>
         </div>
 
-        <div class="flex gap-2">
+        <div class="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap">
             {% block actions %}{% endblock actions %}
         </div>
     </div>
-
-    {# Below `lg` the sidebar is hidden, so the same links appear here rather than nowhere. #}
-    <ul class="menu menu-horizontal mb-6 w-full gap-1 overflow-x-auto rounded-box bg-base-100 lg:hidden">
-        {% include "management/_nav_items.html" %}
-    </ul>
 
     {% comment %}
         A final billing notice follows the admin onto every management page -- but only at

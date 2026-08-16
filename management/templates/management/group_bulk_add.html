@@ -18,23 +18,26 @@
                 {% endfor %}
 
                 {% comment %}
-                    Deliberately not wrapped in the usual overflow-x-auto: that makes a
-                    scroll container, which clips the member picker's absolutely
-                    positioned dropdown for every row but the first couple.
+                    overflow-x-auto is safe here: the member picker's dropdown
+                    (searchable-select.js) is position: fixed, computed from the input's
+                    own screen position rather than document flow, so a scrolling
+                    ancestor around the table no longer clips it.
                 {% endcomment %}
-                <table class="table w-full">
-                    <thead>
-                        <tr>
-                            <th>{% trans "Member" %}</th>
-                            <th></th>
-                        </tr>
-                    </thead>
-                    <tbody id="bulk-add-rows" data-prefix="{{ formset.prefix }}">
-                        {% for form in formset %}
-                            {% include "management/_group_bulk_add_row.html" with form=form %}
-                        {% endfor %}
-                    </tbody>
-                </table>
+                <div class="overflow-x-auto">
+                    <table class="table w-full">
+                        <thead>
+                            <tr>
+                                <th>{% trans "Member" %}</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody id="bulk-add-rows" data-prefix="{{ formset.prefix }}">
+                            {% for form in formset %}
+                                {% include "management/_group_bulk_add_row.html" with form=form %}
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
 
                 <template id="bulk-add-row-template">
                     {% include "management/_group_bulk_add_row.html" with form=formset.empty_form %}

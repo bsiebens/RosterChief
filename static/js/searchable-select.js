@@ -32,8 +32,28 @@
         input.placeholder = select.dataset.searchPlaceholder || "";
         input.autocomplete = "off";
 
+        // `fixed`, not `absolute`: an absolutely positioned dropdown is clipped by
+        // the nearest scrolling ancestor (e.g. the overflow-x-auto wrapper the
+        // bulk-add tables would otherwise need on mobile), which is exactly what
+        // stopped those tables from getting one. Fixed positioning is relative to
+        // the viewport regardless of ancestors, so it's never clipped that way --
+        // position and size are computed in JS instead of via CSS, see positionList().
         const list = document.createElement("ul");
-        list.className = "menu absolute z-10 mt-1 w-full rounded-box bg-base-100 shadow max-h-60 overflow-y-auto flex-nowrap hidden";
+        list.className = "menu fixed z-50 rounded-box bg-base-100 shadow max-h-60 overflow-y-auto flex-nowrap hidden";
+
+        const positionList = () => {
+            const rect = input.getBoundingClientRect();
+            list.style.left = `${rect.left}px`;
+            list.style.top = `${rect.bottom + 4}px`;
+            list.style.width = `${rect.width}px`;
+        };
+
+        // Capture phase: a "scroll" event on an inner scroll container (the
+        // overflow-x-auto table wrapper) doesn't bubble up to window in the
+        // normal (bubbling) phase, but every scroll is seen on the way down in
+        // the capture phase, so this still fires no matter which ancestor moved.
+        window.addEventListener("scroll", () => { if (!list.classList.contains("hidden")) positionList(); }, true);
+        window.addEventListener("resize", () => { if (!list.classList.contains("hidden")) positionList(); });
 
         select.parentNode.insertBefore(wrapper, select);
         if (isMultiple) {
@@ -115,7 +135,12 @@
             });
 
             highlighted = -1;
-            list.classList.toggle("hidden", matches.length === 0);
+            if (matches.length === 0) {
+                list.classList.add("hidden");
+            } else {
+                positionList();
+                list.classList.remove("hidden");
+            }
             return matches;
         };
 

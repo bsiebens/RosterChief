@@ -25,7 +25,7 @@
     <div class="card bg-base-100 shadow">
         <div class="card-body">
             <div class="overflow-x-auto">
-                <table class="table">
+                <table class="table table-cards">
                     <thead>
                         <tr>
                             <th>{% trans "Family" %}</th>
@@ -38,14 +38,14 @@
                         {% for family in families %}
                             <tr>
                                 <td><a class="link link-hover font-semibold" href="{% url 'management:family_detail' family.pk %}">{{ family }}</a></td>
-                                <td>
+                                <td data-label="{% trans 'Parents / guardians' %}">
                                     {% for guardian in family.guardians_display %}
                                         <a class="link link-hover" href="{% url 'management:member_detail' guardian.pk %}">{{ guardian }}</a>{% if not forloop.last %}, {% endif %}
                                     {% empty %}
                                         <span class="opacity-40">-</span>
                                     {% endfor %}
                                 </td>
-                                <td>
+                                <td data-label="{% trans 'Children' %}">
                                     {% for child in family.children_display %}
                                         <a class="link link-hover" href="{% url 'management:member_detail' child.pk %}">{{ child }}</a>{% if not forloop.last %}, {% endif %}
                                     {% empty %}

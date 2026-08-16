@@ -210,3 +210,59 @@
     backface-visibility: hidden;
     transform: translateZ(0);
 }
+
+/* Below `md`, a `.table-cards` table reads as a stack of cards instead of a
+   horizontally-scrolling grid: each row becomes a bordered block, each cell
+   becomes a label/value line pulling its label from `data-label` (set on the
+   <td> in the template -- there's no way to read the matching <th> text from
+   pure CSS). A <td> with no `data-label` renders as plain full-width content
+   instead of a label/value row -- for an image cell, a heading-style link, or
+   an actions row that already lays itself out. At `md` and up this reverts to
+   an ordinary table with nothing left over from the mobile styling. */
+@media (width < 48rem) {
+    .table-cards, .table-cards :is(thead, tbody, tr, th, td) {
+        display: block;
+        width: 100%;
+    }
+
+    .table-cards thead {
+        display: none;
+    }
+
+    .table-cards tbody tr {
+        border: 1px solid var(--color-base-300);
+        border-radius: var(--radius-box);
+        padding: 0 0.75rem;
+    }
+
+    .table-cards tbody tr + tr {
+        margin-top: 0.75rem;
+    }
+
+    .table-cards td {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.75rem;
+        padding: 0.6rem 0;
+        border-bottom: 1px solid var(--color-base-200);
+    }
+
+    .table-cards td:last-child {
+        border-bottom: none;
+    }
+
+    .table-cards td[data-label]:before {
+        content: attr(data-label);
+        flex-shrink: 0;
+        font-size: 0.75rem;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+        text-transform: uppercase;
+        opacity: 0.5;
+    }
+
+    .table-cards td:not([data-label]) {
+        justify-content: flex-start;
+    }
+}

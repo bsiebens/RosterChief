@@ -11,7 +11,7 @@
     <div class="card bg-base-100 shadow">
         <div class="card-body">
             <div class="overflow-x-auto">
-                <table class="table">
+                <table class="table table-cards">
                     <thead>
                         <tr>
                             <th></th>
@@ -30,16 +30,16 @@
                                         <img src="{{ sponsor.logo.url }}" alt="" class="size-8 rounded object-contain">
                                     {% endif %}
                                 </td>
-                                <td>{{ sponsor.name }}</td>
-                                <td>
+                                <td class="font-semibold">{{ sponsor.name }}</td>
+                                <td data-label="{% trans 'URL' %}">
                                     {% if sponsor.url %}
                                         <a class="link link-hover" href="{{ sponsor.url }}" target="_blank" rel="noopener noreferrer">{{ sponsor.url }}</a>
                                     {% else %}
                                         <span class="opacity-50">&mdash;</span>
                                     {% endif %}
                                 </td>
-                                <td>{{ sponsor.start_date|date:"Y-m-d" }}</td>
-                                <td>{{ sponsor.end_date|date:"Y-m-d"|default:"—" }}</td>
+                                <td data-label="{% trans 'Start date' %}">{{ sponsor.start_date|date:"Y-m-d" }}</td>
+                                <td data-label="{% trans 'End date' %}">{{ sponsor.end_date|date:"Y-m-d"|default:"—" }}</td>
                                 <td class="text-right">
                                     <div class="flex justify-end gap-1">
                                         <a class="btn btn-outline btn-sm" href="{% url 'management:sponsor_update' sponsor.pk %}" aria-label="{% trans 'Edit' %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</a>

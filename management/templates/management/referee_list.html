@@ -8,7 +8,7 @@
     <div class="card bg-base-100 shadow">
         <div class="card-body">
             <div class="overflow-x-auto">
-                <table class="table">
+                <table class="table table-cards">
                     <thead>
                         <tr>
                             <th>{% trans "Referee" %}</th>
@@ -21,9 +21,9 @@
                     <tbody>
                         {% for referee in referees %}
                             <tr>
-                                <td><a class="link link-hover" href="{% url 'management:member_detail' referee.pk %}">{{ referee }}</a></td>
-                                <td>{{ referee.referee_profile.level|default:"—" }}</td>
-                                <td>
+                                <td><a class="link link-hover font-semibold" href="{% url 'management:member_detail' referee.pk %}">{{ referee }}</a></td>
+                                <td data-label="{% trans 'Level' %}">{{ referee.referee_profile.level|default:"—" }}</td>
+                                <td data-label="{% trans 'Can referee for' %}">
                                     {% if referee.referee_profile.is_eligible %}
                                         {% for team in referee.referee_profile.eligible_teams %}
                                             <span class="badge badge-outline badge-sm">{{ team.name }}</span>
@@ -34,8 +34,8 @@
                                         <span class="opacity-40">—</span>
                                     {% endif %}
                                 </td>
-                                <td>{{ referee.referee_profile.valid_until|default:"—" }}</td>
-                                <td>
+                                <td data-label="{% trans 'Valid until' %}">{{ referee.referee_profile.valid_until|default:"—" }}</td>
+                                <td data-label="{% trans 'Status' %}">
                                     {% if referee.referee_profile.is_eligible %}
                                         <span class="badge badge-success badge-sm">{% trans "Valid" %}</span>
                                     {% elif not referee.referee_profile.level %}

@@ -119,7 +119,7 @@
                     <div class="divider"></div>
                     <h3 class="text-sm font-semibold opacity-70">{% trans "Season history" %}</h3>
                     <div class="overflow-x-auto">
-                        <table class="table">
+                        <table class="table table-cards">
                             <thead>
                                 <tr>
                                     <th>{% trans "Season" %}</th>
@@ -131,10 +131,10 @@
                             <tbody>
                                 {% for membership in membership_history %}
                                     <tr>
-                                        <td>{{ membership.season.start_date|date:"Y" }} - {{ membership.season.end_date|date:"Y" }}</td>
-                                        <td>{{ membership.get_status_display }}</td>
-                                        <td>{{ membership.get_fee_status_display }}</td>
-                                        <td>{{ membership.license|default:"-" }}</td>
+                                        <td class="font-semibold">{{ membership.season.start_date|date:"Y" }} - {{ membership.season.end_date|date:"Y" }}</td>
+                                        <td data-label="{% trans 'Status' %}">{{ membership.get_status_display }}</td>
+                                        <td data-label="{% trans 'Fee status' %}">{{ membership.get_fee_status_display }}</td>
+                                        <td data-label="{% trans 'License' %}">{{ membership.license|default:"-" }}</td>
                                     </tr>
                                 {% endfor %}
                             </tbody>
@@ -148,7 +148,7 @@
     {% if referee_profile or is_club_admin %}
         <div class="card bg-base-100 shadow mt-4">
             <div class="card-body">
-                <div class="flex items-center justify-between">
+                <div class="flex flex-wrap items-center justify-between gap-2">
                     <h2 class="card-title text-base">{% lucide "flag" size=18 %} {% trans "Referee eligibility" %}</h2>
                     {% if is_club_admin %}
                         <button class="btn btn-outline btn-sm gap-2" type="button" onclick="document.getElementById('referee_eligibility_modal').showModal()">{% lucide "pencil" size=14 %} {% trans "Edit" %}</button>
@@ -214,13 +214,13 @@
     {% for family_group in family_groups %}
         <div class="card bg-base-100 shadow mt-4">
             <div class="card-body">
-                <div class="flex items-center justify-between">
+                <div class="flex flex-wrap items-center justify-between gap-2">
                     <h2 class="card-title text-base">
                         {% lucide "users" size=18 %}
                         <a class="link link-hover" href="{% url 'management:family_detail' family_group.family.pk %}">{{ family_group.family }}</a>
                     </h2>
                     {% if is_club_admin %}
-                        <div class="flex gap-2">
+                        <div class="flex flex-wrap gap-2">
                             <button class="btn btn-outline btn-sm gap-2" type="button" onclick="document.getElementById('{{ family_group.family.pk|dom_id:"add_parent_modal" }}').showModal()">{% lucide "user-plus" size=14 %} {{ add_parent_label }}</button>
                             <button class="btn btn-outline btn-sm gap-2" type="button" onclick="document.getElementById('{{ family_group.family.pk|dom_id:"add_child_modal" }}').showModal()">{% lucide "baby" size=14 %} {{ add_child_label }}</button>
                             <button class="btn btn-outline btn-error btn-sm gap-2" type="button" onclick="document.getElementById('{{ family_group.family.pk|dom_id:"detach_family_modal" }}').showModal()">{% lucide "user-x" size=14 %} {{ remove_from_family_label }}</button>
@@ -245,7 +245,7 @@
     {% if is_club_admin %}
         <div class="card bg-base-100 shadow mt-4">
             <div class="card-body">
-                <div class="flex items-center justify-between">
+                <div class="flex flex-wrap items-center justify-between gap-2">
                     <h2 class="card-title text-base">{% lucide "users" size=18 %} {% trans "Family" %}</h2>
                     <button class="btn btn-outline btn-sm gap-2" type="button" onclick="document.getElementById('attach_family_modal').showModal()">{% lucide "user-plus" size=14 %} {% trans "Add to family" %}</button>
                 </div>

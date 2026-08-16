@@ -11,7 +11,7 @@
     <div class="card bg-base-100 shadow">
         <div class="card-body">
             <div class="overflow-x-auto">
-                <table class="table">
+                <table class="table table-cards">
                     <thead>
                         <tr>
                             <th>{% trans "Name" %}</th>
@@ -24,13 +24,13 @@
                     <tbody>
                         {% for location in locations %}
                             <tr>
-                                <td>
+                                <td class="font-semibold">
                                     {{ location.name }}
                                     {% if location.is_home %}<span class="badge badge-sm badge-primary ml-1">{% trans "Home" %}</span>{% endif %}
                                 </td>
-                                <td>{{ location.address }}</td>
-                                <td>{{ location.city }}</td>
-                                <td>{{ location.country }}</td>
+                                <td data-label="{% trans 'Address' %}">{{ location.address }}</td>
+                                <td data-label="{% trans 'City' %}">{{ location.city }}</td>
+                                <td data-label="{% trans 'Country' %}">{{ location.country }}</td>
                                 <td class="text-right">
                                     <div class="flex justify-end gap-1">
                                         <a class="btn btn-outline btn-sm" href="{% url 'management:location_update' location.pk %}" aria-label="{% trans 'Edit' %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</a>

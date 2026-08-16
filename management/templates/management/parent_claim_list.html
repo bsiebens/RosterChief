@@ -92,7 +92,7 @@
             <div class="card-body">
                 <h2 class="card-title text-base">{% lucide "history" size=18 %} {% trans "Already dealt with" %}</h2>
                 <div class="overflow-x-auto">
-                    <table class="table">
+                    <table class="table table-cards">
                         <thead>
                             <tr>
                                 <th>{% trans "Parent" %}</th>
@@ -104,9 +104,9 @@
                         <tbody>
                             {% for claim in reviewed %}
                                 <tr>
-                                    <td>{{ claim.parent_name }}<div class="text-xs opacity-60">{{ claim.parent_email }}</div></td>
-                                    <td>{{ claim.claimed_child_name }}</td>
-                                    <td>
+                                    <td class="font-semibold">{{ claim.parent_name }}<div class="text-xs font-normal opacity-60">{{ claim.parent_email }}</div></td>
+                                    <td data-label="{% trans 'Claimed' %}">{{ claim.claimed_child_name }}</td>
+                                    <td data-label="{% trans 'Outcome' %}">
                                         {% if claim.status == "approved" %}
                                             <span class="badge badge-success badge-sm">{% trans "Approved" %}</span>
                                             {% if claim.child %}<div class="text-xs opacity-60">{{ claim.child }}</div>{% endif %}
@@ -115,7 +115,7 @@
                                             {% if claim.note %}<div class="text-xs opacity-60">{{ claim.note }}</div>{% endif %}
                                         {% endif %}
                                     </td>
-                                    <td>{{ claim.reviewed_by|default:"—" }}</td>
+                                    <td data-label="{% trans 'Reviewed by' %}">{{ claim.reviewed_by|default:"—" }}</td>
                                 </tr>
                             {% endfor %}
                         </tbody>

@@ -67,7 +67,7 @@
         <div class="card-body">
             <h2 class="card-title text-base">{% lucide "calendar" size=18 %} {% trans "Occurrences" %}</h2>
             <div class="overflow-x-auto">
-                <table class="table">
+                <table class="table table-cards">
                     <thead>
                         <tr>
                             <th>{% trans "When" %}</th>
@@ -77,8 +77,8 @@
                     <tbody>
                         {% for occurrence in occurrences %}
                             <tr>
-                                <td><a class="link link-hover" href="{% url 'management:event_detail' occurrence.pk %}">{{ occurrence.start|date:"j M Y H:i" }}</a></td>
-                                <td>
+                                <td class="font-semibold"><a class="link link-hover" href="{% url 'management:event_detail' occurrence.pk %}">{{ occurrence.start|date:"j M Y H:i" }}</a></td>
+                                <td data-label="{% trans 'Status' %}">
                                     {% if occurrence.cancelled %}
                                         <span class="badge badge-outline gap-1">{% lucide "ban" size=12 %} {% trans "Cancelled" %}</span>
                                     {% elif occurrence.detached %}

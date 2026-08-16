@@ -38,7 +38,7 @@
     <div class="card bg-base-100 shadow">
         <div class="card-body">
             <div class="overflow-x-auto">
-                <table class="table">
+                <table class="table table-cards">
                     <thead>
                         <tr>
                             <th>{% trans "Title" %}</th>
@@ -52,14 +52,14 @@
                     <tbody>
                         {% for event in events %}
                             <tr>
-                                <td class="flex flex-row items-center gap-2">
+                                <td class="flex flex-row items-center gap-2 font-semibold">
                                     <a class="link link-hover" href="{% url 'management:event_detail' event.pk %}">{{ event.title }}</a>
                                     {% if event.series_id %}<span class="tooltip" data-tip="{% trans 'Part of a series' %}">{% lucide "repeat" size=12 %}</span>{% endif %}
                                 </td>
-                                <td>{{ event.get_kind_display }}</td>
-                                <td>{{ event.start|date:"j M Y H:i" }}</td>
-                                <td>{% for team in event.teams.all %}{{ team.short_name }}{% if not forloop.last %}, {% endif %}{% empty %}—{% endfor %}</td>
-                                <td>{{ event.location.name|default:"—" }}</td>
+                                <td data-label="{% trans 'Kind' %}">{{ event.get_kind_display }}</td>
+                                <td data-label="{% trans 'When' %}">{{ event.start|date:"j M Y H:i" }}</td>
+                                <td data-label="{% trans 'Teams' %}">{% for team in event.teams.all %}{{ team.short_name }}{% if not forloop.last %}, {% endif %}{% empty %}—{% endfor %}</td>
+                                <td data-label="{% trans 'Location' %}">{{ event.location.name|default:"—" }}</td>
                                 <td class="text-right">
                                     {% if event.can_manage %}
                                         <div class="flex justify-end gap-1">

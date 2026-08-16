@@ -6,7 +6,7 @@
     can_manage_referees, and an optional next_url to return to after a POST
     (defaults to the event detail page when blank).
 {% endcomment %}
-<div class="flex items-center justify-between">
+<div class="flex flex-wrap items-center justify-between gap-2">
     <h2 class="card-title text-base">
         {% lucide "flag" size=18 %} {% trans "Referees" %}
         <span class="badge badge-sm {% if referees_full %}badge-neutral{% else %}badge-outline{% endif %}">

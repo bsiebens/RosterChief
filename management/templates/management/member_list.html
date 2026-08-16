@@ -4,24 +4,25 @@
 {% block heading %}{% trans "Members" %}{% endblock heading %}
 
 {% block actions %}
-<a class="btn btn-outline btn-info gap-2" href="{% url 'management:member_import_template' %}" xmlns:management="http://www.w3.org/1999/xhtml">{% lucide "download" size=16 %} {% trans "Download upload template" %}</a>
+<a class="btn btn-sm btn-outline btn-info gap-2" href="{% url 'management:member_import_template' %}">{% lucide "download" size=14 %} {% trans "Download upload template" %}</a>
     {% if is_club_admin %}
-        <a class="btn btn-outline btn-info gap-2" href="{% url 'management:member_import' %}">{% lucide "upload" size=16 %} {% trans "Mass upload" %}</a>
-        <a class="btn btn-outline gap-2" href="{% url 'management:family_create' %}">{% lucide "users" size=16 %} {% trans "Add family" %}</a>
-        <a class="btn btn-outline gap-2" href="{% url 'management:member_create' %}">{% lucide "user-plus" size=16 %} {% trans "Add member" %}</a>
+        <a class="btn btn-sm btn-outline btn-info gap-2" href="{% url 'management:member_import' %}">{% lucide "upload" size=14 %} {% trans "Mass upload" %}</a>
+        <a class="btn btn-sm btn-outline gap-2" href="{% url 'management:family_create' %}">{% lucide "users" size=14 %} {% trans "Add family" %}</a>
+        <a class="btn btn-sm btn-outline gap-2" href="{% url 'management:member_create' %}">{% lucide "user-plus" size=14 %} {% trans "Add member" %}</a>
     {% endif %}
 {% endblock actions %}
 
 {% block panel %}
-    <form method="get" class="mb-2 flex flex-wrap items-center gap-2">
-        <label class="input">
+    <form method="get" class="mb-2 flex items-center gap-2">
+        <label class="input grow sm:grow-0">
             <span class="opacity-50">{% lucide "search" size=16 %}</span>
-            <input type="search" name="q" value="{{ search }}" placeholder="{% trans 'Search members ...' %}" class="input input-bordered w-full max-w-xs">
+            <input type="search" name="q" value="{{ search }}" placeholder="{% trans 'Search members ...' %}" class="input input-bordered w-full sm:max-w-xs">
         </label>
         {% if selected_kind != "member" %}<input type="hidden" name="kind" value="{{ selected_kind }}">{% endif %}
-        <button class="btn btn-outline gap-2" type="submit">{% lucide "search" size=16 %} {% trans "Search" %}</button>
+        {# Icon-only below `sm`: label text next to a growing input is what forced this row to wrap on a phone. #}
+        <button class="btn btn-outline gap-2" type="submit" aria-label="{% trans 'Search' %}">{% lucide "search" size=16 %}<span class="hidden sm:inline">{% trans "Search" %}</span></button>
         {% if search %}
-            <a class="btn gap-2" href="{% url "management:member_list" %}">{% lucide "x" size=16 %} {% trans "Clear filter" %}</a>
+            <a class="btn gap-2" href="{% url "management:member_list" %}" aria-label="{% trans 'Clear filter' %}">{% lucide "x" size=16 %}<span class="hidden sm:inline">{% trans "Clear filter" %}</span></a>
         {% endif %}
     </form>
 
@@ -33,23 +34,23 @@
         with nothing on the page explaining why. ?kind= makes the exclusion an
         explicit, reversible choice instead.
     {% endcomment %}
-    <div class="mb-4 flex flex-wrap items-center gap-2">
-        <div class="join">
-            <a href="{% querystring kind=None page=None %}" class="btn btn-sm join-item {% if selected_kind == "member" %}btn-primary{% endif %}">{% trans "Members" %}</a>
-            <a href="{% querystring kind="guardian" page=None %}" class="btn btn-sm join-item {% if selected_kind == "guardian" %}btn-primary{% endif %}">{% trans "Guardians" %}</a>
-            <a href="{% querystring kind="both" page=None %}" class="btn btn-sm join-item {% if selected_kind == "both" %}btn-primary{% endif %}">{% trans "Both" %}</a>
+    <div class="mb-4 flex flex-col gap-2">
+        <div class="join w-full">
+            <a href="{% querystring kind=None page=None %}" class="btn btn-sm join-item flex-1 {% if selected_kind == "member" %}btn-primary{% endif %}">{% trans "Members" %}</a>
+            <a href="{% querystring kind="guardian" page=None %}" class="btn btn-sm join-item flex-1 {% if selected_kind == "guardian" %}btn-primary{% endif %}">{% trans "Guardians" %}</a>
+            <a href="{% querystring kind="both" page=None %}" class="btn btn-sm join-item flex-1 {% if selected_kind == "both" %}btn-primary{% endif %}">{% trans "Both" %}</a>
         </div>
         <span class="text-xs opacity-60">{% trans "Guardians are parents linked only through a child -- no fee, not counted as a member." %}</span>
     </div>
 
     <div class="card bg-base-100 shadow">
         <div class="card-body">
+            {# table-cards: below `md` each row reads as a card instead of forcing a horizontal scroll -- see the .table-cards rule in app.css. #}
             <div class="overflow-x-auto">
-                <table class="table">
+                <table class="table table-cards">
                     <thead>
                         <tr>
-                            <th>{% trans "Last name" %}</th>
-                            <th>{% trans "First name" %}</th>
+                            <th>{% trans "Name" %}</th>
                             <th>{% trans "Email" %}</th>
                             <th>{% trans "Family" %}</th>
                             <th>{% trans "Status" %}</th>
@@ -59,10 +60,9 @@
                     <tbody>
                         {% for member in members %}
                             <tr>
-                                <td><a class="link link-hover" href="{% url 'management:member_detail' member.pk %}">{{ member.last_name }}</a></td>
-                                <td>{{ member.first_name }}</td>
-                                <td>{{ member.contact_email|default:"-" }}</td>
-                                <td>
+                                <td><a class="link link-hover font-semibold" href="{% url 'management:member_detail' member.pk %}">{{ member.last_name }}, {{ member.first_name }}</a></td>
+                                <td data-label="{% trans 'Email' %}">{{ member.contact_email|default:"-" }}</td>
+                                <td data-label="{% trans 'Family' %}">
                                     {% if member.family_memberships_display %}
                                         <div class="flex flex-col gap-1">
                                             {% for fm in member.family_memberships_display %}
@@ -75,7 +75,7 @@
                                         <span class="opacity-40">-</span>
                                     {% endif %}
                                 </td>
-                                <td>
+                                <td data-label="{% trans 'Status' %}">
                                     {% if member.current_membership %}
                                         <span class="badge badge-sm
                                             {% if member.current_membership.status == "active" %}badge-success
@@ -90,7 +90,7 @@
                                 </td>
                                 <td class="text-right">
                                     {% if is_club_admin %}
-                                        <div class="flex justify-end gap-1">
+                                        <div class="flex flex-wrap justify-end gap-1">
                                             <a class="btn btn-outline btn-sm" href="{% url 'management:member_detail' member.pk %}" aria-label="{% trans 'Edit' %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</a>
                                             <button class="btn btn-sm btn-outline btn-error" type="button" onclick="document.getElementById('{{ member.pk|dom_id:"member_delete_modal" }}').showModal()" aria-label="{% trans 'Delete' %}">{% lucide "trash-2" size=14 %} {% trans "Delete" %}</button>
                                         </div>
@@ -99,7 +99,7 @@
                             </tr>
                         {% empty %}
                             <tr>
-                                <td colspan="6" class="text-center opacity-60">{% trans "No members yet." %}</td>
+                                <td colspan="5" class="text-center opacity-60">{% trans "No members yet." %}</td>
                             </tr>
                         {% endfor %}
                     </tbody>

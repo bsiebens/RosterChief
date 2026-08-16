@@ -11,7 +11,7 @@
     <div class="card bg-base-100 shadow">
         <div class="card-body">
             <div class="overflow-x-auto">
-                <table class="table">
+                <table class="table table-cards">
                     <thead>
                         <tr>
                             <th></th>
@@ -27,7 +27,7 @@
                                         <img src="{{ opponent.logo.url }}" alt="" class="size-8 rounded object-contain">
                                     {% endif %}
                                 </td>
-                                <td>{{ opponent.name }}</td>
+                                <td class="font-semibold">{{ opponent.name }}</td>
                                 <td class="text-right">
                                     <div class="flex justify-end gap-1">
                                         <a class="btn btn-outline btn-sm" href="{% url 'management:opponent_update' opponent.pk %}" aria-label="{% trans 'Edit' %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</a>

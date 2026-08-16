@@ -81,7 +81,7 @@
 
         <div class="card bg-base-100 shadow">
             <div class="card-body">
-                <div class="flex items-center justify-between">
+                <div class="flex flex-wrap items-center justify-between gap-2">
                     <h2 class="card-title text-base">{% lucide "user-check" size=18 %} {% trans "RSVPs" %}</h2>
                     {% if has_attendance_rows %}
                         <button class="btn btn-outline btn-sm gap-2" type="button" onclick="document.getElementById('rsvp_modal').showModal()">
@@ -107,7 +107,7 @@
     {% if event.kind == "game" %}
         <div class="mb-6 card bg-base-100 shadow">
             <div class="card-body">
-                <div class="flex items-center justify-between">
+                <div class="flex flex-wrap items-center justify-between gap-2">
                     <h2 class="card-title text-base">
                         {% lucide "trophy" size=18 %} {% trans "Game" %}
                         {% if event.is_live %}<span class="badge badge-error gap-1 animate-pulse">{% lucide "circle" size=10 %} {% trans "Live" %}</span>{% endif %}

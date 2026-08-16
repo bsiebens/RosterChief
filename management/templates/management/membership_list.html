@@ -59,19 +59,19 @@
     {% endif %}
 
     <form method="get" class="mb-4">
-        <div class="flex flex-row items-center gap-2">
-            <label class="input">
+        <div class="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:flex lg:flex-row lg:flex-wrap lg:items-center">
+            <label class="input w-full lg:w-auto">
                 <span class="opacity-50">{% lucide "search" size=16 %}</span>
-                <input type="search" name="q" value="{{ search }}" placeholder="{% trans 'Search members ...' %}" class="input input-bordered">
+                <input type="search" name="q" value="{{ search }}" placeholder="{% trans 'Search members ...' %}" class="input input-bordered w-full">
             </label>
 
-            <select name="season" class="select select-bordered">
+            <select name="season" class="select select-bordered w-full lg:w-auto">
                 {% for season in seasons %}
                     <option value="{{ season.pk }}" {% if season.pk == selected_season.pk %}selected{% endif %}>{% trans "Season" %} {{ season.start_date|date:"Y" }} - {{ season.end_date|date:"Y" }}</option>
                 {% endfor %}
             </select>
 
-            <select name="fee_status" class="select select-bordered">
+            <select name="fee_status" class="select select-bordered w-full lg:w-auto">
                 <option value="not_paid" {% if selected_fee_status == "not_paid" %}selected{% endif %}>{% trans "Not paid (unpaid or partially)" %}</option>
                 {% for value, label in fee_status_choices %}
                     <option value="{{ value }}" {% if value == selected_fee_status %}selected{% endif %}>{{ label|capfirst }}</option>
@@ -79,22 +79,24 @@
                 <option value="all" {% if selected_fee_status == "all" %}selected{% endif %}>{% trans "All" %}</option>
             </select>
 
-            <select name="status" class="select select-bordered">
+            <select name="status" class="select select-bordered w-full lg:w-auto">
                 <option value="all" {% if selected_status == "all" %}selected{% endif %}>{% trans "All statuses" %}</option>
                 {% for value, label in status_choices %}
                     <option value="{{ value }}" {% if value == selected_status %}selected{% endif %}>{{ label|capfirst }}</option>
                 {% endfor %}
             </select>
 
-            <select name="team" class="select select-bordered">
+            <select name="team" class="select select-bordered w-full lg:w-auto">
                 <option value="" {% if not selected_team %}selected{% endif %}>{% trans "All teams" %}</option>
                 {% for team in teams %}
                     <option value="{{ team.pk }}" {% if team.pk|stringformat:"s" == selected_team %}selected{% endif %}>{{ team }}</option>
                 {% endfor %}
             </select>
 
-            <button class="btn btn-outline gap-2" type="submit">{% lucide "filter" size=16 %} {% trans "Filter" %}</button>
-            <a class="btn gap-2" href="{% url 'management:membership_list' %}">{% lucide "x" size=16 %} {% trans "Reset" %}</a>
+            <div class="col-span-full flex gap-2 lg:col-span-1 lg:contents">
+                <button class="btn btn-outline grow gap-2 lg:grow-0" type="submit">{% lucide "filter" size=16 %} {% trans "Filter" %}</button>
+                <a class="btn grow gap-2 lg:grow-0" href="{% url 'management:membership_list' %}">{% lucide "x" size=16 %} {% trans "Reset" %}</a>
+            </div>
         </div>
     </form>
 
@@ -104,20 +106,20 @@
 
         <div class="card bg-base-100 shadow">
             <div class="card-body">
-                <div class="flex items-center justify-between mb-2">
+                <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
                     <span class="text-sm opacity-70 font-semibold">
                         {% blocktrans count counter=memberships|length %}{{ counter }} membership{% plural %}{{ counter }} memberships{% endblocktrans %}
                     </span>
                     <button class="btn btn-success btn-sm gap-2" type="submit">{% lucide "circle-check" size=14 %} {% trans "Mark selected as paid" %}</button>
                 </div>
 
+                {# table-cards: this table is dense enough (10+ columns) that horizontal scroll alone stops being usable below `md` -- see the .table-cards rule in app.css. #}
                 <div class="overflow-x-auto">
-                    <table class="table">
+                    <table class="table table-cards">
                         <thead>
                             <tr>
                                 <th><input type="checkbox" class="checkbox" id="select-all-memberships"></th>
-                                <th>{% trans "Last name" %}</th>
-                                <th>{% trans "First name" %}</th>
+                                <th>{% trans "Name" %}</th>
                                 <th>{% trans "Email" %}</th>
                                 <th>{% trans "Family" %}</th>
                                 <th>{% trans "Status" %}</th>
@@ -132,10 +134,9 @@
                             {% for membership in memberships %}
                                 <tr>
                                     <td><input type="checkbox" class="checkbox membership-row-checkbox" name="membership_ids" value="{{ membership.pk }}"></td>
-                                    <td><a class="link link-hover" href="{% url 'management:member_detail' membership.member.pk %}">{{ membership.member.last_name }}</a></td>
-                                    <td>{{ membership.member.first_name }}</td>
-                                    <td>{{ membership.member.contact_email|default:"-" }}</td>
-                                    <td>
+                                    <td><a class="link link-hover font-semibold" href="{% url 'management:member_detail' membership.member.pk %}">{{ membership.member.last_name }}, {{ membership.member.first_name }}</a></td>
+                                    <td data-label="{% trans 'Email' %}">{{ membership.member.contact_email|default:"-" }}</td>
+                                    <td data-label="{% trans 'Family' %}">
                                         {% if membership.member.family_memberships_display %}
                                             {% for fm in membership.member.family_memberships_display %}
                                                 {{ fm.family }} {% if not forloop.last %},{% endif %}
@@ -144,7 +145,7 @@
                                             <span class="opacity-40">-</span>
                                         {% endif %}
                                     </td>
-                                    <td>
+                                    <td data-label="{% trans 'Status' %}">
                                         <span class="badge badge-sm
                                             {% if membership.status == "active" %}badge-success
                                             {% elif membership.status == "pending" %}badge-warning
@@ -153,7 +154,7 @@
                                             {{ membership.get_status_display }}
                                         </span>
                                     </td>
-                                    <td>
+                                    <td data-label="{% trans 'Fee status' %}">
                                         <span class="badge badge-sm
                                             {% if membership.fee_status == "paid" %}badge-success
                                             {% elif membership.fee_status == "partially_paid" %}badge-warning
@@ -162,17 +163,17 @@
                                             {{ membership.get_fee_status_display }}
                                         </span>
                                     </td>
-                                    <td class="tabular-nums">&euro; {{ membership.fee_amount }}</td>
-                                    <td class="tabular-nums">
+                                    <td data-label="{% trans 'Owed' %}" class="tabular-nums">&euro; {{ membership.fee_amount }}</td>
+                                    <td data-label="{% trans 'Paid' %}" class="tabular-nums">
                                         &euro; {{ membership.amount_paid }}
                                         {% if membership.record_payment_form and membership.fee_amount %}
                                             <div class="text-xs opacity-60">{% blocktrans with remaining=membership.remaining_balance_display %}{{ remaining }} left{% endblocktrans %}</div>
                                         {% endif %}
                                     </td>
-                                    <td>{{ membership.license|default:"-" }}</td>
+                                    <td data-label="{% trans 'License' %}">{{ membership.license|default:"-" }}</td>
                                     <td class="text-right">
                                         {% if membership.record_payment_form %}
-                                            <div class="flex justify-end gap-1">
+                                            <div class="flex flex-wrap justify-end gap-1">
                                                 <button class="btn btn-outline btn-sm" type="button" onclick="document.getElementById('{{ membership.pk|dom_id:"record_payment_modal" }}').showModal()">
                                                     {% lucide "receipt" size=12 %} {% trans "Record payment" %}
                                                 </button>
@@ -185,7 +186,7 @@
                                 </tr>
                             {% empty %}
                                 <tr>
-                                    <td colspan="11" class="text-center opacity-60">{% trans "Nobody matches these filters." %}</td>
+                                    <td colspan="10" class="text-center opacity-60">{% trans "Nobody matches these filters." %}</td>
                                 </tr>
                             {% endfor %}
                         </tbody>

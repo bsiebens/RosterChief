@@ -59,7 +59,7 @@
                                 <span class="opacity-60">{% trans "No referees assigned yet." %}</span>
                             {% endfor %}
                         </div>
-                        <div class="flex items-center justify-between">
+                        <div class="flex flex-wrap items-center justify-between gap-2">
                             <span class="badge badge-sm {% if not game.referee_rows %}badge-error{% elif not game.referees_full %}badge-warning{% else %}badge-success{% endif %}">
                                 {{ game.referee_rows|length }} / {{ game.max_referees }}
                             </span>

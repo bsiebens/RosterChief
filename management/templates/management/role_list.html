@@ -24,7 +24,7 @@
                         <h2 class="card-title text-base">{{ role_label }}</h2>
                         {% if description %}<p class="text-sm opacity-70">{{ description }}</p>{% endif %}
                         <div class="overflow-x-auto">
-                            <table class="table">
+                            <table class="table table-cards">
                                 <thead>
                                     <tr>
                                         <th>{% trans "Member" %}</th>
@@ -34,7 +34,7 @@
                                 <tbody>
                                     {% for role in roles_for_section %}
                                         <tr>
-                                            <td>{{ role.member }}</td>
+                                            <td class="font-semibold">{{ role.member }}</td>
                                             <td class="text-right">
                                                 <form method="post" action="{% url 'management:role_revoke' role.pk %}">
                                                     {% csrf_token %}

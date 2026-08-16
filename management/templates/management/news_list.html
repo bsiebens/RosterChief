@@ -13,7 +13,7 @@
     <div class="card bg-base-100 shadow">
         <div class="card-body">
             <div class="overflow-x-auto">
-                <table class="table">
+                <table class="table table-cards">
                     <thead>
                         <tr>
                             <th>{% trans "Title" %}</th>
@@ -26,16 +26,16 @@
                     <tbody>
                         {% for news_item in news_items %}
                             <tr>
-                                <td><a class="link link-hover" href="{% url 'management:news_detail' news_item.pk %}">{{ news_item.title }}</a></td>
-                                <td>
+                                <td><a class="link link-hover font-semibold" href="{% url 'management:news_detail' news_item.pk %}">{{ news_item.title }}</a></td>
+                                <td data-label="{% trans 'Teams' %}">
                                     {% for team in news_item.teams.all %}
                                         <span class="badge badge-neutral badge-sm">{{ team.short_name }}</span>
                                     {% empty %}
                                         <span class="opacity-60">{% trans "Club-wide" %}</span>
                                     {% endfor %}
                                 </td>
-                                <td>{{ news_item.get_visibility_display }}</td>
-                                <td>
+                                <td data-label="{% trans 'Visibility' %}">{{ news_item.get_visibility_display }}</td>
+                                <td data-label="{% trans 'Status' %}">
                                     {% if news_item.status == "draft" %}
                                         <span class="badge badge-neutral badge-sm">{% trans "Draft" %}</span>
                                     {% elif news_item.is_scheduled %}

@@ -13,7 +13,7 @@
     <div class="card bg-base-100 shadow">
         <div class="card-body">
             <div class="overflow-x-auto">
-                <table class="table">
+                <table class="table table-cards">
                     <thead>
                         <tr>
                             <th>{% trans "Ordering" %}</th>
@@ -27,15 +27,15 @@
                     <tbody>
                         {% for position in positions %}
                             <tr>
-                                <td>{{ position.ordering }}</td>
-                                <td>{{ position.name }}</td>
-                                <td>{{ position.short_name }}</td>
-                                <td>
+                                <td data-label="{% trans 'Ordering' %}">{{ position.ordering }}</td>
+                                <td class="font-semibold">{{ position.name }}</td>
+                                <td data-label="{% trans 'Short name' %}">{{ position.short_name }}</td>
+                                <td data-label="{% trans 'Staff position' %}">
                                     <span class="badge badge-sm {% if position.staff_position %}badge-success{% else %}badge-neutral{% endif %}">
                                         {% if position.staff_position %}{% trans "Yes" %}{% else %}{% trans "No" %}{% endif %}
                                     </span>
                                 </td>
-                                <td>
+                                <td data-label="{% trans 'Management position' %}">
                                     <span class="badge badge-sm {% if position.management_position %}badge-success{% else %}badge-neutral{% endif %}">
                                         {% if position.management_position %}{% trans "Yes" %}{% else %}{% trans "No" %}{% endif %}
                                     </span>

@@ -53,26 +53,46 @@
             intrinsic width.
         {% endcomment %}
         <div class="navbar shrink-0 border-b border-base-300 bg-base-100 px-3 shadow-sm sm:px-6">
-            <div class="my-4 min-w-0 flex-1">
-                {% block brand %}{% endblock brand %}
+            <div class="my-4 flex min-w-0 flex-1 items-center gap-1">
+                {% comment %}
+                    Empty for pages with no menu (the auth screens) -- management/base.html
+                    and controlpanel/base.html are the only overriders, each pairing this
+                    with its own `{% block mobile_menu %}` dialog below in `main`.
+                {% endcomment %}
+                {% block nav_toggle %}{% endblock nav_toggle %}
+                <div class="min-w-0">
+                    {% block brand %}{% endblock brand %}
+                </div>
             </div>
 
-            <button class="btn btn-ghost" type="button" data-theme-toggle aria-label="Theme">
-                <span data-theme-icon="light" class="hidden items-center gap-4">{% lucide "sun" size=20 %} <span class="hidden sm:inline">light</span></span>
-                <span data-theme-icon="dark" class="hidden items-center gap-4">{% lucide "moon" size=20 %} <span class="hidden sm:inline">dark</span></span>
-                <span data-theme-icon="auto" class="hidden items-center gap-4">{% lucide "sun-moon" size=20 %} <span class="hidden sm:inline">auto</span></span>
-            </button>
+            {% comment %}
+                Hidden below `lg` wherever a hamburger drawer exists to hold them instead
+                (management/base.html, controlpanel/base.html override `nav_icons_class` to
+                `hidden lg:flex` and duplicate these same three controls inside their
+                {% block nav_toggle %} dialog) -- on a page with no such drawer (the auth
+                screens, the public club site) the default keeps them in the navbar itself,
+                since there'd be nowhere else for them to go.
+            {% endcomment %}
+            <div class="{% block nav_icons_class %}flex items-center{% endblock nav_icons_class %}">
+                <button class="btn btn-ghost" type="button" data-theme-toggle aria-label="Theme">
+                    <span data-theme-icon="light" class="hidden items-center gap-4">{% lucide "sun" size=20 %} <span class="hidden sm:inline">light</span></span>
+                    <span data-theme-icon="dark" class="hidden items-center gap-4">{% lucide "moon" size=20 %} <span class="hidden sm:inline">dark</span></span>
+                    <span data-theme-icon="auto" class="hidden items-center gap-4">{% lucide "sun-moon" size=20 %} <span class="hidden sm:inline">auto</span></span>
+                </button>
+
+                {% if user.is_authenticated %}
+                    {% if has_management_access %}
+                        {# Only ever true on a club subdomain -- see management.context_processors.management_link. #}
+                        <a class="btn btn-ghost gap-4" href="{% url "management:home" %}" aria-label="Management">{% lucide "layout-dashboard" %}<span class="hidden sm:inline">Management</span></a>
+                    {% endif %}
+
+                    {% if user.is_superuser %}
+                        <a class="btn btn-ghost gap-4" href="{% url "admin:index" %}" aria-label="Django admin">{% lucide "shield-cog" %}<span class="hidden sm:inline">Django admin</span></a>
+                    {% endif %}
+                {% endif %}
+            </div>
 
             {% if user.is_authenticated %}
-                {% if has_management_access %}
-                    {# Only ever true on a club subdomain -- see management.context_processors.management_link. #}
-                    <a class="btn btn-ghost gap-4" href="{% url "management:home" %}" aria-label="Management">{% lucide "layout-dashboard" %}<span class="hidden sm:inline">Management</span></a>
-                {% endif %}
-
-                {% if user.is_superuser %}
-                    <a class="btn btn-ghost gap-4" href="{% url "admin:index" %}" aria-label="Django admin">{% lucide "shield-cog" %}<span class="hidden sm:inline">Django admin</span></a>
-                {% endif %}
-
                 <div class="dropdown dropdown-end">
                     <div tabindex="0" role="button" class="btn btn-ghost gap-4" aria-label="Account">{% lucide "circle-user" %}<span class="hidden max-w-40 truncate sm:inline">{{ user.get_full_name }}</span></div>
                     <ul tabindex="0" class="menu dropdown-content z-10 mt-2 w-60 rounded-box bg-base-100 p-2 shadow border border-base-content/20">
