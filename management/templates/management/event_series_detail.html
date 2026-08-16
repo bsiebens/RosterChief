@@ -22,21 +22,21 @@
             <div class="card-body">
                 <h2 class="card-title text-base">{% lucide "repeat" size=18 %} {% trans "Recurrence" %}</h2>
                 <dl class="divide-y divide-base-200">
-                    <div class="flex items-center justify-between py-2">
+                    <div class="flex flex-col gap-0.5 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                         <dt class="text-sm opacity-70">{% trans "Pattern" %}</dt>
-                        <dd>{{ recurrence_summary }}</dd>
+                        <dd class="sm:text-right">{{ recurrence_summary }}</dd>
                     </div>
-                    <div class="flex items-center justify-between py-2">
+                    <div class="flex flex-col gap-0.5 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                         <dt class="text-sm opacity-70">{% trans "First occurrence" %}</dt>
-                        <dd>{{ series.dtstart|date:"j M Y H:i" }}</dd>
+                        <dd class="sm:text-right">{{ series.dtstart|date:"j M Y H:i" }}</dd>
                     </div>
-                    <div class="flex items-center justify-between py-2">
+                    <div class="flex flex-col gap-0.5 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                         <dt class="text-sm opacity-70">{% trans "Repeats until" %}</dt>
-                        <dd>{{ series.until|date:"j M Y H:i"|default:"—" }}</dd>
+                        <dd class="sm:text-right">{{ series.until|date:"j M Y H:i"|default:"—" }}</dd>
                     </div>
-                    <div class="flex items-center justify-between py-2">
+                    <div class="flex flex-col gap-0.5 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                         <dt class="text-sm opacity-70">{% trans "Generated up to" %}</dt>
-                        <dd>{{ series.generated_until|date:"j M Y"|default:"—" }}</dd>
+                        <dd class="sm:text-right">{{ series.generated_until|date:"j M Y"|default:"—" }}</dd>
                     </div>
                 </dl>
             </div>
@@ -46,17 +46,17 @@
             <div class="card-body">
                 <h2 class="card-title text-base">{% lucide "info" size=18 %} {% trans "Template" %}</h2>
                 <dl class="divide-y divide-base-200">
-                    <div class="flex items-center justify-between py-2">
+                    <div class="flex flex-col gap-0.5 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                         <dt class="text-sm opacity-70">{% trans "Location" %}</dt>
-                        <dd>{{ series.location|default:"—" }}</dd>
+                        <dd class="sm:text-right">{{ series.location|default:"—" }}</dd>
                     </div>
-                    <div class="flex items-center justify-between py-2">
+                    <div class="flex flex-col gap-0.5 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                         <dt class="text-sm opacity-70">{% trans "Opponent" %}</dt>
-                        <dd>{{ series.opponent|default:"—" }}</dd>
+                        <dd class="sm:text-right">{{ series.opponent|default:"—" }}</dd>
                     </div>
-                    <div class="flex items-center justify-between py-2">
+                    <div class="flex flex-col gap-0.5 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                         <dt class="text-sm opacity-70">{% trans "Teams" %}</dt>
-                        <dd>{% for team in series.teams.all %}{{ team.name }}{% if not forloop.last %}, {% endif %}{% empty %}—{% endfor %}</dd>
+                        <dd class="sm:text-right">{% for team in series.teams.all %}{{ team.name }}{% if not forloop.last %}, {% endif %}{% empty %}—{% endfor %}</dd>
                     </div>
                 </dl>
             </div>

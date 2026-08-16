@@ -140,7 +140,8 @@
     </div>
 
     {% if is_club_admin %}
-        <div class="mb-6 grid gap-4 lg:grid-cols-3">
+        {# Charts are desktop-only: three squeezed canvases stacked on a phone add scroll without adding much readability -- the same numbers already sit in the stat cards above. #}
+        <div class="mb-6 hidden gap-4 lg:grid lg:grid-cols-3">
             <div class="card bg-base-100 shadow">
                 <div class="card-body">
                     <h2 class="card-title text-base">{% lucide "user-plus" size=18 %} {% trans "Signups per month" %}</h2>

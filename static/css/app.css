@@ -3107,6 +3107,9 @@
       border-block-end-width: calc(var(--border, 1px) * var(--join-h));
     }
   }
+  .ms-auto {
+    margin-inline-start: auto;
+  }
   .modal-action {
     @layer daisyui.l1.l2.l3 {
       margin-top: calc(0.25rem * 6);
@@ -3624,6 +3627,9 @@
   .justify-start {
     justify-content: flex-start;
   }
+  .gap-0\.5 {
+    gap: calc(var(--spacing) * 0.5);
+  }
   .gap-1 {
     gap: var(--spacing);
   }
@@ -4035,6 +4041,9 @@
     --tw-tracking: var(--tracking-wider);
     letter-spacing: var(--tracking-wider);
   }
+  .break-all {
+    word-break: break-all;
+  }
   .whitespace-nowrap {
     white-space: nowrap;
   }
@@ -4426,6 +4435,11 @@
       max-width: var(--container-xs);
     }
   }
+  .sm\:grow {
+    @media (width >= 40rem) {
+      flex-grow: 1;
+    }
+  }
   .sm\:grow-0 {
     @media (width >= 40rem) {
       flex-grow: 0;
@@ -4474,6 +4488,11 @@
   .sm\:px-6 {
     @media (width >= 40rem) {
       padding-inline: calc(var(--spacing) * 6);
+    }
+  }
+  .sm\:text-right {
+    @media (width >= 40rem) {
+      text-align: right;
     }
   }
   .sm\:text-2xl {
@@ -4526,6 +4545,11 @@
   .lg\:flex {
     @media (width >= 64rem) {
       display: flex;
+    }
+  }
+  .lg\:grid {
+    @media (width >= 64rem) {
+      display: grid;
     }
   }
   .lg\:hidden {

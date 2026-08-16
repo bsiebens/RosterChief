@@ -33,7 +33,7 @@
                                 <td class="font-semibold">{{ sponsor.name }}</td>
                                 <td data-label="{% trans 'URL' %}">
                                     {% if sponsor.url %}
-                                        <a class="link link-hover" href="{{ sponsor.url }}" target="_blank" rel="noopener noreferrer">{{ sponsor.url }}</a>
+                                        <a class="link link-hover break-all" href="{{ sponsor.url }}" target="_blank" rel="noopener noreferrer">{{ sponsor.url }}</a>
                                     {% else %}
                                         <span class="opacity-50">&mdash;</span>
                                     {% endif %}

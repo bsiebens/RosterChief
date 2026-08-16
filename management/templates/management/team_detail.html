@@ -78,7 +78,7 @@
                     <h2 class="card-title text-base">{% lucide "trending-up" size=18 %} {% trans "Top attenders" %}</h2>
                     <ul class="divide-y divide-base-200">
                         {% for entry in top_attenders %}
-                            <li class="flex items-center justify-between py-2">
+                            <li class="flex flex-col gap-1 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                                 <span class="text-sm">{{ entry.member }}</span>
                                 <span class="font-semibold tabular-nums font-mono">{{ entry.rate }}%</span>
                             </li>
@@ -94,7 +94,7 @@
                     <h2 class="card-title text-base">{% lucide "trending-down" size=18 %} {% trans "Needs attention" %}</h2>
                     <ul class="divide-y divide-base-200">
                         {% for entry in bottom_attenders %}
-                            <li class="flex items-center justify-between py-2">
+                            <li class="flex flex-col gap-1 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                                 <span class="text-sm">{{ entry.member }}</span>
                                 <span class="font-semibold tabular-nums font-mono">{{ entry.rate }}%</span>
                             </li>
@@ -205,7 +205,7 @@
                     {% endif %}
                 </div>
                 <div class="overflow-x-auto">
-                    <table class="table">
+                    <table class="table table-cards">
                         <thead>
                             <tr>
                                 <th>{% trans "Member" %}</th>
@@ -216,11 +216,11 @@
                         <tbody>
                             {% for assignment in staff %}
                                 <tr>
-                                    <td>{{ assignment.member }}</td>
-                                    <td>{{ assignment.position }}</td>
+                                    <td class="font-semibold">{{ assignment.member }}</td>
+                                    <td data-label="{% trans 'Position' %}">{{ assignment.position }}</td>
                                     <td class="text-right">
                                         {% if can_manage %}
-                                            <div class="flex justify-end gap-1">
+                                            <div class="flex flex-wrap justify-end gap-1">
                                                 <button class="btn btn-outline btn-sm" type="button" onclick="document.getElementById('{{ assignment.pk|dom_id:"edit_staff_modal" }}').showModal()" aria-label="{% trans 'Edit' %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</button>
                                                 <button class="btn btn-sm btn-outline btn-error" type="button" onclick="document.getElementById('{{ assignment.pk|dom_id:"remove_staff_modal" }}').showModal()" aria-label="{% trans 'Remove' %}">{% lucide "user-minus" size=14 %} {% trans "Remove" %}</button>
                                             </div>

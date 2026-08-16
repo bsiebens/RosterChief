@@ -19,7 +19,7 @@
 </div>
 <ul class="divide-y divide-base-200">
     {% for referee in referees %}
-        <li class="flex items-center justify-between py-2 gap-2">
+        <li class="flex flex-col gap-1 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
             <span>
                 {{ referee.display_name }}
                 {% if referee.is_external %}<span class="badge badge-neutral badge-xs">{% trans "External" %}</span>{% endif %}

@@ -19,7 +19,7 @@
                             <div>
                                 <div class="text-xs opacity-70">{% trans "Parent says they are" %}</div>
                                 <div class="font-semibold">{{ claim.parent_name }}</div>
-                                <div class="text-sm opacity-70">{{ claim.parent_email }}</div>
+                                <div class="text-sm opacity-70 break-all">{{ claim.parent_email }}</div>
                             </div>
                             <div>
                                 <div class="text-xs opacity-70">{% trans "Parent of" %}</div>
@@ -36,7 +36,12 @@
                                 justify-between (rather than everything in one flex-wrap run) keeps
                                 Approve and Reject apart even as the row wraps on a narrow card --
                                 Approve stays pinned left, Reject right, so the two are never one
-                                stray click apart the way adjacent buttons would be.
+                                stray click apart the way adjacent buttons would be. ms-auto on Reject
+                                is the part that actually guarantees "right": once the row is narrow
+                                enough that Approve and Reject fall onto separate flex-wrap lines,
+                                justify-between has only one item per line and pins it to the *start*
+                                -- margin-inline-start:auto keeps Reject flush right regardless of
+                                which line it ends up sharing (or not sharing) with Approve.
                             {% endcomment %}
                             <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
                                 {% if claim.has_candidates %}
@@ -49,7 +54,7 @@
                                     <p class="text-sm opacity-70">{% trans "No child without a parent matches this. Check the spelling and the date of birth with them before rejecting." %}</p>
                                 {% endif %}
 
-                                <button class="btn btn-outline btn-error btn-sm gap-2" type="button" onclick="document.getElementById('{{ claim.pk|dom_id:"claim_reject_modal" }}').showModal()">
+                                <button class="btn btn-outline btn-error btn-sm gap-2 ms-auto" type="button" onclick="document.getElementById('{{ claim.pk|dom_id:"claim_reject_modal" }}').showModal()">
                                     {% lucide "x" size=14 %} {% trans "Reject" %}
                                 </button>
                             </div>
@@ -76,9 +81,9 @@
             <p class="text-sm opacity-70">{% trans "Imported without a parent. They stay here until someone claims them." %}</p>
             <ul class="divide-y divide-base-200">
                 {% for child in awaiting_a_parent %}
-                    <li class="py-2 flex items-center justify-between">
+                    <li class="py-2 flex flex-col gap-0.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                         <a class="link link-hover" href="{% url 'management:member_detail' child.pk %}">{{ child }}</a>
-                        <span class="text-sm opacity-70">{{ child.date_of_birth|date:"j F Y"|default:"—" }}</span>
+                        <span class="text-sm opacity-70 sm:text-right">{{ child.date_of_birth|date:"j F Y"|default:"—" }}</span>
                     </li>
                 {% empty %}
                     <li class="py-2 text-sm opacity-60">{% trans "Every child has a parent linked." %}</li>
@@ -104,7 +109,7 @@
                         <tbody>
                             {% for claim in reviewed %}
                                 <tr>
-                                    <td class="font-semibold">{{ claim.parent_name }}<div class="text-xs font-normal opacity-60">{{ claim.parent_email }}</div></td>
+                                    <td class="font-semibold">{{ claim.parent_name }}<div class="text-xs font-normal opacity-60 break-all">{{ claim.parent_email }}</div></td>
                                     <td data-label="{% trans 'Claimed' %}">{{ claim.claimed_child_name }}</td>
                                     <td data-label="{% trans 'Outcome' %}">
                                         {% if claim.status == "approved" %}

@@ -37,42 +37,42 @@
             <div class="card-body">
                 <h2 class="card-title text-base">{% lucide "info" size=18 %} {% trans "Details" %}</h2>
                 <dl class="divide-y divide-base-200">
-                    <div class="flex items-center justify-between py-2">
+                    <div class="flex flex-col gap-0.5 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                         <dt class="text-sm opacity-70">{% trans "Start" %}</dt>
-                        <dd>{{ event.start|date:"j M Y H:i" }}</dd>
+                        <dd class="sm:text-right">{{ event.start|date:"j M Y H:i" }}</dd>
                     </div>
-                    <div class="flex items-center justify-between py-2">
+                    <div class="flex flex-col gap-0.5 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                         <dt class="text-sm opacity-70">{% trans "End" %}</dt>
-                        <dd>{{ event.end|date:"j M Y H:i"|default:"—" }}</dd>
+                        <dd class="sm:text-right">{{ event.end|date:"j M Y H:i"|default:"—" }}</dd>
                     </div>
-                    <div class="flex items-center justify-between py-2">
+                    <div class="flex flex-col gap-0.5 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                         <dt class="text-sm opacity-70">{% trans "Gathering" %}</dt>
-                        <dd>{{ event.gathering|date:"j M Y H:i"|default:"—" }}</dd>
+                        <dd class="sm:text-right">{{ event.gathering|date:"j M Y H:i"|default:"—" }}</dd>
                     </div>
-                    <div class="flex items-center justify-between py-2">
+                    <div class="flex flex-col gap-0.5 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                         <dt class="text-sm opacity-70">{% trans "Registration deadline" %}</dt>
-                        <dd>{{ event.deadline|date:"j M Y H:i"|default:"—" }}</dd>
+                        <dd class="sm:text-right">{{ event.deadline|date:"j M Y H:i"|default:"—" }}</dd>
                     </div>
-                    <div class="flex items-center justify-between py-2">
+                    <div class="flex flex-col gap-0.5 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                         <dt class="text-sm opacity-70">{% trans "Location" %}</dt>
-                        <dd>{{ event.location|default:"—" }}</dd>
+                        <dd class="sm:text-right">{{ event.location|default:"—" }}</dd>
                     </div>
-                    <div class="flex items-center justify-between py-2">
+                    <div class="flex flex-col gap-0.5 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                         <dt class="text-sm opacity-70">{% trans "Opponent" %}</dt>
-                        <dd>{{ event.opponent|default:"—" }}</dd>
+                        <dd class="sm:text-right">{{ event.opponent|default:"—" }}</dd>
                     </div>
-                    <div class="flex items-center justify-between py-2">
+                    <div class="flex flex-col gap-0.5 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                         <dt class="text-sm opacity-70">{% trans "Teams" %}</dt>
-                        <dd>{% for team in event.teams.all %}{{ team.name }}{% if not forloop.last %}, {% endif %}{% empty %}—{% endfor %}</dd>
+                        <dd class="sm:text-right">{% for team in event.teams.all %}{{ team.name }}{% if not forloop.last %}, {% endif %}{% empty %}—{% endfor %}</dd>
                     </div>
-                    <div class="flex items-center justify-between py-2">
+                    <div class="flex flex-col gap-0.5 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                         <dt class="text-sm opacity-70">{% trans "Groups" %}</dt>
-                        <dd>{% for group in event.groups.all %}{{ group.name }}{% if not forloop.last %}, {% endif %}{% empty %}—{% endfor %}</dd>
+                        <dd class="sm:text-right">{% for group in event.groups.all %}{{ group.name }}{% if not forloop.last %}, {% endif %}{% empty %}—{% endfor %}</dd>
                     </div>
                     {% if event.club_wide %}
-                        <div class="flex items-center justify-between py-2">
+                        <div class="flex flex-col gap-0.5 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                             <dt class="text-sm opacity-70">{% trans "Audience" %}</dt>
-                            <dd><span class="badge badge-primary">{% trans "Whole club" %}</span></dd>
+                            <dd class="sm:text-right"><span class="badge badge-primary">{% trans "Whole club" %}</span></dd>
                         </div>
                     {% endif %}
                 </dl>
@@ -91,9 +91,9 @@
                 </div>
                 <dl class="divide-y divide-base-200">
                     {% for group in attendance_groups %}
-                        <div class="flex items-center justify-between py-2">
+                        <div class="flex flex-col gap-0.5 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                             <dt class="text-sm opacity-70">{{ group.label }}</dt>
-                            <dd class="font-semibold tabular-nums font-mono">{{ group.rows|length }}</dd>
+                            <dd class="font-semibold tabular-nums font-mono sm:text-right">{{ group.rows|length }}</dd>
                         </div>
                     {% endfor %}
                 </dl>

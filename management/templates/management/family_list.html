@@ -11,14 +11,15 @@
 {% endblock actions %}
 
 {% block panel %}
-    <form method="get" class="mb-2 flex flex-wrap items-center gap-2">
-        <label class="input">
+    <form method="get" class="mb-2 flex items-center gap-2">
+        <label class="input grow sm:grow-0">
             <span class="opacity-50">{% lucide "search" size=16 %}</span>
-            <input type="search" name="q" value="{{ search }}" placeholder="{% trans 'Search by parent or child name ...' %}" class="input input-bordered w-full max-w-xs">
+            <input type="search" name="q" value="{{ search }}" placeholder="{% trans 'Search by parent or child name ...' %}" class="input input-bordered w-full sm:max-w-xs">
         </label>
-        <button class="btn btn-outline gap-2" type="submit">{% lucide "search" size=16 %} {% trans "Search" %}</button>
+        {# Icon-only below `sm`: label text next to a growing input is what forced this row to wrap on a phone. #}
+        <button class="btn btn-outline gap-2" type="submit" aria-label="{% trans 'Search' %}">{% lucide "search" size=16 %}<span class="hidden sm:inline">{% trans "Search" %}</span></button>
         {% if search %}
-            <a class="btn gap-2" href="{% url "management:family_list" %}">{% lucide "x" size=16 %} {% trans "Clear filter" %}</a>
+            <a class="btn gap-2" href="{% url "management:family_list" %}" aria-label="{% trans 'Clear filter' %}">{% lucide "x" size=16 %}<span class="hidden sm:inline">{% trans "Clear filter" %}</span></a>
         {% endif %}
     </form>
 

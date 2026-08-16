@@ -68,7 +68,7 @@
                             <span class="badge badge-success badge-sm absolute top-1 left-1">{% trans "Main" %}</span>
                         {% endif %}
                         {% if can_edit %}
-                            <div class="flex gap-1 mt-1">
+                            <div class="flex flex-wrap gap-1 mt-1">
                                 {% if not photo.is_main %}
                                     <form method="post" action="{% url 'management:news_photo_set_main' news_item.pk photo.pk %}">
                                         {% csrf_token %}

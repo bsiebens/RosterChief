@@ -16,36 +16,37 @@
             <div class="card-body">
                 <h2 class="card-title text-base">{% lucide "user" size=18 %} {% trans "Personal information" %}</h2>
                 <dl class="divide-y divide-base-200">
-                    <div class="flex items-center justify-between py-2">
+                    <div class="flex flex-col gap-0.5 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                         <dt class="text-sm opacity-70">{% trans "Date of birth" %}</dt>
-                        <dd class="font-semibold">{{ member.date_of_birth|default:"-" }}</dd>
+                        <dd class="font-semibold sm:text-right">{{ member.date_of_birth|default:"-" }}</dd>
                     </div>
-                    <div class="flex items-center justify-between py-2">
+                    <div class="flex flex-col gap-0.5 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                         <dt class="text-sm opacity-70">{% trans "Phone" %}</dt>
-                        <dd class="font-semibold">{{ member.phone.as_international|default:"-" }}</dd>
+                        <dd class="font-semibold sm:text-right">{{ member.phone.as_international|default:"-" }}</dd>
                     </div>
-                    <div class="flex items-center justify-between py-2">
+                    <div class="flex flex-col gap-0.5 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                         <dt class="text-sm opacity-70">{% trans "Emergency phone" %}</dt>
-                        <dd class="font-semibold">{{ member.emergency_phone.as_international|default:"-" }}</dd>
+                        <dd class="font-semibold sm:text-right">{{ member.emergency_phone.as_international|default:"-" }}</dd>
                     </div>
                     {% for guardian in guardians %}
-                        <div class="flex items-center justify-between py-2">
+                        <div class="flex flex-col gap-0.5 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                             <dt class="text-sm opacity-70">{% trans "Parent phone" %} — {{ guardian.get_full_name }}</dt>
-                            <dd class="font-semibold">{{ guardian.phone.as_international|default:"-" }}</dd>
+                            <dd class="font-semibold sm:text-right">{{ guardian.phone.as_international|default:"-" }}</dd>
                         </div>
-                        <div class="flex items-center justify-between py-2">
+                        <div class="flex flex-col gap-0.5 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                             <dt class="text-sm opacity-70">{% trans "Parent emergency phone" %} — {{ guardian.get_full_name }}</dt>
-                            <dd class="font-semibold">{{ guardian.emergency_phone.as_international|default:"-" }}</dd>
+                            <dd class="font-semibold sm:text-right">{{ guardian.emergency_phone.as_international|default:"-" }}</dd>
                         </div>
                     {% endfor %}
                 </dl>
 
-                <div class="flex flex-row gap-2 items-center mt-2">
+                {# flex-col below `sm`: a button's own label never wraps, so two grow buttons side by side in a fixed row push wider than the screen once either label is long -- stacking avoids that regardless of label length. #}
+                <div class="flex flex-col gap-2 sm:flex-row sm:items-center mt-2">
                     {% if member.phone %}
-                        <a class="btn btn-sm btn-outline btn-primary grow" href="tel:{{ member.phone.as_international }}">{% lucide "phone" size=14 %} {% trans "Call" %}</a>
+                        <a class="btn btn-sm btn-outline btn-primary sm:grow" href="tel:{{ member.phone.as_international }}">{% lucide "phone" size=14 %} {% trans "Call" %}</a>
                     {% endif %}
                     {% if member.emergency_phone %}
-                        <a class="btn btn-sm btn-outline btn-error grow" href="tel:{{ member.emergency_phone.as_international }}">{% lucide "shield-alert" size=14 %} {% trans "Emergency call" %}</a>
+                        <a class="btn btn-sm btn-outline btn-error sm:grow" href="tel:{{ member.emergency_phone.as_international }}">{% lucide "shield-alert" size=14 %} {% trans "Emergency call" %}</a>
                     {% endif %}
                 </div>
 
@@ -56,12 +57,12 @@
                     </div>
                     {% for guardian in guardians %}
                         {% if guardian.phone or guardian.emergency_phone %}
-                            <div class="flex flex-row gap-2 items-center mt-2">
+                            <div class="flex flex-col gap-2 sm:flex-row sm:items-center mt-2">
                                 {% if guardian.phone %}
-                                    <a class="btn btn-sm btn-outline btn-primary grow" href="tel:{{ guardian.phone.as_international }}">{% lucide "phone" size=14 %} {% blocktrans with name=guardian.get_full_name %}Call {{ name }}{% endblocktrans %}</a>
+                                    <a class="btn btn-sm btn-outline btn-primary sm:grow" href="tel:{{ guardian.phone.as_international }}">{% lucide "phone" size=14 %} {% blocktrans with name=guardian.get_full_name %}Call {{ name }}{% endblocktrans %}</a>
                                 {% endif %}
                                 {% if guardian.emergency_phone %}
-                                    <a class="btn btn-sm btn-outline btn-error grow" href="tel:{{ guardian.emergency_phone.as_international }}">{% lucide "shield-alert" size=14 %} {% blocktrans with name=guardian.get_full_name %}Emergency: {{ name }}{% endblocktrans %}</a>
+                                    <a class="btn btn-sm btn-outline btn-error sm:grow" href="tel:{{ guardian.emergency_phone.as_international }}">{% lucide "shield-alert" size=14 %} {% blocktrans with name=guardian.get_full_name %}Emergency: {{ name }}{% endblocktrans %}</a>
                                 {% endif %}
                             </div>
                         {% endif %}
@@ -92,22 +93,22 @@
                         </div>
                     {% endif %}
                     <dl class="divide-y divide-base-200">
-                        <div class="flex items-center justify-between py-2">
+                        <div class="flex flex-col gap-0.5 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                             <dt class="text-sm opacity-70">{% trans "Joined as" %}</dt>
-                            <dd class="font-semibold">{{ current_membership.get_kind_display|capfirst }}</dd>
+                            <dd class="font-semibold sm:text-right">{{ current_membership.get_kind_display|capfirst }}</dd>
                         </div>
-                        <div class="flex items-center justify-between py-2">
+                        <div class="flex flex-col gap-0.5 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                             <dt class="text-sm opacity-70">{% trans "License" %}</dt>
-                            <dd class="font-semibold">{{ current_membership.license|default:"-" }}</dd>
+                            <dd class="font-semibold sm:text-right">{{ current_membership.license|default:"-" }}</dd>
                         </div>
-                        <div class="flex items-center justify-between py-2">
+                        <div class="flex flex-col gap-0.5 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                             <dt class="text-sm opacity-70">{% trans "Status" %}</dt>
-                            <dd class="font-semibold">{{ current_membership.get_status_display }}</dd>
+                            <dd class="font-semibold sm:text-right">{{ current_membership.get_status_display }}</dd>
                         </div>
                         {% if not current_membership.is_guardian %}
-                            <div class="flex items-center justify-between py-2">
+                            <div class="flex flex-col gap-0.5 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                                 <dt class="text-sm opacity-70">{% trans "Fee status" %}</dt>
-                                <dd class="font-semibold">{{ current_membership.get_fee_status_display }}</dd>
+                                <dd class="font-semibold sm:text-right">{{ current_membership.get_fee_status_display }}</dd>
                             </div>
                         {% endif %}
                     </dl>
@@ -157,11 +158,11 @@
 
                 {% if referee_profile and referee_profile.level %}
                     <dl class="divide-y divide-base-200">
-                        <div class="flex items-center justify-between py-2">
+                        <div class="flex flex-col gap-0.5 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                             <dt class="text-sm opacity-70">{% trans "Level" %}</dt>
-                            <dd class="font-semibold">{{ referee_profile.level }}</dd>
+                            <dd class="font-semibold sm:text-right">{{ referee_profile.level }}</dd>
                         </div>
-                        <div class="flex items-center justify-between py-2">
+                        <div class="flex flex-col gap-0.5 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                             <dt class="text-sm opacity-70">{% trans "Valid until" %}</dt>
                             <dd class="font-semibold flex items-center gap-2">
                                 {{ referee_profile.valid_until|default:"—" }}
