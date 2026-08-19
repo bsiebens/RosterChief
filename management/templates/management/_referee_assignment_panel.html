@@ -90,7 +90,8 @@
                         </option>
                     {% endfor %}
                 </select>
-                <button class="btn btn-outline btn-sm gap-2" type="submit">{% lucide "user-plus" size=14 %} {% trans "Assign" %}</button>
+                {# No btn-sm: .select is height:2.25rem, matching plain .btn -- btn-sm would sit 6px shorter and misalign in the row. #}
+                <button class="btn btn-outline gap-2" type="submit">{% lucide "user-plus" size=14 %} {% trans "Assign" %}</button>
             </form>
         {% else %}
             <p class="text-sm text-muted">
@@ -103,7 +104,8 @@
             {% csrf_token %}
             {% if next_url %}<input type="hidden" name="next" value="{{ next_url }}">{% endif %}
             <input type="text" name="name" class="input w-56" placeholder="{% trans 'External referee name' %}">
-            <button class="btn btn-outline btn-sm gap-2" type="submit">{% lucide "user-plus" size=14 %} {% trans "Add external" %}</button>
+            {# No btn-sm: .input is height:2.25rem, matching plain .btn -- btn-sm would sit 6px shorter and misalign in the row. #}
+            <button class="btn btn-outline gap-2" type="submit">{% lucide "user-plus" size=14 %} {% trans "Add external" %}</button>
         </form>
 
         <p class="text-xs text-muted">{% trans "⚠ = also expected at another event around this time -- shown as a warning, not blocked." %}</p>

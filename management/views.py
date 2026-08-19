@@ -2290,6 +2290,7 @@ class EventDetailView(ClubStaffRequiredMixin, DetailView):
             referee_management_needed=referee_management_needed,
             attendance_groups=attendance_groups,
             has_attendance_rows=any(group["rows"] for group in attendance_groups),
+            attendance_row_count=sum(len(group["rows"]) for group in attendance_groups),
             referees=referees,
             referee_candidates=referee_candidates,
             referees_full=referees_full,

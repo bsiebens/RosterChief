@@ -192,41 +192,55 @@
 
     {% if has_attendance_rows %}
         <dialog id="rsvp_modal" class="modal">
-            <div class="modal-box max-w-2xl">
+            <div class="modal-box max-w-3xl">
                 <h3 class="text-lg font-bold text-ink">{% trans "Who responded" %}</h3>
-                <div class="mt-2 flex flex-col gap-2">
+
+                {# One flat, filterable list beats a stack of collapsed accordions you have to open one at a time to see the full picture -- these pills just show/hide rows client-side, no reload. #}
+                <div class="mt-3 flex flex-wrap gap-1.5">
+                    <button type="button" class="btn btn-primary btn-sm gap-1.5 rsvp-filter" data-status="">
+                        {% trans "All" %} <span class="badge badge-sm badge-ghost">{{ attendance_row_count }}</span>
+                    </button>
                     {% for group in attendance_groups %}
                         {% if group.rows %}
-                            <details class="collapse-arrow rounded-lg border border-line bg-white">
-                                <summary class="flex cursor-pointer items-center gap-2 px-3 py-2 text-sm font-medium text-ink">
-                                    <span class="badge badge-sm
-                                        {% if group.value == "present" %}badge-success
-                                        {% elif group.value == "absent" %}badge-error
-                                        {% elif group.value == "excused" %}badge-warning
-                                        {% elif group.value == "selected" %}badge-info
-                                        {% elif group.value == "maybe" %}badge-warning
-                                        {% elif group.value == "not_selected" %}badge-neutral
-                                        {% else %}badge-outline{% endif %}">
-                                        {{ group.label }}
-                                    </span>
-                                    <span class="text-muted">({{ group.rows|length }})</span>
-                                </summary>
-                                <div class="overflow-x-auto border-t border-rule">
-                                    <table class="table">
-                                        <tbody>
-                                            {% for row in group.rows %}
-                                                <tr>
-                                                    <td>{{ row.member }}</td>
-                                                    <td class="text-sm text-muted">{{ row.note|default:"—" }}</td>
-                                                </tr>
-                                            {% endfor %}
-                                        </tbody>
-                                    </table>
-                                </div>
-                            </details>
+                            <button type="button" class="btn btn-outline btn-sm gap-1.5 rsvp-filter" data-status="{{ group.value }}">
+                                {{ group.label }} <span class="badge badge-sm badge-ghost">{{ group.rows|length }}</span>
+                            </button>
                         {% endif %}
                     {% endfor %}
                 </div>
+
+                <div class="mt-3 max-h-96 overflow-y-auto rounded-lg border border-line">
+                    <table class="table">
+                        <tbody>
+                            {% for group in attendance_groups %}
+                                {% for row in group.rows %}
+                                    <tr data-status="{{ group.value }}">
+                                        <td class="w-px">
+                                            <span class="avatar avatar-placeholder shrink-0">
+                                                <div class="h-7 w-7 rounded-full text-xs">{{ row.member.first_name|slice:":1" }}{{ row.member.last_name|slice:":1" }}</div>
+                                            </span>
+                                        </td>
+                                        <td class="font-semibold text-ink">{{ row.member }}</td>
+                                        <td>
+                                            <span class="badge badge-sm
+                                                {% if group.value == "present" %}badge-success
+                                                {% elif group.value == "absent" %}badge-error
+                                                {% elif group.value == "excused" %}badge-warning
+                                                {% elif group.value == "selected" %}badge-info
+                                                {% elif group.value == "maybe" %}badge-warning
+                                                {% elif group.value == "not_selected" %}badge-neutral
+                                                {% else %}badge-outline{% endif %}">
+                                                {{ group.label }}
+                                            </span>
+                                        </td>
+                                        <td class="text-sm text-muted">{{ row.note|default:"—" }}</td>
+                                    </tr>
+                                {% endfor %}
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+
                 <div class="modal-action">
                     <form method="dialog">
                         <button class="btn btn-outline gap-2">{% lucide "x" size=16 %} {% trans "Close" %}</button>
@@ -237,5 +251,21 @@
                 <button>close</button>
             </form>
         </dialog>
+        <script>
+            (() => {
+                const modal = document.getElementById("rsvp_modal");
+                const pills = modal.querySelectorAll(".rsvp-filter");
+                const rows = modal.querySelectorAll("tbody tr[data-status]");
+                pills.forEach((pill) => {
+                    pill.addEventListener("click", () => {
+                        pills.forEach((other) => {
+                            other.classList.toggle("btn-primary", other === pill);
+                            other.classList.toggle("btn-outline", other !== pill);
+                        });
+                        rows.forEach((row) => row.classList.toggle("hidden", pill.dataset.status !== "" && row.dataset.status !== pill.dataset.status));
+                    });
+                });
+            })();
+        </script>
     {% endif %}
 {% endblock extra_body %}

@@ -4,38 +4,96 @@
 {% block heading %}{% if update_view %}{% blocktrans %}Edit {{ object }}{% endblocktrans %}{% else %}{% trans "New event" %}{% endif %}{% endblock heading %}
 
 {% block panel %}
-    <div class="card w-full">
-        <div class="card-body">
-            <form method="post">
-                {% csrf_token %}
+    <form method="post" class="flex flex-col gap-4">
+        {% csrf_token %}
 
-                {% for error in form.non_field_errors %}
-                    <div class="alert alert-error">
-                        <span>{{ error }}</span>
+        {% for error in form.non_field_errors %}
+            <div class="alert alert-error">
+                <span>{{ error }}</span>
+            </div>
+        {% endfor %}
+
+        <div class="card">
+            <div class="card-body">
+                <div class="event-section-header">
+                    <span class="event-section-icon">{% lucide "clipboard-list" size=18 %}</span>
+                    <div>
+                        <div class="event-section-title">{% trans "What's happening?" %}</div>
+                        <div class="event-section-hint">{% trans "Pick a kind to reveal only the fields that matter for it." %}</div>
                     </div>
-                {% endfor %}
-
-                <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
-                    {% form_field form.title %}
-                    {% form_field form.kind %}
                 </div>
 
-                <div class="my-5 border-t border-line"></div>
-                <h3 class="mb-3 font-display text-xs font-extrabold tracking-[.12em] text-muted uppercase">{% trans "Audience" %}</h3>
-                <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
+                <div class="mb-4">
+                    {# Real radios, not a JS-synced facade over a hidden <select> -- each card IS the field's own input, so keyboard/tab/arrow-key operation and screen readers get native radiogroup semantics for free, and there's no second visible control for the same field. #}
+                    <div class="kind-grid" role="radiogroup" aria-label="{{ form.fields.kind.label|capfirst }}">
+                        {% for value, label in form.fields.kind.choices %}
+                            <label class="kind-card" data-kind="{{ value }}">
+                                <input type="radio" name="{{ form.kind.html_name }}" value="{{ value }}" class="sr-only" {% if form.kind.value == value %}checked{% endif %} required>
+                                {% if value == "training" %}{% lucide "dumbbell" size=20 %}
+                                {% elif value == "game" %}{% lucide "swords" size=20 %}
+                                {% elif value == "tournament" %}{% lucide "trophy" size=20 %}
+                                {% elif value == "meeting" %}{% lucide "message-square" size=20 %}
+                                {% elif value == "social" %}{% lucide "party-popper" size=20 %}
+                                {% elif value == "other" %}{% lucide "circle-ellipsis" size=20 %}
+                                {% else %}{% lucide "calendar" size=20 %}
+                                {% endif %}
+                                <span class="kind-card-label">{{ label }}</span>
+                            </label>
+                        {% endfor %}
+                    </div>
+                    {% if form.kind.errors %}
+                        <p class="mt-2 text-xs text-club-dark">{{ form.kind.errors|join:" " }}</p>
+                    {% endif %}
+                </div>
+
+                <div class="w-full">
+                    {% form_field form.title %}
+                </div>
+            </div>
+        </div>
+
+        <div class="card event-summary">
+            <span class="event-summary-icon">{% lucide "sparkles" size=16 %}</span>
+            <span id="event-summary-text">{% trans "This line updates live as you fill in the form below." %}</span>
+        </div>
+
+        <div class="card">
+            <div class="card-body">
+                <div class="event-section-header">
+                    <span class="event-section-icon">{% lucide "users" size=18 %}</span>
+                    <div>
+                        <div class="event-section-title">{% trans "Who's invited" %}</div>
+                        <div class="event-section-hint">{% trans "Teams and groups invite every current member automatically." %}</div>
+                    </div>
+                </div>
+
+                {% if "club_wide" in form.fields %}
+                    <div class="event-clubwide-toggle">
+                        {% form_field form.club_wide show_as_toggle=True %}
+                    </div>
+                {% endif %}
+
+                <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
                     {% form_field form.teams %}
                     {% form_field form.groups %}
-                    {% if "club_wide" in form.fields %}
-                        {% form_field form.club_wide %}
-                    {% endif %}
                 </div>
                 <div class="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
                     {% form_field form.invited_members %}
                     {% form_field form.excluded_members %}
                 </div>
+            </div>
+        </div>
 
-                <div class="my-5 border-t border-line"></div>
-                <h3 class="mb-3 font-display text-xs font-extrabold tracking-[.12em] text-muted uppercase">{% trans "Where" %}</h3>
+        <div class="card">
+            <div class="card-body">
+                <div class="event-section-header">
+                    <span class="event-section-icon">{% lucide "calendar-clock" size=18 %}</span>
+                    <div>
+                        <div class="event-section-title">{% trans "Where & when" %}</div>
+                        <div class="event-section-hint">{% trans "Venue and the times members see on their invite." %}</div>
+                    </div>
+                </div>
+
                 <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
                     {% form_field form.location %}
                     <div class="game-only">
@@ -43,59 +101,100 @@
                     </div>
                 </div>
 
-                <div class="my-5 border-t border-line"></div>
-                <h3 class="mb-3 font-display text-xs font-extrabold tracking-[.12em] text-muted uppercase">{% trans "When" %}</h3>
-                <div class="grid grid-cols-1 gap-4 md:grid-cols-4">
+                <div class="mt-4 grid grid-cols-1 gap-4 border-t border-rule pt-4 md:grid-cols-4">
                     {% form_field form.start %}
                     {% form_field form.end %}
                     {% form_field form.gathering %}
                     {% form_field form.deadline %}
                 </div>
+            </div>
+        </div>
 
-                <div id="game-details-section" class="game-only">
-                    <div class="my-5 border-t border-line"></div>
-                    <h3 class="mb-3 font-display text-xs font-extrabold tracking-[.12em] text-muted uppercase">{% trans "Game" %}</h3>
-                    <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
-                        {% form_field form.competition %}
-                        {% form_field form.external_game_id %}
-                        {% form_field form.max_referees %}
-                        {% if update_view %}
-                            {% comment %}
-                            Score/live status only exist to record once a game has
-                            actually been created -- the add form leaves them out
-                            entirely (see EventForm's editing=False path).
-                            {% endcomment %}
-
-                            {% form_field form.score_for %}
-                            {% form_field form.score_against %}
-                            {% form_field form.is_live %}
-                        {% endif %}
+        <div id="game-details-section" class="card game-only">
+            <div class="card-body">
+                <div class="event-section-header">
+                    <span class="event-section-icon event-section-icon-accent">{% lucide "swords" size=18 %}</span>
+                    <div>
+                        <div class="event-section-title">{% trans "Game details" %}</div>
+                        <div class="event-section-hint">{% trans "Only used for games -- competition, referees and, once played, the score." %}</div>
                     </div>
                 </div>
 
-                <div class="card-actions justify-start pt-4">
-                    <a class="btn btn-outline gap-2" href="{% if update_view %}{% url "management:event_detail" object.pk %}{% else %}{% url "management:event_list" %}{% endif %}">{% lucide "arrow-left" size=16 %} {% trans "Cancel" %}</a>
-                    <button class="btn btn-primary gap-2" type="submit">{% lucide "save" size=16 %} {% trans "Save" %}</button>
+                <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
+                    {% form_field form.competition %}
+                    {% form_field form.external_game_id %}
+                    {% form_field form.max_referees %}
                 </div>
-            </form>
+                {% if update_view %}
+                    {% comment %}
+                    Score/live status only exist to record once a game has
+                    actually been created -- the add form leaves them out
+                    entirely (see EventForm's editing=False path).
+                    {% endcomment %}
+                    <div class="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
+                        {% form_field form.score_for %}
+                        {% form_field form.score_against %}
+                        {% form_field form.is_live show_as_toggle=True %}
+                    </div>
+                {% endif %}
+            </div>
         </div>
-    </div>
+
+        <div class="flex flex-wrap items-center gap-3">
+            <a class="btn btn-outline gap-2" href="{% if update_view %}{% url "management:event_detail" object.pk %}{% else %}{% url "management:event_list" %}{% endif %}">{% lucide "arrow-left" size=16 %} {% trans "Cancel" %}</a>
+            <button class="btn btn-primary gap-2" type="submit">{% lucide "save" size=16 %} {% trans "Save" %}</button>
+        </div>
+    </form>
 {% endblock panel %}
 
 {% block extra_body %}
     <script src="{% static 'js/searchable-select.js' %}"></script>
     <script>
         (() => {
-            // Progressive enhancement only -- the fields stay in the form and post
-            // normally either way, this just hides them when they don't apply so a
-            // training/social/etc. event isn't cluttered with opponent/score/competition
-            // inputs. Anything gated on "only makes sense for a game" carries this class.
-            const kindField = document.getElementById("id_kind");
+            // Progressive enhancement only -- every field still posts normally
+            // either way. The kind cards are the real "kind" radios (see the
+            // template) -- selecting one is what drives (a) the .game-only
+            // show/hide (opponent, and the whole Game details card -- anything
+            // that only makes sense for a game carries this class) and (b) the
+            // live summary line up top. No JS is needed to keep a picker in sync
+            // with a hidden field, because there isn't one.
+            const kindInputs = document.querySelectorAll('input[name="kind"]');
+            const titleField = document.getElementById("id_title");
+            const startField = document.getElementById("id_start");
             const gameOnlyElements = document.querySelectorAll(".game-only");
-            if (!kindField || !gameOnlyElements.length) return;
+            const summary = document.getElementById("event-summary-text");
+            if (!kindInputs.length) return;
 
-            const sync = () => gameOnlyElements.forEach((element) => element.classList.toggle("hidden", kindField.value !== "game"));
-            kindField.addEventListener("change", sync);
+            const NO_TITLE = "{% trans "Untitled event" %}";
+            const NO_DATE = "{% trans "no date set yet" %}";
+
+            const formatStart = (value) => {
+                if (!value) return NO_DATE;
+                const date = new Date(value);
+                if (Number.isNaN(date.getTime())) return NO_DATE;
+                return date.toLocaleString(undefined, { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+            };
+
+            const checkedKind = () => document.querySelector('input[name="kind"]:checked');
+
+            const updateSummary = () => {
+                if (!summary) return;
+                const checked = checkedKind();
+                const kindLabel = checked ? checked.closest(".kind-card").querySelector(".kind-card-label").textContent.trim() : "";
+                const title = (titleField && titleField.value.trim()) || NO_TITLE;
+                const when = formatStart(startField ? startField.value : "");
+                summary.textContent = `${kindLabel} – ${title} – ${when}`;
+            };
+
+            const sync = () => {
+                const checked = checkedKind();
+                gameOnlyElements.forEach((element) => element.classList.toggle("hidden", !checked || checked.value !== "game"));
+                updateSummary();
+            };
+
+            kindInputs.forEach((input) => input.addEventListener("change", sync));
+            if (titleField) titleField.addEventListener("input", updateSummary);
+            if (startField) startField.addEventListener("input", updateSummary);
             sync();
         })();
     </script>

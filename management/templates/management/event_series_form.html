@@ -4,78 +4,197 @@
 {% block heading %}{% if update_view %}{% blocktrans %}Edit {{ object }}{% endblocktrans %}{% else %}{% trans "New series" %}{% endif %}{% endblock heading %}
 
 {% block panel %}
-    <div class="card w-full">
-        <div class="card-body">
-            <form method="post">
-                {% csrf_token %}
+    <form method="post" class="flex flex-col gap-4">
+        {% csrf_token %}
 
-                {% for error in form.non_field_errors %}
-                    <div class="alert alert-error">
-                        <span>{{ error }}</span>
+        {% for error in form.non_field_errors %}
+            <div class="alert alert-error">
+                <span>{{ error }}</span>
+            </div>
+        {% endfor %}
+
+        <div class="card">
+            <div class="card-body">
+                <div class="event-section-header">
+                    <span class="event-section-icon">{% lucide "clipboard-list" size=18 %}</span>
+                    <div>
+                        <div class="event-section-title">{% trans "What's happening?" %}</div>
+                        <div class="event-section-hint">{% trans "Pick a kind to reveal only the fields that matter for it -- it applies to every occurrence this series generates." %}</div>
                     </div>
-                {% endfor %}
-
-                <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
-                    {% form_field form.title %}
-                    {% form_field form.kind %}
                 </div>
 
-                <div class="my-5 border-t border-line"></div>
-                <h3 class="mb-3 font-display text-xs font-extrabold tracking-[.12em] text-muted uppercase">{% trans "Repeats" %}</h3>
+                <div class="mb-4">
+                    {# Real radios, not a JS-synced facade over a hidden <select> -- each card IS the field's own input, so keyboard/tab/arrow-key operation and screen readers get native radiogroup semantics for free, and there's no second visible control for the same field. #}
+                    <div class="kind-grid" role="radiogroup" aria-label="{{ form.fields.kind.label|capfirst }}">
+                        {% for value, label in form.fields.kind.choices %}
+                            <label class="kind-card" data-kind="{{ value }}">
+                                <input type="radio" name="{{ form.kind.html_name }}" value="{{ value }}" class="sr-only" {% if form.kind.value == value %}checked{% endif %} required>
+                                {% if value == "training" %}{% lucide "dumbbell" size=20 %}
+                                {% elif value == "game" %}{% lucide "swords" size=20 %}
+                                {% elif value == "tournament" %}{% lucide "trophy" size=20 %}
+                                {% elif value == "meeting" %}{% lucide "message-square" size=20 %}
+                                {% elif value == "social" %}{% lucide "party-popper" size=20 %}
+                                {% elif value == "other" %}{% lucide "circle-ellipsis" size=20 %}
+                                {% else %}{% lucide "calendar" size=20 %}
+                                {% endif %}
+                                <span class="kind-card-label">{{ label }}</span>
+                            </label>
+                        {% endfor %}
+                    </div>
+                    {% if form.kind.errors %}
+                        <p class="mt-2 text-xs text-club-dark">{{ form.kind.errors|join:" " }}</p>
+                    {% endif %}
+                </div>
+
+                <div class="w-full">
+                    {% form_field form.title %}
+                </div>
+            </div>
+        </div>
+
+        <div class="card event-summary">
+            <span class="event-summary-icon">{% lucide "sparkles" size=16 %}</span>
+            <span id="event-summary-text">{% trans "This line updates live as you fill in the form below." %}</span>
+        </div>
+
+        <div class="card">
+            <div class="card-body">
+                <div class="event-section-header">
+                    <span class="event-section-icon">{% lucide "repeat" size=18 %}</span>
+                    <div>
+                        <div class="event-section-title">{% trans "Repeats" %}</div>
+                        <div class="event-section-hint">{% trans "The friendly pattern below, or drop into a raw recurrence rule for anything unusual." %}</div>
+                    </div>
+                </div>
+
+                {% trans "Only used for a weekly pattern -- a monthly one repeats on the same day of the month as the first occurrence below." as weekdays_help %}
                 <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
                     {% form_field form.frequency %}
                     {% form_field form.interval %}
+                    {% form_field form.weekdays help_text=weekdays_help %}
                     {% form_field form.dtstart %}
                     {% form_field form.until %}
                 </div>
-                {% trans "Only used for a weekly pattern -- a monthly one repeats on the same day of the month as the first occurrence above." as weekdays_help %}
-                {% form_field form.weekdays help_text=weekdays_help %}
                 <details class="collapse-arrow mt-3 rounded-lg border border-line bg-white">
                     <summary class="cursor-pointer px-3 py-2 text-sm font-medium text-ink">{% trans "Advanced: raw recurrence rule" %}</summary>
                     <div class="border-t border-rule p-3">
                         {% form_field form.advanced_rrule %}
                     </div>
                 </details>
+            </div>
+        </div>
 
-                <div class="my-5 border-t border-line"></div>
-                <h3 class="mb-3 font-display text-xs font-extrabold tracking-[.12em] text-muted uppercase">{% trans "Audience" %}</h3>
-                <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <div class="card">
+            <div class="card-body">
+                <div class="event-section-header">
+                    <span class="event-section-icon">{% lucide "users" size=18 %}</span>
+                    <div>
+                        <div class="event-section-title">{% trans "Who's invited" %}</div>
+                        <div class="event-section-hint">{% trans "Teams and groups invite every current member automatically." %}</div>
+                    </div>
+                </div>
+
+                {% if "club_wide" in form.fields %}
+                    <div class="event-clubwide-toggle">
+                        {% form_field form.club_wide show_as_toggle=True %}
+                    </div>
+                {% endif %}
+
+                <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
                     {% form_field form.teams %}
                     {% form_field form.groups %}
-                    {% if "club_wide" in form.fields %}
-                        {% form_field form.club_wide %}
-                    {% endif %}
                 </div>
                 <div class="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
                     {% form_field form.invited_members %}
                     {% form_field form.excluded_members %}
                 </div>
+            </div>
+        </div>
 
-                <div class="my-5 border-t border-line"></div>
-                <h3 class="mb-3 font-display text-xs font-extrabold tracking-[.12em] text-muted uppercase">{% trans "Where" %}</h3>
-                <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
-                    {% form_field form.location %}
-                    {% form_field form.opponent %}
+        <div class="card">
+            <div class="card-body">
+                <div class="event-section-header">
+                    <span class="event-section-icon">{% lucide "calendar-clock" size=18 %}</span>
+                    <div>
+                        <div class="event-section-title">{% trans "Where & timing" %}</div>
+                        <div class="event-section-hint">{% trans "Venue, and how long each occurrence runs relative to its start." %}</div>
+                    </div>
                 </div>
 
-                <div class="my-5 border-t border-line"></div>
-                <h3 class="mb-3 font-display text-xs font-extrabold tracking-[.12em] text-muted uppercase">{% trans "Timing" %}</h3>
-                <div class="grid grid-cols-1 gap-4 md:grid-cols-4">
+                <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+                    {% form_field form.location %}
+                    <div class="game-only">
+                        {% form_field form.opponent %}
+                    </div>
+                </div>
+
+                <div class="mt-4 grid grid-cols-1 gap-4 border-t border-rule pt-4 md:grid-cols-4">
                     {% form_field form.duration_hours %}
                     {% form_field form.duration_minutes %}
                     {% form_field form.gathering_minutes_before %}
                     {% form_field form.deadline_minutes_before %}
                 </div>
-
-                <div class="card-actions justify-start pt-4">
-                    <a class="btn btn-outline gap-2" href="{% if update_view %}{% url "management:event_series_detail" object.pk %}{% else %}{% url "management:event_list" %}{% endif %}">{% lucide "arrow-left" size=16 %} {% trans "Cancel" %}</a>
-                    <button class="btn btn-primary gap-2" type="submit">{% lucide "save" size=16 %} {% trans "Save" %}</button>
-                </div>
-            </form>
+            </div>
         </div>
-    </div>
+
+        <div class="flex flex-wrap items-center gap-3">
+            <a class="btn btn-outline gap-2" href="{% if update_view %}{% url "management:event_series_detail" object.pk %}{% else %}{% url "management:event_list" %}{% endif %}">{% lucide "arrow-left" size=16 %} {% trans "Cancel" %}</a>
+            <button class="btn btn-primary gap-2" type="submit">{% lucide "save" size=16 %} {% trans "Save" %}</button>
+        </div>
+    </form>
 {% endblock panel %}
 
 {% block extra_body %}
     <script src="{% static 'js/searchable-select.js' %}"></script>
+    <script>
+        (() => {
+            // Same mechanism as event_form.html's own copy of this script (see
+            // its comment) -- the kind cards are the real "kind" radios, which
+            // drive .game-only (here just the opponent field -- a series has no
+            // separate "Game details" section to show/hide) and the live
+            // summary line. No hidden field to keep in sync with a picker.
+            const kindInputs = document.querySelectorAll('input[name="kind"]');
+            const titleField = document.getElementById("id_title");
+            const dtstartField = document.getElementById("id_dtstart");
+            const frequencyField = document.getElementById("id_frequency");
+            const gameOnlyElements = document.querySelectorAll(".game-only");
+            const summary = document.getElementById("event-summary-text");
+            if (!kindInputs.length) return;
+
+            const NO_TITLE = "{% trans "Untitled series" %}";
+            const NO_DATE = "{% trans "no start date set yet" %}";
+
+            const formatStart = (value) => {
+                if (!value) return NO_DATE;
+                const date = new Date(value);
+                if (Number.isNaN(date.getTime())) return NO_DATE;
+                return date.toLocaleString(undefined, { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+            };
+
+            const checkedKind = () => document.querySelector('input[name="kind"]:checked');
+
+            const updateSummary = () => {
+                if (!summary) return;
+                const checked = checkedKind();
+                const kindLabel = checked ? checked.closest(".kind-card").querySelector(".kind-card-label").textContent.trim() : "";
+                const title = (titleField && titleField.value.trim()) || NO_TITLE;
+                const selectedFrequency = frequencyField ? frequencyField.options[frequencyField.selectedIndex] : null;
+                const frequencyLabel = selectedFrequency ? selectedFrequency.text : "";
+                const when = formatStart(dtstartField ? dtstartField.value : "");
+                summary.textContent = `${kindLabel} – ${title} – ${frequencyLabel}, ${when}`;
+            };
+
+            const sync = () => {
+                const checked = checkedKind();
+                gameOnlyElements.forEach((element) => element.classList.toggle("hidden", !checked || checked.value !== "game"));
+                updateSummary();
+            };
+
+            kindInputs.forEach((input) => input.addEventListener("change", sync));
+            if (titleField) titleField.addEventListener("input", updateSummary);
+            if (dtstartField) dtstartField.addEventListener("input", updateSummary);
+            if (frequencyField) frequencyField.addEventListener("change", updateSummary);
+            sync();
+        })();
+    </script>
 {% endblock extra_body %}

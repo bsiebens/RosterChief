@@ -14,111 +14,266 @@
 {% endblock actions %}
 
 {% block filter_strip %}
-    <form method="get" class="flex flex-wrap items-center gap-2 border-b border-line bg-white px-7 py-3">
-        <select name="season" class="select w-auto">
-            {% for season in seasons %}
-                <option value="{{ season.pk }}" {% if season.pk == selected_season.pk %}selected{% endif %}>{% trans "Season" %} {{ season.start_date|date:"Y" }}–{{ season.end_date|date:"Y" }}</option>
-            {% endfor %}
-        </select>
-        <select name="kind" class="select w-auto">
-            <option value="">{% trans "All kinds" %}</option>
-            {% for value, label in event_kinds %}
-                <option value="{{ value }}" {% if value == selected_kind %}selected{% endif %}>{{ label }}</option>
-            {% endfor %}
-        </select>
-        <label class="flex cursor-pointer items-center gap-2 text-sm text-slate">
-            <input type="checkbox" name="show_past" value="1" class="checkbox" {% if show_past %}checked{% endif %} onchange="this.form.submit()">
-            {% trans "Show past events" %}
-        </label>
-        <button class="btn btn-outline btn-sm gap-2" type="submit">{% lucide "filter" size=14 %} {% trans "View" %}</button>
-    </form>
+    <div class="flex flex-wrap items-center gap-3 border-b border-line bg-white px-7 py-3">
+        <form method="get" class="flex flex-wrap items-center gap-2">
+            {% if view_mode != "calendar" %}<input type="hidden" name="view" value="{{ view_mode }}">{% endif %}
+            {% if calendar_range != "week" %}<input type="hidden" name="range" value="{{ calendar_range }}">{% endif %}
+            {% if view_mode == "calendar" and calendar_range != "season" %}<input type="hidden" name="date" value="{{ anchor|date:"Y-m-d" }}">{% endif %}
+            <select name="season" class="select w-auto">
+                {% for season in seasons %}
+                    <option value="{{ season.pk }}" {% if season.pk == selected_season.pk %}selected{% endif %}>{% trans "Season" %} {{ season.start_date|date:"Y" }}–{{ season.end_date|date:"Y" }}</option>
+                {% endfor %}
+            </select>
+            <select name="kind" class="select w-auto">
+                <option value="">{% trans "All kinds" %}</option>
+                {% for value, label in event_kinds %}
+                    <option value="{{ value }}" {% if value == selected_kind %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+            {% if view_mode == "list" %}
+                <label class="flex cursor-pointer items-center gap-2 text-sm text-slate">
+                    <input type="checkbox" name="show_past" value="1" class="checkbox" {% if show_past %}checked{% endif %} onchange="this.form.submit()">
+                    {% trans "Show past events" %}
+                </label>
+            {% endif %}
+            <button class="btn btn-outline btn-sm gap-2" type="submit">{% lucide "filter" size=14 %} {% trans "View" %}</button>
+        </form>
+
+        <div class="flex-1"></div>
+
+        {% if view_mode == "calendar" %}
+            <div class="flex items-center gap-1 rounded-full bg-steel p-1">
+                <a href="{% querystring range="week" %}" class="rounded-full px-3 py-1.5 font-display text-xs font-bold tracking-[.08em] uppercase {% if calendar_range == "week" %}bg-white text-ink{% else %}text-on-dark hover:text-white{% endif %}">{% trans "Week" %}</a>
+                <a href="{% querystring range="month" %}" class="rounded-full px-3 py-1.5 font-display text-xs font-bold tracking-[.08em] uppercase {% if calendar_range == "month" %}bg-white text-ink{% else %}text-on-dark hover:text-white{% endif %}">{% trans "Month" %}</a>
+                <a href="{% querystring range="season" %}" class="rounded-full px-3 py-1.5 font-display text-xs font-bold tracking-[.08em] uppercase {% if calendar_range == "season" %}bg-white text-ink{% else %}text-on-dark hover:text-white{% endif %}">{% trans "Season" %}</a>
+            </div>
+
+            {% if calendar_range != "season" %}
+                <div class="flex items-center gap-1">
+                    <a href="{% querystring date=nav.prev|date:"Y-m-d" %}" class="btn btn-square btn-outline btn-sm" aria-label="{% trans 'Previous' %}">{% lucide "chevron-left" size=14 %}</a>
+                    <a href="{% querystring date=today|date:"Y-m-d" %}" class="btn btn-outline btn-sm">{% trans "Today" %}</a>
+                    <a href="{% querystring date=nav.next|date:"Y-m-d" %}" class="btn btn-square btn-outline btn-sm" aria-label="{% trans 'Next' %}">{% lucide "chevron-right" size=14 %}</a>
+                </div>
+            {% endif %}
+        {% endif %}
+
+        {# Calendar/List segmented toggle -- member_list.html's Members/Guardians/Both pattern. #}
+        <div class="flex items-center gap-1 rounded-full bg-steel p-1">
+            <a href="{% querystring view="calendar" %}" class="flex items-center gap-1.5 rounded-full px-3 py-1.5 font-display text-xs font-bold tracking-[.08em] uppercase {% if view_mode == "calendar" %}bg-white text-ink{% else %}text-on-dark hover:text-white{% endif %}">{% lucide "calendar" size=13 %} {% trans "Calendar" %}</a>
+            <a href="{% querystring view="list" %}" class="flex items-center gap-1.5 rounded-full px-3 py-1.5 font-display text-xs font-bold tracking-[.08em] uppercase {% if view_mode == "list" %}bg-white text-ink{% else %}text-on-dark hover:text-white{% endif %}">{% lucide "list" size=13 %} {% trans "List" %}</a>
+        </div>
+    </div>
 {% endblock filter_strip %}
 
 {% block panel %}
-    <div class="card overflow-hidden">
-        <div class="overflow-x-auto">
-            <table class="table">
-                <thead>
-                    <tr>
-                        <th>{% trans "Title" %}</th>
-                        <th>{% trans "Kind" %}</th>
-                        <th>{% trans "When" %}</th>
-                        <th>{% trans "Teams" %}</th>
-                        <th>{% trans "Location" %}</th>
-                        <th></th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for event in events %}
+    {% if view_mode == "list" %}
+        <div class="card overflow-hidden">
+            <div class="overflow-x-auto">
+                <table class="table">
+                    <thead>
                         <tr>
-                            <td>
-                                <a class="link link-hover font-semibold text-ink" href="{% url 'management:event_detail' event.pk %}">{{ event.title }}</a>
-                                {% if event.series_id %}
-                                    <span class="ml-1 inline-flex align-middle text-dim" title="{% trans 'Part of a series' %}" aria-label="{% trans 'Part of a series' %}">{% lucide "repeat" size=12 %}</span>
-                                {% endif %}
-                            </td>
-                            <td>
-                                <span class="badge badge-sm {% if event.kind == "game" %}badge-error{% elif event.kind == "training" %}badge-info{% elif event.kind == "tournament" %}badge-warning{% elif event.kind == "meeting" %}badge-neutral{% elif event.kind == "social" %}border-violet/30 bg-violet/10 text-violet{% else %}badge-outline{% endif %}">
-                                    {{ event.get_kind_display }}
-                                </span>
-                            </td>
-                            <td class="font-mono text-xs text-ink">{{ event.start|date:"D j M Y H:i" }}</td>
-                            <td>{% for team in event.teams.all %}{{ team.short_name }}{% if not forloop.last %}, {% endif %}{% empty %}<span class="text-dim">—</span>{% endfor %}</td>
-                            <td>{{ event.location.name|default:"—" }}</td>
-                            <td class="text-right">
-                                {% if event.can_manage %}
-                                    <div class="flex justify-end gap-1">
-                                        <a class="btn btn-outline btn-sm" href="{% url 'management:event_detail' event.pk %}" aria-label="{% trans 'Edit' %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</a>
-                                        <button class="btn btn-sm btn-outline btn-error" type="button" onclick="document.getElementById('{{ event.pk|dom_id:"event_delete_modal" }}').showModal()" aria-label="{% trans 'Delete' %}">{% lucide "trash-2" size=14 %} {% trans "Delete" %}</button>
-                                    </div>
-                                {% endif %}
-                            </td>
+                            <th>{% trans "Title" %}</th>
+                            <th>{% trans "Kind" %}</th>
+                            <th>{% trans "When" %}</th>
+                            <th>{% trans "Teams" %}</th>
+                            <th>{% trans "Location" %}</th>
+                            <th></th>
                         </tr>
-                    {% empty %}
-                        <tr>
-                            <td colspan="6" class="py-8 text-center text-muted">{% trans "No events." %}</td>
-                        </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+                    </thead>
+                    <tbody>
+                        {% for event in events %}
+                            <tr>
+                                <td>
+                                    <a class="link link-hover font-semibold text-ink" href="{% url 'management:event_detail' event.pk %}">{{ event.title }}</a>
+                                    {% if event.series_id %}
+                                        <span class="ml-1 inline-flex align-middle text-dim" title="{% trans 'Part of a series' %}" aria-label="{% trans 'Part of a series' %}">{% lucide "repeat" size=12 %}</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <span class="badge badge-sm {% if event.kind == "game" %}badge-error{% elif event.kind == "training" %}badge-info{% elif event.kind == "tournament" %}badge-warning{% elif event.kind == "meeting" %}badge-neutral{% elif event.kind == "social" %}border-violet/30 bg-violet/10 text-violet{% else %}badge-outline{% endif %}">
+                                        {{ event.get_kind_display }}
+                                    </span>
+                                </td>
+                                <td class="font-mono text-xs text-ink">{{ event.start|date:"D j M Y H:i" }}</td>
+                                <td>{% for team in event.teams.all %}{{ team.short_name }}{% if not forloop.last %}, {% endif %}{% empty %}<span class="text-dim">—</span>{% endfor %}</td>
+                                <td>{{ event.location.name|default:"—" }}</td>
+                                <td class="text-right">
+                                    {% if event.can_manage %}
+                                        <div class="flex justify-end gap-1">
+                                            <a class="btn btn-outline btn-sm" href="{% url 'management:event_detail' event.pk %}" aria-label="{% trans 'Edit' %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</a>
+                                            <button class="btn btn-sm btn-outline btn-error" type="button" onclick="document.getElementById('{{ event.pk|dom_id:"event_delete_modal" }}').showModal()" aria-label="{% trans 'Delete' %}">{% lucide "trash-2" size=14 %} {% trans "Delete" %}</button>
+                                        </div>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                        {% empty %}
+                            <tr>
+                                <td colspan="6" class="py-8 text-center text-muted">{% trans "No events." %}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
         </div>
-    </div>
 
-    {% include "management/_pagination.html" %}
+        {% include "management/_pagination.html" %}
 
-    {% comment %} Dialogs live outside the table: <tbody> may only contain <tr> elements. {% endcomment %}
-    {% for event in events %}
-        {% if event.can_manage %}
-            <dialog id="{{ event.pk|dom_id:"event_delete_modal" }}" class="modal">
-                <div class="modal-box">
-                    <h3 class="text-lg font-bold text-ink">
-                        {% if event.series_id %}{% trans "Cancel occurrence" %}{% else %}{% trans "Delete event" %}{% endif %}
-                    </h3>
-                    <form method="post" action="{% url 'management:event_delete' event.pk %}" id="{{ event.pk|dom_id:"event_delete_form" }}">
-                        {% csrf_token %}
-                        {% if event.series_id %}
-                            {% blocktrans with name=event.title asvar delete_body %}Removes “{{ name }}” from the schedule. It won't be regenerated.{% endblocktrans %}
-                            <p class="py-2 text-sm text-muted">{{ delete_body }}</p>
-                            <label class="flex cursor-pointer items-start gap-2 text-sm text-slate">
-                                <input type="checkbox" name="keep_record" class="checkbox mt-0.5">
-                                <span>{% trans "Keep a record of it (marks it cancelled instead of deleting it)" %}</span>
-                            </label>
-                        {% else %}
-                            {% blocktrans with name=event.title asvar delete_body %}Delete “{{ name }}”? This cannot be undone.{% endblocktrans %}
-                            <p class="py-2 text-sm text-muted">{{ delete_body }}</p>
-                        {% endif %}
-                    </form>
-                    <div class="modal-action">
-                        <form method="dialog">
-                            <button class="btn btn-outline gap-2">{% lucide "x" size=16 %} {% trans "Cancel" %}</button>
+        {% comment %} Dialogs live outside the table: <tbody> may only contain <tr> elements. {% endcomment %}
+        {% for event in events %}
+            {% if event.can_manage %}
+                <dialog id="{{ event.pk|dom_id:"event_delete_modal" }}" class="modal">
+                    <div class="modal-box">
+                        <h3 class="text-lg font-bold text-ink">
+                            {% if event.series_id %}{% trans "Cancel occurrence" %}{% else %}{% trans "Delete event" %}{% endif %}
+                        </h3>
+                        <form method="post" action="{% url 'management:event_delete' event.pk %}" id="{{ event.pk|dom_id:"event_delete_form" }}">
+                            {% csrf_token %}
+                            {% if event.series_id %}
+                                {% blocktrans with name=event.title asvar delete_body %}Removes “{{ name }}” from the schedule. It won't be regenerated.{% endblocktrans %}
+                                <p class="py-2 text-sm text-muted">{{ delete_body }}</p>
+                                <label class="flex cursor-pointer items-start gap-2 text-sm text-slate">
+                                    <input type="checkbox" name="keep_record" class="checkbox mt-0.5">
+                                    <span>{% trans "Keep a record of it (marks it cancelled instead of deleting it)" %}</span>
+                                </label>
+                            {% else %}
+                                {% blocktrans with name=event.title asvar delete_body %}Delete “{{ name }}”? This cannot be undone.{% endblocktrans %}
+                                <p class="py-2 text-sm text-muted">{{ delete_body }}</p>
+                            {% endif %}
                         </form>
-                        <button class="btn btn-error gap-2" type="submit" form="{{ event.pk|dom_id:"event_delete_form" }}">{% lucide "trash-2" size=16 %} {% trans "Confirm" %}</button>
+                        <div class="modal-action">
+                            <form method="dialog">
+                                <button class="btn btn-outline gap-2">{% lucide "x" size=16 %} {% trans "Cancel" %}</button>
+                            </form>
+                            <button class="btn btn-error gap-2" type="submit" form="{{ event.pk|dom_id:"event_delete_form" }}">{% lucide "trash-2" size=16 %} {% trans "Confirm" %}</button>
+                        </div>
                     </div>
-                </div>
-                <form method="dialog" class="modal-backdrop">
-                    <button>close</button>
-                </form>
-            </dialog>
+                    <form method="dialog" class="modal-backdrop">
+                        <button>close</button>
+                    </form>
+                </dialog>
+            {% endif %}
+        {% endfor %}
+    {% elif calendar_range == "week" %}
+        <div class="card overflow-hidden">
+            <div class="border-b border-line px-4 py-2.5 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">
+                {% blocktrans with start=calendar.week_start|date:"j M" end=calendar.week_end|date:"j M Y" %}{{ start }} – {{ end }}{% endblocktrans %}
+            </div>
+            <div class="overflow-x-auto">
+                {% with hours_span=calendar.hours|length|add:"-1" %}
+                    <div class="cal-week-inner">
+                        <div class="cal-week-header">
+                            <div class="cal-week-gutter-spacer"></div>
+                            {% for day in calendar.days %}
+                                <div class="cal-week-daycol-header {% if day.is_today %}is-today{% endif %}">
+                                    <span class="cal-daycol-dow">{{ day.date|date:"D" }}</span>
+                                    <span class="cal-daycol-num">{{ day.date|date:"j" }}</span>
+                                </div>
+                            {% endfor %}
+                        </div>
+                        <div class="cal-week-body" style="height: calc({{ hours_span }} * 3.5rem)">
+                            <div class="cal-week-gridlines" aria-hidden="true">
+                                {% for hour in calendar.hours %}
+                                    <div class="cal-hour-line" style="top: {% widthratio forloop.counter0 hours_span 100 %}%"></div>
+                                {% endfor %}
+                            </div>
+                            <div class="cal-week-gutter">
+                                {% for hour in calendar.hours %}
+                                    <span class="cal-hour-label" style="top: {% widthratio forloop.counter0 hours_span 100 %}%">{{ hour|stringformat:"02d" }}:00</span>
+                                {% endfor %}
+                            </div>
+                            {% for day in calendar.days %}
+                                <div class="cal-week-daycol {% if day.is_today %}is-today{% endif %}">
+                                    {% for block in day.blocks %}
+                                        <div class="cal-block-slot" style="top: {{ block.top_pct }}%; height: {{ block.height_pct }}%; left: {{ block.left_pct }}%; width: {{ block.width_pct }}%">
+                                            <a class="cal-block cal-block-{{ block.event.kind }}" href="{% url 'management:event_detail' block.event.pk %}" title="{{ block.event.title }}">
+                                                <span class="flex items-center gap-1">
+                                                    <span class="cal-block-time">{{ block.start|date:"H:i" }}</span>
+                                                    {% if block.event.series_id %}<span class="shrink-0" title="{% trans 'Part of a series' %}" aria-label="{% trans 'Part of a series' %}">{% lucide "repeat" size=10 %}</span>{% endif %}
+                                                </span>
+                                                <span class="cal-block-title">{{ block.event.title }}</span>
+                                            </a>
+                                        </div>
+                                    {% endfor %}
+                                </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                {% endwith %}
+            </div>
+        </div>
+    {% elif calendar_range == "month" %}
+        <div class="card overflow-hidden">
+            <div class="border-b border-line px-4 py-2.5 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">
+                {{ anchor|date:"F Y" }}
+            </div>
+            <div class="cal-month-daynames">
+                {% for cell in calendar.weeks.0 %}
+                    <div class="cal-month-dayname">{{ cell.date|date:"D" }}</div>
+                {% endfor %}
+            </div>
+            <div class="cal-month-grid">
+                {% for week in calendar.weeks %}
+                    {% for cell in week %}
+                        <div class="cal-month-cell {% if not cell.in_month %}is-outside{% endif %} {% if cell.is_today %}is-today{% endif %}">
+                            <div class="cal-month-cell-num">{{ cell.date|date:"j" }}</div>
+                            <div class="cal-month-cell-events">
+                                {% for event in cell.events|slice:":3" %}
+                                    <a class="cal-chip cal-chip-{{ event.kind }}" href="{% url 'management:event_detail' event.pk %}" title="{{ event.title }}">
+                                        <span class="cal-dot cal-dot-{{ event.kind }}"></span>
+                                        <span class="truncate">{{ event.title }}</span>
+                                        {% if event.series_id %}<span class="shrink-0" title="{% trans 'Part of a series' %}" aria-label="{% trans 'Part of a series' %}">{% lucide "repeat" size=10 %}</span>{% endif %}
+                                    </a>
+                                {% endfor %}
+                                {% if cell.events|length > 3 %}
+                                    {% with extra_count=cell.events|length|add:"-3" %}
+                                        <a class="cal-chip-more" href="{% querystring view="calendar" range="week" date=cell.date|date:"Y-m-d" %}">
+                                            {% blocktrans count counter=extra_count %}+{{ counter }} more{% plural %}+{{ counter }} more{% endblocktrans %}
+                                        </a>
+                                    {% endwith %}
+                                {% endif %}
+                            </div>
+                        </div>
+                    {% endfor %}
+                {% endfor %}
+            </div>
+        </div>
+    {% elif calendar_range == "season" %}
+        {% if not calendar %}
+            <div class="alert alert-warning">
+                {% lucide "calendar-x" size=20 %}
+                <span>{% trans "Pick a season above to see its calendar." %}</span>
+            </div>
+        {% else %}
+            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                {% for month in calendar.months %}
+                    <div class="card p-3">
+                        <div class="mb-2 font-display text-xs font-extrabold tracking-[.08em] text-ink uppercase">{{ month.label|date:"F Y" }}</div>
+                        <div class="cal-season-daynames">
+                            {% for cell in month.weeks.0 %}
+                                <span class="cal-season-dayname">{{ cell.date|date:"D"|slice:":1" }}</span>
+                            {% endfor %}
+                        </div>
+                        <div class="cal-season-grid">
+                            {% for week in month.weeks %}
+                                {% for cell in week %}
+                                    {% if cell.count %}
+                                        <a class="cal-season-cell has-events {% if not cell.in_month %}is-outside{% endif %} {% if cell.is_today %}is-today{% endif %}" href="{% querystring view="calendar" range="week" date=cell.date|date:"Y-m-d" %}">
+                                            <span class="cal-season-daynum">{{ cell.date|date:"j" }}</span>
+                                            <span class="cal-season-count">{{ cell.count }}</span>
+                                        </a>
+                                    {% else %}
+                                        <span class="cal-season-cell {% if not cell.in_month %}is-outside{% endif %} {% if cell.is_today %}is-today{% endif %}">
+                                            <span class="cal-season-daynum">{{ cell.date|date:"j" }}</span>
+                                        </span>
+                                    {% endif %}
+                                {% endfor %}
+                            {% endfor %}
+                        </div>
+                    </div>
+                {% empty %}
+                    <p class="col-span-full py-6 text-center text-sm text-muted">{% trans "This season has no months to show." %}</p>
+                {% endfor %}
+            </div>
         {% endif %}
-    {% endfor %}
+    {% endif %}
 {% endblock panel %}

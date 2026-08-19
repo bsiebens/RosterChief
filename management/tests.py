@@ -4634,6 +4634,28 @@ class EventManagementTests(ManagementTestBase):
         self.assertContains(response, reverse("management:event_delete", args=[own_event.pk]))
         self.assertNotContains(response, reverse("management:event_delete", args=[other_event.pk]))
 
+    def test_the_week_calendar_marks_a_series_occurrence_with_the_repeat_icon(self):
+        series = EventSeries.objects.create(club=self.club, title="Weekly Training", kind=Event.EventKind.TRAINING, dtstart=timezone.now(), rrule="FREQ=WEEKLY;COUNT=1")
+        occurrence = Event.objects.create(club=self.club, title="Weekly Training", start=timezone.now(), series=series)
+        occurrence.teams.add(self.own_team)
+        standalone = Event.objects.create(club=self.club, title="One-off Training", start=timezone.now() + datetime.timedelta(hours=1))
+        standalone.teams.add(self.own_team)
+        self.client.force_login(self.own_team_coach)
+
+        response = self.club_get("event_list")  # default view=calendar, range=week
+
+        self.assertContains(response, 'aria-label="Part of a series"', count=1)
+
+    def test_the_month_calendar_marks_a_series_occurrence_with_the_repeat_icon(self):
+        series = EventSeries.objects.create(club=self.club, title="Weekly Training", kind=Event.EventKind.TRAINING, dtstart=timezone.now(), rrule="FREQ=WEEKLY;COUNT=1")
+        occurrence = Event.objects.create(club=self.club, title="Weekly Training", start=timezone.now(), series=series)
+        occurrence.teams.add(self.own_team)
+        self.client.force_login(self.own_team_coach)
+
+        response = self.club_get("event_list", params={"range": "month"})
+
+        self.assertContains(response, 'aria-label="Part of a series"', count=1)
+
     def test_a_manager_only_sees_events_for_teams_they_manage(self):
         own_event = Event.objects.create(club=self.club, title="My event", start=timezone.now() + datetime.timedelta(days=1))
         own_event.teams.add(self.own_team)
@@ -5003,14 +5025,25 @@ class EventDetailDisplayTests(ManagementTestBase):
         self.assertContains(response, "Peter Player")
         self.assertContains(response, "Bringing the kit bag")
 
-    def test_the_rsvp_modal_groups_responses_into_collapsible_status_sections(self):
+    def test_the_rsvp_modal_offers_a_filter_pill_per_status_with_responses(self):
         event = self.make_event()
         Attendance.objects.filter(event=event, member=self.player).update(status=Attendance.AttendanceStatus.PRESENT)
 
         response = self.club_get("event_detail", event.pk)
 
-        self.assertContains(response, "<details")
-        self.assertContains(response, "collapse-arrow")
+        # One pill per status that actually has a response ("Present"), none for
+        # the others (Absent, Excused, ... all sit at 0 for this single-player event).
+        self.assertContains(response, 'data-status="present"')
+        self.assertNotContains(response, 'data-status="absent"')
+        self.assertContains(response, 'data-status=""')  # the "All" pill
+
+    def test_the_rsvp_modal_tags_each_row_with_its_status_for_client_side_filtering(self):
+        event = self.make_event()
+        Attendance.objects.filter(event=event, member=self.player).update(status=Attendance.AttendanceStatus.PRESENT)
+
+        response = self.club_get("event_detail", event.pk)
+
+        self.assertContains(response, '<tr data-status="present">')
 
     def test_the_details_card_shows_gathering_and_deadline_even_when_unset(self):
         event = self.make_event()

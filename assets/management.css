@@ -1061,3 +1061,620 @@
         color: #fff;
     }
 }
+
+/* --- Events calendar grid ---
+   Week/Month/Season views for management/templates/management/event_list.html
+   (EventListView, events/services/calendar.py). Kind -> colour follows the same
+   mapping as the table's own badges (see that template's inline badge classes),
+   just built from the underlying tokens instead of the badge component -- these
+   are big rectangles/chips, not small pills, so a tinted fill + solid left edge
+   reads better than a bordered badge blown up to size.
+
+   Percentage math: week_grid() (events/services/calendar.py) hands each block
+   top_pct/height_pct/left_pct/width_pct as floats relative to (a) the visible
+   hour span for top/height and (b) same-day overlap columns for left/width.
+   Percentage heights only resolve against a containing block with a *definite*
+   height, so .cal-week-body gets an explicit inline height (hours_span * the
+   fixed per-hour row height below) from the template -- everything inside it
+   is then free to size purely off the server-computed percentages. */
+@layer components {
+    .cal-week-inner {
+        min-width: 55rem;
+    }
+
+    .cal-week-header {
+        display: flex;
+        border-bottom: 1px solid var(--color-line);
+    }
+
+    .cal-week-gutter-spacer {
+        width: 3.5rem;
+        flex-shrink: 0;
+    }
+
+    .cal-week-daycol-header {
+        flex: 1 1 0;
+        min-width: 7.5rem;
+        padding: 0.5rem 0.25rem;
+        text-align: center;
+        border-left: 1px solid var(--color-rule);
+    }
+
+    .cal-week-daycol-header.is-today {
+        background: var(--color-row-focus);
+    }
+
+    .cal-daycol-dow {
+        display: block;
+        font-family: var(--font-display);
+        font-size: 0.6875rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--color-muted);
+    }
+
+    .cal-week-daycol-header.is-today .cal-daycol-dow {
+        color: var(--color-club-dark);
+    }
+
+    .cal-daycol-num {
+        display: block;
+        font-family: var(--font-display);
+        font-size: 1.25rem;
+        font-weight: 800;
+        color: var(--color-ink);
+    }
+
+    /* Explicit height set inline by the template (hours_span * row height) --
+       this is what makes the children's percentage top/height resolve at all.
+       display:flex is just as load-bearing here as that inline height: the
+       gutter and day columns are meant to sit side by side, each stretched
+       (flex's default align-items) to the row's full height -- without it
+       they're plain block children, which stack vertically instead of
+       side-by-side and, since their real content is all position:absolute
+       (contributing nothing to auto-height), each collapses to near-zero
+       height too. */
+    .cal-week-body {
+        position: relative;
+        display: flex;
+    }
+
+    .cal-week-gridlines {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+    }
+
+    .cal-hour-line {
+        position: absolute;
+        left: 0;
+        right: 0;
+        height: 1px;
+        background: var(--color-rule);
+    }
+
+    .cal-week-gutter {
+        position: relative;
+        width: 3.5rem;
+        flex-shrink: 0;
+    }
+
+    .cal-hour-label {
+        position: absolute;
+        right: 0.625rem;
+        transform: translateY(-50%);
+        font-family: var(--font-mono);
+        font-size: 0.6875rem;
+        color: var(--color-dim);
+        white-space: nowrap;
+    }
+
+    .cal-week-daycol {
+        position: relative;
+        flex: 1 1 0;
+        min-width: 7.5rem;
+        border-left: 1px solid var(--color-rule);
+    }
+
+    .cal-week-daycol.is-today {
+        background: var(--color-row-focus);
+    }
+
+    /* Positioned by the template's inline style (top/height/left/width, straight
+       from the block dict) -- this element owns the percentage box, a plain
+       inset+margin child owns the visual pill, so the 1px gap between
+       side-by-side overlapping blocks doesn't have to come out of the
+       server-computed width itself. */
+    .cal-block-slot {
+        position: absolute;
+        box-sizing: border-box;
+    }
+
+    .cal-block {
+        position: absolute;
+        inset: 0;
+        margin: 1px;
+        display: flex;
+        flex-direction: column;
+        gap: 0.125rem;
+        overflow: hidden;
+        border-radius: 0.375rem;
+        border-left: 3px solid;
+        padding: 0.25rem 0.375rem;
+        text-decoration: none;
+        transition: opacity 0.15s ease;
+    }
+
+    .cal-block:hover {
+        opacity: 0.82;
+    }
+
+    .cal-block-time {
+        font-family: var(--font-mono);
+        font-size: 0.625rem;
+        font-weight: 600;
+        opacity: 0.85;
+        white-space: nowrap;
+    }
+
+    .cal-block-title {
+        font-size: 0.6875rem;
+        font-weight: 700;
+        line-height: 1.15;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    /* Kind -> colour, same source palette as the table's badges (event_list.html):
+       game=club-dark/error, training=info, tournament=warn, meeting=ink/neutral,
+       social=violet, other=neutral outline. Solid tint + left edge, not a badge --
+       these blocks are far bigger than a pill. */
+    .cal-block-game {
+        background: var(--color-danger-bg);
+        border-color: var(--color-club-dark);
+        color: var(--color-club-dark);
+    }
+
+    .cal-block-training {
+        background: var(--color-info-bg);
+        border-color: var(--color-info);
+        color: var(--color-info-text);
+    }
+
+    .cal-block-tournament {
+        background: var(--color-warn-bg);
+        border-color: var(--color-warn);
+        color: var(--color-warn-text);
+    }
+
+    .cal-block-meeting {
+        background: var(--color-rule);
+        border-color: var(--color-ink);
+        color: var(--color-ink);
+    }
+
+    .cal-block-social {
+        background: color-mix(in srgb, var(--color-violet) 12%, white);
+        border-color: var(--color-violet);
+        color: var(--color-violet);
+    }
+
+    .cal-block-other {
+        background: #fff;
+        border-color: var(--color-edge);
+        color: var(--color-muted);
+    }
+
+    /* --- Month grid --- */
+    .cal-month-daynames {
+        display: grid;
+        grid-template-columns: repeat(7, 1fr);
+        border-bottom: 1px solid var(--color-line);
+        background: var(--color-subhead);
+    }
+
+    .cal-month-dayname {
+        padding: 0.4rem 0.25rem;
+        text-align: center;
+        font-family: var(--font-display);
+        font-size: 0.625rem;
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--color-muted);
+    }
+
+    .cal-month-grid {
+        display: grid;
+        grid-template-columns: repeat(7, 1fr);
+        border-top: 1px solid var(--color-line);
+        border-left: 1px solid var(--color-line);
+    }
+
+    .cal-month-cell {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+        min-height: 6.75rem;
+        padding: 0.375rem;
+        background: #fff;
+        border-right: 1px solid var(--color-line);
+        border-bottom: 1px solid var(--color-line);
+    }
+
+    .cal-month-cell.is-outside {
+        background: var(--color-paper);
+    }
+
+    .cal-month-cell.is-outside .cal-month-cell-num {
+        color: var(--color-dim);
+    }
+
+    .cal-month-cell.is-today {
+        background: var(--color-row-focus);
+    }
+
+    .cal-month-cell-num {
+        font-family: var(--font-display);
+        font-size: 0.875rem;
+        font-weight: 800;
+        color: var(--color-ink);
+    }
+
+    .cal-month-cell.is-today .cal-month-cell-num {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 1.375rem;
+        height: 1.375rem;
+        border-radius: 999px;
+        background: var(--color-club);
+        color: var(--color-club-content);
+    }
+
+    .cal-month-cell-events {
+        display: flex;
+        flex-direction: column;
+        gap: 0.1875rem;
+        overflow: hidden;
+    }
+
+    .cal-chip {
+        display: flex;
+        align-items: center;
+        gap: 0.3125rem;
+        padding: 0.0625rem 0.25rem;
+        border-radius: 0.25rem;
+        font-size: 0.625rem;
+        font-weight: 600;
+        line-height: 1.4;
+        text-decoration: none;
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+    }
+
+    .cal-chip-game {
+        background: var(--color-danger-bg);
+        color: var(--color-club-dark);
+    }
+
+    .cal-chip-training {
+        background: var(--color-info-bg);
+        color: var(--color-info-text);
+    }
+
+    .cal-chip-tournament {
+        background: var(--color-warn-bg);
+        color: var(--color-warn-text);
+    }
+
+    .cal-chip-meeting {
+        background: var(--color-rule);
+        color: var(--color-ink);
+    }
+
+    .cal-chip-social {
+        background: color-mix(in srgb, var(--color-violet) 12%, white);
+        color: var(--color-violet);
+    }
+
+    .cal-chip-other {
+        background: var(--color-paper);
+        color: var(--color-muted);
+    }
+
+    .cal-dot {
+        width: 0.375rem;
+        height: 0.375rem;
+        border-radius: 999px;
+        flex-shrink: 0;
+        background: currentColor;
+    }
+
+    .cal-chip-more {
+        padding: 0.0625rem 0.25rem;
+        font-size: 0.625rem;
+        font-weight: 600;
+        color: var(--color-muted);
+        text-decoration: none;
+    }
+
+    .cal-chip-more:hover {
+        color: var(--color-ink);
+        text-decoration: underline;
+    }
+
+    /* --- Season grid: one mini month-calendar per month, counts only (no titles --
+       there's no room at this scale, see events/services/calendar.py's season_grid
+       docstring). --- */
+    .cal-season-daynames {
+        display: grid;
+        grid-template-columns: repeat(7, 1fr);
+        margin-bottom: 0.25rem;
+    }
+
+    .cal-season-dayname {
+        text-align: center;
+        font-family: var(--font-mono);
+        font-size: 0.5625rem;
+        color: var(--color-dim);
+        text-transform: uppercase;
+    }
+
+    .cal-season-grid {
+        display: grid;
+        grid-template-columns: repeat(7, 1fr);
+        gap: 2px;
+    }
+
+    .cal-season-cell {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 0.0625rem;
+        aspect-ratio: 1;
+        border-radius: 0.25rem;
+        text-decoration: none;
+    }
+
+    .cal-season-daynum {
+        font-family: var(--font-mono);
+        font-size: 0.625rem;
+        color: var(--color-slate);
+    }
+
+    .cal-season-cell.is-outside .cal-season-daynum {
+        color: var(--color-dim);
+        opacity: 0.6;
+    }
+
+    .cal-season-cell.is-today {
+        background: var(--color-row-focus);
+    }
+
+    .cal-season-cell.is-today .cal-season-daynum {
+        font-weight: 700;
+        color: var(--color-club-dark);
+    }
+
+    .cal-season-cell.has-events {
+        cursor: pointer;
+    }
+
+    .cal-season-cell.has-events:hover {
+        background: var(--color-subhead);
+    }
+
+    .cal-season-count {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 0.875rem;
+        height: 0.875rem;
+        padding: 0 0.1875rem;
+        border-radius: 999px;
+        background: var(--color-club);
+        color: var(--color-club-content);
+        font-family: var(--font-mono);
+        font-size: 0.5rem;
+        font-weight: 700;
+        line-height: 1;
+    }
+}
+
+/* --- Event form ---
+   management/templates/management/event_form.html and event_series_form.html
+   (EventForm/EventSeriesForm) -- both share the exact same treatment: a
+   prominent kind picker up top (a row of clickable "kind cards" layered over
+   the real, always-visible <select id="id_kind"> -- the select stays the
+   single source of truth so it's still fully keyboard/screen-reader operable;
+   see each template's own inline <script> for how the two stay in sync), then
+   the rest of the form broken into titled .card sections instead of one long
+   flat form. Kind -> colour on a selected card reuses the exact same tokens
+   as the event list's own badges and the calendar grid just above (game =
+   club-dark/danger, training = info, tournament = warn, meeting = ink/
+   neutral, social = violet), so this reads as part of the same system rather
+   than a fourth palette. .game-only itself carries no rule here -- same as
+   before this section existed, it's a plain marker class the template's own
+   script toggles Tailwind's `hidden` utility on/off. */
+@layer components {
+    .event-section-header {
+        display: flex;
+        align-items: flex-start;
+        gap: 0.75rem;
+        margin-bottom: 1rem;
+    }
+
+    .event-section-icon {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 2.25rem;
+        height: 2.25rem;
+        flex-shrink: 0;
+        border-radius: 0.625rem;
+        background: var(--color-rule);
+        color: var(--color-ink);
+    }
+
+    /* Game details' own section icon -- a small accent so the one card that's
+       conditionally shown/hidden also reads as "special" at a glance. */
+    .event-section-icon-accent {
+        background: var(--color-danger-bg);
+        color: var(--color-club-dark);
+    }
+
+    .event-section-title {
+        font-family: var(--font-display);
+        font-weight: 800;
+        font-size: 0.9375rem;
+        letter-spacing: 0.03em;
+        color: var(--color-ink);
+        text-transform: uppercase;
+    }
+
+    .event-section-hint {
+        margin-top: 0.125rem;
+        font-size: 0.8125rem;
+        color: var(--color-muted);
+    }
+
+    /* The kind-card row -- 2 columns on mobile, up to 6 (one per EventKind) on
+       desktop, so all of them are glanceable in a single row on a normal-width
+       screen without ever needing to scroll the picker itself. */
+    .kind-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 0.625rem;
+    }
+
+    @media (min-width: 640px) {
+        .kind-grid {
+            grid-template-columns: repeat(3, 1fr);
+        }
+    }
+
+    @media (min-width: 1024px) {
+        .kind-grid {
+            grid-template-columns: repeat(6, 1fr);
+        }
+    }
+
+    .kind-card {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 0.375rem;
+        padding: 0.875rem 0.5rem;
+        border: 1.5px solid var(--color-line);
+        border-radius: var(--radius-box);
+        background: #fff;
+        color: var(--color-muted);
+        cursor: pointer;
+        text-align: center;
+        transition:
+            border-color 0.15s ease,
+            background-color 0.15s ease,
+            color 0.15s ease;
+    }
+
+    .kind-card:hover {
+        border-color: var(--color-stroke);
+        color: var(--color-ink);
+    }
+
+    /* The card's own radio is visually sr-only (see event_form.html/
+       event_series_form.html) -- :has() reads its checked/focus state back
+       onto the label so there's a visible focus ring for keyboard users even
+       though the input itself is off-screen. */
+    .kind-card:has(input:focus-visible) {
+        outline: 2px solid var(--color-club);
+        outline-offset: 2px;
+    }
+
+    .kind-card-label {
+        font-family: var(--font-display);
+        font-weight: 700;
+        font-size: 0.6875rem;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+    }
+
+    /* Default (also covers "meeting" and "other", which share the app's own
+       ink/neutral and muted/outline treatment elsewhere) -- the per-kind
+       overrides below only replace it for the four kinds with their own
+       colour in the badge/calendar system. */
+    .kind-card:has(input:checked) {
+        border-color: var(--color-ink);
+        background: var(--color-subhead);
+        color: var(--color-ink);
+    }
+
+    .kind-card:has(input:checked)[data-kind="game"] {
+        border-color: var(--color-club-dark);
+        background: var(--color-danger-bg);
+        color: var(--color-club-dark);
+    }
+
+    .kind-card:has(input:checked)[data-kind="training"] {
+        border-color: var(--color-info);
+        background: var(--color-info-bg);
+        color: var(--color-info-text);
+    }
+
+    .kind-card:has(input:checked)[data-kind="tournament"] {
+        border-color: var(--color-warn);
+        background: var(--color-warn-bg);
+        color: var(--color-warn-text);
+    }
+
+    .kind-card:has(input:checked)[data-kind="social"] {
+        border-color: var(--color-violet);
+        background: color-mix(in srgb, var(--color-violet) 12%, white);
+        color: var(--color-violet);
+    }
+
+    /* club_wide's own toggle, pulled out of the plain field grid into its own
+       framed row -- a whole-club event is a bigger decision than any other
+       audience field here, so it gets to look like one. */
+    .event-clubwide-toggle {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        margin-bottom: 1rem;
+        padding: 0.75rem 1rem;
+        border: 1px solid var(--color-line);
+        border-radius: 0.625rem;
+        background: var(--color-paper);
+    }
+
+    /* The live "what you're scheduling" recap -- a dashed border marks it as a
+       read-only, generated-for-you strip rather than another input card. */
+    .event-summary {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        padding: 0.875rem 1.125rem;
+        border-style: dashed;
+        color: var(--color-slate);
+        font-size: 0.875rem;
+    }
+
+    .event-summary-icon {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        width: 2rem;
+        height: 2rem;
+        border-radius: 999px;
+        background: var(--color-club);
+        color: var(--color-club-content);
+    }
+}
