@@ -1,7 +1,15 @@
 {% extends "controlpanel/base.html" %}
 {% load lucide ui %}
 
-{% block heading %}Features{% endblock heading %}
+{% block panel_title %}Features{% endblock panel_title %}
+
+{% block breadcrumb %}
+    <span class="text-ink">features</span>
+    <span class="text-edge">|</span>
+    <span>{{ flags|length }} flag{{ flags|length|pluralize }}</span>
+    <span class="text-edge">|</span>
+    <span>{{ switches|length }} switch{{ switches|length|pluralize }}</span>
+{% endblock breadcrumb %}
 
 {% block actions %}
     <button class="btn btn-primary gap-2" type="button" onclick="document.getElementById('flag_create_modal').showModal()">{% lucide "plus" size=16 %} New feature</button>
@@ -14,132 +22,153 @@
     {% comment %}
         The lock-down. Clubs get a maintenance page, the scheduled jobs stand down, and the
         control panel and the auth screens stay open — otherwise you could not sign in to
-        turn it back off.
+        turn it back off. This is the single most safety-critical control in the panel, so
+        the active state gets the full club/club-dark treatment, not just a badge.
     {% endcomment %}
-    <div class="card mb-6 bg-base-100 shadow {% if maintenance.is_active %}border-l-4 border-error{% endif %}">
-        <div class="card-body">
-            <div class="flex flex-wrap items-start justify-between gap-4">
-                <div class="w-full">
-                    <h2 class="card-title text-base mb-2">{% lucide "wrench" size=18 %} Maintenance mode</h2>
-                    {% if maintenance.is_active %}
-                        <div class="flex flex-row gap-2 text-sm">
-                            <span class="badge badge-error gap-1">{% lucide "lock" size=12 %} Platform closed</span>
-                            <div>&middot;</div>
-                            <div>since {{ maintenance.started_at|date:"j M Y, H:i" }}{% if maintenance.started_by %} by {{ maintenance.started_by.email }}{% endif %}</div>
-                        </div>
-
-                        {% if maintenance.message %}
-                            <div class="my-4">
-                                <div class="font-semibold mb-1">Message</div>
-                                <div class="p-4 bg-base-300 border-l-4 border-info w-full font-mono">{{ maintenance.message }}</div>
-                            </div>
-                        {% endif %}
-                    {% else %}
-                        <p class="text-sm opacity-70">
-                            Closes every club subdomain and stands the scheduled jobs down. The control panel and the sign-in screens stay open.
-                        </p>
-                    {% endif %}
-                </div>
+    <div class="card overflow-hidden {% if maintenance.is_active %}border-2 border-club{% endif %}">
+        {% if maintenance.is_active %}
+            <div class="flex flex-wrap items-center gap-2.5 border-b border-club bg-club px-4 py-3">
+                {% lucide "lock" size=18 class="shrink-0 text-white" %}
+                <span class="font-display text-sm font-extrabold tracking-[.1em] text-white uppercase">Maintenance mode — platform closed</span>
+                <span class="flex-1"></span>
+                <span class="font-mono text-[11px] text-white/80">since {{ maintenance.started_at|date:"j M Y, H:i" }}{% if maintenance.started_by %} · {{ maintenance.started_by.email }}{% endif %}</span>
             </div>
+        {% else %}
+            <div class="flex items-center gap-2.5 border-b border-line bg-subhead px-4 py-3">
+                {% lucide "wrench" size=18 class="shrink-0 text-muted" %}
+                <span class="font-display text-sm font-extrabold tracking-[.1em] text-ink uppercase">Maintenance mode</span>
+                <span class="flex-1"></span>
+                <span class="flex items-center gap-1.5 font-mono text-[11px] text-ok-text">
+                    <span class="h-[7px] w-[7px] rounded-full bg-ok"></span>
+                    platform open
+                </span>
+            </div>
+        {% endif %}
 
-            <form class="mt-2" method="post" action="{% url 'controlpanel:maintenance' %}">
-                {% csrf_token %}
-                {% if not maintenance.is_active %}
-                    <div class="form-control my-2 w-full pb-2">
-                        <label class="label" for="{{ maintenance_form.message.id_for_label }}">
-                            <span class="label-text">{{ maintenance_form.message.label }}</span>
-                        </label>
-                        {{ maintenance_form.message|daisy }}
-                        <span class="label-text-alt mt-1 block text-xs text-base-content/70">{{ maintenance_form.message.help_text }}</span>
+        <div class="card-body">
+            {% if maintenance.is_active %}
+                {% if maintenance.message %}
+                    <div>
+                        <div class="mb-1.5 font-mono text-[10px] tracking-[.08em] text-muted uppercase">Message shown to clubs</div>
+                        <div class="border border-line bg-subhead px-3 py-2.5 font-mono text-sm text-ink">{{ maintenance.message }}</div>
                     </div>
-                    <button class="btn btn-error gap-2" type="submit">{% lucide "lock" size=16 %} Close the platform</button>
-                {% else %}
-                    <button class="btn btn-success gap-2" type="submit">{% lucide "lock-open" size=16 %} Reopen the platform</button>
                 {% endif %}
-            </form>
+                <p class="text-sm text-muted">Every club subdomain is serving a maintenance page and the scheduled jobs have stood down. The control panel and the sign-in screens stay open.</p>
+
+                <form class="mt-1" method="post" action="{% url 'controlpanel:maintenance' %}">
+                    {% csrf_token %}
+                    <button class="btn btn-success gap-2" type="submit">{% lucide "lock-open" size=16 %} Reopen the platform</button>
+                </form>
+            {% else %}
+                <p class="text-sm text-muted">Closes every club subdomain and stands the scheduled jobs down. The control panel and the sign-in screens stay open.</p>
+
+                <form class="flex flex-col gap-3" method="post" action="{% url 'controlpanel:maintenance' %}">
+                    {% csrf_token %}
+                    <div class="form-control w-full">
+                        <label class="label-text mb-1.5 block" for="{{ maintenance_form.message.id_for_label }}">{{ maintenance_form.message.label }}</label>
+                        {{ maintenance_form.message|daisy }}
+                        <span class="label-text-alt mt-1 block">{{ maintenance_form.message.help_text }}</span>
+                    </div>
+                    <button class="btn btn-error gap-2 self-start" type="submit">{% lucide "lock" size=16 %} Close the platform</button>
+                </form>
+            {% endif %}
         </div>
     </div>
 
-    <div class="card mb-6 bg-base-100 shadow">
-        <div class="card-body">
-            <h2 class="card-title text-base">{% lucide "flag" size=18 %} Flags</h2>
-            <p class="text-sm opacity-70">
-                Flags are turned on per club. Setting <em>Everyone</em> to Yes or No overrides club targeting entirely.
-            </p>
-            <div class="overflow-x-auto">
-                <table class="table">
-                    <thead>
+    <div class="card">
+        <div class="flex items-center gap-2.5 border-b border-line px-4 py-3">
+            {% lucide "flag" size=16 class="shrink-0 text-muted" %}
+            <span class="font-display text-sm font-extrabold tracking-[.1em] text-ink uppercase">Flags</span>
+            <span class="flex-1"></span>
+            <span class="font-mono text-[11px] text-muted">{{ flags|length }} flag{{ flags|length|pluralize }}</span>
+        </div>
+        <p class="px-4 pt-3 pb-3 text-sm text-muted">
+            Flags are turned on per club. Setting <span class="font-semibold text-ink">Everyone</span> to Yes or No overrides club targeting entirely.
+        </p>
+        <div class="overflow-x-auto">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Everyone</th>
+                        <th>Clubs</th>
+                        <th>Note</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for flag in flags %}
                         <tr>
-                            <th>Name</th>
-                            <th>Everyone</th>
-                            <th>Clubs</th>
-                            <th>Note</th>
-                            <th></th>
+                            <td class="font-mono">{{ flag.name }}</td>
+                            <td>
+                                {% if flag.everyone is True %}
+                                    <span class="badge badge-success">On for all</span>
+                                {% elif flag.everyone is False %}
+                                    <span class="badge badge-error">Off everywhere</span>
+                                {% else %}
+                                    <span class="badge badge-info">Per club</span>
+                                {% endif %}
+                            </td>
+                            <td class="font-mono tabular-nums text-muted">{{ flag.clubs.count }}</td>
+                            <td class="max-w-xs truncate text-muted">{{ flag.note|default:"—" }}</td>
+                            <td class="text-right">
+                                <button class="btn btn-outline btn-sm gap-1" type="button" onclick="document.getElementById('{{ flag.pk|dom_id:"flag_edit_modal" }}').showModal()">{% lucide "pencil" size=14 %} Edit</button>
+                            </td>
                         </tr>
-                    </thead>
-                    <tbody>
-                        {% for flag in flags %}
-                            <tr>
-                                <td class="font-mono font-medium">{{ flag.name }}</td>
-                                <td>
-                                    {% if flag.everyone is True %}
-                                        <span class="badge badge-success">On for all</span>
-                                    {% elif flag.everyone is False %}
-                                        <span class="badge badge-error">Off everywhere</span>
-                                    {% else %}
-                                        <span class="badge badge-info">Per club</span>
-                                    {% endif %}
-                                </td>
-                                <td>{{ flag.clubs.count }}</td>
-                                <td class="max-w-xs truncate opacity-70">{{ flag.note|default:"-" }}</td>
-                                <td class="text-right">
-                                    <button class="btn btn-outline btn-sm gap-1" type="button" onclick="document.getElementById('{{ flag.pk|dom_id:"flag_edit_modal" }}').showModal()">{% lucide "pencil" size=14 %} Edit</button>
-                                </td>
-                            </tr>
-                        {% empty %}
-                            <tr>
-                                <td colspan="5" class="text-center opacity-60">No features yet.</td>
-                            </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-
-            {% comment %} Dialogs live outside the table: <tbody> may only contain <tr> elements. {% endcomment %}
-            {% for flag in flags %}
-                {% url 'controlpanel:flag_update' flag.pk as flag_update_url %}
-                {% include "controlpanel/_modal_form.html" with modal_id=flag.pk|dom_id:"flag_edit_modal" title="Edit "|add:flag.name form=flag.edit_form action_url=flag_update_url submit_label="Save" submit_icon="check" %}
-            {% endfor %}
+                    {% empty %}
+                        <tr>
+                            <td colspan="5" class="text-center text-muted">No features yet.</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
         </div>
+
+        {% comment %} Dialogs live outside the table: <tbody> may only contain <tr> elements. {% endcomment %}
+        {% for flag in flags %}
+            {% url 'controlpanel:flag_update' flag.pk as flag_update_url %}
+            {% include "controlpanel/_modal_form.html" with modal_id=flag.pk|dom_id:"flag_edit_modal" title="Edit "|add:flag.name form=flag.edit_form action_url=flag_update_url submit_label="Save" submit_icon="check" %}
+        {% endfor %}
     </div>
-    <div class="card bg-base-100 shadow">
-        <div class="card-body">
-            <h2 class="card-title text-base">{% lucide "power" size=18 %} Switches</h2>
-            <p class="text-sm opacity-70">Global on/off for the whole platform — kill-switches, maintenance, infra rollouts.</p>
-            <div class="overflow-x-auto">
-                <table class="table">
-                    <tbody>
-                        {% for switch in switches %}
-                            <tr>
-                                <td class="font-mono font-medium">{{ switch.name }}</td>
-                                <td class="opacity-70">{{ switch.note|default:"-" }}</td>
-                                <td class="text-right">
-                                    <form method="post" action="{% url 'controlpanel:switch_toggle' switch.pk %}">
-                                        {% csrf_token %}
-                                        <button class="btn btn-sm gap-1 {% if switch.active %}btn-success{% else %}btn-ghost{% endif %}" type="submit">
-                                            {% if switch.active %}{% lucide "toggle-right" size=16 %} On{% else %}{% lucide "toggle-left" size=16 %} Off{% endif %}
-                                        </button>
-                                    </form>
-                                </td>
-                            </tr>
-                        {% empty %}
-                            <tr>
-                                <td class="text-center opacity-60">No switches yet — add one in the Django admin.</td>
-                            </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
+
+    <div class="card">
+        <div class="flex items-center gap-2.5 border-b border-line px-4 py-3">
+            {% lucide "power" size=16 class="shrink-0 text-muted" %}
+            <span class="font-display text-sm font-extrabold tracking-[.1em] text-ink uppercase">Switches</span>
+            <span class="flex-1"></span>
+            <span class="font-mono text-[11px] text-muted">{{ switches|length }} switch{{ switches|length|pluralize }}</span>
+        </div>
+        <p class="px-4 pt-3 pb-3 text-sm text-muted">Global on/off for the whole platform — kill-switches, maintenance, infra rollouts.</p>
+        <div class="overflow-x-auto">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Note</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for switch in switches %}
+                        <tr>
+                            <td class="font-mono">{{ switch.name }}</td>
+                            <td class="text-muted">{{ switch.note|default:"—" }}</td>
+                            <td class="text-right">
+                                <form method="post" action="{% url 'controlpanel:switch_toggle' switch.pk %}">
+                                    {% csrf_token %}
+                                    <button class="relative inline-block h-[22px] w-10 shrink-0 rounded-full transition-colors {% if switch.active %}bg-ok{% else %}bg-edge{% endif %}" type="submit" aria-pressed="{% if switch.active %}true{% else %}false{% endif %}" aria-label="Toggle {{ switch.name }}">
+                                        <span class="absolute top-[3px] h-4 w-4 rounded-full bg-white transition-all {% if switch.active %}right-[3px]{% else %}left-[3px]{% endif %}"></span>
+                                    </button>
+                                </form>
+                            </td>
+                        </tr>
+                    {% empty %}
+                        <tr>
+                            <td colspan="3" class="text-center text-muted">No switches yet — add one in the Django admin.</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
         </div>
     </div>
 {% endblock panel %}

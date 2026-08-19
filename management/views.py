@@ -1,9 +1,9 @@
-from datetime import timedelta
+from datetime import date, timedelta
 from decimal import Decimal
 
 from django.db import IntegrityError, transaction
 from django.db.models import Count, ProtectedError, Q
-from django.http import HttpResponse
+from django.http import FileResponse, Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -19,19 +19,22 @@ from club.mixins import (
     EventManagerRequiredMixin,
     FeatureRequiredMixin,
     ManagementPositionRequiredMixin,
+    MemberAdminRequiredMixin,
     NewsAuthorRequiredMixin,
     NewsEditRequiredMixin,
     NewsPublisherRequiredMixin,
     TeamManagerRequiredMixin,
 )
-from club.models import ClubMembership, ClubRole, Season, Sponsor
+from club.models import ClubMembership, ClubRole, MemberRequirementStatus, OnboardingRequirement, Season, Sponsor
 from club.services.access import _guardians_only, can_edit_news, can_publish_news, current_season, groups_manageable_by, is_club_admin, members_visible_to, teams_managed_by, teams_staffed_by
 from club.services.fees import mark_as_paid, record_payment, remaining_balance
+from club.services.onboarding import annotate_onboarding_status, approve_all_clean, approve_one, blocking_event_kinds, checklist_for, is_signup_clean, mark_bypassed, mark_complete, mark_incomplete, members_with_open_requirements
 from controlpanel.messages import notify
 from controlpanel.mixins import RedirectOnInvalidMixin
-from controlpanel.services.statistics import club_attention, club_charts, club_statistics
+from controlpanel.services.statistics import club_attention, club_charts, club_statistics, unrostered_members
 from events.models import Attendance, Event, EventReferee, EventSeries, Location, Opponent
 from events.services.attendance import player_attendance_rankings, players_who_missed_recent_practices, team_attendance_rate, team_no_shows
+from events.services.calendar import add_months, month_bounds, month_grid, season_grid, week_bounds, week_grid
 from events.services.competitions import CompetitionFetchError, fetch_game_info
 from events.services.rbihf_import import RBIHFImportError, apply_plan, build_plan, extract_team_id, fetch_html
 from events.services.recurrence import cancel_occurrence, detach_occurrence, generate_occurrences, propagate_series
@@ -54,6 +57,7 @@ from .forms import (
     AttachToFamilyForm,
     ClubMembershipForm,
     ClubRoleAssignForm,
+    ClubSettingsForm,
     EventForm,
     EventRefereeFeeForm,
     EventSeriesForm,
@@ -69,11 +73,15 @@ from .forms import (
     NewsForm,
     NewsPhotoUploadForm,
     NewsPublishForm,
+    OnboardingRequirementForm,
     OpponentForm,
     PositionForm,
     RBIHFImportForm,
     RecordFeePaymentForm,
     RefereeLevelForm,
+    RequirementBypassForm,
+    RequirementCompletionForm,
+    SignupTeamPlacementForm,
     SponsorForm,
     StaffAssignmentForm,
     TeamBulkAddFormSet,
@@ -112,11 +120,36 @@ class HomeView(ClubStaffRequiredMixin, TemplateView):
 
         upcoming_events = scoped_to_managed_teams(Event.objects.filter(club=club, start__gte=timezone.now()), user, club).order_by("start").prefetch_related("teams")[:5]
 
+        attention = club_attention(club)
+        season = attention["season"]
+
+        # Compared against the season right before this one (not last year on the
+        # calendar) -- Season.before, same "adjacent by date" idea as next_after.
+        member_count = ClubMembership.objects.filter(club=club, season=season, kind=ClubMembership.Kind.MEMBER).count() if season else 0
+        previous_season = Season.before(club, season) if season else None
+        member_count_change = None
+        if previous_season is not None:
+            previous_member_count = ClubMembership.objects.filter(club=club, season=previous_season, kind=ClubMembership.Kind.MEMBER).count()
+            member_count_change = member_count - previous_member_count
+
+        # Hidden entirely (not just zeroed) for a club that hasn't set up any
+        # onboarding requirements -- "0 missing" would otherwise read as "everyone's
+        # paperwork is in", when really there's no paperwork being tracked at all.
+        requirements_configured = OnboardingRequirement.objects.filter(club=club, is_active=True).exists()
+        missing_documentation_count = 0
+        if requirements_configured and season is not None:
+            memberships_this_season = ClubMembership.objects.filter(club=club, season=season, kind=ClubMembership.Kind.MEMBER)
+            missing_documentation_count = sum(1 for membership in annotate_onboarding_status(memberships_this_season) if membership.onboarding_open)
+
         return super().get_context_data(
-            attention=club_attention(club),
+            attention=attention,
             charts=club_charts(club),
             groups=club_statistics(club),
             upcoming_events=upcoming_events,
+            member_count=member_count,
+            member_count_change=member_count_change,
+            requirements_configured=requirements_configured,
+            missing_documentation_count=missing_documentation_count,
             published_news=News.objects.filter(club=club, status=News.Status.PUBLISHED, published_at__lte=timezone.now()).order_by("-published_at")[:5],
             billing_ends_at=billing_ends_at,
             billing_auto_renews=subscription.auto_renew if subscription else False,
@@ -206,13 +239,52 @@ class MemberListView(ClubStaffRequiredMixin, ListView):
             members = members_visible_to(self.request.user, self.request.club)
         self.selected_kind = kind
 
+        # Status/fee status/team all key off the *current* season's ClubMembership --
+        # a member's status/fee last season (or next) isn't what "filter by Pending"
+        # means on a page showing everyone's standing right now.
+        season = current_season(self.request.club)
+        self.selected_status = self.request.GET.get("status", "")
+        self.selected_fee_status = self.request.GET.get("fee_status", "")
+        self.selected_team = self.request.GET.get("team", "")
+        self.selected_unrostered = self.request.GET.get("unrostered", "")
+        self.selected_docs = self.request.GET.get("docs", "")
+
+        if self.selected_status:
+            members = members.filter(member_of__season=season, member_of__status=self.selected_status)
+        if self.selected_fee_status:
+            members = members.filter(member_of__season=season, member_of__fee_status=self.selected_fee_status)
+        if self.selected_team:
+            members = members.filter(team_memberships__season=season, team_memberships__team_id=self.selected_team)
+        if self.selected_unrostered:
+            # The dashboard's "Unrostered members" attention row -- same query
+            # club_attention() itself counts (controlpanel.services.statistics).
+            members = members.filter(pk__in=unrostered_members(self.request.club, season).values("pk"))
+        if self.selected_docs == "open":
+            # The dashboard's "Missing documentation" KPI/attention row.
+            members = members.filter(pk__in=members_with_open_requirements(self.request.club, season).values("pk"))
+
         search = self.request.GET.get("q", "").strip()
         if search:
             members = members.filter(first_name__icontains=search) | members.filter(last_name__icontains=search) | members.filter(email__icontains=search) | members.filter(user__email__icontains=search)
         return members.distinct()
 
     def get_context_data(self, **kwargs):
-        context = super().get_context_data(search=self.request.GET.get("q", ""), selected_kind=self.selected_kind, **kwargs)
+        total_requirements = OnboardingRequirement.objects.filter(club=self.request.club, is_active=True).count()
+        context = super().get_context_data(
+            search=self.request.GET.get("q", ""),
+            selected_kind=self.selected_kind,
+            selected_status=self.selected_status,
+            selected_fee_status=self.selected_fee_status,
+            selected_team=self.selected_team,
+            selected_unrostered=self.selected_unrostered,
+            selected_docs=self.selected_docs,
+            status_choices=ClubMembership.StatusChoices.choices,
+            fee_status_choices=ClubMembership.FeeStatus.choices,
+            teams=Team.objects.filter(club=self.request.club),
+            requirements_configured=total_requirements > 0,
+            total_requirements=total_requirements,
+            **kwargs,
+        )
         members = list(context["members"])
 
         memberships = FamilyMembership.objects.filter(member__in=members).select_related("family")
@@ -226,6 +298,10 @@ class MemberListView(ClubStaffRequiredMixin, ListView):
         club_memberships_by_member_id = {}
         if season is not None:
             club_memberships = ClubMembership.objects.filter(club=self.request.club, season=season, member__in=members)
+            if total_requirements:
+                club_memberships = annotate_onboarding_status(club_memberships)
+                for cm in club_memberships:
+                    cm.completed_requirements = total_requirements - cm.onboarding_open
             club_memberships_by_member_id = {cm.member_id: cm for cm in club_memberships}
         for member in members:
             member.current_membership = club_memberships_by_member_id.get(member.pk)
@@ -352,16 +428,16 @@ class MembershipListView(ClubAdminRequiredMixin, ListView):
 
 
 class MembershipMarkPaidView(ClubAdminRequiredMixin, View):
-    """Flag a batch of memberships as settled: active + paid, in one go. There's no
-    bank integration, so this is always a manual admin action -- the point of this
-    view is to make the manual action fast, not to replace it with automation.
+    """Flag a batch of memberships as settled: fee_status -> paid, in one go. There's
+    no bank integration, so this is always a manual admin action -- the point of this
+    view is to make the manual action fast, not to replace it with automation. Does
+    not touch status/activate the membership -- see club.services.fees.mark_as_paid
+    and OnboardingRequirement's docstring (club/models.py) for why that's exclusively
+    the Sign-up page's Approve step.
 
     Uses club.services.fees.mark_as_paid per row (a .save() loop under the hood,
-    never a bulk .update()): club/signals.py grants the MEMBER ClubRole via a
-    post_save signal on ClubMembership, which .update() would bypass entirely,
-    silently leaving a marked-paid member without their role. Same function backs
-    the per-row "Mark fully paid" button (MembershipMarkFullyPaidView) -- one place
-    decides how a membership becomes paid.
+    never a bulk .update()), matching the per-row "Mark fully paid" button
+    (MembershipMarkFullyPaidView) -- one place decides how a membership becomes paid.
     """
 
     def post(self, request):
@@ -390,7 +466,7 @@ class MembershipMarkFullyPaidView(ClubAdminRequiredMixin, View):
     def post(self, request, pk):
         membership = get_object_or_404(ClubMembership, pk=pk, club=request.club)
         mark_as_paid(membership, recorded_by=request.user)
-        notify(request, f"s|{_('Marked as paid')}|{_('“%(member)s” is now active and paid.') % {'member': membership.member}}")
+        notify(request, f"s|{_('Marked as paid')}|{_('“%(member)s” is now paid.') % {'member': membership.member}}")
 
         next_url = request.POST.get("next")
         if next_url and url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}, require_https=request.is_secure()):
@@ -462,7 +538,7 @@ class MemberImportTemplateView(ClubStaffRequiredMixin, View):
         return response
 
 
-class MemberImportView(ClubAdminRequiredMixin, View):
+class MemberImportView(MemberAdminRequiredMixin, View):
     """Step 1 of the mass-upload: upload a filled-in template, see exactly what
     will be created before anything actually is. Row data -- already extracted to
     plain values, see bulk_import.read_member_import_workbook -- rides in the
@@ -497,7 +573,7 @@ class MemberImportView(ClubAdminRequiredMixin, View):
         )
 
 
-class MemberImportConfirmView(ClubAdminRequiredMixin, View):
+class MemberImportConfirmView(MemberAdminRequiredMixin, View):
     """Step 2: no row data in the request at all, just a submit button -- there's
     nothing here for a client to tamper with. Re-parses the rows stashed in the
     session by MemberImportView, so what gets created is guaranteed to match what
@@ -559,7 +635,7 @@ class MemberImportConfirmView(ClubAdminRequiredMixin, View):
         return redirect("management:member_list")
 
 
-class MemberCreateView(ClubAdminRequiredMixin, CreateView):
+class MemberCreateView(MemberAdminRequiredMixin, CreateView):
     model = Member
     form_class = MemberForm
     template_name = "management/member_form.html"
@@ -590,7 +666,7 @@ class MemberCreateView(ClubAdminRequiredMixin, CreateView):
         return reverse("management:member_detail", args=[self.object.pk])
 
 
-class MemberUpdateView(ClubAdminRequiredMixin, View):
+class MemberUpdateView(MemberAdminRequiredMixin, View):
     """Not a generic UpdateView: this page owns two forms on one submit -- the
     member's own fields, and (when they're actually rostered this season) their
     ClubMembership's license/status/fee status. A Member has no club of its own
@@ -647,6 +723,7 @@ class MemberDetailView(ClubStaffRequiredMixin, DetailView):
 
         is_admin = is_club_admin(self.request.user, self.request.club)
         referee_profile = RefereeProfile.objects.filter(member=self.object).select_related("level").first()
+        current_membership = ClubMembership.objects.filter(club=self.request.club, member=self.object, season=current_season(self.request.club)).first()
 
         return super().get_context_data(
             family_groups=family_groups,
@@ -654,7 +731,8 @@ class MemberDetailView(ClubStaffRequiredMixin, DetailView):
             add_child_form=AddChildForm(),
             add_parent_form=AddParentForm(),
             attach_to_family_form=AttachToFamilyForm(club=self.request.club, member=self.object),
-            current_membership=ClubMembership.objects.filter(club=self.request.club, member=self.object, season=current_season(self.request.club)).first(),
+            current_membership=current_membership,
+            checklist=checklist_for(current_membership) if current_membership else [],
             membership_history=ClubMembership.objects.filter(club=self.request.club, member=self.object).select_related("season").order_by("-season__start_date"),
             # Non-empty only when `member` is a CHILD in some family -- that's the same
             # signal the Personal information card uses to decide whether to show parent
@@ -666,7 +744,7 @@ class MemberDetailView(ClubStaffRequiredMixin, DetailView):
         )
 
 
-class MemberAttachToFamilyView(ClubAdminRequiredMixin, RedirectOnInvalidMixin, FormView):
+class MemberAttachToFamilyView(MemberAdminRequiredMixin, RedirectOnInvalidMixin, FormView):
     """Reachable only via the "Add to family" modal on a standalone member's page."""
 
     form_class = AttachToFamilyForm
@@ -688,7 +766,7 @@ class MemberAttachToFamilyView(ClubAdminRequiredMixin, RedirectOnInvalidMixin, F
         return redirect("management:member_detail", pk=member.pk)
 
 
-class MemberRefereeEligibilityUpdateView(ClubAdminRequiredMixin, RedirectOnInvalidMixin, FormView):
+class MemberRefereeEligibilityUpdateView(MemberAdminRequiredMixin, RedirectOnInvalidMixin, FormView):
     """Reachable only via the "Referee eligibility" modal on a member's page --
     which teams' home games this member can be assigned to referee
     (teams.RefereeProfile). Admin-only, same as Roles/Positions/Groups."""
@@ -713,7 +791,7 @@ class MemberRefereeEligibilityUpdateView(ClubAdminRequiredMixin, RedirectOnInval
         return redirect("management:member_detail", pk=member.pk)
 
 
-class MemberGrantLoginView(ClubAdminRequiredMixin, RedirectOnInvalidMixin, FormView):
+class MemberGrantLoginView(MemberAdminRequiredMixin, RedirectOnInvalidMixin, FormView):
     """Reachable only via the "Grant login" modal on a login-less child's row in
     _family_members_table.html. The form itself (management.forms.GrantLoginForm)
     already rejects an email already in use, so form_valid only ever runs with a
@@ -738,7 +816,7 @@ class MemberGrantLoginView(ClubAdminRequiredMixin, RedirectOnInvalidMixin, FormV
         return redirect("management:member_detail", pk=member.pk)
 
 
-class MemberDetachFromFamilyView(ClubAdminRequiredMixin, View):
+class MemberDetachFromFamilyView(MemberAdminRequiredMixin, View):
     def post(self, request, pk, family_pk):
         member = get_object_or_404(members_visible_to(request.user, request.club, include_guardians=True), pk=pk)
         family = get_object_or_404(Family, pk=family_pk, memberships__member=member)
@@ -751,7 +829,7 @@ class MemberDetachFromFamilyView(ClubAdminRequiredMixin, View):
         return redirect("management:member_detail", pk=member.pk)
 
 
-class FamilyMembershipRoleUpdateView(ClubAdminRequiredMixin, View):
+class FamilyMembershipRoleUpdateView(MemberAdminRequiredMixin, View):
     """Reclassify one person's role within one specific family -- from the inline
     dropdown in _family_members_table.html, reachable from both the member and
     family detail pages since that partial is shared between them. Lands back on
@@ -780,7 +858,7 @@ class FamilyMembershipRoleUpdateView(ClubAdminRequiredMixin, View):
         return redirect("management:family_detail", pk=family.pk)
 
 
-class MemberDeleteView(ClubAdminRequiredMixin, View):
+class MemberDeleteView(MemberAdminRequiredMixin, View):
     def post(self, request, pk):
         member = get_object_or_404(members_visible_to(request.user, request.club, include_guardians=True), pk=pk)
         name = str(member)
@@ -837,7 +915,7 @@ class TeamListView(ClubStaffRequiredMixin, ListView):
         return super().get_context_data(search=self.request.GET.get("q", ""), **kwargs)
 
 
-class TeamCreateView(ClubAdminRequiredMixin, CreateView):
+class TeamCreateView(MemberAdminRequiredMixin, CreateView):
     model = Team
     form_class = TeamForm
     template_name = "management/team_form.html"
@@ -852,7 +930,7 @@ class TeamCreateView(ClubAdminRequiredMixin, CreateView):
         return reverse("management:team_detail", args=[self.object.pk])
 
 
-class TeamUpdateView(ClubAdminRequiredMixin, UpdateView):
+class TeamUpdateView(MemberAdminRequiredMixin, UpdateView):
     model = Team
     form_class = TeamForm
     template_name = "management/team_form.html"
@@ -873,7 +951,7 @@ class TeamUpdateView(ClubAdminRequiredMixin, UpdateView):
         return super().get_context_data(update_view=True, **kwargs)
 
 
-class TeamDeleteView(ClubAdminRequiredMixin, View):
+class TeamDeleteView(MemberAdminRequiredMixin, View):
     def post(self, request, pk):
         team = get_object_or_404(Team.objects.filter(club=request.club), pk=pk)
         name = str(team)
@@ -1403,7 +1481,7 @@ class FamilyListView(ClubStaffRequiredMixin, ListView):
         return context | {"families": families}
 
 
-class FamilyCreateView(ClubAdminRequiredMixin, FormView):
+class FamilyCreateView(MemberAdminRequiredMixin, FormView):
     """One new family in one go: a parent (who gets a login) and a child (who
     doesn't) -- see members.services.family.register_family."""
 
@@ -1469,7 +1547,7 @@ class FamilyDetailView(ClubStaffRequiredMixin, DetailView):
         )
 
 
-class FamilyAddChildView(ClubAdminRequiredMixin, RedirectOnInvalidMixin, FormView):
+class FamilyAddChildView(MemberAdminRequiredMixin, RedirectOnInvalidMixin, FormView):
     """Reachable only via the "Add child" modal on the family overview / member
     detail pages -- a family that needs one more child registered, most often a
     sibling joining."""
@@ -1489,7 +1567,7 @@ class FamilyAddChildView(ClubAdminRequiredMixin, RedirectOnInvalidMixin, FormVie
         return redirect("management:family_detail", pk=family.pk)
 
 
-class FamilyAddParentView(ClubAdminRequiredMixin, RedirectOnInvalidMixin, FormView):
+class FamilyAddParentView(MemberAdminRequiredMixin, RedirectOnInvalidMixin, FormView):
     """Reachable only via the "Add parent" modal on the family overview / member
     detail pages -- a family that needs one more parent/guardian registered."""
 
@@ -1508,7 +1586,7 @@ class FamilyAddParentView(ClubAdminRequiredMixin, RedirectOnInvalidMixin, FormVi
         return redirect("management:family_detail", pk=family.pk)
 
 
-class ParentClaimListView(ClubAdminRequiredMixin, ListView):
+class ParentClaimListView(MemberAdminRequiredMixin, ListView):
     """The review queue for parents asking to be linked to a child.
 
     Approving is a human decision on purpose -- see members.models.ParentClaim.
@@ -1546,7 +1624,7 @@ class ParentClaimListView(ClubAdminRequiredMixin, ListView):
         )
 
 
-class ParentClaimApproveView(ClubAdminRequiredMixin, View):
+class ParentClaimApproveView(MemberAdminRequiredMixin, View):
     """Link the claim's parent to the chosen child. The parent lands as a
     guardian, not a member -- see members.services.claims.approve_claim."""
 
@@ -1576,7 +1654,7 @@ class ParentClaimApproveView(ClubAdminRequiredMixin, View):
         return redirect("management:parent_claim_list")
 
 
-class ParentClaimRejectView(ClubAdminRequiredMixin, View):
+class ParentClaimRejectView(MemberAdminRequiredMixin, View):
     def post(self, request, pk):
         claim = get_object_or_404(ParentClaim.objects.filter(club=request.club), pk=pk)
         reviewer = Member.objects.filter(user=request.user).first()
@@ -1649,7 +1727,7 @@ class RefereeLevelListView(ClubStaffRequiredMixin, ListView):
         return RefereeLevel.objects.filter(club=self.request.club).prefetch_related("teams")
 
 
-class RefereeLevelCreateView(ClubAdminRequiredMixin, CreateView):
+class RefereeLevelCreateView(MemberAdminRequiredMixin, CreateView):
     model = RefereeLevel
     form_class = RefereeLevelForm
     template_name = "management/referee_level_form.html"
@@ -1668,7 +1746,7 @@ class RefereeLevelCreateView(ClubAdminRequiredMixin, CreateView):
         return reverse("management:referee_level_list")
 
 
-class RefereeLevelUpdateView(ClubAdminRequiredMixin, UpdateView):
+class RefereeLevelUpdateView(MemberAdminRequiredMixin, UpdateView):
     model = RefereeLevel
     form_class = RefereeLevelForm
     template_name = "management/referee_level_form.html"
@@ -1709,7 +1787,7 @@ class RefereeListView(ClubStaffRequiredMixin, ListView):
 # a referee pool, ...) -- admin-only, like Positions/Roles above -------------------
 
 
-class GroupListView(ClubAdminRequiredMixin, ListView):
+class GroupListView(MemberAdminRequiredMixin, ListView):
     template_name = "management/group_list.html"
     context_object_name = "groups"
     paginate_by = 25
@@ -1721,7 +1799,7 @@ class GroupListView(ClubAdminRequiredMixin, ListView):
         return Group.objects.filter(club=self.request.club).annotate(member_count=Count("memberships", distinct=True)).order_by("name")
 
 
-class GroupCreateView(ClubAdminRequiredMixin, CreateView):
+class GroupCreateView(MemberAdminRequiredMixin, CreateView):
     model = Group
     form_class = GroupForm
     template_name = "management/group_form.html"
@@ -1737,7 +1815,7 @@ class GroupCreateView(ClubAdminRequiredMixin, CreateView):
         return reverse("management:group_detail", args=[self.object.pk])
 
 
-class GroupUpdateView(ClubAdminRequiredMixin, UpdateView):
+class GroupUpdateView(MemberAdminRequiredMixin, UpdateView):
     model = Group
     form_class = GroupForm
     template_name = "management/group_form.html"
@@ -1758,7 +1836,7 @@ class GroupUpdateView(ClubAdminRequiredMixin, UpdateView):
         return super().get_context_data(update_view=True, **kwargs)
 
 
-class GroupDeleteView(ClubAdminRequiredMixin, View):
+class GroupDeleteView(MemberAdminRequiredMixin, View):
     def post(self, request, pk):
         group = get_object_or_404(Group.objects.filter(club=request.club), pk=pk)
         name = str(group)
@@ -1767,7 +1845,7 @@ class GroupDeleteView(ClubAdminRequiredMixin, View):
         return redirect("management:group_list")
 
 
-class GroupDetailView(ClubAdminRequiredMixin, DetailView):
+class GroupDetailView(MemberAdminRequiredMixin, DetailView):
     template_name = "management/group_detail.html"
     context_object_name = "group"
 
@@ -1781,7 +1859,7 @@ class GroupDetailView(ClubAdminRequiredMixin, DetailView):
         )
 
 
-class GroupBulkAddView(ClubAdminRequiredMixin, View):
+class GroupBulkAddView(MemberAdminRequiredMixin, View):
     """Add many members to a group in one go -- mirrors TeamBulkAddView's
     searchable-row formset, minus the position/jersey columns (group membership
     carries no per-member attributes)."""
@@ -1827,7 +1905,7 @@ class GroupBulkAddView(ClubAdminRequiredMixin, View):
         return redirect("management:group_detail", pk=group.pk)
 
 
-class GroupMemberRemoveView(ClubAdminRequiredMixin, View):
+class GroupMemberRemoveView(MemberAdminRequiredMixin, View):
     def post(self, request, pk, membership_pk):
         group = get_object_or_404(Group.objects.filter(club=request.club), pk=pk)
         membership = get_object_or_404(GroupMembership.objects.filter(group=group), pk=membership_pk)
@@ -2029,71 +2107,138 @@ class NewsPhotoDeleteView(NewsEditRequiredMixin, View):
 
 
 def scoped_to_managed_teams(queryset, user, club):
-    """Non-admin: only rows for a team they manage, plus team-less/club-wide
-    ones (a social, an AGM) -- there's no team to scope those to, so they stay
-    visible to everyone. Same "manages" rule as who can edit (teams_managed_by),
-    not the broader "staffed on any role" one. Works for any queryset whose
-    model has a `teams` M2M -- Event and EventSeries both do -- so it backs the
-    events list, the dashboard's upcoming-events widget, and both detail views
-    (an out-of-scope one 404s if opened directly, same as any other
+    """Non-admin: only rows for a team they manage or a group they belong to,
+    plus rows tied to neither (a club-wide social, an AGM) -- there's nothing
+    to scope those to, so they stay visible to everyone. Same "manages"/
+    "belongs to" rules as who can create against a given team/group
+    (teams_managed_by/groups_manageable_by), not the broader "staffed on any
+    role" one. Works for any queryset whose model has `teams`/`groups` M2Ms --
+    Event and EventSeries both do -- so it backs the events list, the
+    dashboard's upcoming-events widget, and both detail views (an
+    out-of-scope one 404s if opened directly, same as any other
     queryset-scoped detail view here, not just unlisted)."""
     if is_club_admin(user, club):
         return queryset
     managed_team_ids = teams_managed_by(user, club).values_list("pk", flat=True)
-    return queryset.filter(Q(teams__in=managed_team_ids) | Q(teams__isnull=True)).distinct()
+    member_group_ids = groups_manageable_by(user, club).values_list("pk", flat=True)
+    return queryset.filter(Q(teams__in=managed_team_ids) | Q(groups__in=member_group_ids) | Q(teams__isnull=True, groups__isnull=True)).distinct()
 
 
 class EventListView(ClubStaffRequiredMixin, ListView):
-    """Upcoming by default (what a coach actually opens this page to check);
-    ``?show_past=1`` flips to the most recent past events instead. Season
-    filtering mirrors Event.season's own "explicit, else derived from start
-    date" rule (events/models.py) rather than requiring a stored season on
-    every row."""
+    """The D5-alike calendar (``?view=calendar``, the default) plus the
+    original table (``?view=list``) this page used to be exclusively --
+    the List toggle in the template switches between the two without
+    changing URL. Calendar mode further switches between Week/Month/Season
+    via ``?range=``, navigated with ``?date=<iso date>`` (week/month) or the
+    existing ``?season=<pk>`` selector (season range, matching every other
+    season-scoped page).
+
+    List mode is upcoming-by-default (what a coach actually opens this page
+    to check); ``?show_past=1`` flips it to the most recent past events
+    instead, and it alone paginates -- a calendar view always shows its whole
+    window at once, see get_paginate_by. Calendar mode's season filtering
+    mirrors Event.season's own "explicit, else derived from start date" rule
+    (events/models.py) rather than requiring a stored season on every row."""
 
     template_name = "management/event_list.html"
     context_object_name = "events"
     paginate_by = 25
 
-    def get_queryset(self):
-        club = self.request.club
-        user = self.request.user
+    def get_paginate_by(self, queryset):
+        return None if self.request.GET.get("view", "calendar") == "calendar" else self.paginate_by
+
+    def _anchor_date(self):
+        raw = self.request.GET.get("date")
+        if raw:
+            try:
+                return date.fromisoformat(raw)
+            except ValueError:
+                pass
+        return timezone.localdate()
+
+    def _base_queryset(self):
+        club, user = self.request.club, self.request.user
         events = Event.objects.filter(club=club).select_related("location", "opponent").prefetch_related("teams")
-
-        season = selected_season_from_request(self.request, club)
-        if season is not None:
-            events = events.filter(Q(season=season) | Q(season__isnull=True, start__date__gte=season.start_date, start__date__lte=season.end_date))
-
         kind = self.request.GET.get("kind", "")
         if kind:
             events = events.filter(kind=kind)
+        return scoped_to_managed_teams(events, user, club)
 
-        events = scoped_to_managed_teams(events, user, club)
+    def get_queryset(self):
+        club, user = self.request.club, self.request.user
+        events = self._base_queryset()
 
-        is_admin = is_club_admin(user, club)
-        managed_team_ids = set() if is_admin else set(teams_managed_by(user, club).values_list("pk", flat=True))
-
-        now = timezone.now()
-        if self.request.GET.get("show_past") == "1":
-            events = list(events.filter(start__lt=now).order_by("-start"))
+        if self.request.GET.get("view", "calendar") == "calendar":
+            range_kind = self.request.GET.get("range", "week")
+            if range_kind == "week":
+                start, end = week_bounds(self._anchor_date())
+            elif range_kind == "season":
+                season = selected_season_from_request(self.request, club)
+                start, end = (season.start_date, season.end_date) if season else month_bounds(self._anchor_date())
+            else:
+                start, end = month_bounds(self._anchor_date())
+            events = list(events.filter(start__date__gte=start, start__date__lte=end).order_by("start"))
         else:
-            events = list(events.filter(start__gte=now).order_by("start"))
+            season = selected_season_from_request(self.request, club)
+            if season is not None:
+                events = events.filter(Q(season=season) | Q(season__isnull=True, start__date__gte=season.start_date, start__date__lte=season.end_date))
+            now = timezone.now()
+            if self.request.GET.get("show_past") == "1":
+                events = list(events.filter(start__lt=now).order_by("-start"))
+            else:
+                events = list(events.filter(start__gte=now).order_by("start"))
 
         # Attached per row so the template can show/hide Edit/Delete per event --
         # computed once here rather than a query per row (teams is already
         # prefetched above).
+        is_admin = is_club_admin(user, club)
+        managed_team_ids = set() if is_admin else set(teams_managed_by(user, club).values_list("pk", flat=True))
         for event in events:
             event.can_manage = is_admin or any(team.pk in managed_team_ids for team in event.teams.all())
         return events
 
+    def _calendar_context(self, range_kind, anchor, selected_season):
+        """The grid + prev/next/today nav for whichever range is active --
+        events is self.object_list, already windowed to it by get_queryset
+        above. Season range has no anchor-based nav: it steps between actual
+        Season rows (seasons, already in context) via next(start_date) since
+        that list is sorted newest-first."""
+        events = self.object_list
+        if range_kind == "week":
+            grid = week_grid(events, week_bounds(anchor)[0])
+            nav = {"prev": anchor - timedelta(days=7), "next": anchor + timedelta(days=7)}
+        elif range_kind == "season":
+            grid = {"months": season_grid(events, selected_season)} if selected_season else None
+            nav = {}
+        else:
+            grid = month_grid(events, anchor)
+            nav = {"prev": add_months(anchor, -1), "next": add_months(anchor, 1)}
+        return grid, nav
+
     def get_context_data(self, **kwargs):
         club, user = self.request.club, self.request.user
+        view_mode = self.request.GET.get("view", "calendar")
+        range_kind = self.request.GET.get("range", "week")
+        anchor = self._anchor_date()
+        selected_season = selected_season_from_request(self.request, club)
+
+        calendar, nav = (None, None)
+        if view_mode == "calendar":
+            calendar, nav = self._calendar_context(range_kind, anchor, selected_season)
+
         return super().get_context_data(
             seasons=Season.objects.filter(club=club).order_by("-start_date"),
-            selected_season=selected_season_from_request(self.request, club),
+            selected_season=selected_season,
             selected_kind=self.request.GET.get("kind", ""),
             show_past=self.request.GET.get("show_past") == "1",
             event_kinds=Event.EventKind.choices,
             can_create=is_club_admin(user, club) or teams_managed_by(user, club).exists(),
+            view_mode=view_mode,
+            calendar_range=range_kind,
+            anchor=anchor,
+            today=timezone.localdate(),
+            calendar=calendar,
+            nav=nav,
             **kwargs,
         )
 
@@ -2132,9 +2277,6 @@ class EventDetailView(ClubStaffRequiredMixin, DetailView):
         if referee_management_needed:
             referees = list(event.referees.select_related("member", "assigned_by").order_by("member__last_name", "member__first_name"))
             referees_full = len(referees) >= event.max_referees
-            if can_manage_referees:
-                for referee in referees:
-                    referee.fee_form = EventRefereeFeeForm(instance=referee)
             if can_manage_referees and not referees_full:
                 for candidate in eligible_referees(event):
                     conflicts = conflicting_events(candidate, event)
@@ -2327,7 +2469,7 @@ def games_missing_referees_count(club, limit=10):
     return sum(1 for game in games if game.referee_count == 0)
 
 
-class RefereeManagementDashboardView(ClubAdminRequiredMixin, TemplateView):
+class RefereeManagementDashboardView(MemberAdminRequiredMixin, TemplateView):
     """One-stop admin view of every upcoming home game that needs a
     club-arranged referee (federation-managed teams never appear here, see
     events.services.referees.needs_referee_management), with inline
@@ -2366,19 +2508,21 @@ class RefereeManagementDashboardView(ClubAdminRequiredMixin, TemplateView):
         kpi_no_referee = 0
         kpi_understaffed = 0
         kpi_fully_staffed = 0
+        kpi_fees_pending = 0
 
         for game in games:
             game.referee_rows = list(game.referees.all())
-            for referee in game.referee_rows:
-                referee.fee_form = EventRefereeFeeForm(instance=referee)
             game.referees_full = len(game.referee_rows) >= game.max_referees
             game.referee_candidates = []
+            game.fees_pending = any(not referee.fee for referee in game.referee_rows)
             if not game.referee_rows:
                 kpi_no_referee += 1
             elif not game.referees_full:
                 kpi_understaffed += 1
             else:
                 kpi_fully_staffed += 1
+            if game.fees_pending:
+                kpi_fees_pending += 1
             if not game.referees_full:
                 for candidate in eligible_referees(game):
                     conflicts = conflicting_events(candidate, game)
@@ -2393,6 +2537,7 @@ class RefereeManagementDashboardView(ClubAdminRequiredMixin, TemplateView):
             kpi_no_referee=kpi_no_referee,
             kpi_understaffed=kpi_understaffed,
             kpi_fully_staffed=kpi_fully_staffed,
+            kpi_fees_pending=kpi_fees_pending,
             **kwargs,
         )
 
@@ -2975,3 +3120,312 @@ class SubmissionListView(FeatureRequiredMixin, StubListMixin, ListView):
 
     def get_queryset(self):
         return Submission.objects.filter(form__club=self.request.club, form_id=self.kwargs["pk"])
+
+
+class ClubSettingsView(ClubAdminRequiredMixin, UpdateView):
+    """A club's own self-service identity/branding editor -- the "Club identity"
+    settings sub-item. Singleton by construction: always edits request.club, never
+    a pk from the URL (there is exactly one club to edit here, unlike controlpanel's
+    ClubForm which picks one out of every club on the platform)."""
+
+    form_class = ClubSettingsForm
+    template_name = "management/club_settings.html"
+
+    def get_object(self, queryset=None):
+        return self.request.club
+
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        notify(self.request, f"s|{_('Settings saved')}|{_('Club identity updated.')}")
+        return response
+
+    def get_success_url(self):
+        return reverse("management:club_settings")
+
+    def get_context_data(self, **kwargs):
+        return super().get_context_data(**kwargs)
+
+
+class OnboardingRequirementListView(MemberAdminRequiredMixin, ListView):
+    """What a club requires from every member after they sign up or renew (a
+    photo, a medical certificate, ...) -- see club/models.py's OnboardingRequirement
+    docstring for why this is tracked separately from status/fee_status."""
+
+    template_name = "management/onboarding_requirement_list.html"
+    context_object_name = "requirements"
+
+    def get_queryset(self):
+        return OnboardingRequirement.objects.filter(club=self.request.club)
+
+    def get_context_data(self, **kwargs):
+        return super().get_context_data(**kwargs)
+
+
+class OnboardingRequirementCreateView(MemberAdminRequiredMixin, CreateView):
+    model = OnboardingRequirement
+    form_class = OnboardingRequirementForm
+    template_name = "management/onboarding_requirement_form.html"
+
+    def form_valid(self, form):
+        form.instance.club = self.request.club
+        response = super().form_valid(form)
+        notify(self.request, f"s|{_('Requirement added')}|" + _("“%(name)s” is now required for every member.") % {"name": self.object.name})
+        return response
+
+    def get_success_url(self):
+        return reverse("management:onboarding_requirement_list")
+
+    def get_context_data(self, **kwargs):
+        return super().get_context_data(**kwargs)
+
+
+class OnboardingRequirementUpdateView(MemberAdminRequiredMixin, UpdateView):
+    model = OnboardingRequirement
+    form_class = OnboardingRequirementForm
+    template_name = "management/onboarding_requirement_form.html"
+
+    def get_queryset(self):
+        return OnboardingRequirement.objects.filter(club=self.request.club)
+
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        notify(self.request, f"s|{_('Requirement updated')}|" + _("“%(name)s” updated.") % {"name": self.object.name})
+        return response
+
+    def get_success_url(self):
+        return reverse("management:onboarding_requirement_list")
+
+    def get_context_data(self, **kwargs):
+        return super().get_context_data(update_view=True, **kwargs)
+
+
+class OnboardingRequirementDeleteView(MemberAdminRequiredMixin, View):
+    def post(self, request, pk):
+        requirement = get_object_or_404(OnboardingRequirement.objects.filter(club=request.club), pk=pk)
+        name = requirement.name
+        requirement.delete()
+
+        notify(request, f"w|{_('Requirement deleted')}|" + _("“%(name)s” is no longer required. Existing checklists keep whatever was already recorded for it.") % {"name": name})
+        return redirect("management:onboarding_requirement_list")
+
+
+def _current_membership_or_404(request, member_pk):
+    """The signed-in club's current-season ClubMembership for member_pk -- same
+    lookup MemberDetailView itself uses for `current_membership`, since the
+    Documents tab these three views serve lives on that same page and a
+    checklist item only ever makes sense against a member's *current* signup."""
+    membership = ClubMembership.objects.filter(club=request.club, member_id=member_pk, season=current_season(request.club)).first()
+    if membership is None:
+        raise Http404("No current-season membership for this member.")
+    return membership
+
+
+class MemberRequirementCompleteView(ClubStaffRequiredMixin, View):
+    """Mark one checklist item done for one membership -- any staff, not just
+    admins (same visibility as the rest of a member's profile), can record that
+    a document came in. Reachable from the member detail page's Documents tab
+    (the default fallback) and from the admin-only Sign-up page (via `next`)."""
+
+    def post(self, request, pk, requirement_pk):
+        membership = _current_membership_or_404(request, pk)
+        requirement = get_object_or_404(OnboardingRequirement.objects.filter(club=request.club), pk=requirement_pk)
+        form = RequirementCompletionForm(request.POST, request.FILES)
+
+        if form.is_valid():
+            mark_complete(membership, requirement, user=request.user, document=form.cleaned_data.get("document") or None, note=form.cleaned_data["note"])
+            notify(request, f"s|{_('Marked complete')}|" + _("“%(name)s” marked complete for %(member)s.") % {"name": requirement.name, "member": membership.member})
+        else:
+            notify(request, f"e|{_('Could not save')}|{' '.join(str(error) for errors in form.errors.values() for error in errors)}")
+
+        return _redirect_next_or(request, reverse("management:member_detail", args=[membership.member_id]))
+
+
+class MemberRequirementBypassView(ClubStaffRequiredMixin, View):
+    """Confirm one checklist item isn't needed for this member (e.g. they already
+    have a recent photo on file) -- see club.services.onboarding.mark_bypassed.
+    Same visibility as MemberRequirementCompleteView; bypassing isn't a bigger
+    deal than completing, it's just a different reason the item stops blocking
+    anything."""
+
+    def post(self, request, pk, requirement_pk):
+        membership = _current_membership_or_404(request, pk)
+        requirement = get_object_or_404(OnboardingRequirement.objects.filter(club=request.club), pk=requirement_pk)
+        form = RequirementBypassForm(request.POST)
+
+        if form.is_valid():
+            mark_bypassed(membership, requirement, user=request.user, note=form.cleaned_data["note"])
+            notify(request, f"s|{_('Marked as not needed')}|" + _("“%(name)s” bypassed for %(member)s.") % {"name": requirement.name, "member": membership.member})
+        else:
+            notify(request, f"e|{_('Could not save')}|{' '.join(str(error) for errors in form.errors.values() for error in errors)}")
+
+        return _redirect_next_or(request, reverse("management:member_detail", args=[membership.member_id]))
+
+
+class MemberRequirementIncompleteView(ClubStaffRequiredMixin, View):
+    def post(self, request, pk, requirement_pk):
+        membership = _current_membership_or_404(request, pk)
+        requirement = get_object_or_404(OnboardingRequirement.objects.filter(club=request.club), pk=requirement_pk)
+
+        mark_incomplete(membership, requirement)
+        notify(request, f"w|{_('Marked incomplete')}|" + _("“%(name)s” reopened for %(member)s.") % {"name": requirement.name, "member": membership.member})
+
+        return _redirect_next_or(request, reverse("management:member_detail", args=[membership.member_id]))
+
+
+class MemberRequirementDocumentView(ClubStaffRequiredMixin, View):
+    """Streams a checklist document (see MemberRequirementStatus.document) to any
+    signed-in staff -- same visibility as the rest of a member's profile. The file
+    itself lives on rosterchief.storage.private_storage, which has no public URL at
+    all; this view is the only way to read one."""
+
+    def get(self, request, pk, requirement_pk):
+        membership = _current_membership_or_404(request, pk)
+        status = get_object_or_404(MemberRequirementStatus.objects.filter(membership=membership, requirement_id=requirement_pk))
+
+        if not status.document:
+            raise Http404("No document has been uploaded for this requirement.")
+
+        return FileResponse(status.document.open("rb"), as_attachment=True, filename=status.document.name.rsplit("/", 1)[-1])
+
+
+# --- Sign-up (admin only) ----------------------------------------------------------
+
+
+class SignupDashboardView(ClubAdminRequiredMixin, TemplateView):
+    """Every current-season MEMBER-kind membership, checklist status and fee status
+    side by side, plus which teams they've been placed on so far -- the D3-inspired
+    admin queue for processing this season's sign-ups end to end. Admin-only: fee
+    status feeds this page directly (see MembershipListView, its own separate
+    Finance-side page for actually recording payment), so it sits on the same side
+    of that boundary, unlike the rest of the Members section which MEMBER_ADMIN can
+    also reach.
+
+    Team placement (SignupPlaceInTeamView) creates the roster row immediately,
+    regardless of status -- see events.services.attendance.effective_members and
+    club.services.onboarding.blocked_member_ids_for_event for how an event's
+    invitations/selection still exclude a member per event kind until whatever
+    blocks that kind clears, so a provisional player is visible to their coach
+    without being invited to a game their paperwork isn't ready for."""
+
+    template_name = "management/signup_list.html"
+
+    def get_context_data(self, **kwargs):
+        club = self.request.club
+        season = current_season(club)
+        memberships = []
+        teams = Team.objects.filter(club=club)
+
+        if season is not None:
+            # PENDING first and oldest-first within that -- same "the queue's own
+            # priority order" reasoning as D3's own longest-waiting-on-top table,
+            # with anyone already ACTIVE but not yet clean (unpaid, or an open
+            # checklist item) trailing behind since it's lower priority, not done.
+            memberships = list(ClubMembership.objects.filter(club=club, season=season, kind=ClubMembership.Kind.MEMBER).select_related("member"))
+            # Sorted in Python, not via .order_by("-status", ...): StatusChoices'
+            # string values only put PENDING first alphabetically by accident, and
+            # that would silently break the moment a choice's value changes.
+            memberships.sort(key=lambda membership: (membership.status != ClubMembership.StatusChoices.PENDING, membership.created))
+            annotate_onboarding_status(memberships)
+            oldest_pending_id = next((membership.pk for membership in memberships if membership.status == ClubMembership.StatusChoices.PENDING), None)
+            for membership in memberships:
+                membership.checklist = checklist_for(membership)
+                membership.blocked_kinds = blocking_event_kinds(membership)
+                membership.teams_registered = teams.filter(roster__member_id=membership.member_id, roster__season=season).distinct()
+                membership.placement_form = SignupTeamPlacementForm(club=club, season=season, member=membership.member)
+                membership.is_clean = is_signup_clean(membership)
+                membership.is_oldest_pending = membership.pk == oldest_pending_id
+            # Already-ACTIVE *and* clean (paid, checklist fully resolved) memberships
+            # have nothing left for this queue to do -- drop them rather than leaving
+            # them trailing at the bottom, where they read as still needing attention.
+            memberships = [membership for membership in memberships if not (membership.status == ClubMembership.StatusChoices.ACTIVE and membership.is_clean)]
+
+        return super().get_context_data(
+            season=season,
+            memberships=memberships,
+            teams=teams,
+            requirements_configured=OnboardingRequirement.objects.filter(club=club, is_active=True).exists(),
+            **kwargs,
+        )
+
+
+class SignupApproveAllCleanView(ClubAdminRequiredMixin, View):
+    """Bulk-activates every membership that's both paid up and has resolved its
+    whole checklist -- see club.services.onboarding.approve_all_clean for exactly
+    what "clean" means; it's the only path to ACTIVE, deliberately manual even
+    for a fully-paid membership."""
+
+    def post(self, request):
+        season = current_season(request.club)
+        if season is None:
+            notify(request, f"e|{_('No active season')}|{_('There is no season covering today to approve sign-ups for.')}")
+            return redirect("management:signup_list")
+
+        activated = approve_all_clean(request.club, season)
+        if activated:
+            notify(request, f"s|{_('Approved')}|" + _("%(count)d membership moved to active.") % {"count": activated})
+        else:
+            notify(request, f"w|{_('Nothing to approve')}|{_('No pending membership is both paid up and fully checked off yet.')}")
+
+        return redirect("management:signup_list")
+
+
+class SignupApproveOneView(ClubAdminRequiredMixin, View):
+    """The detail panel's own "Approve" button -- club.services.onboarding.approve_one
+    for a single membership, same rule as the bulk version above."""
+
+    def post(self, request, pk):
+        club = request.club
+        season = current_season(club)
+        if season is None:
+            raise Http404("No active season to approve this member in.")
+        membership = get_object_or_404(ClubMembership.objects.filter(club=club, season=season, kind=ClubMembership.Kind.MEMBER), member_id=pk)
+
+        if approve_one(membership):
+            notify(request, f"s|{_('Approved')}|" + _("%(member)s is now active.") % {"member": membership.member})
+        else:
+            notify(request, f"w|{_('Not ready yet')}|" + _("%(member)s isn't both paid up and fully checked off yet.") % {"member": membership.member})
+
+        return redirect("management:signup_list")
+
+
+class SignupPlaceInTeamView(ClubAdminRequiredMixin, View):
+    """Rosters one member from the Sign-up page onto a team for the current season
+    -- see SignupTeamPlacementForm for why this bypasses eligible_roster_members'
+    active-only filter on purpose.
+
+    signup_list.html posts to this in the background (fetch, X-Requested-With) and
+    just toggles the clicked button's own colour on success -- no full-page reload
+    for what's a one-field, one-click action. That's progressive enhancement, not
+    the only way in: a plain (non-JS) POST still works exactly as before, redirected
+    back to the page with a normal Django message."""
+
+    def post(self, request, pk):
+        club = request.club
+        season = current_season(club)
+        if season is None:
+            raise Http404("No active season to place this member in.")
+        membership = get_object_or_404(ClubMembership.objects.filter(club=club, season=season, kind=ClubMembership.Kind.MEMBER), member_id=pk)
+        is_ajax = request.headers.get("X-Requested-With") == "XMLHttpRequest"
+
+        form = SignupTeamPlacementForm(request.POST, club=club, season=season, member=membership.member)
+        # Team's the only real form field -- season/member are pre-seeded straight
+        # onto the instance (not form fields), so ModelForm.validate_unique() skips
+        # unique_member_per_team_per_season entirely (Django excludes a unique
+        # check the moment any field it covers isn't part of the form). The
+        # already-placed team's own button renders disabled, but a resent POST
+        # still has to be handled here rather than 500ing on the DB constraint.
+        if not form.is_valid():
+            ok = False
+            level, title, body = "e", _("Could not place on team"), " ".join(str(error) for errors in form.errors.values() for error in errors)
+        elif TeamMembership.objects.filter(team=form.cleaned_data["team"], member=membership.member, season=season).exists():
+            ok = False
+            level, title, body = "w", _("Already placed"), _("%(member)s is already on %(team)s.") % {"member": membership.member, "team": form.cleaned_data["team"]}
+        else:
+            form.save()
+            ok = True
+            level, title, body = "s", _("Placed on team"), _("%(member)s added to %(team)s.") % {"member": membership.member, "team": form.cleaned_data["team"]}
+
+        if is_ajax:
+            return JsonResponse({"ok": ok, "title": str(title), "body": str(body)})
+        notify(request, f"{level}|{title}|{body}")
+        return redirect("management:signup_list")

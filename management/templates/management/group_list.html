@@ -2,45 +2,44 @@
 {% load i18n lucide ui %}
 
 {% block heading %}{% trans "Groups" %}{% endblock heading %}
-{% block subheading %}{% trans "Named collections of members -- coaches, team managers, referee pools, committees..." %}{% endblock subheading %}
+
+{% block topbar_context %}
+    <span class="font-mono text-[13px] text-muted">{% trans "Named collections of members -- coaches, team managers, referee pools, committees..." %}</span>
+{% endblock topbar_context %}
 
 {% block actions %}
-    <a class="btn btn-outline gap-2" href="{% url 'management:group_create' %}">{% lucide "plus" size=16 %} {% trans "New group" %}</a>
+    <a class="btn btn-primary gap-2" href="{% url 'management:group_create' %}">{% lucide "plus" size=16 %} {% trans "New group" %}</a>
 {% endblock actions %}
 
 {% block panel %}
-    <div class="card bg-base-100 shadow">
-        <div class="card-body">
-            <div class="overflow-x-auto">
-                <table class="table table-cards">
-                    <thead>
-                        <tr>
-                            <th>{% trans "Name" %}</th>
-                            <th>{% trans "Members" %}</th>
-                            <th></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for group in groups %}
-                            <tr>
-                                <td><a class="link link-hover font-semibold" href="{% url 'management:group_detail' group.pk %}">{{ group.name }}</a></td>
-                                <td data-label="{% trans 'Members' %}">{{ group.member_count }}</td>
-                                <td class="text-right">
-                                    <div class="flex justify-end gap-1">
-                                        <a class="btn btn-outline btn-sm" href="{% url 'management:group_detail' group.pk %}" aria-label="{% trans 'Edit' %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</a>
-                                        <button class="btn btn-sm btn-outline btn-error" type="button" onclick="document.getElementById('{{ group.pk|dom_id:"group_delete_modal" }}').showModal()" aria-label="{% trans 'Delete' %}">{% lucide "trash-2" size=14 %} {% trans "Delete" %}</button>
-                                    </div>
-                                </td>
-                            </tr>
-                        {% empty %}
-                            <tr>
-                                <td colspan="3" class="text-center opacity-60">{% trans "No groups yet." %}</td>
-                            </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        </div>
+    <div class="card overflow-hidden">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>{% trans "Name" %}</th>
+                    <th>{% trans "Members" %}</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for group in groups %}
+                    <tr>
+                        <td><a class="link link-hover font-semibold text-ink" href="{% url 'management:group_detail' group.pk %}">{{ group.name }}</a></td>
+                        <td class="font-mono text-sm">{{ group.member_count }}</td>
+                        <td class="text-right">
+                            <div class="flex justify-end gap-1">
+                                <a class="btn btn-outline btn-xs" href="{% url 'management:group_detail' group.pk %}" aria-label="{% trans 'Edit' %}">{% lucide "pencil" size=13 %} {% trans "Edit" %}</a>
+                                <button class="btn btn-xs btn-outline btn-error" type="button" onclick="document.getElementById('{{ group.pk|dom_id:"group_delete_modal" }}').showModal()" aria-label="{% trans 'Delete' %}">{% lucide "trash-2" size=13 %} {% trans "Delete" %}</button>
+                            </div>
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="3" class="py-6 text-center text-muted">{% trans "No groups yet." %}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
     </div>
 
     {% include "management/_pagination.html" %}

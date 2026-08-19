@@ -45,19 +45,44 @@ def has_club_role(user: User, club: Club, role: ClubRole.Roles) -> bool:
     return ClubRole.objects.filter(member__user=user, club=club, role=role).exists()
 
 
+def is_platform_superuser(user: User) -> bool:
+    """A Django superuser sees and manages every club as if they held ADMIN there,
+    with no ClubRole row needed -- the platform-operator override. Already forced
+    through MFA regardless (authentication.middleware.mfa_required_for checks
+    is_superuser directly), so this bypass never skips that."""
+    return bool(user and user.is_authenticated and user.is_superuser)
+
+
 def is_club_admin(user: User, club: Club) -> bool:
-    return has_club_role(user, club, ClubRole.Roles.ADMIN)
+    return is_platform_superuser(user) or has_club_role(user, club, ClubRole.Roles.ADMIN)
+
+
+def is_member_admin(user: User, club: Club) -> bool:
+    """MEMBER_ADMIN: full read/write on people (members, families, groups, parent
+    claims, teams, referee setup, onboarding requirements) without Finance/Shop,
+    Club identity, Sponsors, or the ability to grant/revoke ClubRole itself --
+    see can_manage_members for the actual gate, this is just the role check."""
+    return has_club_role(user, club, ClubRole.Roles.MEMBER_ADMIN)
+
+
+def can_manage_members(user: User, club: Club) -> bool:
+    """The gate for club.mixins.MemberAdminRequiredMixin -- real ADMIN (which already
+    includes the superuser bypass), or MEMBER_ADMIN specifically."""
+    return is_club_admin(user, club) or is_member_admin(user, club)
 
 
 def has_management_access(user: User, club: Club) -> bool:
-    """Anyone with real authority in the club: ADMIN/EDITOR, or *any* current-season
-    staff assignment (coach, team manager, physio, ...).
+    """Anyone with real authority in the club: ADMIN/EDITOR/MEMBER_ADMIN, a platform
+    superuser, or *any* current-season staff assignment (coach, team manager,
+    physio, ...).
 
     Deliberately excludes the plain MEMBER role -- every signed-up player (or club
     member generally) holds that automatically the moment their ClubMembership goes
     active (club/signals.py), so it says nothing about whether someone is staff.
     """
-    elevated = ClubRole.objects.filter(member__user=user, club=club, role__in=(ClubRole.Roles.ADMIN, ClubRole.Roles.EDITOR)).exists()
+    if is_platform_superuser(user):
+        return True
+    elevated = ClubRole.objects.filter(member__user=user, club=club, role__in=(ClubRole.Roles.ADMIN, ClubRole.Roles.EDITOR, ClubRole.Roles.MEMBER_ADMIN)).exists()
     return elevated or teams_staffed_by(user, club).exists()
 
 

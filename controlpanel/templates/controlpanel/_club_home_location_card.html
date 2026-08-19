@@ -6,31 +6,31 @@
     Locations page shows, no separate sync step involved. Included with `club`,
     `home_location`, `home_location_form` already in context.
 {% endcomment %}
-<div class="card mb-6 bg-base-100 shadow">
-    <div class="card-body">
-        <div class="flex items-center justify-between">
-            <h2 class="card-title text-base">{% lucide "map-pin" size=18 %} Home location</h2>
-            <button class="btn btn-primary btn-sm gap-2" type="button" onclick="document.getElementById('club_home_location_modal').showModal()">
-                {% if home_location %}
-                    {% lucide "pencil" size=16 %} Edit
-                {% else %}
-                    {% lucide "plus" size=16 %} Set home location
-                {% endif %}
-            </button>
-        </div>
+<div class="card flex flex-col">
+    <div class="flex items-center justify-between border-b border-line px-4 py-3">
+        <span class="font-display text-sm font-extrabold tracking-[.1em] text-ink uppercase">Home location</span>
+        <button class="btn btn-outline btn-sm gap-2" type="button" onclick="document.getElementById('club_home_location_modal').showModal()">
+            {% if home_location %}
+                {% lucide "pencil" size=14 %} Edit
+            {% else %}
+                {% lucide "plus" size=14 %} Set home location
+            {% endif %}
+        </button>
+    </div>
+    <div class="px-4 py-3">
         {% if home_location %}
-            <dl class="divide-y divide-base-200">
+            <dl>
                 <div class="flex items-center justify-between py-2">
-                    <dt class="text-sm opacity-70">Name</dt>
-                    <dd class="font-semibold">{{ home_location.name }}</dd>
+                    <dt class="text-sm text-muted">Name</dt>
+                    <dd class="font-semibold text-ink">{{ home_location.name }}</dd>
                 </div>
                 <div class="flex items-center justify-between py-2">
-                    <dt class="text-sm opacity-70">Address</dt>
-                    <dd>{{ home_location.address }}, {{ home_location.zip_code }} {{ home_location.city }}, {{ home_location.country }}</dd>
+                    <dt class="text-sm text-muted">Address</dt>
+                    <dd class="text-right text-sm text-slate">{{ home_location.address }}, {{ home_location.zip_code }} {{ home_location.city }}, {{ home_location.country }}</dd>
                 </div>
             </dl>
         {% else %}
-            <p class="text-sm opacity-60">Not set yet. Once set, events at this location can be recognised as home games.</p>
+            <p class="text-sm text-muted">Not set yet. Once set, events at this location can be recognised as home games.</p>
         {% endif %}
     </div>
 </div>

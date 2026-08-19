@@ -37,13 +37,13 @@
                 />
 
             {% elif field_type == "checkbox" %}
-                <div class="flex flex-row items-center gap-2">
+                <div class="flex flex-row items-start gap-2">
                     <input
                             type="checkbox"
                             {% if show_as_toggle %}
-                            class="toggle {% if size_modifier %}toggle-{{ size_modifier }}{% endif %}"
+                            class="toggle mt-0.5 {% if size_modifier %}toggle-{{ size_modifier }}{% endif %}"
                             {% else %}
-                            class="checkbox {% if size_modifier %}checkbox-{{ size_modifier }}{% endif %}"
+                            class="checkbox mt-0.5 {% if size_modifier %}checkbox-{{ size_modifier }}{% endif %}"
                             {% endif %}
                             name="{{ field.html_name }}"
                             {% if field.value %}checked="checked"{% endif %}

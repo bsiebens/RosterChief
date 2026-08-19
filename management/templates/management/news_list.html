@@ -5,65 +5,52 @@
 
 {% block actions %}
     {% if can_add_news %}
-        <a class="btn btn-outline gap-2" href="{% url 'management:news_create' %}">{% lucide "plus" size=16 %} {% trans "New news item" %}</a>
+        <a class="btn btn-primary gap-2" href="{% url 'management:news_create' %}">{% lucide "plus" size=16 %} {% trans "New news item" %}</a>
     {% endif %}
 {% endblock actions %}
 
 {% block panel %}
-    <div class="card bg-base-100 shadow">
-        <div class="card-body">
-            <div class="overflow-x-auto">
-                <table class="table table-cards">
-                    <thead>
-                        <tr>
-                            <th>{% trans "Title" %}</th>
-                            <th>{% trans "Teams" %}</th>
-                            <th>{% trans "Visibility" %}</th>
-                            <th>{% trans "Status" %}</th>
-                            <th></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for news_item in news_items %}
-                            <tr>
-                                <td><a class="link link-hover font-semibold" href="{% url 'management:news_detail' news_item.pk %}">{{ news_item.title }}</a></td>
-                                <td data-label="{% trans 'Teams' %}">
-                                    <div class="flex flex-wrap gap-2">
-                                        {% for team in news_item.teams.all %}
-                                            <span class="badge badge-neutral badge-sm">{{ team.short_name }}</span>
-                                        {% empty %}
-                                            <span class="opacity-60">{% trans "Club-wide" %}</span>
-                                        {% endfor %}
-                                    </div>
-                                </td>
-                                <td data-label="{% trans 'Visibility' %}">{{ news_item.get_visibility_display }}</td>
-                                <td data-label="{% trans 'Status' %}">
-                                    {% if news_item.status == "draft" %}
-                                        <span class="badge badge-neutral badge-sm">{% trans "Draft" %}</span>
-                                    {% elif news_item.is_scheduled %}
-                                        <span class="badge badge-warning badge-sm">{% blocktrans with date=news_item.published_at %}Scheduled for {{ date }}{% endblocktrans %}</span>
-                                    {% else %}
-                                        <span class="badge badge-success badge-sm">{% trans "Published" %}</span>
-                                    {% endif %}
-                                </td>
-                                <td class="text-right">
-                                    {% if news_item.can_edit %}
-                                        <div class="flex flex-wrap justify-end gap-1">
-                                            <a class="btn btn-outline btn-sm" href="{% url 'management:news_detail' news_item.pk %}" aria-label="{% trans 'Edit' %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</a>
-                                            <button class="btn btn-sm btn-outline btn-error" type="button" onclick="document.getElementById('{{ news_item.pk|dom_id:"news_delete_modal" }}').showModal()" aria-label="{% trans 'Delete' %}">{% lucide "trash-2" size=14 %} {% trans "Delete" %}</button>
-                                        </div>
-                                    {% endif %}
-                                </td>
-                            </tr>
+    <div class="card overflow-hidden divide-y">
+        {% for news_item in news_items %}
+            <div class="flex items-center gap-3.5 px-4.5 py-3.5 {% if news_item.status == 'draft' %}border-l-[3px] border-club bg-row-sel{% endif %}">
+                <div class="min-w-0 flex-1">
+                    <div class="mb-1 flex flex-wrap items-center gap-2">
+                        {% if news_item.status == "draft" %}
+                            <span class="badge badge-sm">{% trans "Draft" %}</span>
+                        {% elif news_item.is_scheduled %}
+                            <span class="badge badge-info badge-sm">{% blocktrans with date=news_item.published_at %}Scheduled for {{ date }}{% endblocktrans %}</span>
+                        {% else %}
+                            <span class="badge badge-success badge-sm">{% trans "Published" %}</span>
+                        {% endif %}
+                        <span class="font-mono text-xs text-dim">
+                            {% if news_item.status == "draft" %}
+                                {% blocktrans with time=news_item.modified|timesince %}Edited {{ time }} ago{% endblocktrans %}
+                            {% else %}
+                                {{ news_item.published_at|date:"j M Y" }}
+                            {% endif %}
+                        </span>
+                    </div>
+                    <a class="block truncate font-display text-lg font-extrabold text-ink uppercase hover:text-club" href="{% url 'management:news_detail' news_item.pk %}">{{ news_item.title }}</a>
+                    <div class="mt-0.5 flex flex-wrap items-center gap-2 text-[13px] text-muted">
+                        {% if news_item.created_by %}<span>{{ news_item.created_by }}</span>&middot;{% endif %}
+                        {% for team in news_item.teams.all %}
+                            <span class="badge badge-outline badge-xs">{{ team.short_name }}</span>
                         {% empty %}
-                            <tr>
-                                <td colspan="5" class="text-center opacity-60">{% trans "No news items yet." %}</td>
-                            </tr>
+                            <span>{% trans "Club-wide" %}</span>
                         {% endfor %}
-                    </tbody>
-                </table>
+                        &middot; <span>{{ news_item.get_visibility_display }}</span>
+                    </div>
+                </div>
+                {% if news_item.can_edit %}
+                    <div class="flex shrink-0 flex-wrap justify-end gap-1">
+                        <a class="btn btn-outline btn-sm" href="{% url 'management:news_detail' news_item.pk %}" aria-label="{% trans 'Edit' %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</a>
+                        <button class="btn btn-sm btn-outline btn-error" type="button" onclick="document.getElementById('{{ news_item.pk|dom_id:"news_delete_modal" }}').showModal()" aria-label="{% trans 'Delete' %}">{% lucide "trash-2" size=14 %} {% trans "Delete" %}</button>
+                    </div>
+                {% endif %}
             </div>
-        </div>
+        {% empty %}
+            <div class="px-4.5 py-10 text-center text-sm text-muted">{% trans "No news items yet." %}</div>
+        {% endfor %}
     </div>
 
     {% include "management/_pagination.html" %}

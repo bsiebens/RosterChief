@@ -7,76 +7,96 @@
     that list can be long. See billing.services.plans for what "delete" actually does.
 {% endcomment %}
 
-{% block heading %}{% blocktrans with plan=plan.name %}Delete “{{ plan }}”{% endblocktrans %}{% endblock heading %}
+{% block panel_title %}{% blocktrans with plan=plan.name %}Delete “{{ plan }}”{% endblocktrans %}{% endblock panel_title %}
+
+{% block breadcrumb %}
+    <a class="text-ink hover:underline" href="{% url 'controlpanel:billing' %}">billing</a>
+    <span class="text-edge">|</span>
+    <span>delete plan</span>
+    <span class="text-edge">|</span>
+    <span class="text-club-dark">{{ plan.name }}</span>
+{% endblock breadcrumb %}
 
 {% block actions %}
     <a class="btn btn-outline gap-2" href="{% url 'controlpanel:billing' %}">{% lucide "arrow-left" size=16 %} {% trans "Back to billing" %}</a>
 {% endblock actions %}
 
 {% block panel %}
-    <div class="card mb-6 bg-base-100 shadow">
-        <div class="card-body">
-            <h2 class="card-title text-base">{% lucide "triangle-alert" size=18 %} {% trans "This can't be undone" %}</h2>
-            {% if impact.will_hard_delete %}
-                <p class="text-sm opacity-70">{% blocktrans with plan=plan.name %}“{{ plan }}” has never billed anyone, so it will be removed completely.{% endblocktrans %}</p>
-            {% else %}
-                <p class="text-sm opacity-70">{% blocktrans with plan=plan.name %}“{{ plan }}” has billing history, so it will be hidden rather than removed — past invoices will still show what they were billed under.{% endblocktrans %}</p>
-            {% endif %}
-        </div>
-    </div>
-
-    {% if impact.unsubscribed_clubs %}
-        <div class="card mb-6 bg-base-100 shadow border-l-4 border-error">
-            <div class="card-body">
-                <h2 class="card-title text-base">
-                    {% lucide "building-2" size=18 %}
-                    {% blocktrans count counter=impact.unsubscribed_clubs|length %}{{ counter }} club is currently on this plan{% plural %}{{ counter }} clubs are currently on this plan{% endblocktrans %}
-                </h2>
-                <p class="text-sm opacity-70">{% trans "Deleting this plan removes their subscription outright — each shows as not billed for anything afterwards, the same as a club that was never put on a plan." %}</p>
-                <ul class="mt-2 divide-y divide-base-200">
-                    {% for club in impact.unsubscribed_clubs %}
-                        <li class="py-2 flex items-center justify-between">
-                            <a class="link link-hover font-medium" href="{% url 'controlpanel:club_detail' club.pk %}">{{ club.name }}</a>
-                            <span class="badge badge-error badge-outline gap-1">{% lucide "circle-x" size=12 %} {% trans "Loses this plan" %}</span>
-                        </li>
-                    {% endfor %}
-                </ul>
+    <div class="max-w-3xl">
+        {# --- the plan being removed, and which of the two outcomes applies -- #}
+        <div class="card flex items-start gap-3 border-l-4 border-l-club-dark p-4">
+            {% lucide "triangle-alert" size=20 class="mt-0.5 shrink-0 text-club-dark" %}
+            <div>
+                <div class="font-display text-sm font-extrabold tracking-[.1em] text-ink uppercase">{% trans "This can't be undone" %}</div>
+                {% if impact.will_hard_delete %}
+                    <p class="mt-1.5 text-sm text-slate">{% blocktrans with plan=plan.name %}“{{ plan }}” has never billed anyone, so the plan will be removed completely.{% endblocktrans %}</p>
+                {% else %}
+                    <p class="mt-1.5 text-sm text-slate">{% blocktrans with plan=plan.name %}“{{ plan }}” has billing history, so it will be hidden rather than removed — past invoices will still show what they were billed under.{% endblocktrans %}</p>
+                {% endif %}
             </div>
         </div>
-    {% endif %}
 
-    {% if impact.broken_trial_clubs %}
-        <div class="card mb-6 bg-base-100 shadow border-l-4 border-warning">
-            <div class="card-body">
-                <h2 class="card-title text-base">
-                    {% lucide "hourglass" size=18 %}
-                    {% blocktrans count counter=impact.broken_trial_clubs|length %}{{ counter }} club's trial is scheduled to switch to this plan{% plural %}{{ counter }} clubs' trials are scheduled to switch to this plan{% endblocktrans %}
-                </h2>
-                <p class="text-sm opacity-70">{% trans "They stay on their current trial plan, but the scheduled switch is cancelled — pick a new plan for them before the trial ends." %}</p>
-                <ul class="mt-2 divide-y divide-base-200">
-                    {% for club in impact.broken_trial_clubs %}
-                        <li class="py-2 flex items-center justify-between">
-                            <a class="link link-hover font-medium" href="{% url 'controlpanel:club_detail' club.pk %}">{{ club.name }}</a>
-                            <span class="badge badge-warning badge-outline gap-1">{% lucide "octagon-alert" size=12 %} {% trans "Trial needs a new plan" %}</span>
-                        </li>
-                    {% endfor %}
-                </ul>
+        {# --- clubs currently subscribed to this plan -------------------------- #}
+        {% if impact.unsubscribed_clubs %}
+            <div class="card mt-4 flex flex-col border-l-4 border-l-club-dark">
+                <div class="flex items-center gap-2.5 border-b border-line px-4 py-3">
+                    {% lucide "building-2" size=16 class="text-club-dark" %}
+                    <span class="font-display text-sm font-extrabold tracking-[.1em] text-ink uppercase">
+                        {% blocktrans count counter=impact.unsubscribed_clubs|length %}{{ counter }} club is currently on this plan{% plural %}{{ counter }} clubs are currently on this plan{% endblocktrans %}
+                    </span>
+                </div>
+                <p class="px-4 pt-3 text-sm text-slate">{% trans "Deleting this plan removes their subscription outright — each shows as not billed for anything afterwards, the same as a club that was never put on a plan." %}</p>
+                <table class="table mt-1">
+                    <tbody>
+                        {% for club in impact.unsubscribed_clubs %}
+                            <tr>
+                                <td><a class="link link-hover font-semibold text-ink" href="{% url 'controlpanel:club_detail' club.pk %}">{{ club.name }}</a></td>
+                                <td class="text-right">
+                                    <span class="badge badge-error gap-1">{% lucide "circle-x" size=11 %} {% trans "Loses this plan" %}</span>
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
             </div>
-        </div>
-    {% endif %}
+        {% endif %}
 
-    {% if not impact.has_impact %}
-        <div class="alert alert-info mb-6">
-            {% lucide "info" size=20 %}
-            <span>{% trans "No club is currently on this plan, or has a trial scheduled to switch to it." %}</span>
-        </div>
-    {% endif %}
+        {# --- clubs mid-trial, scheduled to land on this plan ------------------- #}
+        {% if impact.broken_trial_clubs %}
+            <div class="card mt-4 flex flex-col border-l-4 border-l-warn">
+                <div class="flex items-center gap-2.5 border-b border-line px-4 py-3">
+                    {% lucide "hourglass" size=16 class="text-warn-text" %}
+                    <span class="font-display text-sm font-extrabold tracking-[.1em] text-ink uppercase">
+                        {% blocktrans count counter=impact.broken_trial_clubs|length %}{{ counter }} club's trial is scheduled to switch to this plan{% plural %}{{ counter }} clubs' trials are scheduled to switch to this plan{% endblocktrans %}
+                    </span>
+                </div>
+                <p class="px-4 pt-3 text-sm text-slate">{% trans "They stay on their current trial plan, but the scheduled switch is cancelled — pick a new plan for them before the trial ends." %}</p>
+                <table class="table mt-1">
+                    <tbody>
+                        {% for club in impact.broken_trial_clubs %}
+                            <tr>
+                                <td><a class="link link-hover font-semibold text-ink" href="{% url 'controlpanel:club_detail' club.pk %}">{{ club.name }}</a></td>
+                                <td class="text-right">
+                                    <span class="badge badge-warning gap-1">{% lucide "octagon-alert" size=11 %} {% trans "Trial needs a new plan" %}</span>
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% endif %}
 
-    <form method="post" action="{% url 'controlpanel:plan_delete' plan.pk %}">
-        {% csrf_token %}
-        <div class="flex flex-row justify-end gap-2">
+        {% if not impact.has_impact %}
+            <div class="alert alert-info mt-4">
+                {% lucide "info" size=18 %}
+                <span>{% trans "No club is currently on this plan, or has a trial scheduled to switch to it." %}</span>
+            </div>
+        {% endif %}
+
+        <form method="post" action="{% url 'controlpanel:plan_delete' plan.pk %}" class="mt-6 flex justify-end gap-2">
+            {% csrf_token %}
             <a class="btn btn-outline gap-2" href="{% url 'controlpanel:billing' %}">{% lucide "x" size=16 %} {% trans "Cancel" %}</a>
             <button class="btn btn-error gap-2" type="submit">{% lucide "trash-2" size=16 %} {% trans "Delete plan" %}</button>
-        </div>
-    </form>
+        </form>
+    </div>
 {% endblock panel %}

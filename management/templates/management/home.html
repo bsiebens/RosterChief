@@ -1,24 +1,32 @@
 {% extends "management/base.html" %}
 {% load i18n static lucide %}
 
+{% block panel_title %}Overview{% endblock panel_title %}
 {% block heading %}{{ club.name }}{% endblock heading %}
-{% block subheading %}{% trans "Management" %}{% endblock subheading %}
+
+{% block topbar_context %}
+    {% if not attention.no_season %}
+        <span class="badge badge-success">{% blocktrans with start=attention.season.start_date|date:"Y" end=attention.season.end_date|date:"Y" %}Season {{ start }}-{{ end }}{% endblocktrans %}</span>
+    {% endif %}
+{% endblock topbar_context %}
+
+{% block actions %}
+    <a class="btn btn-primary gap-2" href="{% url 'management:member_create' %}">{% lucide "plus" size=16 %} {% trans "New member" %}</a>
+{% endblock actions %}
 
 {% block panel %}
     {# Every level here; base.html repeats it on other pages only once it turns urgent. #}
     {% include "management/_billing_notice.html" %}
 
     {% if attention.no_season %}
-        <div class="alert alert-warning mb-6">
+        <div class="alert alert-warning">
             {% lucide "calendar-x" size=20 %}
-            <span>
-                {% trans "No season covers today, so this club cannot take a signup or schedule a match. Nothing errors — it is simply inert." %}
-            </span>
+            <span>{% trans "No season covers today, so this club cannot take a signup or schedule a match. Nothing errors — it is simply inert." %}</span>
         </div>
     {% endif %}
 
     {% if is_club_admin and billing_ends_at %}
-        <div class="alert alert-warning mb-6">
+        <div class="alert alert-warning">
             {% lucide "calendar-clock" size=20 %}
             <span>
                 {% if billing_auto_renews %}
@@ -30,167 +38,198 @@
         </div>
     {% endif %}
 
-    {% comment %}
-        The club's own numbers that should be zero -- same attention/chart/stat-group
-        data controlpanel/club_detail.html shows a platform admin drilling into this
-        club from outside; club_attention/club_charts/club_statistics are already
-        club-scoped, so this is that same data for the club's own staff. Nothing
-        money-shaped renders below for non-admins, same line the nav already draws
-        around the Shop section.
-    {% endcomment %}
-    <div class="mb-6 grid gap-4 sm:grid-cols-2 md:grid-cols-5">
-        <div class="card bg-base-100 shadow border-l-4 {% if attention.teams_without_manager %}border-error{% else %}border-success{% endif %}">
-            <div class="card-body p-4">
-                <div class="flex items-center gap-2 text-sm opacity-70 mb-3">{% lucide "user-x" size=16 %} {% trans "Teams without coach" %}</div>
-                <div class="text-4xl font-bold tabular-nums font-mono">{{ attention.teams_without_manager }}</div>
-                <div class="text-xs opacity-60">{% trans "Teams nobody can pick a squad for" %}</div>
+    <div class="flex gap-3.5">
+        <div class="card min-w-0 flex-1 p-4">
+            <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Total members" %}</div>
+            <div class="mt-1 font-display text-[34px] leading-none font-extrabold text-ink tabular-nums">{{ member_count }}</div>
+            <div class="mt-1 text-[13px] {% if member_count_change > 0 %}text-ok{% elif member_count_change < 0 %}text-club{% else %}text-muted{% endif %}">
+                {% if member_count_change is None %}
+                    {% trans "No previous season to compare" %}
+                {% else %}
+                    {% if member_count_change > 0 %}+{% endif %}{{ member_count_change }} {% trans "vs last season" %}
+                {% endif %}
             </div>
         </div>
-
-        <div class="card bg-base-100 shadow border-l-4 {% if attention.unrostered %}border-warning{% else %}border-success{% endif %}">
-            <div class="card-body p-4">
-                <div class="flex items-center gap-2 text-sm opacity-70 mb-3">{% lucide "user-minus" size=16 %} {% trans "Unrostered members" %}</div>
-                <div class="text-4xl font-bold tabular-nums font-mono">{{ attention.unrostered }}</div>
-                <div class="text-xs opacity-60">{% trans "Active members on no team" %}</div>
-            </div>
+        <div class="card min-w-0 flex-1 p-4">
+            <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Awaiting approval" %}</div>
+            <div class="mt-1 font-display text-[34px] leading-none font-extrabold tabular-nums {% if attention.pending_approvals %}text-club{% else %}text-ink{% endif %}">{{ attention.pending_approvals }}</div>
+            <div class="mt-1 text-[13px] text-muted">{% trans "Memberships to review" %}</div>
         </div>
-
-        <div class="card bg-base-100 shadow border-l-4 {% if attention.pending_approvals %}border-warning{% else %}border-success{% endif %}">
-            <div class="card-body p-4">
-                <div class="flex items-center gap-2 text-sm opacity-70 mb-3">{% lucide "clock" size=16 %} {% trans "Pending" %}</div>
-                <div class="text-4xl font-bold tabular-nums font-mono">{{ attention.pending_approvals }}</div>
-                <div class="text-xs opacity-60">{% trans "Memberships awaiting approval" %}</div>
-            </div>
+        <div class="card min-w-0 flex-1 p-4">
+            <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Teams without coach" %}</div>
+            <div class="mt-1 font-display text-[34px] leading-none font-extrabold tabular-nums {% if attention.teams_without_manager %}text-club{% else %}text-ink{% endif %}">{{ attention.teams_without_manager }}</div>
+            <div class="mt-1 text-[13px] text-muted">{% trans "Nobody can pick a squad" %}</div>
         </div>
-
-        <div class="card bg-base-100 shadow border-l-4 border-info">
-            <div class="card-body p-4">
-                <div class="flex items-center gap-2 text-sm opacity-70 mb-3">{% lucide "sparkles" size=16 %} {% trans "New members" %}</div>
-                <div class="text-4xl font-bold tabular-nums font-mono">{{ attention.new_members }}</div>
-                <div class="text-xs opacity-60">{% trans "First season at this club" %}</div>
-            </div>
+        <div class="card min-w-0 flex-1 p-4">
+            <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Unrostered members" %}</div>
+            <div class="mt-1 font-display text-[34px] leading-none font-extrabold tabular-nums {% if attention.unrostered %}text-warn{% else %}text-ink{% endif %}">{{ attention.unrostered }}</div>
+            <div class="mt-1 text-[13px] text-muted">{% trans "Active, on no team" %}</div>
         </div>
-
-        <div class="card bg-base-100 shadow border-l-4 {% if attention.attendance.turnout is None %}border-info{% elif attention.attendance.turnout < 30 %}border-error{% elif attention.attendance.turnout < 65 %}border-warning{% else %}border-success{% endif %}">
-            <div class="card-body p-4">
-                <div class="flex items-center gap-2 text-sm opacity-70 mb-3">{% lucide "user-check" size=16 %} {% trans "Attendance rate" %}</div>
-                <div class="text-4xl font-bold tabular-nums font-mono">
-                    {% if attention.attendance.turnout is None %}
-                        {% trans "N/A" %}
-                    {% else %}
-                        {{ attention.attendance.turnout }}%
-                    {% endif %}
-                </div>
-                <div class="text-xs opacity-60">
-                    {% if attention.attendance.turnout is None %}
-                        {% trans "No events this season" %}
-                    {% else %}
-                        <progress class="progress w-full {% if attention.attendance.turnout < 30 %}progress-error{% elif attention.attendance.turnout < 65 %}progress-warning{% else %}progress-success{% endif %}"
-                                  value="{{ attention.attendance.turnout }}" max="100"></progress>
-                    {% endif %}
-                </div>
-            </div>
+        <div class="card min-w-0 flex-1 p-4">
+            <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "New members" %}</div>
+            <div class="mt-1 font-display text-[34px] leading-none font-extrabold text-ink tabular-nums">{{ attention.new_members }}</div>
+            <div class="mt-1 text-[13px] text-muted">{% trans "First season at this club" %}</div>
         </div>
+        <div class="card min-w-0 flex-1 p-4">
+            <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Attendance" %}</div>
+            <div class="mt-1 font-display text-[34px] leading-none font-extrabold text-ink tabular-nums">{% if attention.attendance.turnout is None %}—{% else %}{{ attention.attendance.turnout }}%{% endif %}</div>
+            <div class="mt-1 text-[13px] text-muted">{% if attention.attendance.turnout is None %}{% trans "No events this season" %}{% else %}{% trans "Turnout this season" %}{% endif %}</div>
+        </div>
+        {% if requirements_configured %}
+            <div class="card min-w-0 flex-1 p-4">
+                <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Missing documentation" %}</div>
+                <div class="mt-1 font-display text-[34px] leading-none font-extrabold tabular-nums {% if missing_documentation_count %}text-warn{% else %}text-ink{% endif %}">{{ missing_documentation_count }}</div>
+                <div class="mt-1 text-[13px] text-muted">{% trans "Members with an open checklist item" %}</div>
+            </div>
+        {% endif %}
     </div>
 
-    <div class="mb-6 grid gap-4 lg:grid-cols-2">
-        <div class="card bg-base-100 shadow">
-            <div class="card-body">
-                <div class="flex flex-wrap items-center justify-between gap-2">
-                    <h2 class="card-title text-base">{% lucide "calendar" size=18 %} {% trans "Upcoming events" %}</h2>
-                    <a class="btn btn-outline btn-sm gap-2" href="{% url 'management:event_list' %}">{% lucide "arrow-right" size=14 %} {% trans "View all" %}</a>
+    <div class="grid grid-cols-1 gap-5 xl:grid-cols-[1.35fr_1fr]">
+        {# --- left: needs attention + signups ----------------------------- #}
+        <div class="flex flex-col gap-5">
+            <div class="card flex flex-col">
+                <div class="flex items-center border-b border-line px-4.5 py-3.5">
+                    <span class="font-display text-base font-extrabold tracking-[.08em] text-ink uppercase">{% trans "Needs attention" %}</span>
                 </div>
-                <ul class="divide-y divide-base-200">
-                    {% for event in upcoming_events %}
-                        <li class="flex flex-col gap-1 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-                            <div class="min-w-0">
-                                <div class="truncate font-semibold">{{ event.title }}</div>
-                                <div class="truncate text-xs opacity-60">
-                                    {{ event.get_kind_display }}
-                                    {% for team in event.teams.all %}&middot; {{ team.short_name }}{% if not forloop.last %}, {% endif %}{% endfor %}
-                                </div>
+                <div class="flex flex-col">
+                    {% if attention.pending_approvals %}
+                        <div class="flex items-center gap-3.5 border-b border-rule px-4.5 py-3.5">
+                            <span class="h-8.5 w-1.5 shrink-0 rounded-sm bg-club"></span>
+                            <div class="flex-1">
+                                <div class="text-[15px] font-semibold text-ink">{% blocktrans count count=attention.pending_approvals %}{{ count }} membership awaiting approval{% plural %}{{ count }} memberships awaiting approval{% endblocktrans %}</div>
                             </div>
-                            <div class="shrink-0 whitespace-nowrap text-sm opacity-70">{{ event.start|date:"D j M, H:i" }}</div>
-                        </li>
-                    {% empty %}
-                        <li class="py-2 text-center text-sm opacity-60">{% trans "Nothing scheduled." %}</li>
-                    {% endfor %}
-                </ul>
-            </div>
-        </div>
-
-        <div class="card bg-base-100 shadow">
-            <div class="card-body">
-                <div class="flex flex-wrap items-center justify-between gap-2">
-                    <h2 class="card-title text-base">{% lucide "newspaper" size=18 %} {% trans "News" %}</h2>
-                    <a class="btn btn-outline btn-sm gap-2" href="{% url 'management:news_list' %}">{% lucide "arrow-right" size=14 %} {% trans "View all" %}</a>
-                </div>
-                <ul class="divide-y divide-base-200">
-                    {% for news_item in published_news %}
-                        <li class="flex flex-col gap-1 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-                            <a class="link link-hover truncate font-semibold" href="{% url 'management:news_detail' news_item.pk %}">{{ news_item.title }}</a>
-                            <span class="shrink-0 whitespace-nowrap text-sm opacity-70">{{ news_item.published_at|date:"D j M" }}</span>
-                        </li>
-                    {% empty %}
-                        <li class="py-2 text-center text-sm opacity-60">{% trans "Nothing published yet." %}</li>
-                    {% endfor %}
-                </ul>
-            </div>
-        </div>
-    </div>
-
-    {% if is_club_admin %}
-        {# Charts are desktop-only: three squeezed canvases stacked on a phone add scroll without adding much readability -- the same numbers already sit in the stat cards above. #}
-        <div class="mb-6 hidden gap-4 lg:grid lg:grid-cols-3">
-            <div class="card bg-base-100 shadow">
-                <div class="card-body">
-                    <h2 class="card-title text-base">{% lucide "user-plus" size=18 %} {% trans "Signups per month" %}</h2>
-                    <p class="text-sm opacity-70">{% trans "New members against returning ones." %}</p>
-                    <div class="h-56">
-                        <canvas id="signups-chart"></canvas>
-                    </div>
-                </div>
-            </div>
-
-            <div class="card bg-base-100 shadow">
-                <div class="card-body">
-                    <h2 class="card-title text-base">{% lucide "wallet" size=18 %} {% trans "Club fee status this season" %}</h2>
-                    <div class="h-56">
-                        <canvas id="fees-chart"></canvas>
-                    </div>
-                </div>
-            </div>
-
-            <div class="card bg-base-100 shadow">
-                <div class="card-body">
-                    <h2 class="card-title text-base">{% lucide "repeat" size=18 %} {% trans "Renewal rate" %}</h2>
-                    {% if attention.renewal_rate is None %}
-                        <p class="text-sm opacity-70">{% trans "No previous season to compare." %}</p>
-                    {% else %}
-                        <div class="h-56">
-                            <canvas id="renewal-chart"></canvas>
+                            <a class="btn btn-outline btn-sm" href="{% url 'management:member_list' %}?status=pending">{% trans "Review" %}</a>
                         </div>
                     {% endif %}
+                    {% if attention.teams_without_manager %}
+                        <div class="flex items-center gap-3.5 border-b border-rule px-4.5 py-3.5">
+                            <span class="h-8.5 w-1.5 shrink-0 rounded-sm bg-warn"></span>
+                            <div class="flex-1">
+                                <div class="text-[15px] font-semibold text-ink">{% blocktrans count count=attention.teams_without_manager %}{{ count }} team has no coach assigned{% plural %}{{ count }} teams have no coach assigned{% endblocktrans %}</div>
+                                <div class="text-[13px] text-muted">{% trans "Nobody can pick a squad for them" %}</div>
+                            </div>
+                            <a class="btn btn-outline btn-sm" href="{% url 'management:team_list' %}">{% trans "Assign" %}</a>
+                        </div>
+                    {% endif %}
+                    {% if attention.unrostered %}
+                        <div class="flex items-center gap-3.5 border-b border-rule px-4.5 py-3.5">
+                            <span class="h-8.5 w-1.5 shrink-0 rounded-sm bg-warn"></span>
+                            <div class="flex-1">
+                                <div class="text-[15px] font-semibold text-ink">{% blocktrans count count=attention.unrostered %}{{ count }} active member is on no team{% plural %}{{ count }} active members are on no team{% endblocktrans %}</div>
+                            </div>
+                            <a class="btn btn-outline btn-sm" href="{% url 'management:member_list' %}?unrostered=1">{% trans "Review" %}</a>
+                        </div>
+                    {% endif %}
+                    {% if missing_documentation_count %}
+                        <div class="flex items-center gap-3.5 border-b border-rule px-4.5 py-3.5">
+                            <span class="h-8.5 w-1.5 shrink-0 rounded-sm bg-warn"></span>
+                            <div class="flex-1">
+                                <div class="text-[15px] font-semibold text-ink">{% blocktrans count count=missing_documentation_count %}{{ count }} member has an open checklist item{% plural %}{{ count }} members have an open checklist item{% endblocktrans %}</div>
+                                <div class="text-[13px] text-muted">{% trans "Documents/medical certificates still outstanding" %}</div>
+                            </div>
+                            <a class="btn btn-outline btn-sm" href="{% url 'management:member_list' %}?docs=open">{% trans "Review" %}</a>
+                        </div>
+                    {% endif %}
+                    {% if not attention.pending_approvals and not attention.teams_without_manager and not attention.unrostered and not missing_documentation_count %}
+                        <div class="px-4.5 py-6 text-center text-sm text-muted">{% trans "Nothing needs attention." %}</div>
+                    {% endif %}
+                </div>
+            </div>
+
+            {% if is_club_admin %}
+                {# Financial/admin-only charts -- desktop-only canvases, same reasoning the old flat template gave: squeezed on a phone, and this surface is desktop-only anyway now. #}
+                <div class="grid grid-cols-1 gap-5 lg:grid-cols-3">
+                    <div class="card p-4.5">
+                        <div class="mb-3.5 font-display text-base font-extrabold tracking-[.08em] text-ink uppercase">{% trans "Signups per month" %}</div>
+                        <p class="mb-2 text-sm text-muted">{% trans "New members against returning ones." %}</p>
+                        <div class="h-44">
+                            <canvas id="signups-chart"></canvas>
+                        </div>
+                    </div>
+                    <div class="card p-4.5">
+                        <div class="mb-3.5 font-display text-base font-extrabold tracking-[.08em] text-ink uppercase">{% trans "Club fee status" %}</div>
+                        <div class="h-44">
+                            <canvas id="fees-chart"></canvas>
+                        </div>
+                    </div>
+                    <div class="card p-4.5">
+                        <div class="mb-3.5 font-display text-base font-extrabold tracking-[.08em] text-ink uppercase">{% trans "Renewal rate" %}</div>
+                        {% if attention.renewal_rate is None %}
+                            <p class="text-sm text-muted">{% trans "No previous season to compare." %}</p>
+                        {% else %}
+                            <div class="h-44">
+                                <canvas id="renewal-chart"></canvas>
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+            {% endif %}
+        </div>
+
+        {# --- right: this weekend + news ----------------------------------- #}
+        <div class="flex flex-col gap-5">
+            <div class="rounded-xl bg-ink p-4.5 text-white">
+                <div class="mb-3.5 font-display text-base font-extrabold tracking-[.08em] uppercase">{% trans "Upcoming" %}</div>
+                <div class="flex flex-col gap-3">
+                    {% for event in upcoming_events %}
+                        <div class="flex items-center gap-3">
+                            <div class="w-11 shrink-0 text-center">
+                                <div class="font-display text-[22px] leading-none font-extrabold">{{ event.start|date:"d" }}</div>
+                                <div class="font-display text-[10px] tracking-[.1em] text-on-dark-dim uppercase">{{ event.start|date:"D" }}</div>
+                            </div>
+                            <div class="min-w-0 flex-1">
+                                <a class="block truncate text-sm font-semibold hover:underline" href="{% url 'management:event_detail' event.pk %}">{{ event.title }}</a>
+                                <div class="font-mono text-xs text-on-dark-dim">{{ event.start|date:"H:i" }}</div>
+                            </div>
+                            <div class="flex max-w-[35%] shrink-0 flex-wrap items-center justify-end gap-1.5">
+                                {% for team in event.teams.all %}
+                                    <span class="inline-flex items-center rounded-full border border-on-dark-faint px-1.5 py-0.5 font-display text-[10px] font-bold tracking-[.06em] text-white uppercase">{{ team.short_name }}</span>
+                                {% endfor %}
+                            </div>
+                            <a class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-on-dark-faint text-on-dark-dim hover:border-white hover:text-white" href="{% url 'management:event_detail' event.pk %}" aria-label="{% trans "View event" %}">
+                                {% lucide "chevron-right" size=15 %}
+                            </a>
+                        </div>
+                        {% if not forloop.last %}<div class="h-px bg-hairline"></div>{% endif %}
+                    {% empty %}
+                        <div class="text-sm text-on-dark-dim">{% trans "Nothing scheduled." %}</div>
+                    {% endfor %}
+                </div>
+                <a class="mt-3.5 inline-flex items-center gap-1 font-mono text-[11px] text-on-dark-dim hover:text-white" href="{% url 'management:event_list' %}">{% trans "View calendar" %} &rarr;</a>
+            </div>
+
+            <div class="card flex-1 p-4.5">
+                <div class="mb-3.5 flex items-center justify-between">
+                    <span class="font-display text-base font-extrabold tracking-[.08em] text-ink uppercase">{% trans "News" %}</span>
+                    <a class="btn btn-outline btn-sm" href="{% url 'management:news_list' %}">{% trans "View all" %}</a>
+                </div>
+                <div class="divide-y">
+                    {% for news_item in published_news %}
+                        <div class="flex items-center justify-between gap-3 py-2.5">
+                            <a class="truncate text-sm font-semibold text-ink hover:underline" href="{% url 'management:news_detail' news_item.pk %}">{{ news_item.title }}</a>
+                            <span class="shrink-0 font-mono text-xs text-muted">{{ news_item.published_at|date:"j M" }}</span>
+                        </div>
+                    {% empty %}
+                        <div class="py-4 text-center text-sm text-muted">{% trans "Nothing published yet." %}</div>
+                    {% endfor %}
                 </div>
             </div>
         </div>
-    {% endif %}
+    </div>
 
-    <div class="grid gap-4 {% if is_club_admin %}md:grid-cols-4{% else %}md:grid-cols-3{% endif %}">
+    <div class="grid grid-cols-1 gap-3.5 {% if is_club_admin %}md:grid-cols-4{% else %}md:grid-cols-3{% endif %}">
         {% for group in groups %}
             {% if group.title != "Shop" or is_club_admin %}
-                <div class="card bg-base-100 shadow">
-                    <div class="card-body">
-                        <h2 class="card-title text-base">{% lucide group.icon size=18 %} {{ group.title }}</h2>
-                        <dl class="divide-y divide-base-200">
-                            {% for label, value in group.stats %}
-                                <div class="flex items-center justify-between py-2">
-                                    <dt class="text-sm opacity-70">{{ label }}</dt>
-                                    <dd class="font-semibold tabular-nums font-mono">{% if group.title == "Shop" and label == "Outstanding" or label == "Revenue" %}&euro;{% endif %}{{ value }}</dd>
-                                </div>
-                            {% endfor %}
-                        </dl>
-                    </div>
+                <div class="card p-4">
+                    <div class="mb-2 flex items-center gap-1.5 font-display text-sm font-extrabold tracking-[.06em] text-ink uppercase">{% lucide group.icon size=16 %} {{ group.title }}</div>
+                    <dl>
+                        {% for label, value in group.stats %}
+                            <div class="flex items-center justify-between py-1.5">
+                                <dt class="text-[13px] text-muted">{{ label }}</dt>
+                                <dd class="font-mono text-sm font-semibold text-ink">{% if group.title == "Shop" and label == "Outstanding" or label == "Revenue" %}&euro;{% endif %}{{ value }}</dd>
+                            </div>
+                        {% endfor %}
+                    </dl>
                 </div>
             {% endif %}
         {% endfor %}
@@ -209,96 +248,61 @@
         (() => {
             const data = JSON.parse(document.getElementById("chart-data").textContent);
             const renewalRate = JSON.parse(document.getElementById("renewal-rate-data").textContent);
-            const css = (name, fallback) => getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+            // The club's own accent (--color-club resolves through --tenant-club, set in
+            // base.html from Club.secondary_color) -- Chart.js paints to a canvas, so it
+            // needs the resolved colour, not the CSS variable reference itself.
+            const clubColor = getComputedStyle(document.documentElement).getPropertyValue("--color-club").trim() || "#E4002B";
+            const ink = "#3A4658";
+            const grid = "#EEF0F3";
+
             const signupsCanvas = document.getElementById("signups-chart");
+            if (signupsCanvas) {
+                new Chart(signupsCanvas, {
+                    type: "bar",
+                    data: {
+                        labels: data.signups.map((point) => point.month),
+                        datasets: [
+                            {label: "{{ new_label|escapejs }}", data: data.signups.map((point) => point.new), backgroundColor: "#0B1220"},
+                            {label: "{{ returning_label|escapejs }}", data: data.signups.map((point) => point.returning), backgroundColor: clubColor},
+                        ],
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {legend: {position: "bottom", labels: {color: ink, font: {family: "Barlow"}}}},
+                        scales: {
+                            x: {stacked: true, ticks: {color: ink}, grid: {display: false}},
+                            y: {stacked: true, beginAtZero: true, ticks: {color: ink, precision: 0}, grid: {color: grid}},
+                        },
+                    },
+                });
+            }
+
             const feesCanvas = document.getElementById("fees-chart");
+            if (feesCanvas) {
+                // Colour carries the meaning here -- unpaid must read as a problem, waived
+                // must not -- so the slices are pinned to the semantic tokens, in order.
+                new Chart(feesCanvas, {
+                    type: "pie",
+                    data: {
+                        labels: data.fees.map((slice) => slice.label),
+                        datasets: [{data: data.fees.map((slice) => slice.value), backgroundColor: ["#14A05A", "#F0A22E", "#E4002B", "#8B95A4"]}],
+                    },
+                    options: {responsive: true, maintainAspectRatio: false, plugins: {legend: {position: "bottom", labels: {color: ink}}}},
+                });
+            }
+
             const renewalCanvas = document.getElementById("renewal-chart");
-
-            const render = () => {
-                const ink = css("--color-base-content", "#333");
-                const grid = "color-mix(in oklab, " + ink + " 15%, transparent)";
-                const charts = [];
-
-                // Both canvases are admin-only -- absent entirely for a manager/coach,
-                // same gate as the Shop nav section and the rest of this row.
-                if (signupsCanvas) {
-                    // Stacked: the bar height stays "signups this month" while the split shows
-                    // where they came from. Side-by-side bars would answer a different question.
-                    charts.push(new Chart(signupsCanvas, {
-                        type: "bar",
-                        data: {
-                            labels: data.signups.map((point) => point.month),
-                            datasets: [
-                                {label: "{{ new_label|escapejs }}", data: data.signups.map((point) => point.new), backgroundColor: css("--color-primary", "#4f46e5")},
-                                {label: "{{ returning_label|escapejs }}", data: data.signups.map((point) => point.returning), backgroundColor: css("--color-accent", "#0ea5e9")},
-                            ],
-                        },
-                        options: {
-                            responsive: true,
-                            maintainAspectRatio: false,
-                            plugins: {legend: {position: "bottom", labels: {color: ink}}},
-                            scales: {
-                                x: {stacked: true, ticks: {color: ink}, grid: {color: grid}},
-                                y: {stacked: true, beginAtZero: true, ticks: {color: ink, precision: 0}, grid: {color: grid}},
-                            },
-                        },
-                    }));
-                }
-
-                if (feesCanvas) {
-                    // Colour carries the meaning here — unpaid must read as a problem, waived
-                    // must not — so the slices are pinned to the semantic theme colours, in order.
-                    charts.push(new Chart(feesCanvas, {
-                        type: "pie",
-                        data: {
-                            labels: data.fees.map((slice) => slice.label),
-                            datasets: [
-                                {
-                                    data: data.fees.map((slice) => slice.value),
-                                    backgroundColor: [css("--color-success", "#16a34a"), css("--color-warning", "#f59e0b"), css("--color-error", "#dc2626"), css("--color-neutral", "#6b7280")],
-                                },
-                            ],
-                        },
-                        options: {
-                            responsive: true,
-                            maintainAspectRatio: false,
-                            plugins: {legend: {position: "right", labels: {color: ink}}},
-                        },
-                    }));
-                }
-
-                if (renewalCanvas && renewalRate !== null) {
-                    // Same "colour carries the meaning" reasoning as the fee chart: a low
-                    // renewal rate reads as a problem, so it's pinned to error, not neutral.
-                    charts.push(new Chart(renewalCanvas, {
-                        type: "pie",
-                        data: {
-                            labels: ["{{ renewed_label|escapejs }}", "{{ not_renewed_label|escapejs }}"],
-                            datasets: [
-                                {
-                                    data: [renewalRate, 100 - renewalRate],
-                                    backgroundColor: [css("--color-success", "#16a34a"), css("--color-error", "#dc2626")],
-                                },
-                            ],
-                        },
-                        options: {
-                            responsive: true,
-                            maintainAspectRatio: false,
-                            plugins: {legend: {position: "right", labels: {color: ink}}},
-                        },
-                    }));
-                }
-
-                return charts;
-            };
-
-            let charts = render();
-
-            // "auto" removes data-theme entirely, so watch the attribute rather than a click.
-            new MutationObserver(() => {
-                charts.forEach((chart) => chart.destroy());
-                charts = render();
-            }).observe(document.documentElement, {attributes: true, attributeFilter: ["data-theme"]});
+            if (renewalCanvas && renewalRate !== null) {
+                new Chart(renewalCanvas, {
+                    type: "pie",
+                    data: {
+                        labels: ["{{ renewed_label|escapejs }}", "{{ not_renewed_label|escapejs }}"],
+                        datasets: [{data: [renewalRate, 100 - renewalRate], backgroundColor: ["#14A05A", "#E4002B"]}],
+                    },
+                    options: {responsive: true, maintainAspectRatio: false, plugins: {legend: {position: "bottom", labels: {color: ink}}}},
+                });
+            }
         })();
     </script>
 {% endblock extra_body %}

@@ -2,7 +2,19 @@
 {% load lucide ui i18n static %}
 
 {% block heading %}{{ member.get_full_name }}{% endblock heading %}
-{% block subheading %}{{ member.contact_email }}{% endblock subheading %}
+
+{% block topbar_context %}
+    {% if member.contact_email %}<span class="font-mono text-[13px] text-muted">{{ member.contact_email }}</span>{% endif %}
+    {% if current_membership %}
+        <span class="badge
+            {% if current_membership.status == "active" %}badge-success
+            {% elif current_membership.status == "pending" %}badge-warning
+            {% elif current_membership.status == "cancelled" %}badge-error
+            {% else %}badge-neutral{% endif %}">
+            {{ current_membership.get_status_display }}
+        </span>
+    {% endif %}
+{% endblock topbar_context %}
 
 {% block actions %}
     {% if is_club_admin %}
@@ -12,63 +24,60 @@
 
 {% block panel %}
     <div class="grid gap-4 lg:grid-cols-2">
-        <div class="card bg-base-100 shadow">
-            <div class="card-body">
-                <h2 class="card-title text-base">{% lucide "user" size=18 %} {% trans "Personal information" %}</h2>
-                <dl class="divide-y divide-base-200">
-                    <div class="flex flex-col gap-0.5 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-                        <dt class="text-sm opacity-70">{% trans "Date of birth" %}</dt>
-                        <dd class="font-semibold sm:text-right">{{ member.date_of_birth|default:"-" }}</dd>
-                    </div>
-                    <div class="flex flex-col gap-0.5 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-                        <dt class="text-sm opacity-70">{% trans "Phone" %}</dt>
-                        <dd class="font-semibold sm:text-right">{{ member.phone.as_international|default:"-" }}</dd>
-                    </div>
-                    <div class="flex flex-col gap-0.5 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-                        <dt class="text-sm opacity-70">{% trans "Emergency phone" %}</dt>
-                        <dd class="font-semibold sm:text-right">{{ member.emergency_phone.as_international|default:"-" }}</dd>
-                    </div>
-                    {% for guardian in guardians %}
-                        <div class="flex flex-col gap-0.5 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-                            <dt class="text-sm opacity-70">{% trans "Parent phone" %} — {{ guardian.get_full_name }}</dt>
-                            <dd class="font-semibold sm:text-right">{{ guardian.phone.as_international|default:"-" }}</dd>
-                        </div>
-                        <div class="flex flex-col gap-0.5 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-                            <dt class="text-sm opacity-70">{% trans "Parent emergency phone" %} — {{ guardian.get_full_name }}</dt>
-                            <dd class="font-semibold sm:text-right">{{ guardian.emergency_phone.as_international|default:"-" }}</dd>
-                        </div>
-                    {% endfor %}
-                </dl>
-
-                {# flex-col below `sm`: a button's own label never wraps, so two grow buttons side by side in a fixed row push wider than the screen once either label is long -- stacking avoids that regardless of label length. #}
-                <div class="flex flex-col gap-2 sm:flex-row sm:items-center mt-2">
-                    {% if member.phone %}
-                        <a class="btn btn-sm btn-outline btn-primary sm:grow" href="tel:{{ member.phone.as_international }}">{% lucide "phone" size=14 %} {% trans "Call" %}</a>
-                    {% endif %}
-                    {% if member.emergency_phone %}
-                        <a class="btn btn-sm btn-outline btn-error sm:grow" href="tel:{{ member.emergency_phone.as_international }}">{% lucide "shield-alert" size=14 %} {% trans "Emergency call" %}</a>
-                    {% endif %}
+        <div class="card card-body">
+            <h2 class="card-title">{% lucide "user" size=18 %} {% trans "Personal information" %}</h2>
+            <dl>
+                <div class="flex items-center justify-between gap-4 py-2">
+                    <dt class="text-sm text-muted">{% trans "Date of birth" %}</dt>
+                    <dd class="font-mono text-sm font-semibold text-ink">{{ member.date_of_birth|default:"—" }}</dd>
                 </div>
-
-                {% if guardians %}
-                    <div class="divider my-1"></div>
-                    <div class="text-xs font-semibold uppercase opacity-60 flex items-center gap-1 mb-1">
-                        {% lucide "users" size=12 %} {% trans "Parent/guardian contact" %}
+                <div class="flex items-center justify-between gap-4 py-2">
+                    <dt class="text-sm text-muted">{% trans "Phone" %}</dt>
+                    <dd class="font-mono text-sm font-semibold text-ink">{{ member.phone.as_international|default:"—" }}</dd>
+                </div>
+                <div class="flex items-center justify-between gap-4 py-2">
+                    <dt class="text-sm text-muted">{% trans "Emergency phone" %}</dt>
+                    <dd class="font-mono text-sm font-semibold text-ink">{{ member.emergency_phone.as_international|default:"—" }}</dd>
+                </div>
+                {% for guardian in guardians %}
+                    <div class="flex items-center justify-between gap-4 py-2">
+                        <dt class="text-sm text-muted">{% trans "Parent phone" %} — {{ guardian.get_full_name }}</dt>
+                        <dd class="font-mono text-sm font-semibold text-ink">{{ guardian.phone.as_international|default:"—" }}</dd>
                     </div>
-                    {% for guardian in guardians %}
-                        {% if guardian.phone or guardian.emergency_phone %}
-                            <div class="flex flex-col gap-2 sm:flex-row sm:items-center mt-2">
-                                {% if guardian.phone %}
-                                    <a class="btn btn-sm btn-outline btn-primary sm:grow" href="tel:{{ guardian.phone.as_international }}">{% lucide "phone" size=14 %} {% blocktrans with name=guardian.get_full_name %}Call {{ name }}{% endblocktrans %}</a>
-                                {% endif %}
-                                {% if guardian.emergency_phone %}
-                                    <a class="btn btn-sm btn-outline btn-error sm:grow" href="tel:{{ guardian.emergency_phone.as_international }}">{% lucide "shield-alert" size=14 %} {% blocktrans with name=guardian.get_full_name %}Emergency: {{ name }}{% endblocktrans %}</a>
-                                {% endif %}
-                            </div>
-                        {% endif %}
-                    {% endfor %}
+                    <div class="flex items-center justify-between gap-4 py-2">
+                        <dt class="text-sm text-muted">{% trans "Parent emergency phone" %} — {{ guardian.get_full_name }}</dt>
+                        <dd class="font-mono text-sm font-semibold text-ink">{{ guardian.emergency_phone.as_international|default:"—" }}</dd>
+                    </div>
+                {% endfor %}
+            </dl>
+
+            <div class="mt-2 flex flex-wrap items-center gap-2">
+                {% if member.phone %}
+                    <a class="btn btn-outline btn-info btn-sm gap-2 flex-1" href="tel:{{ member.phone.as_international }}">{% lucide "phone" size=14 %} {% trans "Call" %}</a>
+                {% endif %}
+                {% if member.emergency_phone %}
+                    <a class="btn btn-outline btn-error btn-sm gap-2 flex-1" href="tel:{{ member.emergency_phone.as_international }}">{% lucide "shield-alert" size=14 %} {% trans "Emergency call" %}</a>
                 {% endif %}
             </div>
+
+            {% if guardians %}
+                <div class="my-1 h-px bg-rule"></div>
+                <div class="mb-1 flex items-center gap-1.5 font-display text-xs font-bold tracking-[.1em] text-muted uppercase">
+                    {% lucide "users" size=12 %} {% trans "Parent/guardian contact" %}
+                </div>
+                {% for guardian in guardians %}
+                    {% if guardian.phone or guardian.emergency_phone %}
+                        <div class="mt-2 flex flex-wrap items-center gap-2">
+                            {% if guardian.phone %}
+                                <a class="btn btn-outline btn-info btn-sm gap-2 flex-1" href="tel:{{ guardian.phone.as_international }}">{% lucide "phone" size=14 %} {% blocktrans with name=guardian.get_full_name %}Call {{ name }}{% endblocktrans %}</a>
+                            {% endif %}
+                            {% if guardian.emergency_phone %}
+                                <a class="btn btn-outline btn-error btn-sm gap-2 flex-1" href="tel:{{ guardian.emergency_phone.as_international }}">{% lucide "shield-alert" size=14 %} {% blocktrans with name=guardian.get_full_name %}Emergency: {{ name }}{% endblocktrans %}</a>
+                            {% endif %}
+                        </div>
+                    {% endif %}
+                {% endfor %}
+            {% endif %}
         </div>
 
         {% comment %}
@@ -76,126 +85,189 @@
             actually ties this person to *this* club, so it gets its own panel: the
             current season's standing, plus every season they've been part of.
         {% endcomment %}
-        <div class="card bg-base-100 shadow">
-            <div class="card-body">
-                <h2 class="card-title text-base">{% lucide "id-card" size=18 %} {% trans "Club membership" %}</h2>
-                {% if current_membership %}
-                    {% if current_membership.is_guardian %}
-                        {% comment %}
-                            Stated plainly rather than left to be inferred from an empty
-                            fee: a guardian is deliberately missing from the member list
-                            and every member count, and someone looking at this page needs
-                            to know that is on purpose. See club.models.ClubMembership.Kind.
-                        {% endcomment %}
-                        <div class="alert alert-warning py-2 my-1">
-                            {% lucide "users" size=16 %}
-                            <span class="text-sm">{% trans "Guardian: attached to the club as a parent of a member. Holds the login, owes no fee, and is not counted as a member." %}</span>
-                        </div>
-                    {% endif %}
-                    <dl class="divide-y divide-base-200">
-                        <div class="flex flex-col gap-0.5 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-                            <dt class="text-sm opacity-70">{% trans "Joined as" %}</dt>
-                            <dd class="font-semibold sm:text-right">{{ current_membership.get_kind_display|capfirst }}</dd>
-                        </div>
-                        <div class="flex flex-col gap-0.5 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-                            <dt class="text-sm opacity-70">{% trans "License" %}</dt>
-                            <dd class="font-semibold sm:text-right">{{ current_membership.license|default:"-" }}</dd>
-                        </div>
-                        <div class="flex flex-col gap-0.5 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-                            <dt class="text-sm opacity-70">{% trans "Status" %}</dt>
-                            <dd class="font-semibold sm:text-right">{{ current_membership.get_status_display }}</dd>
-                        </div>
-                        {% if not current_membership.is_guardian %}
-                            <div class="flex flex-col gap-0.5 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-                                <dt class="text-sm opacity-70">{% trans "Fee status" %}</dt>
-                                <dd class="font-semibold sm:text-right">{{ current_membership.get_fee_status_display }}</dd>
-                            </div>
-                        {% endif %}
-                    </dl>
-                {% else %}
-                    <p class="text-sm opacity-60">{% trans "Not rostered for the current season." %}</p>
-                {% endif %}
-
-                {% if membership_history %}
-                    <div class="divider"></div>
-                    <h3 class="text-sm font-semibold opacity-70">{% trans "Season history" %}</h3>
-                    <div class="overflow-x-auto">
-                        <table class="table table-cards">
-                            <thead>
-                                <tr>
-                                    <th>{% trans "Season" %}</th>
-                                    <th>{% trans "Status" %}</th>
-                                    <th>{% trans "Fee status" %}</th>
-                                    <th>{% trans "License" %}</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for membership in membership_history %}
-                                    <tr>
-                                        <td class="font-semibold">{{ membership.season.start_date|date:"Y" }} - {{ membership.season.end_date|date:"Y" }}</td>
-                                        <td data-label="{% trans 'Status' %}">{{ membership.get_status_display }}</td>
-                                        <td data-label="{% trans 'Fee status' %}">{{ membership.get_fee_status_display }}</td>
-                                        <td data-label="{% trans 'License' %}">{{ membership.license|default:"-" }}</td>
-                                    </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
+        <div class="card card-body">
+            <h2 class="card-title">{% lucide "id-card" size=18 %} {% trans "Club membership" %}</h2>
+            {% if current_membership %}
+                {% if current_membership.is_guardian %}
+                    {% comment %}
+                        Stated plainly rather than left to be inferred from an empty
+                        fee: a guardian is deliberately missing from the member list
+                        and every member count, and someone looking at this page needs
+                        to know that is on purpose. See club.models.ClubMembership.Kind.
+                    {% endcomment %}
+                    <div class="alert alert-warning">
+                        {% lucide "users" size=16 %}
+                        <span>{% trans "Guardian: attached to the club as a parent of a member. Holds the login, owes no fee, and is not counted as a member." %}</span>
                     </div>
                 {% endif %}
-            </div>
+                <dl>
+                    <div class="flex items-center justify-between gap-4 py-2">
+                        <dt class="text-sm text-muted">{% trans "Joined as" %}</dt>
+                        <dd class="text-sm font-semibold text-ink">{{ current_membership.get_kind_display|capfirst }}</dd>
+                    </div>
+                    <div class="flex items-center justify-between gap-4 py-2">
+                        <dt class="text-sm text-muted">{% trans "License" %}</dt>
+                        <dd class="font-mono text-sm font-semibold text-ink">{{ current_membership.license|default:"—" }}</dd>
+                    </div>
+                    <div class="flex items-center justify-between gap-4 py-2">
+                        <dt class="text-sm text-muted">{% trans "Status" %}</dt>
+                        <dd>
+                            <span class="badge badge-sm
+                                {% if current_membership.status == "active" %}badge-success
+                                {% elif current_membership.status == "pending" %}badge-warning
+                                {% elif current_membership.status == "cancelled" %}badge-error
+                                {% else %}badge-neutral{% endif %}">
+                                {{ current_membership.get_status_display }}
+                            </span>
+                        </dd>
+                    </div>
+                    {% if not current_membership.is_guardian %}
+                        <div class="flex items-center justify-between gap-4 py-2">
+                            <dt class="text-sm text-muted">{% trans "Fee status" %}</dt>
+                            <dd>
+                                <span class="badge badge-sm
+                                    {% if current_membership.fee_status == "paid" %}badge-success
+                                    {% elif current_membership.fee_status == "partially_paid" %}badge-warning
+                                    {% elif current_membership.fee_status == "unpaid" %}badge-error
+                                    {% else %}badge-ghost{% endif %}">
+                                    {{ current_membership.get_fee_status_display }}
+                                </span>
+                            </dd>
+                        </div>
+                    {% endif %}
+                </dl>
+            {% else %}
+                <p class="text-sm text-muted">{% trans "Not rostered for the current season." %}</p>
+            {% endif %}
+
+            {% if membership_history %}
+                <div class="my-1 h-px bg-rule"></div>
+                <h3 class="font-display text-xs font-bold tracking-[.1em] text-muted uppercase">{% trans "Season history" %}</h3>
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>{% trans "Season" %}</th>
+                            <th>{% trans "Status" %}</th>
+                            <th>{% trans "Fee status" %}</th>
+                            <th>{% trans "License" %}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for membership in membership_history %}
+                            <tr>
+                                <td class="font-semibold">{{ membership.season.start_date|date:"Y" }} - {{ membership.season.end_date|date:"Y" }}</td>
+                                <td>{{ membership.get_status_display }}</td>
+                                <td>{{ membership.get_fee_status_display }}</td>
+                                <td class="font-mono text-xs">{{ membership.license|default:"—" }}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            {% endif %}
         </div>
     </div>
 
-    {% if referee_profile or is_club_admin %}
-        <div class="card bg-base-100 shadow mt-4">
-            <div class="card-body">
-                <div class="flex flex-wrap items-center justify-between gap-2">
-                    <h2 class="card-title text-base">{% lucide "flag" size=18 %} {% trans "Referee eligibility" %}</h2>
-                    {% if is_club_admin %}
-                        <button class="btn btn-outline btn-sm gap-2" type="button" onclick="document.getElementById('referee_eligibility_modal').showModal()">{% lucide "pencil" size=14 %} {% trans "Edit" %}</button>
-                    {% endif %}
-                </div>
-
-                {% if referee_profile and referee_profile.level %}
-                    <dl class="divide-y divide-base-200">
-                        <div class="flex flex-col gap-0.5 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-                            <dt class="text-sm opacity-70">{% trans "Level" %}</dt>
-                            <dd class="font-semibold sm:text-right">{{ referee_profile.level }}</dd>
-                        </div>
-                        <div class="flex flex-col gap-0.5 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-                            <dt class="text-sm opacity-70">{% trans "Valid until" %}</dt>
-                            <dd class="font-semibold flex items-center gap-2">
-                                {{ referee_profile.valid_until|default:"—" }}
-                                {% if referee_profile.is_currently_valid %}
-                                    <span class="badge badge-success badge-sm">{% trans "Valid" %}</span>
-                                {% elif referee_profile.valid_until %}
-                                    <span class="badge badge-error badge-sm">{% trans "Expired" %}</span>
+    {% comment %}
+        Onboarding checklist -- club.services.onboarding.checklist_for, paired with
+        MemberRequirementStatus if one exists. Any staff can mark an item done or
+        reopen it, not just admins (same visibility as the rest of this page) --
+        see the module docstring on club/services/onboarding.py for why this stays
+        separate from ClubMembership.status/fee_status.
+    {% endcomment %}
+    <div class="card card-body mt-4">
+        <h2 class="card-title">{% lucide "clipboard-check" size=18 %} {% trans "Documents" %}</h2>
+        {% if not current_membership %}
+            <p class="text-sm text-muted">{% trans "Not rostered for the current season -- nothing to check off yet." %}</p>
+        {% elif not checklist %}
+            <p class="text-sm text-muted">{% trans "This club has no onboarding requirements set up." %}</p>
+        {% else %}
+            <div class="flex flex-col gap-1">
+                {% for requirement, status in checklist %}
+                    <div class="flex items-start justify-between gap-4 py-3">
+                        <div class="min-w-0 flex-1">
+                            <div class="flex flex-wrap items-center gap-2">
+                                <span class="font-semibold text-ink">{{ requirement.name }}</span>
+                                {% if status.is_complete %}
+                                    <span class="badge badge-sm badge-success">{% trans "Complete" %}</span>
+                                {% elif status %}
+                                    <span class="badge badge-sm badge-warning">{% trans "Incomplete" %}</span>
                                 {% else %}
-                                    <span class="badge badge-warning badge-sm">{% trans "No validity set" %}</span>
+                                    <span class="badge badge-sm badge-ghost">{% trans "Not started" %}</span>
                                 {% endif %}
-                            </dd>
+                            </div>
+                            {% if requirement.description %}<p class="mt-1 text-sm text-muted">{{ requirement.description }}</p>{% endif %}
+                            {% if status.is_complete %}
+                                <p class="mt-1 font-mono text-xs text-dim">{% blocktrans with who=status.completed_by when=status.completed_at|date:"j M Y H:i" %}Completed by {{ who }} on {{ when }}{% endblocktrans %}</p>
+                            {% endif %}
+                            {% if status.note %}<p class="mt-1 text-sm text-slate italic">&ldquo;{{ status.note }}&rdquo;</p>{% endif %}
+                            {% if status.document %}
+                                <a class="mt-1 inline-flex items-center gap-1 text-sm link link-hover" href="{% url 'management:member_requirement_document' pk=member.pk requirement_pk=requirement.pk %}">{% lucide "download" size=13 %} {% trans "Download document" %}</a>
+                            {% endif %}
                         </div>
-                    </dl>
+                        <div class="flex shrink-0 items-center gap-1.5">
+                            {% if status.is_complete %}
+                                <form method="post" action="{% url 'management:member_requirement_incomplete' pk=member.pk requirement_pk=requirement.pk %}">
+                                    {% csrf_token %}
+                                    <button class="btn btn-outline btn-xs gap-1" type="submit">{% lucide "rotate-ccw" size=12 %} {% trans "Reopen" %}</button>
+                                </form>
+                            {% else %}
+                                <button class="btn btn-primary btn-xs gap-1" type="button" onclick="document.getElementById('{{ requirement.pk|dom_id:"requirement_complete_modal" }}').showModal()">{% lucide "check" size=12 %} {% trans "Mark complete" %}</button>
+                            {% endif %}
+                        </div>
+                    </div>
+                {% endfor %}
+            </div>
+        {% endif %}
+    </div>
 
-                    {% if referee_profile.is_eligible %}
-                        <div class="text-xs font-semibold uppercase opacity-60 mt-2 mb-1">{% trans "Can referee for" %}</div>
-                        <div class="flex flex-wrap gap-2">
-                            {% for team in referee_profile.eligible_teams %}
-                                <span class="badge badge-outline">{{ team.name }}</span>
-                            {% empty %}
-                                <span class="text-sm opacity-60">{% trans "This level has no teams linked yet." %}</span>
-                            {% endfor %}
-                        </div>
-                    {% else %}
-                        <div class="alert alert-warning mt-2">
-                            {% lucide "triangle-alert" size=16 %}
-                            <span>{% trans "Not currently eligible to referee -- set or extend the validity date above to reinstate them." %}</span>
-                        </div>
-                    {% endif %}
-                {% else %}
-                    <p class="text-sm opacity-60">{% trans "Not eligible to referee for any team." %}</p>
+    {% if referee_profile or is_club_admin %}
+        <div class="card card-body mt-4">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+                <h2 class="card-title">{% lucide "flag" size=18 %} {% trans "Referee eligibility" %}</h2>
+                {% if is_club_admin %}
+                    <button class="btn btn-outline btn-sm gap-2" type="button" onclick="document.getElementById('referee_eligibility_modal').showModal()">{% lucide "pencil" size=14 %} {% trans "Edit" %}</button>
                 {% endif %}
             </div>
+
+            {% if referee_profile and referee_profile.level %}
+                <dl>
+                    <div class="flex items-center justify-between gap-4 py-2">
+                        <dt class="text-sm text-muted">{% trans "Level" %}</dt>
+                        <dd class="text-sm font-semibold text-ink">{{ referee_profile.level }}</dd>
+                    </div>
+                    <div class="flex items-center justify-between gap-4 py-2">
+                        <dt class="text-sm text-muted">{% trans "Valid until" %}</dt>
+                        <dd class="flex items-center gap-2">
+                            <span class="font-mono text-sm font-semibold text-ink">{{ referee_profile.valid_until|default:"—" }}</span>
+                            {% if referee_profile.is_currently_valid %}
+                                <span class="badge badge-sm badge-success">{% trans "Valid" %}</span>
+                            {% elif referee_profile.valid_until %}
+                                <span class="badge badge-sm badge-error">{% trans "Expired" %}</span>
+                            {% else %}
+                                <span class="badge badge-sm badge-warning">{% trans "No validity set" %}</span>
+                            {% endif %}
+                        </dd>
+                    </div>
+                </dl>
+
+                {% if referee_profile.is_eligible %}
+                    <div class="mt-2 mb-1 font-display text-xs font-bold tracking-[.1em] text-muted uppercase">{% trans "Can referee for" %}</div>
+                    <div class="flex flex-wrap gap-2">
+                        {% for team in referee_profile.eligible_teams %}
+                            <span class="badge badge-outline">{{ team.name }}</span>
+                        {% empty %}
+                            <span class="text-sm text-muted">{% trans "This level has no teams linked yet." %}</span>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <div class="alert alert-warning mt-2">
+                        {% lucide "triangle-alert" size=16 %}
+                        <span>{% trans "Not currently eligible to referee -- set or extend the validity date above to reinstate them." %}</span>
+                    </div>
+                {% endif %}
+            {% else %}
+                <p class="text-sm text-muted">{% trans "Not eligible to referee for any team." %}</p>
+            {% endif %}
         </div>
 
         {% if is_club_admin %}
@@ -213,23 +285,21 @@
     {% trans "Remove from family" as remove_from_family_title %}
     {% trans "Remove" as remove_label %}
     {% for family_group in family_groups %}
-        <div class="card bg-base-100 shadow mt-4">
-            <div class="card-body">
-                <div class="flex flex-wrap items-center justify-between gap-2">
-                    <h2 class="card-title text-base">
-                        {% lucide "users" size=18 %}
-                        <a class="link link-hover" href="{% url 'management:family_detail' family_group.family.pk %}">{{ family_group.family }}</a>
-                    </h2>
-                    {% if is_club_admin %}
-                        <div class="flex flex-wrap gap-2">
-                            <button class="btn btn-outline btn-sm gap-2" type="button" onclick="document.getElementById('{{ family_group.family.pk|dom_id:"add_parent_modal" }}').showModal()">{% lucide "user-plus" size=14 %} {{ add_parent_label }}</button>
-                            <button class="btn btn-outline btn-sm gap-2" type="button" onclick="document.getElementById('{{ family_group.family.pk|dom_id:"add_child_modal" }}').showModal()">{% lucide "baby" size=14 %} {{ add_child_label }}</button>
-                            <button class="btn btn-outline btn-error btn-sm gap-2" type="button" onclick="document.getElementById('{{ family_group.family.pk|dom_id:"detach_family_modal" }}').showModal()">{% lucide "user-x" size=14 %} {{ remove_from_family_label }}</button>
-                        </div>
-                    {% endif %}
-                </div>
-                {% include "management/_family_members_table.html" with group=family_group next_url=request.path %}
+        <div class="card card-body mt-4">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+                <h2 class="card-title">
+                    {% lucide "users" size=18 %}
+                    <a class="link link-hover" href="{% url 'management:family_detail' family_group.family.pk %}">{{ family_group.family }}</a>
+                </h2>
+                {% if is_club_admin %}
+                    <div class="flex flex-wrap gap-2">
+                        <button class="btn btn-outline btn-sm gap-2" type="button" onclick="document.getElementById('{{ family_group.family.pk|dom_id:"add_parent_modal" }}').showModal()">{% lucide "user-plus" size=14 %} {{ add_parent_label }}</button>
+                        <button class="btn btn-outline btn-sm gap-2" type="button" onclick="document.getElementById('{{ family_group.family.pk|dom_id:"add_child_modal" }}').showModal()">{% lucide "baby" size=14 %} {{ add_child_label }}</button>
+                        <button class="btn btn-outline btn-error btn-sm gap-2" type="button" onclick="document.getElementById('{{ family_group.family.pk|dom_id:"detach_family_modal" }}').showModal()">{% lucide "user-x" size=14 %} {{ remove_from_family_label }}</button>
+                    </div>
+                {% endif %}
             </div>
+            {% include "management/_family_members_table.html" with group=family_group next_url=request.path %}
         </div>
 
         {% if is_club_admin %}
@@ -244,16 +314,14 @@
     {% endfor %}
 
     {% if is_club_admin %}
-        <div class="card bg-base-100 shadow mt-4">
-            <div class="card-body">
-                <div class="flex flex-wrap items-center justify-between gap-2">
-                    <h2 class="card-title text-base">{% lucide "users" size=18 %} {% trans "Family" %}</h2>
-                    <button class="btn btn-outline btn-sm gap-2" type="button" onclick="document.getElementById('attach_family_modal').showModal()">{% lucide "user-plus" size=14 %} {% trans "Add to family" %}</button>
-                </div>
-                {% if not family_groups %}
-                    <p class="text-sm opacity-60">{% trans "Not part of a family." %}</p>
-                {% endif %}
+        <div class="card card-body mt-4">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+                <h2 class="card-title">{% lucide "users" size=18 %} {% trans "Family" %}</h2>
+                <button class="btn btn-outline btn-sm gap-2" type="button" onclick="document.getElementById('attach_family_modal').showModal()">{% lucide "user-plus" size=14 %} {% trans "Add to family" %}</button>
             </div>
+            {% if not family_groups %}
+                <p class="text-sm text-muted">{% trans "Not part of a family." %}</p>
+            {% endif %}
         </div>
 
         {% url 'management:member_attach_family' member.pk as attach_family_url %}
@@ -262,6 +330,36 @@
         {% trans "Pick an existing family, or leave it blank to start a new one." as attach_family_blurb %}
         {% include "controlpanel/_modal_form.html" with modal_id="attach_family_modal" title=add_to_family_title form=attach_to_family_form action_url=attach_family_url submit_label=add_label submit_icon="user-plus" blurb=attach_family_blurb %}
     {% endif %}
+
+    {% for requirement, status in checklist %}
+        {% if not status.is_complete %}
+            <dialog id="{{ requirement.pk|dom_id:"requirement_complete_modal" }}" class="modal">
+                <div class="modal-box">
+                    <h3 class="font-display text-lg font-extrabold text-ink uppercase">{% blocktrans with name=requirement.name %}Mark “{{ name }}” complete{% endblocktrans %}</h3>
+                    <form method="post" action="{% url 'management:member_requirement_complete' pk=member.pk requirement_pk=requirement.pk %}" id="{{ requirement.pk|dom_id:"requirement_complete_form" }}" enctype="multipart/form-data">
+                        {% csrf_token %}
+                        <div class="form-control my-3">
+                            <label class="label-text" for="{{ requirement.pk|dom_id:"requirement_document" }}">{% trans "Document" %}</label>
+                            <input class="file-input mt-1" type="file" name="document" id="{{ requirement.pk|dom_id:"requirement_document" }}">
+                        </div>
+                        <div class="form-control my-3">
+                            <label class="label-text" for="{{ requirement.pk|dom_id:"requirement_note" }}">{% trans "Note" %}</label>
+                            <textarea class="textarea mt-1" name="note" id="{{ requirement.pk|dom_id:"requirement_note" }}" rows="2"></textarea>
+                        </div>
+                    </form>
+                    <div class="modal-action">
+                        <form method="dialog">
+                            <button class="btn btn-outline gap-2">{% lucide "x" size=16 %} {% trans "Cancel" %}</button>
+                        </form>
+                        <button class="btn btn-primary gap-2" type="submit" form="{{ requirement.pk|dom_id:"requirement_complete_form" }}">{% lucide "check" size=16 %} {% trans "Mark complete" %}</button>
+                    </div>
+                </div>
+                <form method="dialog" class="modal-backdrop">
+                    <button>close</button>
+                </form>
+            </dialog>
+        {% endif %}
+    {% endfor %}
 {% endblock panel %}
 
 {% block extra_body %}

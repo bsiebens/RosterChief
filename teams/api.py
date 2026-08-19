@@ -7,6 +7,7 @@ request cycle.
 import uuid
 from itertools import groupby
 
+from django.db.models import F
 from ninja import Router, Schema
 from ninja.errors import HttpError
 
@@ -84,7 +85,15 @@ def build_roster(team, request) -> RosterOut:
 
     photo = TeamPhoto.objects.filter(team=team, season=season).first()
 
-    memberships = TeamMembership.objects.filter(team=team, season=season).select_related("member", "position").order_by("position__ordering", "position__name", "jersey_number")
+    # nulls_last: a roster spot placed from the Sign-up page (management.forms.
+    # SignupTeamPlacementForm) has no position yet -- those trail every real
+    # position group instead of sorting first (NULL's default position varies by
+    # database backend otherwise).
+    memberships = (
+        TeamMembership.objects.filter(team=team, season=season)
+        .select_related("member", "position")
+        .order_by(F("position__ordering").asc(nulls_last=True), F("position__name").asc(nulls_last=True), "jersey_number")
+    )
     assignments = team.staff_assignments.filter(season=season).select_related("member", "position").order_by("position__ordering", "position__name", "member__last_name")
 
     # A player's license lives on their club-wide ClubMembership for the season, not on
@@ -92,8 +101,14 @@ def build_roster(team, request) -> RosterOut:
     license_by_member_id = dict(ClubMembership.objects.filter(club=team.club, season=season).values_list("member_id", "license"))
 
     # groupby only groups consecutive runs -- relies on the queryset already
-    # being ordered by position first, which it is.
-    players = [PositionGroupOut(position=position_name, players=[_to_player_out(m, license_by_member_id) for m in members]) for position_name, members in groupby(memberships, key=lambda m: m.position.name)]
+    # being ordered by position first, which it is. A member placed with no
+    # position yet (position_id is None -- see the nulls_last comment above)
+    # groups together under an empty "" label rather than crashing on
+    # m.position.name; it's the caller's job to label that group, not this API's.
+    players = [
+        PositionGroupOut(position=position_name or "", players=[_to_player_out(m, license_by_member_id) for m in members])
+        for position_name, members in groupby(memberships, key=lambda m: m.position.name if m.position_id else None)
+    ]
     staff = [
         StaffMemberOut(id=assignment.member_id, first_name=assignment.member.first_name, last_name=assignment.member.last_name, position=assignment.position.name)
         for assignment in assignments

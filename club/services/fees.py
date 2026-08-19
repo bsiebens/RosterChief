@@ -8,7 +8,6 @@ step here, never recomputed by re-aggregating FeePayment on every read.
 from decimal import Decimal
 
 from django.db.models import F
-from django.utils import timezone
 
 from club.models import ClubMembership, FeePayment
 
@@ -20,7 +19,8 @@ def remaining_balance(membership):
 def record_payment(membership, *, amount, method=FeePayment.Method.BANK_TRANSFER, reference="", note="", recorded_by=None):
     """Record money received against one membership's fee. Several payments may
     land on one membership -- a family paying in two installments must not read as
-    unpaid. Updates amount_paid and re-syncs fee_status/status to match."""
+    unpaid. Updates amount_paid and re-syncs fee_status to match; membership.status
+    is untouched -- see _sync_fee_status."""
     payment = FeePayment.objects.create(membership=membership, amount=amount, method=method, reference=reference, note=note, recorded_by=recorded_by)
 
     membership.amount_paid = F("amount_paid") + amount
@@ -54,16 +54,10 @@ def _sync_fee_status(membership, *, force_paid=False):
     else:
         new_status = ClubMembership.FeeStatus.UNPAID
 
+    # fee_status only -- membership.status is never touched here. Paying in full
+    # used to also flip status straight to ACTIVE on its own; now that's exclusively
+    # club.services.onboarding.approve_one/approve_all_clean's call, so a paid-up
+    # membership still waits on that deliberate admin step. See OnboardingRequirement's
+    # docstring (club/models.py) for why.
     membership.fee_status = new_status
-    update_fields = ["fee_status"]
-
-    # Same "become a full member" behavior the bulk action already had: settling
-    # the fee in full also activates the membership, once, first time only.
-    if new_status == ClubMembership.FeeStatus.PAID:
-        membership.status = ClubMembership.StatusChoices.ACTIVE
-        update_fields.append("status")
-        if membership.activated_at is None:
-            membership.activated_at = timezone.localdate()
-            update_fields.append("activated_at")
-
-    membership.save(update_fields=update_fields)
+    membership.save(update_fields=["fee_status"])

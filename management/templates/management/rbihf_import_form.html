@@ -4,9 +4,9 @@
 {% block heading %}{% trans "Import from RBIHF" %}{% endblock heading %}
 
 {% block panel %}
-    <div class="card w-full bg-base-100 shadow">
+    <div class="card w-full">
         <div class="card-body">
-            <p class="text-sm opacity-70">
+            <p class="text-sm text-muted">
                 {% blocktrans %}Paste the URL of a team's page on the RBIHF website and pick which of
                 your teams it's for. Nothing is created yet: you'll see exactly what will
                 be added, changed, or removed before anything is saved.{% endblocktrans %}
@@ -16,7 +16,7 @@
                 {% csrf_token %}
 
                 {% for error in form.non_field_errors %}
-                    <div class="alert alert-error my-2">
+                    <div class="alert alert-error">
                         <span>{{ error }}</span>
                     </div>
                 {% endfor %}
@@ -25,7 +25,7 @@
                     {% form_field field %}
                 {% endfor %}
 
-                <div class="card-actions justify-start pt-2 mt-2">
+                <div class="card-actions justify-start pt-4">
                     <a class="btn btn-outline gap-2" href="{% url 'management:event_list' %}">{% lucide "arrow-left" size=16 %} {% trans "Cancel" %}</a>
                     <button class="btn btn-primary gap-2" type="submit">{% lucide "download" size=16 %} {% trans "Fetch and preview" %}</button>
                 </div>

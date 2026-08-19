@@ -1,72 +1,75 @@
 {% extends "management/base.html" %}
 {% load i18n lucide %}
 
-{% block heading %}{% trans "Families" %}{% endblock heading %}
-{% block subheading %}{% trans "Every household on file -- who their parents/guardians and children are." %}{% endblock subheading %}
+{% block heading %}{% trans "Households" %}{% endblock heading %}
+
+{% block topbar_context %}
+    <span class="font-mono text-[13px] text-muted">{% trans "Every household on file." %}</span>
+{% endblock topbar_context %}
 
 {% block actions %}
     {% if is_club_admin %}
-        <a class="btn btn-outline gap-2" href="{% url 'management:family_create' %}">{% lucide "users" size=16 %} {% trans "Add family" %}</a>
+        <a class="btn btn-primary gap-2" href="{% url 'management:family_create' %}">{% lucide "users" size=16 %} {% trans "Add family" %}</a>
     {% endif %}
 {% endblock actions %}
 
-{% block panel %}
-    <form method="get" class="mb-2 flex items-center gap-2">
-        <label class="input grow sm:grow-0">
-            <span class="opacity-50">{% lucide "search" size=16 %}</span>
-            <input type="search" name="q" value="{{ search }}" placeholder="{% trans 'Search by parent or child name ...' %}" class="input input-bordered w-full sm:max-w-xs">
-        </label>
-        {# Icon-only below `sm`: label text next to a growing input is what forced this row to wrap on a phone. #}
-        <button class="btn btn-outline gap-2" type="submit" aria-label="{% trans 'Search' %}">{% lucide "search" size=16 %}<span class="hidden sm:inline">{% trans "Search" %}</span></button>
-        {% if search %}
-            <a class="btn gap-2" href="{% url "management:family_list" %}" aria-label="{% trans 'Clear filter' %}">{% lucide "x" size=16 %}<span class="hidden sm:inline">{% trans "Clear filter" %}</span></a>
-        {% endif %}
-    </form>
-
-    <div class="card bg-base-100 shadow">
-        <div class="card-body">
-            <div class="overflow-x-auto">
-                <table class="table table-cards">
-                    <thead>
-                        <tr>
-                            <th>{% trans "Family" %}</th>
-                            <th>{% trans "Parents / guardians" %}</th>
-                            <th>{% trans "Children" %}</th>
-                            <th></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for family in families %}
-                            <tr>
-                                <td><a class="link link-hover font-semibold" href="{% url 'management:family_detail' family.pk %}">{{ family }}</a></td>
-                                <td data-label="{% trans 'Parents / guardians' %}">
-                                    {% for guardian in family.guardians_display %}
-                                        <a class="link link-hover" href="{% url 'management:member_detail' guardian.pk %}">{{ guardian }}</a>{% if not forloop.last %}, {% endif %}
-                                    {% empty %}
-                                        <span class="opacity-40">-</span>
-                                    {% endfor %}
-                                </td>
-                                <td data-label="{% trans 'Children' %}">
-                                    {% for child in family.children_display %}
-                                        <a class="link link-hover" href="{% url 'management:member_detail' child.pk %}">{{ child }}</a>{% if not forloop.last %}, {% endif %}
-                                    {% empty %}
-                                        <span class="opacity-40">-</span>
-                                    {% endfor %}
-                                </td>
-                                <td class="text-right">
-                                    {# Same convention as Groups: "Edit" lands on the overview page, not a standalone rename form -- family_detail is where every family action (add parent/child, change role, remove) actually lives. #}
-                                    <a class="btn btn-outline btn-sm" href="{% url 'management:family_detail' family.pk %}" aria-label="{% trans 'Edit' %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</a>
-                                </td>
-                            </tr>
-                        {% empty %}
-                            <tr>
-                                <td colspan="4" class="text-center opacity-60">{% trans "No families yet." %}</td>
-                            </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
+{% block filter_strip %}
+    <div class="flex h-[54px] shrink-0 items-center gap-2 border-b border-line bg-white px-7">
+        <form method="get" class="flex items-center gap-2">
+            <div class="relative">
+                <span class="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-dim">{% lucide "search" size=14 %}</span>
+                <input type="search" name="q" value="{{ search }}" placeholder="{% trans 'Search by parent or child name ...' %}" class="input w-72 pl-9">
             </div>
-        </div>
+            {# No btn-sm: .input is height:2.25rem, matching plain .btn -- btn-sm would sit 6px shorter and misalign in the row. #}
+            <button class="btn btn-outline gap-2" type="submit">{% lucide "search" size=14 %} {% trans "Search" %}</button>
+            {% if search %}
+                <a class="btn btn-outline gap-2" href="{% url "management:family_list" %}">{% lucide "x" size=14 %} {% trans "Clear" %}</a>
+            {% endif %}
+        </form>
+    </div>
+{% endblock filter_strip %}
+
+{% block panel %}
+    <div class="card overflow-hidden">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>{% trans "Family" %}</th>
+                    <th>{% trans "Parents / guardians" %}</th>
+                    <th>{% trans "Children" %}</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for family in families %}
+                    <tr>
+                        <td><a class="link link-hover font-semibold text-ink" href="{% url 'management:family_detail' family.pk %}">{{ family }}</a></td>
+                        <td class="text-sm">
+                            {% for guardian in family.guardians_display %}
+                                <a class="link link-hover" href="{% url 'management:member_detail' guardian.pk %}">{{ guardian }}</a>{% if not forloop.last %}, {% endif %}
+                            {% empty %}
+                                <span class="text-dim">—</span>
+                            {% endfor %}
+                        </td>
+                        <td class="text-sm">
+                            {% for child in family.children_display %}
+                                <a class="link link-hover" href="{% url 'management:member_detail' child.pk %}">{{ child }}</a>{% if not forloop.last %}, {% endif %}
+                            {% empty %}
+                                <span class="text-dim">—</span>
+                            {% endfor %}
+                        </td>
+                        <td class="text-right">
+                            {# Same convention as Groups: "Edit" lands on the overview page, not a standalone rename form -- family_detail is where every family action (add parent/child, change role, remove) actually lives. #}
+                            <a class="btn btn-outline btn-xs" href="{% url 'management:family_detail' family.pk %}" aria-label="{% trans 'Edit' %}">{% lucide "pencil" size=13 %} {% trans "Edit" %}</a>
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="4" class="py-6 text-center text-muted">{% trans "No families yet." %}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
     </div>
 
     {% include "management/_pagination.html" %}

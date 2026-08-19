@@ -2,14 +2,21 @@
 {% load i18n lucide static ui %}
 
 {% block heading %}{{ team.name }}{% endblock heading %}
-{% block subheading %}
-    {# The raw id is a reference for support/debugging, not something a coach glancing at their phone needs -- hidden below `sm` rather than left to wrap awkwardly inside the pill. #}
-    <span class="flex flex-row items-center gap-2">
-        <span>{{ team.short_name }}</span>
-        <span class="hidden sm:inline">&middot;</span>
-        <span class="badge badge-outline badge-sm hidden sm:inline-flex">{% lucide "bookmark" size=14 %} {{ team.pk }}</span>
-    </span>
-{% endblock subheading %}
+
+{% block topbar_context %}
+    <span class="badge badge-outline">{{ team.short_name }}</span>
+    {% if seasons %}
+        <form method="get" class="flex items-center gap-2">
+            <select name="season" class="select w-auto">
+                {% for season in seasons %}
+                    <option value="{{ season.pk }}" {% if season.pk == selected_season.pk %}selected{% endif %}>{% trans "Season" %} {{ season.start_date|date:"Y" }} - {{ season.end_date|date:"Y" }}</option>
+                {% endfor %}
+            </select>
+            {# No btn-sm: .select is height:2.25rem, matching plain .btn -- btn-sm would sit 6px shorter and misalign in the row. #}
+            <button class="btn btn-outline gap-2" type="submit">{% lucide "filter" size=14 %} {% trans "View" %}</button>
+        </form>
+    {% endif %}
+{% endblock topbar_context %}
 
 {% block actions %}
     {% if is_club_admin %}
@@ -18,19 +25,8 @@
 {% endblock actions %}
 
 {% block panel %}
-    <form method="get" class="mb-4">
-        <div class="flex flex-row flex-wrap items-center gap-2">
-            <select name="season" class="select select-bordered">
-                {% for season in seasons %}
-                    <option value="{{ season.pk }}" {% if season.pk == selected_season.pk %}selected{% endif %}>{% trans "Season" %} {{ season.start_date|date:"Y" }} - {{ season.end_date|date:"Y" }}</option>
-                {% endfor %}
-            </select>
-            <button class="btn btn-outline gap-2" type="submit">{% lucide "filter" size=16 %} {% trans "View" %}</button>
-        </div>
-    </form>
-
     {% if not selected_season %}
-        <div class="alert alert-warning mb-6">
+        <div class="alert alert-warning">
             {% lucide "calendar-x" size=20 %}
             <span>{% trans "This club has no seasons yet, so there's no roster or staff to show." %}</span>
         </div>
@@ -52,240 +48,221 @@
             {% endif %}
         {% endif %}
 
-        <div class="mb-4 grid gap-4 lg:grid-cols-3">
-            <div class="card bg-base-100 shadow border-l-4 {% if attendance_rate is None %}border-info{% elif attendance_rate < 30 %}border-error{% elif attendance_rate < 65 %}border-warning{% else %}border-success{% endif %}">
-                <div class="card-body p-4">
-                    <div class="flex items-center gap-2 text-sm opacity-70 mb-3">{% lucide "user-check" size=16 %} {% trans "Attendance rate" %}</div>
-                    <div class="text-4xl font-bold tabular-nums font-mono">
-                        {% if attendance_rate is None %}
-                            {% trans "N/A" %}
-                        {% else %}
-                            {{ attendance_rate }}%
-                        {% endif %}
-                    </div>
-                    <div class="text-xs opacity-60">
-                        {% if attendance_rate is None %}
-                            {% trans "No past events this season" %}
-                        {% else %}
-                            <progress class="progress w-full {% if attendance_rate < 30 %}progress-error{% elif attendance_rate < 65 %}progress-warning{% else %}progress-success{% endif %}" value="{{ attendance_rate }}" max="100"></progress>
-                        {% endif %}
-                    </div>
-                </div>
-            </div>
+        {# --- hero: team cover photo (or an ink fallback), headline meta, photo controls and the bulk-add CTA --- #}
+        <div class="relative flex h-[180px] shrink-0 flex-col justify-between overflow-hidden rounded-box bg-ink p-6">
+            {% if team_photo %}
+                <img class="absolute inset-0 h-full w-full object-cover" src="{{ team_photo.image.url }}" alt="">
+                <div class="absolute inset-0" style="background:linear-gradient(90deg, rgba(11,18,32,.95) 30%, rgba(11,18,32,.4))"></div>
+            {% endif %}
 
-            <div class="card bg-base-100 shadow">
-                <div class="card-body">
-                    <h2 class="card-title text-base">{% lucide "trending-up" size=18 %} {% trans "Top attenders" %}</h2>
-                    <ul class="divide-y divide-base-200">
-                        {% for entry in top_attenders %}
-                            <li class="flex flex-col gap-1 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-                                <span class="text-sm">{{ entry.member }}</span>
-                                <span class="font-semibold tabular-nums font-mono">{{ entry.rate }}%</span>
-                            </li>
-                        {% empty %}
-                            <li class="py-2 text-center text-sm opacity-60">{% trans "Not enough data yet." %}</li>
-                        {% endfor %}
-                    </ul>
-                </div>
-            </div>
-
-            <div class="card bg-base-100 shadow">
-                <div class="card-body">
-                    <h2 class="card-title text-base">{% lucide "trending-down" size=18 %} {% trans "Needs attention" %}</h2>
-                    <ul class="divide-y divide-base-200">
-                        {% for entry in bottom_attenders %}
-                            <li class="flex flex-col gap-1 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-                                <span class="text-sm">{{ entry.member }}</span>
-                                <span class="font-semibold tabular-nums font-mono">{{ entry.rate }}%</span>
-                            </li>
-                        {% empty %}
-                            <li class="py-2 text-center text-sm opacity-60">{% trans "Not enough data yet." %}</li>
-                        {% endfor %}
-                    </ul>
-                </div>
-            </div>
-        </div>
-
-        <div class="mb-6 grid gap-4 lg:grid-cols-2">
-            <div class="card bg-base-100 shadow">
-                <div class="card-body">
-                    <h2 class="card-title text-base">{% lucide "alert-triangle" size=18 %} {% trans "Missed the last 2 practices" %}</h2>
-                    <ul class="divide-y divide-base-200">
-                        {% for member in missed_practices %}
-                            <li class="py-2 text-sm">{{ member }}</li>
-                        {% empty %}
-                            <li class="py-2 text-center text-sm opacity-60">{% trans "No one -- or not enough practice history yet." %}</li>
-                        {% endfor %}
-                    </ul>
-                </div>
-            </div>
-
-            <div class="card bg-base-100 shadow">
-                <div class="card-body">
-                    <h2 class="card-title text-base">{% lucide "user-x" size=18 %} {% trans "No-shows" %}</h2>
-                    <!-- <p class="text-sm opacity-70">{% trans "Said they'd attend, but were checked in as absent." %}</p> -->
-                    <ul class="divide-y divide-base-200">
-                        {% for entry in no_shows %}
-                            <li class="flex flex-col gap-1 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-                                <div class="min-w-0">
-                                    <span class="font-semibold">{{ entry.member }}</span>
-                                    <span class="text-sm opacity-70">&middot; {{ entry.event.title }}</span>
-                                </div>
-                                <div class="shrink-0 whitespace-nowrap text-sm opacity-60">{{ entry.event.start|date:"j M" }}</div>
-                            </li>
-                        {% empty %}
-                            <li class="py-2 text-center text-sm opacity-60">{% trans "None recorded." %}</li>
-                        {% endfor %}
-                    </ul>
-                </div>
-            </div>
-        </div>
-
-        <div class="card bg-base-100 shadow">
-            <div class="card-body">
-                <div class="flex flex-wrap items-center justify-between gap-2">
-                    <h2 class="card-title text-base">{% trans "Roster" %}</h2>
-                    {% if can_manage %}
-                        <div class="flex flex-wrap gap-2">
-                            <a class="btn btn-outline btn-sm gap-2" href="{% url 'management:team_bulk_add' team.pk selected_season.pk %}">{% lucide "users" size=14 %} {% trans "Add multiple" %}</a>
-                            <button class="btn btn-outline btn-sm gap-2" type="button" onclick="document.getElementById('add_player_modal').showModal()">{% lucide "user-plus" size=14 %} {% trans "Add player" %}</button>
-                        </div>
+            <div class="relative flex items-center justify-end gap-2">
+                {% if can_manage %}
+                    {% trans "Upload photo" as upload_photo_label %}
+                    {% trans "Replace photo" as replace_photo_label %}
+                    {% if not team_photo %}
+                        <span class="text-xs text-on-dark-faint">{% trans "No photo uploaded for this season yet." %}</span>
                     {% endif %}
-                </div>
-                <div class="overflow-x-auto">
-                    <table class="table table-cards">
-                        <thead>
-                            <tr>
-                                <th>{% trans "Member" %}</th>
-                                <th>{% trans "Position" %}</th>
-                                <th>{% trans "Jersey #" %}</th>
-                                <th></th>
-                                <th></th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for membership in roster %}
-                                <tr>
-                                    <td class="font-semibold">{{ membership.member }}</td>
-                                    <td data-label="{% trans 'Position' %}">{{ membership.position }}</td>
-                                    <td data-label="{% trans 'Jersey #' %}">{{ membership.jersey_number|default:"—" }}</td>
-                                    <td>
-                                        {% if membership.is_captain %}<span class="badge badge-neutral badge-sm">{% trans "Captain" %}</span>{% endif %}
-                                        {% if membership.is_alternate_captain %}<span class="badge badge-neutral badge-sm">{% trans "Alternate captain" %}</span>{% endif %}
-                                    </td>
-                                    <td class="text-right">
-                                        {% if can_manage %}
-                                            <div class="flex flex-wrap justify-end gap-1">
-                                                <button class="btn btn-outline btn-sm" type="button" onclick="document.getElementById('{{ membership.pk|dom_id:"edit_player_modal" }}').showModal()" aria-label="{% trans 'Edit' %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</button>
-                                                <button class="btn btn-sm btn-outline btn-error" type="button" onclick="document.getElementById('{{ membership.pk|dom_id:"remove_player_modal" }}').showModal()" aria-label="{% trans 'Remove' %}">{% lucide "user-minus" size=14 %} {% trans "Remove" %}</button>
-                                            </div>
-                                        {% endif %}
-                                    </td>
-                                </tr>
-                            {% empty %}
-                                <tr>
-                                    <td colspan="5" class="text-center opacity-60">{% trans "No one on the roster for this season yet." %}</td>
-                                </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
-
-        <div class="card bg-base-100 shadow mt-4">
-            <div class="card-body">
-                <div class="flex flex-wrap items-center justify-between gap-2">
-                    <h2 class="card-title text-base">{% trans "Staff" %}</h2>
-                    {% if can_manage %}
-                        <div class="flex flex-wrap gap-2">
-                            <a class="btn btn-outline btn-sm gap-2" href="{% url 'management:team_bulk_add' team.pk selected_season.pk %}">{% lucide "users" size=14 %} {% trans "Add multiple" %}</a>
-                            <button class="btn btn-outline btn-sm gap-2" type="button" onclick="document.getElementById('add_staff_modal').showModal()">{% lucide "user-plus" size=14 %} {% trans "Assign staff" %}</button>
-                        </div>
-                    {% endif %}
-                </div>
-                <div class="overflow-x-auto">
-                    <table class="table table-cards">
-                        <thead>
-                            <tr>
-                                <th>{% trans "Member" %}</th>
-                                <th>{% trans "Position" %}</th>
-                                <th></th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for assignment in staff %}
-                                <tr>
-                                    <td class="font-semibold">{{ assignment.member }}</td>
-                                    <td data-label="{% trans 'Position' %}">{{ assignment.position }}</td>
-                                    <td class="text-right">
-                                        {% if can_manage %}
-                                            <div class="flex flex-wrap justify-end gap-1">
-                                                <button class="btn btn-outline btn-sm" type="button" onclick="document.getElementById('{{ assignment.pk|dom_id:"edit_staff_modal" }}').showModal()" aria-label="{% trans 'Edit' %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</button>
-                                                <button class="btn btn-sm btn-outline btn-error" type="button" onclick="document.getElementById('{{ assignment.pk|dom_id:"remove_staff_modal" }}').showModal()" aria-label="{% trans 'Remove' %}">{% lucide "user-minus" size=14 %} {% trans "Remove" %}</button>
-                                            </div>
-                                        {% endif %}
-                                    </td>
-                                </tr>
-                            {% empty %}
-                                <tr>
-                                    <td colspan="3" class="text-center opacity-60">{% trans "No staff assigned for this season yet." %}</td>
-                                </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
-
-        <div class="card bg-base-100 shadow mt-4">
-            <div class="card-body">
-                <h2 class="card-title text-base">{% lucide "flag" size=18 %} {% trans "Eligible referees" %}</h2>
-                {% if eligible_referees is None %}
-                    <p class="text-sm opacity-70">{% trans "Referees for this team's home games are managed by the federation, not the club -- nothing to configure here." %}</p>
-                {% else %}
-                    <p class="text-sm opacity-70">{% trans "Members who can be assigned to referee this team's home games. Set from each member's own page." %}</p>
-                    {% if eligible_referees %}
-                        <div class="flex flex-wrap gap-2">
-                            {% for referee in eligible_referees %}
-                                <a class="badge badge-outline hover:badge-neutral" href="{% url 'management:member_detail' referee.pk %}">{{ referee }}</a>
-                            {% endfor %}
-                        </div>
-                    {% else %}
-                        <p class="text-sm opacity-60">{% trans "No one yet." %}</p>
-                    {% endif %}
-                {% endif %}
-            </div>
-        </div>
-
-        <div class="card bg-base-100 shadow mt-4">
-            <div class="card-body">
-                <div class="flex flex-wrap items-center justify-between gap-2">
-                    <h2 class="card-title text-base">{% trans "Team photo" %}</h2>
-                    {% if can_manage %}
-                    <div class="flex flex-wrap gap-2">
-                        {% trans "Upload photo" as upload_photo_label %}
-                        {% trans "Replace photo" as replace_photo_label %}
-                        <button class="btn btn-outline btn-sm gap-2" type="button" onclick="document.getElementById('team_photo_modal').showModal()">
-                            {% if team_photo %}
-                            {% lucide "pencil" size=14 %} {{ replace_photo_label }}
-                            {% else %}
-                            {% lucide "upload" size=14 %} {{ upload_photo_label }}
-                            {% endif %}
-                        </button>
+                    <button class="btn btn-ghost btn-sm gap-2 bg-white/15 text-white hover:bg-white/25" type="button" onclick="document.getElementById('team_photo_modal').showModal()">
                         {% if team_photo %}
-                        <button class="btn btn-outline btn-error btn-sm gap-2" type="button" onclick="document.getElementById('team_photo_delete_modal').showModal()">{% lucide "trash-2" size=14 %} {% trans "Remove" %}</button>
+                            {% lucide "pencil" size=14 %} {{ replace_photo_label }}
+                        {% else %}
+                            {% lucide "upload" size=14 %} {{ upload_photo_label }}
                         {% endif %}
-                    </div>
+                    </button>
+                    {% if team_photo %}
+                        <button class="btn btn-ghost btn-sm gap-2 bg-white/15 text-white hover:bg-white/25" type="button" onclick="document.getElementById('team_photo_delete_modal').showModal()">{% lucide "trash-2" size=14 %} {% trans "Remove" %}</button>
                     {% endif %}
-                </div>
-
-                {% if team_photo %}
-                <img class="mt-2 w-full max-w-md rounded-lg object-cover" src="{{ team_photo.image.url }}" alt="{{ team }}">
-                {% else %}
-                <p class="text-sm opacity-60">{% trans "No photo uploaded for this season yet." %}</p>
                 {% endif %}
             </div>
+
+            <div class="relative flex items-end justify-between gap-4">
+                <div class="min-w-0 text-white">
+                    <div class="font-display text-xs font-extrabold tracking-[.14em] text-info uppercase">{% trans "Season" %} {{ selected_season.start_date|date:"Y" }}–{{ selected_season.end_date|date:"Y" }}</div>
+                    <div class="font-display text-5xl leading-[.94] font-extrabold uppercase">{{ team.name }}</div>
+                    <div class="mt-2 flex gap-5 text-sm text-on-dark">
+                        <span>{% blocktrans count counter=roster|length %}{{ counter }} player{% plural %}{{ counter }} players{% endblocktrans %}</span>
+                        <span>{% blocktrans count counter=staff|length %}{{ counter }} staff member{% plural %}{{ counter }} staff members{% endblocktrans %}</span>
+                    </div>
+                </div>
+                {% if can_manage %}
+                    <a class="btn btn-primary shrink-0 gap-2" href="{% url 'management:team_bulk_add' team.pk selected_season.pk %}">{% lucide "users" size=16 %} {% trans "Add multiple" %}</a>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="grid grid-cols-3 gap-4">
+            <div class="card p-4">
+                <div class="mb-3 flex items-center gap-1.5 font-mono text-[10px] tracking-[.08em] text-muted uppercase">{% lucide "user-check" size=13 %} {% trans "Attendance rate" %}</div>
+                <div class="font-display text-4xl leading-none font-extrabold tabular-nums {% if attendance_rate is None %}text-info{% elif attendance_rate < 30 %}text-club-dark{% elif attendance_rate < 65 %}text-warn{% else %}text-ok{% endif %}">
+                    {% if attendance_rate is None %}
+                        {% trans "N/A" %}
+                    {% else %}
+                        {{ attendance_rate }}%
+                    {% endif %}
+                </div>
+                <div class="mt-2">
+                    {% if attendance_rate is None %}
+                        <span class="text-xs text-muted">{% trans "No past events this season" %}</span>
+                    {% else %}
+                        <progress class="progress {% if attendance_rate < 30 %}progress-error{% elif attendance_rate < 65 %}progress-warning{% else %}progress-success{% endif %}" value="{{ attendance_rate }}" max="100"></progress>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="card p-4">
+                <div class="card-title mb-1">{% lucide "trending-up" size=16 %} {% trans "Top attenders" %}</div>
+                <ul class="divide-y">
+                    {% for entry in top_attenders %}
+                        <li class="flex items-center justify-between gap-4 py-2">
+                            <span class="text-sm text-ink">{{ entry.member }}</span>
+                            <span class="font-mono text-sm font-semibold text-ink tabular-nums">{{ entry.rate }}%</span>
+                        </li>
+                    {% empty %}
+                        <li class="py-2 text-center text-sm text-muted">{% trans "Not enough data yet." %}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+
+            <div class="card p-4">
+                <div class="card-title mb-1">{% lucide "trending-down" size=16 %} {% trans "Needs attention" %}</div>
+                <ul class="divide-y">
+                    {% for entry in bottom_attenders %}
+                        <li class="flex items-center justify-between gap-4 py-2">
+                            <span class="text-sm text-ink">{{ entry.member }}</span>
+                            <span class="font-mono text-sm font-semibold text-ink tabular-nums">{{ entry.rate }}%</span>
+                        </li>
+                    {% empty %}
+                        <li class="py-2 text-center text-sm text-muted">{% trans "Not enough data yet." %}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-4">
+            <div class="card p-4">
+                <div class="card-title mb-1">{% lucide "alert-triangle" size=16 %} {% trans "Missed the last 2 practices" %}</div>
+                <ul class="divide-y">
+                    {% for member in missed_practices %}
+                        <li class="py-2 text-sm text-ink">{{ member }}</li>
+                    {% empty %}
+                        <li class="py-2 text-center text-sm text-muted">{% trans "No one -- or not enough practice history yet." %}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+
+            <div class="card p-4">
+                <div class="card-title mb-1">{% lucide "user-x" size=16 %} {% trans "No-shows" %}</div>
+                <ul class="divide-y">
+                    {% for entry in no_shows %}
+                        <li class="flex items-center justify-between gap-4 py-2">
+                            <div class="min-w-0">
+                                <span class="text-sm font-semibold text-ink">{{ entry.member }}</span>
+                                <span class="text-sm text-muted">&middot; {{ entry.event.title }}</span>
+                            </div>
+                            <div class="shrink-0 font-mono text-xs whitespace-nowrap text-muted">{{ entry.event.start|date:"j M" }}</div>
+                        </li>
+                    {% empty %}
+                        <li class="py-2 text-center text-sm text-muted">{% trans "None recorded." %}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
+
+        <div class="card flex flex-col overflow-hidden">
+            <div class="flex items-center gap-2 border-b border-line px-4 py-3">
+                <span class="font-display text-sm font-extrabold tracking-[.1em] text-ink uppercase">{% trans "Roster" %}</span>
+                <span class="flex-1"></span>
+                {% if can_manage %}
+                    <button class="btn btn-outline btn-sm gap-2" type="button" onclick="document.getElementById('add_player_modal').showModal()">{% lucide "user-plus" size=14 %} {% trans "Add player" %}</button>
+                {% endif %}
+            </div>
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>{% trans "No." %}</th>
+                        <th>{% trans "Player" %}</th>
+                        <th>{% trans "Position" %}</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for membership in roster %}
+                        <tr>
+                            <td class="font-display text-lg font-extrabold text-ink tabular-nums">{{ membership.jersey_number|default:"—" }}</td>
+                            <td class="font-semibold text-ink">
+                                {{ membership.member }}
+                                {% if membership.is_captain %}<span class="ml-1 font-display text-xs font-extrabold tracking-[.08em] text-club-dark" title="{% trans 'Captain' %}">C</span>{% endif %}
+                                {% if membership.is_alternate_captain %}<span class="ml-1 font-display text-xs font-extrabold tracking-[.08em] text-club-dark" title="{% trans 'Alternate captain' %}">A</span>{% endif %}
+                            </td>
+                            <td class="text-slate">{{ membership.position|default:"—" }}</td>
+                            <td class="text-right">
+                                {% if can_manage %}
+                                    <div class="flex justify-end gap-1">
+                                        <button class="btn btn-outline btn-sm" type="button" onclick="document.getElementById('{{ membership.pk|dom_id:"edit_player_modal" }}').showModal()" aria-label="{% trans 'Edit' %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</button>
+                                        <button class="btn btn-outline btn-error btn-sm" type="button" onclick="document.getElementById('{{ membership.pk|dom_id:"remove_player_modal" }}').showModal()" aria-label="{% trans 'Remove' %}">{% lucide "user-minus" size=14 %} {% trans "Remove" %}</button>
+                                    </div>
+                                {% endif %}
+                            </td>
+                        </tr>
+                    {% empty %}
+                        <tr>
+                            <td colspan="4" class="text-center text-muted">{% trans "No one on the roster for this season yet." %}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <div class="card flex flex-col">
+            <div class="flex items-center gap-2 border-b border-line px-4 py-3">
+                <span class="font-display text-sm font-extrabold tracking-[.1em] text-ink uppercase">{% trans "Staff" %}</span>
+                <span class="flex-1"></span>
+                {% if can_manage %}
+                    <button class="btn btn-outline btn-sm gap-2" type="button" onclick="document.getElementById('add_staff_modal').showModal()">{% lucide "user-plus" size=14 %} {% trans "Assign staff" %}</button>
+                {% endif %}
+            </div>
+            <div class="flex flex-col divide-y">
+                {% for assignment in staff %}
+                    <div class="flex items-center gap-3 px-4 py-2.5">
+                        <div class="avatar avatar-placeholder">
+                            <div class="h-8 w-8 {% if assignment.position.management_position %}bg-club{% endif %}">
+                                <span class="text-xs">{{ assignment.member.first_name|slice:":1" }}{{ assignment.member.last_name|slice:":1" }}</span>
+                            </div>
+                        </div>
+                        <div class="min-w-0 flex-1">
+                            <div class="text-sm font-semibold text-ink">{{ assignment.member }}</div>
+                            <div class="text-xs text-muted">{{ assignment.position }}</div>
+                        </div>
+                        <span class="font-mono text-xs text-dim">{% blocktrans with year=assignment.created|date:"Y" %}since {{ year }}{% endblocktrans %}</span>
+                        {% if can_manage %}
+                            <div class="flex shrink-0 gap-1">
+                                <button class="btn btn-outline btn-xs" type="button" onclick="document.getElementById('{{ assignment.pk|dom_id:"edit_staff_modal" }}').showModal()" aria-label="{% trans 'Edit' %}">{% lucide "pencil" size=12 %}</button>
+                                <button class="btn btn-outline btn-error btn-xs" type="button" onclick="document.getElementById('{{ assignment.pk|dom_id:"remove_staff_modal" }}').showModal()" aria-label="{% trans 'Remove' %}">{% lucide "user-minus" size=12 %}</button>
+                            </div>
+                        {% endif %}
+                    </div>
+                {% empty %}
+                    <div class="px-4 py-4 text-center text-sm text-muted">{% trans "No staff assigned for this season yet." %}</div>
+                {% endfor %}
+            </div>
+        </div>
+
+        <div class="card p-4">
+            <div class="card-title mb-1">{% lucide "flag" size=16 %} {% trans "Eligible referees" %}</div>
+            {% if eligible_referees is None %}
+                <p class="text-sm text-muted">{% trans "Referees for this team's home games are managed by the federation, not the club -- nothing to configure here." %}</p>
+            {% else %}
+                <p class="text-sm text-muted">{% trans "Members who can be assigned to referee this team's home games. Set from each member's own page." %}</p>
+                {% if eligible_referees %}
+                    <div class="flex flex-wrap gap-2 mt-2">
+                        {% for referee in eligible_referees %}
+                            <a class="badge badge-outline transition-colors hover:bg-ink hover:text-white" href="{% url 'management:member_detail' referee.pk %}">{{ referee }}</a>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <p class="text-sm text-dim">{% trans "No one yet." %}</p>
+                {% endif %}
+            {% endif %}
         </div>
 
         {% if can_manage %}

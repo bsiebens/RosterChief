@@ -4,7 +4,7 @@
 {% block heading %}{% if update_view %}{% blocktrans %}Edit {{ object }}{% endblocktrans %}{% else %}{% trans "New news item" %}{% endif %}{% endblock heading %}
 
 {% block panel %}
-    <div class="card w-full bg-base-100 shadow">
+    <div class="card w-full">
         <div class="card-body">
             <form method="post">
                 {% csrf_token %}
@@ -16,25 +16,25 @@
                 {% endfor %}
 
                 {% if not update_view %}
-                    <p class="opacity-70 text-sm mb-2">{% trans "Photos can be added once the news item is created." %}</p>
+                    <p class="mb-2 text-sm text-muted">{% trans "Photos can be added once the news item is created." %}</p>
                 {% endif %}
 
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
                     {% form_field form.title %}
                     {% form_field form.title_en %}
                 </div>
 
-                <div class="grid grid-cols-1 gap-4 mt-4">
+                <div class="mt-4 grid grid-cols-1 gap-4">
                     {% form_field form.teams %}
                     {% form_field form.visibility %}
                 </div>
 
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                <div class="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
                     {% form_field form.body %}
                     {% form_field form.body_en %}
                 </div>
 
-                <div class="card-actions justify-start pt-2 mt-2">
+                <div class="mt-4 flex items-center gap-2 border-t border-line pt-4">
                     <a class="btn btn-outline gap-2" href="{% if update_view %}{% url "management:news_detail" object.pk %}{% else %}{% url "management:news_list" %}{% endif %}">{% lucide "arrow-left" size=16 %} {% trans "Cancel" %}</a>
                     <button class="btn btn-primary gap-2" type="submit">{% lucide "save" size=16 %} {% trans "Save" %}</button>
                 </div>

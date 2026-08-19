@@ -7,12 +7,20 @@ individually ``invited_members``, minus any ``excluded_members`` -- or, for a
 event's season instead of teams/groups (the two are mutually exclusive, see
 EventForm/EventSeriesForm). Attendance rows are reconciled against that set,
 but only for events that are still in the future — history is never rewritten.
+
+A member provisionally rostered by management.views.SignupPlaceInTeamView
+(on a team, but still PENDING -- their sign-up isn't fully processed yet) is
+still subtracted back out here if an open onboarding requirement blocks this
+event's kind -- see club.services.onboarding.blocked_member_ids_for_event.
+Explicitly ``invited_members`` bypasses that: a named, individual invite is a
+deliberate staff decision that should win regardless.
 """
 
 from django.db.models import Count, Q
 from django.utils import timezone
 
 from club.models import ClubMembership, Season
+from club.services.onboarding import blocked_member_ids_for_event
 from events.models import Attendance, Event
 from members.models import Member
 from teams.models import TeamMembership
@@ -44,7 +52,12 @@ def effective_members(event):
         if group_ids:
             member_ids.update(Member.objects.filter(group_memberships__group_id__in=group_ids).values_list("id", flat=True))
 
-    member_ids.update(event.invited_members.values_list("id", flat=True))
+    invited_ids = set(event.invited_members.values_list("id", flat=True))
+
+    if season is not None:
+        member_ids.difference_update(blocked_member_ids_for_event(event.club, season, event.kind) - invited_ids)
+
+    member_ids.update(invited_ids)
     member_ids.difference_update(event.excluded_members.values_list("id", flat=True))
 
     return Member.objects.filter(id__in=member_ids)

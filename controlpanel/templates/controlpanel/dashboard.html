@@ -1,111 +1,213 @@
 {% extends "controlpanel/base.html" %}
 {% load static lucide %}
 
-{% block heading %}RosterChief Platform Dashboard{% endblock heading %}
-{% block subheading %}Welcome back {{ user.member.first_name }} &middot; {% now "d b Y" %}{% endblock subheading %}
+{% block panel_title %}Platform health{% endblock panel_title %}
+
+{% block breadcrumb %}
+    <span class="text-ink">platform</span>
+    <span class="text-edge">|</span>
+    <span>{{ totals.clubs }} club{{ totals.clubs|pluralize }} live</span>
+    <span class="text-edge">|</span>
+    <span>{{ totals.members }} member{{ totals.members|pluralize }}</span>
+{% endblock breadcrumb %}
+
+{% block strip_right %}
+    {% if failed_jobs %}
+        <span class="text-club-dark">{{ failed_jobs|length }} job failure{{ failed_jobs|length|pluralize }} · 24h</span>
+    {% endif %}
+{% endblock strip_right %}
 
 {% block actions %}
-    <a class="btn btn-primary gap-2" href="{% url 'controlpanel:club_create' %}">{% lucide "plus" size=16 %} Create new club</a>
+    <a class="btn btn-primary" href="{% url 'controlpanel:club_create' %}">{% lucide "plus" size=14 %} Create club</a>
 {% endblock actions %}
 
 {% block panel %}
-    <div class="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-6">
-        <div class="card bg-base-100 shadow border-l-4 border-info">
-            <div class="card-body p-4">
-                <div class="flex items-center gap-2 text-sm opacity-70 mb-3">{% lucide "building-2" size=16 %} Clubs</div>
-                <div class="text-4xl font-bold tabular-nums font-mono">{{ totals.clubs }}</div>
-                <div class="text-xs opacity-60">Managing {{ totals.members }} member{{ totals.members|pluralize }}</div>
-            </div>
+    {# --- KPI row ------------------------------------------------------- #}
+    <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+        <div class="card p-3.5">
+            <div class="font-mono text-[10px] tracking-[.08em] text-muted uppercase">clubs live</div>
+            <div class="mt-0.5 font-display text-4xl leading-none font-extrabold text-ink tabular-nums">{{ totals.clubs }}</div>
+            <div class="mt-1.5 font-mono text-[11px] text-muted">{{ totals.archived_clubs }} archived</div>
         </div>
-
-        <div class="card bg-base-100 shadow border-l-4 border-info">
-            <div class="card-body p-4">
-                <div class="flex items-center gap-2 text-sm opacity-70 mb-3">{% lucide "archive" size=16 %} Archived clubs</div>
-                <div class="text-4xl font-bold tabular-nums font-mono">{{ totals.archived_clubs }}</div>
-                <div class="text-xs opacity-60">Not accessible but data maintained</div>
-            </div>
+        <div class="card p-3.5">
+            <div class="font-mono text-[10px] tracking-[.08em] text-muted uppercase">members</div>
+            <div class="mt-0.5 font-display text-4xl leading-none font-extrabold text-ink tabular-nums">{{ totals.members }}</div>
+            <div class="mt-1.5 font-mono text-[11px] text-muted">{{ totals.admins }} club admin{{ totals.admins|pluralize }}</div>
         </div>
-
-        <div class="card bg-base-100 shadow border-l-4 border-success {% if attention.clubs_without_season %}border-warning{% endif %}">
-            <div class="card-body p-4">
-                <div class="flex items-center gap-2 text-sm opacity-70 mb-3">{% lucide "calendar-x" size=16 %} No current season</div>
-                <div class="text-4xl font-bold tabular-nums font-mono">{{ attention.clubs_without_season }}</div>
-                <div class="text-xs opacity-60">Clubs that cannot take signups</div>
-            </div>
+        <div class="card p-3.5">
+            <div class="font-mono text-[10px] tracking-[.08em] text-muted uppercase">dues owed</div>
+            <div class="mt-0.5 font-display text-4xl leading-none font-extrabold text-ink tabular-nums">€{{ attention.dues_owed|floatformat:0 }}</div>
+            <div class="mt-1.5 font-mono text-[11px] {% if attention.dues_overdue %}text-club-dark{% else %}text-muted{% endif %}">{{ attention.dues_in_grace }} in grace · {{ attention.dues_overdue }} overdue</div>
         </div>
-
-        <div class="card bg-base-100 shadow border-l-4 border-success {% if attention.dormant_clubs %}border-warning{% endif %}">
-            <div class="card-body p-4">
-                <div class="flex items-center gap-2 text-sm opacity-70 mb-3">{% lucide "moon-star" size=16 %} Dormant clubs</div>
-                <div class="text-4xl font-bold tabular-nums font-mono">{{ attention.dormant_clubs }}</div>
-                <div class="text-xs opacity-60">No events scheduled next 30 days</div>
-            </div>
+        <div class="card p-3.5 {% if attention.clubs_without_season %}border-warn{% endif %}">
+            <div class="font-mono text-[10px] tracking-[.08em] text-muted uppercase">no season</div>
+            <div class="mt-0.5 font-display text-4xl leading-none font-extrabold tabular-nums {% if attention.clubs_without_season %}text-warn{% else %}text-ink{% endif %}">{{ attention.clubs_without_season }}</div>
+            <div class="mt-1.5 font-mono text-[11px] text-muted">can't take signups</div>
         </div>
-
-        <div class="card bg-base-100 shadow border-l-4 border-success {% if attention.admins_pending_mfa %}border-warning{% endif %}">
-            <div class="card-body p-4">
-                <div class="flex items-center gap-2 text-sm opacity-70 mb-3">{% lucide "shield-alert" size=16 %} MFA pending</div>
-                <div class="text-4xl font-bold tabular-nums font-mono">{{ attention.admins_pending_mfa }}</div>
-                <div class="text-xs opacity-60">Admins without MFA configured</div>
-            </div>
+        <div class="card p-3.5 {% if attention.dormant_clubs %}border-warn{% endif %}">
+            <div class="font-mono text-[10px] tracking-[.08em] text-muted uppercase">dormant clubs</div>
+            <div class="mt-0.5 font-display text-4xl leading-none font-extrabold tabular-nums {% if attention.dormant_clubs %}text-warn{% else %}text-ink{% endif %}">{{ attention.dormant_clubs }}</div>
+            <div class="mt-1.5 font-mono text-[11px] text-muted">no events 30d</div>
         </div>
-
-        <div class="card bg-base-100 shadow border-l-4 border-success {% if attention.dues_owed %}border-warning{% endif %}">
-            <div class="card-body p-4">
-                <div class="flex items-center gap-2 text-sm opacity-70 mb-3">{% lucide "receipt-euro" size=16 %} Payment pending</div>
-                <div class="text-4xl font-bold tabular-nums font-mono">&euro;{{ attention.dues_owed|floatformat:2 }}</div>
-                <div class="text-xs opacity-60">
-                    {{ attention.dues_in_grace }} in grace ·
-                    <span class="{% if attention.dues_overdue %}font-semibold text-error{% endif %}">{{ attention.dues_overdue }} overdue</span>
-                    {% comment %}
-                        Renewals pending should sit at ~0: the cron job renews clubs 30 days out and
-                        then they fall past the horizon. A number that lingers here means the job has
-                        stopped and a club is about to use the platform for free — which no other
-                        figure on this page reveals, because nothing has been billed yet.
-                    {% endcomment %}
-                    {% if attention.renewals_pending %}
-                        · <span class="font-semibold text-warning">{{ attention.renewals_pending }} awaiting renewal</span>
-                    {% endif %}
-                </div>
-            </div>
+        <div class="card p-3.5 {% if failed_jobs %}border-club{% endif %}">
+            <div class="font-mono text-[10px] tracking-[.08em] text-muted uppercase">failed jobs</div>
+            <div class="mt-0.5 font-display text-4xl leading-none font-extrabold tabular-nums {% if failed_jobs %}text-club{% else %}text-ink{% endif %}">{{ failed_jobs|length }}</div>
+            <div class="mt-1.5 font-mono text-[11px] text-muted">last 24h · <a class="link link-hover" href="{% url 'controlpanel:jobs' %}">jobs</a></div>
         </div>
     </div>
 
-    <div class="mb-6 grid gap-4 lg:grid-cols-2">
-        <div class="card bg-base-100 shadow">
-            <div class="card-body">
-                <h2 class="card-title text-base">{% lucide "user-plus" size=18 %} Signups per month</h2>
-                <p class="text-sm opacity-70">New members against returning ones, across every club.</p>
-                <div class="h-56">
+    <div class="grid grid-cols-1 gap-4 xl:grid-cols-[1.6fr_1fr]">
+        {# --- left column ------------------------------------------------ #}
+        <div class="flex flex-col gap-4">
+            <div class="card p-4">
+                <div class="mb-3 flex items-center">
+                    {# No hand-written colour key here: Chart.js renders its own real, correctly-swatched legend below the chart -- a second, uncoloured text hint duplicating it just reads as broken. #}
+                    <span class="font-display text-sm font-extrabold tracking-[.1em] text-ink uppercase">Signups · {{ charts.signups|length }} months</span>
+                </div>
+                <div class="h-44">
                     <canvas id="signups-chart"></canvas>
                 </div>
             </div>
-        </div>
 
-        <div class="card bg-base-100 shadow">
-            <div class="card-body">
-                <h2 class="card-title text-base">{% lucide "milestone" size=18 %} Onboarding</h2>
-                <p class="text-sm opacity-70">Tracking club onboarding to ensure a smooth start</p>
-                <div class="mt-2 space-y-3">
+            <div class="card flex flex-col">
+                <div class="flex items-center border-b border-line px-4 py-3">
+                    <span class="font-display text-sm font-extrabold tracking-[.1em] text-ink uppercase">Club health</span>
+                    <span class="flex-1"></span>
+                    <span class="font-mono text-[11px] text-muted">sorted by risk</span>
+                </div>
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Club</th>
+                            <th>Active members</th>
+                            <th>Events 30d</th>
+                            <th>Plan</th>
+                            <th>Risk</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for club in clubs %}
+                            <tr>
+                                <td><a class="link link-hover font-semibold text-ink" href="{% url 'controlpanel:club_detail' club.pk %}">{{ club.name }}</a></td>
+                                <td class="font-mono tabular-nums">{{ club.active_members }}</td>
+                                <td class="font-mono tabular-nums {% if not club.upcoming_events %}text-club-dark{% endif %}">{{ club.upcoming_events }}</td>
+                                <td class="font-mono">{{ club.plan_name|default:"—" }}</td>
+                                <td>
+                                    {% if club.risk == "high" %}
+                                        <span class="badge badge-error" title="{{ club.risk_reason }}">high</span>
+                                    {% elif club.risk == "watch" %}
+                                        <span class="badge badge-warning" title="{{ club.risk_reason }}">watch</span>
+                                    {% else %}
+                                        <span class="badge badge-success" title="{{ club.risk_reason }}">ok</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                        {% empty %}
+                            <tr>
+                                <td colspan="5" class="text-center text-muted">No clubs yet.</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="card p-4">
+                <div class="mb-3 font-display text-sm font-extrabold tracking-[.1em] text-ink uppercase">Onboarding</div>
+                <div class="grid grid-cols-2 gap-4 sm:grid-cols-4">
                     {% for step in funnel %}
                         <div>
-                            <div class="mb-1 flex items-center justify-between text-sm">
-                                <span class="flex items-center gap-2">{% lucide step.icon size=14 %} {{ step.label }}</span>
-                                <span class="font-semibold tabular-nums font-mono">{{ step.count }}</span>
-                            </div>
-                            <progress class="progress {% if step.count == funnel.0.count %}progress-success{% elif step.count == 0 %}progress-error{% else %}progress-warning{% endif %} w-full" value="{{ step.count }}"
-                                      max="{{ funnel.0.count }}"></progress>
+                            <div class="mb-1 flex items-center gap-1.5 font-mono text-[11px] text-muted">{% lucide step.icon size=12 %} {{ step.label }}</div>
+                            <div class="font-display text-2xl leading-none font-extrabold text-ink tabular-nums">{{ step.count }}</div>
+                            <progress class="progress mt-1.5 {% if step.count == funnel.0.count %}progress-success{% elif step.count == 0 %}progress-error{% else %}progress-warning{% endif %}" value="{{ step.count }}" max="{{ funnel.0.count|default:1 }}"></progress>
                         </div>
                     {% endfor %}
                 </div>
             </div>
         </div>
-    </div>
 
-    <div class="card bg-base-100 shadow">
-        <div class="card-body">
-            <h2 class="card-title">{% lucide "building-2" size=18 %} Clubs</h2>
-            {% include "controlpanel/_club_health_table.html" %}
+        {# --- right column ------------------------------------------------ #}
+        <div class="flex flex-col gap-4">
+            <div class="rounded bg-ink p-4 text-white">
+                <div class="mb-3 font-display text-sm font-extrabold tracking-[.1em] uppercase">Alerts</div>
+                <div class="flex flex-col gap-2.5 font-mono text-xs">
+                    {% if attention.renewals_pending %}
+                        <div class="border-l-2 border-club pl-2.5">
+                            <div>{{ attention.renewals_pending }} subscription{{ attention.renewals_pending|pluralize }} awaiting renewal</div>
+                            <div class="text-on-dark-dim">renew_subscriptions may be stalled</div>
+                        </div>
+                    {% endif %}
+                    {% if attention.dues_overdue %}
+                        <div class="border-l-2 border-club pl-2.5">
+                            <div>{{ attention.dues_overdue }} club{{ attention.dues_overdue|pluralize }} overdue on platform fees</div>
+                            <div class="text-on-dark-dim">past grace — see billing</div>
+                        </div>
+                    {% endif %}
+                    {% for run in job_log %}
+                        {% if run.status == "failure" %}
+                            <div class="border-l-2 border-club pl-2.5">
+                                <div>{{ run.name }} failed</div>
+                                <div class="text-on-dark-dim">{{ run.started_at|date:"H:i" }} · {{ run.error|truncatechars:60|default:"see the Jobs tab" }}</div>
+                            </div>
+                        {% endif %}
+                    {% endfor %}
+                    {% if attention.admins_pending_mfa %}
+                        <div class="border-l-2 border-warn pl-2.5">
+                            <div>{{ attention.admins_pending_mfa }} admin{{ attention.admins_pending_mfa|pluralize }} without MFA</div>
+                            <div class="text-on-dark-dim">locked out until they enrol</div>
+                        </div>
+                    {% endif %}
+                    {% if attention.clubs_unbilled %}
+                        <div class="border-l-2 border-warn pl-2.5">
+                            <div>{{ attention.clubs_unbilled }} active club{{ attention.clubs_unbilled|pluralize }} on no plan</div>
+                            <div class="text-on-dark-dim">using the platform for free</div>
+                        </div>
+                    {% endif %}
+                    {% if not attention.renewals_pending and not attention.dues_overdue and not attention.admins_pending_mfa and not attention.clubs_unbilled and not failed_jobs %}
+                        <div class="text-on-dark-dim">Nothing needs attention.</div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="card p-4">
+                <div class="mb-3 font-display text-sm font-extrabold tracking-[.1em] text-ink uppercase">Feature adoption</div>
+                <div class="flex flex-col gap-2.5 font-mono text-[11px] text-slate">
+                    {% for flag in flags %}
+                        <div>
+                            <div class="mb-1 flex justify-between">
+                                <span>{{ flag.name }}</span>
+                                <span>{% if flag.overridden %}{{ flag.everyone|yesno:"everyone,off" }}{% else %}{{ flag.clubs }}/{{ totals.clubs }}{% endif %}</span>
+                            </div>
+                            <div class="h-1.5 bg-rule">
+                                <div class="h-full bg-ink" style="width:{% if flag.overridden %}100{% else %}{% widthratio flag.clubs totals.clubs 100 %}{% endif %}%"></div>
+                            </div>
+                        </div>
+                    {% empty %}
+                        <div class="text-muted">No feature flags yet.</div>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <div class="card flex-1 p-4">
+                <div class="mb-3 font-display text-sm font-extrabold tracking-[.1em] text-ink uppercase">Job log</div>
+                <div class="flex flex-col gap-1.5 font-mono text-[11px]">
+                    {% for run in job_log %}
+                        <div class="flex gap-2">
+                            <span class="text-dim">{{ run.started_at|date:"H:i" }}</span>
+                            {% if run.status == "success" %}
+                                <span class="text-ok-text">ok</span>
+                            {% elif run.status == "failure" %}
+                                <span class="text-club-dark">err</span>
+                            {% else %}
+                                <span class="text-info-text">···</span>
+                            {% endif %}
+                            <span class="text-slate">{{ run.name }}{% if run.detail %} · {{ run.detail|truncatechars:40 }}{% endif %}</span>
+                        </div>
+                    {% empty %}
+                        <div class="text-muted">No job runs recorded yet.</div>
+                    {% endfor %}
+                </div>
+                <a class="mt-3 self-start font-mono text-[11px] text-club-dark hover:underline" href="{% url 'controlpanel:jobs' %}">View all jobs →</a>
+            </div>
         </div>
     </div>
 {% endblock panel %}
@@ -116,84 +218,28 @@
     <script>
         (() => {
             const data = JSON.parse(document.getElementById("chart-data").textContent);
+            const ink = "#3A4658";
+            const grid = "rgba(58,70,88,.12)";
 
-            // Chart.js paints to a canvas, so it cannot inherit daisyUI's colours the way the
-            // rest of the page does — they are CSS variables. Read the computed values, and
-            // rebuild when the theme attribute changes, or the charts keep the light palette
-            // after a switch to dark.
-            const css = (name, fallback) => getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
-
-            const render = () => {
-                const ink = css("--color-base-content", "#333");
-                const grid = "color-mix(in oklab, " + ink + " 15%, transparent)";
-
-                // Locale-aware, so 1234.5 reads as "€ 1.234,50" rather than "€1,234.5". Two of
-                // them: the axis is rounded to keep the labels short, but the tooltip keeps the
-                // cents — rounding a euro amount someone is reading off a chart is a lie.
-                const axisEuros = new Intl.NumberFormat("nl-BE", {style: "currency", currency: "EUR", maximumFractionDigits: 0});
-                const exactEuros = new Intl.NumberFormat("nl-BE", {style: "currency", currency: "EUR", minimumFractionDigits: 2});
-
-                const build = (id, label, series, colour, type, money) =>
-                    new Chart(document.getElementById(id), {
-                        type,
-                        data: {
-                            labels: series.map((point) => point.month),
-                            datasets: [{label, data: series.map((point) => point.value), borderColor: colour, backgroundColor: colour, tension: 0.3}],
-                        },
-                        options: {
-                            responsive: true,
-                            maintainAspectRatio: false,
-                            plugins: {
-                                legend: {display: false},
-                                // The tooltip carries the unit too: an axis in euros and a bare
-                                // number on hover reads as two different quantities.
-                                tooltip: money ? {callbacks: {label: (item) => exactEuros.format(item.parsed.y)}} : {},
-                            },
-                            scales: {
-                                x: {ticks: {color: ink}, grid: {color: grid}},
-                                y: {
-                                    beginAtZero: true,
-                                    grid: {color: grid},
-                                    ticks: {color: ink, precision: 0, callback: money ? (value) => axisEuros.format(value) : undefined},
-                                },
-                            },
-                        },
-                    });
-
-                // Stacked, so the bar height stays "signups this month" while the split shows
-                // where they came from. New is per club: joining a second club is a new
-                // membership there, even for someone who has been on the platform for years.
-                const signups = new Chart(document.getElementById("signups-chart"), {
-                    type: "bar",
-                    data: {
-                        labels: data.signups.map((point) => point.month),
-                        datasets: [
-                            {label: "New", data: data.signups.map((point) => point.new), backgroundColor: css("--color-primary", "#4f46e5")},
-                            {label: "Returning", data: data.signups.map((point) => point.returning), backgroundColor: css("--color-accent", "#0ea5e9")},
-                        ],
+            new Chart(document.getElementById("signups-chart"), {
+                type: "bar",
+                data: {
+                    labels: data.signups.map((point) => point.month),
+                    datasets: [
+                        {label: "New", data: data.signups.map((point) => point.new), backgroundColor: "#0B1220"},
+                        {label: "Returning", data: data.signups.map((point) => point.returning), backgroundColor: "#14B8E8"},
+                    ],
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {legend: {position: "bottom", labels: {color: ink, font: {family: "IBM Plex Mono", size: 11}}}},
+                    scales: {
+                        x: {stacked: true, ticks: {color: ink, font: {family: "IBM Plex Mono", size: 10}}, grid: {display: false}},
+                        y: {stacked: true, beginAtZero: true, ticks: {color: ink, precision: 0, font: {family: "IBM Plex Mono", size: 10}}, grid: {color: grid}},
                     },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        plugins: {legend: {position: "bottom", labels: {color: ink}}},
-                        scales: {
-                            x: {stacked: true, ticks: {color: ink}, grid: {color: grid}},
-                            y: {stacked: true, beginAtZero: true, ticks: {color: ink, precision: 0}, grid: {color: grid}},
-                        },
-                    },
-                });
-
-                return [signups]; // build("revenue-chart", "Dues", data.dues, css("--color-accent", "#0ea5e9"), "bar", true)];
-            };
-
-            let charts = render();
-
-            // The theme toggle sets data-theme on <html>; "auto" removes it entirely, so watch
-            // the attribute rather than listening for a click.
-            new MutationObserver(() => {
-                charts.forEach((chart) => chart.destroy());
-                charts = render();
-            }).observe(document.documentElement, {attributes: true, attributeFilter: ["data-theme"]});
+                },
+            });
         })();
     </script>
 {% endblock extra_body %}

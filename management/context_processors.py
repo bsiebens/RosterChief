@@ -10,7 +10,7 @@ action rather than the whole section (``NewsAuthorRequiredMixin``/``can_add_news
 from waffle import flag_is_active
 
 from billing.services.notices import club_billing_notice
-from club.services.access import can_add_news, has_management_access, is_club_admin, is_coach_manager
+from club.services.access import can_add_news, can_manage_members, has_management_access, is_club_admin, is_coach_manager
 from members.models import ParentClaim
 
 #: Every management URL name, mapped to the nav item it should light up --
@@ -126,6 +126,57 @@ _NAV_SECTIONS = {
     "invoice_list": "invoice_list",
     "form_list": "form_list",
     "submission_list": "form_list",
+    "club_settings": "club_settings",
+    "onboarding_requirement_list": "onboarding_requirement_list",
+    "onboarding_requirement_create": "onboarding_requirement_list",
+    "onboarding_requirement_update": "onboarding_requirement_list",
+    "onboarding_requirement_delete": "onboarding_requirement_list",
+    "member_requirement_complete": "member_list",
+    "member_requirement_bypass": "member_list",
+    "member_requirement_incomplete": "member_list",
+    "member_requirement_document": "member_list",
+    "signup_list": "signup_list",
+    "signup_approve_all_clean": "signup_list",
+    "signup_approve_one": "signup_list",
+    "signup_place_in_team": "signup_list",
+}
+
+
+#: The redesigned sidebar has two levels (design_handoff_rosterchief_platform/README.md,
+#: D1's 236px sidebar: Overview/Members/Teams/Calendar/News/Finance/Settings, each except
+#: News expandable into sub-items -- D2 shows Members expanded as All members/Sign-ups/
+#: Households/Roles). This maps each *leaf* nav value from _NAV_SECTIONS above to which
+#: top-level item should be open/highlighted; management/templates/management/_nav_items.html
+#: reads `nav_section` for that, and `nav` (unchanged) for which sub-item.
+#:
+#: Membership dues tracking moved from Members to Finance here versus the old flat nav --
+#: D6 "Dues & billing" is a Finance concern in the design, not a People one.
+_TOP_SECTION = {
+    "home": "overview",
+    "member_list": "members",
+    "signup_list": "members",
+    "family_list": "members",
+    "parent_claim_list": "members",
+    "group_list": "members",
+    "membership_list": "finance",
+    "team_list": "teams",
+    "referee_list": "teams",
+    "news_list": "news",
+    "event_list": "calendar",
+    "location_list": "calendar",
+    "opponent_list": "calendar",
+    "sponsor_list": "settings",
+    "product_list": "finance",
+    "order_list": "finance",
+    "discount_list": "finance",
+    "invoice_list": "finance",
+    "form_list": "settings",
+    "club_settings": "settings",
+    "onboarding_requirement_list": "settings",
+    "role_list": "settings",
+    "position_list": "settings",
+    "referee_level_list": "settings",
+    "referee_management": "settings",
 }
 
 
@@ -135,17 +186,24 @@ def active_nav_section(request):
     some other app can never leak into this."""
     match = request.resolver_match
     if match is None or match.namespace != "management":
-        return {"nav": None}
+        return {"nav": None, "nav_section": None}
 
-    return {"nav": _NAV_SECTIONS.get(match.url_name)}
+    nav = _NAV_SECTIONS.get(match.url_name)
+    return {"nav": nav, "nav_section": _TOP_SECTION.get(nav)}
 
 
 def is_admin(request):
     club = getattr(request, "club", None)
     if club is None or not request.user.is_authenticated:
-        return {"is_club_admin": False}
+        return {"is_club_admin": False, "can_manage_members": False}
 
-    return {"is_club_admin": is_club_admin(request.user, club)}
+    return {
+        "is_club_admin": is_club_admin(request.user, club),
+        # Gates the nav items MemberAdminRequiredMixin also gates at the view layer
+        # (Members/Teams/Referee setup/Onboarding requirements) -- real ADMIN (which
+        # already includes the platform-superuser bypass) or MEMBER_ADMIN.
+        "can_manage_members": can_manage_members(request.user, club),
+    }
 
 
 def billing_notice(request):
@@ -221,13 +279,14 @@ def sidebar_counters(request):
     the same shape RefereeManagementDashboardView's own kpi_no_referee uses for
     its default "next 10" range).
 
-    Admin-only, matching how _nav_items.html itself gates both links (`{% if
-    is_club_admin %}`) -- a coach never sees either link, so there's no reason
-    to run either query for them. Always an int when shown, never hidden at 0:
-    "the queue is empty" and "nobody checked" have to read differently.
+    Gated on can_manage_members (real ADMIN or MEMBER_ADMIN), matching how
+    _nav_items.html itself gates both links -- a coach never sees either link, so
+    there's no reason to run either query for them. Always an int when shown,
+    never hidden at 0: "the queue is empty" and "nobody checked" have to read
+    differently.
     """
     club = getattr(request, "club", None)
-    if club is None or not request.user.is_authenticated or not is_club_admin(request.user, club):
+    if club is None or not request.user.is_authenticated or not can_manage_members(request.user, club):
         return {"pending_parent_claims_count": None, "games_missing_referees_count": None}
 
     # Imported here rather than at module level to keep this module's own import

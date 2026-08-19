@@ -1,0 +1,77 @@
+{% extends "controlpanel/base.html" %}
+{% load lucide %}
+
+{% block panel_title %}Jobs{% endblock panel_title %}
+
+{% block breadcrumb %}
+    <span class="text-ink">jobs</span>
+    <span class="text-edge">|</span>
+    <span>{{ jobs|length }} scheduled</span>
+{% endblock breadcrumb %}
+
+{% block panel %}
+    <div class="rounded border border-info-border bg-info-bg px-4 py-3 text-sm text-info-text">
+        {% lucide "info" size=16 class="inline -mt-0.5 mr-1" %}
+        These run on Celery Beat's own schedule (see <span class="font-mono">rosterchief/settings.py</span>) — this page is monitoring only, there is no "run now" here. A run that never appears at its scheduled time is the signal something's wrong with <span class="font-mono">worker</span>/<span class="font-mono">beat</span>, not with this page.
+    </div>
+
+    <div class="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
+        {% for job in jobs %}
+            <div class="card flex flex-col">
+                <div class="flex items-start justify-between gap-3 border-b border-line px-4 py-3">
+                    <div>
+                        <div class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{{ job.label }}</div>
+                        <div class="mt-0.5 font-mono text-[11px] text-muted">{{ job.name }}</div>
+                    </div>
+                    {% if job.latest %}
+                        {% if job.latest.status == "success" %}
+                            <span class="badge badge-success shrink-0">ok</span>
+                        {% elif job.latest.status == "failure" %}
+                            <span class="badge badge-error shrink-0">error</span>
+                        {% else %}
+                            <span class="badge badge-info shrink-0">running</span>
+                        {% endif %}
+                    {% else %}
+                        <span class="badge shrink-0">never run</span>
+                    {% endif %}
+                </div>
+                <div class="flex flex-1 flex-col gap-2 px-4 py-3 text-sm">
+                    {# flex-1 here so the paragraph absorbs whatever space a shorter description leaves, keeping the schedule pill pinned to the bottom of the content block across every card in the row instead of drifting with description length. #}
+                    <p class="flex-1 text-slate">{{ job.description }}</p>
+                    <div class="badge flex items-center gap-1.5 font-mono text-[11px] text-muted">
+                        {% lucide "clock" size=12 %} {{ job.schedule }}
+                    </div>
+                    {% if job.latest %}
+                        <div class="mt-1 font-mono text-[11px] text-muted">
+                            last run {{ job.latest.started_at|date:"j M Y, H:i" }}
+                            {% if job.latest.duration %}· {{ job.latest.duration.total_seconds|floatformat:1 }}s{% endif %}
+                        </div>
+                        {% if job.latest.status == "success" and job.latest.detail %}
+                            <div class="rounded bg-subhead px-2.5 py-2 font-mono text-xs text-slate">{{ job.latest.detail }}</div>
+                        {% elif job.latest.status == "failure" and job.latest.error %}
+                            <div class="rounded border border-danger-border bg-danger-bg px-2.5 py-2 font-mono text-xs text-club-dark">{{ job.latest.error }}</div>
+                        {% endif %}
+                    {% endif %}
+                </div>
+
+                {% if job.runs|length > 1 %}
+                    <div class="mt-auto flex flex-col gap-1.5 border-t border-rule px-4 py-3">
+                        <div class="font-mono text-[10px] tracking-[.06em] text-dim uppercase">Recent runs</div>
+                        {% for run in job.runs|slice:":5" %}
+                            <div class="flex items-center gap-2 font-mono text-[11px]">
+                                <span class="text-dim">{{ run.started_at|date:"d/m H:i" }}</span>
+                                {% if run.status == "success" %}
+                                    <span class="text-ok-text">ok</span>
+                                {% elif run.status == "failure" %}
+                                    <span class="text-club-dark">error</span>
+                                {% else %}
+                                    <span class="text-info-text">running</span>
+                                {% endif %}
+                            </div>
+                        {% endfor %}
+                    </div>
+                {% endif %}
+            </div>
+        {% endfor %}
+    </div>
+{% endblock panel %}

@@ -1,27 +1,31 @@
 {% extends "management/base.html" %}
 {% load i18n lucide ui %}
 
+{% block panel_title %}{% if update_view %}{% trans "Edit sponsor" %}{% else %}{% trans "New sponsor" %}{% endif %}{% endblock panel_title %}
 {% block heading %}{% if update_view %}{% blocktrans %}Edit {{ object }}{% endblocktrans %}{% else %}{% trans "New sponsor" %}{% endif %}{% endblock heading %}
 
 {% block panel %}
-    <div class="card w-full bg-base-100 shadow">
+    <div class="card">
         <div class="card-body">
             <form method="post" enctype="multipart/form-data">
                 {% csrf_token %}
 
                 {% for error in form.non_field_errors %}
-                    <div class="alert alert-error my-2">
+                    <div class="alert alert-error">
+                        {% lucide "circle-x" size=18 %}
                         <span>{{ error }}</span>
                     </div>
                 {% endfor %}
 
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="grid grid-cols-2 gap-4">
                     {% for field in form %}
-                        {% form_field field %}
+                        <div class="{% if field.widget_type == "textarea" or field.widget_type == "clearablefile" %}col-span-2{% endif %}">
+                            {% form_field field %}
+                        </div>
                     {% endfor %}
                 </div>
 
-                <div class="card-actions justify-start pt-2 mt-2">
+                <div class="mt-4 flex justify-start gap-2">
                     <a class="btn btn-outline gap-2" href="{% url "management:sponsor_list" %}">{% lucide "arrow-left" size=16 %} {% trans "Cancel" %}</a>
                     <button class="btn btn-primary gap-2" type="submit">{% lucide "save" size=16 %} {% trans "Save" %}</button>
                 </div>

@@ -104,6 +104,42 @@ def clubs_with_health(queryset=None, today=None, now=None):
     )
 
 
+#: Risk tiers for the dashboard's "Club health" table, high risk first. Derived from signals
+#: `clubs_with_health` already annotates -- no separate query, and nothing here is invented:
+#: a club with no season covering today cannot take a signup, and dues past their grace date
+#: are exactly what the archive job is about to act on.
+RISK_HIGH, RISK_WATCH, RISK_OK = "high", "watch", "ok"
+
+
+def club_risk(club, today):
+    """The risk tier, plus a human reason naming exactly which signal tripped it -- so the
+    dashboard can show *why*, not just a colour. Checked in the same order as the tier
+    logic below: the first matching condition is the one reported."""
+    if not club.has_season:
+        return RISK_HIGH, _("No season covers today")
+    if club.dues_grace_until is not None and club.dues_grace_until < today:
+        return RISK_HIGH, _("Dues overdue past grace")
+    if not club.upcoming_events:
+        return RISK_WATCH, _("No events in the next 30 days")
+    if club.dues_owed:
+        return RISK_WATCH, _("Dues outstanding")
+    return RISK_OK, _("Nothing needs attention")
+
+
+def clubs_by_risk(queryset=None, today=None):
+    """`clubs_with_health`, ordered highest risk first -- the dashboard's Club health table
+    is "sorted by risk" per the design, and risk is exactly the thing that table is for."""
+    today = today or timezone.localdate()
+    order = {RISK_HIGH: 0, RISK_WATCH: 1, RISK_OK: 2}
+
+    clubs = list(clubs_with_health(queryset, today=today))
+    for club in clubs:
+        club.risk, club.risk_reason = club_risk(club, today)
+    clubs.sort(key=lambda club: order[club.risk])
+
+    return clubs
+
+
 def platform_totals():
     return {
         "clubs": Club.objects.active().count(),

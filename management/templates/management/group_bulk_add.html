@@ -2,51 +2,49 @@
 {% load i18n lucide static %}
 
 {% block heading %}{% trans "Add multiple members" %}{% endblock heading %}
-{% block subheading %}{{ group.name }}{% endblock subheading %}
+
+{% block topbar_context %}
+    <span class="font-mono text-[13px] text-muted">{{ group.name }}</span>
+{% endblock topbar_context %}
 
 {% block panel %}
     <form method="post">
         {% csrf_token %}
         {{ formset.management_form }}
 
-        <div class="card bg-base-100 shadow">
-            <div class="card-body">
-                {% for error in formset.non_form_errors %}
-                    <div class="alert alert-error my-2">
-                        <span>{{ error }}</span>
-                    </div>
-                {% endfor %}
-
-                {% comment %}
-                    overflow-x-auto is safe here: the member picker's dropdown
-                    (searchable-select.js) is position: fixed, computed from the input's
-                    own screen position rather than document flow, so a scrolling
-                    ancestor around the table no longer clips it.
-                {% endcomment %}
-                <div class="overflow-x-auto">
-                    <table class="table w-full">
-                        <thead>
-                            <tr>
-                                <th>{% trans "Member" %}</th>
-                                <th></th>
-                            </tr>
-                        </thead>
-                        <tbody id="bulk-add-rows" data-prefix="{{ formset.prefix }}">
-                            {% for form in formset %}
-                                {% include "management/_group_bulk_add_row.html" with form=form %}
-                            {% endfor %}
-                        </tbody>
-                    </table>
+        <div class="card card-body">
+            {% for error in formset.non_form_errors %}
+                <div class="alert alert-error my-2">
+                    <span>{{ error }}</span>
                 </div>
+            {% endfor %}
 
-                <template id="bulk-add-row-template">
-                    {% include "management/_group_bulk_add_row.html" with form=formset.empty_form %}
-                </template>
+            {% comment %}
+                The member picker's dropdown (searchable-select.js) is position: fixed,
+                computed from the input's own screen position rather than document flow,
+                so no ancestor scroll wrapper is needed to keep it from being clipped.
+            {% endcomment %}
+            <table class="table w-full">
+                <thead>
+                    <tr>
+                        <th>{% trans "Member" %}</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody id="bulk-add-rows" data-prefix="{{ formset.prefix }}">
+                    {% for form in formset %}
+                        {% include "management/_group_bulk_add_row.html" with form=form %}
+                    {% endfor %}
+                </tbody>
+            </table>
 
-                <div class="flex flex-wrap items-center gap-2 mt-2">
-                    <button class="btn btn-outline btn-sm gap-2" type="button" id="add-row">{% lucide "plus" size=14 %} {% trans "Add another row" %}</button>
-                    <button class="btn btn-primary btn-sm gap-2" type="submit">{% lucide "users" size=14 %} {% trans "Add to group" %}</button>
-                </div>
+            <template id="bulk-add-row-template">
+                {% include "management/_group_bulk_add_row.html" with form=formset.empty_form %}
+            </template>
+
+            <div class="mt-2 flex flex-wrap items-center gap-2">
+                <button class="btn btn-outline btn-sm gap-2" type="button" id="add-row">{% lucide "plus" size=14 %} {% trans "Add another row" %}</button>
+                <button class="btn btn-primary btn-sm gap-2" type="submit">{% lucide "users" size=14 %} {% trans "Add to group" %}</button>
             </div>
         </div>
 

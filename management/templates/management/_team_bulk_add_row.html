@@ -5,28 +5,28 @@
     row" button clones from -- so the two can never drift apart.
 {% endcomment %}
 <tr class="bulk-add-row">
-    <td>
+    <td class="py-2">
         {{ form.member }}
-        {% for error in form.member.errors %}<p class="text-xs text-error mt-1">{{ error }}</p>{% endfor %}
-        {% for error in form.non_field_errors %}<p class="text-xs text-error mt-1">{{ error }}</p>{% endfor %}
+        {% for error in form.member.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
+        {% for error in form.non_field_errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
     </td>
-    <td>
+    <td class="py-2">
         {{ form.position }}
-        {% for error in form.position.errors %}<p class="text-xs text-error mt-1">{{ error }}</p>{% endfor %}
+        {% for error in form.position.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
     </td>
-    <td class="w-24">
+    <td class="w-24 py-2">
         {{ form.jersey_number }}
-        {% for error in form.jersey_number.errors %}<p class="text-xs text-error mt-1">{{ error }}</p>{% endfor %}
+        {% for error in form.jersey_number.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
     </td>
-    <td class="w-16 text-center">
+    <td class="w-16 py-2 text-center">
         {{ form.is_captain }}
-        {% for error in form.is_captain.errors %}<p class="text-xs text-error mt-1">{{ error }}</p>{% endfor %}
+        {% for error in form.is_captain.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
     </td>
-    <td class="w-16 text-center">
+    <td class="w-16 py-2 text-center">
         {{ form.is_alternate_captain }}
-        {% for error in form.is_alternate_captain.errors %}<p class="text-xs text-error mt-1">{{ error }}</p>{% endfor %}
+        {% for error in form.is_alternate_captain.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
     </td>
-    <td class="w-12">
-        <button class="btn btn-ghost btn-sm remove-row" type="button" aria-label="{% trans 'Remove this row' %}" title="{% trans 'Remove this row' %}">{% lucide "x" size=16 %}</button>
+    <td class="w-12 py-2">
+        <button class="btn btn-ghost btn-sm btn-square remove-row" type="button" aria-label="{% trans 'Remove this row' %}" title="{% trans 'Remove this row' %}">{% lucide "x" size=16 %}</button>
     </td>
 </tr>

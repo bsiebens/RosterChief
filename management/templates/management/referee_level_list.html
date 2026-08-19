@@ -2,53 +2,49 @@
 {% load i18n lucide %}
 
 {% block heading %}{% trans "Referee levels" %}{% endblock heading %}
-{% block subheading %}{% trans "Which teams' home games each level qualifies a referee for." %}{% endblock subheading %}
+{% block topbar_context %}<span class="text-sm text-muted">{% trans "Which teams' home games each level qualifies a referee for." %}</span>{% endblock topbar_context %}
 
 {% block actions %}
     {% if is_club_admin %}
-        <a class="btn btn-outline gap-2" href="{% url 'management:referee_level_create' %}">{% lucide "plus" size=16 %} {% trans "New level" %}</a>
+        <a class="btn btn-primary gap-2" href="{% url 'management:referee_level_create' %}">{% lucide "plus" size=16 %} {% trans "New level" %}</a>
     {% endif %}
 {% endblock actions %}
 
 {% block panel %}
-    <div class="card bg-base-100 shadow">
-        <div class="card-body">
-            <div class="overflow-x-auto">
-                <table class="table table-cards">
-                    <thead>
-                        <tr>
-                            <th>{% trans "Ordering" %}</th>
-                            <th>{% trans "Name" %}</th>
-                            <th>{% trans "Qualifies for" %}</th>
-                            <th></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for level in levels %}
-                            <tr>
-                                <td data-label="{% trans 'Ordering' %}">{{ level.ordering }}</td>
-                                <td class="font-semibold">{{ level.name }}</td>
-                                <td data-label="{% trans 'Qualifies for' %}">
-                                    {% for team in level.teams.all %}
-                                        <span class="badge badge-outline badge-sm">{{ team.name }}</span>
-                                    {% empty %}
-                                        <span class="opacity-40">—</span>
-                                    {% endfor %}
-                                </td>
-                                <td class="text-right">
-                                    {% if is_club_admin %}
-                                        <a class="btn btn-outline btn-sm gap-2" href="{% url 'management:referee_level_update' level.pk %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</a>
-                                    {% endif %}
-                                </td>
-                            </tr>
-                        {% empty %}
-                            <tr>
-                                <td colspan="4" class="text-center opacity-60">{% trans "No referee levels yet." %}</td>
-                            </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        </div>
+    <div class="card overflow-hidden">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>{% trans "Ordering" %}</th>
+                    <th>{% trans "Name" %}</th>
+                    <th>{% trans "Qualifies for" %}</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for level in levels %}
+                    <tr>
+                        <td class="font-mono text-muted">{{ level.ordering }}</td>
+                        <td class="font-semibold text-ink">{{ level.name }}</td>
+                        <td>
+                            {% for team in level.teams.all %}
+                                <span class="badge badge-outline badge-sm">{{ team.name }}</span>
+                            {% empty %}
+                                <span class="text-dim">—</span>
+                            {% endfor %}
+                        </td>
+                        <td class="text-right">
+                            {% if is_club_admin %}
+                                <a class="btn btn-outline btn-sm gap-2" href="{% url 'management:referee_level_update' level.pk %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</a>
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="4" class="text-center text-muted">{% trans "No referee levels yet." %}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
     </div>
 {% endblock panel %}

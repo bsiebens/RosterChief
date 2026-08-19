@@ -8,44 +8,42 @@
 {% endblock actions %}
 
 {% block panel %}
-    <div class="card bg-base-100 shadow">
-        <div class="card-body">
-            <div class="overflow-x-auto">
-                <table class="table table-cards">
-                    <thead>
+    <div class="card overflow-hidden">
+        <div class="overflow-x-auto">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>{% trans "Name" %}</th>
+                        <th>{% trans "Address" %}</th>
+                        <th>{% trans "City" %}</th>
+                        <th>{% trans "Country" %}</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for location in locations %}
                         <tr>
-                            <th>{% trans "Name" %}</th>
-                            <th>{% trans "Address" %}</th>
-                            <th>{% trans "City" %}</th>
-                            <th>{% trans "Country" %}</th>
-                            <th></th>
+                            <td class="font-semibold text-ink">
+                                {{ location.name }}
+                                {% if location.is_home %}<span class="badge badge-sm badge-neutral ml-1">{% trans "Home" %}</span>{% endif %}
+                            </td>
+                            <td>{{ location.address }}</td>
+                            <td>{{ location.city }}</td>
+                            <td>{{ location.country }}</td>
+                            <td class="text-right">
+                                <div class="flex justify-end gap-1">
+                                    <a class="btn btn-outline btn-sm" href="{% url 'management:location_update' location.pk %}" aria-label="{% trans 'Edit' %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</a>
+                                    <button class="btn btn-sm btn-outline btn-error" type="button" onclick="document.getElementById('{{ location.pk|dom_id:"location_delete_modal" }}').showModal()" aria-label="{% trans 'Delete' %}">{% lucide "trash-2" size=14 %} {% trans "Delete" %}</button>
+                                </div>
+                            </td>
                         </tr>
-                    </thead>
-                    <tbody>
-                        {% for location in locations %}
-                            <tr>
-                                <td class="font-semibold">
-                                    {{ location.name }}
-                                    {% if location.is_home %}<span class="badge badge-sm badge-primary ml-1">{% trans "Home" %}</span>{% endif %}
-                                </td>
-                                <td data-label="{% trans 'Address' %}">{{ location.address }}</td>
-                                <td data-label="{% trans 'City' %}">{{ location.city }}</td>
-                                <td data-label="{% trans 'Country' %}">{{ location.country }}</td>
-                                <td class="text-right">
-                                    <div class="flex justify-end gap-1">
-                                        <a class="btn btn-outline btn-sm" href="{% url 'management:location_update' location.pk %}" aria-label="{% trans 'Edit' %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</a>
-                                        <button class="btn btn-sm btn-outline btn-error" type="button" onclick="document.getElementById('{{ location.pk|dom_id:"location_delete_modal" }}').showModal()" aria-label="{% trans 'Delete' %}">{% lucide "trash-2" size=14 %} {% trans "Delete" %}</button>
-                                    </div>
-                                </td>
-                            </tr>
-                        {% empty %}
-                            <tr>
-                                <td colspan="5" class="text-center opacity-60">{% trans "No locations yet." %}</td>
-                            </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
+                    {% empty %}
+                        <tr>
+                            <td colspan="5" class="py-8 text-center text-muted">{% trans "No locations yet." %}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
         </div>
     </div>
 

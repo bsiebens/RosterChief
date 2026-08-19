@@ -1,90 +1,169 @@
-{% extends "_club_base.html" %}
-{% load i18n lucide %}
+{% load static lucide ui i18n %}
 
 {% comment %}
-    The club-staff shell: team managers, coaches and admins only (never parents or
-    players -- see club.mixins.ClubStaffRequiredMixin). Mirrors controlpanel/base.html's
-    block structure, extending the club's own skin instead of the platform's.
+    Standalone shell for club management -- does NOT extend templates/_base.html or
+    _club_base.html, and does not load assets/app.css or daisyUI. Same reasoning as
+    controlpanel/templates/controlpanel/base.html's own standalone shell, but this
+    surface IS club-branded (design_handoff_rosterchief_platform/README.md, "Club
+    theming"): the --tenant-club/--tenant-club-dark custom properties below feed
+    assets/management.css's --color-club/--color-club-dark tokens, set per request
+    from Club.secondary_color. Desktop only, matching the design's own scope for this
+    surface -- no mobile nav here, unlike the club-facing chrome this replaces.
 {% endcomment %}
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-{% block head_title %}
-    {% block section_title %}{% trans "Management" %}{% endblock section_title %}
-{% endblock head_title %}
+        <title>
+            {% block title %}{% block panel_title %}Management{% endblock panel_title %} &middot; {{ club.name }}{% endblock title %}
+        </title>
 
-{% block nav_toggle %}
-    <button class="btn btn-ghost btn-square lg:hidden" type="button" onclick="document.getElementById('mobile_nav_modal').showModal()" aria-label="{% trans 'Menu' %}">
-        {% lucide "menu" size=20 %}
-    </button>
-{% endblock nav_toggle %}
+        <link rel="stylesheet" href="{% static 'css/management.css' %}">
+        {% if club.secondary_color %}
+            <style>
+                :root {
+                    --tenant-club: {{ club.secondary_color }};
+                    --tenant-club-dark: color-mix(in srgb, {{ club.secondary_color }} 80%, black);
+                    {% comment %}
+                        Club.secondary_content_color is already the WCAG-luminance black-or-white
+                        choice (Club._content_color_for) -- e.g. the active nav item's own text,
+                        which sits on --color-club and can't assume white reads on every colour.
+                    {% endcomment %}
+                    --tenant-club-content: {{ club.secondary_content_color }};
+                }
+            </style>
+        {% endif %}
+        {% if club.primary_color %}
+            <style>
+                :root {
+                    {# Same WCAG black-or-white choice as secondary_content_color above, for the sidebar's own background. #}
+                    --tenant-sidebar-bg: {{ club.primary_color }};
+                    --tenant-sidebar-fg: {{ club.primary_content_color }};
+                }
+            </style>
+        {% endif %}
+        {% block extra_head %}{% endblock extra_head %}
+    </head>
 
-{% comment %} Kept in the navbar itself only at `lg`+, where there's no hamburger drawer to hold them instead -- see the comment on `nav_icons_class` in _base.html. {% endcomment %}
-{% block nav_icons_class %}hidden items-center lg:flex{% endblock nav_icons_class %}
+    <body class="flex h-screen flex-col overflow-hidden bg-paper font-sans text-slate">
+        <div class="flex flex-1 overflow-hidden">
+            <aside class="flex w-[236px] shrink-0 flex-col bg-sidebar-bg py-5">
+                <a class="flex items-center gap-2.5 px-[18px] pb-[22px]" href="{% url 'management:home' %}">
+                    {% if club.logo %}
+                        <img class="crest h-[30px] w-7 shrink-0 object-cover" src="{{ club.logo.url }}" alt="">
+                    {% else %}
+                        <span class="crest flex h-[30px] w-7 shrink-0 items-center justify-center bg-club">
+                            <span class="font-display text-[10px] font-extrabold text-club-content">{{ club.initials }}</span>
+                        </span>
+                    {% endif %}
+                    <span class="min-w-0">
+                        <span class="block truncate font-display text-[17px] leading-none font-extrabold tracking-[.06em] text-sidebar-fg uppercase">{{ club.name }}</span>
+                        <span class="block font-mono text-[10px] text-sidebar-fg-faint">RosterChief &middot; management</span>
+                    </span>
+                </a>
 
-{% block menu %}
-    <aside class="hidden w-64 shrink-0 overflow-y-auto border-r border-base-300 bg-base-100 lg:block">
-        <ul class="menu w-full gap-1 p-3 mt-4">
-            {% include "management/_nav_items.html" %}
-        </ul>
-    </aside>
-{% endblock menu %}
+                <nav class="flex flex-col gap-0.5 px-2.5">
+                    {% include "management/_nav_items.html" %}
+                </nav>
 
-{% block main %}
-    {# Below `lg` the sidebar is hidden and {% block nav_toggle %} above opens this instead. #}
-    <dialog id="mobile_nav_modal" class="modal modal-start lg:hidden">
-        <div class="modal-box h-full max-h-none w-72 max-w-[85vw] rounded-none p-0">
-            <div class="flex items-center justify-between border-b border-base-300 p-3">
-                <span class="font-roboto text-lg font-bold tracking-wider">{% trans "Menu" %}</span>
-                <form method="dialog">
-                    <button class="btn btn-ghost btn-square btn-sm" aria-label="{% trans 'Close' %}">{% lucide "x" size=18 %}</button>
-                </form>
+                <div class="flex-1"></div>
+
+                <div class="px-[18px]">
+                    {% comment %}
+                        <details>, not a click-driven dropdown -- no JS needed to open it, only
+                        the outside-click/Escape listener below to close it (a <details> stays
+                        open until its own <summary> is clicked again otherwise, which would be
+                        the only sidebar element on the whole page that doesn't dismiss itself).
+                        Opens upward (bottom-full): the trigger sits at the very bottom of the
+                        sidebar, so a menu opening down would run off the viewport.
+                    {% endcomment %}
+                    <details id="user-menu" class="relative border-t border-sidebar-hairline pt-3.5">
+                        <summary class="flex cursor-pointer list-none items-center gap-2.5 [&::-webkit-details-marker]:hidden">
+                            <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-sidebar-chip font-display text-[13px] font-extrabold text-sidebar-fg">{% if user.member %}{{ user.member.first_name|slice:":1" }}{{ user.member.last_name|slice:":1" }}{% else %}?{% endif %}</span>
+                            <span class="min-w-0 flex-1">
+                                <span class="block truncate text-[13px] font-semibold text-sidebar-fg">{{ user.member|default:user.email }}</span>
+                                <span class="block text-[11px] text-sidebar-fg-faint">{% if is_club_admin %}Admin{% else %}Staff{% endif %}</span>
+                            </span>
+                            {% lucide "chevron-up" size=14 class="shrink-0 text-sidebar-fg-faint" %}
+                        </summary>
+                        <div class="absolute bottom-full left-0 z-20 mb-2 w-full rounded-xl border border-sidebar-hairline bg-sidebar-bg p-1.5 shadow-lg">
+                            <a class="flex items-center gap-2 rounded-lg px-2.5 py-2 text-[13px] font-medium text-sidebar-fg-dim hover:bg-sidebar-hairline hover:text-sidebar-fg" href="{% url 'account_change_password' %}">{% lucide "key-round" size=14 %} {% trans "Change password" %}</a>
+                            <a class="flex items-center gap-2 rounded-lg px-2.5 py-2 text-[13px] font-medium text-sidebar-fg-dim hover:bg-sidebar-hairline hover:text-sidebar-fg" href="{% url 'mfa_index' %}">{% lucide "shield-check" size=14 %} {% trans "Manage two-factor auth" %}</a>
+                            <div class="my-1 h-px bg-sidebar-hairline"></div>
+                            <a class="flex items-center gap-2 rounded-lg px-2.5 py-2 text-[13px] font-medium text-sidebar-fg-dim hover:bg-sidebar-hairline hover:text-sidebar-fg" href="{% url 'account_logout' %}">{% lucide "log-out" size=14 %} {% trans "Log out" %}</a>
+                        </div>
+                    </details>
+                </div>
+            </aside>
+
+            <div class="flex min-w-0 flex-1 flex-col">
+                <header class="flex h-16 shrink-0 items-center gap-4 border-b border-line bg-white px-7">
+                    <span class="font-display text-2xl font-extrabold text-ink uppercase">{% block heading %}{% block topbar_title %}Management{% endblock topbar_title %}{% endblock heading %}</span>
+                    {% block topbar_context %}{% endblock topbar_context %}
+                    <div class="flex-1"></div>
+                    <div class="flex items-center gap-2">
+                        {% block actions %}{% endblock actions %}
+                    </div>
+                </header>
+
+                {% block filter_strip %}{% endblock filter_strip %}
+
+                <main class="flex-1 overflow-y-auto">
+                    <div class="flex flex-col gap-4 px-7 py-6">
+                        {% if billing_notice.is_urgent and nav != "home" %}
+                            {% include "management/_billing_notice.html" %}
+                        {% endif %}
+
+                        {% if messages %}
+                            <div class="flex flex-col gap-2">
+                                {% for message in messages %}
+                                    {% with alert=message|as_alert %}
+                                        <div class="alert {{ alert.css }}" role="alert">
+                                            {% lucide alert.icon size=18 %}
+                                            <div>
+                                                <div class="font-display text-sm font-bold tracking-wide uppercase">{{ alert.title }}</div>
+                                                <div class="text-sm">{{ alert.body }}</div>
+                                            </div>
+                                        </div>
+                                    {% endwith %}
+                                {% endfor %}
+                            </div>
+                        {% endif %}
+
+                        {% block panel %}{% endblock panel %}
+                    </div>
+                </main>
             </div>
-            <ul class="menu w-full gap-1 p-3">
-                <li>
-                    <button type="button" data-theme-toggle>
-                        <span data-theme-icon="light" class="hidden items-center gap-3">{% lucide "sun" size=16 %} {% trans "Light theme" %}</span>
-                        <span data-theme-icon="dark" class="hidden items-center gap-3">{% lucide "moon" size=16 %} {% trans "Dark theme" %}</span>
-                        <span data-theme-icon="auto" class="hidden items-center gap-3">{% lucide "sun-moon" size=16 %} {% trans "Auto theme" %}</span>
-                    </button>
-                </li>
-                {% if has_management_access %}
-                    <li><a href="{% url "management:home" %}">{% lucide "layout-dashboard" size=16 %} {% trans "Management" %}</a></li>
-                {% endif %}
-                {% if user.is_superuser %}
-                    <li><a href="{% url "admin:index" %}">{% lucide "shield-cog" size=16 %} {% trans "Django admin" %}</a></li>
-                {% endif %}
-                <li class="menu-title">{% trans "Navigation" %}</li>
-                {% include "management/_nav_items.html" %}
-            </ul>
-        </div>
-        <form method="dialog" class="modal-backdrop">
-            <button>{% trans "close" %}</button>
-        </form>
-    </dialog>
-
-    {# flex-col below `sm`: title over a full-width, stacked column of action buttons reads far better on a phone than the same row wrapping mid-button. #}
-    <div class="mb-6 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-        <div class="flex flex-col gap-2 grow">
-            <h1 class="text-3xl font-bold">
-                {% block heading %}{% trans "Management" %}{% endblock heading %}
-            </h1>
-            <span class="text-sm text-base-content/50">{% block subheading %}{% endblock subheading %}</span>
         </div>
 
-        <div class="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap">
-            {% block actions %}{% endblock actions %}
-        </div>
-    </div>
+        <script>
+            (() => {
+                const menu = document.getElementById("user-menu");
+                if (!menu) return;
+                document.addEventListener("click", (event) => {
+                    if (menu.open && !menu.contains(event.target)) menu.open = false;
+                });
+                document.addEventListener("keydown", (event) => {
+                    if (event.key === "Escape") menu.open = false;
+                });
+            })();
 
-    {% comment %}
-        A final billing notice follows the admin onto every management page -- but only at
-        error level (inside 7 days of archiving, or already past it). Shown from the moment
-        anything is owed it would sit on every screen for weeks and train people to ignore
-        the one week it matters. home.html includes the same partial at every level, hence
-        the guard here rather than inside the partial.
-    {% endcomment %}
-    {% if billing_notice.is_urgent and nav != "home" %}
-        {% include "management/_billing_notice.html" %}
-    {% endif %}
+            // Search-as-you-type: any [data-autosubmit] input submits its own form a
+            // beat after typing stops, instead of needing a separate Search button.
+            // Debounced (not one submit per keystroke) so a full-page GET reload isn't
+            // fired on every character -- 400ms is short enough to feel immediate,
+            // long enough that normal typing speed never triggers it mid-word.
+            document.querySelectorAll("[data-autosubmit]").forEach((input) => {
+                let timeout;
+                input.addEventListener("input", () => {
+                    clearTimeout(timeout);
+                    timeout = setTimeout(() => input.form.requestSubmit(), 400);
+                });
+            });
+        </script>
 
-    {% block panel %}{% endblock panel %}
-{% endblock main %}
+        {% block extra_body %}{% endblock extra_body %}
+    </body>
+</html>

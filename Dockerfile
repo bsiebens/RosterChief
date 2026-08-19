@@ -77,6 +77,8 @@ COPY --from=venv /app/.venv ./.venv
 
 COPY . .
 COPY --from=css /build/static/css/app.css ./static/css/app.css
+COPY --from=css /build/static/css/controlpanel.css ./static/css/controlpanel.css
+COPY --from=css /build/static/css/management.css ./static/css/management.css
 
 # collectstatic needs a settings module that imports: a throwaway key, never used at runtime.
 RUN DJANGO_SECRET_KEY=build-only-not-a-secret \
@@ -88,7 +90,7 @@ RUN DJANGO_SECRET_KEY=build-only-not-a-secret \
 # app runs as rosterchief, not root. Existing image content (even an empty, correctly-owned
 # dir) is what a named volume copies its initial ownership from on first use.
 RUN useradd --system --uid 1000 rosterchief \
-    && mkdir -p /app/media \
+    && mkdir -p /app/media /app/private_media \
     && chown -R rosterchief /app
 USER rosterchief
 

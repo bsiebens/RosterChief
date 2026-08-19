@@ -4,7 +4,7 @@
 {% block heading %}{% trans "Review import" %}{% endblock heading %}
 
 {% block panel %}
-    <div class="alert alert-info mb-4">
+    <div class="alert alert-info">
         {% lucide "info" size=16 %}
         <span>{% blocktrans with scraped=plan.scraped_team_name team=plan.team %}Importing fixtures for “{{ scraped }}” onto your team “{{ team }}”. Double check that's the right match before confirming.{% endblocktrans %}</span>
     </div>
@@ -12,137 +12,139 @@
     <form method="post" action="{% url 'management:rbihf_import_confirm' %}">
         {% csrf_token %}
 
-        <div class="card bg-base-100 shadow mb-4">
-            <div class="card-body">
-                <h2 class="card-title text-base">{% lucide "plus" size=18 %} {% blocktrans count counter=plan.to_create|length %}{{ counter }} game to create{% plural %}{{ counter }} games to create{% endblocktrans %}</h2>
+        <div class="flex flex-col gap-4">
+            <div class="card">
+                <div class="card-body">
+                    <h2 class="card-title text-base">{% lucide "plus" size=18 %} {% blocktrans count counter=plan.to_create|length %}{{ counter }} game to create{% plural %}{{ counter }} games to create{% endblocktrans %}</h2>
 
-                {% if plan.to_create %}
-                    <div class="overflow-x-auto">
-                        <table class="table">
-                            <thead>
-                                <tr>
-                                    <th>{% trans "#" %}</th>
-                                    <th>{% trans "Start" %}</th>
-                                    <th>{% trans "Opponent" %}</th>
-                                    <th>{% trans "Location" %}</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for planned in plan.to_create %}
+                    {% if plan.to_create %}
+                        <div class="overflow-x-auto">
+                            <table class="table">
+                                <thead>
                                     <tr>
-                                        <td>{{ planned.fixture.external_game_id }}</td>
-                                        <td>{{ planned.fixture.start|date:"Y-m-d H:i" }}</td>
-                                        <td>
-                                            <div class="flex items-center gap-2">
-                                                <select name="opponent_{{ planned.fixture.external_game_id }}" class="select select-sm w-full">
-                                                    <option value="">{% trans "Use scraped name" %}</option>
-                                                    {% for opponent in plan.opponent_choices %}
-                                                        <option value="{{ opponent.pk }}" {% if planned.suggested_opponent.pk == opponent.pk %}selected{% endif %}>{{ opponent.name }}</option>
-                                                    {% endfor %}
-                                                </select>
-                                                <span class="text-xs opacity-60 whitespace-nowrap">{% blocktrans with opponent=planned.fixture.opponent_name %}RBIHF: {{ opponent }}{% endblocktrans %}</span>
-                                            </div>
-                                        </td>
-                                        <td>
-                                            <div class="flex items-center gap-2">
-                                                <select name="location_{{ planned.fixture.external_game_id }}" class="select select-sm w-full">
-                                                    <option value="">&mdash;</option>
-                                                    {% for location in plan.location_choices %}
-                                                        <option value="{{ location.pk }}" {% if planned.suggested_location.pk == location.pk %}selected{% endif %}>{{ location.name }}</option>
-                                                    {% endfor %}
-                                                </select>
-                                                <span class="text-xs opacity-60 whitespace-nowrap">{% blocktrans with venue=planned.fixture.venue_text %}RBIHF: {{ venue }}{% endblocktrans %}</span>
-                                            </div>
-                                        </td>
+                                        <th>{% trans "#" %}</th>
+                                        <th>{% trans "Start" %}</th>
+                                        <th>{% trans "Opponent" %}</th>
+                                        <th>{% trans "Location" %}</th>
                                     </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                {% endif %}
-            </div>
-        </div>
-
-        <div class="card bg-base-100 shadow mb-4">
-            <div class="card-body">
-                <h2 class="card-title text-base">{% lucide "refresh-cw" size=18 %} {% blocktrans count counter=plan.to_update|length %}{{ counter }} game to update{% plural %}{{ counter }} games to update{% endblocktrans %}</h2>
-
-                {% if plan.to_update %}
-                    <div class="overflow-x-auto">
-                        <table class="table">
-                            <thead>
-                                <tr>
-                                    <th>{% trans "#" %}</th>
-                                    <th>{% trans "Changes" %}</th>
-                                    <th>{% trans "Opponent" %}</th>
-                                    <th>{% trans "Location" %}</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for planned in plan.to_update %}
-                                    <tr>
-                                        <td>{{ planned.fixture.external_game_id }}</td>
-                                        <td>
-                                            {% for field, change in planned.changes.items %}
-                                                <div class="text-xs">
-                                                    <span class="font-semibold">{{ field }}:</span>
-                                                    <span class="opacity-60 line-through">{{ change.0|default:"—" }}</span>
-                                                    &rarr;
-                                                    <span>{{ change.1 }}</span>
+                                </thead>
+                                <tbody>
+                                    {% for planned in plan.to_create %}
+                                        <tr>
+                                            <td class="font-mono text-xs">{{ planned.fixture.external_game_id }}</td>
+                                            <td class="font-mono text-xs">{{ planned.fixture.start|date:"Y-m-d H:i" }}</td>
+                                            <td>
+                                                <div class="flex items-center gap-2">
+                                                    <select name="opponent_{{ planned.fixture.external_game_id }}" class="select w-full">
+                                                        <option value="">{% trans "Use scraped name" %}</option>
+                                                        {% for opponent in plan.opponent_choices %}
+                                                            <option value="{{ opponent.pk }}" {% if planned.suggested_opponent.pk == opponent.pk %}selected{% endif %}>{{ opponent.name }}</option>
+                                                        {% endfor %}
+                                                    </select>
+                                                    <span class="text-xs whitespace-nowrap text-muted">{% blocktrans with opponent=planned.fixture.opponent_name %}RBIHF: {{ opponent }}{% endblocktrans %}</span>
                                                 </div>
-                                            {% endfor %}
-                                        </td>
-                                        <td>
-                                            <div class="flex items-center gap-2">
-                                                <select name="opponent_{{ planned.fixture.external_game_id }}" class="select select-sm w-full">
-                                                    <option value="">{% trans "Use scraped name" %}</option>
-                                                    {% for opponent in plan.opponent_choices %}
-                                                        <option value="{{ opponent.pk }}" {% if planned.suggested_opponent.pk == opponent.pk %}selected{% endif %}>{{ opponent.name }}</option>
-                                                    {% endfor %}
-                                                </select>
-                                                <span class="text-xs opacity-60 whitespace-nowrap">{% blocktrans with opponent=planned.fixture.opponent_name %}RBIHF: {{ opponent }}{% endblocktrans %}</span>
-                                            </div>
-                                        </td>
-                                        <td>
-                                            <div class="flex items-center gap-2">
-                                                <select name="location_{{ planned.fixture.external_game_id }}" class="select select-sm w-full">
-                                                    <option value="">&mdash;</option>
-                                                    {% for location in plan.location_choices %}
-                                                        <option value="{{ location.pk }}" {% if planned.suggested_location.pk == location.pk %}selected{% endif %}>{{ location.name }}</option>
-                                                    {% endfor %}
-                                                </select>
-                                                <span class="text-xs opacity-60 whitespace-nowrap">{% blocktrans with venue=planned.fixture.venue_text %}RBIHF: {{ venue }}{% endblocktrans %}</span>
-                                            </div>
-                                        </td>
+                                            </td>
+                                            <td>
+                                                <div class="flex items-center gap-2">
+                                                    <select name="location_{{ planned.fixture.external_game_id }}" class="select w-full">
+                                                        <option value="">&mdash;</option>
+                                                        {% for location in plan.location_choices %}
+                                                            <option value="{{ location.pk }}" {% if planned.suggested_location.pk == location.pk %}selected{% endif %}>{{ location.name }}</option>
+                                                        {% endfor %}
+                                                    </select>
+                                                    <span class="text-xs whitespace-nowrap text-muted">{% blocktrans with venue=planned.fixture.venue_text %}RBIHF: {{ venue }}{% endblocktrans %}</span>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-body">
+                    <h2 class="card-title text-base">{% lucide "refresh-cw" size=18 %} {% blocktrans count counter=plan.to_update|length %}{{ counter }} game to update{% plural %}{{ counter }} games to update{% endblocktrans %}</h2>
+
+                    {% if plan.to_update %}
+                        <div class="overflow-x-auto">
+                            <table class="table">
+                                <thead>
+                                    <tr>
+                                        <th>{% trans "#" %}</th>
+                                        <th>{% trans "Changes" %}</th>
+                                        <th>{% trans "Opponent" %}</th>
+                                        <th>{% trans "Location" %}</th>
                                     </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                {% endif %}
+                                </thead>
+                                <tbody>
+                                    {% for planned in plan.to_update %}
+                                        <tr>
+                                            <td class="font-mono text-xs">{{ planned.fixture.external_game_id }}</td>
+                                            <td>
+                                                {% for field, change in planned.changes.items %}
+                                                    <div class="text-xs">
+                                                        <span class="font-semibold text-ink">{{ field }}:</span>
+                                                        <span class="text-muted line-through">{{ change.0|default:"—" }}</span>
+                                                        &rarr;
+                                                        <span class="text-ink">{{ change.1 }}</span>
+                                                    </div>
+                                                {% endfor %}
+                                            </td>
+                                            <td>
+                                                <div class="flex items-center gap-2">
+                                                    <select name="opponent_{{ planned.fixture.external_game_id }}" class="select w-full">
+                                                        <option value="">{% trans "Use scraped name" %}</option>
+                                                        {% for opponent in plan.opponent_choices %}
+                                                            <option value="{{ opponent.pk }}" {% if planned.suggested_opponent.pk == opponent.pk %}selected{% endif %}>{{ opponent.name }}</option>
+                                                        {% endfor %}
+                                                    </select>
+                                                    <span class="text-xs whitespace-nowrap text-muted">{% blocktrans with opponent=planned.fixture.opponent_name %}RBIHF: {{ opponent }}{% endblocktrans %}</span>
+                                                </div>
+                                            </td>
+                                            <td>
+                                                <div class="flex items-center gap-2">
+                                                    <select name="location_{{ planned.fixture.external_game_id }}" class="select w-full">
+                                                        <option value="">&mdash;</option>
+                                                        {% for location in plan.location_choices %}
+                                                            <option value="{{ location.pk }}" {% if planned.suggested_location.pk == location.pk %}selected{% endif %}>{{ location.name }}</option>
+                                                        {% endfor %}
+                                                    </select>
+                                                    <span class="text-xs whitespace-nowrap text-muted">{% blocktrans with venue=planned.fixture.venue_text %}RBIHF: {{ venue }}{% endblocktrans %}</span>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    {% endif %}
+                </div>
             </div>
+
+            <div class="card">
+                <div class="card-body">
+                    <h2 class="card-title text-base">{% lucide "trash-2" size=18 %} {% blocktrans count counter=plan.to_delete|length %}{{ counter }} game to delete{% plural %}{{ counter }} games to delete{% endblocktrans %}</h2>
+                    <p class="text-sm text-muted">{% trans "No longer listed on the RBIHF page — only upcoming games are ever removed this way, past results are left alone." %}</p>
+
+                    {% if plan.to_delete %}
+                        <ul class="list-inside list-disc text-sm text-ink">
+                            {% for event in plan.to_delete %}
+                                <li class="font-mono text-xs">{{ event.start|date:"Y-m-d H:i" }} &mdash; <span class="font-sans text-sm">{{ event }}</span></li>
+                            {% endfor %}
+                        </ul>
+                    {% endif %}
+                </div>
+            </div>
+
+            {% if plan.unchanged_count %}
+                <p class="text-sm text-muted">{% blocktrans count counter=plan.unchanged_count %}{{ counter }} game is already up to date.{% plural %}{{ counter }} games are already up to date.{% endblocktrans %}</p>
+            {% endif %}
         </div>
 
-        <div class="card bg-base-100 shadow mb-4">
-            <div class="card-body">
-                <h2 class="card-title text-base">{% lucide "trash-2" size=18 %} {% blocktrans count counter=plan.to_delete|length %}{{ counter }} game to delete{% plural %}{{ counter }} games to delete{% endblocktrans %}</h2>
-                <p class="text-sm opacity-70">{% trans "No longer listed on the RBIHF page — only upcoming games are ever removed this way, past results are left alone." %}</p>
-
-                {% if plan.to_delete %}
-                    <ul class="list-disc list-inside text-sm">
-                        {% for event in plan.to_delete %}
-                            <li>{{ event.start|date:"Y-m-d H:i" }} &mdash; {{ event }}</li>
-                        {% endfor %}
-                    </ul>
-                {% endif %}
-            </div>
-        </div>
-
-        {% if plan.unchanged_count %}
-            <p class="text-sm opacity-60 mb-4">{% blocktrans count counter=plan.unchanged_count %}{{ counter }} game is already up to date.{% plural %}{{ counter }} games are already up to date.{% endblocktrans %}</p>
-        {% endif %}
-
-        <div class="card-actions justify-start pt-2 mt-2">
+        <div class="card-actions justify-start pt-4">
             <a class="btn btn-outline gap-2" href="{% url 'management:rbihf_import' %}">{% lucide "arrow-left" size=16 %} {% trans "Back" %}</a>
             {% if plan.to_create or plan.to_update or plan.to_delete %}
                 <button class="btn btn-primary gap-2" type="submit">{% lucide "check" size=16 %} {% trans "Confirm import" %}</button>

@@ -1,0 +1,112 @@
+{% load static lucide ui %}
+
+{% comment %}
+    Standalone shell for every sitewide allauth screen -- login, password change/reset,
+    MFA, passkeys, recovery codes -- plus 403.html/maintenance.html, rendered whenever
+    there is no club tenant (see club/context_processors.py: this is
+    PLATFORM_BASE_TEMPLATE). Same industrial design language as controlpanel/base.html --
+    dark ink chrome, Barlow/Barlow Condensed/IBM Plex Mono, assets/controlpanel.css --
+    but deliberately simpler: one centred card on a dark page, not a full command-bar
+    app shell, since these are public entrance screens for the whole platform (every
+    club admin and base-domain account), not the control panel itself.
+
+    Block names match what templates/_base.html used to provide (head_title, extra_head,
+    main, extra_body) rather than inventing new ones: templates/allauth/layouts/base.html
+    and templates/403.html/maintenance.html target those names directly, and both are
+    shared with the club-branded skin (_club_base.html, still on assets/app.css and real
+    daisyUI, untouched) -- give them a different block name here and they would have
+    nothing to override on this side of the fork.
+{% endcomment %}
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+        <title>
+            {% block head_title %}{% endblock head_title %} &middot; RosterChief
+        </title>
+
+        <link rel="stylesheet" href="{% static 'css/controlpanel.css' %}">
+        {% block extra_head %}{% endblock extra_head %}
+    </head>
+
+    <body class="flex min-h-screen flex-col items-center gap-10 bg-ink px-4 py-14 font-sans text-slate">
+        {# Explicit bg-ink here too, not just on <body>: the white-on-dark brand mark must stay legible on its own. #}
+        <div class="flex w-full max-w-md items-center justify-between gap-4 bg-ink py-1">
+            <a class="flex min-w-0 shrink-0 items-center gap-2.5" href="/">
+                {# The real mark, not the .crest clip-path fallback (that's for clubs with no logo of their own) -- white-on-dark variant for this page. #}
+                <img class="h-8 w-8 shrink-0" src="{% static 'images/rosterchief-white.svg' %}" alt="" width="32" height="32">
+                <span class="font-display text-xl font-extrabold tracking-[.1em] text-white uppercase">RosterChief</span>
+            </a>
+            <a class="flex shrink-0 items-center gap-1.5 font-mono text-xs text-on-dark-dim hover:text-white" href="/">
+                {% lucide "arrow-left" size=14 %} Back to site
+            </a>
+        </div>
+
+        <main class="flex w-full max-w-md flex-1 flex-col justify-center gap-4">
+            {% if messages %}
+                <div class="flex flex-col gap-2">
+                    {% for message in messages %}
+                        {% with alert=message|as_alert %}
+                            <div class="alert {{ alert.css }}" role="alert">
+                                {% lucide alert.icon size=18 %}
+                                <div>
+                                    <div class="font-display text-sm font-bold tracking-wide uppercase">{{ alert.title }}</div>
+                                    <div class="text-sm">{{ alert.body }}</div>
+                                </div>
+                            </div>
+                        {% endwith %}
+                    {% endfor %}
+                </div>
+            {% endif %}
+
+            {% block main %}{% endblock main %}
+        </main>
+
+        <p class="font-mono text-[11px] text-on-dark-faint">&copy; {% now "Y" %} RosterChief</p>
+
+        {% comment %}
+            A TOTP code is 6 characters, a recovery code 8, and allauth accepts either in
+            the same field (templates/allauth/elements/fields.html). The boxed .otp layout
+            only fits six, so past that this falls back to a plain .input-lg rather than
+            letting the text spill out of the boxes.
+
+            The real <input>'s own text is invisible (assets/controlpanel.css: `.otp input`
+            is `color: transparent`, only its caret shows) -- this writes each typed
+            character into its matching <span> directly instead, which is exact by
+            construction. A pure-CSS letter-spacing overlay (spacing the real glyphs to
+            match the box pitch) was tried first and drifted more with every character
+            typed, in a way font-metric tuning couldn't reliably fix.
+        {% endcomment %}
+        <script>
+            document.querySelectorAll("[data-otp]").forEach((otp) => {
+                const input = otp.querySelector("input");
+                const boxes = otp.querySelectorAll("span");
+                if (!input) return;
+
+                const fit = () => {
+                    const boxed = input.value.length <= boxes.length;
+                    otp.classList.toggle("otp", boxed);
+                    otp.classList.toggle("otp-lg", boxed);
+                    boxes.forEach((box, index) => {
+                        box.classList.toggle("hidden", !boxed);
+                        box.textContent = boxed ? input.value[index] || "" : "";
+                    });
+                    input.classList.toggle("input", !boxed);
+                    input.classList.toggle("input-lg", !boxed);
+                };
+
+                input.addEventListener("input", fit);
+                fit();
+            });
+        </script>
+
+        {% comment %}
+            allauth puts page-level scripts and out-of-form markup here -- notably the
+            hidden `mfa_login` form the passkey button submits on the login page. Without
+            this block that form is never rendered and "Sign in with a passkey" is dead.
+        {% endcomment %}
+        {% block extra_body %}{% endblock extra_body %}
+    </body>
+</html>

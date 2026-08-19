@@ -1,0 +1,1063 @@
+/* RosterChief club management -- a deliberately separate stylesheet from both
+ * assets/app.css (the old daisyUI skin, still used by the auth/public chain via
+ * _club_base.html) and assets/controlpanel.css (the platform-staff surface, which is
+ * explicitly never club-branded).
+ *
+ * Management IS club-branded (see design_handoff_rosterchief_platform/README.md, "Club
+ * theming"): --color-club and --color-club-dark below resolve through --tenant-club /
+ * --tenant-club-dark custom properties, which management/templates/management/base.html
+ * sets per-request from Club.secondary_color -- everything else (structure, type,
+ * neutrals, status colours, table chrome, form fields) is locked platform-wide, same
+ * rule the design doc gives for the public site.
+ *
+ * Same "hand-roll the daisyUI-shaped class vocabulary" pattern as controlpanel.css: a
+ * few shared templates (`_form_fields.html`, `templatetags/field.html`,
+ * `controlpanel/templatetags/ui.py`'s `daisy`/`form_field`) render class names
+ * (`input`, `select`, `textarea`, `checkbox`, `toggle`, `btn`, `badge`, `card`, `table`,
+ * `modal`, `alert`, `avatar`, `progress`, `form-control`, `label`, `divide-y`, `link`)
+ * without daisyUI itself supplying their CSS here (it isn't loaded here either) -- see
+ * management/templates/management/_form_fields.html for management's own copy of that
+ * shared machinery (forked, not reused, so the login/MFA pages stay untouched -- same
+ * reasoning as controlpanel's fork, see that file's own banner comment).
+ */
+@import "tailwindcss";
+
+@source "../management";
+
+@theme {
+    --font-display: "Barlow Condensed", ui-sans-serif, system-ui, sans-serif;
+    --font-sans: "Barlow", ui-sans-serif, system-ui, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
+
+    --color-ink: #0b1220;
+    --color-navy: #101e36;
+    --color-steel: #1b2b47;
+    --color-hairline: #1e2b42;
+    --color-paper: #f4f5f7;
+    --color-line: #e3e6eb;
+    --color-rule: #eef0f3;
+    --color-edge: #d6dae1;
+    --color-stroke: #c9cfd8;
+    --color-muted: #6c7787;
+    --color-dim: #8b95a4;
+    --color-slate: #3a4658;
+    --color-on-dark: #93a0b4;
+    --color-on-dark-dim: #7c8aa0;
+    --color-on-dark-faint: #5c6b85;
+
+    /* Club-themeable: see the file banner. Falls back to the platform red so a club
+       that hasn't set a secondary_color yet still gets a sane, branded-looking accent. */
+    --color-club: var(--tenant-club, #e4002b);
+    --color-club-dark: var(--tenant-club-dark, #b00021);
+    /* base.html sets --tenant-club-content from Club.secondary_content_color (already
+       WCAG-luminance-computed black/white, see Club._content_color_for) -- e.g. the
+       active nav item's own text, which sits on --color-club and can't assume white
+       reads on every club's chosen colour. */
+    --color-club-content: var(--tenant-club-content, #ffffff);
+
+    /* The sidebar's own background/foreground -- base.html sets --tenant-sidebar-bg/fg
+       from Club.primary_color/primary_content_color when the club has set one, same
+       WCAG black-or-white choice as club-content above. Falls back to the original
+       fixed dark-ink look otherwise. Derived shades (dim/faint/hairline/chip) are
+       color-mix'd toward the background rather than kept as a separate light/dark
+       palette -- that self-corrects for either direction (dark-on-light primary colour,
+       or light-on-dark) instead of needing two hand-tuned scales. */
+    --color-sidebar-bg: var(--tenant-sidebar-bg, var(--color-ink));
+    --color-sidebar-fg: var(--tenant-sidebar-fg, #ffffff);
+    --color-sidebar-fg-dim: color-mix(in srgb, var(--color-sidebar-fg) 68%, var(--color-sidebar-bg));
+    --color-sidebar-fg-faint: color-mix(in srgb, var(--color-sidebar-fg) 38%, var(--color-sidebar-bg));
+    --color-sidebar-hairline: color-mix(in srgb, var(--color-sidebar-fg) 16%, var(--color-sidebar-bg));
+    --color-sidebar-chip: color-mix(in srgb, var(--color-sidebar-fg) 24%, var(--color-sidebar-bg));
+
+    --color-ok: #14a05a;
+    --color-ok-bg: #e6f6ee;
+    --color-ok-border: #bfe7d3;
+    --color-ok-text: #0c7a43;
+
+    --color-warn: #f0a22e;
+    --color-warn-bg: #fff5e4;
+    --color-warn-border: #f6e0b8;
+    --color-warn-text: #9a6410;
+    --color-warn-deep: #7a4e08;
+
+    --color-danger-bg: #fdecec;
+    --color-danger-border: #f5c9ce;
+
+    --color-info: #14b8e8;
+    --color-info-bg: #eaf7fc;
+    --color-info-border: #c3e7f4;
+    --color-info-text: #0a6f91;
+
+    --color-row-sel: #fff7f8;
+    --color-row-focus: #f4f9ff;
+    --color-row-warn: #fffdf6;
+    --color-subhead: #f8f9fa;
+
+    /* Calendar resource colour (training rink, in the design's Season calendar screen) --
+       management-only, controlpanel.css has no equivalent. */
+    --color-violet: #7c5cfc;
+
+    --radius-box: 0.75rem; /* management cards/buttons are rounded-xl, not controlpanel's square 4px */
+}
+
+/* --- fonts: identical set to controlpanel.css, same self-hosted files (shared static/fonts/
+   directory -- one download, two stylesheets). See that file for the licensing/privacy
+   rationale (no Google Fonts CDN request). --- */
+
+@font-face {
+    font-family: "Barlow";
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url("../fonts/barlow-latin-400-normal.woff2") format("woff2");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+    font-family: "Barlow";
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url("../fonts/barlow-latin-ext-400-normal.woff2") format("woff2");
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+    font-family: "Barlow";
+    font-style: normal;
+    font-weight: 500;
+    font-display: swap;
+    src: url("../fonts/barlow-latin-500-normal.woff2") format("woff2");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+    font-family: "Barlow";
+    font-style: normal;
+    font-weight: 500;
+    font-display: swap;
+    src: url("../fonts/barlow-latin-ext-500-normal.woff2") format("woff2");
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+    font-family: "Barlow";
+    font-style: normal;
+    font-weight: 600;
+    font-display: swap;
+    src: url("../fonts/barlow-latin-600-normal.woff2") format("woff2");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+    font-family: "Barlow";
+    font-style: normal;
+    font-weight: 600;
+    font-display: swap;
+    src: url("../fonts/barlow-latin-ext-600-normal.woff2") format("woff2");
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+    font-family: "Barlow";
+    font-style: normal;
+    font-weight: 700;
+    font-display: swap;
+    src: url("../fonts/barlow-latin-700-normal.woff2") format("woff2");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+    font-family: "Barlow";
+    font-style: normal;
+    font-weight: 700;
+    font-display: swap;
+    src: url("../fonts/barlow-latin-ext-700-normal.woff2") format("woff2");
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+    font-family: "Barlow Condensed";
+    font-style: normal;
+    font-weight: 600;
+    font-display: swap;
+    src: url("../fonts/barlow-condensed-latin-600-normal.woff2") format("woff2");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+    font-family: "Barlow Condensed";
+    font-style: normal;
+    font-weight: 600;
+    font-display: swap;
+    src: url("../fonts/barlow-condensed-latin-ext-600-normal.woff2") format("woff2");
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+    font-family: "Barlow Condensed";
+    font-style: normal;
+    font-weight: 700;
+    font-display: swap;
+    src: url("../fonts/barlow-condensed-latin-700-normal.woff2") format("woff2");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+    font-family: "Barlow Condensed";
+    font-style: normal;
+    font-weight: 700;
+    font-display: swap;
+    src: url("../fonts/barlow-condensed-latin-ext-700-normal.woff2") format("woff2");
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+    font-family: "Barlow Condensed";
+    font-style: normal;
+    font-weight: 800;
+    font-display: swap;
+    src: url("../fonts/barlow-condensed-latin-800-normal.woff2") format("woff2");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+    font-family: "Barlow Condensed";
+    font-style: normal;
+    font-weight: 800;
+    font-display: swap;
+    src: url("../fonts/barlow-condensed-latin-ext-800-normal.woff2") format("woff2");
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+    font-family: "IBM Plex Mono";
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url("../fonts/ibm-plex-mono-latin-400-normal.woff2") format("woff2");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+    font-family: "IBM Plex Mono";
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url("../fonts/ibm-plex-mono-latin-ext-400-normal.woff2") format("woff2");
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+    font-family: "IBM Plex Mono";
+    font-style: normal;
+    font-weight: 500;
+    font-display: swap;
+    src: url("../fonts/ibm-plex-mono-latin-500-normal.woff2") format("woff2");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+    font-family: "IBM Plex Mono";
+    font-style: normal;
+    font-weight: 500;
+    font-display: swap;
+    src: url("../fonts/ibm-plex-mono-latin-ext-500-normal.woff2") format("woff2");
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+    font-family: "IBM Plex Mono";
+    font-style: normal;
+    font-weight: 600;
+    font-display: swap;
+    src: url("../fonts/ibm-plex-mono-latin-600-normal.woff2") format("woff2");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+    font-family: "IBM Plex Mono";
+    font-style: normal;
+    font-weight: 600;
+    font-display: swap;
+    src: url("../fonts/ibm-plex-mono-latin-ext-600-normal.woff2") format("woff2");
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@layer base {
+    body {
+        background: var(--color-paper);
+        color: var(--color-slate);
+        font-family: var(--font-sans);
+    }
+}
+
+/* --- component layer: same daisyUI-shaped class vocabulary as controlpanel.css, rounded
+   -xl (0.75rem) rather than controlpanel's square 4px -- see design tokens table,
+   "Radius: mobile cards rounded-[14px]; ... desktop cards rounded-xl". --- */
+
+@layer components {
+    .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
+        height: 2.25rem;
+        padding-inline: 1rem;
+        border-radius: var(--radius-box);
+        font-family: var(--font-display);
+        font-weight: 800;
+        font-size: 0.8125rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        background: var(--color-ink);
+        color: #fff;
+        border: 1px solid transparent;
+        cursor: pointer;
+        transition: opacity 0.15s ease;
+        white-space: nowrap;
+    }
+
+    .btn:hover {
+        opacity: 0.85;
+    }
+
+    .btn:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+    }
+
+    .btn-primary {
+        background: var(--color-club);
+        color: #fff;
+    }
+
+    .btn-success {
+        background: var(--color-ok);
+        color: #fff;
+    }
+
+    .btn-warning {
+        background: var(--color-warn);
+        color: var(--color-ink);
+    }
+
+    .btn-error {
+        background: var(--color-club-dark);
+        color: #fff;
+    }
+
+    /* "ice" in the mobile/coach-app design tokens -- same #14B8E8 as --color-info here,
+       used e.g. for the Sign-up page's oldest-waiting row accent (signup_list.html). */
+    .btn-info {
+        background: var(--color-info);
+        color: #fff;
+    }
+
+    .btn-ghost {
+        background: transparent;
+        color: var(--color-ink);
+    }
+
+    .btn-ghost:hover {
+        background: var(--color-rule);
+        opacity: 1;
+    }
+
+    .btn-outline {
+        background: #fff;
+        color: var(--color-ink);
+        border-color: var(--color-stroke);
+    }
+
+    .btn-outline:hover {
+        background: var(--color-subhead);
+        opacity: 1;
+    }
+
+    .btn-outline.btn-primary {
+        background: #fff;
+        color: var(--color-club-dark);
+        border-color: var(--color-danger-border);
+    }
+
+    .btn-outline.btn-error {
+        background: #fff;
+        color: var(--color-club-dark);
+        border-color: var(--color-danger-border);
+    }
+
+    .btn-outline.btn-success {
+        background: #fff;
+        color: var(--color-ok-text);
+        border-color: var(--color-ok-border);
+    }
+
+    .btn-outline.btn-info {
+        background: #fff;
+        color: var(--color-info-text);
+        border-color: var(--color-info-border);
+    }
+
+    .btn-sm {
+        height: 1.875rem;
+        padding-inline: 0.75rem;
+        font-size: 0.75rem;
+    }
+
+    .btn-xs {
+        height: 1.5rem;
+        padding-inline: 0.5rem;
+        font-size: 0.6875rem;
+        gap: 0.25rem;
+    }
+
+    .btn-square {
+        padding-inline: 0;
+        width: 2.25rem;
+    }
+
+    /* The design's own D-series badges/chips (D8's "Draft"/status pills aside) mostly run
+       small cornered boxes, not a full pill -- e.g. D2's team tags (U16/U18/Women, 8px)
+       and D8's filter chips (All 42/Overdue, 6px). A flat 999px read as noticeably rounder
+       than either once actually rendered at badge height, so this is a fixed value rather
+       than reusing --radius-box (0.75rem/12px), which is tuned for cards, not a ~22px chip. */
+    .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.25rem;
+        padding: 0.15rem 0.6rem;
+        border-radius: 6px;
+        font-family: var(--font-display);
+        font-weight: 700;
+        font-size: 0.6875rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        background: var(--color-rule);
+        color: var(--color-slate);
+        border: 1px solid var(--color-line);
+        white-space: nowrap;
+    }
+
+    .badge-sm {
+        font-size: 0.625rem;
+        padding: 0.1rem 0.45rem;
+    }
+
+    .badge-xs {
+        font-size: 0.5625rem;
+        padding: 0.05rem 0.35rem;
+    }
+
+    .badge-success {
+        background: var(--color-ok-bg);
+        color: var(--color-ok-text);
+        border-color: var(--color-ok-border);
+    }
+
+    .badge-error {
+        background: var(--color-danger-bg);
+        color: var(--color-club-dark);
+        border-color: var(--color-danger-border);
+    }
+
+    .badge-warning {
+        background: var(--color-warn-bg);
+        color: var(--color-warn-text);
+        border-color: var(--color-warn-border);
+    }
+
+    .badge-info {
+        background: var(--color-info-bg);
+        color: var(--color-info-text);
+        border-color: var(--color-info-border);
+    }
+
+    .badge-ghost,
+    .badge-outline {
+        background: #fff;
+        color: var(--color-muted);
+        border-color: var(--color-edge);
+    }
+
+    .badge-neutral {
+        background: var(--color-ink);
+        color: #fff;
+        border-color: var(--color-ink);
+    }
+
+    .card {
+        background: #fff;
+        border: 1px solid var(--color-line);
+        border-radius: var(--radius-box);
+    }
+
+    .card-body {
+        padding: 1.125rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+
+    .card-title {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-family: var(--font-display);
+        font-weight: 800;
+        font-size: 1rem;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--color-ink);
+    }
+
+    .table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.875rem;
+    }
+
+    .table thead tr {
+        background: var(--color-subhead);
+        border-bottom: 1px solid var(--color-line);
+    }
+
+    .table thead th {
+        padding: 0.5rem 1rem;
+        text-align: left;
+        font-family: var(--font-display);
+        font-weight: 700;
+        font-size: 0.6875rem;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--color-muted);
+    }
+
+    .table tbody tr {
+        border-bottom: 1px solid var(--color-rule);
+    }
+
+    .table tbody tr:last-child {
+        border-bottom: none;
+    }
+
+    /* Scoped to .cursor-pointer, not every .table row -- most tables in the app
+       aren't themselves clickable (actions live in per-row buttons instead), and a
+       row-wide hover there would suggest an interaction that isn't there. Currently
+       just the Sign-up page's queue (signup_list.html), whose rows open the detail
+       drawer on click. --color-subhead, not --color-row-focus: that token is also
+       used as signup_list.html's persistent "oldest pending" row background, and
+       sharing it made that row look permanently hovered. */
+    .table tbody tr.cursor-pointer:hover {
+        background: var(--color-subhead);
+    }
+
+    .table tbody td {
+        padding: 0.75rem 1rem;
+        color: var(--color-ink);
+        vertical-align: middle;
+    }
+
+    .alert {
+        display: flex;
+        align-items: flex-start;
+        gap: 0.75rem;
+        padding: 0.875rem 1rem;
+        border-radius: var(--radius-box);
+        border: 1px solid var(--color-line);
+        background: #fff;
+        font-size: 0.875rem;
+    }
+
+    .alert-error {
+        background: var(--color-danger-bg);
+        border-color: var(--color-danger-border);
+        color: var(--color-club-dark);
+    }
+
+    .alert-warning {
+        background: var(--color-warn-bg);
+        border-color: var(--color-warn-border);
+        color: var(--color-warn-deep);
+    }
+
+    .alert-success {
+        background: var(--color-ok-bg);
+        border-color: var(--color-ok-border);
+        color: var(--color-ok-text);
+    }
+
+    .alert-info {
+        background: var(--color-info-bg);
+        border-color: var(--color-info-border);
+        color: var(--color-info-text);
+    }
+
+    .avatar > div {
+        border-radius: 999px;
+        overflow: hidden;
+    }
+
+    .avatar-placeholder > div {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: var(--color-steel);
+        color: #fff;
+        font-family: var(--font-display);
+        font-weight: 800;
+    }
+
+    progress.progress {
+        appearance: none;
+        width: 100%;
+        height: 0.375rem;
+        border-radius: 999px;
+        overflow: hidden;
+        background: var(--color-rule);
+        border: none;
+    }
+
+    progress.progress::-webkit-progress-bar {
+        background: var(--color-rule);
+    }
+
+    progress.progress::-webkit-progress-value {
+        background: var(--color-ink);
+    }
+
+    progress.progress::-moz-progress-bar {
+        background: var(--color-ink);
+    }
+
+    progress.progress-success::-webkit-progress-value {
+        background: var(--color-ok);
+    }
+
+    progress.progress-success::-moz-progress-bar {
+        background: var(--color-ok);
+    }
+
+    progress.progress-warning::-webkit-progress-value {
+        background: var(--color-warn);
+    }
+
+    progress.progress-warning::-moz-progress-bar {
+        background: var(--color-warn);
+    }
+
+    progress.progress-error::-webkit-progress-value {
+        background: var(--color-club);
+    }
+
+    progress.progress-error::-moz-progress-bar {
+        background: var(--color-club);
+    }
+
+    .input,
+    .select,
+    .textarea,
+    .file-input {
+        width: 100%;
+        border: 1px solid var(--color-edge);
+        border-radius: 0.5rem;
+        background: #fff;
+        color: var(--color-ink);
+        font-family: var(--font-sans);
+        font-size: 0.875rem;
+        padding: 0.5rem 0.75rem;
+        height: 2.25rem;
+    }
+
+    .select {
+        appearance: none;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236C7787' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: right 0.6rem center;
+        background-size: 1rem;
+        padding-right: 2rem;
+    }
+
+    /* The browser's own "Choose File" control has no author styling at all, so it
+       renders as a second, differently-chromed box nested inside .file-input's own
+       border -- restyle the button itself as a small pill so there's one field
+       boundary, not two. The trailing "no file chosen" text is UA shadow content
+       (can't be restyled beyond color, which it inherits from .file-input). */
+    .file-input {
+        /* display:flex/align-items:center alone don't reliably center a file
+           input's native button+label in every browser -- Safari lays that out
+           as shadow content that ignores the host's flex alignment. Centering it
+           through the box model instead (top/bottom padding sized to leave equal
+           space above and below the button below) works regardless: 2.25rem box
+           - 2 * 1px border - 1.5rem button, split evenly. */
+        display: flex;
+        align-items: center;
+        padding-block: 0.3125rem;
+        color: var(--color-dim);
+    }
+
+    .file-input::file-selector-button,
+    .file-input::-webkit-file-upload-button {
+        /* Safari ignores author background/border-radius on this pseudo-element
+           and keeps drawing its own native bezeled button unless appearance is
+           reset first -- everything below was silently a no-op in Safari without
+           this line (same family of "Safari overrides author styling on a native
+           control" issue as the sign-up drawer's <dialog> corners). */
+        appearance: none;
+        -webkit-appearance: none;
+        height: 1.5rem;
+        padding-inline: 0.75rem;
+        margin-right: 0.75rem;
+        border: none;
+        /* Not 999px: that pill radius is reserved elsewhere (.avatar, .toggle,
+           .progress, .crest) for genuinely round/pill shapes -- every real .btn
+           uses var(--radius-box) (rounded-xl), so a pill here read as a toggle
+           chip rather than a button. */
+        border-radius: 0.375rem;
+        background: var(--color-ink);
+        color: #fff;
+        font-family: var(--font-display);
+        font-weight: 800;
+        font-size: 0.6875rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        cursor: pointer;
+        transition: opacity 0.15s ease;
+    }
+
+    .file-input:hover::file-selector-button,
+    .file-input:hover::-webkit-file-upload-button {
+        opacity: 0.85;
+    }
+
+    .input:focus,
+    .select:focus,
+    .textarea:focus,
+    .file-input:focus-within {
+        outline: 2px solid var(--color-club);
+        outline-offset: -1px;
+        border-color: var(--color-club);
+    }
+
+    .textarea {
+        height: auto;
+        min-height: 6rem;
+    }
+
+    .input-error,
+    .select-error,
+    .textarea-error {
+        border-color: var(--color-club);
+        color: var(--color-club-dark);
+    }
+
+    /* Taller variant for a code-entry input that has fallen back out of the boxed
+       .otp layout below (a recovery code is longer than the boxes fit). Same pair as
+       controlpanel.css's own copy -- see that file's .otp comment for why the real
+       input stays invisible-but-focusable rather than trying to align its own glyphs
+       with the box pitch via CSS alone. */
+    .input-lg {
+        height: 3rem;
+        font-family: var(--font-mono);
+        font-size: 1.125rem;
+        letter-spacing: 0.2em;
+        text-align: center;
+    }
+
+    .otp {
+        position: relative;
+        display: inline-flex;
+        gap: 0.5rem;
+    }
+
+    .otp span {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 2.75rem;
+        height: 3rem;
+        border: 1px solid var(--color-edge);
+        border-radius: 0.5rem;
+        background: #fff;
+        font-family: var(--font-mono);
+        font-size: 1.25rem;
+        color: var(--color-ink);
+    }
+
+    .otp:focus-within span {
+        border-color: var(--color-club);
+    }
+
+    .otp input {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        padding: 0;
+        border: none;
+        outline: none;
+        background: transparent;
+        color: transparent;
+        caret-color: var(--color-ink);
+    }
+
+    .otp-lg span {
+        width: 3.25rem;
+        height: 3.5rem;
+        font-size: 1.375rem;
+    }
+
+    .checkbox {
+        width: 1.125rem;
+        height: 1.125rem;
+        border-radius: 0.25rem;
+        border: 1.5px solid var(--color-stroke);
+        accent-color: var(--color-club);
+    }
+
+    .toggle {
+        width: 2.5rem;
+        height: 1.375rem;
+        border-radius: 999px;
+        accent-color: var(--color-ok);
+    }
+
+    .form-control {
+        display: flex;
+        flex-direction: column;
+    }
+
+    .label-text {
+        font-size: 0.8125rem;
+        font-weight: 600;
+        color: var(--color-slate);
+    }
+
+    .label-text-alt {
+        font-size: 0.75rem;
+        color: var(--color-muted);
+    }
+
+    .link {
+        color: var(--color-club-dark);
+        text-decoration: none;
+    }
+
+    .link-hover:hover {
+        text-decoration: underline;
+    }
+
+    .divide-y > * + * {
+        border-top: 1px solid var(--color-rule);
+    }
+
+    /* Native <dialog>-based modals -- see management/templates/management/_modal_form.html
+       and _confirm_modal.html (forked from controlpanel's, same reasoning). */
+    dialog.modal {
+        margin: auto;
+        padding: 0;
+        border: none;
+        border-radius: var(--radius-box);
+        background: transparent;
+        max-width: none;
+        max-height: none;
+    }
+
+    dialog.modal::backdrop {
+        background: rgba(11, 18, 32, 0.55);
+    }
+
+    dialog.modal .modal-box {
+        background: #fff;
+        border: 1px solid var(--color-line);
+        border-radius: var(--radius-box);
+        padding: 1.5rem;
+        width: 32rem;
+        max-width: 91vw;
+        max-height: 85vh;
+        overflow-y: auto;
+    }
+
+    /* No .modal-start variant here (unlike controlpanel.css) -- a native <dialog>
+       shown via showModal() gets its own corner-rounding applied by Safari
+       regardless of author CSS (confirmed: zeroing border-radius on both the
+       <dialog> itself and its .modal-box still left rounded corners), so a
+       right-side slide-in drawer uses the plain .drawer-backdrop/.drawer classes
+       below instead -- see signup_list.html. */
+
+    .modal-action {
+        display: flex;
+        justify-content: flex-end;
+        gap: 0.5rem;
+        margin-top: 1.5rem;
+    }
+
+    .modal-backdrop {
+        display: none;
+    }
+
+    /* A right-side slide-in drawer (signup_list.html) -- a plain fixed-position <div>
+       toggled by JS (openDrawer/closeDrawer), not a native <dialog>. Safari applies its
+       own corner-rounding to a <dialog> shown via showModal() regardless of an author's
+       own border-radius: 0 (confirmed -- zeroing radius on both the <dialog> itself and
+       its .modal-box still left rounded corners in Safari), so a plain div sidesteps that
+       native top-layer rendering entirely. transform/transition also gets a real slide
+       animation for free, which @starting-style-based <dialog> entry animations can't
+       do reliably across browsers yet. */
+    .drawer-backdrop {
+        display: none;
+        position: fixed;
+        inset: 0;
+        z-index: 50;
+        background: rgba(11, 18, 32, 0);
+        transition: background-color 0.2s ease;
+    }
+
+    /* Split from .open on purpose -- display can't itself transition, so JS adds
+       .visible (display:block) and forces a reflow *before* adding .open (the
+       background/transform change), otherwise the browser never renders the
+       "just-appeared, still off-screen" frame to animate away from and the drawer
+       would just snap into place instead of sliding. */
+    .drawer-backdrop.visible {
+        display: block;
+    }
+
+    .drawer-backdrop.open {
+        background: rgba(11, 18, 32, 0.55);
+    }
+
+    .drawer {
+        position: absolute;
+        top: 0;
+        right: 0;
+        height: 100%;
+        width: 420px;
+        max-width: 91vw;
+        display: flex;
+        flex-direction: column;
+        background: #fff;
+        border-left: 1px solid var(--color-line);
+        transform: translateX(100%);
+        transition: transform 0.2s ease;
+    }
+
+    .drawer-backdrop.open .drawer {
+        transform: translateX(0);
+    }
+
+    /* The club crest mark -- a circle fallback for a club with no logo uploaded (see
+       controlpanel.css's own .crest, which settled on a circle over the design's original
+       hexagon after it read as a "5-pointed" shape rather than a shield in practice). */
+    .crest {
+        border-radius: 999px;
+    }
+
+    /* "Place in" big team buttons on the Sign-up page (signup_list.html) -- a plain
+       CSS state class rather than juggling several Tailwind utilities via classList
+       in JS (see the page's own fetch handler), so toggling "placed" on click can't
+       drift out of sync with what the template renders server-side on a full reload. */
+    .team-chip {
+        border-radius: 0.5rem;
+        padding: 0.5rem 0.875rem;
+        font-family: var(--font-display);
+        font-weight: 700;
+        font-size: 0.875rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        border: 1px solid var(--color-line);
+        background: var(--color-paper);
+        color: var(--color-muted);
+        cursor: pointer;
+        transition:
+            background-color 0.15s ease,
+            color 0.15s ease,
+            border-color 0.15s ease;
+    }
+
+    .team-chip:hover:not(:disabled) {
+        border-color: var(--color-club);
+        color: var(--color-ink);
+    }
+
+    .team-chip.placed,
+    .team-chip:disabled {
+        background: var(--color-ink);
+        color: #fff;
+        border-color: var(--color-ink);
+        cursor: default;
+    }
+
+    /* Sidebar nav (management/templates/management/_nav_items.html). */
+    .nav-item {
+        display: flex;
+        align-items: center;
+        gap: 0.625rem;
+        height: 2.5rem;
+        padding-inline: 0.75rem;
+        border-radius: 0.5rem;
+        font-family: var(--font-display);
+        font-weight: 700;
+        font-size: 1rem;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--color-sidebar-fg-dim);
+    }
+
+    .nav-item:hover {
+        color: var(--color-sidebar-fg);
+    }
+
+    .nav-item.active {
+        background: var(--color-club);
+        color: var(--color-club-content);
+    }
+
+    .nav-subitem {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        height: 1.875rem;
+        padding-left: 1.375rem;
+        font-size: 0.875rem;
+        color: var(--color-sidebar-fg-faint);
+    }
+
+    .nav-subitem:hover,
+    .nav-subitem.active {
+        color: var(--color-sidebar-fg);
+        font-weight: 600;
+    }
+
+    /* static/js/searchable-select.js's dropdown -- the script is shared with controlpanel.css
+       (see that file's own copy of this block) and hardcodes these daisyUI-era class names as
+       its public API rather than importing a stylesheet, so each app supplies its own visual
+       treatment under the same selectors instead of the script picking a look. */
+    .bg-base-100 {
+        background: #fff;
+    }
+
+    .menu {
+        list-style: none;
+        margin: 0;
+        padding: 0.375rem;
+    }
+
+    .menu li a {
+        display: block;
+        padding: 0.5rem 0.75rem;
+        border-radius: 0.375rem;
+        font-family: var(--font-sans);
+        font-size: 0.875rem;
+        color: var(--color-ink);
+        cursor: pointer;
+    }
+
+    .menu li a:hover {
+        background: var(--color-rule);
+    }
+
+    .menu li a.menu-active {
+        background: var(--color-club);
+        color: #fff;
+    }
+}

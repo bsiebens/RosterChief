@@ -24,6 +24,15 @@ urlpatterns = [
     path("members/<uuid:pk>/grant-login/", views.MemberGrantLoginView.as_view(), name="member_grant_login"),
     path("members/<uuid:pk>/referee-eligibility/", views.MemberRefereeEligibilityUpdateView.as_view(), name="member_referee_eligibility_update"),
     path("members/<uuid:pk>/detach-family/<uuid:family_pk>/", views.MemberDetachFromFamilyView.as_view(), name="member_detach_family"),
+    path("members/<uuid:pk>/requirements/<uuid:requirement_pk>/complete/", views.MemberRequirementCompleteView.as_view(), name="member_requirement_complete"),
+    path("members/<uuid:pk>/requirements/<uuid:requirement_pk>/bypass/", views.MemberRequirementBypassView.as_view(), name="member_requirement_bypass"),
+    path("members/<uuid:pk>/requirements/<uuid:requirement_pk>/incomplete/", views.MemberRequirementIncompleteView.as_view(), name="member_requirement_incomplete"),
+    path("members/<uuid:pk>/requirements/<uuid:requirement_pk>/document/", views.MemberRequirementDocumentView.as_view(), name="member_requirement_document"),
+    # Sign-up (admin only)
+    path("signup/", views.SignupDashboardView.as_view(), name="signup_list"),
+    path("signup/approve-all-clean/", views.SignupApproveAllCleanView.as_view(), name="signup_approve_all_clean"),
+    path("signup/<uuid:pk>/approve/", views.SignupApproveOneView.as_view(), name="signup_approve_one"),
+    path("signup/<uuid:pk>/place-in-team/", views.SignupPlaceInTeamView.as_view(), name="signup_place_in_team"),
     path("families/", views.FamilyListView.as_view(), name="family_list"),
     path("families/new/", views.FamilyCreateView.as_view(), name="family_create"),
     path("families/<uuid:pk>/", views.FamilyDetailView.as_view(), name="family_detail"),
@@ -120,4 +129,10 @@ urlpatterns = [
     # Forms
     path("forms/", views.FormListView.as_view(), name="form_list"),
     path("forms/<uuid:pk>/submissions/", views.SubmissionListView.as_view(), name="submission_list"),
+    # Settings (admin only)
+    path("settings/", views.ClubSettingsView.as_view(), name="club_settings"),
+    path("settings/onboarding-requirements/", views.OnboardingRequirementListView.as_view(), name="onboarding_requirement_list"),
+    path("settings/onboarding-requirements/new/", views.OnboardingRequirementCreateView.as_view(), name="onboarding_requirement_create"),
+    path("settings/onboarding-requirements/<uuid:pk>/edit/", views.OnboardingRequirementUpdateView.as_view(), name="onboarding_requirement_update"),
+    path("settings/onboarding-requirements/<uuid:pk>/delete/", views.OnboardingRequirementDeleteView.as_view(), name="onboarding_requirement_delete"),
 ]

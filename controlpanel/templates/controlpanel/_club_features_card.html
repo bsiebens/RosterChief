@@ -4,42 +4,34 @@
     Which feature flags apply to this club. Included with `club`, `flags` (from
     `flags_for_club`) already in context.
 {% endcomment %}
-<div class="card mb-6 bg-base-100 shadow">
-    <div class="card-body">
-        <div class="flex items-center justify-between">
-            <h2 class="card-title text-base">{% lucide "toggle-right" size=18 %} Features</h2>
-            <a class="btn btn-outline btn-sm gap-2" href="{% url 'controlpanel:features' %}">{% lucide "wrench" size=14 %} Manage features</a>
-        </div>
-        <div class="overflow-x-auto">
-            <table class="table">
-                <tbody>
-                    {% for entry in flags %}
-                        <tr>
-                            <td class="font-mono font-medium">{{ entry.flag.name }}</td>
-                            <td class="opacity-70">{{ entry.flag.note|default:"—" }}</td>
-                            <td class="text-right">
-                                {% if entry.overridden %}
-                                    {# `everyone` overrides club targeting, so a per-club toggle would be a lie. #}
-                                    <span class="badge {% if entry.flag.everyone %}badge-success{% else %}badge-error{% endif %}">
-                                        {% if entry.flag.everyone %}On for all clubs{% else %}Off everywhere{% endif %}
-                                    </span>
-                                {% else %}
-                                    <form method="post" action="{% url 'controlpanel:club_feature_toggle' club.pk entry.flag.pk %}">
-                                        {% csrf_token %}
-                                        <button class="btn btn-sm gap-1 {% if entry.enabled %}btn-success{% else %}btn-ghost{% endif %}" type="submit">
-                                            {% if entry.enabled %}{% lucide "toggle-right" size=16 %} On{% else %}{% lucide "toggle-left" size=16 %} Off{% endif %}
-                                        </button>
-                                    </form>
-                                {% endif %}
-                            </td>
-                        </tr>
-                    {% empty %}
-                        <tr>
-                            <td class="text-center opacity-60">No features defined yet.</td>
-                        </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
+<div class="card flex flex-col">
+    <div class="flex items-center justify-between border-b border-line px-4 py-3">
+        <span class="font-display text-sm font-extrabold tracking-[.1em] text-ink uppercase">Feature flags</span>
+        <a class="font-mono text-[11px] text-club-dark hover:underline" href="{% url 'controlpanel:features' %}">{% lucide "wrench" size=12 class="inline -mt-0.5" %} manage</a>
+    </div>
+    <div>
+        {% for entry in flags %}
+            <div class="flex items-center gap-3 border-b border-rule px-4 py-2.5 last:border-b-0">
+                <div class="min-w-0 flex-1">
+                    <div class="font-mono text-xs text-ink">{{ entry.flag.name }}</div>
+                    <div class="text-xs text-muted">{{ entry.flag.note|default:"—" }}</div>
+                </div>
+                {% if entry.overridden %}
+                    {# `everyone` overrides club targeting, so a per-club toggle would be a lie. #}
+                    <span class="badge {% if entry.flag.everyone %}badge-success{% else %}badge-error{% endif %} shrink-0">
+                        {% if entry.flag.everyone %}On for all clubs{% else %}Off everywhere{% endif %}
+                    </span>
+                {% else %}
+                    <form method="post" action="{% url 'controlpanel:club_feature_toggle' club.pk entry.flag.pk %}">
+                        {% csrf_token %}
+                        <button class="btn btn-xs shrink-0 gap-1 {% if entry.enabled %}btn-success{% else %}btn-ghost{% endif %}" type="submit">
+                            {% if entry.enabled %}{% lucide "toggle-right" size=14 %} On{% else %}{% lucide "toggle-left" size=14 %} Off{% endif %}
+                        </button>
+                    </form>
+                {% endif %}
+            </div>
+        {% empty %}
+            <div class="px-4 py-6 text-center text-sm text-muted">No features defined yet.</div>
+        {% endfor %}
     </div>
 </div>

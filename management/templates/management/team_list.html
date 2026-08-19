@@ -5,49 +5,45 @@
 
 {% block actions %}
     {% if is_club_admin %}
-        <a class="btn btn-outline gap-2" href="{% url 'management:team_create' %}">{% lucide "plus" size=16 %} {% trans "New team" %}</a>
+        <a class="btn btn-primary gap-2" href="{% url 'management:team_create' %}">{% lucide "plus" size=16 %} {% trans "New team" %}</a>
     {% endif %}
 {% endblock actions %}
 
 {% block panel %}
-    <div class="card bg-base-100 shadow">
-        <div class="card-body">
-            <div class="overflow-x-auto">
-                <table class="table table-cards">
-                    <thead>
-                        <tr>
-                            <th>{% trans "Name" %}</th>
-                            <th>{% trans "Short name" %}</th>
-                            <th>{% trans "Players" %}</th>
-                            <th>{% trans "Staff" %}</th>
-                            <th></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for team in teams %}
-                            <tr>
-                                <td><a class="link link-hover font-semibold" href="{% url 'management:team_detail' team.pk %}">{{ team.name }}</a></td>
-                                <td data-label="{% trans 'Short name' %}">{{ team.short_name }}</td>
-                                <td data-label="{% trans 'Players' %}">{{ team.player_count }}</td>
-                                <td data-label="{% trans 'Staff' %}">{{ team.staff_count }}</td>
-                                <td class="text-right">
-                                    {% if is_club_admin %}
-                                        <div class="flex justify-end gap-1">
-                                            <a class="btn btn-outline btn-sm" href="{% url 'management:team_detail' team.pk %}" aria-label="{% trans 'Edit' %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</a>
-                                            <button class="btn btn-sm btn-outline btn-error" type="button" onclick="document.getElementById('{{ team.pk|dom_id:"team_delete_modal" }}').showModal()" aria-label="{% trans 'Delete' %}">{% lucide "trash-2" size=14 %} {% trans "Delete" %}</button>
-                                        </div>
-                                    {% endif %}
-                                </td>
-                            </tr>
-                        {% empty %}
-                            <tr>
-                                <td colspan="5" class="text-center opacity-60">{% trans "No teams yet." %}</td>
-                            </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        </div>
+    <div class="card overflow-hidden">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>{% trans "Name" %}</th>
+                    <th>{% trans "Short name" %}</th>
+                    <th>{% trans "Players" %}</th>
+                    <th>{% trans "Staff" %}</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for team in teams %}
+                    <tr>
+                        <td><a class="link link-hover font-semibold" href="{% url 'management:team_detail' team.pk %}">{{ team.name }}</a></td>
+                        <td class="font-mono text-muted">{{ team.short_name }}</td>
+                        <td class="font-mono tabular-nums">{{ team.player_count }}</td>
+                        <td class="font-mono tabular-nums">{{ team.staff_count }}</td>
+                        <td class="text-right">
+                            {% if is_club_admin %}
+                                <div class="flex justify-end gap-1">
+                                    <a class="btn btn-outline btn-sm" href="{% url 'management:team_detail' team.pk %}" aria-label="{% trans 'Edit' %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</a>
+                                    <button class="btn btn-outline btn-error btn-sm" type="button" onclick="document.getElementById('{{ team.pk|dom_id:"team_delete_modal" }}').showModal()" aria-label="{% trans 'Delete' %}">{% lucide "trash-2" size=14 %} {% trans "Delete" %}</button>
+                                </div>
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="5" class="text-center text-muted">{% trans "No teams yet." %}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
     </div>
 
     {% include "management/_pagination.html" %}

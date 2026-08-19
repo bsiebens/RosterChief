@@ -4,7 +4,7 @@ from waffle import flag_is_active
 
 from members.models import Group
 
-from .services.access import can_add_news, can_edit_news, can_publish_news, groups_manageable_by, has_management_access, is_club_admin, is_coach_manager, teams_managed_by
+from .services.access import can_add_news, can_edit_news, can_manage_members, can_publish_news, groups_manageable_by, has_management_access, is_club_admin, is_coach_manager, teams_managed_by
 
 
 class ClubStaffRequiredMixin(LoginRequiredMixin, UserPassesTestMixin):
@@ -25,6 +25,12 @@ class ClubStaffRequiredMixin(LoginRequiredMixin, UserPassesTestMixin):
     def dispatch(self, request, *args, **kwargs):
         if getattr(request, "club", None) is None:
             raise Http404("The management app is not available on the base domain.")
+        # Read by club/context_processors.py's branding() -- allauth's password-change/MFA/
+        # logout screens live under /accounts/, not /manage/, so a path check alone can't
+        # tell they were reached from the management app's own user menu. This sticks for
+        # the rest of the session (nothing clears it back to False on a public-site visit),
+        # which is the right default for the common case of one person, one role.
+        request.session["management_context"] = True
         return super().dispatch(request, *args, **kwargs)
 
     def test_func(self):
@@ -32,11 +38,26 @@ class ClubStaffRequiredMixin(LoginRequiredMixin, UserPassesTestMixin):
 
 
 class ClubAdminRequiredMixin(ClubStaffRequiredMixin):
-    """ADMIN role only — club-wide settings that aren't scoped to a single team:
-    seasons, positions, roles, shop configuration."""
+    """ADMIN role only (a platform superuser always passes too, see
+    is_club_admin) — genuinely admin-only ground: Finance/Shop, Club identity,
+    Sponsors, seasons, and granting/revoking ClubRole itself. Everything a
+    MEMBER_ADMIN may also touch uses MemberAdminRequiredMixin below instead."""
 
     def test_func(self):
         return is_club_admin(self.request.user, self.request.club)
+
+
+class MemberAdminRequiredMixin(ClubStaffRequiredMixin):
+    """ADMIN, a platform superuser, or MEMBER_ADMIN specifically -- full read/write
+    on people: members, families, groups, parent claims, member import, teams
+    (roster/staff/CRUD), referee levels, referee management, and onboarding
+    requirements. Deliberately does NOT cover Finance/Shop, Club identity,
+    Sponsors, or role-granting (role_list/role_create/role_revoke stay
+    ClubAdminRequiredMixin) -- a MEMBER_ADMIN must never be able to grant
+    themselves, or anyone else, real ADMIN."""
+
+    def test_func(self):
+        return can_manage_members(self.request.user, self.request.club)
 
 
 class FeatureRequiredMixin(ClubAdminRequiredMixin):

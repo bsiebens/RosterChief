@@ -5,55 +5,51 @@
 
 {% block actions %}
     {% if is_club_admin %}
-        <a class="btn btn-outline gap-2" href="{% url 'management:position_create' %}">{% lucide "plus" size=16 %} {% trans "New position" %}</a>
+        <a class="btn btn-primary gap-2" href="{% url 'management:position_create' %}">{% lucide "plus" size=16 %} {% trans "New position" %}</a>
     {% endif %}
 {% endblock actions %}
 
 {% block panel %}
-    <div class="card bg-base-100 shadow">
-        <div class="card-body">
-            <div class="overflow-x-auto">
-                <table class="table table-cards">
-                    <thead>
-                        <tr>
-                            <th>{% trans "Ordering" %}</th>
-                            <th>{% trans "Name" %}</th>
-                            <th>{% trans "Short name" %}</th>
-                            <th>{% trans "Staff position" %}</th>
-                            <th>{% trans "Management position" %}</th>
-                            <th></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for position in positions %}
-                            <tr>
-                                <td data-label="{% trans 'Ordering' %}">{{ position.ordering }}</td>
-                                <td class="font-semibold">{{ position.name }}</td>
-                                <td data-label="{% trans 'Short name' %}">{{ position.short_name }}</td>
-                                <td data-label="{% trans 'Staff position' %}">
-                                    <span class="badge badge-sm {% if position.staff_position %}badge-success{% else %}badge-neutral{% endif %}">
-                                        {% if position.staff_position %}{% trans "Yes" %}{% else %}{% trans "No" %}{% endif %}
-                                    </span>
-                                </td>
-                                <td data-label="{% trans 'Management position' %}">
-                                    <span class="badge badge-sm {% if position.management_position %}badge-success{% else %}badge-neutral{% endif %}">
-                                        {% if position.management_position %}{% trans "Yes" %}{% else %}{% trans "No" %}{% endif %}
-                                    </span>
-                                </td>
-                                <td class="text-right">
-                                    {% if is_club_admin %}
-                                        <a class="btn btn-outline btn-sm gap-2" href="{% url 'management:position_update' position.pk %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</a>
-                                    {% endif %}
-                                </td>
-                            </tr>
-                        {% empty %}
-                            <tr>
-                                <td colspan="6" class="text-center opacity-60">{% trans "No positions yet." %}</td>
-                            </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        </div>
+    <div class="card overflow-hidden">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>{% trans "Ordering" %}</th>
+                    <th>{% trans "Name" %}</th>
+                    <th>{% trans "Short name" %}</th>
+                    <th>{% trans "Staff position" %}</th>
+                    <th>{% trans "Management position" %}</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for position in positions %}
+                    <tr>
+                        <td class="font-mono text-muted">{{ position.ordering }}</td>
+                        <td class="font-semibold text-ink">{{ position.name }}</td>
+                        <td class="font-mono text-muted">{{ position.short_name }}</td>
+                        <td>
+                            <span class="badge badge-sm {% if position.staff_position %}badge-success{% else %}badge-ghost{% endif %}">
+                                {% if position.staff_position %}{% trans "Yes" %}{% else %}{% trans "No" %}{% endif %}
+                            </span>
+                        </td>
+                        <td>
+                            <span class="badge badge-sm {% if position.management_position %}badge-success{% else %}badge-ghost{% endif %}">
+                                {% if position.management_position %}{% trans "Yes" %}{% else %}{% trans "No" %}{% endif %}
+                            </span>
+                        </td>
+                        <td class="text-right">
+                            {% if is_club_admin %}
+                                <a class="btn btn-outline btn-sm gap-2" href="{% url 'management:position_update' position.pk %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</a>
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="6" class="text-center text-muted">{% trans "No positions yet." %}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
     </div>
 {% endblock panel %}

@@ -151,3 +151,38 @@ class Maintenance(UUIDModel):
         maintenance.save()
 
         return maintenance
+
+
+class JobRun(UUIDModel):
+    """One execution of a scheduled platform job -- see features/jobs.py for the registry
+    of what each job is, and rosterchief/settings.CELERY_BEAT_SCHEDULE for when it runs.
+
+    Written entirely by the Celery signal handlers in features/signals.py: individual tasks
+    (billing/tasks.py, club/tasks.py, events/tasks.py) don't touch this model, so a task
+    that raises still gets a row -- the signal fires regardless of how the task ended.
+    """
+
+    class Status(models.TextChoices):
+        STARTED = "started", _("Started")
+        SUCCESS = "success", _("Success")
+        FAILURE = "failure", _("Failed")
+
+    task_id = models.CharField(_("task id"), max_length=255, unique=True)
+    name = models.CharField(_("task name"), max_length=255, help_text=_("Dotted Celery task name, e.g. billing.tasks.renew_subscriptions."))
+    status = models.CharField(_("status"), max_length=10, choices=Status.choices, default=Status.STARTED)
+    started_at = models.DateTimeField(_("started at"))
+    finished_at = models.DateTimeField(_("finished at"), null=True, blank=True)
+    detail = models.TextField(_("detail"), blank=True, help_text=_("What the task returned, on success."))
+    error = models.TextField(_("error"), blank=True, help_text=_("What the task raised, on failure."))
+
+    class Meta:
+        verbose_name = _("job run")
+        verbose_name_plural = _("job runs")
+        ordering = ["-started_at"]
+
+    def __str__(self):
+        return f"{self.name} · {self.started_at:%Y-%m-%d %H:%M}"
+
+    @property
+    def duration(self):
+        return None if self.finished_at is None else self.finished_at - self.started_at

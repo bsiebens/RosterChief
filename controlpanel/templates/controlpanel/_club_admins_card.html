@@ -4,38 +4,36 @@
     Club-scoped admins, and the modals to add one / confirm removing one. Included with
     `club`, `admins`, `admin_form` already in context.
 {% endcomment %}
-<div class="card bg-base-100 shadow">
-    <div class="card-body">
-        <div class="flex items-center justify-between">
-            <h2 class="card-title text-base">{% lucide "shield-user" size=18 %} Club admins</h2>
-            <button class="btn btn-primary btn-sm gap-2" type="button" onclick="document.getElementById('club_admin_add_modal').showModal()">{% lucide "user-plus" size=16 %} Add admin</button>
-        </div>
-        <div class="overflow-x-auto">
-            <table class="table">
-                <thead>
+<div class="card flex flex-col">
+    <div class="flex items-center justify-between border-b border-line px-4 py-3">
+        <span class="font-display text-sm font-extrabold tracking-[.1em] text-ink uppercase">Club admins</span>
+        <button class="btn btn-primary btn-sm gap-2" type="button" onclick="document.getElementById('club_admin_add_modal').showModal()">{% lucide "user-plus" size=14 %} Add admin</button>
+    </div>
+    <div class="overflow-x-auto">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Email</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for role in admins %}
                     <tr>
-                        <th>Name</th>
-                        <th>Email</th>
-                        <th></th>
+                        <td class="font-semibold text-ink">{{ role.member }}</td>
+                        <td class="font-mono text-xs text-muted">{{ role.member.user.email|default:"—" }}</td>
+                        <td class="text-right">
+                            <button class="btn btn-outline btn-xs gap-1" type="button" onclick="document.getElementById('{{ role.pk|dom_id:"admin_remove_modal" }}').showModal()">{% lucide "trash-2" size=12 %} Remove</button>
+                        </td>
                     </tr>
-                </thead>
-                <tbody>
-                    {% for role in admins %}
-                        <tr>
-                            <td>{{ role.member }}</td>
-                            <td>{{ role.member.user.email|default:"—" }}</td>
-                            <td class="text-right">
-                                <button class="btn btn-error btn-outline btn-sm gap-1" type="button" onclick="document.getElementById('{{ role.pk|dom_id:"admin_remove_modal" }}').showModal()">{% lucide "trash-2" size=14 %} Remove</button>
-                            </td>
-                        </tr>
-                    {% empty %}
-                        <tr>
-                            <td colspan="3" class="text-center opacity-60">No admins yet.</td>
-                        </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
+                {% empty %}
+                    <tr>
+                        <td colspan="3" class="text-center text-muted">No admins yet.</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
     </div>
 </div>
 

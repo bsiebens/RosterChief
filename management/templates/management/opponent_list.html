@@ -8,41 +8,39 @@
 {% endblock actions %}
 
 {% block panel %}
-    <div class="card bg-base-100 shadow">
-        <div class="card-body">
-            <div class="overflow-x-auto">
-                <table class="table table-cards">
-                    <thead>
+    <div class="card overflow-hidden">
+        <div class="overflow-x-auto">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th></th>
+                        <th>{% trans "Name" %}</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for opponent in opponents %}
                         <tr>
-                            <th></th>
-                            <th>{% trans "Name" %}</th>
-                            <th></th>
+                            <td>
+                                {% if opponent.logo %}
+                                    <img src="{{ opponent.logo.url }}" alt="" class="size-8 rounded object-contain">
+                                {% endif %}
+                            </td>
+                            <td class="font-semibold text-ink">{{ opponent.name }}</td>
+                            <td class="text-right">
+                                <div class="flex justify-end gap-1">
+                                    <a class="btn btn-outline btn-sm" href="{% url 'management:opponent_update' opponent.pk %}" aria-label="{% trans 'Edit' %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</a>
+                                    <button class="btn btn-sm btn-outline btn-error" type="button" onclick="document.getElementById('{{ opponent.pk|dom_id:"opponent_delete_modal" }}').showModal()" aria-label="{% trans 'Delete' %}">{% lucide "trash-2" size=14 %} {% trans "Delete" %}</button>
+                                </div>
+                            </td>
                         </tr>
-                    </thead>
-                    <tbody>
-                        {% for opponent in opponents %}
-                            <tr>
-                                <td>
-                                    {% if opponent.logo %}
-                                        <img src="{{ opponent.logo.url }}" alt="" class="size-8 rounded object-contain">
-                                    {% endif %}
-                                </td>
-                                <td class="font-semibold">{{ opponent.name }}</td>
-                                <td class="text-right">
-                                    <div class="flex justify-end gap-1">
-                                        <a class="btn btn-outline btn-sm" href="{% url 'management:opponent_update' opponent.pk %}" aria-label="{% trans 'Edit' %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</a>
-                                        <button class="btn btn-sm btn-outline btn-error" type="button" onclick="document.getElementById('{{ opponent.pk|dom_id:"opponent_delete_modal" }}').showModal()" aria-label="{% trans 'Delete' %}">{% lucide "trash-2" size=14 %} {% trans "Delete" %}</button>
-                                    </div>
-                                </td>
-                            </tr>
-                        {% empty %}
-                            <tr>
-                                <td colspan="3" class="text-center opacity-60">{% trans "No opponents yet." %}</td>
-                            </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
+                    {% empty %}
+                        <tr>
+                            <td colspan="3" class="py-8 text-center text-muted">{% trans "No opponents yet." %}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
         </div>
     </div>
 

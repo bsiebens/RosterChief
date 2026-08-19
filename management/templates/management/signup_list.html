@@ -1,0 +1,270 @@
+{% extends "management/base.html" %}
+{% load i18n lucide ui %}
+
+{% block heading %}{% trans "Sign-up" %}{% endblock heading %}
+{% block topbar_context %}
+    {% if season %}
+        <span class="font-mono text-[13px] text-muted">{% blocktrans with start=season.start_date|date:"Y" end=season.end_date|date:"Y" %}Season {{ start }}-{{ end }}{% endblocktrans %}</span>
+    {% endif %}
+{% endblock topbar_context %}
+
+{% block actions %}
+    {% if season %}
+        <form method="post" action="{% url 'management:signup_approve_all_clean' %}">
+            {% csrf_token %}
+            <button class="btn btn-outline gap-2" type="submit">{% lucide "check-check" size=16 %} {% trans "Approve all clean" %}</button>
+        </form>
+    {% endif %}
+{% endblock actions %}
+
+{% block panel %}
+    {% if not season %}
+        <div class="alert alert-warning">
+            {% lucide "calendar-x" size=20 %}
+            <span>{% trans "No season covers today, so there is nothing to process sign-ups for." %}</span>
+        </div>
+    {% else %}
+        <div class="card overflow-hidden">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>{% trans "Applicant" %}</th>
+                        <th>{% trans "Born" %}</th>
+                        <th>{% trans "Team" %}</th>
+                        <th>{% trans "Fee" %}</th>
+                        <th>{% trans "Checks" %}</th>
+                        <th>{% trans "Waiting" %}</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for membership in memberships %}
+                        {# A plain border-left on a <tr> is unreliable under border-collapse (varies by browser, can get clipped by the card's rounded corner) -- an inset box-shadow paints the same accent bar without depending on table border behaviour at all. #}
+                        <tr class="cursor-pointer {% if membership.is_oldest_pending %}bg-row-focus shadow-[inset_3px_0_0_var(--color-info)]{% endif %}" onclick="openDrawer('{{ membership.pk|dom_id:"signup_drawer" }}')">
+                            <td>
+                                <div class="flex items-center gap-2.5">
+                                    <span class="avatar avatar-placeholder shrink-0">
+                                        <div class="h-8 w-8 rounded-full text-xs">{{ membership.member.first_name|slice:":1" }}{{ membership.member.last_name|slice:":1" }}</div>
+                                    </span>
+                                    <div>
+                                        <div class="font-semibold text-ink">{{ membership.member.get_full_name }}</div>
+                                        <div class="text-xs text-muted">
+                                            {% if membership.status == "pending" %}{% trans "Awaiting processing" %}{% else %}{{ membership.get_status_display }}{% endif %}
+                                        </div>
+                                    </div>
+                                </div>
+                            </td>
+                            <td class="font-mono text-sm text-muted">{{ membership.member.date_of_birth|date:"Y"|default:"—" }}</td>
+                            <td class="text-sm text-ink">
+                                {% if membership.teams_registered %}
+                                    {% for team in membership.teams_registered %}{{ team.short_name }}{% if not forloop.last %}, {% endif %}{% endfor %}
+                                {% else %}
+                                    <span class="text-dim">{% trans "Not placed yet" %}</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <span class="badge badge-sm {% if membership.fee_status == "paid" %}badge-success{% elif membership.fee_status == "partially_paid" %}badge-warning{% elif membership.fee_status == "unpaid" %}badge-error{% else %}badge-ghost{% endif %}">{{ membership.get_fee_status_display }}</span>
+                            </td>
+                            <td>
+                                {% if requirements_configured %}
+                                    <span class="badge badge-sm {% if membership.onboarding_open %}badge-warning{% else %}badge-success{% endif %}">
+                                        {% if membership.onboarding_open %}{% blocktrans count count=membership.onboarding_open %}{{ count }} open{% plural %}{{ count }} open{% endblocktrans %}{% else %}{% trans "Clean" %}{% endif %}
+                                    </span>
+                                {% else %}
+                                    <span class="text-dim">—</span>
+                                {% endif %}
+                            </td>
+                            {# text-xs, not text-sm: IBM Plex Mono reads noticeably larger than Barlow at the same declared size, and "timesince" text (e.g. "2 weeks") is already the most visually busy string in the row. #}
+                            <td class="font-mono text-xs {% if membership.is_oldest_pending %}text-club-dark{% else %}text-muted{% endif %}">
+                                {% if membership.status == "pending" %}{{ membership.created|timesince }}{% else %}—{% endif %}
+                            </td>
+                            <td class="text-right">
+                                <button class="btn btn-outline btn-xs gap-1" type="button" onclick="event.stopPropagation(); openDrawer('{{ membership.pk|dom_id:"signup_drawer" }}')">{% trans "Open" %} {% lucide "chevron-right" size=12 %}</button>
+                            </td>
+                        </tr>
+                    {% empty %}
+                        <tr>
+                            <td colspan="7" class="py-6 text-center text-muted">{% trans "No one is signed up for this season yet." %}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% endif %}
+{% endblock panel %}
+
+{% block extra_body %}
+    {% trans "Confirm" as confirm_label %}
+    {% trans "Bypass" as bypass_label %}
+    {% trans "Reopen" as reopen_label %}
+    {% url 'management:signup_list' as signup_url %}
+    {% for membership in memberships %}
+        <div id="{{ membership.pk|dom_id:"signup_drawer" }}" class="drawer-backdrop">
+            <div class="drawer">
+                <div class="flex items-center gap-3 border-b border-line p-5">
+                    <span class="avatar avatar-placeholder shrink-0">
+                        <div class="h-11 w-11 rounded-full text-base">{{ membership.member.first_name|slice:":1" }}{{ membership.member.last_name|slice:":1" }}</div>
+                    </span>
+                    <div class="min-w-0 flex-1">
+                        <div class="truncate font-display text-xl font-extrabold text-ink uppercase">{{ membership.member.get_full_name }}</div>
+                        <div class="text-[13px] text-muted">{% blocktrans with date=membership.created|date:"j M" %}Applied {{ date }}{% endblocktrans %}{% if membership.teams_registered %} · {% for team in membership.teams_registered %}{{ team.short_name }}{% if not forloop.last %}, {% endif %}{% endfor %}{% endif %}</div>
+                    </div>
+                    <button type="button" class="btn btn-ghost btn-square btn-sm" aria-label="{% trans 'Close' %}" onclick="closeDrawer('{{ membership.pk|dom_id:"signup_drawer" }}')">{% lucide "x" size=16 %}</button>
+                </div>
+
+                <div class="flex flex-1 flex-col gap-5 overflow-y-auto p-5">
+                    {% if requirements_configured %}
+                        <div>
+                            <div class="mb-2.5 font-display text-xs font-bold tracking-[.14em] text-muted uppercase">{% trans "Checks" %}</div>
+                            <div class="flex flex-col gap-2">
+                                {% for requirement, status in membership.checklist %}
+                                    <div class="flex items-center gap-2.5 text-sm">
+                                        {% if status.is_complete or status.is_bypassed %}
+                                            <span class="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-ok text-white">{% lucide "check" size=13 %}</span>
+                                        {% else %}
+                                            <span class="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-warn font-display text-xs font-extrabold text-white">!</span>
+                                        {% endif %}
+                                        <span class="min-w-0 flex-1 text-ink">
+                                            {{ requirement.name }}
+                                            {% if status.is_bypassed %}<span class="text-xs text-muted">({% trans "bypassed" %})</span>{% endif %}
+                                        </span>
+                                        {% if not status.is_complete and not status.is_bypassed %}
+                                            <form method="post" action="{% url 'management:member_requirement_complete' membership.member.pk requirement.pk %}" class="shrink-0">
+                                                {% csrf_token %}<input type="hidden" name="next" value="{{ signup_url }}"><input type="hidden" name="note" value="">
+                                                <button class="btn btn-outline btn-success btn-xs" type="submit">{{ confirm_label }}</button>
+                                            </form>
+                                            <button class="btn btn-outline btn-xs shrink-0" type="button" onclick="document.getElementById('bypass_{{ membership.pk }}_{{ requirement.pk }}').showModal()">{{ bypass_label }}</button>
+                                        {% else %}
+                                            <form method="post" action="{% url 'management:member_requirement_incomplete' membership.member.pk requirement.pk %}" class="shrink-0">
+                                                {% csrf_token %}<input type="hidden" name="next" value="{{ signup_url }}">
+                                                <button class="btn btn-outline btn-xs" type="submit">{{ reopen_label }}</button>
+                                            </form>
+                                        {% endif %}
+                                    </div>
+
+                                    {% if not status.is_complete and not status.is_bypassed %}
+                                        <dialog id="bypass_{{ membership.pk }}_{{ requirement.pk }}" class="modal">
+                                            <div class="modal-box">
+                                                <h3 class="text-lg font-bold text-ink">{% blocktrans with name=requirement.name %}Bypass “{{ name }}”{% endblocktrans %}</h3>
+                                                <form method="post" action="{% url 'management:member_requirement_bypass' membership.member.pk requirement.pk %}" id="bypass_{{ membership.pk }}_{{ requirement.pk }}_form">
+                                                    {% csrf_token %}
+                                                    <input type="hidden" name="next" value="{{ signup_url }}">
+                                                    <div class="form-control mt-2">
+                                                        <label class="label-text">{% trans "Why isn't this needed?" %}</label>
+                                                        <textarea class="textarea" name="note" rows="2" required placeholder="{% trans 'e.g. already has a recent photo on file' %}"></textarea>
+                                                    </div>
+                                                </form>
+                                                <div class="modal-action">
+                                                    <form method="dialog"><button class="btn btn-outline gap-2">{% lucide "x" size=16 %} {% trans "Cancel" %}</button></form>
+                                                    <button class="btn btn-primary gap-2" type="submit" form="bypass_{{ membership.pk }}_{{ requirement.pk }}_form">{% lucide "check" size=16 %} {{ bypass_label }}</button>
+                                                </div>
+                                            </div>
+                                            <form method="dialog" class="modal-backdrop"><button>close</button></form>
+                                        </dialog>
+                                    {% endif %}
+                                {% empty %}
+                                    <p class="text-sm text-muted">{% trans "This club has no onboarding requirements set up." %}</p>
+                                {% endfor %}
+                            </div>
+                        </div>
+                    {% endif %}
+
+                    <div>
+                        <div class="mb-2.5 font-display text-xs font-bold tracking-[.14em] text-muted uppercase">{% trans "Place in" %}</div>
+                        <div class="flex flex-wrap gap-2">
+                            {% for team in teams %}
+                                <form method="post" action="{% url 'management:signup_place_in_team' membership.member.pk %}" data-place-in-team>
+                                    {% csrf_token %}
+                                    <input type="hidden" name="team" value="{{ team.pk }}">
+                                    <button type="submit" class="team-chip {% if team in membership.teams_registered %}placed{% endif %}" {% if team in membership.teams_registered %}disabled{% endif %}>
+                                        {{ team.short_name }}
+                                    </button>
+                                </form>
+                            {% empty %}
+                                <p class="text-sm text-muted">{% trans "This club has no teams set up yet." %}</p>
+                            {% endfor %}
+                        </div>
+                        <p class="mt-2 text-xs text-muted">{% trans "Rosters them immediately so the team's coach can see them -- position/number is the team's own call to set correctly later. They still won't be invited to (or selectable for) an event kind a blocking checklist item covers." %}</p>
+                    </div>
+
+                    <div>
+                        <div class="mb-2.5 font-display text-xs font-bold tracking-[.14em] text-muted uppercase">{% trans "Fee" %}</div>
+                        <div class="flex items-center justify-between rounded-lg border border-line p-3">
+                            <span class="badge badge-sm {% if membership.fee_status == "paid" %}badge-success{% elif membership.fee_status == "partially_paid" %}badge-warning{% elif membership.fee_status == "unpaid" %}badge-error{% else %}badge-ghost{% endif %}">{{ membership.get_fee_status_display }}</span>
+                            <a class="link link-hover text-sm" href="{% url 'management:membership_list' %}">{% trans "Manage in Finance" %} →</a>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="flex gap-2.5 border-t border-line p-4">
+                    <form method="post" action="{% url 'management:signup_approve_one' membership.member.pk %}" class="flex-1">
+                        {% csrf_token %}
+                        <button class="btn btn-success w-full gap-2" type="submit" {% if not membership.is_clean or membership.status != "pending" %}disabled{% endif %}>{% lucide "check" size=16 %} {% trans "Approve" %}</button>
+                    </form>
+                    <button type="button" class="btn btn-outline gap-2" onclick="closeDrawer('{{ membership.pk|dom_id:"signup_drawer" }}')">{% trans "Close" %}</button>
+                </div>
+            </div>
+        </div>
+    {% endfor %}
+
+    <script>
+        // The detail drawer needs JS to open at all now (see assets/management.css's
+        // own .drawer-backdrop comment for why it's a plain div, not a native
+        // <dialog> -- Safari rounds a shown <dialog>'s corners regardless of
+        // author CSS). display can't itself transition, so opening adds .visible
+        // (display:block) and forces a reflow *before* adding .open (the actual
+        // background-fade/slide-in), otherwise the browser has no "just-appeared,
+        // still off-screen" frame to animate away from.
+        function openDrawer(id) {
+            const backdrop = document.getElementById(id);
+            backdrop.classList.add("visible");
+            void backdrop.offsetHeight;
+            backdrop.classList.add("open");
+        }
+
+        function closeDrawer(id) {
+            const backdrop = document.getElementById(id);
+            backdrop.classList.remove("open");
+            setTimeout(() => backdrop.classList.remove("visible"), 200);
+        }
+
+        document.querySelectorAll(".drawer-backdrop").forEach((backdrop) => {
+            backdrop.addEventListener("click", (event) => {
+                if (event.target === backdrop) closeDrawer(backdrop.id);
+            });
+        });
+
+        document.addEventListener("keydown", (event) => {
+            if (event.key !== "Escape") return;
+            document.querySelectorAll(".drawer-backdrop.open").forEach((backdrop) => closeDrawer(backdrop.id));
+        });
+
+        // "Place in [team]" posts in the background -- clicking a team is a single
+        // fact ("this member is on this team now"), not something that needs a
+        // full-page reload to confirm. X-Requested-With is what
+        // SignupPlaceInTeamView checks to answer with JSON instead of a redirect;
+        // a non-JS client (or a fetch failure) still gets the exact same effect
+        // through a plain synchronous submit, just with a page reload.
+        document.querySelectorAll("[data-place-in-team]").forEach((form) => {
+            form.addEventListener("submit", (event) => {
+                event.preventDefault();
+                const button = form.querySelector("button");
+                if (button.disabled) return;
+
+                fetch(form.action, {
+                    method: "POST",
+                    body: new FormData(form),
+                    headers: {"X-Requested-With": "XMLHttpRequest"},
+                })
+                    .then((response) => response.json())
+                    .then((data) => {
+                        if (data.ok) {
+                            button.classList.add("placed");
+                            button.disabled = true;
+                        }
+                    })
+                    .catch(() => form.submit());
+            });
+        });
+    </script>
+{% endblock extra_body %}

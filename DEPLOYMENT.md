@@ -117,34 +117,30 @@ docker compose up -d --no-deps web
 
 ## Scheduled jobs
 
-Four commands need to run on a schedule. Put them on the **host**, not in a container, and on
-**exactly one node** when you have several — three nodes archiving the same club is three
-emails to the same club.
+Five jobs run on a schedule via **Celery Beat**, not host cron — see `rosterchief/settings.py`
+(`CELERY_BEAT_SCHEDULE`) for the exact times and `features/jobs.py` for what each one does.
+`worker` and `beat` are just the `web` image running a different command (see `compose.yaml`);
+`worker` can scale to several containers, but run **exactly one `beat`** across the whole
+deployment — it decides *when* a task fires, so two of them means every job runs twice (two
+`archive_overdue_clubs` runs is two emails to the same club, the same "exactly one node"
+reasoning the old crontab needed).
 
-```cron
-# Bill: remind club admins about outstanding platform fees. Dry-run by default, same as the
-# archive job below — this one mails paying customers, so --commit is opt-in. Reminders go
-# once per escalation level, not once per run, so a daily cron is not a daily email.
-0 5 * * *  cd /srv/rosterchief && docker compose run --rm web python manage.py send_billing_reminders --commit
+| Job | Cadence | What it does |
+|---|---|---|
+| `extend_event_series` | daily 03:00 | materialises recurring event occurrences so the calendar never runs dry |
+| `renew_subscriptions` | daily 04:00 | opens the next billing period for clubs whose current one is running out |
+| `send_billing_reminders` | daily 05:00 | emails club admins about outstanding platform fees, once per escalation level |
+| `archive_overdue_clubs` | daily 06:00 | archives clubs unpaid past their grace period |
+| `generate_seasons` | monthly, 1st 05:00 | generates the next 2 years of seasons for every active club |
 
-# Bill: archive clubs unpaid past their grace period.
-# Run it WITHOUT --commit for the first week and read the output. The flag exists because
-# this switches off paying customers: a bad clock or a bad cron should cost you an email,
-# not a morning of angry clubs. Since grace now runs from the period START rather than its
-# end (see BILLING.md §3), this job is load-bearing in a way it never used to be — a club
-# is archivable ~60 days after being invoiced, not ~410. Re-do the dry-run week.
-0 6 * * *  cd /srv/rosterchief && docker compose run --rm web python manage.py archive_overdue_clubs --commit
+Each task always acts (no `--dry-run`/`--commit` gate) — the same as the old crontab always
+passing `--commit`. Run status (started, finished, success/failure, what it returned or
+raised) is recorded in `features.models.JobRun` and shown on the control panel's **Jobs**
+tab, which a crontab line mailing stderr on failure never gave us.
 
-# Events: extend recurring series so the calendar never runs dry.
-0 3 * * *  cd /srv/rosterchief && docker compose run --rm web python manage.py extend_event_series
-
-# Seasons: generate the next 2 years ahead for every active club. Safe to run repeatedly and
-# needs no --commit — unlike archiving or resyncing, creating a future season row is additive
-# and idempotent, so a monthly cadence just keeps every club's season list from ever running
-# out. --resync exists on the same command for removing seasons that no longer match a club's
-# settings, but that can delete rows, so it isn't run unattended here.
-0 5 1 * *  cd /srv/rosterchief && docker compose run --rm web python manage.py generate_seasons
-```
+The `manage.py <command>` versions of these still exist unchanged, for manual/dry-run use
+from a shell — see each command's own `--help` (`generate_seasons --resync`, for one, is
+still CLI-only: it can delete rows, so it isn't something a beat schedule runs unattended).
 
 ## Maintenance mode
 
@@ -155,16 +151,19 @@ Control panel → **Features → Maintenance mode**. While it is on:
   you with no way to turn it back off;
 - `/healthz` keeps answering on every host, or the load balancer would take the node out of
   rotation and the control panel with it;
-- the **scheduled jobs stand down** — `archive_overdue_clubs`, `extend_event_series` and
-  `import_members_csv` refuse to run.
+- the **scheduled jobs stand down** — the five Celery tasks in the table above, plus
+  `import_members_csv` when run by hand.
 
 `migrate` and `collectstatic` are deliberately **not** blocked. Maintenance is usually
 declared *in order* to run them, and a guard that stopped them would mean turning the mode
 off to do the work you turned it on for.
 
-The scheduled jobs exit **non-zero** while the platform is closed, so cron will mail you.
-That is intended: a job that silently skips itself is how a month of billing goes missing. If
-you genuinely mean to run one during a window, pass `--ignore-maintenance`.
+A Celery task raises loudly rather than skipping quietly while the platform is closed — that
+is intended, a job that silently no-ops is how a month of billing goes missing — which
+`worker` logs and, via `features/signals.py`, records as a `Failed` JobRun on the control
+panel's **Jobs** tab. The `manage.py` version of each command still exits non-zero the same
+way and accepts `--ignore-maintenance` for the rare case you genuinely mean to run one by
+hand during a window.
 
 So a migration-heavy deploy looks like:
 
@@ -456,6 +455,12 @@ via copy-on-write instead of each worker importing Django independently), plus t
 Postgres rows to come in lower than above — not yet re-measured, so treat the table as the
 shape of where memory goes rather than exact numbers on the current config.
 
+The table also predates `worker` and `beat` (see "Scheduled jobs"): each is one more full
+Django process, not re-measured yet either, but expect each to land in the same range as one
+gunicorn worker above (~50–60 MB) since it's the same app import cost with none of gunicorn's
+own overhead. `beat` additionally has essentially nothing to do between firing its five daily
+tasks, so it's the cheapest process in the stack to run.
+
 2 GB would run it. 4 GB is the recommendation for three reasons, all of which are the kind of
 thing that bites at the worst moment:
 
@@ -599,7 +604,7 @@ Nothing in the code changes. What changes is where the services live:
 | Cache / flags | `redis` container | managed Redis (or your existing one) |
 | Uploads | local disk | **S3 bucket** (`AWS_STORAGE_BUCKET_NAME`) |
 | Static files | WhiteNoise, in the image | unchanged — that is why WhiteNoise is there |
-| Cron | host crontab | one node only |
+| Scheduled jobs | `worker` + `beat` containers | `worker` on any/every node; **`beat` on exactly one** |
 | TLS | Caddy on the box | load balancer, or Caddy on each node |
 
 Drop `db` and `redis` from `compose.yaml`, point the URLs at the central services, and run

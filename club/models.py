@@ -5,11 +5,13 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import FileExtensionValidator, MaxValueValidator, MinValueValidator, RegexValidator
 from django.db import models
+from django.db.models import Q
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 from members.models import Member
 from rosterchief.base import ClubScopedModel, UUIDModel, unique_slugify, validate_club_scope
+from rosterchief.storage import private_storage
 
 
 class ClubManager(models.Manager):
@@ -256,6 +258,14 @@ class Season(ClubScopedModel):
         context needed) -- the season that follows the one covering ``date``."""
         return cls.objects.filter(club=club, start_date__gt=date).order_by("start_date").first()
 
+    @classmethod
+    def before(cls, club, season):
+        """Return ``club``'s most recent season starting before ``season`` --
+        e.g. the management dashboard's member-count trend compares against
+        this. Mirrors next_after's own "adjacent by date" reasoning, just
+        looking the other way."""
+        return cls.objects.filter(club=club, start_date__lt=season.start_date).order_by("-start_date").first()
+
 
 class ClubMembership(ClubScopedModel):
     class Kind(models.TextChoices):
@@ -319,6 +329,21 @@ class ClubMembership(ClubScopedModel):
         """
         return self.kind == self.Kind.GUARDIAN
 
+    @property
+    def open_requirement_count(self) -> int:
+        """How many active onboarding requirements this membership hasn't resolved
+        yet (completed or bypassed) -- see OnboardingRequirement's docstring for why
+        this is separate from status/fee_status. One query per call; for a list of
+        memberships, annotate with club.services.onboarding.annotate_onboarding_status
+        instead."""
+        met = set(self.requirement_statuses.filter(Q(is_complete=True) | Q(is_bypassed=True)).values_list("requirement_id", flat=True))
+        required = set(OnboardingRequirement.objects.filter(club_id=self.club_id, is_active=True).values_list("pk", flat=True))
+        return len(required - met)
+
+    @property
+    def onboarding_complete(self) -> bool:
+        return self.open_requirement_count == 0
+
     def clean(self):
         validate_club_scope(self, self.club_id, same_club_fields=("season",))
         # A guardian owes nothing -- they're not a member. Caught here rather than
@@ -356,11 +381,104 @@ class FeePayment(UUIDModel):
         return f"{self.membership} — {self.amount}"
 
 
+def onboarding_document_path(instance: MemberRequirementStatus, filename: str) -> str:
+    return f"clubs/{instance.membership.club.slug}/onboarding/{instance.membership_id}/{filename}"
+
+
+class OnboardingRequirement(ClubScopedModel):
+    """A club-defined item every member must satisfy after signing up or renewing --
+    e.g. "provide a medical certificate", "upload a photo".
+
+    ``ClubMembership.fee_status`` is still driven by payment alone (see
+    ``club.services.fees._sync_fee_status``) and this never touches it -- a member
+    reads as paid *and* still has an open checklist, both true at once. ``status``
+    is different: paying in full only ever settles ``fee_status`` now -- it never
+    flips ``status`` to ACTIVE by itself. The only path there is the deliberately
+    manual one, ``club.services.onboarding.approve_one``/``approve_all_clean``, run
+    by an admin from the Sign-up page, which additionally requires every blocking
+    requirement to be resolved first. Nothing flips status automatically just
+    because the fee cleared or the last checklist item was ticked (checklist actions
+    aren't even admin-gated); activation is always that one deliberate admin step,
+    so a membership can be fully paid *and* fully checked off and still sit PENDING
+    until someone actually clicks Approve.
+
+    ``blocked_event_kinds`` is what makes a specific requirement matter before that
+    point: a club can decide e.g. a medical certificate blocks GAME invitations/
+    selection but not TRAINING ones, so a provisionally-rostered member (see
+    ``events.services.attendance.effective_members``) can still be invited to practice
+    while their paperwork is outstanding. Empty means "informational only" -- open or
+    not, it never blocks anything. Stored as a plain list of ``events.models.Event.
+    EventKind`` values (not a FK/enum at the DB layer) specifically to avoid a
+    club -> events import cycle (events already imports club for Event.club); the
+    form layer (management/forms.py) is what actually validates against EventKind.
+
+    ``MemberRequirementStatus`` tracks completion per ``ClubMembership`` (so a fresh
+    checklist starts each season, matching how membership itself is season-scoped).
+    """
+
+    name = models.CharField(_("name"), max_length=100)
+    description = models.TextField(_("description"), blank=True, help_text=_("Shown to staff on the member's checklist."))
+    requires_document = models.BooleanField(_("requires a document"), default=False, help_text=_("Staff can attach a file (e.g. the certificate itself) when marking this complete."))
+    blocked_event_kinds = models.JSONField(_("blocks selection for"), default=list, blank=True, help_text=_("Event kinds a member can't be invited to or selected for while this is open. Empty means purely informational."))
+    is_active = models.BooleanField(_("active"), default=True, help_text=_("Inactive requirements no longer apply to new memberships, but existing statuses are kept."))
+    order = models.PositiveIntegerField(_("order"), default=0, help_text=_("Lower numbers show first on the checklist."))
+
+    class Meta:
+        verbose_name = _("onboarding requirement")
+        verbose_name_plural = _("onboarding requirements")
+        ordering = ["order", "name"]
+        constraints = [
+            models.UniqueConstraint(fields=["club", "name"], name="unique_onboarding_requirement_name_per_club"),
+        ]
+
+    def __str__(self):
+        return self.name
+
+
+class MemberRequirementStatus(UUIDModel):
+    """Whether one ``ClubMembership`` has satisfied one ``OnboardingRequirement``,
+    this season. Not itself club-scoped -- its club is reached through ``membership``,
+    same reasoning as ``FeePayment`` above."""
+
+    membership = models.ForeignKey(ClubMembership, on_delete=models.CASCADE, related_name="requirement_statuses", verbose_name=_("membership"))
+    requirement = models.ForeignKey(OnboardingRequirement, on_delete=models.CASCADE, related_name="statuses", verbose_name=_("requirement"))
+    is_complete = models.BooleanField(_("complete"), default=False)
+    #: Distinct from is_complete -- "confirmed, not needed for this person" (e.g. they
+    #: already have a recent photo on file) reads differently from "actually received"
+    #: on a checklist/audit, even though both equally stop this item from blocking
+    #: anything (see club.services.onboarding.is_open). Mutually exclusive with
+    #: is_complete in practice (mark_bypassed/mark_complete each clear the other).
+    is_bypassed = models.BooleanField(_("bypassed"), default=False)
+    completed_at = models.DateTimeField(_("completed at"), null=True, blank=True)
+    completed_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("completed by"))
+    document = models.FileField(_("document"), storage=private_storage, upload_to=onboarding_document_path, blank=True, help_text=_("Stored privately -- readable only through this member's own page, never a direct link."))
+    note = models.TextField(_("note"), blank=True, help_text=_("Staff-only, e.g. how or when this was received."))
+
+    class Meta:
+        verbose_name = _("member requirement status")
+        verbose_name_plural = _("member requirement statuses")
+        constraints = [
+            models.UniqueConstraint(fields=["membership", "requirement"], name="unique_requirement_status_per_membership"),
+        ]
+
+    def __str__(self):
+        return f"{self.membership} — {self.requirement}"
+
+    def clean(self):
+        validate_club_scope(self, self.membership.club_id, same_club_fields=("requirement",))
+
+
 class ClubRole(ClubScopedModel):
     class Roles(models.TextChoices):
         ADMIN = "admin", _("admin")
         MEMBER = "member", _("member")
         EDITOR = "editor", _("editor")
+        #: Full read/write on people (members, families, groups, parent claims,
+        #: teams, referee setup, onboarding requirements) without Finance/Shop,
+        #: Club identity, Sponsors, or the ability to grant/revoke ClubRole itself
+        #: -- see club.services.access.can_manage_members and
+        #: club.mixins.MemberAdminRequiredMixin for exactly what that covers.
+        MEMBER_ADMIN = "member_admin", _("member admin")
 
     member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="roles", verbose_name=_("member"))
     role = models.CharField(_("role"), max_length=250, choices=Roles.choices, default=Roles.MEMBER)

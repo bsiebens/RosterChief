@@ -1,0 +1,76 @@
+{% extends "management/base.html" %}
+{% load i18n lucide ui %}
+
+{% comment %}
+    A club's own self-service identity/branding editor -- see
+    management/forms.py's ClubSettingsForm for exactly which fields are
+    editable here versus platform-staff-only (slug, seasons). D9 "Club
+    identity & branding" in the design handoff is the reference; its
+    live-preview and advanced (custom stylesheet / own domain) panels aren't
+    real features here, so this sticks to the fields the form actually has,
+    laid out in the same card-per-section language.
+{% endcomment %}
+
+{% block panel_title %}{% trans "Club identity" %}{% endblock panel_title %}
+{% block heading %}{% trans "Club identity" %}{% endblock heading %}
+
+{% block actions %}
+    <button class="btn btn-primary gap-2" type="submit" form="club-settings-form">{% lucide "save" size=16 %} {% trans "Save changes" %}</button>
+{% endblock actions %}
+
+{% block panel %}
+    <form id="club-settings-form" method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+
+        {% for error in form.non_field_errors %}
+            <div class="alert alert-error">
+                {% lucide "circle-x" size=18 %}
+                <span>{{ error }}</span>
+            </div>
+        {% endfor %}
+
+        <div class="grid grid-cols-2 gap-5">
+            <div class="flex flex-col gap-5">
+                <div class="card">
+                    <div class="card-body">
+                        <div class="card-title">{% lucide "building-2" size=16 %} {% trans "Club" %}</div>
+                        <div class="flex flex-col gap-4">
+                            {% form_field form.name %}
+                            {% form_field form.legal_name %}
+                            {% form_field form.contact_email %}
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-body">
+                        <div class="card-title">{% lucide "image" size=16 %} {% trans "Logo" %}</div>
+                        <div class="flex items-center gap-3.5">
+                            {% if club.logo %}
+                                <img class="h-14 w-14 shrink-0 rounded-lg border border-line bg-paper object-contain p-1" src="{{ club.logo.url }}" alt="">
+                            {% else %}
+                                <span class="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg border border-line bg-paper font-display text-sm font-extrabold text-muted">{{ club.initials }}</span>
+                            {% endif %}
+                            <div class="flex-1">{% form_field form.logo %}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card self-start">
+                <div class="card-body">
+                    <div class="card-title">{% lucide "palette" size=16 %} {% trans "Colours" %}</div>
+                    <div class="grid grid-cols-2 gap-4">
+                        {% form_field form.primary_color %}
+                        {% form_field form.secondary_color %}
+                    </div>
+                    <div class="mt-1 flex items-center gap-2">
+                        <span class="h-7 w-7 rounded-md border border-line" style="background: {{ form.primary_color.value|default:'#fff' }}"></span>
+                        <span class="h-7 w-7 rounded-md border border-line" style="background: {{ form.secondary_color.value|default:'#fff' }}"></span>
+                        <span class="font-mono text-xs text-muted">{% trans "Current colours" %}</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </form>
+{% endblock panel %}

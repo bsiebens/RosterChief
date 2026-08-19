@@ -1,8 +1,8 @@
 """Force MFA enrolment for privileged users.
 
 Anyone who can change other people's data must have a second factor: Django
-staff/superusers, and anyone holding an elevated ``ClubRole`` (ADMIN or EDITOR)
-in *any* club. Regular members may enrol, but aren't forced to.
+staff/superusers, and anyone holding an elevated ``ClubRole`` (ADMIN, EDITOR, or
+MEMBER_ADMIN) in *any* club. Regular members may enrol, but aren't forced to.
 
 Enrolled users are challenged for their second factor by allauth at login; this
 middleware only handles the other half — a privileged user who has never
@@ -21,7 +21,7 @@ from club.models import ClubRole
 #: under DEBUG — without it, live reload dies on the enrolment page itself.
 EXEMPT_PREFIXES = ("/accounts/", "/static/", "/media/", "/__reload__/")
 
-ELEVATED_ROLES = (ClubRole.Roles.ADMIN, ClubRole.Roles.EDITOR)
+ELEVATED_ROLES = (ClubRole.Roles.ADMIN, ClubRole.Roles.EDITOR, ClubRole.Roles.MEMBER_ADMIN)
 
 
 def mfa_required_for(user) -> bool:

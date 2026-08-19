@@ -8,35 +8,33 @@
 {% endblock actions %}
 
 {% block panel %}
-    <div class="card w-full bg-base-100 shadow">
-        <div class="card-body">
-            <p class="text-sm opacity-70">
-                {% blocktrans %}Fill in the downloaded template — one row per member — then upload it
-                here. Nothing is created yet: you'll see exactly what will be added
-                before anything is saved.{% endblocktrans %}
-            </p>
-            <p class="text-sm opacity-70">
-                {% blocktrans %}To register a family, give matching rows the same <code>family_group</code> value (any label works, e.g. a surname) and set each row's <code>family_role</code>. A parent/guardian row with an email gets a login; a child row doesn't — grant one later from their member page if they need it.{% endblocktrans %}
-            </p>
+    <div class="card card-body">
+        <p class="text-sm text-muted">
+            {% blocktrans %}Fill in the downloaded template — one row per member — then upload it
+            here. Nothing is created yet: you'll see exactly what will be added
+            before anything is saved.{% endblocktrans %}
+        </p>
+        <p class="text-sm text-muted">
+            {% blocktrans %}To register a family, give matching rows the same <code>family_group</code> value (any label works, e.g. a surname) and set each row's <code>family_role</code>. A parent/guardian row with an email gets a login; a child row doesn't — grant one later from their member page if they need it.{% endblocktrans %}
+        </p>
 
-            <form method="post" enctype="multipart/form-data">
-                {% csrf_token %}
+        <form method="post" enctype="multipart/form-data">
+            {% csrf_token %}
 
-                {% for error in form.non_field_errors %}
-                    <div class="alert alert-error my-2">
-                        <span>{{ error }}</span>
-                    </div>
-                {% endfor %}
-
-                {% for field in form %}
-                    {% form_field field %}
-                {% endfor %}
-
-                <div class="card-actions justify-start pt-2 mt-2">
-                    <a class="btn btn-outline gap-2" href="{% url 'management:member_list' %}">{% lucide "arrow-left" size=16 %} {% trans "Cancel" %}</a>
-                    <button class="btn btn-primary gap-2" type="submit">{% lucide "upload" size=16 %} {% trans "Upload and preview" %}</button>
+            {% for error in form.non_field_errors %}
+                <div class="alert alert-error my-2">
+                    <span>{{ error }}</span>
                 </div>
-            </form>
-        </div>
+            {% endfor %}
+
+            {% for field in form %}
+                {% form_field field %}
+            {% endfor %}
+
+            <div class="mt-2 flex items-center gap-2 pt-2">
+                <a class="btn btn-outline gap-2" href="{% url 'management:member_list' %}">{% lucide "arrow-left" size=16 %} {% trans "Cancel" %}</a>
+                <button class="btn btn-primary gap-2" type="submit">{% lucide "upload" size=16 %} {% trans "Upload and preview" %}</button>
+            </div>
+        </form>
     </div>
 {% endblock panel %}

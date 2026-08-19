@@ -1,0 +1,111 @@
+{% load static lucide ui i18n %}
+
+{% comment %}
+    Standalone shell for allauth screens (password change/reset, MFA, passkeys, recovery
+    codes) and 403.html/maintenance.html, rendered whenever the request path is under
+    /manage/ (see club/context_processors.py: MANAGEMENT_BASE_TEMPLATE). Without this, a
+    club staff member clicking "Change password" or "Manage MFA" from the management app's
+    user menu would get bounced onto _club_base.html's old daisyUI chain -- the club's
+    *public* skin, not the management app they were just in. Same reasoning and structure as
+    controlpanel/_auth_base.html (its own fork of this same problem for the platform side),
+    but themed with assets/management.css and this club's own colours, matching
+    management/base.html.
+
+    Block names match what templates/allauth/layouts/base.html and templates/403.html/
+    maintenance.html target (head_title, extra_head, main, extra_body) -- same contract as
+    controlpanel/_auth_base.html and _club_base.html, so none of those shared templates need
+    to know this base exists.
+{% endcomment %}
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+        <title>
+            {% block head_title %}{% endblock head_title %} &middot; {{ club.name }}
+        </title>
+
+        <link rel="stylesheet" href="{% static 'css/management.css' %}">
+        {% if club.secondary_color %}
+            <style>
+                :root {
+                    --tenant-club: {{ club.secondary_color }};
+                    --tenant-club-dark: color-mix(in srgb, {{ club.secondary_color }} 80%, black);
+                }
+            </style>
+        {% endif %}
+        {% block extra_head %}{% endblock extra_head %}
+    </head>
+
+    <body class="flex min-h-screen flex-col items-center gap-10 bg-ink px-4 py-14 font-sans text-slate">
+        <div class="flex w-full max-w-md items-center justify-between gap-4 bg-ink py-1">
+            <a class="flex min-w-0 items-center gap-2.5" href="{% url 'management:home' %}">
+                {% if club.logo %}
+                    <img class="crest h-8 w-8 shrink-0 object-cover" src="{{ club.logo.url }}" alt="">
+                {% else %}
+                    <span class="crest flex h-8 w-8 shrink-0 items-center justify-center bg-club">
+                        <span class="font-display text-[11px] font-extrabold text-white">{{ club.initials }}</span>
+                    </span>
+                {% endif %}
+                <span class="min-w-0 truncate font-display text-lg font-extrabold tracking-[.08em] text-white uppercase">{{ club.name }}</span>
+            </a>
+            <a class="flex shrink-0 items-center gap-1.5 font-mono text-xs text-on-dark-dim hover:text-white" href="{% url 'management:home' %}">
+                {% lucide "arrow-left" size=14 %} {% trans "Back to management" %}
+            </a>
+        </div>
+
+        <main class="flex w-full max-w-md flex-1 flex-col justify-center gap-4">
+            {% if messages %}
+                <div class="flex flex-col gap-2">
+                    {% for message in messages %}
+                        {% with alert=message|as_alert %}
+                            <div class="alert {{ alert.css }}" role="alert">
+                                {% lucide alert.icon size=18 %}
+                                <div>
+                                    <div class="font-display text-sm font-bold tracking-wide uppercase">{{ alert.title }}</div>
+                                    <div class="text-sm">{{ alert.body }}</div>
+                                </div>
+                            </div>
+                        {% endwith %}
+                    {% endfor %}
+                </div>
+            {% endif %}
+
+            {% block main %}{% endblock main %}
+        </main>
+
+        <p class="font-mono text-[11px] text-on-dark-faint">&copy; {% now "Y" %} RosterChief</p>
+
+        {% comment %}
+            Same data-otp enhancement as controlpanel/_auth_base.html -- see that file's own
+            comment for why the real <input> stays invisible-but-focusable and each typed
+            character is mirrored into its own <span> instead of trying to align the real
+            glyphs with the box pitch via CSS alone.
+        {% endcomment %}
+        <script>
+            document.querySelectorAll("[data-otp]").forEach((otp) => {
+                const input = otp.querySelector("input");
+                const boxes = otp.querySelectorAll("span");
+                if (!input) return;
+
+                const fit = () => {
+                    const boxed = input.value.length <= boxes.length;
+                    otp.classList.toggle("otp", boxed);
+                    otp.classList.toggle("otp-lg", boxed);
+                    boxes.forEach((box, index) => {
+                        box.classList.toggle("hidden", !boxed);
+                        box.textContent = boxed ? input.value[index] || "" : "";
+                    });
+                    input.classList.toggle("input", !boxed);
+                    input.classList.toggle("input-lg", !boxed);
+                };
+
+                input.addEventListener("input", fit);
+                fit();
+            });
+        </script>
+
+        {% block extra_body %}{% endblock extra_body %}
+    </body>
+</html>

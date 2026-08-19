@@ -2,7 +2,13 @@
 {% load i18n lucide %}
 
 {% block heading %}{{ event.title }}{% endblock heading %}
-{% block subheading %}{{ event.get_kind_display }}{% endblock subheading %}
+
+{% block topbar_context %}
+    <span class="badge {% if event.kind == "game" %}badge-error{% elif event.kind == "training" %}badge-info{% elif event.kind == "tournament" %}badge-warning{% elif event.kind == "meeting" %}badge-neutral{% elif event.kind == "social" %}border-violet/30 bg-violet/10 text-violet{% else %}badge-outline{% endif %}">
+        {{ event.get_kind_display }}
+    </span>
+    {% if event.is_live %}<span class="badge badge-error gap-1 animate-pulse">{% lucide "circle" size=10 %} {% trans "Live" %}</span>{% endif %}
+{% endblock topbar_context %}
 
 {% block actions %}
     {% if can_manage %}
@@ -22,7 +28,7 @@
 
 {% block panel %}
     {% if event.series_id %}
-        <div class="alert alert-info mb-6">
+        <div class="alert alert-info">
             {% lucide "repeat" size=20 %}
             <span>
                 {% blocktrans with series=event.series %}Part of the recurring series “{{ series }}”.{% endblocktrans %}
@@ -32,54 +38,54 @@
         </div>
     {% endif %}
 
-    <div class="mb-6 grid gap-4 lg:grid-cols-2">
-        <div class="card bg-base-100 shadow">
+    <div class="grid gap-4 lg:grid-cols-2">
+        <div class="card">
             <div class="card-body">
                 <h2 class="card-title text-base">{% lucide "info" size=18 %} {% trans "Details" %}</h2>
-                <dl class="divide-y divide-base-200">
-                    <div class="flex flex-col gap-0.5 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-                        <dt class="text-sm opacity-70">{% trans "Start" %}</dt>
-                        <dd class="sm:text-right">{{ event.start|date:"j M Y H:i" }}</dd>
+                <dl>
+                    <div class="flex items-center justify-between gap-4 py-2">
+                        <dt class="text-sm text-muted">{% trans "Start" %}</dt>
+                        <dd class="font-mono text-sm text-ink">{{ event.start|date:"j M Y H:i" }}</dd>
                     </div>
-                    <div class="flex flex-col gap-0.5 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-                        <dt class="text-sm opacity-70">{% trans "End" %}</dt>
-                        <dd class="sm:text-right">{{ event.end|date:"j M Y H:i"|default:"—" }}</dd>
+                    <div class="flex items-center justify-between gap-4 py-2">
+                        <dt class="text-sm text-muted">{% trans "End" %}</dt>
+                        <dd class="font-mono text-sm text-ink">{{ event.end|date:"j M Y H:i"|default:"—" }}</dd>
                     </div>
-                    <div class="flex flex-col gap-0.5 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-                        <dt class="text-sm opacity-70">{% trans "Gathering" %}</dt>
-                        <dd class="sm:text-right">{{ event.gathering|date:"j M Y H:i"|default:"—" }}</dd>
+                    <div class="flex items-center justify-between gap-4 py-2">
+                        <dt class="text-sm text-muted">{% trans "Gathering" %}</dt>
+                        <dd class="font-mono text-sm text-ink">{{ event.gathering|date:"j M Y H:i"|default:"—" }}</dd>
                     </div>
-                    <div class="flex flex-col gap-0.5 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-                        <dt class="text-sm opacity-70">{% trans "Registration deadline" %}</dt>
-                        <dd class="sm:text-right">{{ event.deadline|date:"j M Y H:i"|default:"—" }}</dd>
+                    <div class="flex items-center justify-between gap-4 py-2">
+                        <dt class="text-sm text-muted">{% trans "Registration deadline" %}</dt>
+                        <dd class="font-mono text-sm text-ink">{{ event.deadline|date:"j M Y H:i"|default:"—" }}</dd>
                     </div>
-                    <div class="flex flex-col gap-0.5 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-                        <dt class="text-sm opacity-70">{% trans "Location" %}</dt>
-                        <dd class="sm:text-right">{{ event.location|default:"—" }}</dd>
+                    <div class="flex items-center justify-between gap-4 py-2">
+                        <dt class="text-sm text-muted">{% trans "Location" %}</dt>
+                        <dd class="text-sm text-ink">{{ event.location|default:"—" }}</dd>
                     </div>
-                    <div class="flex flex-col gap-0.5 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-                        <dt class="text-sm opacity-70">{% trans "Opponent" %}</dt>
-                        <dd class="sm:text-right">{{ event.opponent|default:"—" }}</dd>
+                    <div class="flex items-center justify-between gap-4 py-2">
+                        <dt class="text-sm text-muted">{% trans "Opponent" %}</dt>
+                        <dd class="text-sm text-ink">{{ event.opponent|default:"—" }}</dd>
                     </div>
-                    <div class="flex flex-col gap-0.5 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-                        <dt class="text-sm opacity-70">{% trans "Teams" %}</dt>
-                        <dd class="sm:text-right">{% for team in event.teams.all %}{{ team.name }}{% if not forloop.last %}, {% endif %}{% empty %}—{% endfor %}</dd>
+                    <div class="flex items-center justify-between gap-4 py-2">
+                        <dt class="text-sm text-muted">{% trans "Teams" %}</dt>
+                        <dd class="text-sm text-ink">{% for team in event.teams.all %}{{ team.name }}{% if not forloop.last %}, {% endif %}{% empty %}—{% endfor %}</dd>
                     </div>
-                    <div class="flex flex-col gap-0.5 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-                        <dt class="text-sm opacity-70">{% trans "Groups" %}</dt>
-                        <dd class="sm:text-right">{% for group in event.groups.all %}{{ group.name }}{% if not forloop.last %}, {% endif %}{% empty %}—{% endfor %}</dd>
+                    <div class="flex items-center justify-between gap-4 py-2">
+                        <dt class="text-sm text-muted">{% trans "Groups" %}</dt>
+                        <dd class="text-sm text-ink">{% for group in event.groups.all %}{{ group.name }}{% if not forloop.last %}, {% endif %}{% empty %}—{% endfor %}</dd>
                     </div>
                     {% if event.club_wide %}
-                        <div class="flex flex-col gap-0.5 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-                            <dt class="text-sm opacity-70">{% trans "Audience" %}</dt>
-                            <dd class="sm:text-right"><span class="badge badge-primary">{% trans "Whole club" %}</span></dd>
+                        <div class="flex items-center justify-between gap-4 py-2">
+                            <dt class="text-sm text-muted">{% trans "Audience" %}</dt>
+                            <dd><span class="badge badge-neutral">{% trans "Whole club" %}</span></dd>
                         </div>
                     {% endif %}
                 </dl>
             </div>
         </div>
 
-        <div class="card bg-base-100 shadow">
+        <div class="card">
             <div class="card-body">
                 <div class="flex flex-wrap items-center justify-between gap-2">
                     <h2 class="card-title text-base">{% lucide "user-check" size=18 %} {% trans "RSVPs" %}</h2>
@@ -89,29 +95,26 @@
                         </button>
                     {% endif %}
                 </div>
-                <dl class="divide-y divide-base-200">
+                <dl>
                     {% for group in attendance_groups %}
-                        <div class="flex flex-col gap-0.5 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-                            <dt class="text-sm opacity-70">{{ group.label }}</dt>
-                            <dd class="font-semibold tabular-nums font-mono sm:text-right">{{ group.rows|length }}</dd>
+                        <div class="flex items-center justify-between gap-4 py-2">
+                            <dt class="text-sm text-muted">{{ group.label }}</dt>
+                            <dd class="font-mono text-sm font-semibold text-ink tabular-nums">{{ group.rows|length }}</dd>
                         </div>
                     {% endfor %}
                 </dl>
                 {% if not has_attendance_rows %}
-                    <p class="text-sm opacity-60">{% trans "No one invited yet." %}</p>
+                    <p class="text-sm text-muted">{% trans "No one invited yet." %}</p>
                 {% endif %}
             </div>
         </div>
     </div>
 
     {% if event.kind == "game" %}
-        <div class="mb-6 card bg-base-100 shadow">
+        <div class="card">
             <div class="card-body">
                 <div class="flex flex-wrap items-center justify-between gap-2">
-                    <h2 class="card-title text-base">
-                        {% lucide "trophy" size=18 %} {% trans "Game" %}
-                        {% if event.is_live %}<span class="badge badge-error gap-1 animate-pulse">{% lucide "circle" size=10 %} {% trans "Live" %}</span>{% endif %}
-                    </h2>
+                    <h2 class="card-title text-base">{% lucide "trophy" size=18 %} {% trans "Game" %}</h2>
                     {% if can_manage and event.competition %}
                         <form method="post" action="{% url 'management:event_fetch_game_info' event.pk %}">
                             {% csrf_token %}
@@ -119,20 +122,20 @@
                         </form>
                     {% endif %}
                 </div>
-                <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                <div class="grid grid-cols-3 gap-4">
                     <div>
-                        <div class="text-sm opacity-70">{% trans "Score" %}</div>
-                        <div class="text-sm font-semibold tabular-nums font-mono">
+                        <div class="text-sm text-muted">{% trans "Score" %}</div>
+                        <div class="font-mono text-sm font-semibold tabular-nums text-ink">
                             {% if event.score_for is not None and event.score_against is not None %}{{ event.score_for }} - {{ event.score_against }}{% else %}—{% endif %}
                         </div>
                     </div>
                     <div>
-                        <div class="text-sm opacity-70">{% trans "Competition" %}</div>
-                        <div class="text-sm">{{ event.competition|default:"—" }}</div>
+                        <div class="text-sm text-muted">{% trans "Competition" %}</div>
+                        <div class="text-sm text-ink">{{ event.competition|default:"—" }}</div>
                     </div>
                     <div>
-                        <div class="text-sm opacity-70">{% trans "External game ID" %}</div>
-                        <div class="font-mono text-sm">{{ event.external_game_id|default:"—" }}</div>
+                        <div class="text-sm text-muted">{% trans "External game ID" %}</div>
+                        <div class="font-mono text-sm text-ink">{{ event.external_game_id|default:"—" }}</div>
                     </div>
                 </div>
             </div>
@@ -140,14 +143,14 @@
     {% endif %}
 
     {% if event.is_home_game and not referee_management_needed %}
-        <div class="alert alert-info mb-6">
+        <div class="alert alert-info">
             {% lucide "info" size=20 %}
             <span>{% trans "Referees for this game are managed by the federation, not the club." %}</span>
         </div>
     {% endif %}
 
     {% if referee_management_needed %}
-        <div class="mb-6 card bg-base-100 shadow">
+        <div class="card">
             <div class="card-body">
                 {% include "management/_referee_assignment_panel.html" %}
             </div>
@@ -159,19 +162,19 @@
     {% if can_manage %}
         <dialog id="event_delete_modal" class="modal">
             <div class="modal-box">
-                <h3 class="text-lg font-bold">
+                <h3 class="text-lg font-bold text-ink">
                     {% if event.series_id %}{% trans "Cancel occurrence" %}{% else %}{% trans "Delete event" %}{% endif %}
                 </h3>
                 <form method="post" action="{% url 'management:event_delete' event.pk %}" id="event_delete_form">
                     {% csrf_token %}
                     {% if event.series_id %}
-                        <p class="py-2 text-sm opacity-70">{% trans "Removes this occurrence from the schedule. It won't be regenerated." %}</p>
-                        <label class="label cursor-pointer justify-start gap-2">
-                            <input type="checkbox" name="keep_record" class="checkbox">
-                            <span class="label-text">{% trans "Keep a record of it (marks it cancelled instead of deleting it)" %}</span>
+                        <p class="py-2 text-sm text-muted">{% trans "Removes this occurrence from the schedule. It won't be regenerated." %}</p>
+                        <label class="flex cursor-pointer items-start gap-2 text-sm text-slate">
+                            <input type="checkbox" name="keep_record" class="checkbox mt-0.5">
+                            <span>{% trans "Keep a record of it (marks it cancelled instead of deleting it)" %}</span>
                         </label>
                     {% else %}
-                        <p class="py-2 text-sm opacity-70">{% trans "This cannot be undone." %}</p>
+                        <p class="py-2 text-sm text-muted">{% trans "This cannot be undone." %}</p>
                     {% endif %}
                 </form>
                 <div class="modal-action">
@@ -190,37 +193,35 @@
     {% if has_attendance_rows %}
         <dialog id="rsvp_modal" class="modal">
             <div class="modal-box max-w-2xl">
-                <h3 class="text-lg font-bold">{% trans "Who responded" %}</h3>
-                <div class="mt-2 space-y-2">
+                <h3 class="text-lg font-bold text-ink">{% trans "Who responded" %}</h3>
+                <div class="mt-2 flex flex-col gap-2">
                     {% for group in attendance_groups %}
                         {% if group.rows %}
-                            <details class="collapse collapse-arrow border border-base-300 bg-base-100">
-                                <summary class="collapse-title text-sm font-medium">
+                            <details class="collapse-arrow rounded-lg border border-line bg-white">
+                                <summary class="flex cursor-pointer items-center gap-2 px-3 py-2 text-sm font-medium text-ink">
                                     <span class="badge badge-sm
                                         {% if group.value == "present" %}badge-success
                                         {% elif group.value == "absent" %}badge-error
                                         {% elif group.value == "excused" %}badge-warning
                                         {% elif group.value == "selected" %}badge-info
-                                        {% elif group.value == "maybe" %}badge-warning badge-outline
+                                        {% elif group.value == "maybe" %}badge-warning
                                         {% elif group.value == "not_selected" %}badge-neutral
                                         {% else %}badge-outline{% endif %}">
                                         {{ group.label }}
                                     </span>
-                                    <span class="opacity-60">({{ group.rows|length }})</span>
+                                    <span class="text-muted">({{ group.rows|length }})</span>
                                 </summary>
-                                <div class="collapse-content">
-                                    <div class="overflow-x-auto">
-                                        <table class="table table-sm">
-                                            <tbody>
-                                                {% for row in group.rows %}
-                                                    <tr>
-                                                        <td>{{ row.member }}</td>
-                                                        <td class="text-sm opacity-70">{{ row.note|default:"—" }}</td>
-                                                    </tr>
-                                                {% endfor %}
-                                            </tbody>
-                                        </table>
-                                    </div>
+                                <div class="overflow-x-auto border-t border-rule">
+                                    <table class="table">
+                                        <tbody>
+                                            {% for row in group.rows %}
+                                                <tr>
+                                                    <td>{{ row.member }}</td>
+                                                    <td class="text-sm text-muted">{{ row.note|default:"—" }}</td>
+                                                </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
                                 </div>
                             </details>
                         {% endif %}

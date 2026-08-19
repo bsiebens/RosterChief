@@ -1,37 +1,17 @@
-{% load lucide %}
-
 {% comment %}
-    The panel's navigation, in one place: the sidebar renders it on a wide screen and the
-    collapsed menu renders it on a narrow one. Two copies of a link list is how a new section
-    ends up reachable on a desktop and invisible on a phone.
+    The command bar's tabs. One place, included by base.html, so a new section is a new
+    <li>-equivalent here and nowhere else -- see design_handoff_rosterchief_platform/README.md
+    for the "platform / clubs / features / billing / admins / jobs" tab order this mirrors.
 
-    `menu-active` is daisyUI 5's active state; hover and focus come with `.menu` itself.
+    Active tab: `bg-steel` fill with a 2px `ice` bottom border, per the handoff's command-bar
+    spec. Inactive tabs are plain `text-on-dark-dim`.
 {% endcomment %}
-<li>
-    <a class="{% if nav == 'dashboard' %}menu-active{% endif %}" href="{% url 'controlpanel:dashboard' %}">
-        {% lucide "layout-dashboard" size=16 %} Dashboard
-    </a>
-</li>
-<li>
-    <a class="{% if nav == 'clubs' %}menu-active{% endif %}" href="{% url 'controlpanel:club_list' %}">
-        {% lucide "building-2" size=16 %} Clubs
-    </a>
-</li>
-<li>
-    <a class="{% if nav == 'billing' %}menu-active{% endif %}" href="{% url 'controlpanel:billing' %}">
-        {% lucide "receipt-euro" size=16 %} Billing
-    </a>
-</li>
-<li>
-    <a class="{% if nav == 'features' %}menu-active{% endif %}" href="{% url 'controlpanel:features' %}">
-        {% lucide "toggle-right" size=16 %} Features
-    </a>
-</li>
+<a class="flex h-full items-center px-3.5 {% if nav == 'dashboard' %}bg-steel text-white border-b-2 border-ice{% else %}text-on-dark-dim hover:text-white{% endif %}" href="{% url 'controlpanel:dashboard' %}">platform</a>
+<a class="flex h-full items-center px-3.5 {% if nav == 'clubs' %}bg-steel text-white border-b-2 border-ice{% else %}text-on-dark-dim hover:text-white{% endif %}" href="{% url 'controlpanel:club_list' %}">clubs</a>
+<a class="flex h-full items-center px-3.5 {% if nav == 'features' %}bg-steel text-white border-b-2 border-ice{% else %}text-on-dark-dim hover:text-white{% endif %}" href="{% url 'controlpanel:features' %}">features</a>
+<a class="flex h-full items-center px-3.5 {% if nav == 'billing' %}bg-steel text-white border-b-2 border-ice{% else %}text-on-dark-dim hover:text-white{% endif %}" href="{% url 'controlpanel:billing' %}">billing</a>
 {% if user.is_superuser %}
-    {# Superusers only, exactly as the view is gated: a link staff cannot follow is a lie. #}
-    <li>
-        <a class="{% if nav == 'admins' %}menu-active{% endif %}" href="{% url 'controlpanel:admins' %}">
-            {% lucide "user-cog" size=16 %} Platform admins
-        </a>
-    </li>
+    {# Superusers only, exactly as the view is gated: a tab staff cannot follow is a lie. #}
+    <a class="flex h-full items-center px-3.5 {% if nav == 'admins' %}bg-steel text-white border-b-2 border-ice{% else %}text-on-dark-dim hover:text-white{% endif %}" href="{% url 'controlpanel:admins' %}">admins</a>
 {% endif %}
+<a class="flex h-full items-center px-3.5 {% if nav == 'jobs' %}bg-steel text-white border-b-2 border-ice{% else %}text-on-dark-dim hover:text-white{% endif %}" href="{% url 'controlpanel:jobs' %}">jobs</a>

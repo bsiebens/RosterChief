@@ -86,7 +86,16 @@ class TeamMembership(UUIDModel):
     team = models.ForeignKey(Team, on_delete=models.CASCADE, related_name="roster", verbose_name=_("team"))
     member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="team_memberships", verbose_name=_("member"))
     season = models.ForeignKey(Season, on_delete=models.PROTECT, related_name="team_memberships", verbose_name=_("season"))
-    position = models.ForeignKey(Position, on_delete=models.PROTECT, related_name="team_memberships", verbose_name=_("position"), limit_choices_to={"staff_position": False})
+    position = models.ForeignKey(
+        Position,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="team_memberships",
+        verbose_name=_("position"),
+        limit_choices_to={"staff_position": False},
+        help_text=_("Left blank for a member placed on the roster before their position is decided (e.g. from the Sign-up page) -- the team's own manager sets it once known."),
+    )
 
     jersey_number = models.PositiveSmallIntegerField(_("jersey number"), blank=True, null=True)
     is_captain = models.BooleanField(_("is captain"), default=False)

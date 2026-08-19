@@ -24,6 +24,9 @@ services:
       # this, a rebuild or recreate wipes MEDIA_ROOT even though the container itself keeps
       # running fine in between.
       - media_data:/app/media
+      # Private uploads (e.g. a member's medical certificate) -- see compose.yaml's own
+      # comment on this volume for why it's absent from every other service here.
+      - private_media_data:/app/private_media
     depends_on:
       db:
         condition: service_healthy
@@ -35,6 +38,32 @@ services:
       timeout: 5s
       retries: 3
       start_period: 20s
+
+  worker:
+    build: .
+    restart: unless-stopped
+    env_file: .env.production
+    # See compose.yaml for what runs here and why.
+    command: ["celery", "-A", "rosterchief", "worker", "--loglevel=info", "--concurrency=2"]
+    volumes:
+      - media_data:/app/media
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+  beat:
+    build: .
+    restart: unless-stopped
+    env_file: .env.production
+    # Exactly ONE of these across the whole deployment -- see compose.yaml.
+    command: ["celery", "-A", "rosterchief", "beat", "--loglevel=info"]
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
 
   db:
     image: postgres:17-alpine
@@ -56,8 +85,10 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    # Cache AND Celery broker for worker/beat above -- see compose.yaml's redis comment.
     command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "32mb", "--maxmemory-policy", "allkeys-lru"]
 
 volumes:
   pgdata:
   media_data:
+  private_media_data:

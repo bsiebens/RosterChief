@@ -1,0 +1,74 @@
+{% extends "management/base.html" %}
+{% load i18n lucide ui %}
+
+{% comment %}
+    What this club requires from every member after they sign up or renew --
+    see club/models.py's OnboardingRequirement docstring. Order matters (shown
+    as typed in `order`, ascending) -- it's the sequence staff see on a
+    member's checklist. No dedicated mockup screen for this (new feature, not
+    in the original design file) -- extrapolates the card/table vocabulary
+    used across Settings.
+{% endcomment %}
+
+{% block panel_title %}{% trans "Onboarding requirements" %}{% endblock panel_title %}
+{% block heading %}{% trans "Onboarding requirements" %}{% endblock heading %}
+
+{% block topbar_context %}
+    <span class="badge badge-neutral">{% blocktrans count counter=requirements|length %}{{ counter }} requirement{% plural %}{{ counter }} requirements{% endblocktrans %}</span>
+{% endblock topbar_context %}
+
+{% block actions %}
+    <a class="btn btn-primary gap-2" href="{% url 'management:onboarding_requirement_create' %}">{% lucide "plus" size=16 %} {% trans "New requirement" %}</a>
+{% endblock actions %}
+
+{% block panel %}
+    <p class="text-sm text-muted">
+        {% trans "Shown as a checklist on every member's Documents tab. A member can be fully paid and still show as incomplete here until every active requirement is met — the two are tracked separately on purpose." %}
+    </p>
+
+    <div class="card overflow-hidden">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>{% trans "Name" %}</th>
+                    <th>{% trans "Description" %}</th>
+                    <th>{% trans "Document required" %}</th>
+                    <th>{% trans "Active" %}</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for requirement in requirements %}
+                    <tr>
+                        <td class="font-semibold">{{ requirement.name }}</td>
+                        <td class="max-w-xs truncate text-muted">{{ requirement.description|default:"—" }}</td>
+                        <td>
+                            {% if requirement.requires_document %}<span class="badge badge-info">{% trans "Yes" %}</span>{% else %}<span class="text-dim">{% trans "No" %}</span>{% endif %}
+                        </td>
+                        <td>
+                            {% if requirement.is_active %}<span class="badge badge-success">{% trans "Active" %}</span>{% else %}<span class="badge badge-ghost">{% trans "Inactive" %}</span>{% endif %}
+                        </td>
+                        <td class="text-right">
+                            <div class="flex justify-end gap-1">
+                                <a class="btn btn-outline btn-sm" href="{% url 'management:onboarding_requirement_update' requirement.pk %}" aria-label="{% trans 'Edit' %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</a>
+                                <button class="btn btn-sm btn-outline btn-error" type="button" onclick="document.getElementById('{{ requirement.pk|dom_id:"requirement_delete_modal" }}').showModal()" aria-label="{% trans 'Delete' %}">{% lucide "trash-2" size=14 %} {% trans "Delete" %}</button>
+                            </div>
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="5" class="text-center text-dim">{% trans "No requirements set — every member's checklist is empty until you add one." %}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    {% trans "Delete requirement" as delete_title %}
+    {% trans "Delete" as delete_label %}
+    {% for requirement in requirements %}
+        {% url 'management:onboarding_requirement_delete' requirement.pk as requirement_delete_url %}
+        {% blocktrans with name=requirement.name asvar delete_body %}Delete “{{ name }}”? Existing checklists keep whatever was already recorded for it, but no member will be asked for it again.{% endblocktrans %}
+        {% include "controlpanel/_confirm_modal.html" with modal_id=requirement.pk|dom_id:"requirement_delete_modal" title=delete_title body=delete_body action_url=requirement_delete_url submit_label=delete_label %}
+    {% endfor %}
+{% endblock panel %}

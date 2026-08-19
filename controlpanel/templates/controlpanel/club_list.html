@@ -1,41 +1,52 @@
 {% extends "controlpanel/base.html" %}
 {% load lucide %}
 
-{% block heading %}{% if show_archived %}Archived clubs{% else %}Clubs{% endif %}{% endblock heading %}
+{% block panel_title %}{% if show_archived %}Archived clubs{% else %}Clubs{% endif %}{% endblock panel_title %}
+
+{% block breadcrumb %}
+    <span class="text-ink">clubs</span>
+    {% if show_archived %}
+        <span class="text-edge">|</span>
+        <span class="font-semibold text-club-dark">Archived</span>
+    {% endif %}
+    <span class="text-edge">|</span>
+    <span>{{ clubs|length }} club{{ clubs|length|pluralize }}</span>
+{% endblock breadcrumb %}
 
 {% block actions %}
     {% if show_archived %}
-        <a class="btn btn-outline" href="{% url 'controlpanel:club_list' %}">{% lucide "archive-x" size=16 %} Hide archived clubs</a>
+        <a class="btn btn-outline gap-2" href="{% url 'controlpanel:club_list' %}">{% lucide "archive-x" size=14 %} Hide archived</a>
     {% else %}
-        <a class="btn btn-outline" href="{% url 'controlpanel:club_list' %}?archived=1">{% lucide "archive" size=16 %} Show archived clubs</a>
+        <a class="btn btn-outline gap-2" href="{% url 'controlpanel:club_list' %}?archived=1">{% lucide "archive" size=14 %} Show archived</a>
     {% endif %}
-    <a class="btn btn-primary gap-2" href="{% url 'controlpanel:club_create' %}">{% lucide "plus" size=16 %} New club</a>
+    <a class="btn btn-primary gap-2" href="{% url 'controlpanel:club_create' %}">{% lucide "plus" size=14 %} New club</a>
 {% endblock actions %}
 
 {% block panel %}
-    <form method="get" class="mb-4 flex gap-2">
-        {% if show_archived %}<input type="hidden" name="archived" value="1">{% endif %}
-        <label class="input">
-            <span class="opacity-50">{% lucide "search" size=16 %}</span>
-            <input type="search"
-                   name="q"
-                   value="{{ search }}"
-                   placeholder="Search clubs…"
-                   class="input input-bordered w-full max-w-xs">
-        </label>
+    {% if show_archived %}
+        <div class="flex items-center gap-2">
+            <span class="font-display text-xl font-extrabold tracking-[.04em] text-ink uppercase">Archived clubs</span>
+            <span class="badge badge-warning">{% lucide "archive" size=12 %} {{ clubs|length }} archived</span>
+        </div>
+    {% endif %}
 
-        <button class="btn btn-outline gap-2" type="submit">{% lucide "search" size=16 %} Search</button>
+    <form method="get" class="flex items-center gap-2">
+        {% if show_archived %}<input type="hidden" name="archived" value="1">{% endif %}
+        <div class="relative">
+            <span class="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-dim">{% lucide "search" size=14 %}</span>
+            <input type="search" name="q" value="{{ search }}" placeholder="Search clubs…" class="input w-64 pl-8 font-mono text-xs">
+        </div>
+        <button class="btn btn-outline gap-2" type="submit">{% lucide "search" size=14 %} Search</button>
         {% if search %}
-            <a class="btn btn-primary gap-2" href="{% url "controlpanel:club_list" %}">{% lucide "x" size=16 %} Clear filter</a>
+            <a class="btn btn-ghost gap-2" href="{% url "controlpanel:club_list" %}{% if show_archived %}?archived=1{% endif %}">{% lucide "x" size=14 %} Clear</a>
         {% endif %}
     </form>
-    <div class="card bg-base-100 shadow">
-        <div class="card-body">
-            {% if show_archived %}
-                {% include "controlpanel/_club_health_table.html" with empty_message="No archived clubs." %}
-            {% else %}
-                {% include "controlpanel/_club_health_table.html" %}
-            {% endif %}
-        </div>
+
+    <div class="card">
+        {% if show_archived %}
+            {% include "controlpanel/_club_health_table.html" with empty_message="No archived clubs." %}
+        {% else %}
+            {% include "controlpanel/_club_health_table.html" %}
+        {% endif %}
     </div>
 {% endblock panel %}

@@ -126,10 +126,13 @@ class ClubManagementTests(ControlPanelTestBase):
         self.assertContains(self.client.get(reverse("controlpanel:dashboard")), "Ajax United")
 
     def test_the_club_rows_subtitle_shows_the_sport_type_behind_the_url(self):
+        # The dashboard's own Club health table is deliberately leaner (club / active
+        # members / events / plan / risk — see dashboard.html) to stay scannable; the full
+        # subdomain-and-sport subtitle lives on the clubs list instead.
         self.club.sport_type = Club.SportType.ICE_HOCKEY
         self.club.save()
 
-        response = self.client.get(reverse("controlpanel:dashboard"))
+        response = self.client.get(reverse("controlpanel:club_list"))
 
         self.assertContains(response, f"{self.club.slug}.rosterchief.app &middot; Ice hockey", html=False)
 
@@ -665,8 +668,8 @@ class MessageRenderingTests(ControlPanelTestBase):
         # so the generic per-level one ("Careful") must not show.
         response = self.client.post(reverse("controlpanel:club_archive", args=[self.club.pk]), follow=True)
 
-        self.assertContains(response, "alert alert-soft border-2 alert-warning border-warning")
-        self.assertContains(response, '<div class="font-bold">Club archived</div>', html=False)
+        self.assertContains(response, "alert alert-warning border-warning")
+        self.assertContains(response, "Club archived")
         self.assertContains(response, "<svg")  # the lucide icon
 
 
@@ -968,9 +971,9 @@ class DashboardMetricsTests(ControlPanelTestBase):
     def test_the_dashboard_renders_its_metrics_and_charts(self):
         response = self.client.get(reverse("controlpanel:dashboard"))
 
-        self.assertContains(response, "No current season")
-        self.assertContains(response, "MFA pending")
-        self.assertContains(response, "Payment pending")
+        # The six KPI tiles -- see controlpanel/templates/controlpanel/dashboard.html.
+        for label in ("clubs live", "members", "dues owed", "no season", "dormant clubs", "failed jobs"):
+            self.assertContains(response, label)
         self.assertContains(response, 'id="signups-chart"')
         self.assertContains(response, "js/chart.js")
         self.assertIn("signups", response.context["charts"])
@@ -1249,8 +1252,10 @@ class ClubHealthTableTests(TestCase):
 
         response = self.client.get(reverse("controlpanel:dashboard"))
 
-        # Health, not vanity: Plan and Dues each name something to act on, next to the counts.
-        for column in ("Members", "Admins", "Teams", "Events", "Plan", "Dues"):
+        # Health, not vanity: a leaner set than the full clubs list -- one row per club is
+        # meant to be scannable, so "risk" is the column that matters, not everything club_list
+        # already shows in full via _club_health_table.html.
+        for column in ("Club", "Active members", "Events 30d", "Plan", "Risk"):
             self.assertContains(response, f">{column}</th>")
 
 

@@ -2,68 +2,69 @@
 {% load i18n lucide static ui %}
 
 {% block heading %}{% trans "Parent claims" %}{% endblock heading %}
-{% block subheading %}{% trans "Parents asking to be linked to a child the club already has on file." %}{% endblock subheading %}
+
+{% block topbar_context %}
+    {% if pending %}
+        <span class="badge badge-error">{% blocktrans count counter=pending|length %}{{ counter }} waiting{% plural %}{{ counter }} waiting{% endblocktrans %}</span>
+    {% endif %}
+{% endblock topbar_context %}
 
 {% block panel %}
-    <div class="card bg-base-100 shadow mb-4">
-        <div class="card-body">
-            <h2 class="card-title text-base">{% lucide "inbox" size=18 %} {% trans "Waiting for review" %}</h2>
-            <p class="text-sm opacity-70">
-                {% blocktrans %}Check each request against your own records before approving. The shortlist only ever contains children who have nobody on file, so approving can never re-parent a child who already has one. An approved parent is added as a guardian: they get the login, but owe no fee and are not counted as a member.{% endblocktrans %}
-            </p>
+    <div class="card card-body">
+        <h2 class="card-title">{% lucide "inbox" size=18 %} {% trans "Waiting for review" %}</h2>
+        <p class="text-sm text-muted">
+            {% blocktrans %}Check each request against your own records before approving. The shortlist only ever contains children who have nobody on file, so approving can never re-parent a child who already has one. An approved parent is added as a guardian: they get the login, but owe no fee and are not counted as a member.{% endblocktrans %}
+        </p>
 
-            <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 mt-2">
-                {% for claim in pending %}
-                    <div class="card border border-base-300">
-                        <div class="card-body p-4 gap-3">
-                            <div>
-                                <div class="text-xs opacity-70">{% trans "Parent says they are" %}</div>
-                                <div class="font-semibold">{{ claim.parent_name }}</div>
-                                <div class="text-sm opacity-70 break-all">{{ claim.parent_email }}</div>
-                            </div>
-                            <div>
-                                <div class="text-xs opacity-70">{% trans "Parent of" %}</div>
-                                <div class="font-semibold">{{ claim.claimed_child_name }}</div>
-                                <div class="text-sm opacity-70">{{ claim.child_date_of_birth|date:"j F Y" }}</div>
-                            </div>
-
-                            {% comment %}
-                                size="small" + show_label=False on the dropdown: {% form_field %}
-                                defaults to daisyUI's medium control height, taller than the btn-sm
-                                used by Approve/Reject below -- without it the dropdown stands out
-                                against the buttons either side of it.
-
-                                justify-between (rather than everything in one flex-wrap run) keeps
-                                Approve and Reject apart even as the row wraps on a narrow card --
-                                Approve stays pinned left, Reject right, so the two are never one
-                                stray click apart the way adjacent buttons would be. ms-auto on Reject
-                                is the part that actually guarantees "right": once the row is narrow
-                                enough that Approve and Reject fall onto separate flex-wrap lines,
-                                justify-between has only one item per line and pins it to the *start*
-                                -- margin-inline-start:auto keeps Reject flush right regardless of
-                                which line it ends up sharing (or not sharing) with Approve.
-                            {% endcomment %}
-                            <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-                                {% if claim.has_candidates %}
-                                    <form method="post" action="{% url 'management:parent_claim_approve' claim.pk %}" class="flex flex-wrap items-center gap-2">
-                                        {% csrf_token %}
-                                        <div class="min-w-40">{% form_field claim.review_form.child size="small" show_label=False %}</div>
-                                        <button class="btn btn-primary btn-sm gap-2" type="submit">{% lucide "check" size=14 %} {% trans "Approve" %}</button>
-                                    </form>
-                                {% else %}
-                                    <p class="text-sm opacity-70">{% trans "No child without a parent matches this. Check the spelling and the date of birth with them before rejecting." %}</p>
-                                {% endif %}
-
-                                <button class="btn btn-outline btn-error btn-sm gap-2 ms-auto" type="button" onclick="document.getElementById('{{ claim.pk|dom_id:"claim_reject_modal" }}').showModal()">
-                                    {% lucide "x" size=14 %} {% trans "Reject" %}
-                                </button>
-                            </div>
-                        </div>
+        <div class="mt-2 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {% for claim in pending %}
+                <div class="card card-body gap-3 border-l-[3px] border-l-info">
+                    <div>
+                        <div class="font-display text-xs font-bold tracking-[.1em] text-muted uppercase">{% trans "Parent says they are" %}</div>
+                        <div class="font-semibold text-ink">{{ claim.parent_name }}</div>
+                        <div class="text-sm break-all text-muted">{{ claim.parent_email }}</div>
                     </div>
-                {% empty %}
-                    <p class="text-sm opacity-60 mt-2">{% trans "Nothing waiting." %}</p>
-                {% endfor %}
-            </div>
+                    <div>
+                        <div class="font-display text-xs font-bold tracking-[.1em] text-muted uppercase">{% trans "Parent of" %}</div>
+                        <div class="font-semibold text-ink">{{ claim.claimed_child_name }}</div>
+                        <div class="text-sm text-muted">{{ claim.child_date_of_birth|date:"j F Y" }}</div>
+                    </div>
+
+                    {% comment %}
+                        size="small" + show_label=False on the dropdown: {% form_field %}
+                        defaults to a taller control than the btn-sm used by Approve/Reject
+                        below -- without it the dropdown stands out against the buttons
+                        either side of it.
+
+                        justify-between (rather than everything in one flex-wrap run) keeps
+                        Approve and Reject apart even as the row wraps on a narrow card --
+                        Approve stays pinned left, Reject right, so the two are never one
+                        stray click apart the way adjacent buttons would be. ms-auto on Reject
+                        is the part that actually guarantees "right": once the row is narrow
+                        enough that Approve and Reject fall onto separate flex-wrap lines,
+                        justify-between has only one item per line and pins it to the *start*
+                        -- margin-inline-start:auto keeps Reject flush right regardless of
+                        which line it ends up sharing (or not sharing) with Approve.
+                    {% endcomment %}
+                    <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+                        {% if claim.has_candidates %}
+                            <form method="post" action="{% url 'management:parent_claim_approve' claim.pk %}" class="flex flex-wrap items-center gap-2">
+                                {% csrf_token %}
+                                <div class="min-w-40">{% form_field claim.review_form.child size="small" show_label=False %}</div>
+                                <button class="btn btn-primary btn-sm gap-2" type="submit">{% lucide "check" size=14 %} {% trans "Approve" %}</button>
+                            </form>
+                        {% else %}
+                            <p class="text-sm text-muted">{% trans "No child without a parent matches this. Check the spelling and the date of birth with them before rejecting." %}</p>
+                        {% endif %}
+
+                        <button class="btn btn-outline btn-error btn-sm ms-auto gap-2" type="button" onclick="document.getElementById('{{ claim.pk|dom_id:"claim_reject_modal" }}').showModal()">
+                            {% lucide "x" size=14 %} {% trans "Reject" %}
+                        </button>
+                    </div>
+                </div>
+            {% empty %}
+                <p class="mt-2 text-sm text-muted">{% trans "Nothing waiting." %}</p>
+            {% endfor %}
         </div>
     </div>
 
@@ -75,58 +76,52 @@
         {% include "controlpanel/_modal_form.html" with modal_id=claim.pk|dom_id:"claim_reject_modal" title=reject_claim_title form=claim.reject_form action_url=reject_claim_url submit_label=reject_claim_submit_label submit_icon="x" blurb=reject_claim_blurb %}
     {% endfor %}
 
-    <div class="card bg-base-100 shadow mb-4">
-        <div class="card-body">
-            <h2 class="card-title text-base">{% lucide "user-search" size=18 %} {% trans "Children with nobody on file" %}</h2>
-            <p class="text-sm opacity-70">{% trans "Imported without a parent. They stay here until someone claims them." %}</p>
-            <ul class="divide-y divide-base-200">
-                {% for child in awaiting_a_parent %}
-                    <li class="py-2 flex flex-col gap-0.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-                        <a class="link link-hover" href="{% url 'management:member_detail' child.pk %}">{{ child }}</a>
-                        <span class="text-sm opacity-70 sm:text-right">{{ child.date_of_birth|date:"j F Y"|default:"—" }}</span>
-                    </li>
-                {% empty %}
-                    <li class="py-2 text-sm opacity-60">{% trans "Every child has a parent linked." %}</li>
-                {% endfor %}
-            </ul>
+    <div class="card card-body mt-4">
+        <h2 class="card-title">{% lucide "user-search" size=18 %} {% trans "Children with nobody on file" %}</h2>
+        <p class="text-sm text-muted">{% trans "Imported without a parent. They stay here until someone claims them." %}</p>
+        <div class="divide-y">
+            {% for child in awaiting_a_parent %}
+                <div class="flex items-center justify-between gap-4 py-2">
+                    <a class="link link-hover" href="{% url 'management:member_detail' child.pk %}">{{ child }}</a>
+                    <span class="font-mono text-sm text-muted">{{ child.date_of_birth|date:"j F Y"|default:"—" }}</span>
+                </div>
+            {% empty %}
+                <p class="py-2 text-sm text-muted">{% trans "Every child has a parent linked." %}</p>
+            {% endfor %}
         </div>
     </div>
 
     {% if reviewed %}
-        <div class="card bg-base-100 shadow">
-            <div class="card-body">
-                <h2 class="card-title text-base">{% lucide "history" size=18 %} {% trans "Already dealt with" %}</h2>
-                <div class="overflow-x-auto">
-                    <table class="table table-cards">
-                        <thead>
-                            <tr>
-                                <th>{% trans "Parent" %}</th>
-                                <th>{% trans "Claimed" %}</th>
-                                <th>{% trans "Outcome" %}</th>
-                                <th>{% trans "Reviewed by" %}</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for claim in reviewed %}
-                                <tr>
-                                    <td class="font-semibold">{{ claim.parent_name }}<div class="text-xs font-normal opacity-60 break-all">{{ claim.parent_email }}</div></td>
-                                    <td data-label="{% trans 'Claimed' %}">{{ claim.claimed_child_name }}</td>
-                                    <td data-label="{% trans 'Outcome' %}">
-                                        {% if claim.status == "approved" %}
-                                            <span class="badge badge-success badge-sm">{% trans "Approved" %}</span>
-                                            {% if claim.child %}<div class="text-xs opacity-60">{{ claim.child }}</div>{% endif %}
-                                        {% else %}
-                                            <span class="badge badge-error badge-sm">{% trans "Rejected" %}</span>
-                                            {% if claim.note %}<div class="text-xs opacity-60">{{ claim.note }}</div>{% endif %}
-                                        {% endif %}
-                                    </td>
-                                    <td data-label="{% trans 'Reviewed by' %}">{{ claim.reviewed_by|default:"—" }}</td>
-                                </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
+        <div class="card card-body mt-4">
+            <h2 class="card-title">{% lucide "history" size=18 %} {% trans "Already dealt with" %}</h2>
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>{% trans "Parent" %}</th>
+                        <th>{% trans "Claimed" %}</th>
+                        <th>{% trans "Outcome" %}</th>
+                        <th>{% trans "Reviewed by" %}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for claim in reviewed %}
+                        <tr>
+                            <td class="font-semibold text-ink">{{ claim.parent_name }}<div class="text-xs font-normal break-all text-muted">{{ claim.parent_email }}</div></td>
+                            <td>{{ claim.claimed_child_name }}</td>
+                            <td>
+                                {% if claim.status == "approved" %}
+                                    <span class="badge badge-success badge-sm">{% trans "Approved" %}</span>
+                                    {% if claim.child %}<div class="mt-1 text-xs text-muted">{{ claim.child }}</div>{% endif %}
+                                {% else %}
+                                    <span class="badge badge-error badge-sm">{% trans "Rejected" %}</span>
+                                    {% if claim.note %}<div class="mt-1 text-xs text-muted">{{ claim.note }}</div>{% endif %}
+                                {% endif %}
+                            </td>
+                            <td class="text-sm text-muted">{{ claim.reviewed_by|default:"—" }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
         </div>
     {% endif %}
 {% endblock panel %}

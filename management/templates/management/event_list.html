@@ -9,74 +9,78 @@
     {% endif %}
     {% if can_create %}
         <a class="btn btn-outline gap-2" href="{% url 'management:event_series_create' %}">{% lucide "repeat" size=16 %} {% trans "New series" %}</a>
-        <a class="btn btn-outline gap-2" href="{% url 'management:event_create' %}">{% lucide "plus" size=16 %} {% trans "New event" %}</a>
+        <a class="btn btn-primary gap-2" href="{% url 'management:event_create' %}">{% lucide "plus" size=16 %} {% trans "New event" %}</a>
     {% endif %}
 {% endblock actions %}
 
-{% block panel %}
-    <form method="get" class="mb-4">
-        <div class="flex flex-row flex-wrap items-center gap-2">
-            <select name="season" class="select select-bordered">
-                {% for season in seasons %}
-                    <option value="{{ season.pk }}" {% if season.pk == selected_season.pk %}selected{% endif %}>{% trans "Season" %} {{ season.start_date|date:"Y" }} - {{ season.end_date|date:"Y" }}</option>
-                {% endfor %}
-            </select>
-            <select name="kind" class="select select-bordered">
-                <option value="">{% trans "All kinds" %}</option>
-                {% for value, label in event_kinds %}
-                    <option value="{{ value }}" {% if value == selected_kind %}selected{% endif %}>{{ label }}</option>
-                {% endfor %}
-            </select>
-            <label class="label cursor-pointer gap-2">
-                <input type="checkbox" name="show_past" value="1" class="checkbox" {% if show_past %}checked{% endif %} onchange="this.form.submit()">
-                <span class="label-text">{% trans "Show past events" %}</span>
-            </label>
-            <button class="btn btn-outline gap-2" type="submit">{% lucide "filter" size=16 %} {% trans "View" %}</button>
-        </div>
+{% block filter_strip %}
+    <form method="get" class="flex flex-wrap items-center gap-2 border-b border-line bg-white px-7 py-3">
+        <select name="season" class="select w-auto">
+            {% for season in seasons %}
+                <option value="{{ season.pk }}" {% if season.pk == selected_season.pk %}selected{% endif %}>{% trans "Season" %} {{ season.start_date|date:"Y" }}–{{ season.end_date|date:"Y" }}</option>
+            {% endfor %}
+        </select>
+        <select name="kind" class="select w-auto">
+            <option value="">{% trans "All kinds" %}</option>
+            {% for value, label in event_kinds %}
+                <option value="{{ value }}" {% if value == selected_kind %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
+        <label class="flex cursor-pointer items-center gap-2 text-sm text-slate">
+            <input type="checkbox" name="show_past" value="1" class="checkbox" {% if show_past %}checked{% endif %} onchange="this.form.submit()">
+            {% trans "Show past events" %}
+        </label>
+        <button class="btn btn-outline btn-sm gap-2" type="submit">{% lucide "filter" size=14 %} {% trans "View" %}</button>
     </form>
+{% endblock filter_strip %}
 
-    <div class="card bg-base-100 shadow">
-        <div class="card-body">
-            <div class="overflow-x-auto">
-                <table class="table table-cards">
-                    <thead>
+{% block panel %}
+    <div class="card overflow-hidden">
+        <div class="overflow-x-auto">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>{% trans "Title" %}</th>
+                        <th>{% trans "Kind" %}</th>
+                        <th>{% trans "When" %}</th>
+                        <th>{% trans "Teams" %}</th>
+                        <th>{% trans "Location" %}</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for event in events %}
                         <tr>
-                            <th>{% trans "Title" %}</th>
-                            <th>{% trans "Kind" %}</th>
-                            <th>{% trans "When" %}</th>
-                            <th>{% trans "Teams" %}</th>
-                            <th>{% trans "Location" %}</th>
-                            <th></th>
+                            <td>
+                                <a class="link link-hover font-semibold text-ink" href="{% url 'management:event_detail' event.pk %}">{{ event.title }}</a>
+                                {% if event.series_id %}
+                                    <span class="ml-1 inline-flex align-middle text-dim" title="{% trans 'Part of a series' %}" aria-label="{% trans 'Part of a series' %}">{% lucide "repeat" size=12 %}</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <span class="badge badge-sm {% if event.kind == "game" %}badge-error{% elif event.kind == "training" %}badge-info{% elif event.kind == "tournament" %}badge-warning{% elif event.kind == "meeting" %}badge-neutral{% elif event.kind == "social" %}border-violet/30 bg-violet/10 text-violet{% else %}badge-outline{% endif %}">
+                                    {{ event.get_kind_display }}
+                                </span>
+                            </td>
+                            <td class="font-mono text-xs text-ink">{{ event.start|date:"D j M Y H:i" }}</td>
+                            <td>{% for team in event.teams.all %}{{ team.short_name }}{% if not forloop.last %}, {% endif %}{% empty %}<span class="text-dim">—</span>{% endfor %}</td>
+                            <td>{{ event.location.name|default:"—" }}</td>
+                            <td class="text-right">
+                                {% if event.can_manage %}
+                                    <div class="flex justify-end gap-1">
+                                        <a class="btn btn-outline btn-sm" href="{% url 'management:event_detail' event.pk %}" aria-label="{% trans 'Edit' %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</a>
+                                        <button class="btn btn-sm btn-outline btn-error" type="button" onclick="document.getElementById('{{ event.pk|dom_id:"event_delete_modal" }}').showModal()" aria-label="{% trans 'Delete' %}">{% lucide "trash-2" size=14 %} {% trans "Delete" %}</button>
+                                    </div>
+                                {% endif %}
+                            </td>
                         </tr>
-                    </thead>
-                    <tbody>
-                        {% for event in events %}
-                            <tr>
-                                <td class="flex flex-row items-center gap-2 font-semibold">
-                                    <a class="link link-hover" href="{% url 'management:event_detail' event.pk %}">{{ event.title }}</a>
-                                    {% if event.series_id %}<span class="tooltip" data-tip="{% trans 'Part of a series' %}">{% lucide "repeat" size=12 %}</span>{% endif %}
-                                </td>
-                                <td data-label="{% trans 'Kind' %}">{{ event.get_kind_display }}</td>
-                                <td data-label="{% trans 'When' %}">{{ event.start|date:"j M Y H:i" }}</td>
-                                <td data-label="{% trans 'Teams' %}">{% for team in event.teams.all %}{{ team.short_name }}{% if not forloop.last %}, {% endif %}{% empty %}—{% endfor %}</td>
-                                <td data-label="{% trans 'Location' %}">{{ event.location.name|default:"—" }}</td>
-                                <td class="text-right">
-                                    {% if event.can_manage %}
-                                        <div class="flex justify-end gap-1">
-                                            <a class="btn btn-outline btn-sm" href="{% url 'management:event_detail' event.pk %}" aria-label="{% trans 'Edit' %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</a>
-                                            <button class="btn btn-sm btn-outline btn-error" type="button" onclick="document.getElementById('{{ event.pk|dom_id:"event_delete_modal" }}').showModal()" aria-label="{% trans 'Delete' %}">{% lucide "trash-2" size=14 %} {% trans "Delete" %}</button>
-                                        </div>
-                                    {% endif %}
-                                </td>
-                            </tr>
-                        {% empty %}
-                            <tr>
-                                <td colspan="6" class="text-center opacity-60">{% trans "No events." %}</td>
-                            </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
+                    {% empty %}
+                        <tr>
+                            <td colspan="6" class="py-8 text-center text-muted">{% trans "No events." %}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
         </div>
     </div>
 
@@ -87,21 +91,21 @@
         {% if event.can_manage %}
             <dialog id="{{ event.pk|dom_id:"event_delete_modal" }}" class="modal">
                 <div class="modal-box">
-                    <h3 class="text-lg font-bold">
+                    <h3 class="text-lg font-bold text-ink">
                         {% if event.series_id %}{% trans "Cancel occurrence" %}{% else %}{% trans "Delete event" %}{% endif %}
                     </h3>
                     <form method="post" action="{% url 'management:event_delete' event.pk %}" id="{{ event.pk|dom_id:"event_delete_form" }}">
                         {% csrf_token %}
                         {% if event.series_id %}
                             {% blocktrans with name=event.title asvar delete_body %}Removes “{{ name }}” from the schedule. It won't be regenerated.{% endblocktrans %}
-                            <p class="py-2 text-sm opacity-70">{{ delete_body }}</p>
-                            <label class="label cursor-pointer justify-start gap-2">
-                                <input type="checkbox" name="keep_record" class="checkbox">
-                                <span class="label-text">{% trans "Keep a record of it (marks it cancelled instead of deleting it)" %}</span>
+                            <p class="py-2 text-sm text-muted">{{ delete_body }}</p>
+                            <label class="flex cursor-pointer items-start gap-2 text-sm text-slate">
+                                <input type="checkbox" name="keep_record" class="checkbox mt-0.5">
+                                <span>{% trans "Keep a record of it (marks it cancelled instead of deleting it)" %}</span>
                             </label>
                         {% else %}
                             {% blocktrans with name=event.title asvar delete_body %}Delete “{{ name }}”? This cannot be undone.{% endblocktrans %}
-                            <p class="py-2 text-sm opacity-70">{{ delete_body }}</p>
+                            <p class="py-2 text-sm text-muted">{{ delete_body }}</p>
                         {% endif %}
                     </form>
                     <div class="modal-action">

@@ -25,6 +25,7 @@ from .forms import ClubAdminForm, ClubForm, DuePaymentForm, FlagForm, HomeLocati
 from .messages import notify
 from .mixins import PlatformStaffRequiredMixin, PlatformSuperuserRequiredMixin, RedirectOnInvalidMixin
 from .services.admins import grant_club_admin, revoke_club_admin
+from .services.jobs import job_overview, recent_job_runs
 from .services.platform_admins import (
     PlatformAdminError,
     grant_platform_access,
@@ -32,7 +33,7 @@ from .services.platform_admins import (
     revoke_platform_access,
     set_platform_access,
 )
-from .services.statistics import club_attention, club_charts, club_statistics, clubs_with_health, flag_adoption, flags_for_club, onboarding_funnel, platform_attention, platform_charts, platform_totals
+from .services.statistics import club_attention, club_charts, club_statistics, clubs_by_risk, clubs_with_health, flag_adoption, flags_for_club, onboarding_funnel, platform_attention, platform_charts, platform_totals
 
 Flag = get_waffle_flag_model()
 Switch = get_waffle_switch_model()
@@ -63,10 +64,26 @@ class DashboardView(PlatformStaffRequiredMixin, TemplateView):
             funnel=onboarding_funnel(),
             flags=flag_adoption(),
             charts=platform_charts(),
-            clubs=clubs_with_health(),
+            clubs=clubs_by_risk(),
+            # failed_jobs itself comes from controlpanel.context_processors.job_health, on
+            # every controlpanel page (the command bar's status indicator needs it too) --
+            # not re-fetched here, so the query only runs once per request.
+            job_log=recent_job_runs(),
             today=timezone.localdate(),
             **kwargs,
         )
+
+
+class JobsView(PlatformStaffRequiredMixin, TemplateView):
+    """Status and recent history of the scheduled platform jobs -- see features/jobs.py for
+    the registry and features/models.JobRun for what a Celery task run writes. Monitoring
+    only, deliberately: these run on Celery Beat's own schedule (rosterchief/settings.py),
+    not on demand from here."""
+
+    template_name = "controlpanel/jobs.html"
+
+    def get_context_data(self, **kwargs):
+        return super().get_context_data(nav="jobs", jobs=job_overview(), **kwargs)
 
 
 class ClubListView(PlatformStaffRequiredMixin, ListView):

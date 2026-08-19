@@ -3,12 +3,13 @@ import datetime
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError
 from django.db.models import ProtectedError
-from django.test import TestCase
+from django.test import RequestFactory, TestCase
 from django.utils import timezone
 
 from club.models import Club, Season
 from members.models import Member
 
+from .api import build_roster
 from .models import Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
 
 
@@ -302,3 +303,50 @@ class RefereeProfileModelTests(TeamsTestCase):
         self.member.delete()
 
         self.assertFalse(RefereeProfile.objects.filter(pk=profile.pk).exists())
+
+
+class RosterApiTests(TeamsTestCase):
+    """build_roster (teams/api.py) -- called directly, not through Ninja's routing,
+    same reasoning the module's own docstring gives for splitting it out. A roster
+    spot placed from the Sign-up page (management.forms.SignupTeamPlacementForm)
+    has no position yet -- this must group and sort those without crashing on
+    m.position.name."""
+
+    def make_request(self):
+        return RequestFactory().get("/")
+
+    def test_groups_players_by_position(self):
+        # self.forward (TeamsTestCase's own fixture) sorts second here on purpose --
+        # confirms ordering follows Position.ordering, not creation/name order.
+        self.forward.ordering = 2
+        self.forward.save()
+        defence = Position.objects.create(club=self.club, name="Defence", ordering=1)
+        striker = Member.objects.create(first_name="Sam", last_name="Striker")
+        defender = Member.objects.create(first_name="Dee", last_name="Fender")
+        TeamMembership.objects.create(team=self.team, member=striker, season=self.season, position=self.forward, jersey_number=9)
+        TeamMembership.objects.create(team=self.team, member=defender, season=self.season, position=defence, jersey_number=4)
+
+        roster = build_roster(self.team, self.make_request())
+
+        self.assertEqual([group.position for group in roster.players], ["Defence", "Forward"])
+        self.assertEqual(roster.players[1].players[0].last_name, "Striker")
+
+    def test_a_positionless_member_groups_under_an_empty_label_without_crashing(self):
+        placed = Member.objects.create(first_name="Noor", last_name="Placed")
+        TeamMembership.objects.create(team=self.team, member=placed, season=self.season, position=None, jersey_number=None)
+
+        roster = build_roster(self.team, self.make_request())
+
+        self.assertEqual(len(roster.players), 1)
+        self.assertEqual(roster.players[0].position, "")
+        self.assertEqual(roster.players[0].players[0].last_name, "Placed")
+
+    def test_positionless_members_sort_after_every_real_position_group(self):
+        placed_member = Member.objects.create(first_name="Noor", last_name="Placed")
+        assigned_member = Member.objects.create(first_name="Sam", last_name="Striker")
+        TeamMembership.objects.create(team=self.team, member=placed_member, season=self.season, position=None)
+        TeamMembership.objects.create(team=self.team, member=assigned_member, season=self.season, position=self.forward, jersey_number=9)
+
+        roster = build_roster(self.team, self.make_request())
+
+        self.assertEqual([group.position for group in roster.players], ["Forward", ""])

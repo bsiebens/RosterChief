@@ -10,46 +10,44 @@
 {% endblock actions %}
 
 {% block panel %}
-    <div class="card w-full bg-base-100 shadow">
-        <div class="card-body">
-            <form method="post">
-                {% csrf_token %}
+    <div class="card card-body">
+        <form method="post">
+            {% csrf_token %}
 
-                {% for error in form.non_field_errors %}
+            {% for error in form.non_field_errors %}
+                <div class="alert alert-error my-2">
+                    <span>{{ error }}</span>
+                </div>
+            {% endfor %}
+
+            <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+                {% for field in form %}
+                    {% form_field field %}
+                {% endfor %}
+            </div>
+
+            {% if membership_form %}
+                <div class="my-2 h-px bg-rule"></div>
+                <h2 class="card-title">{% lucide "id-card" size=18 %} {% trans "This season" %}</h2>
+
+                {% for error in membership_form.non_field_errors %}
                     <div class="alert alert-error my-2">
                         <span>{{ error }}</span>
                     </div>
                 {% endfor %}
 
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {% for field in form %}
+                <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+                    {% for field in membership_form %}
                         {% form_field field %}
                     {% endfor %}
                 </div>
+            {% endif %}
 
-                {% if membership_form %}
-                    <div class="divider"></div>
-                    <h2 class="card-title text-base">{% lucide "id-card" size=18 %} {% trans "This season" %}</h2>
-
-                    {% for error in membership_form.non_field_errors %}
-                        <div class="alert alert-error my-2">
-                            <span>{{ error }}</span>
-                        </div>
-                    {% endfor %}
-
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {% for field in membership_form %}
-                            {% form_field field %}
-                        {% endfor %}
-                    </div>
-                {% endif %}
-
-                <div class="card-actions justify-start pt-2 mt-2">
-                    <a class="btn btn-outline gap-2" href="{% if update_view %}{% url "management:member_detail" object.pk %}{% else %}{% url "management:member_list" %}{% endif %}">{% lucide "arrow-left" size=16 %} {% trans "Cancel" %}</a>
-                    <button class="btn btn-primary gap-2" type="submit">{% lucide "save" size=16 %} {% trans "Save" %}</button>
-                </div>
-            </form>
-        </div>
+            <div class="mt-2 flex items-center gap-2 pt-2">
+                <a class="btn btn-outline gap-2" href="{% if update_view %}{% url "management:member_detail" object.pk %}{% else %}{% url "management:member_list" %}{% endif %}">{% lucide "arrow-left" size=16 %} {% trans "Cancel" %}</a>
+                <button class="btn btn-primary gap-2" type="submit">{% lucide "save" size=16 %} {% trans "Save" %}</button>
+            </div>
+        </form>
     </div>
 
     {% if update_view %}

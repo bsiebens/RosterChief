@@ -8,6 +8,7 @@ from allauth.mfa.models import Authenticator
 from dateutil.relativedelta import relativedelta
 from django.contrib import admin as django_admin
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import AnonymousUser
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
 from django.db import IntegrityError
@@ -21,18 +22,34 @@ from members.models import Family, FamilyMembership, Member
 from teams.models import Position, StaffAssignment, Team, TeamMembership
 from teams.services import eligible_roster_members
 
-from .models import Club, ClubMembership, ClubRole, FeePayment, Season, Sponsor, club_logo_path
+from .models import Club, ClubMembership, ClubRole, FeePayment, MemberRequirementStatus, OnboardingRequirement, Season, Sponsor, club_logo_path
 from .services.access import (
     COACH_MANAGER,
     can_edit_event,
+    can_manage_members,
     can_manage_shop,
     has_club_role,
+    has_management_access,
+    is_club_admin,
+    is_member_admin,
+    is_platform_superuser,
     members_visible_to,
     roles_in_club,
     teams_managed_by,
     teams_staffed_by,
 )
 from .services.fees import mark_as_paid, record_payment, remaining_balance
+from .services.onboarding import (
+    annotate_onboarding_status,
+    approve_all_clean,
+    approve_one,
+    blocked_member_ids_for_event,
+    blocking_event_kinds,
+    checklist_for,
+    mark_bypassed,
+    mark_complete,
+    mark_incomplete,
+)
 from .services.seasons import _initial_season_start, _season_end, generate_seasons, resync_seasons
 from .tenancy import (
     ClubTenantMiddleware,
@@ -494,6 +511,26 @@ class SeasonNextAfterTests(TestCase):
         Season.objects.create(club=other, start_date=datetime.date(2027, 8, 1), end_date=datetime.date(2028, 5, 31))
 
         self.assertEqual(Season.next_after(other, datetime.date(2026, 12, 25)).club, other)
+
+
+class SeasonBeforeTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        cls.previous = Season.objects.create(club=cls.club, start_date=datetime.date(2025, 8, 1), end_date=datetime.date(2026, 5, 31))
+        cls.current = Season.objects.create(club=cls.club, start_date=datetime.date(2026, 8, 1), end_date=datetime.date(2027, 5, 31))
+
+    def test_returns_the_most_recent_season_starting_before_this_one(self):
+        self.assertEqual(Season.before(self.club, self.current), self.previous)
+
+    def test_returns_none_when_there_is_no_earlier_season(self):
+        self.assertIsNone(Season.before(self.club, self.previous))
+
+    def test_is_scoped_to_the_given_club(self):
+        other = Club.objects.create(name="Rival FC", slug="rival-fc")
+        other_current = Season.objects.create(club=other, start_date=datetime.date(2026, 8, 1), end_date=datetime.date(2027, 5, 31))
+
+        self.assertIsNone(Season.before(other, other_current))
 
 
 class SponsorModelTests(TestCase):
@@ -1035,6 +1072,61 @@ class AccessServiceTests(TestCase):
         self.assertTrue(can_manage_shop(admin_user, self.club))
         self.assertFalse(can_manage_shop(editor_user, self.club))
 
+    # --- platform superuser bypass ---
+    def test_superuser_is_club_admin_everywhere_with_no_clubrole_at_all(self):
+        user, _ = self.make_user_member("root@example.com")
+        user.is_superuser = True
+        user.save()
+
+        self.assertTrue(is_club_admin(user, self.club))
+        self.assertTrue(is_club_admin(user, self.other_club))
+        self.assertTrue(has_management_access(user, self.club))
+        self.assertTrue(is_platform_superuser(user))
+
+    def test_a_plain_staff_flag_alone_is_not_the_superuser_bypass(self):
+        user, _ = self.make_user_member("staffonly@example.com")
+        user.is_staff = True
+        user.save()
+
+        self.assertFalse(is_club_admin(user, self.club))
+        self.assertFalse(is_platform_superuser(user))
+
+    def test_an_anonymous_user_is_never_the_superuser_bypass(self):
+        self.assertFalse(is_platform_superuser(AnonymousUser()))
+
+    # --- MEMBER_ADMIN / can_manage_members ---
+    def test_member_admin_role_grants_can_manage_members_but_not_is_club_admin(self):
+        user, member = self.make_user_member("memberadmin@example.com")
+        self.grant(member, ClubRole.Roles.MEMBER_ADMIN)
+
+        self.assertTrue(is_member_admin(user, self.club))
+        self.assertTrue(can_manage_members(user, self.club))
+        self.assertFalse(is_club_admin(user, self.club))
+
+    def test_real_admin_also_satisfies_can_manage_members(self):
+        user, member = self.make_user_member("admin@example.com")
+        self.grant(member, ClubRole.Roles.ADMIN)
+
+        self.assertTrue(can_manage_members(user, self.club))
+
+    def test_editor_alone_does_not_satisfy_can_manage_members(self):
+        user, member = self.make_user_member("editor@example.com")
+        self.grant(member, ClubRole.Roles.EDITOR)
+
+        self.assertFalse(can_manage_members(user, self.club))
+
+    def test_member_admin_counts_as_management_access(self):
+        user, member = self.make_user_member("memberadmin@example.com")
+        self.grant(member, ClubRole.Roles.MEMBER_ADMIN)
+
+        self.assertTrue(has_management_access(user, self.club))
+
+    def test_member_admin_in_one_club_has_no_bearing_on_another(self):
+        user, member = self.make_user_member("memberadmin@example.com")
+        ClubRole.objects.create(club=self.club, member=member, role=ClubRole.Roles.MEMBER_ADMIN)
+
+        self.assertFalse(can_manage_members(user, self.other_club))
+
 
 class ClubRoleStatusSyncTests(TestCase):
     @classmethod
@@ -1154,16 +1246,16 @@ class BrandingTests(TestCase):
     def test_the_base_domain_gets_the_platform_skin(self):
         response = self.login_page("rosterchief.app")
 
-        self.assertTemplateUsed(response, "_platform_base.html")
+        self.assertTemplateUsed(response, "controlpanel/_auth_base.html")
         self.assertTemplateNotUsed(response, "_club_base.html")
-        self.assertContains(response, "Club &amp; Team Management")
+        self.assertContains(response, "RosterChief")
         self.assertIsNone(response.context["club"])
 
     def test_a_club_subdomain_gets_the_club_skin(self):
         response = self.login_page("ajax-united.rosterchief.app")
 
         self.assertTemplateUsed(response, "_club_base.html")
-        self.assertTemplateNotUsed(response, "_platform_base.html")
+        self.assertTemplateNotUsed(response, "controlpanel/_auth_base.html")
         self.assertContains(response, "Ajax United")
         self.assertEqual(response.context["club"], self.club)
 
@@ -1171,7 +1263,7 @@ class BrandingTests(TestCase):
         # The subdomain stops resolving, so there is no club to brand with.
         self.club.archive()
 
-        self.assertTemplateUsed(self.login_page("ajax-united.rosterchief.app"), "_platform_base.html")
+        self.assertTemplateUsed(self.login_page("ajax-united.rosterchief.app"), "controlpanel/_auth_base.html")
 
     def test_a_club_without_a_logo_shows_its_initials_not_our_mark(self):
         response = self.login_page("ajax-united.rosterchief.app")
@@ -1214,17 +1306,69 @@ class BrandingTests(TestCase):
     ROSTERCHIEF_BASE_DOMAIN="rosterchief.app",
     ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"],
 )
+class ManagementBrandingTests(TestCase):
+    """allauth's password-change/MFA/logout screens live under /accounts/, outside
+    /manage/, so branding() (this module) can't tell they were reached from the
+    management app's own user menu by path alone -- it also checks the session flag
+    ClubStaffRequiredMixin.dispatch sets (club/mixins.py). These are the tests for
+    that flag, as distinct from BrandingTests above (which only covers the plain
+    per-tenant split, never touching /manage/ at all)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        cls.season = Season.objects.create(club=cls.club, start_date=timezone.localdate() - datetime.timedelta(days=30), end_date=timezone.localdate() + datetime.timedelta(days=300))
+
+        cls.staff_user = get_user_model().objects.create_user(email="staff@example.com", password="pw-secret-123")
+        member = Member.objects.create(user=cls.staff_user, first_name="Ada", last_name="Admin")
+        ClubMembership.objects.create(club=cls.club, member=member, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
+        ClubRole.objects.filter(club=cls.club, member=member).update(role=ClubRole.Roles.ADMIN)
+        Authenticator.objects.create(user=cls.staff_user, type=Authenticator.Type.TOTP, data={"secret": "JBSWY3DPEHPK3PXP"})
+
+    def test_the_change_password_screen_stays_club_branded_without_a_visit_to_manage(self):
+        self.client.force_login(self.staff_user)
+
+        response = self.client.get(reverse("account_change_password"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertTemplateUsed(response, "_club_base.html")
+        self.assertTemplateNotUsed(response, "management/_auth_base.html")
+
+    def test_the_change_password_screen_gets_the_management_skin_after_visiting_manage(self):
+        self.client.force_login(self.staff_user)
+        self.client.get(reverse("management:home"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        response = self.client.get(reverse("account_change_password"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertTemplateUsed(response, "management/_auth_base.html")
+        self.assertContains(response, "Ajax United")
+
+    def test_the_mfa_index_screen_gets_the_management_skin_after_visiting_manage(self):
+        self.client.force_login(self.staff_user)
+        self.client.get(reverse("management:home"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        response = self.client.get(reverse("mfa_index"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertTemplateUsed(response, "management/_auth_base.html")
+
+
+@override_settings(
+    ROSTERCHIEF_BASE_DOMAIN="rosterchief.app",
+    ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"],
+)
 class Custom403PageTests(TestCase):
     """Django's default 403 handler picks up templates/403.html automatically --
     branded per tenant (base_template, same as maintenance.html) so a permission
-    error still looks like the app, not a bare Django error page, and the navbar
-    (sign out, theme toggle, home link) stays reachable."""
+    error still looks like the app, not a bare Django error page. A club subdomain
+    itself splits further: a /manage/ URL gets the management app's own skin
+    (management/_auth_base.html) rather than the club's public one, matching every
+    other allauth-adjacent screen reached from inside the management app -- see
+    club/context_processors.py's MANAGEMENT_BASE_TEMPLATE."""
 
     @classmethod
     def setUpTestData(cls):
         cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
 
-    def test_a_club_subdomain_403_gets_the_club_skin(self):
+    def test_a_manage_url_403_gets_the_management_skin(self):
         member = get_user_model().objects.create_user(email="member-403@example.com", password="pw-secret-123")
         self.client.force_login(member)
 
@@ -1233,7 +1377,7 @@ class Custom403PageTests(TestCase):
         self.assertEqual(response.status_code, 403)
         self.assertContains(response, "Access denied", status_code=403)
         self.assertContains(response, "Ajax United", status_code=403)
-        self.assertContains(response, "Sign out", status_code=403)
+        self.assertTemplateUsed(response, "management/_auth_base.html")
 
     def test_the_base_domain_403_gets_the_platform_skin(self):
         self.client.force_login(get_user_model().objects.create_user(email="platform-403@example.com", password="pw-secret-123"))
@@ -1242,7 +1386,8 @@ class Custom403PageTests(TestCase):
 
         self.assertEqual(response.status_code, 403)
         self.assertContains(response, "Access denied", status_code=403)
-        self.assertContains(response, "Club &amp; Team Management", status_code=403)
+        self.assertTemplateUsed(response, "controlpanel/_auth_base.html")
+        self.assertContains(response, "RosterChief", status_code=403)
 
 
 class ClubBrandingModelTests(TestCase):
@@ -1352,17 +1497,21 @@ class FeeServiceTests(TestCase):
         self.assertEqual(self.membership.fee_status, ClubMembership.FeeStatus.PARTIALLY_PAID)
         self.assertEqual(FeePayment.objects.filter(membership=self.membership).count(), 2)
 
-    def test_reaching_the_full_amount_settles_and_activates(self):
+    def test_reaching_the_full_amount_settles_the_fee_but_leaves_status_pending(self):
+        # Paying in full only ever settles fee_status now -- activation is
+        # exclusively club.services.onboarding.approve_one/approve_all_clean's call
+        # (see OnboardingRequirement's docstring), so a membership can be fully paid
+        # and still sit PENDING until an admin actually approves it.
         record_payment(self.membership, amount=Decimal("100.00"))
         record_payment(self.membership, amount=Decimal("50.00"))
 
         self.membership.refresh_from_db()
         self.assertEqual(self.membership.fee_status, ClubMembership.FeeStatus.PAID)
-        self.assertEqual(self.membership.status, ClubMembership.StatusChoices.ACTIVE)
-        self.assertEqual(self.membership.activated_at, timezone.localdate())
-        self.assertTrue(self.roles().filter(role=ClubRole.Roles.MEMBER).exists())
+        self.assertEqual(self.membership.status, ClubMembership.StatusChoices.PENDING)
+        self.assertIsNone(self.membership.activated_at)
+        self.assertFalse(self.roles().filter(role=ClubRole.Roles.MEMBER).exists())
 
-    def test_settling_in_full_does_not_overwrite_an_earlier_activated_at(self):
+    def test_settling_in_full_never_touches_activated_at(self):
         earlier = datetime.date(2026, 1, 1)
         self.membership.activated_at = earlier
         self.membership.save()
@@ -1400,7 +1549,7 @@ class FeeServiceTests(TestCase):
 
         unpriced.refresh_from_db()
         self.assertEqual(unpriced.fee_status, ClubMembership.FeeStatus.PAID)
-        self.assertEqual(unpriced.status, ClubMembership.StatusChoices.ACTIVE)
+        self.assertEqual(unpriced.status, ClubMembership.StatusChoices.PENDING)
         self.assertFalse(FeePayment.objects.filter(membership=unpriced).exists())
 
     def test_recorded_by_is_stored_on_the_payment(self):
@@ -1652,3 +1801,294 @@ class GenerateSeasonsCommandTests(TestCase):
 
         self.assertFalse(Season.objects.filter(pk=wrong.pk).exists())
 
+
+
+class OnboardingRequirementTests(TestCase):
+    """club.services.onboarding -- deliberately orthogonal to status/fee_status (see
+    OnboardingRequirement's docstring): a fully paid, active membership can still
+    have open requirements, and neither field moves when one is marked complete."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        cls.season = make_season(cls.club)
+        cls.member = Member.objects.create(first_name="Jane", last_name="Doe")
+        cls.membership = ClubMembership.objects.create(
+            club=cls.club, member=cls.member, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE, fee_status=ClubMembership.FeeStatus.PAID
+        )
+        cls.staff = get_user_model().objects.create_user(email="staff@example.com", password="pw-secret-123")
+        cls.photo = OnboardingRequirement.objects.create(club=cls.club, name="Photo", order=1)
+        cls.medical = OnboardingRequirement.objects.create(club=cls.club, name="Medical certificate", requires_document=True, order=2)
+
+    def test_a_membership_with_no_status_rows_has_every_requirement_open(self):
+        self.assertEqual(self.membership.open_requirement_count, 2)
+        self.assertFalse(self.membership.onboarding_complete)
+
+    def test_marking_one_complete_leaves_the_other_open(self):
+        mark_complete(self.membership, self.photo, user=self.staff)
+
+        self.assertEqual(self.membership.open_requirement_count, 1)
+        self.assertFalse(self.membership.onboarding_complete)
+
+    def test_completing_every_requirement_clears_the_membership(self):
+        mark_complete(self.membership, self.photo, user=self.staff)
+        mark_complete(self.membership, self.medical, user=self.staff)
+
+        self.assertTrue(self.membership.onboarding_complete)
+
+    def test_marking_complete_never_touches_status_or_fee_status(self):
+        # The whole point: a document upload must never re-derive membership state --
+        # club.services.fees owns status/fee_status exclusively.
+        unpaid = ClubMembership.objects.create(club=self.club, member=Member.objects.create(first_name="Tom", last_name="Roe"), season=self.season, status=ClubMembership.StatusChoices.PENDING)
+
+        mark_complete(unpaid, self.photo, user=self.staff)
+        mark_complete(unpaid, self.medical, user=self.staff)
+        unpaid.refresh_from_db()
+
+        self.assertTrue(unpaid.onboarding_complete)
+        self.assertEqual(unpaid.status, ClubMembership.StatusChoices.PENDING)
+        self.assertEqual(unpaid.fee_status, ClubMembership.FeeStatus.UNPAID)
+
+    def test_mark_complete_records_who_and_when(self):
+        status = mark_complete(self.membership, self.medical, user=self.staff, note="emailed 12 Aug")
+
+        self.assertTrue(status.is_complete)
+        self.assertEqual(status.completed_by, self.staff)
+        self.assertIsNotNone(status.completed_at)
+        self.assertEqual(status.note, "emailed 12 Aug")
+
+    def test_mark_complete_is_idempotent_per_requirement(self):
+        mark_complete(self.membership, self.photo, user=self.staff)
+        mark_complete(self.membership, self.photo, user=self.staff)
+
+        self.assertEqual(MemberRequirementStatus.objects.filter(membership=self.membership, requirement=self.photo).count(), 1)
+
+    def test_mark_incomplete_undoes_it_without_deleting_the_row(self):
+        mark_complete(self.membership, self.photo, user=self.staff, note="handed in at practice")
+        status = mark_incomplete(self.membership, self.photo)
+
+        self.assertFalse(status.is_complete)
+        self.assertIsNone(status.completed_at)
+        self.assertIsNone(status.completed_by)
+        # The note (and any document) survive the toggle -- it's evidence something
+        # was received once, even if it needs redoing.
+        self.assertEqual(status.note, "handed in at practice")
+
+    def test_an_inactive_requirement_does_not_block_onboarding(self):
+        self.medical.is_active = False
+        self.medical.save()
+
+        mark_complete(self.membership, self.photo, user=self.staff)
+
+        self.assertTrue(self.membership.onboarding_complete)
+
+    def test_checklist_for_pairs_every_active_requirement_with_its_status_or_none(self):
+        mark_complete(self.membership, self.photo, user=self.staff)
+
+        checklist = checklist_for(self.membership)
+        by_requirement = dict(checklist)
+
+        self.assertEqual(len(checklist), 2)
+        self.assertTrue(by_requirement[self.photo].is_complete)
+        self.assertIsNone(by_requirement[self.medical])
+
+    def test_a_second_clubs_requirement_never_applies_here(self):
+        other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
+        OnboardingRequirement.objects.create(club=other_club, name="Waiver")
+
+        self.assertEqual(self.membership.open_requirement_count, 2)  # not 3
+
+    def test_annotate_onboarding_status_matches_the_per_row_property_across_a_list(self):
+        second = ClubMembership.objects.create(club=self.club, member=Member.objects.create(first_name="Sam", last_name="Lee"), season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        mark_complete(self.membership, self.photo, user=self.staff)
+
+        annotated = annotate_onboarding_status(ClubMembership.objects.filter(club=self.club))
+        by_pk = {membership.pk: membership.onboarding_open for membership in annotated}
+
+        self.assertEqual(by_pk[self.membership.pk], 1)
+        self.assertEqual(by_pk[second.pk], 2)
+
+    def test_annotate_onboarding_status_costs_a_fixed_number_of_queries_regardless_of_list_size(self):
+        # One for the queryset itself, one for the club's required requirements, one for
+        # every membership's completed statuses -- flat regardless of how many rows.
+        for i in range(5):
+            ClubMembership.objects.create(club=self.club, member=Member.objects.create(first_name=f"M{i}", last_name="Roe"), season=self.season)
+
+        with self.assertNumQueries(3):
+            annotate_onboarding_status(ClubMembership.objects.filter(club=self.club))
+
+    # --- mark_bypassed ---
+    def test_mark_bypassed_resolves_the_item_without_marking_it_complete(self):
+        status = mark_bypassed(self.membership, self.photo, user=self.staff, note="already has a recent one on file")
+
+        self.assertFalse(status.is_complete)
+        self.assertTrue(status.is_bypassed)
+        self.assertEqual(status.note, "already has a recent one on file")
+        self.assertEqual(self.membership.open_requirement_count, 1)
+
+    def test_mark_complete_clears_a_prior_bypass(self):
+        mark_bypassed(self.membership, self.photo, user=self.staff, note="not needed")
+        status = mark_complete(self.membership, self.photo, user=self.staff)
+
+        self.assertTrue(status.is_complete)
+        self.assertFalse(status.is_bypassed)
+
+    def test_mark_bypassed_clears_a_prior_completion(self):
+        mark_complete(self.membership, self.photo, user=self.staff)
+        status = mark_bypassed(self.membership, self.photo, user=self.staff, note="turns out not needed")
+
+        self.assertFalse(status.is_complete)
+        self.assertTrue(status.is_bypassed)
+
+    def test_mark_incomplete_also_clears_a_bypass(self):
+        mark_bypassed(self.membership, self.photo, user=self.staff, note="not needed")
+        status = mark_incomplete(self.membership, self.photo)
+
+        self.assertFalse(status.is_complete)
+        self.assertFalse(status.is_bypassed)
+        self.assertEqual(self.membership.open_requirement_count, 2)
+
+    # --- blocking_event_kinds ---
+    def test_blocking_event_kinds_is_empty_when_nothing_blocks_anything(self):
+        self.assertEqual(blocking_event_kinds(self.membership), set())
+
+    def test_blocking_event_kinds_collects_kinds_from_every_open_requirement(self):
+        self.medical.blocked_event_kinds = ["game", "tournament"]
+        self.medical.save()
+        self.photo.blocked_event_kinds = ["game"]
+        self.photo.save()
+
+        self.assertEqual(blocking_event_kinds(self.membership), {"game", "tournament"})
+
+    def test_blocking_event_kinds_ignores_a_resolved_requirement(self):
+        self.medical.blocked_event_kinds = ["game"]
+        self.medical.save()
+        mark_complete(self.membership, self.medical, user=self.staff)
+
+        self.assertEqual(blocking_event_kinds(self.membership), set())
+
+    def test_blocking_event_kinds_ignores_a_bypassed_requirement(self):
+        self.medical.blocked_event_kinds = ["game"]
+        self.medical.save()
+        mark_bypassed(self.membership, self.medical, user=self.staff, note="waived")
+
+        self.assertEqual(blocking_event_kinds(self.membership), set())
+
+    # --- blocked_member_ids_for_event ---
+    def test_blocked_member_ids_for_event_is_empty_when_nothing_is_configured_to_block(self):
+        self.assertEqual(blocked_member_ids_for_event(self.club, self.season, "game"), set())
+
+    def test_blocked_member_ids_for_event_flags_a_member_with_an_open_blocking_requirement(self):
+        self.medical.blocked_event_kinds = ["game"]
+        self.medical.save()
+
+        self.assertEqual(blocked_member_ids_for_event(self.club, self.season, "game"), {self.member.pk})
+
+    def test_blocked_member_ids_for_event_is_kind_specific(self):
+        self.medical.blocked_event_kinds = ["game"]
+        self.medical.save()
+
+        self.assertEqual(blocked_member_ids_for_event(self.club, self.season, "training"), set())
+
+    def test_blocked_member_ids_for_event_excludes_a_member_who_resolved_it(self):
+        self.medical.blocked_event_kinds = ["game"]
+        self.medical.save()
+        mark_complete(self.membership, self.medical, user=self.staff)
+
+        self.assertEqual(blocked_member_ids_for_event(self.club, self.season, "game"), set())
+
+    def test_blocked_member_ids_for_event_excludes_a_bypassed_requirement_too(self):
+        self.medical.blocked_event_kinds = ["game"]
+        self.medical.save()
+        mark_bypassed(self.membership, self.medical, user=self.staff, note="waived")
+
+        self.assertEqual(blocked_member_ids_for_event(self.club, self.season, "game"), set())
+
+    # --- approve_all_clean ---
+    def test_approve_all_clean_activates_a_pending_paid_up_fully_checked_member(self):
+        pending = ClubMembership.objects.create(club=self.club, member=Member.objects.create(first_name="Tom", last_name="Roe"), season=self.season, status=ClubMembership.StatusChoices.PENDING, fee_status=ClubMembership.FeeStatus.PAID)
+        mark_complete(pending, self.photo, user=self.staff)
+        mark_bypassed(pending, self.medical, user=self.staff, note="waived")
+
+        activated = approve_all_clean(self.club, self.season)
+
+        pending.refresh_from_db()
+        self.assertEqual(activated, 1)
+        self.assertEqual(pending.status, ClubMembership.StatusChoices.ACTIVE)
+
+    def test_approve_all_clean_skips_a_pending_member_with_an_open_requirement(self):
+        pending = ClubMembership.objects.create(club=self.club, member=Member.objects.create(first_name="Tom", last_name="Roe"), season=self.season, status=ClubMembership.StatusChoices.PENDING, fee_status=ClubMembership.FeeStatus.PAID)
+        mark_complete(pending, self.photo, user=self.staff)
+        # self.medical left open.
+
+        activated = approve_all_clean(self.club, self.season)
+
+        pending.refresh_from_db()
+        self.assertEqual(activated, 0)
+        self.assertEqual(pending.status, ClubMembership.StatusChoices.PENDING)
+
+    def test_approve_all_clean_skips_a_pending_member_who_has_not_paid(self):
+        pending = ClubMembership.objects.create(club=self.club, member=Member.objects.create(first_name="Tom", last_name="Roe"), season=self.season, status=ClubMembership.StatusChoices.PENDING, fee_status=ClubMembership.FeeStatus.UNPAID)
+        mark_complete(pending, self.photo, user=self.staff)
+        mark_complete(pending, self.medical, user=self.staff)
+
+        activated = approve_all_clean(self.club, self.season)
+
+        pending.refresh_from_db()
+        self.assertEqual(activated, 0)
+        self.assertEqual(pending.status, ClubMembership.StatusChoices.PENDING)
+
+    def test_approve_all_clean_never_touches_an_already_active_membership(self):
+        # self.membership is already ACTIVE/PAID with two open requirements --
+        # approve_all_clean only ever moves PENDING -> ACTIVE, it doesn't re-check
+        # or deactivate anyone already active.
+        activated = approve_all_clean(self.club, self.season)
+
+        self.membership.refresh_from_db()
+        self.assertEqual(activated, 0)
+        self.assertEqual(self.membership.status, ClubMembership.StatusChoices.ACTIVE)
+
+    def test_approve_all_clean_ignores_a_guardian_kind_membership(self):
+        guardian_member = Member.objects.create(first_name="Pat", last_name="Guardian")
+        ClubMembership.objects.create(club=self.club, member=guardian_member, season=self.season, kind=ClubMembership.Kind.GUARDIAN, status=ClubMembership.StatusChoices.PENDING, fee_status=ClubMembership.FeeStatus.PAID)
+
+        activated = approve_all_clean(self.club, self.season)
+
+        self.assertEqual(activated, 0)
+
+    def test_approve_all_clean_stamps_activated_at(self):
+        pending = ClubMembership.objects.create(club=self.club, member=Member.objects.create(first_name="Tom", last_name="Roe"), season=self.season, status=ClubMembership.StatusChoices.PENDING, fee_status=ClubMembership.FeeStatus.PAID)
+        mark_complete(pending, self.photo, user=self.staff)
+        mark_complete(pending, self.medical, user=self.staff)
+
+        approve_all_clean(self.club, self.season)
+
+        pending.refresh_from_db()
+        self.assertEqual(pending.activated_at, timezone.localdate())
+
+    # --- approve_one ---
+    def test_approve_one_activates_a_clean_pending_membership_and_stamps_activated_at(self):
+        pending = ClubMembership.objects.create(club=self.club, member=Member.objects.create(first_name="Tom", last_name="Roe"), season=self.season, status=ClubMembership.StatusChoices.PENDING, fee_status=ClubMembership.FeeStatus.PAID)
+        mark_complete(pending, self.photo, user=self.staff)
+        mark_complete(pending, self.medical, user=self.staff)
+
+        activated = approve_one(pending)
+
+        pending.refresh_from_db()
+        self.assertTrue(activated)
+        self.assertEqual(pending.status, ClubMembership.StatusChoices.ACTIVE)
+        self.assertEqual(pending.activated_at, timezone.localdate())
+
+    def test_approve_one_refuses_a_paid_but_unchecked_membership(self):
+        # Fully paid is not enough on its own -- the whole point of this change is
+        # that fee_status alone never activates; the checklist must be resolved too.
+        pending = ClubMembership.objects.create(club=self.club, member=Member.objects.create(first_name="Tom", last_name="Roe"), season=self.season, status=ClubMembership.StatusChoices.PENDING, fee_status=ClubMembership.FeeStatus.PAID)
+        mark_complete(pending, self.photo, user=self.staff)
+        # self.medical left open.
+
+        activated = approve_one(pending)
+
+        pending.refresh_from_db()
+        self.assertFalse(activated)
+        self.assertEqual(pending.status, ClubMembership.StatusChoices.PENDING)
+        self.assertIsNone(pending.activated_at)

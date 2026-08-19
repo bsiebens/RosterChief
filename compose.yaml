@@ -40,6 +40,10 @@ services:
       # this, a rebuild or recreate wipes MEDIA_ROOT even though the container itself keeps
       # running fine in between.
       - media_data:/app/media
+      # Private uploads (e.g. a member's medical certificate -- see rosterchief/storage.py).
+      # Deliberately NOT mounted into `caddy` below, unlike media_data: nothing should be able
+      # to serve this except the authenticated Django view that reads it.
+      - private_media_data:/app/private_media
     depends_on:
       db:
         condition: service_healthy
@@ -51,6 +55,38 @@ services:
       timeout: 5s
       retries: 3
       start_period: 20s
+
+  worker:
+    build: .
+    restart: unless-stopped
+    env_file: .env.production
+    # The scheduled platform jobs (see billing/tasks.py, club/tasks.py, events/tasks.py) run
+    # here, dispatched by `beat` below over the same Redis `web` uses as a cache — see
+    # rosterchief/settings.py's "Task queue (Celery)" section. Several of these are safe to
+    # scale; `beat` is not (see its own comment).
+    command: ["celery", "-A", "rosterchief", "worker", "--loglevel=info", "--concurrency=2"]
+    volumes:
+      - media_data:/app/media
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+  beat:
+    build: .
+    restart: unless-stopped
+    env_file: .env.production
+    # The scheduler -- decides *when* each task in CELERY_BEAT_SCHEDULE fires and hands it to
+    # a worker. Run exactly ONE of these: two beats would each independently decide it's time
+    # and every job runs twice (two archive_overdue_clubs runs is two emails to the same club,
+    # same reasoning as the old crontab's "exactly one node" -- see DEPLOYMENT.md).
+    command: ["celery", "-A", "rosterchief", "beat", "--loglevel=info"]
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
 
   db:
     image: postgres:17-alpine
@@ -75,10 +111,14 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    # Cache only, so nothing here needs to survive a restart. It is not optional though: it
-    # is what keeps every gunicorn worker agreeing about which feature flags are on. maxmemory
-    # is a ceiling, not a saving — this is already the smallest process in the stack — but on a
-    # memory-limited box it should evict cache entries under pressure, not grow unbounded.
+    # Doubles as the Celery broker/result backend for `worker`/`beat` (see rosterchief/settings.py)
+    # as well as the cache. maxmemory-policy allkeys-lru is right for a cache — evict rather than
+    # grow unbounded — but it means a queued task message COULD be evicted under memory pressure
+    # before a worker consumes it, same as a Redis restart drops anything queued (--save "",
+    # --appendonly no: nothing here persists by design). Acceptable at this job volume (five
+    # scheduled tasks a day; a missed one runs at its next scheduled time regardless, per
+    # CELERY_BEAT_SCHEDULE); if that stops being true, give Celery its own Redis instance rather
+    # than changing this cache's eviction policy to suit it.
     command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "32mb", "--maxmemory-policy", "allkeys-lru"]
 
 volumes:
@@ -86,3 +126,4 @@ volumes:
   caddy_data:
   caddy_config:
   media_data:
+  private_media_data:

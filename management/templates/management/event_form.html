@@ -4,48 +4,48 @@
 {% block heading %}{% if update_view %}{% blocktrans %}Edit {{ object }}{% endblocktrans %}{% else %}{% trans "New event" %}{% endif %}{% endblock heading %}
 
 {% block panel %}
-    <div class="card w-full bg-base-100 shadow">
+    <div class="card w-full">
         <div class="card-body">
             <form method="post">
                 {% csrf_token %}
 
                 {% for error in form.non_field_errors %}
-                    <div class="alert alert-error my-2">
+                    <div class="alert alert-error">
                         <span>{{ error }}</span>
                     </div>
                 {% endfor %}
 
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
                     {% form_field form.title %}
                     {% form_field form.kind %}
                 </div>
 
-                <div class="divider"></div>
-                <h3 class="text-lg font-semibold mb-3">{% trans "Audience" %}</h3>
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div class="my-5 border-t border-line"></div>
+                <h3 class="mb-3 font-display text-xs font-extrabold tracking-[.12em] text-muted uppercase">{% trans "Audience" %}</h3>
+                <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
                     {% form_field form.teams %}
                     {% form_field form.groups %}
                     {% if "club_wide" in form.fields %}
                         {% form_field form.club_wide %}
                     {% endif %}
                 </div>
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                <div class="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
                     {% form_field form.invited_members %}
                     {% form_field form.excluded_members %}
                 </div>
 
-                <div class="divider"></div>
-                <h3 class="text-lg font-semibold mb-3">{% trans "Where" %}</h3>
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="my-5 border-t border-line"></div>
+                <h3 class="mb-3 font-display text-xs font-extrabold tracking-[.12em] text-muted uppercase">{% trans "Where" %}</h3>
+                <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
                     {% form_field form.location %}
                     <div class="game-only">
                         {% form_field form.opponent %}
                     </div>
                 </div>
 
-                <div class="divider"></div>
-                <h3 class="text-lg font-semibold mb-3">{% trans "When" %}</h3>
-                <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div class="my-5 border-t border-line"></div>
+                <h3 class="mb-3 font-display text-xs font-extrabold tracking-[.12em] text-muted uppercase">{% trans "When" %}</h3>
+                <div class="grid grid-cols-1 gap-4 md:grid-cols-4">
                     {% form_field form.start %}
                     {% form_field form.end %}
                     {% form_field form.gathering %}
@@ -53,9 +53,9 @@
                 </div>
 
                 <div id="game-details-section" class="game-only">
-                    <div class="divider"></div>
-                    <h3 class="text-lg font-semibold mb-3">{% trans "Game" %}</h3>
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div class="my-5 border-t border-line"></div>
+                    <h3 class="mb-3 font-display text-xs font-extrabold tracking-[.12em] text-muted uppercase">{% trans "Game" %}</h3>
+                    <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
                         {% form_field form.competition %}
                         {% form_field form.external_game_id %}
                         {% form_field form.max_referees %}
@@ -73,7 +73,7 @@
                     </div>
                 </div>
 
-                <div class="card-actions justify-start pt-2 mt-2">
+                <div class="card-actions justify-start pt-4">
                     <a class="btn btn-outline gap-2" href="{% if update_view %}{% url "management:event_detail" object.pk %}{% else %}{% url "management:event_list" %}{% endif %}">{% lucide "arrow-left" size=16 %} {% trans "Cancel" %}</a>
                     <button class="btn btn-primary gap-2" type="submit">{% lucide "save" size=16 %} {% trans "Save" %}</button>
                 </div>

@@ -1,67 +1,77 @@
 {% extends "controlpanel/base.html" %}
 {% load static lucide %}
 
-{% block logo %}
-    {% if club.logo %}
-        {% comment %}
-            The ring is the club's own primary colour, same as on the club's own subdomain --
-            but the control panel never injects a page-wide --color-primary override (it must
-            not dress itself up as the club), so it's set here as a locally-scoped custom
-            property instead: it only reaches this element and its children, not the rest of
-            the panel's buttons and badges.
-        {% endcomment %}
-        <div class="avatar">
-            <div class="w-16 rounded-full bg-base-100 ring-2 ring-primary ring-offset-2 ring-offset-base-100" {% if club.primary_color %}style="--color-primary: {{ club.primary_color }};"{% endif %}>
-                <img class="club-logo object-contain" src="{{ club.logo.url }}" alt="{{ club.name }}">
-            </div>
-        </div>
-    {% else %}
-        <div class="avatar avatar-placeholder">
-            <div class="w-16 text-xl rounded-full bg-neutral text-neutral-content">
-                <span>{{ club.initials }}</span>
-            </div>
-        </div>
-    {% endif %}
-{% endblock logo %}
+{% block panel_title %}{{ club.name }}{% endblock panel_title %}
 
-{% block heading %}{{ club.name }}{% endblock heading %}
-
-{% block subheading %}
-    {{ club.slug }}.rosterchief.app &middot; {{ club.get_sport_type_display }}{% if club.legal_name %} &middot; {{ club.legal_name }}{% endif %}
-    {% if club.is_archived %}
-        <span class="badge badge-warning badge-sm ml-2">Archived</span>
-    {% endif %}
-{% endblock subheading %}
+{% block breadcrumb %}
+    <a class="hover:text-ink" href="{% url 'controlpanel:club_list' %}">clubs</a>
+    <span>/</span>
+    <span class="text-ink">{{ club.slug }}</span>
+    <span>/</span>
+    <span>settings</span>
+    <div class="flex-1"></div>
+    <span>id {{ club.pk|stringformat:"s"|slice:":8" }}</span>
+    <span class="text-edge">|</span>
+    <span>created {{ club.created|date:"Y-m-d" }}</span>
+{% endblock breadcrumb %}
 
 {% block actions %}
-    <a class="btn btn-outline gap-2" href="{% url 'controlpanel:club_update' club.pk %}">{% lucide "pencil" size=16 %} Edit</a>
-    <a class="btn btn-primary gap-2" href="https://{{ club.slug }}.rosterchief.app">{% lucide "external-link" size=16 %} Open</a>
+    <a class="btn btn-outline gap-2" href="{% url 'controlpanel:club_update' club.pk %}">{% lucide "pencil" size=14 %} Edit</a>
+    <a class="btn btn-primary gap-2" href="https://{{ club.slug }}.rosterchief.app" target="_blank" rel="noopener">{% lucide "external-link" size=14 %} Open</a>
     {% if club.is_archived %}
         <form method="post" action="{% url 'controlpanel:club_restore' club.pk %}">
             {% csrf_token %}
-            <button class="btn btn-success gap-2" type="submit">{% lucide "archive-restore" size=16 %} Restore</button>
+            <button class="btn btn-success gap-2" type="submit">{% lucide "archive-restore" size=14 %} Restore</button>
         </form>
     {% else %}
         <form method="post" action="{% url 'controlpanel:club_archive' club.pk %}">
             {% csrf_token %}
-            <button class="btn btn-warning gap-2" type="submit">{% lucide "archive" size=16 %} Archive</button>
+            <button class="btn btn-warning gap-2" type="submit">{% lucide "archive" size=14 %} Archive</button>
         </form>
     {% endif %}
 {% endblock actions %}
 
 {% block panel %}
+    {# --- club header --------------------------------------------------- #}
+    <div class="flex items-start gap-4">
+        {% comment %}
+            The ring is the club's own primary colour, same as on the club's own subdomain --
+            but the control panel never injects a page-wide --color-primary override (it must
+            not dress itself up as the club), so it's set here as a locally-scoped custom
+            property instead: it only reaches this element, not the rest of the panel's
+            buttons and badges.
+        {% endcomment %}
+        {% if club.logo %}
+            <div class="crest ring-primary flex h-[68px] w-[68px] shrink-0 items-center justify-center overflow-hidden bg-ink" {% if club.primary_color %}style="--color-primary: {{ club.primary_color }};"{% endif %}>
+                <img class="h-full w-full object-cover" src="{{ club.logo.url }}" alt="{{ club.name }}">
+            </div>
+        {% else %}
+            <div class="crest flex h-[68px] w-[68px] shrink-0 items-center justify-center bg-ink">
+                <span class="font-display text-xl font-extrabold text-white">{{ club.initials }}</span>
+            </div>
+        {% endif %}
+
+        <div class="flex-1">
+            <div class="font-display text-2xl leading-none font-extrabold text-ink uppercase">{{ club.name }}</div>
+            <div class="mt-1.5 font-mono text-xs text-muted">
+                {{ club.slug }}.rosterchief.app &middot; {{ club.get_sport_type_display }}{% if club.legal_name %} &middot; {{ club.legal_name }}{% endif %}
+                {% if club.is_archived %}
+                    <span class="badge badge-warning badge-sm ml-2">Archived</span>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
     {% if club.is_archived %}
-        <div class="alert alert-warning mb-6">
-            {% lucide "alert-triangle" size=20 %}
+        <div class="alert alert-warning">
+            {% lucide "alert-triangle" size=18 %}
             <span>This club is archived: its subdomain no longer resolves. Nothing has been deleted — restore it to bring it back.</span>
         </div>
     {% endif %}
     {% if attention.no_season %}
-        <div class="alert alert-warning mb-6">
-            {% lucide "calendar-x" size=20 %}
-            <span>
-                No season covers today, so this club cannot take a signup or schedule a match. Nothing errors — it is simply inert.
-            </span>
+        <div class="alert alert-warning">
+            {% lucide "calendar-x" size=18 %}
+            <span>No season covers today, so this club cannot take a signup or schedule a match. Nothing errors — it is simply inert.</span>
         </div>
     {% endif %}
 
@@ -70,132 +80,110 @@
         the club's setup, not a statistic: with nobody in a management position the access
         service grants no authority over that team, so nobody can pick the squad.
     {% endcomment %}
-    <div class="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-6">
-        {% comment %}<div class="card bg-base-100 shadow {% if attention.outstanding %}border-l-4 border-error{% endif %}">
-            <div class="card-body p-4">
-                <div class="flex items-center gap-2 text-sm opacity-70">{% lucide "banknote" size=16 %} Outstanding</div>
-                <div class="text-3xl font-bold tabular-nums">€{{ attention.outstanding|floatformat:2 }}</div>
-                <div class="text-xs opacity-60">{{ attention.unpaid_members }} member{{ attention.unpaid_members|pluralize }} unpaid this season</div>
-            </div>
+    <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+        {% comment %}<div class="card p-3.5 border-club">
+            <div class="font-mono text-[10px] tracking-[.08em] text-muted uppercase">Outstanding</div>
+            <div class="mt-0.5 font-display text-3xl leading-none font-extrabold text-club tabular-nums">€{{ attention.outstanding|floatformat:2 }}</div>
+            <div class="mt-1.5 font-mono text-[11px] text-muted">{{ attention.unpaid_members }} member{{ attention.unpaid_members|pluralize }} unpaid this season</div>
         </div>{% endcomment %}
-        <div class="card bg-base-100 shadow border-l-4 {% if attention.teams_without_manager %}border-error{% else %}border-success{% endif %}">
-            <div class="card-body p-4">
-                <div class="flex items-center gap-2 text-sm opacity-70 mb-3">{% lucide "user-x" size=16 %} Teams without coach</div>
-                <div class="text-4xl font-bold tabular-nums font-mono">{{ attention.teams_without_manager }}</div>
-                <div class="text-xs opacity-60">Teams nobody can pick a squad for</div>
+        <div class="card p-3.5 {% if attention.teams_without_manager %}border-club{% endif %}">
+            <div class="font-mono text-[10px] tracking-[.08em] text-muted uppercase">Teams without coach</div>
+            <div class="mt-0.5 font-display text-3xl leading-none font-extrabold tabular-nums {% if attention.teams_without_manager %}text-club{% else %}text-ink{% endif %}">{{ attention.teams_without_manager }}</div>
+            <div class="mt-1.5 font-mono text-[11px] text-muted">Teams nobody can pick a squad for</div>
+        </div>
+
+        <div class="card p-3.5 {% if attention.unrostered %}border-warn{% endif %}">
+            <div class="font-mono text-[10px] tracking-[.08em] text-muted uppercase">Unrostered members</div>
+            <div class="mt-0.5 font-display text-3xl leading-none font-extrabold tabular-nums {% if attention.unrostered %}text-warn{% else %}text-ink{% endif %}">{{ attention.unrostered }}</div>
+            <div class="mt-1.5 font-mono text-[11px] text-muted">Active members on no team</div>
+        </div>
+
+        <div class="card p-3.5 {% if attention.pending_approvals %}border-warn{% endif %}">
+            <div class="font-mono text-[10px] tracking-[.08em] text-muted uppercase">Pending</div>
+            <div class="mt-0.5 font-display text-3xl leading-none font-extrabold tabular-nums {% if attention.pending_approvals %}text-warn{% else %}text-ink{% endif %}">{{ attention.pending_approvals }}</div>
+            <div class="mt-1.5 font-mono text-[11px] text-muted">Memberships awaiting approval</div>
+        </div>
+
+        <div class="card p-3.5">
+            <div class="font-mono text-[10px] tracking-[.08em] text-muted uppercase">New members</div>
+            <div class="mt-0.5 font-display text-3xl leading-none font-extrabold text-ink tabular-nums">{{ attention.new_members }}</div>
+            {# First season at this club — someone returning after a year away is a renewal. #}
+            <div class="mt-1.5 font-mono text-[11px] text-muted">First season at this club</div>
+        </div>
+
+        <div class="card p-3.5">
+            <div class="font-mono text-[10px] tracking-[.08em] text-muted uppercase">Renewal rate</div>
+            <div class="mt-0.5 font-display text-3xl leading-none font-extrabold text-ink tabular-nums">
+                {% if attention.renewal_rate is None %}N/A{% else %}{{ attention.renewal_rate }}%{% endif %}
+            </div>
+            <div class="mt-1.5 font-mono text-[11px] text-muted">
+                {% if attention.renewal_rate is None %}
+                    No previous season
+                {% else %}
+                    <progress class="progress mt-1 {% if attention.renewal_rate < 30 %}progress-error{% elif attention.renewal_rate < 65 %}progress-warning{% else %}progress-success{% endif %}" value="{{ attention.renewal_rate }}" max="100"></progress>
+                {% endif %}
             </div>
         </div>
 
-        <div class="card bg-base-100 shadow border-l-4 {% if attention.unrostered %}border-warning{% else %}border-success{% endif %}">
-            <div class="card-body p-4">
-                <div class="flex items-center gap-2 text-sm opacity-70 mb-3">{% lucide "user-minus" size=16 %} Unrostered members</div>
-                <div class="text-4xl font-bold tabular-nums font-mono">{{ attention.unrostered }}</div>
-                <div class="text-xs opacity-60">Active members on no team</div>
+        <div class="card p-3.5">
+            <div class="font-mono text-[10px] tracking-[.08em] text-muted uppercase">Attendance rate</div>
+            <div class="mt-0.5 font-display text-3xl leading-none font-extrabold text-ink tabular-nums">
+                {% if attention.attendance.turnout is None %}N/A{% else %}{{ attention.attendance.turnout }}%{% endif %}
             </div>
-        </div>
-
-        <div class="card bg-base-100 shadow border-l-4 {% if attention.pending_approvals %}border-warning{% else %}border-success{% endif %}">
-            <div class="card-body p-4">
-                <div class="flex items-center gap-2 text-sm opacity-70 mb-3">{% lucide "clock" size=16 %} Pending</div>
-                <div class="text-4xl font-bold tabular-nums font-mono">{{ attention.pending_approvals }}</div>
-                <div class="text-xs opacity-60">Memberships awaiting approval</div>
-            </div>
-        </div>
-
-        <div class="card bg-base-100 shadow border-l-4 border-info">
-            <div class="card-body p-4">
-                <div class="flex items-center gap-2 text-sm opacity-70 mb-3">{% lucide "sparkles" size=16 %} New members</div>
-                <div class="text-4xl font-bold tabular-nums font-mono">{{ attention.new_members }}</div>
-                {# First season at this club — someone returning after a year away is a renewal. #}
-                <div class="text-xs opacity-60">First season at this club</div>
-            </div>
-        </div>
-
-        <div class="card bg-base-100 shadow border-l-4 {% if attention.renewal_rate is None %}border-info{% elif attention.renewal_rate < 30 %}border-error{% elif attention.renewal_rate < 65 %}border-warning{% else %}border-success{% endif %}">
-            <div class="card-body p-4">
-                <div class="flex items-center gap-2 text-sm opacity-70 mb-3">{% lucide "repeat" size=16 %} Renewal rate</div>
-                <div class="text-4xl font-bold tabular-nums font-mono">
-                    {% if attention.renewal_rate is None %}
-                        N/A
-                    {% else %}
-                        {{ attention.renewal_rate }}%
-                    {% endif %}
-                </div>
-                <div class="text-xs opacity-60">
-                    {% if attention.renewal_rate is None %}
-                        No previous season
-                    {% else %}
-                        <progress class="progress w-full {% if attention.renewal_rate < 30 %}progress-error{% elif attention.renewal_rate < 65 %}progress-warning{% else %}progress-success{% endif %}" value="{{ attention.renewal_rate }}"
-                                  max="100"></progress>
-                    {% endif %}
-                </div>
-            </div>
-        </div>
-
-        <div class="card bg-base-100 shadow border-l-4 {% if attention.attendance.turnout is None %}border-info{% elif attention.attendance.turnout < 30 %}border-error{% elif attention.attendance.turnout < 65 %}border-warning{% else %}border-success{% endif %}">
-            <div class="card-body p-4">
-                <div class="flex items-center gap-2 text-sm opacity-70 mb-3">{% lucide "user-check" size=16 %} Attendance rate</div>
-                <div class="text-4xl font-bold tabular-nums font-mono">
-                    {% if attention.attendance.turnout is None %}
-                        N/A
-                    {% else %}
-                        {{ attention.attendance.turnout }}%
-                    {% endif %}
-                </div>
-                <div class="text-xs opacity-60">
-                    {% if attention.attendance.turnout is None %}
-                        No events this season
-                    {% else %}
-                        <progress class="progress w-full {% if attention.attendance.turnout < 30 %}progress-error{% elif attention.attendance.turnout < 65 %}progress-warning{% else %}progress-success{% endif %}"
-                                  value="{{ attention.attendance.turnout }}" max="100"></progress>
-                    {% endif %}
-                </div>
+            <div class="mt-1.5 font-mono text-[11px] text-muted">
+                {% if attention.attendance.turnout is None %}
+                    No events this season
+                {% else %}
+                    <progress class="progress mt-1 {% if attention.attendance.turnout < 30 %}progress-error{% elif attention.attendance.turnout < 65 %}progress-warning{% else %}progress-success{% endif %}" value="{{ attention.attendance.turnout }}" max="100"></progress>
+                {% endif %}
             </div>
         </div>
     </div>
 
+    {# --- two-column layout: left = charts/stats, right = flags/admins/billing --- #}
+    <div class="grid grid-cols-1 gap-4 xl:grid-cols-2">
+        <div class="flex flex-col gap-4">
+            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div class="card p-4">
+                    <div class="mb-3 flex items-center gap-2 font-display text-sm font-extrabold tracking-[.1em] text-ink uppercase">{% lucide "user-plus" size=16 %} Signups per month</div>
+                    <p class="mb-2 font-mono text-[11px] text-muted">New members against returning ones.</p>
+                    <div class="h-48">
+                        <canvas id="signups-chart"></canvas>
+                    </div>
+                </div>
+                <div class="card p-4">
+                    <div class="mb-3 flex items-center gap-2 font-display text-sm font-extrabold tracking-[.1em] text-ink uppercase">{% lucide "wallet" size=16 %} Club fee status this season</div>
+                    <div class="h-48">
+                        <canvas id="fees-chart"></canvas>
+                    </div>
+                </div>
+            </div>
 
-    <div class="mb-6 grid gap-4 lg:grid-cols-2">
-        <div class="card bg-base-100 shadow">
-            <div class="card-body">
-                <h2 class="card-title text-base">{% lucide "user-plus" size=18 %} Signups per month</h2>
-                <p class="text-sm opacity-70">New members against returning ones.</p>
-                <div class="h-56">
-                    <canvas id="signups-chart"></canvas>
-                </div>
+            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                {% for group in groups %}
+                    <div class="card flex flex-col">
+                        <div class="flex items-center gap-2 border-b border-line px-4 py-3 font-display text-sm font-extrabold tracking-[.1em] text-ink uppercase">{% lucide group.icon size=16 %} {{ group.title }}</div>
+                        <dl class="px-4">
+                            {% for label, value in group.stats %}
+                                <div class="flex items-center justify-between py-2">
+                                    <dt class="text-sm text-muted">{{ label }}</dt>
+                                    <dd class="font-mono font-semibold text-ink tabular-nums">{% if group.title == "Shop" and label == "Outstanding" or label == "Revenue" %}&euro;{% endif %}{{ value }}</dd>
+                                </div>
+                            {% endfor %}
+                        </dl>
+                    </div>
+                {% endfor %}
             </div>
+
+            {% include "controlpanel/_club_home_location_card.html" %}
         </div>
-        <div class="card bg-base-100 shadow">
-            <div class="card-body">
-                <h2 class="card-title text-base">{% lucide "wallet" size=18 %} Club fee status this season</h2>
-                <div class="h-56">
-                    <canvas id="fees-chart"></canvas>
-                </div>
-            </div>
+
+        <div class="flex flex-col gap-4">
+            {% include "controlpanel/_club_features_card.html" %}
+            {% include "controlpanel/_club_admins_card.html" %}
+            {% include "controlpanel/_club_billing_card.html" %}
         </div>
     </div>
-
-    <div class="mb-6 grid gap-4 md:grid-cols-4">
-        {% for group in groups %}
-            <div class="card bg-base-100 shadow">
-                <div class="card-body">
-                    <h2 class="card-title text-base">{% lucide group.icon size=18 %} {{ group.title }}</h2>
-                    <dl class="divide-y divide-base-200">
-                        {% for label, value in group.stats %}
-                            <div class="flex items-center justify-between py-2">
-                                <dt class="text-sm opacity-70">{{ label }}</dt>
-                                <dd class="font-semibold tabular-nums font-mono">{% if group.title == "Shop" and label == "Outstanding" or label == "Revenue" %}&euro;{% endif %}{{ value }}</dd>
-                            </div>
-                        {% endfor %}
-                    </dl>
-                </div>
-            </div>
-        {% endfor %}
-    </div>
-    {% include "controlpanel/_club_features_card.html" %}
-    {% include "controlpanel/_club_billing_card.html" %}
-    {% include "controlpanel/_club_home_location_card.html" %}
-    {% include "controlpanel/_club_admins_card.html" %}
 {% endblock panel %}
 
 {% block extra_body %}
@@ -205,64 +193,50 @@
     <script>
         (() => {
             const data = JSON.parse(document.getElementById("chart-data").textContent);
-            const css = (name, fallback) => getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+            const ink = "#3A4658";
+            const grid = "rgba(58,70,88,.12)";
 
-            const render = () => {
-                const ink = css("--color-base-content", "#333");
-                const grid = "color-mix(in oklab, " + ink + " 15%, transparent)";
-
-                // Stacked: the bar height stays "signups this month" while the split shows where
-                // they came from. Side-by-side bars would answer a different question.
-                const signups = new Chart(document.getElementById("signups-chart"), {
-                    type: "bar",
-                    data: {
-                        labels: data.signups.map((point) => point.month),
-                        datasets: [
-                            {label: "New", data: data.signups.map((point) => point.new), backgroundColor: css("--color-primary", "#4f46e5")},
-                            {label: "Returning", data: data.signups.map((point) => point.returning), backgroundColor: css("--color-accent", "#0ea5e9")},
-                        ],
+            // Stacked: the bar height stays "signups this month" while the split shows where
+            // they came from. Side-by-side bars would answer a different question.
+            const signups = new Chart(document.getElementById("signups-chart"), {
+                type: "bar",
+                data: {
+                    labels: data.signups.map((point) => point.month),
+                    datasets: [
+                        {label: "New", data: data.signups.map((point) => point.new), backgroundColor: "#0B1220"},
+                        {label: "Returning", data: data.signups.map((point) => point.returning), backgroundColor: "#14B8E8"},
+                    ],
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {legend: {position: "bottom", labels: {color: ink, font: {family: "IBM Plex Mono", size: 11}}}},
+                    scales: {
+                        x: {stacked: true, ticks: {color: ink, font: {family: "IBM Plex Mono", size: 10}}, grid: {display: false}},
+                        y: {stacked: true, beginAtZero: true, ticks: {color: ink, precision: 0, font: {family: "IBM Plex Mono", size: 10}}, grid: {color: grid}},
                     },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        plugins: {legend: {position: "bottom", labels: {color: ink}}},
-                        scales: {
-                            x: {stacked: true, ticks: {color: ink}, grid: {color: grid}},
-                            y: {stacked: true, beginAtZero: true, ticks: {color: ink, precision: 0}, grid: {color: grid}},
+                },
+            });
+
+            // Colour carries the meaning here — unpaid must read as a problem, waived must
+            // not — so the slices are pinned to the semantic theme colours, in order.
+            const fees = new Chart(document.getElementById("fees-chart"), {
+                type: "pie",
+                data: {
+                    labels: data.fees.map((slice) => slice.label),
+                    datasets: [
+                        {
+                            data: data.fees.map((slice) => slice.value),
+                            backgroundColor: ["#14A05A", "#F0A22E", "#E4002B", "#8B95A4"],
                         },
-                    },
-                });
-
-                // Colour carries the meaning here — unpaid must read as a problem, waived must
-                // not — so the slices are pinned to the semantic theme colours, in order.
-                const fees = new Chart(document.getElementById("fees-chart"), {
-                    type: "pie",
-                    data: {
-                        labels: data.fees.map((slice) => slice.label),
-                        datasets: [
-                            {
-                                data: data.fees.map((slice) => slice.value),
-                                backgroundColor: [css("--color-success", "#16a34a"), css("--color-warning", "#f59e0b"), css("--color-error", "#dc2626"), css("--color-neutral", "#6b7280")],
-                            },
-                        ],
-                    },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        plugins: {legend: {position: "right", labels: {color: ink}}},
-                    },
-                });
-
-                return [signups, fees];
-            };
-
-            let charts = render();
-
-            // "auto" removes data-theme entirely, so watch the attribute rather than a click.
-            new MutationObserver(() => {
-                charts.forEach((chart) => chart.destroy());
-                charts = render();
-            }).observe(document.documentElement, {attributes: true, attributeFilter: ["data-theme"]});
+                    ],
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {legend: {position: "right", labels: {color: ink, font: {family: "IBM Plex Mono", size: 11}}}},
+                },
+            });
         })();
     </script>
 {% endblock extra_body %}

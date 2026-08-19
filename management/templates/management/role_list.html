@@ -12,45 +12,41 @@
 {% block heading %}{% trans "Roles" %}{% endblock heading %}
 
 {% block actions %}
-    <button class="btn btn-outline gap-2" type="button" onclick="document.getElementById('grant_role_modal').showModal()">{% lucide "plus" size=16 %} {% trans "Grant role" %}</button>
+    <button class="btn btn-primary gap-2" type="button" onclick="document.getElementById('grant_role_modal').showModal()">{% lucide "plus" size=16 %} {% trans "Grant role" %}</button>
 {% endblock actions %}
 
 {% block panel %}
     <div class="flex flex-col gap-4">
         {% for value, label, description, roles_for_section in sections %}
             {% with role_label=label|capfirst %}
-                <div class="card bg-base-100 shadow">
-                    <div class="card-body">
-                        <h2 class="card-title text-base">{{ role_label }}</h2>
-                        {% if description %}<p class="text-sm opacity-70">{{ description }}</p>{% endif %}
-                        <div class="overflow-x-auto">
-                            <table class="table table-cards">
-                                <thead>
-                                    <tr>
-                                        <th>{% trans "Member" %}</th>
-                                        <th></th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {% for role in roles_for_section %}
-                                        <tr>
-                                            <td class="font-semibold">{{ role.member }}</td>
-                                            <td class="text-right">
-                                                <form method="post" action="{% url 'management:role_revoke' role.pk %}">
-                                                    {% csrf_token %}
-                                                    <button class="btn btn-outline btn-error btn-sm gap-2" type="submit">{% lucide "x" size=14 %} {% trans "Revoke" %}</button>
-                                                </form>
-                                            </td>
-                                        </tr>
-                                    {% empty %}
-                                        <tr>
-                                            <td colspan="2" class="text-center opacity-60">{% blocktrans %}No one has the {{ role_label }} role yet.{% endblocktrans %}</td>
-                                        </tr>
-                                    {% endfor %}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
+                <div class="card card-body">
+                    <h2 class="card-title">{{ role_label }}</h2>
+                    {% if description %}<p class="text-sm text-muted">{{ description }}</p>{% endif %}
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>{% trans "Member" %}</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for role in roles_for_section %}
+                                <tr>
+                                    <td class="font-semibold text-ink">{{ role.member }}</td>
+                                    <td class="text-right">
+                                        <form method="post" action="{% url 'management:role_revoke' role.pk %}">
+                                            {% csrf_token %}
+                                            <button class="btn btn-outline btn-error btn-xs gap-1" type="submit">{% lucide "x" size=13 %} {% trans "Revoke" %}</button>
+                                        </form>
+                                    </td>
+                                </tr>
+                            {% empty %}
+                                <tr>
+                                    <td colspan="2" class="py-4 text-center text-muted">{% blocktrans %}No one has the {{ role_label }} role yet.{% endblocktrans %}</td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
                 </div>
             {% endwith %}
         {% endfor %}

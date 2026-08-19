@@ -409,7 +409,7 @@ ClubMembership(ClubScopedModel)      # -> carries `club`
   status       CharField (TextChoices: pending | active | lapsed | cancelled)
   fee_status   CharField (TextChoices: unpaid | partial | paid | waived)
   signed_up_at DateTimeField (null)     # when the member registered for the season
-  activated_at DateTimeField (null)     # when membership became active (usually on payment)
+  activated_at DateTimeField (null)     # when membership became active (admin approval only, never on payment alone)
   Meta: unique_together (club, member, season); ordering = ["-season__start_date", ...]
 ```
 

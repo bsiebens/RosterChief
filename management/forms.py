@@ -6,7 +6,7 @@ from django.contrib.auth import get_user_model
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
-from club.models import ClubMembership, ClubRole, FeePayment, Sponsor
+from club.models import Club, ClubMembership, ClubRole, FeePayment, OnboardingRequirement, Sponsor
 from club.services.access import groups_manageable_by, is_club_admin, teams_managed_by
 from events.models import Competition, Event, EventReferee, EventSeries, Location, Opponent
 from events.services.rbihf_import import RBIHFImportError, extract_team_id
@@ -137,6 +137,11 @@ class TeamMembershipForm(forms.ModelForm):
             members = members.exclude(pk__in=taken)
         self.fields["member"].queryset = members
         self.fields["position"].queryset = Position.objects.filter(club=club, staff_position=False)
+        # The model field itself is optional (SignupTeamPlacementForm leaves it
+        # blank on purpose -- see that form's own docstring), but adding/editing a
+        # roster spot here is still expected to pick one; only the Sign-up page's
+        # own placement skips it.
+        self.fields["position"].required = True
 
     def clean(self):
         cleaned = super().clean()
@@ -865,3 +870,91 @@ class RecordFeePaymentForm(forms.Form):
     method = forms.ChoiceField(label=_("Method"), choices=FeePayment.Method.choices)
     reference = forms.CharField(label=_("Reference"), required=False, help_text=_("Bank reference, transaction id — whatever lets you find this again."))
     note = forms.CharField(label=_("Note"), required=False, widget=forms.Textarea(attrs={"rows": 2}))
+
+
+class ClubSettingsForm(forms.ModelForm):
+    """A club's own self-service identity/branding editor (management:club_settings) --
+    the club-facing equivalent of controlpanel's ClubForm, minus everything only
+    platform staff should touch: `slug` (the club's subdomain -- changing it breaks
+    every link the club has ever shared) and the season fields (governed by
+    club.services.seasons, not something to edit casually from a settings form)."""
+
+    class Meta:
+        model = Club
+        fields = ["name", "legal_name", "contact_email", "logo", "primary_color", "secondary_color"]
+        widgets = {
+            "primary_color": forms.TextInput(attrs={"placeholder": "#1e40af"}),
+            "secondary_color": forms.TextInput(attrs={"placeholder": "#be185d"}),
+            "logo": forms.ClearableFileInput(attrs={"accept": "image/png,image/jpeg,image/gif,image/webp,image/svg+xml"}),
+        }
+
+
+class OnboardingRequirementForm(forms.ModelForm):
+    #: Not a model field lookup -- blocked_event_kinds is a plain JSONField (see
+    #: OnboardingRequirement's own docstring for why: importing Event.EventKind at
+    #: the model layer would create a club<->events import cycle). This is the one
+    #: place that actually validates against real event kinds.
+    blocked_event_kinds = forms.MultipleChoiceField(
+        label=_("Blocks selection for"),
+        choices=Event.EventKind.choices,
+        required=False,
+        widget=forms.CheckboxSelectMultiple,
+        help_text=_("Event kinds a member can't be invited to or selected for while this is open. Leave unchecked for a purely informational requirement."),
+    )
+
+    class Meta:
+        model = OnboardingRequirement
+        fields = ["name", "description", "requires_document", "blocked_event_kinds", "is_active", "order"]
+
+
+class RequirementCompletionForm(forms.Form):
+    """Marks one OnboardingRequirement complete for one membership -- see
+    club.services.onboarding.mark_complete. `document` is only meaningful when the
+    requirement itself has `requires_document=True`; the view doesn't reject an
+    upload against a requirement that doesn't ask for one, it's just unused."""
+
+    document = forms.FileField(label=_("Document"), required=False)
+    note = forms.CharField(label=_("Note"), required=False, widget=forms.Textarea(attrs={"rows": 2}))
+
+
+class SignupTeamPlacementForm(forms.ModelForm):
+    """Places one member (fixed by the view, not a form field) onto a team from
+    the Sign-up page -- team only, picked from big buttons rather than a form.
+    Position is left blank entirely (TeamMembership.position is nullable) rather
+    than guessed at: which position/number they end up with is the team
+    manager's own call to make correctly later (team_roster_update), and a
+    blank position is also what groups every just-placed, not-yet-sorted member
+    together (e.g. via the API) until then.
+
+    Deliberately does NOT filter through eligible_roster_members like
+    TeamMembershipForm's own member queryset does -- the whole point here is
+    placing a still-PENDING member so a team's coach can already see them and the
+    roster count is accurate, before their status/documents are actually clean.
+    See club.services.onboarding.blocked_member_ids_for_event for what still
+    gates their event invitations in the meantime."""
+
+    class Meta:
+        model = TeamMembership
+        fields = ["team"]
+
+    def __init__(self, *args, club=None, season=None, member=None, **kwargs):
+        # Pre-seed the instance (not just self.season/self.member) -- same reasoning
+        # as TeamRosterAddView's own form_kwargs comment: TeamMembership.clean()'s
+        # validate_club_scope needs season/member set on the instance *before*
+        # is_valid() runs, since ModelForm._post_clean() calls instance.clean()
+        # straight after copying the form's own fields (team, the only real one
+        # here) onto it -- season/member never being form fields, they'd
+        # otherwise still be unset at that point. position is left at its default
+        # (None) -- see the class docstring.
+        kwargs.setdefault("instance", TeamMembership(season=season, member=member))
+        super().__init__(*args, **kwargs)
+        self.fields["team"].queryset = Team.objects.filter(club=club)
+
+
+class RequirementBypassForm(forms.Form):
+    """Marks one OnboardingRequirement as not needed for one member -- see
+    club.services.onboarding.mark_bypassed. A note is required here (unlike
+    RequirementCompletionForm's optional one): "why" is the whole point of a
+    bypass in a way it isn't for an ordinary completion."""
+
+    note = forms.CharField(label=_("Why isn't this needed?"), widget=forms.Textarea(attrs={"rows": 2}))

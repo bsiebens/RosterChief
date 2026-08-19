@@ -9,59 +9,57 @@ management.views.group_by_family: family/guardians/children/others/all) and
 passes its own URL so admins land back on the member they were viewing; family_detail.html
 leaves it unset, since staying on the family page is already the right place there.
 {% endcomment %}
-<div class="overflow-x-auto">
-    <table class="table table-cards">
-        <thead>
-            <tr>
-                <th>{% trans "Name" %}</th>
-                <th>{% trans "Email" %}</th>
-                <th>{% trans "Type" %}</th>
-                <th></th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for person in group.all %}
-            <tr>
-                <td><a class="link link-hover font-semibold" href="{% url 'management:member_detail' person.pk %}">{{ person.last_name }}, {{ person.first_name }}</a></td>
-                <td data-label="{% trans 'Email' %}">{{ person.contact_email|default:"-" }}</td>
-                <td data-label="{% trans 'Type' %}">
-                    {% if is_club_admin %}
-                    <form method="post" action="{% url 'management:family_membership_role_update' group.family.pk person.pk %}">
-                        {% csrf_token %}
-                        {% if next_url %}<input type="hidden" name="next" value="{{ next_url }}">{% endif %}
-                        <select name="role" class="select select-bordered select-sm" onchange="this.form.requestSubmit()" aria-label="{% trans 'Role in family' %}">
-                            {% for value, label in family_role_choices %}
-                            <option value="{{ value }}" {% if value == person.role_in_family %}selected{% endif %}>{{ label|capfirst }}</option>
-                            {% endfor %}
-                        </select>
-                    </form>
-                    {% else %}
-                    <span class="badge badge-sm badge-ghost">{{ person.role_in_family_display|capfirst }}</span>
+<table class="table">
+    <thead>
+        <tr>
+            <th>{% trans "Name" %}</th>
+            <th>{% trans "Email" %}</th>
+            <th>{% trans "Type" %}</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for person in group.all %}
+        <tr>
+            <td><a class="link link-hover font-semibold text-ink" href="{% url 'management:member_detail' person.pk %}">{{ person.last_name }}, {{ person.first_name }}</a></td>
+            <td class="text-sm text-muted">{{ person.contact_email|default:"—" }}</td>
+            <td>
+                {% if is_club_admin %}
+                <form method="post" action="{% url 'management:family_membership_role_update' group.family.pk person.pk %}">
+                    {% csrf_token %}
+                    {% if next_url %}<input type="hidden" name="next" value="{{ next_url }}">{% endif %}
+                    <select name="role" class="select w-auto" onchange="this.form.requestSubmit()" aria-label="{% trans 'Role in family' %}">
+                        {% for value, label in family_role_choices %}
+                        <option value="{{ value }}" {% if value == person.role_in_family %}selected{% endif %}>{{ label|capfirst }}</option>
+                        {% endfor %}
+                    </select>
+                </form>
+                {% else %}
+                <span class="badge badge-sm badge-ghost">{{ person.role_in_family_display|capfirst }}</span>
+                {% endif %}
+            </td>
+            <td class="text-right">
+                {% if is_club_admin %}
+                <div class="flex flex-wrap justify-end gap-1">
+                    {% if person.grant_login_form %}
+                    <button class="btn btn-outline btn-xs" type="button" onclick="document.getElementById('grant_login_modal_{{ group.family.pk }}_{{ person.pk }}').showModal()" aria-label="{% trans 'Grant login' %}">
+                        {% lucide "key-round" size=13 %} {% trans "Grant login" %}
+                    </button>
                     {% endif %}
-                </td>
-                <td class="text-right">
-                    {% if is_club_admin %}
-                    <div class="flex flex-wrap justify-end gap-1">
-                        {% if person.grant_login_form %}
-                        <button class="btn btn-outline btn-sm" type="button" onclick="document.getElementById('grant_login_modal_{{ group.family.pk }}_{{ person.pk }}').showModal()" aria-label="{% trans 'Grant login' %}">
-                            {% lucide "key-round" size=14 %} {% trans "Grant login" %}
-                        </button>
-                        {% endif %}
-                        <a class="btn btn-outline btn-sm" href="{% url 'management:member_detail' person.pk %}" aria-label="{% trans 'Edit' %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</a>
-                        <button class="btn btn-sm btn-outline btn-error" type="button" onclick="document.getElementById('remove_family_modal_{{ group.family.pk }}_{{ person.pk }}').showModal()" aria-label="{% trans 'Remove from family' %}">
-                            {% lucide "user-x" size=14 %} {% trans "Remove" %}
-                        </button>
-                        <button class="btn btn-sm btn-outline btn-error" type="button" onclick="document.getElementById('member_delete_modal_{{ group.family.pk }}_{{ person.pk }}').showModal()" aria-label="{% trans 'Delete' %}">
-                            {% lucide "trash-2" size=14 %} {% trans "Delete" %}
-                        </button>
-                    </div>
-                    {% endif %}
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-</div>
+                    <a class="btn btn-outline btn-xs" href="{% url 'management:member_detail' person.pk %}" aria-label="{% trans 'Edit' %}">{% lucide "pencil" size=13 %} {% trans "Edit" %}</a>
+                    <button class="btn btn-xs btn-outline btn-error" type="button" onclick="document.getElementById('remove_family_modal_{{ group.family.pk }}_{{ person.pk }}').showModal()" aria-label="{% trans 'Remove from family' %}">
+                        {% lucide "user-x" size=13 %} {% trans "Remove" %}
+                    </button>
+                    <button class="btn btn-xs btn-outline btn-error" type="button" onclick="document.getElementById('member_delete_modal_{{ group.family.pk }}_{{ person.pk }}').showModal()" aria-label="{% trans 'Delete' %}">
+                        {% lucide "trash-2" size=13 %} {% trans "Delete" %}
+                    </button>
+                </div>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
 
 {% if is_club_admin %}
 {% trans "Delete member" as delete_member_title %}

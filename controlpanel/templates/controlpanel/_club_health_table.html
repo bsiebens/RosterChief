@@ -28,64 +28,56 @@
             {% for club in clubs %}
                 <tr>
                     <td>
-                        <div class="flex flex-row items-center gap-4">
-                            <div>
-                                {% if club.logo %}
-                                    <img class="h-12 w-12 object-contain" src="{{ club.logo.url }}" alt="{{ club.name }}">
-                                {% else %}
-                                    <div class="avatar avatar-placeholder">
-                                        <div class="w-12 rounded-full bg-neutral text-neutral-content">
-                                            <span>{{ club.initials }}</span>
-                                        </div>
-                                    </div>
-                                {% endif %}
-                            </div>
+                        <div class="flex flex-row items-center gap-3">
+                            {% if club.logo %}
+                                <img class="h-10 w-10 shrink-0 object-contain" src="{{ club.logo.url }}" alt="{{ club.name }}">
+                            {% else %}
+                                <div class="crest flex h-10 w-10 shrink-0 items-center justify-center bg-ink">
+                                    <span class="font-display text-xs font-extrabold text-white">{{ club.initials }}</span>
+                                </div>
+                            {% endif %}
 
-                            <div class="flex flex-col gap-1">
-                                <a class="link link-hover font-semibold tracking-wide" href="{% url "controlpanel:club_detail" club.pk %}">{{ club.name }}</a>
-                                <div class="text-xs opacity-60">{{ club.slug }}.rosterchief.app &middot; {{ club.get_sport_type_display }}</div>
+                            <div class="flex flex-col">
+                                <a class="link link-hover font-semibold text-ink" href="{% url "controlpanel:club_detail" club.pk %}">{{ club.name }}</a>
+                                <div class="font-mono text-[11px] text-muted">{{ club.slug }}.rosterchief.app &middot; {{ club.get_sport_type_display }}</div>
                             </div>
                         </div>
                     </td>
 
                     <td>
-                        <div class="flex flex-row gap-2">
+                        <div class="flex flex-row gap-1.5">
                             {% if club.is_archived %}
-                                <span class="badge badge-warning">{% lucide "archive" size=14 %} archived</span>
+                                <span class="badge badge-warning badge-sm">{% lucide "archive" size=12 %} Archived</span>
                             {% else %}
                                 {% if not club.has_season %}
-                                    <span class="badge badge-warning">{% lucide "calendar-x" size=14 %} no seasons</span>
+                                    <span class="badge badge-warning badge-sm">{% lucide "calendar-x" size=12 %} No seasons</span>
                                 {% endif %}
 
                                 {% if not club.upcoming_events %}
-                                    <span class="badge badge-ghost badge-outline">{% lucide "moon-star" size=14 %}dormant</span>
+                                    <span class="badge badge-ghost badge-sm">{% lucide "moon-star" size=12 %} Dormant</span>
                                 {% endif %}
                             {% endif %}
                         </div>
                     </td>
 
-                    <td class="text-right tabular-nums">{{ club.active_members }}</td>
-                    <td class="text-right tabular-nums">
-                        <div class="flex flex-row gap-2 items-center justify-end">
+                    <td class="text-right font-mono tabular-nums">{{ club.active_members }}</td>
+                    <td class="text-right">
+                        <div class="flex flex-row items-center justify-end gap-1.5">
                             {% if not club.admin_count %}
-                                <span class="text-error">{% lucide "triangle-alert" size=16 %}</span>
+                                <span class="text-club-dark">{% lucide "triangle-alert" size=14 %}</span>
                             {% endif %}
-                            <span class="{% if not club.admin_count %}font-bold text-error{% endif %}">{{ club.admin_count }}</span>
+                            <span class="font-mono tabular-nums {% if not club.admin_count %}font-bold text-club-dark{% endif %}">{{ club.admin_count }}</span>
                         </div>
                     </td>
-                    <td class="text-right tabular-nums">{{ club.team_count }}</td>
-                    <td class="text-right tabular-nums">{{ club.upcoming_events }}</td>
+                    <td class="text-right font-mono tabular-nums">{{ club.team_count }}</td>
+                    <td class="text-right font-mono tabular-nums">{{ club.upcoming_events }}</td>
 
-                    <td class="text-right">
-                        {% if club.plan_name %}
-                            <span class="badge badge-accent">{{ club.plan_name|lower }}</span>
-                        {% else %}
-                            -
-                        {% endif %}
+                    <td class="text-right font-mono text-xs text-muted">
+                        {{ club.plan_name|lower|default:"—" }}
                     </td>
 
                     <td class="text-right">
-                        <div class="flex flex-row gap-2 items-center justify-end">
+                        <div class="flex flex-row items-center justify-end gap-1.5">
                             {% if not club.dues_owed %}
                                 {% if club.plan_name %}
                                     {% comment %}
@@ -94,40 +86,36 @@
                                         for a paid period AND a waived one (both cover the club, they just differ in
                                         how). No covered period at all (only cancelled dues, say) shows a dash.
                                     {% endcomment %}
-                                    <div class="flex flex-col items-end gap-1">
-                                        {% if club.covered_status == "waived" %}
-                                            <span class="badge badge-ghost badge-outline">waived</span>
-                                        {% elif club.covered_until %}
-                                            <span class="badge badge-success">paid</span>
-                                        {% else %}
-                                            -
-                                        {% endif %}
-                                    </div>
+                                    {% if club.covered_status == "waived" %}
+                                        <span class="badge badge-ghost badge-sm">Waived</span>
+                                    {% elif club.covered_until %}
+                                        <span class="badge badge-success badge-sm">Paid</span>
+                                    {% else %}
+                                        <span class="text-muted">—</span>
+                                    {% endif %}
                                 {% else %}
-                                    -
+                                    <span class="text-muted">—</span>
                                 {% endif %}
                             {% else %}
-                                <span class="font-semibold">€{{ club.dues_owed|floatformat:2 }}</span>
+                                <span class="font-mono font-semibold text-ink tabular-nums">€{{ club.dues_owed|floatformat:2 }}</span>
                                 {% if club.dues_grace_until < today %}
-                                    <span class="badge badge-error">overdue</span>
+                                    <span class="badge badge-error badge-sm">Overdue</span>
                                 {% elif club.dues_period_end < today %}
-                                    <span class="badge badge-warning">grace</span>
+                                    <span class="badge badge-warning badge-sm">Grace</span>
                                 {% endif %}
                             {% endif %}
                         </div>
                     </td>
 
-                    <td class="text-right">
-                        <span class="whitespace-nowrap">{{ club.covered_until|date:"j M Y"|default:"-" }}</span>
-                    </td>
+                    <td class="text-right font-mono text-xs whitespace-nowrap text-muted">{{ club.covered_until|date:"j M Y"|default:"—" }}</td>
 
                     <td>
-                        <a class="btn btn-outline btn-sm gap-2" href="{% url "controlpanel:club_detail" club.pk %}">{% lucide "pencil" size=14 %} Edit</a>
+                        <a class="btn btn-outline btn-xs gap-1" href="{% url "controlpanel:club_detail" club.pk %}">{% lucide "pencil" size=12 %} Edit</a>
                     </td>
                 </tr>
             {% empty %}
                 <tr>
-                    <td colspan="9" class="text-center opacity-60">{{ empty_message|default:"No clubs yet." }}</td>
+                    <td colspan="10" class="text-center text-muted">{{ empty_message|default:"No clubs yet." }}</td>
                 </tr>
             {% endfor %}
         </tbody>

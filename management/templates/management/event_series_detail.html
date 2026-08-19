@@ -2,7 +2,13 @@
 {% load i18n lucide ui %}
 
 {% block heading %}{{ series.title }}{% endblock heading %}
-{% block subheading %}{{ series.get_kind_display }} · {{ recurrence_summary }}{% endblock subheading %}
+
+{% block topbar_context %}
+    <span class="badge {% if series.kind == "game" %}badge-error{% elif series.kind == "training" %}badge-info{% elif series.kind == "tournament" %}badge-warning{% elif series.kind == "meeting" %}badge-neutral{% elif series.kind == "social" %}border-violet/30 bg-violet/10 text-violet{% else %}badge-outline{% endif %}">
+        {{ series.get_kind_display }}
+    </span>
+    <span class="font-mono text-xs text-muted">{{ recurrence_summary }}</span>
+{% endblock topbar_context %}
 
 {% block actions %}
     {% if can_manage %}
@@ -17,57 +23,57 @@
 {% endblock actions %}
 
 {% block panel %}
-    <div class="mb-6 grid gap-4 lg:grid-cols-2">
-        <div class="card bg-base-100 shadow">
+    <div class="grid gap-4 lg:grid-cols-2">
+        <div class="card">
             <div class="card-body">
                 <h2 class="card-title text-base">{% lucide "repeat" size=18 %} {% trans "Recurrence" %}</h2>
-                <dl class="divide-y divide-base-200">
-                    <div class="flex flex-col gap-0.5 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-                        <dt class="text-sm opacity-70">{% trans "Pattern" %}</dt>
-                        <dd class="sm:text-right">{{ recurrence_summary }}</dd>
+                <dl>
+                    <div class="flex items-center justify-between gap-4 py-2">
+                        <dt class="text-sm text-muted">{% trans "Pattern" %}</dt>
+                        <dd class="text-sm text-ink">{{ recurrence_summary }}</dd>
                     </div>
-                    <div class="flex flex-col gap-0.5 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-                        <dt class="text-sm opacity-70">{% trans "First occurrence" %}</dt>
-                        <dd class="sm:text-right">{{ series.dtstart|date:"j M Y H:i" }}</dd>
+                    <div class="flex items-center justify-between gap-4 py-2">
+                        <dt class="text-sm text-muted">{% trans "First occurrence" %}</dt>
+                        <dd class="font-mono text-sm text-ink">{{ series.dtstart|date:"j M Y H:i" }}</dd>
                     </div>
-                    <div class="flex flex-col gap-0.5 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-                        <dt class="text-sm opacity-70">{% trans "Repeats until" %}</dt>
-                        <dd class="sm:text-right">{{ series.until|date:"j M Y H:i"|default:"—" }}</dd>
+                    <div class="flex items-center justify-between gap-4 py-2">
+                        <dt class="text-sm text-muted">{% trans "Repeats until" %}</dt>
+                        <dd class="font-mono text-sm text-ink">{{ series.until|date:"j M Y H:i"|default:"—" }}</dd>
                     </div>
-                    <div class="flex flex-col gap-0.5 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-                        <dt class="text-sm opacity-70">{% trans "Generated up to" %}</dt>
-                        <dd class="sm:text-right">{{ series.generated_until|date:"j M Y"|default:"—" }}</dd>
+                    <div class="flex items-center justify-between gap-4 py-2">
+                        <dt class="text-sm text-muted">{% trans "Generated up to" %}</dt>
+                        <dd class="font-mono text-sm text-ink">{{ series.generated_until|date:"j M Y"|default:"—" }}</dd>
                     </div>
                 </dl>
             </div>
         </div>
 
-        <div class="card bg-base-100 shadow">
+        <div class="card">
             <div class="card-body">
                 <h2 class="card-title text-base">{% lucide "info" size=18 %} {% trans "Template" %}</h2>
-                <dl class="divide-y divide-base-200">
-                    <div class="flex flex-col gap-0.5 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-                        <dt class="text-sm opacity-70">{% trans "Location" %}</dt>
-                        <dd class="sm:text-right">{{ series.location|default:"—" }}</dd>
+                <dl>
+                    <div class="flex items-center justify-between gap-4 py-2">
+                        <dt class="text-sm text-muted">{% trans "Location" %}</dt>
+                        <dd class="text-sm text-ink">{{ series.location|default:"—" }}</dd>
                     </div>
-                    <div class="flex flex-col gap-0.5 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-                        <dt class="text-sm opacity-70">{% trans "Opponent" %}</dt>
-                        <dd class="sm:text-right">{{ series.opponent|default:"—" }}</dd>
+                    <div class="flex items-center justify-between gap-4 py-2">
+                        <dt class="text-sm text-muted">{% trans "Opponent" %}</dt>
+                        <dd class="text-sm text-ink">{{ series.opponent|default:"—" }}</dd>
                     </div>
-                    <div class="flex flex-col gap-0.5 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-                        <dt class="text-sm opacity-70">{% trans "Teams" %}</dt>
-                        <dd class="sm:text-right">{% for team in series.teams.all %}{{ team.name }}{% if not forloop.last %}, {% endif %}{% empty %}—{% endfor %}</dd>
+                    <div class="flex items-center justify-between gap-4 py-2">
+                        <dt class="text-sm text-muted">{% trans "Teams" %}</dt>
+                        <dd class="text-sm text-ink">{% for team in series.teams.all %}{{ team.name }}{% if not forloop.last %}, {% endif %}{% empty %}—{% endfor %}</dd>
                     </div>
                 </dl>
             </div>
         </div>
     </div>
 
-    <div class="card bg-base-100 shadow">
+    <div class="card">
         <div class="card-body">
             <h2 class="card-title text-base">{% lucide "calendar" size=18 %} {% trans "Occurrences" %}</h2>
             <div class="overflow-x-auto">
-                <table class="table table-cards">
+                <table class="table">
                     <thead>
                         <tr>
                             <th>{% trans "When" %}</th>
@@ -77,8 +83,8 @@
                     <tbody>
                         {% for occurrence in occurrences %}
                             <tr>
-                                <td class="font-semibold"><a class="link link-hover" href="{% url 'management:event_detail' occurrence.pk %}">{{ occurrence.start|date:"j M Y H:i" }}</a></td>
-                                <td data-label="{% trans 'Status' %}">
+                                <td class="font-mono text-sm font-semibold"><a class="link link-hover" href="{% url 'management:event_detail' occurrence.pk %}">{{ occurrence.start|date:"j M Y H:i" }}</a></td>
+                                <td>
                                     {% if occurrence.cancelled %}
                                         <span class="badge badge-outline gap-1">{% lucide "ban" size=12 %} {% trans "Cancelled" %}</span>
                                     {% elif occurrence.detached %}
@@ -92,7 +98,7 @@
                             </tr>
                         {% empty %}
                             <tr>
-                                <td colspan="2" class="text-center opacity-60">{% trans "No occurrences generated yet." %}</td>
+                                <td colspan="2" class="py-8 text-center text-muted">{% trans "No occurrences generated yet." %}</td>
                             </tr>
                         {% endfor %}
                     </tbody>

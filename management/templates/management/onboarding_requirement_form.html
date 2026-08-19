@@ -1,0 +1,57 @@
+{% extends "management/base.html" %}
+{% load i18n lucide ui %}
+
+{% block panel_title %}{% if update_view %}{% trans "Edit requirement" %}{% else %}{% trans "New requirement" %}{% endif %}{% endblock panel_title %}
+{% block heading %}{% if update_view %}{% blocktrans %}Edit {{ object }}{% endblocktrans %}{% else %}{% trans "New requirement" %}{% endif %}{% endblock heading %}
+
+{% block panel %}
+    <div class="card">
+        <div class="card-body">
+            <form method="post">
+                {% csrf_token %}
+
+                {% for error in form.non_field_errors %}
+                    <div class="alert alert-error">
+                        {% lucide "circle-x" size=18 %}
+                        <span>{{ error }}</span>
+                    </div>
+                {% endfor %}
+
+                <div class="grid grid-cols-2 gap-4">
+                    {% for field in form %}
+                        {% if field.name != "blocked_event_kinds" %}
+                            <div class="{% if field.widget_type == "textarea" or field.widget_type == "clearablefile" %}col-span-2{% endif %}">
+                                {% form_field field %}
+                            </div>
+                        {% endif %}
+                    {% endfor %}
+
+                    {% comment %}
+                        Hand-rendered: field.widget_type for CheckboxSelectMultiple
+                        ("checkboxselectmultiple") isn't one templatetags/field.html
+                        recognises, so {% form_field %} would fall through to its
+                        plain-input case and render an unusable <input type=
+                        "checkboxselectmultiple">.
+                    {% endcomment %}
+                    <div class="form-control col-span-2">
+                        <label class="label-text">{{ form.blocked_event_kinds.label }}</label>
+                        <div class="flex flex-wrap gap-3">
+                            {% for choice in form.blocked_event_kinds %}
+                                <label class="flex items-center gap-1.5 text-sm text-ink">
+                                    {{ choice.tag }} {{ choice.choice_label }}
+                                </label>
+                            {% endfor %}
+                        </div>
+                        <span class="label-text-alt mt-1">{{ form.blocked_event_kinds.help_text }}</span>
+                        {% for error in form.blocked_event_kinds.errors %}<div class="text-xs text-club-dark">{{ error }}</div>{% endfor %}
+                    </div>
+                </div>
+
+                <div class="mt-4 flex justify-start gap-2">
+                    <a class="btn btn-outline gap-2" href="{% url "management:onboarding_requirement_list" %}">{% lucide "arrow-left" size=16 %} {% trans "Cancel" %}</a>
+                    <button class="btn btn-primary gap-2" type="submit">{% lucide "save" size=16 %} {% trans "Save" %}</button>
+                </div>
+            </form>
+        </div>
+    </div>
+{% endblock panel %}

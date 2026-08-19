@@ -3,14 +3,22 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tailwindcss -i ./assets/app.css -o ./static/css/app.css --minify",
+    "build": "npm run build:app && npm run build:controlpanel && npm run build:management",
+    "build:app": "tailwindcss -i ./assets/app.css -o ./static/css/app.css --minify",
+    "build:controlpanel": "tailwindcss -i ./assets/controlpanel.css -o ./static/css/controlpanel.css --minify",
+    "build:management": "tailwindcss -i ./assets/management.css -o ./static/css/management.css --minify",
     "watch": "tailwindcss -i ./assets/app.css -o ./static/css/app.css --watch",
+    "watch:controlpanel": "tailwindcss -i ./assets/controlpanel.css -o ./static/css/controlpanel.css --watch",
+    "watch:management": "tailwindcss -i ./assets/management.css -o ./static/css/management.css --watch",
     "vendor:chart": "node -e \"const fs=require('fs');const s=fs.readFileSync('node_modules/chart.js/dist/chart.umd.js','utf8').split('\\n').filter(l=>!l.startsWith('//# sourceMappingURL=')).join('\\n');fs.writeFileSync('static/js/chart.js',s)\""
   },
   "devDependencies": {
     "@fontsource-variable/jetbrains-mono": "^5.2.8",
     "@fontsource-variable/roboto": "^5.2.10",
     "@fontsource-variable/tourney": "^5.2.8",
+    "@fontsource/barlow": "^5.3.0",
+    "@fontsource/barlow-condensed": "^5.3.0",
+    "@fontsource/ibm-plex-mono": "^5.3.0",
     "@fontsource/ubuntu": "^5.2.8",
     "@tailwindcss/cli": "^4.1.0",
     "daisyui": "^5.0.0",

@@ -1,5 +1,5 @@
 {% extends "management/base.html" %}
-{% load i18n %}
+{% load i18n lucide %}
 
 {% comment %}
     Shared placeholder for every entity that doesn't have its own list template yet
@@ -11,23 +11,26 @@
 {% block heading %}{{ page_title }}{% endblock heading %}
 
 {% block panel %}
-    <div class="card bg-base-100 shadow">
-        <div class="card-body">
-            <div class="overflow-x-auto">
-                <table class="table">
-                    <tbody>
-                        {% for object in object_list %}
-                            <tr>
-                                <td>{{ object }}</td>
-                            </tr>
-                        {% empty %}
-                            <tr>
-                                <td class="text-center opacity-60">{% trans "Nothing here yet." %}</td>
-                            </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
+    <div class="alert alert-info">
+        {% lucide "construction" size=18 %}
+        <span>{% trans "This section is still being built. For now it only lists what's on file." %}</span>
+    </div>
+
+    <div class="card overflow-hidden">
+        <div class="overflow-x-auto">
+            <table class="table">
+                <tbody>
+                    {% for object in object_list %}
+                        <tr>
+                            <td>{{ object }}</td>
+                        </tr>
+                    {% empty %}
+                        <tr>
+                            <td class="text-center text-muted">{% trans "Nothing here yet." %}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
         </div>
     </div>
 {% endblock panel %}

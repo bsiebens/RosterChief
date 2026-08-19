@@ -2,16 +2,17 @@
 {% load i18n lucide ui %}
 
 {% block heading %}{{ news_item.title }}{% endblock heading %}
-{% block subheading %}
+
+{% block topbar_context %}
     {% if news_item.status == "draft" %}
-        {% trans "Draft" %}
+        <span class="badge">{% trans "Draft" %}</span>
     {% elif news_item.is_scheduled %}
-        {% blocktrans with date=news_item.published_at %}Scheduled for {{ date }}{% endblocktrans %}
+        <span class="badge badge-info">{% blocktrans with date=news_item.published_at %}Scheduled for {{ date }}{% endblocktrans %}</span>
     {% else %}
-        {% blocktrans with date=news_item.published_at %}Published {{ date }}{% endblocktrans %}
+        <span class="badge badge-success">{% blocktrans with date=news_item.published_at %}Published {{ date }}{% endblocktrans %}</span>
     {% endif %}
-    · {{ news_item.get_visibility_display }}
-{% endblock subheading %}
+    <span class="font-mono text-xs text-dim">{{ news_item.get_visibility_display }}</span>
+{% endblock topbar_context %}
 
 {% block actions %}
     {% if can_edit %}
@@ -28,47 +29,57 @@
 {% endblock actions %}
 
 {% block panel %}
-    <div class="card bg-base-100 shadow">
+    <div class="card">
         <div class="card-body">
             {% if news_item.teams.all %}
-                <div class="flex flex-wrap gap-2 mb-2">
+                <div class="mb-1 flex flex-wrap gap-2">
                     {% for team in news_item.teams.all %}
                         <span class="badge badge-neutral">{{ team.short_name }}</span>
                     {% endfor %}
                 </div>
+            {% else %}
+                <div class="mb-1 font-display text-xs font-bold tracking-[.14em] text-club uppercase">{% trans "Club-wide" %}</div>
             {% endif %}
-            <p class="whitespace-pre-line">{{ news_item.body }}</p>
+            <div class="h-[3px] w-14 bg-club"></div>
+            <p class="whitespace-pre-line text-[15px] leading-relaxed text-ink">{{ news_item.body }}</p>
+
+            {% if news_item.created_by %}
+                <div class="mt-2 flex items-center gap-2.5 border-t border-line pt-3.5 text-sm text-muted">
+                    <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-steel font-display text-xs font-extrabold text-white">{{ news_item.created_by.first_name|slice:":1" }}{{ news_item.created_by.last_name|slice:":1" }}</span>
+                    {% blocktrans with name=news_item.created_by %}Posted by {{ name }}{% endblocktrans %}
+                </div>
+            {% endif %}
         </div>
     </div>
 
     {% if news_item.title_en or news_item.body_en %}
-        <div class="card bg-base-100 shadow mt-4">
+        <div class="card mt-4">
             <div class="card-body">
-                <h2 class="card-title text-base">{% trans "English" %}</h2>
-                {% if news_item.title_en %}<p class="font-semibold">{{ news_item.title_en }}</p>{% endif %}
-                {% if news_item.body_en %}<p class="whitespace-pre-line">{{ news_item.body_en }}</p>{% endif %}
+                <h2 class="card-title">{% lucide "languages" size=18 %} {% trans "English" %}</h2>
+                {% if news_item.title_en %}<p class="font-display text-lg font-extrabold text-ink uppercase">{{ news_item.title_en }}</p>{% endif %}
+                {% if news_item.body_en %}<p class="whitespace-pre-line text-[15px] leading-relaxed text-ink">{{ news_item.body_en }}</p>{% endif %}
             </div>
         </div>
     {% endif %}
 
-    <div class="card bg-base-100 shadow mt-4">
+    <div class="card mt-4">
         <div class="card-body">
             <div class="flex flex-wrap items-center justify-between gap-2">
-                <h2 class="card-title text-base">{% trans "Photos" %}</h2>
+                <h2 class="card-title">{% lucide "image" size=18 %} {% trans "Photos" %}</h2>
                 {% if can_edit %}
                     <button class="btn btn-outline btn-sm gap-2" type="button" onclick="document.getElementById('add_photos_modal').showModal()">{% lucide "image-plus" size=14 %} {% trans "Add photos" %}</button>
                 {% endif %}
             </div>
 
-            <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mt-2">
+            <div class="mt-2 grid grid-cols-2 gap-4 md:grid-cols-4">
                 {% for photo in news_item.photos.all %}
                     <div class="relative">
-                        <img class="rounded-box aspect-square object-cover w-full" src="{{ photo.image.url }}" alt="">
+                        <img class="aspect-square w-full rounded-box border border-line object-cover" src="{{ photo.image.url }}" alt="">
                         {% if photo.is_main %}
-                            <span class="badge badge-success badge-sm absolute top-1 left-1">{% trans "Main" %}</span>
+                            <span class="badge badge-success badge-sm absolute top-1.5 left-1.5">{% trans "Main" %}</span>
                         {% endif %}
                         {% if can_edit %}
-                            <div class="flex flex-wrap gap-1 mt-1">
+                            <div class="mt-1 flex flex-wrap gap-1">
                                 {% if not photo.is_main %}
                                     <form method="post" action="{% url 'management:news_photo_set_main' news_item.pk photo.pk %}">
                                         {% csrf_token %}
@@ -85,7 +96,7 @@
                         {% endif %}
                     </div>
                 {% empty %}
-                    <p class="opacity-60 col-span-full">{% trans "No photos yet." %}</p>
+                    <p class="col-span-full text-sm text-muted">{% trans "No photos yet." %}</p>
                 {% endfor %}
             </div>
         </div>

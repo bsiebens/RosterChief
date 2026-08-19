@@ -6,27 +6,27 @@
     `dues`, `today`, `subscription_form`, `open_period_form`, `open_period_blurb` already
     in context.
 {% endcomment %}
-<div class="card mb-6 bg-base-100 shadow">
-    <div class="card-body">
-        <div class="flex flex-wrap items-center justify-between gap-2">
-            <h2 class="card-title text-base">{% lucide "receipt-euro" size=18 %} Billing</h2>
-            <div class="flex flex-wrap gap-2">
-                <button class="btn btn-outline btn-sm gap-2" type="button" onclick="document.getElementById('subscription_modal').showModal()">
-                    {% lucide "layers" size=14 %} {% if subscription %}Change plan{% else %}Start billing{% endif %}
+<div class="card flex flex-col">
+    <div class="flex flex-wrap items-center justify-between gap-2 border-b border-line px-4 py-3">
+        <span class="font-display text-sm font-extrabold tracking-[.1em] text-ink uppercase">Plan &amp; billing</span>
+        <div class="flex flex-wrap gap-2">
+            <button class="btn btn-outline btn-sm gap-2" type="button" onclick="document.getElementById('subscription_modal').showModal()">
+                {% lucide "layers" size=14 %} {% if subscription %}Change plan{% else %}Start billing{% endif %}
+            </button>
+            {% if not subscription %}
+                <button class="btn btn-outline btn-sm gap-2" type="button" onclick="document.getElementById('trial_modal').showModal()">
+                    {% lucide "hourglass" size=14 %} Start trial
                 </button>
-                {% if not subscription %}
-                    <button class="btn btn-outline btn-sm gap-2" type="button" onclick="document.getElementById('trial_modal').showModal()">
-                        {% lucide "hourglass" size=14 %} Start trial
-                    </button>
-                {% endif %}
-                {% if subscription %}
-                    <button class="btn btn-primary btn-sm gap-2" type="button" onclick="document.getElementById('open_period_modal').showModal()">
-                        {% lucide "calendar-plus" size=14 %} {% if club.is_archived %}Reactivate{% else %}Open period{% endif %}
-                    </button>
-                {% endif %}
-            </div>
+            {% endif %}
+            {% if subscription %}
+                <button class="btn btn-primary btn-sm gap-2" type="button" onclick="document.getElementById('open_period_modal').showModal()">
+                    {% lucide "calendar-plus" size=14 %} {% if club.is_archived %}Reactivate{% else %}Open period{% endif %}
+                </button>
+            {% endif %}
         </div>
+    </div>
 
+    <div class="flex flex-col gap-3 px-4 py-3">
         {% comment %}
             Paying up does not un-archive a club on its own -- restoring is a deliberate act,
             because a club can also be archived by hand for reasons that have nothing to do
@@ -34,20 +34,20 @@
             instead of something you have to remember to go and check.
         {% endcomment %}
         {% if club.is_archived and dues_settled %}
-            <div class="alert alert-success alert-sm mb-2">
+            <div class="alert alert-success">
                 {% lucide "circle-check" size=16 %}
                 <span>This club is archived but owes nothing. Reactivating will restore access and open its next period.</span>
             </div>
         {% endif %}
 
         {% if not subscription %}
-            <p class="text-sm opacity-70">This club is not billed for anything. Put it on a plan to start.</p>
+            <p class="text-sm text-muted">This club is not billed for anything. Put it on a plan to start.</p>
         {% else %}
-            <p class="text-sm opacity-70">
-                On plan <strong>{{ subscription.plan.name }}</strong>.
+            <p class="text-sm text-slate">
+                On plan <strong class="text-ink">{{ subscription.plan.name }}</strong>.
                 {% if subscription.trial_ends_at %}
                     <span class="badge badge-info badge-sm gap-1">{% lucide "hourglass" size=12 %} Trial</span>
-                    On trial until {{ subscription.trial_ends_at|date:"j M Y" }}, then switches to <strong>{{ subscription.post_trial_plan.name }}</strong>.
+                    On trial until {{ subscription.trial_ends_at|date:"j M Y" }}, then switches to <strong class="text-ink">{{ subscription.post_trial_plan.name }}</strong>.
                 {% endif %}
                 {{ subscription.plan.duration_months }}-month periods, archived {{ subscription.plan.grace_days }} days after a period starts if unpaid.
                 {% if subscription.auto_renew %}
@@ -76,28 +76,32 @@
                     <tbody>
                         {% for due in dues %}
                             <tr>
-                                <td>
+                                <td class="min-w-[220px] whitespace-nowrap">
                                     {{ due.period_start|date:"j M Y" }} — {{ due.period_end|date:"j M Y" }}
-                                    <div class="text-xs opacity-60">{{ due.plan.name }} · {{ due.invoice.number }} · grace to {{ due.grace_until|date:"j M Y" }}</div>
+                                    <div class="font-mono text-[11px] text-muted">
+                                        {{ due.plan.name }} · {{ due.invoice.number }}
+                                        <div>grace to {{ due.grace_until|date:"j M Y" }}</div>
+                                    </div>
                                 </td>
-                                <td class="text-right tabular-nums">€{{ due.amount|floatformat:2 }}</td>
-                                <td class="text-right tabular-nums">€{{ due.amount_paid|floatformat:2 }}</td>
+                                <td class="text-right font-mono tabular-nums">€{{ due.amount|floatformat:2 }}</td>
+                                <td class="text-right font-mono tabular-nums">€{{ due.amount_paid|floatformat:2 }}</td>
                                 <td class="text-right">
                                     {% if due.status == "paid" %}
                                         <span class="badge badge-success gap-1">{% lucide "check" size=12 %} Paid</span>
                                     {% elif due.status == "waived" %}
-                                        <span class="badge badge-outline gap-1">{% lucide "check" size=12 %} Waived</span>
+                                        <span class="badge badge-ghost gap-1">{% lucide "check" size=12 %} Waived</span>
                                     {% elif due.grace_until < today %}
                                         <span class="badge badge-error gap-1">{% lucide "triangle-alert" size=12 %} Overdue</span>
                                     {% elif due.period_end < today %}
                                         <span class="badge badge-warning gap-1">{% lucide "hourglass" size=12 %} In grace</span>
                                     {% else %}
-                                        <span class="badge badge-outline">{{ due.get_status_display }}</span>
+                                        <span class="badge badge-ghost">{{ due.get_status_display }}</span>
                                     {% endif %}
                                 </td>
-                                <td class="text-right flex flex-row gap-2 justify-end">
+                                <td class="text-right">
+                                    <div class="flex flex-row flex-wrap items-center justify-end gap-2">
                                     {% if due.is_owing %}
-                                        <button class="btn btn-primary btn-outline btn-sm gap-1" type="button" onclick="document.getElementById('{{ due.pk|dom_id:"due_pay_modal" }}').showModal()">{% lucide "banknote" size=14 %} Add payment</button>
+                                        <button class="btn btn-outline btn-sm gap-1" type="button" onclick="document.getElementById('{{ due.pk|dom_id:"due_pay_modal" }}').showModal()">{% lucide "banknote" size=14 %} Add payment</button>
                                         {% if not due.payments.all %}
                                             <form class="inline" method="post" action="{% url 'controlpanel:due_waive' due.pk %}">
                                                 {% csrf_token %}
@@ -105,11 +109,12 @@
                                             </form>
                                         {% endif %}
                                     {% endif %}
-                                    <a class="btn btn-accent btn-outline btn-sm gap-1" href="{% url 'controlpanel:due_invoice' due.pk %}">{% lucide "file-down" size=14 %} Download invoice</a>
+                                    <a class="btn btn-outline btn-sm gap-1" href="{% url 'controlpanel:due_invoice' due.pk %}">{% lucide "file-down" size=14 %} Download invoice</a>
+                                    </div>
                                 </td>
                             </tr>
                             {% for payment in due.payments.all %}
-                                <tr class="text-xs opacity-70">
+                                <tr class="font-mono text-[11px] text-muted">
                                     <td colspan="2" class="pl-8">
                                         {% lucide "corner-down-right" size=12 %}
                                         {{ payment.paid_at|date:"j M Y" }} · {{ payment.get_method_display }}{% if payment.reference %} · {{ payment.reference }}{% endif %}
@@ -120,7 +125,7 @@
                             {% endfor %}
                         {% empty %}
                             <tr>
-                                <td colspan="5" class="text-center opacity-60">No periods billed yet.</td>
+                                <td colspan="5" class="text-center text-muted">No periods billed yet.</td>
                             </tr>
                         {% endfor %}
                     </tbody>

@@ -1,7 +1,8 @@
-from datetime import timedelta
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from io import StringIO
 
+from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
 from django.db import IntegrityError
@@ -9,7 +10,8 @@ from django.test import TestCase
 from django.utils import timezone
 from waffle import get_waffle_flag_model
 
-from club.models import Club, ClubMembership, Season
+from club.models import Club, ClubMembership, OnboardingRequirement, Season
+from club.services.onboarding import mark_bypassed, mark_complete
 from members.models import Group, GroupMembership, Member
 from teams.models import Position, RefereeLevel, RefereeProfile, Team, TeamMembership
 
@@ -28,6 +30,7 @@ from .services import (
     team_attendance_rate,
     team_no_shows,
 )
+from .services.calendar import add_months, month_bounds, month_grid, season_grid, week_bounds, week_grid
 from .services.rbihf_import import RBIHFImportError, apply_plan, build_plan, extract_team_id, parse_fixtures, suggested_location, suggested_opponent
 from .services.referees import RefereeAssignmentError, add_external_referee, assign_referee, conflicting_events, eligible_referees, needs_referee_management, remove_referee, set_referee_fee
 
@@ -256,6 +259,66 @@ class EffectiveMembersTests(EventsTestBase):
         event.excluded_members.set([carol])
 
         self.assertEqual(self.attendee_ids(event), {dave.id})
+
+    # --- onboarding-requirement gating (club.services.onboarding.blocked_member_ids_for_event) ---
+    def make_membership(self, member, **kwargs):
+        kwargs.setdefault("status", ClubMembership.StatusChoices.ACTIVE)
+        return ClubMembership.objects.create(club=self.club, member=member, season=self.season, **kwargs)
+
+    def test_an_open_blocking_requirement_excludes_the_member_for_that_kind(self):
+        self.make_membership(self.alice)
+        OnboardingRequirement.objects.create(club=self.club, name="Medical certificate", blocked_event_kinds=["game"])
+        event = self.make_event(kind=Event.EventKind.GAME)
+        event.teams.set([self.team])
+
+        self.assertEqual(self.attendee_ids(event), {self.bob.id})
+
+    def test_the_same_open_requirement_does_not_block_an_unlisted_kind(self):
+        self.make_membership(self.alice)
+        OnboardingRequirement.objects.create(club=self.club, name="Medical certificate", blocked_event_kinds=["game"])
+        event = self.make_event(kind=Event.EventKind.TRAINING)
+        event.teams.set([self.team])
+
+        self.assertEqual(self.attendee_ids(event), {self.alice.id, self.bob.id})
+
+    def test_a_completed_blocking_requirement_stops_excluding_the_member(self):
+        membership = self.make_membership(self.alice)
+        staff = get_user_model().objects.create_user(email="staff@example.com", password="pw-secret-123")
+        requirement = OnboardingRequirement.objects.create(club=self.club, name="Medical certificate", blocked_event_kinds=["game"])
+        mark_complete(membership, requirement, user=staff)
+        event = self.make_event(kind=Event.EventKind.GAME)
+        event.teams.set([self.team])
+
+        self.assertEqual(self.attendee_ids(event), {self.alice.id, self.bob.id})
+
+    def test_a_bypassed_blocking_requirement_also_stops_excluding_the_member(self):
+        membership = self.make_membership(self.alice)
+        staff = get_user_model().objects.create_user(email="staff@example.com", password="pw-secret-123")
+        requirement = OnboardingRequirement.objects.create(club=self.club, name="Medical certificate", blocked_event_kinds=["game"])
+        mark_bypassed(membership, requirement, user=staff, note="waived")
+        event = self.make_event(kind=Event.EventKind.GAME)
+        event.teams.set([self.team])
+
+        self.assertEqual(self.attendee_ids(event), {self.alice.id, self.bob.id})
+
+    def test_an_explicit_invite_overrides_the_block(self):
+        self.make_membership(self.alice)
+        OnboardingRequirement.objects.create(club=self.club, name="Medical certificate", blocked_event_kinds=["game"])
+        event = self.make_event(kind=Event.EventKind.GAME)
+        event.teams.set([self.team])
+        event.invited_members.set([self.alice])
+
+        self.assertEqual(self.attendee_ids(event), {self.alice.id, self.bob.id})
+
+    def test_a_member_with_no_club_membership_at_all_is_unaffected_either_way(self):
+        # Alice/Bob have a TeamMembership but no ClubMembership in the base fixture --
+        # blocked_member_ids_for_event has nothing to look up for them, and they were
+        # never excluded by it to begin with (this is really a "doesn't crash" check).
+        OnboardingRequirement.objects.create(club=self.club, name="Medical certificate", blocked_event_kinds=["game"])
+        event = self.make_event(kind=Event.EventKind.GAME)
+        event.teams.set([self.team])
+
+        self.assertEqual(self.attendee_ids(event), {self.alice.id, self.bob.id})
 
 
 class AttendanceSyncTests(EventsTestBase):
@@ -1289,3 +1352,119 @@ class RefereeServiceTests(EventsTestBase):
         assignment.refresh_from_db()
         self.assertEqual(assignment.km_total, Decimal("0"))
         self.assertEqual(assignment.total_payable, Decimal("25.00"))
+
+
+class CalendarGridTests(EventsTestBase):
+    """events.services.calendar -- date-range math and grid layout behind the
+    Events page's Week/Month/Season views."""
+
+    def at(self, day, hour, minute=0):
+        return timezone.make_aware(datetime.combine(day, time(hour, minute)))
+
+    def test_week_bounds_returns_monday_to_sunday(self):
+        start, end = week_bounds(date(2026, 8, 19))  # a Wednesday
+
+        self.assertEqual(start, date(2026, 8, 17))
+        self.assertEqual(end, date(2026, 8, 23))
+
+    def test_month_bounds_returns_first_and_last_day(self):
+        start, end = month_bounds(date(2026, 2, 10))
+
+        self.assertEqual(start, date(2026, 2, 1))
+        self.assertEqual(end, date(2026, 2, 28))
+
+    def test_add_months_rolls_over_the_year(self):
+        self.assertEqual(add_months(date(2026, 11, 15), 2), date(2027, 1, 1))
+
+    def test_week_grid_places_an_event_within_the_default_hours(self):
+        monday = date(2026, 8, 17)
+        event = self.make_event(start=self.at(monday, 10), end=self.at(monday, 11, 30))
+
+        grid = week_grid([event], monday)
+
+        self.assertEqual(grid["day_start_hour"], 8)
+        self.assertEqual(grid["day_end_hour"], 22)
+        span = 22 - 8
+        block = grid["days"][0]["blocks"][0]
+        self.assertAlmostEqual(block["top_pct"], 100 * (10 - 8) / span, places=2)
+        self.assertAlmostEqual(block["height_pct"], 100 * 1.5 / span, places=2)
+
+    def test_week_grid_expands_the_hours_for_an_early_or_late_event(self):
+        monday = date(2026, 8, 17)
+        event = self.make_event(start=self.at(monday, 6), end=self.at(monday, 23))
+
+        grid = week_grid([event], monday)
+
+        self.assertEqual(grid["day_start_hour"], 6)
+        self.assertEqual(grid["day_end_hour"], 23)
+
+    def test_week_grid_excludes_events_outside_the_week(self):
+        monday = date(2026, 8, 17)
+        event = self.make_event(start=self.at(monday + timedelta(days=7), 10))
+
+        grid = week_grid([event], monday)
+
+        self.assertFalse(any(day["blocks"] for day in grid["days"]))
+
+    def test_week_grid_splits_overlapping_events_into_columns(self):
+        monday = date(2026, 8, 17)
+        first = self.make_event(title="Training A", start=self.at(monday, 10), end=self.at(monday, 11))
+        second = self.make_event(title="Training B", start=self.at(monday, 10, 30), end=self.at(monday, 11, 30))
+
+        grid = week_grid([first, second], monday)
+
+        blocks = grid["days"][0]["blocks"]
+        self.assertEqual(len(blocks), 2)
+        self.assertEqual({block["width_pct"] for block in blocks}, {50.0})
+        self.assertEqual({block["left_pct"] for block in blocks}, {0.0, 50.0})
+
+    def test_week_grid_gives_non_overlapping_events_full_width(self):
+        monday = date(2026, 8, 17)
+        first = self.make_event(title="Morning", start=self.at(monday, 9), end=self.at(monday, 10))
+        second = self.make_event(title="Evening", start=self.at(monday, 18), end=self.at(monday, 19))
+
+        grid = week_grid([first, second], monday)
+
+        blocks = grid["days"][0]["blocks"]
+        self.assertTrue(all(block["width_pct"] == 100.0 for block in blocks))
+
+    def test_month_grid_always_spans_full_weeks_of_seven_days(self):
+        grid = month_grid([], date(2026, 2, 1))  # Feb 2026 starts on a Sunday
+
+        self.assertTrue(all(len(week) == 7 for week in grid["weeks"]))
+        self.assertEqual(grid["weeks"][0][0]["date"].weekday(), 0)  # Monday
+
+    def test_month_grid_flags_days_outside_the_month(self):
+        grid = month_grid([], date(2026, 2, 1))
+
+        self.assertFalse(grid["weeks"][0][0]["in_month"])  # January spillover
+        in_month_cell = next(cell for week in grid["weeks"] for cell in week if cell["date"] == date(2026, 2, 1))
+        self.assertTrue(in_month_cell["in_month"])
+
+    def test_month_grid_buckets_events_under_their_start_day(self):
+        event = self.make_event(start=self.at(date(2026, 2, 12), 14))
+
+        grid = month_grid([event], date(2026, 2, 1))
+
+        cell = next(cell for week in grid["weeks"] for cell in week if cell["date"] == date(2026, 2, 12))
+        self.assertEqual(cell["events"], [event])
+
+    def test_season_grid_spans_every_month_of_the_season(self):
+        season = Season.objects.create(club=self.club, start_date=date(2026, 8, 1), end_date=date(2027, 7, 31))
+
+        months = season_grid([], season)
+
+        self.assertEqual(len(months), 12)
+        self.assertEqual(months[0]["label"], date(2026, 8, 1))
+        self.assertEqual(months[-1]["label"], date(2027, 7, 1))
+
+    def test_season_grid_cells_carry_a_count_not_the_event_list(self):
+        season = Season.objects.create(club=self.club, start_date=date(2026, 8, 1), end_date=date(2027, 7, 31))
+        event = self.make_event(start=self.at(date(2026, 9, 5), 10))
+
+        months = season_grid([event], season)
+
+        september = next(month for month in months if month["label"] == date(2026, 9, 1))
+        cell = next(cell for week in september["weeks"] for cell in week if cell["date"] == date(2026, 9, 5))
+        self.assertEqual(cell["count"], 1)
+        self.assertNotIn("events", cell)

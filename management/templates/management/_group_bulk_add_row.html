@@ -6,8 +6,8 @@
 <tr class="bulk-add-row">
     <td>
         {{ form.member }}
-        {% for error in form.member.errors %}<p class="text-xs text-error mt-1">{{ error }}</p>{% endfor %}
-        {% for error in form.non_field_errors %}<p class="text-xs text-error mt-1">{{ error }}</p>{% endfor %}
+        {% for error in form.member.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
+        {% for error in form.non_field_errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
     </td>
     <td class="w-12">
         <button class="btn btn-ghost btn-sm remove-row" type="button" aria-label="{% trans 'Remove this row' %}" title="{% trans 'Remove this row' %}">{% lucide "x" size=16 %}</button>

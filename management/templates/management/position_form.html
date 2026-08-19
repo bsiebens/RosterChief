@@ -4,31 +4,31 @@
 {% block heading %}{% if update_view %}{% blocktrans %}Edit {{ object }}{% endblocktrans %}{% else %}{% trans "New position" %}{% endif %}{% endblock heading %}
 
 {% block panel %}
-    <div class="card w-full bg-base-100 shadow">
+    <div class="card max-w-3xl">
         <div class="card-body">
             <form method="post">
                 {% csrf_token %}
 
                 {% for error in form.non_field_errors %}
-                    <div class="alert alert-error my-2">
+                    <div class="alert alert-error">
                         <span>{{ error }}</span>
                     </div>
                 {% endfor %}
 
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="grid grid-cols-2 gap-4">
                     {% form_field form.name %}
                     {% form_field form.short_name %}
                     {% form_field form.ordering %}
                 </div>
 
-                <div class="divider"></div>
+                <div class="my-2 border-t border-line"></div>
 
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="grid grid-cols-2 gap-4">
                     {% form_field form.staff_position %}
                     {% form_field form.management_position %}
                 </div>
 
-                <div class="card-actions justify-start pt-2 mt-2">
+                <div class="mt-4 flex gap-2">
                     <a class="btn btn-outline gap-2" href="{% url "management:position_list" %}">{% lucide "arrow-left" size=16 %} {% trans "Cancel" %}</a>
                     <button class="btn btn-primary gap-2" type="submit">{% lucide "save" size=16 %} {% trans "Save" %}</button>
                 </div>

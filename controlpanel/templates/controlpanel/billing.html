@@ -1,147 +1,182 @@
 {% extends "controlpanel/base.html" %}
-{% load lucide ui %}
+{% load i18n lucide ui %}
 
-{% block heading %}Billing{% endblock heading %}
+{% comment %}
+    Platform billing: RosterChief charging the clubs (not clubs charging their members --
+    see billing/services). Two tables: every Plan (with its dated price history) and every
+    Due currently owing across every club. Every action here already existed as a modal or
+    a link before this restyle; nothing was added or removed, only reskinned to the
+    industrial control-panel vocabulary (assets/controlpanel.css).
+{% endcomment %}
+
+{% block panel_title %}{% trans "Billing" %}{% endblock panel_title %}
+
+{% block breadcrumb %}
+    <span class="text-ink">billing</span>
+    <span class="text-edge">|</span>
+    <span>{{ plans|length }} plan{{ plans|length|pluralize }}</span>
+    <span class="text-edge">|</span>
+    <span>{{ owing|length }} club{{ owing|length|pluralize }} owing</span>
+{% endblock breadcrumb %}
 
 {% block actions %}
-    <button class="btn btn-primary gap-2" type="button" onclick="document.getElementById('plan_create_modal').showModal()">{% lucide "plus" size=16 %} New plan</button>
+    <button class="btn btn-primary gap-2" type="button" onclick="document.getElementById('plan_create_modal').showModal()">{% lucide "plus" size=14 %} {% trans "New plan" %}</button>
 {% endblock actions %}
 
 {% block panel %}
     {% url 'controlpanel:plan_create' as plan_create_url %}
-    {% include "controlpanel/_modal_form.html" with modal_id="plan_create_modal" title="New plan" form=plan_form action_url=plan_create_url submit_label="Create plan" submit_icon="plus" box_class="max-w-2xl" two_columns=True %}
+    {% trans "New plan" as new_plan_title %}
+    {% trans "Create plan" as create_plan_label %}
+    {% include "controlpanel/_modal_form.html" with modal_id="plan_create_modal" title=new_plan_title form=plan_form action_url=plan_create_url submit_label=create_plan_label submit_icon="plus" box_class="max-w-2xl" two_columns=True %}
 
-    <div class="card mb-6 bg-base-100 shadow">
-        <div class="card-body">
-            <h2 class="card-title text-base">{% lucide "layers" size=18 %} Plans</h2>
+    {# --- Plans ----------------------------------------------------------- #}
+    <div class="card flex flex-col">
+        <div class="flex items-center gap-3 border-b border-line px-4 py-3">
+            <span class="font-display text-sm font-extrabold tracking-[.1em] text-ink uppercase">{% trans "Plans" %}</span>
+            <span class="flex-1"></span>
             {% comment %}
                 Prices are dated, not edited. A rate change is a new row with a future
                 active_from; every period already opened keeps the amount it was billed at,
-                so raising the price cannot rewrite an invoice you have already sent.
+                so raising the price cannot rewrite an invoice already sent.
             {% endcomment %}
-            <p class="text-sm opacity-70">A rate change only takes effect as of a certain date. Periods already billed keep the amount they were issued at.</p>
-            <div class="overflow-x-auto">
-                <table class="table">
-                    <thead>
+            <span class="font-mono text-[11px] text-muted">{% trans "rate changes apply from a future date — open periods keep the amount they were billed at" %}</span>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>{% trans "Plan" %}</th>
+                        <th>{% trans "Timing" %}</th>
+                        <th class="text-right">{% trans "Clubs" %}</th>
+                        <th>{% trans "Prices" %}</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for plan in plans %}
                         <tr>
-                            <th>Plan</th>
-                            <th>Clocks</th>
-                            <th class="text-right">Clubs</th>
-                            <th>Prices</th>
-                            <th></th>
+                            <td>
+                                <div class="flex items-center gap-1.5">
+                                    <span class="font-semibold text-ink">{{ plan.name }}</span>
+                                    {% if plan.is_trial %}<span class="badge badge-info badge-xs">{% trans "Trial" %}</span>{% endif %}
+                                    {% if not plan.is_active %}<span class="badge badge-ghost badge-xs">{% trans "Retired" %}</span>{% endif %}
+                                </div>
+                                {% if plan.description %}<div class="mt-0.5 text-xs text-muted">{{ plan.description }}</div>{% endif %}
+                            </td>
+                            {% comment %}
+                                Named for what each measures from, because that is the easy
+                                thing to get wrong: grace runs from the period START, not its
+                                end.
+                            {% endcomment %}
+                            <td class="font-mono text-[11px] whitespace-nowrap text-muted">
+                                <div>{% blocktrans count counter=plan.duration_months %}{{ counter }} month{% plural %}{{ counter }} months{% endblocktrans %}</div>
+                                <div>{% blocktrans with days=plan.renewal_lead_days %}billed {{ days }}d before start{% endblocktrans %}</div>
+                                <div>{% blocktrans with days=plan.grace_days %}grace {{ days }}d after start{% endblocktrans %}</div>
+                            </td>
+                            <td class="text-right font-mono tabular-nums">{{ plan.club_count }}</td>
+                            <td>
+                                {% for price in plan.prices.all %}
+                                    <div class="flex items-center gap-1.5 font-mono text-xs whitespace-nowrap">
+                                        <span class="tabular-nums text-ink">€ {{ price.amount|floatformat:2 }}</span>
+                                        <span class="text-muted">{% blocktrans with active_from=price.active_from|date:"Y-m-d" %}from {{ active_from }}{% endblocktrans %}</span>
+                                        {% if price.active_from > today %}<span class="badge badge-info badge-xs">{% trans "Scheduled" %}</span>{% endif %}
+                                    </div>
+                                {% empty %}
+                                    <span class="badge badge-error badge-xs">{% trans "No price — cannot be billed" %}</span>
+                                {% endfor %}
+                            </td>
+                            <td>
+                                <div class="flex justify-end gap-2">
+                                    <button class="btn btn-outline btn-sm gap-1" type="button" onclick="document.getElementById('{{ plan.pk|dom_id:"plan_price_modal" }}').showModal()">{% lucide "euro" size=13 %} {% trans "New price" %}</button>
+                                    <button class="btn btn-outline btn-sm gap-1" type="button" onclick="document.getElementById('{{ plan.pk|dom_id:"plan_edit_modal" }}').showModal()">{% lucide "pencil" size=13 %} {% trans "Edit" %}</button>
+                                    <a class="btn btn-outline btn-error btn-sm gap-1" href="{% url 'controlpanel:plan_delete' plan.pk %}">{% lucide "trash-2" size=13 %} {% trans "Delete" %}</a>
+                                </div>
+                            </td>
                         </tr>
-                    </thead>
-                    <tbody>
-                        {% for plan in plans %}
-                            <tr>
-                                <td>
-                                    <div class="font-medium">{{ plan.name }}</div>
-                                    {% if plan.is_trial %}<span class="badge badge-info badge-xs">Trial</span>{% endif %}
-                                    {% if not plan.is_active %}<span class="badge badge-ghost badge-xs">Retired</span>{% endif %}
-                                    {% if plan.description %}
-                                        <div class="text-xs opacity-60">{{ plan.description }}</div>{% endif %}
-                                </td>
-                                {% comment %}
-                                    Named for what each measures from, because that is the easy thing to
-                                    get wrong: grace runs from the period START, not its end.
-                                {% endcomment %}
-                                <td class="text-xs opacity-70 whitespace-nowrap">
-                                    <div>{{ plan.duration_months }} month{{ plan.duration_months|pluralize }} long</div>
-                                    <div>billed {{ plan.renewal_lead_days }}d before it starts</div>
-                                    <div>archived {{ plan.grace_days }}d after it starts</div>
-                                </td>
-                                <td class="text-right tabular-nums">{{ plan.club_count }}</td>
-                                <td>
-                                    {% for price in plan.prices.all %}
-                                        <div class="text-sm tabular-nums">
-                                            €{{ price.amount|floatformat:2 }}
-                                            <span class="opacity-60">from {{ price.active_from|date:"j M Y" }}</span>
-                                            {% if price.active_from > today %}<span class="badge badge-info badge-xs">Scheduled</span>{% endif %}
-                                        </div>
-                                    {% empty %}
-                                        <span class="badge badge-error badge-sm">No price — cannot be billed</span>
-                                    {% endfor %}
-                                </td>
-                                <td class="flex flex-row gap-2 justify-end">
-                                    <button class="btn btn-primary btn-sm btn-outline gap-1" type="button" onclick="document.getElementById('{{ plan.pk|dom_id:"plan_price_modal" }}').showModal()">{% lucide "euro" size=14 %} New price</button>
-                                    <button class="btn btn-outline btn-sm gap-1" type="button" onclick="document.getElementById('{{ plan.pk|dom_id:"plan_edit_modal" }}').showModal()">{% lucide "pencil" size=14 %} Edit</button>
-                                    <a class="btn btn-error btn-outline btn-sm gap-1" href="{% url 'controlpanel:plan_delete' plan.pk %}">{% lucide "trash-2" size=14 %} Delete</a>
-                                </td>
-                            </tr>
-                        {% empty %}
-                            <tr>
-                                <td colspan="5" class="text-center opacity-60">No plans yet.</td>
-                            </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
+                    {% empty %}
+                        <tr>
+                            <td colspan="5" class="text-center text-muted">{% trans "No plans yet." %}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
         </div>
     </div>
 
     {% comment %} Dialogs live outside the table: <tbody> may only contain <tr> elements. {% endcomment %}
     {% for plan in plans %}
         {% url 'controlpanel:plan_price_create' plan.pk as plan_price_url %}
-        {% include "controlpanel/_modal_form.html" with modal_id=plan.pk|dom_id:"plan_price_modal" title="New price — "|add:plan.name form=plan.price_form action_url=plan_price_url submit_label="Add price" submit_icon="euro" %}
+        {% blocktrans asvar plan_price_title with plan=plan.name %}New price — {{ plan }}{% endblocktrans %}
+        {% trans "Add price" as add_price_label %}
+        {% include "controlpanel/_modal_form.html" with modal_id=plan.pk|dom_id:"plan_price_modal" title=plan_price_title form=plan.price_form action_url=plan_price_url submit_label=add_price_label submit_icon="euro" %}
 
         {% url 'controlpanel:plan_update' plan.pk as plan_update_url %}
-        {% include "controlpanel/_modal_form.html" with modal_id=plan.pk|dom_id:"plan_edit_modal" title="Edit "|add:plan.name form=plan.edit_form action_url=plan_update_url submit_label="Save" submit_icon="check" box_class="max-w-2xl" two_columns=True %}
+        {% blocktrans asvar plan_edit_title with plan=plan.name %}Edit {{ plan }}{% endblocktrans %}
+        {% trans "Save" as save_label %}
+        {% include "controlpanel/_modal_form.html" with modal_id=plan.pk|dom_id:"plan_edit_modal" title=plan_edit_title form=plan.edit_form action_url=plan_update_url submit_label=save_label submit_icon="check" box_class="max-w-2xl" two_columns=True %}
     {% endfor %}
 
-    <div class="card bg-base-100 shadow">
-        <div class="card-body">
-            <h2 class="card-title text-base">{% lucide "receipt-euro" size=18 %} Owed</h2>
-            <div class="overflow-x-auto">
-                <table class="table">
-                    <thead>
+    {# --- Owed -------------------------------------------------------------- #}
+    <div class="card flex flex-col">
+        <div class="flex items-center gap-3 border-b border-line px-4 py-3">
+            <span class="font-display text-sm font-extrabold tracking-[.1em] text-ink uppercase">{% trans "Owed" %}</span>
+            <span class="flex-1"></span>
+            <span class="font-mono text-[11px] text-muted">{% blocktrans count counter=owing|length %}{{ counter }} period outstanding{% plural %}{{ counter }} periods outstanding{% endblocktrans %}</span>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>{% trans "Club" %}</th>
+                        <th>{% trans "Period" %}</th>
+                        <th class="text-right">{% trans "Balance" %}</th>
+                        <th>{% trans "Status" %}</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for due in owing %}
                         <tr>
-                            <th>Club</th>
-                            <th>Period</th>
-                            <th class="text-right">Owed</th>
-                            <th class="text-right">Status</th>
-                            <th></th>
+                            <td>
+                                <a class="link link-hover font-semibold text-ink" href="{% url 'controlpanel:club_detail' due.club.pk %}">{{ due.club.name }}</a>
+                                <div class="text-xs text-muted">{{ due.plan.name }}</div>
+                            </td>
+                            <td class="font-mono text-[11px] whitespace-nowrap text-muted">
+                                {{ due.period_start|date:"Y-m-d" }} → {{ due.period_end|date:"Y-m-d" }}
+                                <div>{% blocktrans with grace_until=due.grace_until|date:"Y-m-d" %}grace to {{ grace_until }}{% endblocktrans %}</div>
+                            </td>
+                            <td class="text-right font-mono font-semibold tabular-nums text-ink">€ {{ due.balance|floatformat:2 }}</td>
+                            <td>
+                                {% if due.grace_until < today %}
+                                    <span class="badge badge-error gap-1">{% lucide "triangle-alert" size=11 %} {% trans "Overdue" %}</span>
+                                {% elif due.period_end < today %}
+                                    <span class="badge badge-warning gap-1">{% lucide "hourglass" size=11 %} {% trans "In grace" %}</span>
+                                {% else %}
+                                    <span class="badge badge-outline">{{ due.get_status_display }}</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <div class="flex justify-end gap-2">
+                                    <button class="btn btn-outline btn-success btn-sm gap-1" type="button" onclick="document.getElementById('{{ due.pk|dom_id:"due_pay_modal" }}').showModal()">{% lucide "banknote" size=13 %} {% trans "Record payment" %}</button>
+                                    <a class="btn btn-outline btn-sm gap-1" href="{% url 'controlpanel:due_invoice' due.pk %}">{% lucide "file-down" size=13 %} {% trans "Invoice" %}</a>
+                                </div>
+                            </td>
                         </tr>
-                    </thead>
-                    <tbody>
-                        {% for due in owing %}
-                            <tr>
-                                <td>
-                                    <a class="link link-hover font-medium" href="{% url 'controlpanel:club_detail' due.club.pk %}">{{ due.club.name }}</a>
-                                    <div class="text-xs opacity-60">{{ due.plan.name }}</div>
-                                </td>
-                                <td class="text-sm">
-                                    {{ due.period_start|date:"j M Y" }} — {{ due.period_end|date:"j M Y" }}
-                                    <div class="text-xs opacity-60">Grace to {{ due.grace_until|date:"j M Y" }}</div>
-                                </td>
-                                <td class="text-right font-semibold tabular-nums">€{{ due.balance|floatformat:2 }}</td>
-                                <td class="text-right">
-                                    {% if due.grace_until < today %}
-                                        <span class="badge badge-error gap-1">{% lucide "triangle-alert" size=12 %} Overdue</span>
-                                    {% elif due.period_end < today %}
-                                        <span class="badge badge-warning gap-1">{% lucide "hourglass" size=12 %} In grace</span>
-                                    {% else %}
-                                        <span class="badge badge-outline">{{ due.get_status_display }}</span>
-                                    {% endif %}
-                                </td>
-                                <td class="text-right flex flex-row gap-2 justify-end">
-                                    <button class="btn btn-primary btn-sm btn-outline gap-1" type="button" onclick="document.getElementById('{{ due.pk|dom_id:"due_pay_modal" }}').showModal()">{% lucide "banknote" size=14 %} Record payment</button>
-                                    <a class="btn btn-accent btn-outline btn-sm gap-1" href="{% url 'controlpanel:due_invoice' due.pk %}">{% lucide "file-down" size=14 %} Download invoice</a>
-                                </td>
-                            </tr>
-                        {% empty %}
-                            <tr>
-                                <td colspan="5" class="text-center opacity-60">Nothing outstanding.</td>
-                            </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
+                    {% empty %}
+                        <tr>
+                            <td colspan="5" class="text-center text-muted">{% trans "Nothing outstanding." %}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
         </div>
     </div>
 
     {% comment %} Dialogs live outside the table: <tbody> may only contain <tr> elements. {% endcomment %}
     {% for due in owing %}
         {% url 'controlpanel:due_pay' due.pk as due_pay_url %}
-        {% include "controlpanel/_modal_form.html" with modal_id=due.pk|dom_id:"due_pay_modal" title="Record payment — "|add:due.club.name form=due.payment_form action_url=due_pay_url submit_label="Record payment" submit_icon="banknote" %}
+        {% blocktrans asvar due_pay_title with club=due.club.name %}Record payment — {{ club }}{% endblocktrans %}
+        {% trans "Record payment" as record_payment_label %}
+        {% include "controlpanel/_modal_form.html" with modal_id=due.pk|dom_id:"due_pay_modal" title=due_pay_title form=due.payment_form action_url=due_pay_url submit_label=record_payment_label submit_icon="banknote" %}
     {% endfor %}
 {% endblock panel %}
