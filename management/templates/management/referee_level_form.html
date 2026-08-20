@@ -4,7 +4,7 @@
 {% block heading %}{% if update_view %}{% blocktrans %}Edit {{ object }}{% endblocktrans %}{% else %}{% trans "New referee level" %}{% endif %}{% endblock heading %}
 
 {% block panel %}
-    <div class="card max-w-3xl">
+    <div class="card">
         <div class="card-body">
             <form method="post">
                 {% csrf_token %}
@@ -17,7 +17,9 @@
 
                 <div class="grid grid-cols-2 items-start gap-4">
                     {% for field in form %}
-                        {% form_field field %}
+                        <div class="{% if field.widget_type == "selectmultiple" %}col-span-2{% endif %}">
+                            {% form_field field %}
+                        </div>
                     {% endfor %}
                 </div>
 
