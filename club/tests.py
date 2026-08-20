@@ -22,7 +22,7 @@ from members.models import Family, FamilyMembership, Member
 from teams.models import Position, StaffAssignment, Team, TeamMembership
 from teams.services import eligible_roster_members
 
-from .models import Club, ClubMembership, ClubRole, FeePayment, MemberRequirementStatus, OnboardingRequirement, Season, Sponsor, club_logo_path
+from .models import Club, ClubMembership, ClubRole, DuesInvoice, FeePayment, MemberRequirementStatus, OnboardingRequirement, Season, Sponsor, club_logo_path
 from .services.access import (
     COACH_MANAGER,
     can_edit_event,
@@ -39,6 +39,7 @@ from .services.access import (
     teams_staffed_by,
 )
 from .services.fees import mark_as_paid, record_payment, remaining_balance
+from .services.invoicing import create_or_resend_invoice, invoices_due_for_reminder, recipient_for
 from .services.onboarding import (
     annotate_onboarding_status,
     approve_all_clean,
@@ -1558,6 +1559,123 @@ class FeeServiceTests(TestCase):
         payment = record_payment(self.membership, amount=Decimal("50.00"), recorded_by=user)
 
         self.assertEqual(payment.recorded_by, user)
+
+
+class RecipientForTests(TestCase):
+    """club.services.invoicing.recipient_for -- the member's own email, else the
+    first parent/guardian who has one, else nobody reachable at all."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        cls.season = make_season(cls.club)
+
+    def test_the_members_own_email_wins(self):
+        member = Member.objects.create(first_name="Jane", last_name="Doe", email="jane@example.com")
+
+        email, used_guardian = recipient_for(member)
+
+        self.assertEqual(email, "jane@example.com")
+        self.assertFalse(used_guardian)
+
+    def test_falls_back_to_a_guardians_email_when_the_member_has_none(self):
+        family = Family.objects.create()
+        member = Member.objects.create(first_name="Jane", last_name="Doe")
+        parent = Member.objects.create(first_name="Pat", last_name="Doe", email="pat@example.com")
+        FamilyMembership.objects.create(family=family, member=member, role=FamilyMembership.FamilyRole.CHILD)
+        FamilyMembership.objects.create(family=family, member=parent, role=FamilyMembership.FamilyRole.PARENT)
+
+        email, used_guardian = recipient_for(member)
+
+        self.assertEqual(email, "pat@example.com")
+        self.assertTrue(used_guardian)
+
+    def test_empty_when_nobody_is_reachable(self):
+        family = Family.objects.create()
+        member = Member.objects.create(first_name="Jane", last_name="Doe")
+        parent = Member.objects.create(first_name="Pat", last_name="Doe")
+        FamilyMembership.objects.create(family=family, member=member, role=FamilyMembership.FamilyRole.CHILD)
+        FamilyMembership.objects.create(family=family, member=parent, role=FamilyMembership.FamilyRole.PARENT)
+
+        email, used_guardian = recipient_for(member)
+
+        self.assertEqual(email, "")
+        self.assertFalse(used_guardian)
+
+
+class CreateOrResendInvoiceTests(TestCase):
+    """club.services.invoicing.create_or_resend_invoice -- one invoice per
+    membership, numbered once, re-snapshotted on every send."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        cls.season = make_season(cls.club)
+        cls.member = Member.objects.create(first_name="Jane", last_name="Doe", email="jane@example.com")
+        cls.membership = ClubMembership.objects.create(club=cls.club, member=cls.member, season=cls.season, status=ClubMembership.StatusChoices.PENDING, fee_amount=Decimal("150.00"))
+
+    def test_amount_is_the_remaining_balance_not_the_full_fee(self):
+        record_payment(self.membership, amount=Decimal("50.00"))
+
+        invoice = create_or_resend_invoice(self.membership, due_in_days=14, recipient_email="jane@example.com", sent_to_guardian=False)
+
+        self.assertEqual(invoice.amount, Decimal("100.00"))
+
+    def test_due_date_is_today_plus_due_in_days(self):
+        invoice = create_or_resend_invoice(self.membership, due_in_days=10, recipient_email="jane@example.com", sent_to_guardian=False)
+
+        self.assertEqual(invoice.due_date, timezone.now().date() + datetime.timedelta(days=10))
+
+    def test_a_number_is_allocated_once(self):
+        invoice = create_or_resend_invoice(self.membership, due_in_days=14, recipient_email="jane@example.com", sent_to_guardian=False)
+        first_number = invoice.number
+
+        resent = create_or_resend_invoice(self.membership, due_in_days=30, recipient_email="jane@example.com", sent_to_guardian=False)
+
+        self.assertEqual(resent.pk, invoice.pk)
+        self.assertEqual(resent.number, first_number)
+        self.assertEqual(resent.due_date, timezone.now().date() + datetime.timedelta(days=30))
+
+    def test_a_membership_can_only_ever_have_one_invoice_row(self):
+        create_or_resend_invoice(self.membership, due_in_days=14, recipient_email="jane@example.com", sent_to_guardian=False)
+        create_or_resend_invoice(self.membership, due_in_days=14, recipient_email="jane@example.com", sent_to_guardian=False)
+
+        self.assertEqual(DuesInvoice.objects.filter(membership=self.membership).count(), 1)
+
+
+class InvoicesDueForReminderTests(TestCase):
+    """club.services.invoicing.invoices_due_for_reminder -- sent, unpaid, past
+    their own due date; never paid, waived, or not yet due."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        cls.season = make_season(cls.club)
+
+    def make_invoice(self, *, fee_status, due_date, sent_at=None):
+        member = Member.objects.create(first_name="Member", last_name=fee_status)
+        membership = ClubMembership.objects.create(club=self.club, member=member, season=self.season, status=ClubMembership.StatusChoices.PENDING, fee_amount=Decimal("100.00"), fee_status=fee_status)
+        return DuesInvoice.objects.create(club=self.club, membership=membership, amount=Decimal("100.00"), due_date=due_date, sent_at=sent_at or timezone.now())
+
+    def test_includes_an_overdue_unpaid_invoice(self):
+        overdue = self.make_invoice(fee_status=ClubMembership.FeeStatus.UNPAID, due_date=timezone.now().date() - datetime.timedelta(days=1))
+
+        self.assertIn(overdue, invoices_due_for_reminder(self.club))
+
+    def test_excludes_a_paid_invoice(self):
+        paid = self.make_invoice(fee_status=ClubMembership.FeeStatus.PAID, due_date=timezone.now().date() - datetime.timedelta(days=1))
+
+        self.assertNotIn(paid, invoices_due_for_reminder(self.club))
+
+    def test_excludes_a_waived_invoice(self):
+        waived = self.make_invoice(fee_status=ClubMembership.FeeStatus.WAIVED, due_date=timezone.now().date() - datetime.timedelta(days=1))
+
+        self.assertNotIn(waived, invoices_due_for_reminder(self.club))
+
+    def test_excludes_one_not_yet_due(self):
+        not_due = self.make_invoice(fee_status=ClubMembership.FeeStatus.UNPAID, due_date=timezone.now().date() + datetime.timedelta(days=5))
+
+        self.assertNotIn(not_due, invoices_due_for_reminder(self.club))
 
 
 class SeasonStartEndTests(TestCase):

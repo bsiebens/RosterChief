@@ -1,0 +1,10 @@
+{% load i18n %}{% blocktrans with name=member.first_name %}Hello {{ name }},{% endblocktrans %}
+
+{% blocktrans with club=club.name date=invoice.due_date|date:"j F Y" %}This is a reminder that {{ club }}'s invoice for your membership fee was due on {{ date }} and is still unpaid.{% endblocktrans %}
+
+{% trans "Amount due:" %} €{{ invoice.amount }}
+{% trans "Invoice number:" %} {{ invoice.number }}
+{% if club.contact_email %}
+{% blocktrans with email=club.contact_email %}Already paid? Let us know at {{ email }} so we can update our records.{% endblocktrans %}
+{% endif %}
+{% blocktrans with club=club.name %}— {{ club }}{% endblocktrans %}

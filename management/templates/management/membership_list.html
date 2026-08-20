@@ -10,6 +10,14 @@
 {% endblock topbar_context %}
 
 {% block actions %}
+    <form method="post" action="{% url 'management:membership_send_invoice_reminders' %}" class="inline-flex">
+        {% csrf_token %}
+        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+        <button class="btn btn-outline gap-2" type="submit">
+            {% lucide "bell" size=16 %} {% trans "Send reminders" %}
+            {% if kpi_overdue_invoices %}<span class="badge badge-error badge-xs">{{ kpi_overdue_invoices }}</span>{% endif %}
+        </button>
+    </form>
     <a class="btn btn-outline gap-2" href="{% url 'management:membership_export_pdf' %}?{{ request.GET.urlencode }}">{% lucide "file-down" size=16 %} {% trans "Export to PDF" %}</a>
 {% endblock actions %}
 
@@ -108,7 +116,10 @@
                 <span class="font-display text-sm font-bold tracking-wide text-muted uppercase">
                     {% blocktrans count counter=memberships|length %}{{ counter }} membership{% plural %}{{ counter }} memberships{% endblocktrans %}
                 </span>
-                <button class="btn btn-success btn-sm gap-2" type="submit">{% lucide "circle-check" size=14 %} {% trans "Mark selected as paid" %}</button>
+                <div class="flex gap-2">
+                    <button class="btn btn-outline btn-sm gap-2" type="button" onclick="document.getElementById('send_invoices_modal').showModal()">{% lucide "send" size=14 %} {% trans "Send invoice" %}</button>
+                    <button class="btn btn-success btn-sm gap-2" type="submit">{% lucide "circle-check" size=14 %} {% trans "Mark selected as paid" %}</button>
+                </div>
             </div>
 
             <div class="overflow-x-auto">
@@ -124,6 +135,7 @@
                             <th>{% trans "Owed" %}</th>
                             <th>{% trans "Paid" %}</th>
                             <th>{% trans "License" %}</th>
+                            <th>{% trans "Invoice" %}</th>
                             <th></th>
                         </tr>
                     </thead>
@@ -168,6 +180,18 @@
                                     {% endif %}
                                 </td>
                                 <td>{{ membership.license|default:"-" }}</td>
+                                <td>
+                                    {% if membership.dues_invoice %}
+                                        <a class="link link-hover" href="{% url 'management:membership_invoice_detail' membership.pk %}">
+                                            <span class="badge badge-sm {% if membership.dues_invoice.is_paid %}badge-success{% elif membership.dues_invoice.is_overdue %}badge-error{% else %}badge-neutral{% endif %}">
+                                                {% if membership.dues_invoice.is_paid %}{% trans "Paid" %}{% elif membership.dues_invoice.is_overdue %}{% trans "Overdue" %}{% else %}{% trans "Sent" %}{% endif %}
+                                            </span>
+                                        </a>
+                                        <div class="text-xs text-muted">{{ membership.dues_invoice.sent_at|date:"j M" }}{% if membership.dues_invoice.reminder_count %}, {% blocktrans count counter=membership.dues_invoice.reminder_count %}{{ counter }} reminder{% plural %}{{ counter }} reminders{% endblocktrans %}{% endif %}</div>
+                                    {% else %}
+                                        <span class="text-xs text-dim">{% trans "Not sent" %}</span>
+                                    {% endif %}
+                                </td>
                                 <td class="text-right">
                                     {% if membership.record_payment_form %}
                                         <div class="flex flex-wrap justify-end gap-1">
@@ -183,7 +207,7 @@
                             </tr>
                         {% empty %}
                             <tr>
-                                <td colspan="10" class="text-center text-muted">{% trans "Nobody matches these filters." %}</td>
+                                <td colspan="11" class="text-center text-muted">{% trans "Nobody matches these filters." %}</td>
                             </tr>
                         {% endfor %}
                     </tbody>
@@ -191,6 +215,24 @@
             </div>
         </div>
     </form>
+
+    {# due_in_days's widget carries form="membership-form" (see SendDuesInvoicesForm), so it and the submit button below (via its own form=) post through the *same* form as the row checkboxes, just to a different action, overridden with formaction. #}
+    <dialog id="send_invoices_modal" class="modal">
+        <div class="modal-box">
+            <h3 class="text-lg font-bold">{% trans "Send invoice" %}</h3>
+            <p class="py-2 text-sm opacity-70">{% trans "Emails each selected member (or a parent/guardian, if they have no email on file) an invoice for their outstanding balance." %}</p>
+            <div class="form-control w-full">
+                {% form_field send_invoice_form.due_in_days size="small" %}
+            </div>
+        </div>
+        <div class="modal-action">
+            <form method="dialog">
+                <button class="btn btn-outline gap-2">{% lucide "x" size=16 %} {% trans "Cancel" %}</button>
+            </form>
+            <button class="btn btn-primary gap-2" type="submit" form="membership-form" formaction="{% url 'management:membership_send_invoices' %}">{% lucide "send" size=16 %} {% trans "Send" %}</button>
+        </div>
+        <form method="dialog" class="modal-backdrop"><button>close</button></form>
+    </dialog>
 
     {% trans "Record payment" as record_payment_title %}
     {% trans "Record" as record_payment_submit_label %}

@@ -19,7 +19,8 @@ from waffle import get_waffle_flag_model
 
 from billing.models import Plan, PlanPrice
 from billing.services.dues import record_payment, subscribe
-from club.models import Club, ClubMembership, ClubRole, FeePayment, MemberRequirementStatus, OnboardingRequirement, Season, Sponsor
+from club.models import Club, ClubMembership, ClubRole, DuesInvoice, FeePayment, MemberRequirementStatus, OnboardingRequirement, Season, Sponsor
+from club.services.invoicing import DuesInvoicePDFError
 from club.services.onboarding import mark_complete
 from events.models import Attendance, Competition, Event, EventReferee, EventSeries, Location, Opponent
 from events.services.rbihf_import import RBIHFImportError
@@ -3254,6 +3255,195 @@ class MembershipExportPdfTests(ManagementTestBase):
         self.client.force_login(coach_user)
 
         response = self.club_get("membership_export_pdf")
+
+        self.assertEqual(response.status_code, 403)
+
+
+class MembershipSendInvoicesTests(ManagementTestBase):
+    def setUp(self):
+        super().setUp()
+        self.client.force_login(self.admin_user)
+        self.member = Member.objects.create(first_name="Jane", last_name="Doe", email="jane@example.com")
+        self.membership = ClubMembership.objects.create(club=self.club, member=self.member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE, fee_amount=Decimal("150.00"))
+
+    def test_sending_creates_and_emails_an_invoice(self):
+        self.club_post("membership_send_invoices", {"membership_ids": [str(self.membership.pk)], "due_in_days": "14"})
+
+        invoice = DuesInvoice.objects.get(membership=self.membership)
+        self.assertIsNotNone(invoice.sent_at)
+        self.assertEqual(invoice.sent_to_email, "jane@example.com")
+        self.assertEqual(invoice.amount, Decimal("150.00"))
+        self.assertEqual(invoice.due_date, timezone.now().date() + datetime.timedelta(days=14))
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ["jane@example.com"])
+
+    def test_the_email_carries_an_html_alternative(self):
+        self.club_post("membership_send_invoices", {"membership_ids": [str(self.membership.pk)], "due_in_days": "14"})
+
+        [(html_body, mimetype)] = mail.outbox[0].alternatives
+        self.assertEqual(mimetype, "text/html")
+        self.assertIn(self.club.name, html_body)
+
+    def test_falls_back_to_a_guardians_email(self):
+        self.member.email = ""
+        self.member.save(update_fields=["email"])
+        family = Family.objects.create()
+        parent = Member.objects.create(first_name="Pat", last_name="Doe", email="pat@example.com")
+        FamilyMembership.objects.create(family=family, member=self.member, role=FamilyMembership.FamilyRole.CHILD)
+        FamilyMembership.objects.create(family=family, member=parent, role=FamilyMembership.FamilyRole.PARENT)
+
+        self.club_post("membership_send_invoices", {"membership_ids": [str(self.membership.pk)], "due_in_days": "14"})
+
+        invoice = DuesInvoice.objects.get(membership=self.membership)
+        self.assertEqual(invoice.sent_to_email, "pat@example.com")
+        self.assertTrue(invoice.sent_to_guardian)
+
+    def test_a_member_with_no_reachable_email_is_skipped(self):
+        self.member.email = ""
+        self.member.save(update_fields=["email"])
+
+        response = self.club_post("membership_send_invoices", {"membership_ids": [str(self.membership.pk)], "due_in_days": "14"})
+
+        self.assertFalse(DuesInvoice.objects.filter(membership=self.membership).exists())
+        self.assertEqual(len(mail.outbox), 0)
+        response = self.client.get(response.url, HTTP_HOST="ajax-united.rosterchief.app")
+        self.assertContains(response, "no email on file")
+
+    def test_resending_updates_the_same_invoice(self):
+        self.club_post("membership_send_invoices", {"membership_ids": [str(self.membership.pk)], "due_in_days": "14"})
+        first_number = DuesInvoice.objects.get(membership=self.membership).number
+
+        self.club_post("membership_send_invoices", {"membership_ids": [str(self.membership.pk)], "due_in_days": "30"})
+
+        self.assertEqual(DuesInvoice.objects.filter(membership=self.membership).count(), 1)
+        invoice = DuesInvoice.objects.get(membership=self.membership)
+        self.assertEqual(invoice.number, first_number)
+        self.assertEqual(invoice.due_date, timezone.now().date() + datetime.timedelta(days=30))
+        self.assertEqual(len(mail.outbox), 2)
+
+    def test_no_selection_shows_an_error(self):
+        response = self.club_post("membership_send_invoices", {"due_in_days": "14"})
+
+        self.assertFalse(DuesInvoice.objects.exists())
+        response = self.client.get(response.url, HTTP_HOST="ajax-united.rosterchief.app")
+        self.assertContains(response, "Select at least one member")
+
+    def test_non_admin_gets_403(self):
+        coach_user = User.objects.create_user(email="coach-invoice@example.com", password="pw-secret-123")
+        coach_member = Member.objects.create(user=coach_user, first_name="Cara", last_name="Coach")
+        team = Team.objects.create(club=self.club, name="U15", short_name="U15")
+        position = Position.objects.create(club=self.club, name="Coach11", short_name="C11", staff_position=True)
+        StaffAssignment.objects.create(team=team, member=coach_member, season=self.season, position=position)
+        self.client.force_login(coach_user)
+
+        response = self.club_post("membership_send_invoices", {"membership_ids": [str(self.membership.pk)], "due_in_days": "14"})
+
+        self.assertEqual(response.status_code, 403)
+
+
+class MembershipSendInvoiceRemindersTests(ManagementTestBase):
+    def setUp(self):
+        super().setUp()
+        self.client.force_login(self.admin_user)
+
+    def make_invoice(self, *, due_date, fee_status=ClubMembership.FeeStatus.UNPAID, email="jane@example.com"):
+        member = Member.objects.create(first_name="Jane", last_name="Doe", email=email)
+        membership = ClubMembership.objects.create(club=self.club, member=member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE, fee_amount=Decimal("100.00"), fee_status=fee_status)
+        return DuesInvoice.objects.create(club=self.club, membership=membership, number="DUE-2026-00001", amount=Decimal("100.00"), due_date=due_date, sent_at=timezone.now(), sent_to_email=email)
+
+    def test_reminds_an_overdue_unpaid_invoice(self):
+        invoice = self.make_invoice(due_date=timezone.now().date() - datetime.timedelta(days=1))
+
+        self.club_post("membership_send_invoice_reminders", {})
+
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.reminder_count, 1)
+        self.assertIsNotNone(invoice.last_reminder_sent_at)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ["jane@example.com"])
+
+    def test_does_not_remind_one_not_yet_due(self):
+        invoice = self.make_invoice(due_date=timezone.now().date() + datetime.timedelta(days=5))
+
+        self.club_post("membership_send_invoice_reminders", {})
+
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.reminder_count, 0)
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_does_not_remind_a_paid_invoice(self):
+        invoice = self.make_invoice(due_date=timezone.now().date() - datetime.timedelta(days=1), fee_status=ClubMembership.FeeStatus.PAID)
+
+        self.club_post("membership_send_invoice_reminders", {})
+
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.reminder_count, 0)
+
+    def test_nothing_to_remind_notifies_gracefully(self):
+        response = self.club_post("membership_send_invoice_reminders", {})
+
+        response = self.client.get(response.url, HTTP_HOST="ajax-united.rosterchief.app")
+        self.assertContains(response, "Nothing to remind")
+
+    def test_non_admin_gets_403(self):
+        coach_user = User.objects.create_user(email="coach-reminder@example.com", password="pw-secret-123")
+        coach_member = Member.objects.create(user=coach_user, first_name="Cara", last_name="Coach")
+        team = Team.objects.create(club=self.club, name="U16", short_name="U16")
+        position = Position.objects.create(club=self.club, name="Coach12", short_name="C12", staff_position=True)
+        StaffAssignment.objects.create(team=team, member=coach_member, season=self.season, position=position)
+        self.client.force_login(coach_user)
+
+        response = self.club_post("membership_send_invoice_reminders", {})
+
+        self.assertEqual(response.status_code, 403)
+
+
+class DuesInvoiceDetailViewTests(ManagementTestBase):
+    def setUp(self):
+        super().setUp()
+        self.client.force_login(self.admin_user)
+        self.member = Member.objects.create(first_name="Jane", last_name="Doe", email="jane@example.com")
+        self.membership = ClubMembership.objects.create(club=self.club, member=self.member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE, fee_amount=Decimal("150.00"))
+        self.invoice = DuesInvoice.objects.create(club=self.club, membership=self.membership, number="DUE-2026-00001", amount=Decimal("150.00"), due_date=timezone.now().date(), sent_at=timezone.now(), sent_to_email="jane@example.com")
+
+    def test_shows_the_invoice(self):
+        response = self.club_get("membership_invoice_detail", self.membership.pk)
+
+        self.assertContains(response, "DUE-2026-00001")
+        self.assertContains(response, "jane@example.com")
+
+    def test_404_when_the_membership_has_no_invoice(self):
+        other_member = Member.objects.create(first_name="No", last_name="Invoice")
+        other_membership = ClubMembership.objects.create(club=self.club, member=other_member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+
+        response = self.club_get("membership_invoice_detail", other_membership.pk)
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_downloads_as_a_pdf(self):
+        with mock.patch("management.views.invoice_pdf", return_value=b"%PDF-fake") as renderer:
+            response = self.club_get("membership_invoice_pdf", self.membership.pk)
+
+        self.assertEqual(response["Content-Type"], "application/pdf")
+        self.assertEqual(response.content, b"%PDF-fake")
+        renderer.assert_called_once()
+
+    def test_a_missing_pdf_library_is_reported_rather_than_a_500(self):
+        with mock.patch("management.views.invoice_pdf", side_effect=DuesInvoicePDFError("PDF rendering needs the native pango/cairo libraries.")):
+            response = self.club_get("membership_invoice_pdf", self.membership.pk)
+        response = self.client.get(response.url, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, "pango")
+
+    def test_non_admin_gets_403(self):
+        coach_user = User.objects.create_user(email="coach-invoice-detail@example.com", password="pw-secret-123")
+        coach_member = Member.objects.create(user=coach_user, first_name="Cara", last_name="Coach")
+        team = Team.objects.create(club=self.club, name="U17", short_name="U17")
+        position = Position.objects.create(club=self.club, name="Coach13", short_name="C13", staff_position=True)
+        StaffAssignment.objects.create(team=team, member=coach_member, season=self.season, position=position)
+        self.client.force_login(coach_user)
+
+        response = self.club_get("membership_invoice_detail", self.membership.pk)
 
         self.assertEqual(response.status_code, 403)
 

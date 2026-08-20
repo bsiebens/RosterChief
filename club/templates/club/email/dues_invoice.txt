@@ -1,0 +1,11 @@
+{% load i18n %}{% blocktrans with name=member.first_name %}Hello {{ name }},{% endblocktrans %}
+
+{% blocktrans with club=club.name season=membership.season %}{{ club }} has sent you an invoice for your {{ season }} membership fee.{% endblocktrans %}
+
+{% trans "Amount due:" %} €{{ invoice.amount }}
+{% trans "Due date:" %} {{ invoice.due_date|date:"j F Y" }}
+{% trans "Invoice number:" %} {{ invoice.number }}
+{% if club.contact_email %}
+{% blocktrans with email=club.contact_email %}Questions about this invoice? Reply to this note or write to {{ email }}.{% endblocktrans %}
+{% endif %}
+{% blocktrans with club=club.name %}— {{ club }}{% endblocktrans %}

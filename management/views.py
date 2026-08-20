@@ -25,9 +25,10 @@ from club.mixins import (
     NewsPublisherRequiredMixin,
     TeamManagerRequiredMixin,
 )
-from club.models import ClubMembership, ClubRole, MemberRequirementStatus, OnboardingRequirement, Season, Sponsor
+from club.models import ClubMembership, ClubRole, DuesInvoice, MemberRequirementStatus, OnboardingRequirement, Season, Sponsor
 from club.services.access import _guardians_only, can_edit_news, can_publish_news, current_season, groups_manageable_by, is_club_admin, members_visible_to, teams_managed_by, teams_staffed_by
 from club.services.fees import mark_as_paid, record_payment, remaining_balance
+from club.services.invoicing import DuesInvoicePDFError, create_or_resend_invoice, invoice_pdf, invoices_due_for_reminder, recipient_for, send_invoice_email, send_reminders
 from club.services.onboarding import annotate_onboarding_status, approve_all_clean, approve_one, blocking_event_kinds, checklist_for, is_signup_clean, mark_bypassed, mark_complete, mark_incomplete, members_with_open_requirements
 from controlpanel.messages import notify
 from controlpanel.mixins import RedirectOnInvalidMixin
@@ -81,6 +82,7 @@ from .forms import (
     RefereeLevelForm,
     RequirementBypassForm,
     RequirementCompletionForm,
+    SendDuesInvoicesForm,
     SignupTeamPlacementForm,
     SponsorForm,
     StaffAssignmentForm,
@@ -386,6 +388,8 @@ class MembershipListView(ClubAdminRequiredMixin, ListView):
         waived = counts.get(ClubMembership.FeeStatus.WAIVED, 0)
         total = paid + partial + unpaid + waived
 
+        overdue_count = invoices_due_for_reminder(club).count() if current is not None else 0
+
         context = super().get_context_data(
             current_season=current,
             selected_season=self.get_selected_season(),
@@ -403,6 +407,8 @@ class MembershipListView(ClubAdminRequiredMixin, ListView):
             kpi_unpaid=unpaid,
             kpi_waived=waived,
             kpi_paid_rate=round(100 * paid / total) if total else None,
+            kpi_overdue_invoices=overdue_count,
+            send_invoice_form=SendDuesInvoicesForm(),
             **kwargs,
         )
 
@@ -415,9 +421,11 @@ class MembershipListView(ClubAdminRequiredMixin, ListView):
         family_memberships_by_member_id = {}
         for fm in family_memberships:
             family_memberships_by_member_id.setdefault(fm.member_id, []).append(fm)
+        invoices_by_membership_id = {invoice.membership_id: invoice for invoice in DuesInvoice.objects.filter(membership__in=memberships)}
         for membership in memberships:
             membership.member.family_memberships_display = family_memberships_by_member_id.get(membership.member_id, [])
             membership.remaining_balance_display = remaining_balance(membership)
+            membership.dues_invoice = invoices_by_membership_id.get(membership.pk)
             # Nothing to collect on an already-settled or deliberately-exempted row.
             if membership.fee_status in (ClubMembership.FeeStatus.PAID, ClubMembership.FeeStatus.WAIVED):
                 membership.record_payment_form = None
@@ -523,6 +531,98 @@ class MembershipExportPdfView(MembershipListView):
         filename = f"memberships-{season}.pdf" if season else "memberships.pdf"
         response = HttpResponse(pdf, content_type="application/pdf")
         response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return response
+
+
+class MembershipSendInvoicesView(ClubAdminRequiredMixin, View):
+    """The bulk "Send invoice" action on Dues & billing -- one invoice per selected
+    membership, mailed to the member's own email or a parent/guardian's when they
+    have none (see club.services.invoicing.recipient_for). Every membership in the
+    batch shares the one due-in-days setting from the form; per-membership tracking
+    (sent_at, who it went to, reminders) still lives on each invoice individually."""
+
+    def post(self, request):
+        next_url = request.POST.get("next")
+        redirect_url = next_url if next_url and url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}, require_https=request.is_secure()) else reverse("management:membership_list")
+
+        ids = request.POST.getlist("membership_ids")
+        if not ids:
+            notify(request, f"e|{_('No members selected')}|{_('Select at least one member to invoice.')}")
+            return redirect(redirect_url)
+
+        form = SendDuesInvoicesForm(request.POST)
+        if not form.is_valid():
+            notify(request, f"e|{_('Could not send invoices')}|{_('Enter a valid number of days until due.')}")
+            return redirect(redirect_url)
+
+        memberships = ClubMembership.objects.filter(pk__in=ids, club=request.club).select_related("member")
+        sent = failed = unreachable = 0
+        for membership in memberships:
+            email, sent_to_guardian = recipient_for(membership.member)
+            if not email:
+                unreachable += 1
+                continue
+            invoice = create_or_resend_invoice(membership, due_in_days=form.cleaned_data["due_in_days"], recipient_email=email, sent_to_guardian=sent_to_guardian)
+            if send_invoice_email(invoice, request=request):
+                sent += 1
+            else:
+                failed += 1
+
+        if sent:
+            notify(request, f"s|{_('Invoices sent')}|{_('%(count)d invoice(s) sent.') % {'count': sent}}")
+        if failed:
+            notify(request, f"w|{_('Some invoices could not be emailed')}|{_('%(count)d invoice(s) were recorded but the email could not be sent.') % {'count': failed}}")
+        if unreachable:
+            notify(request, f"w|{_('Some members have no email on file')}|{_('%(count)d member(s) have no email on file, on themselves or a parent/guardian, so no invoice was sent.') % {'count': unreachable}}")
+        return redirect(redirect_url)
+
+
+class MembershipSendInvoiceRemindersView(ClubAdminRequiredMixin, View):
+    """The push-button "remind everyone past due" action -- every sent, unpaid
+    invoice whose due date has passed, club-wide, regardless of the current list's
+    filters or page. See club.services.invoicing.invoices_due_for_reminder."""
+
+    def post(self, request):
+        next_url = request.POST.get("next")
+        redirect_url = next_url if next_url and url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}, require_https=request.is_secure()) else reverse("management:membership_list")
+
+        sent, failed = send_reminders(request.club, request=request)
+        if not sent and not failed:
+            notify(request, f"s|{_('Nothing to remind')}|{_('No overdue, unpaid invoices right now.')}")
+        else:
+            if sent:
+                notify(request, f"s|{_('Reminders sent')}|{_('%(count)d reminder(s) sent.') % {'count': sent}}")
+            if failed:
+                notify(request, f"w|{_('Some reminders could not be emailed')}|{_('%(count)d reminder(s) failed to send.') % {'count': failed}}")
+        return redirect(redirect_url)
+
+
+class DuesInvoiceDetailView(ClubAdminRequiredMixin, DetailView):
+    """A staff-facing view of one membership's invoice -- the same document the
+    member/guardian received, viewable here for reference without re-sending it."""
+
+    template_name = "management/dues_invoice_detail.html"
+    context_object_name = "invoice"
+
+    def get_object(self, queryset=None):
+        return get_object_or_404(DuesInvoice, membership__pk=self.kwargs["pk"], club=self.request.club)
+
+    def get_context_data(self, **kwargs):
+        return super().get_context_data(membership=self.object.membership, member=self.object.membership.member, **kwargs)
+
+
+class DuesInvoicePdfView(ClubAdminRequiredMixin, View):
+    def get(self, request, pk):
+        invoice = get_object_or_404(DuesInvoice, membership__pk=pk, club=request.club)
+
+        try:
+            pdf = invoice_pdf(invoice)
+        except DuesInvoicePDFError as error:
+            notify(request, f"e|{_('PDF unavailable')}|{error}")
+            return redirect("management:membership_invoice_detail", pk=pk)
+
+        response = HttpResponse(pdf, content_type="application/pdf")
+        response["Content-Disposition"] = f'attachment; filename="{invoice.number}.pdf"'
         return response
 
 

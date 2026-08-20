@@ -4,8 +4,8 @@ from decimal import Decimal
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import FileExtensionValidator, MaxValueValidator, MinValueValidator, RegexValidator
-from django.db import models
-from django.db.models import Q
+from django.db import IntegrityError, models, transaction
+from django.db.models import Q, UniqueConstraint
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
@@ -380,6 +380,82 @@ class FeePayment(UUIDModel):
 
     def __str__(self):
         return f"{self.membership} — {self.amount}"
+
+
+class DuesInvoice(ClubScopedModel):
+    """A record of asking one membership's fee to be paid — not itself the source of
+    truth for what's owed or settled (that's still ``ClubMembership.fee_amount``/
+    ``amount_paid``/``fee_status``, via ``club.services.fees``). Sending one snapshots
+    the outstanding balance and a due date so a later fee change or reminder never
+    silently rewrites a bill someone already received; whether it still needs chasing
+    is read live off the membership's own ``fee_status``, since a payment recorded
+    through any route settles the same balance this invoice asked for.
+
+    One per membership (see ``club.services.invoicing``): "send" creates it if
+    missing, "resend" re-snapshots the balance and pushes the due date out again on
+    the existing row, so a membership never accumulates a history of stale invoices.
+    """
+
+    membership = models.OneToOneField(ClubMembership, on_delete=models.CASCADE, related_name="dues_invoice", verbose_name=_("membership"))
+    number = models.CharField(_("number"), max_length=255, blank=True)
+
+    amount = models.DecimalField(_("amount"), max_digits=10, decimal_places=2, help_text=_("The outstanding balance at the time this was sent — not re-read from the membership afterwards."))
+    due_date = models.DateField(_("due date"))
+
+    sent_at = models.DateTimeField(_("sent at"), null=True, blank=True)
+    sent_to_email = models.EmailField(_("sent to"), blank=True)
+    sent_to_guardian = models.BooleanField(_("sent to a parent/guardian"), default=False, help_text=_("The member had no email on file, so a parent/guardian's was used instead."))
+
+    last_reminder_sent_at = models.DateTimeField(_("last reminder sent at"), null=True, blank=True)
+    reminder_count = models.PositiveIntegerField(_("reminders sent"), default=0)
+
+    class Meta:
+        verbose_name = _("dues invoice")
+        verbose_name_plural = _("dues invoices")
+        ordering = ["-sent_at"]
+        constraints = [
+            UniqueConstraint(fields=["club", "number"], name="unique_dues_invoice_number_per_club"),
+        ]
+
+    def __str__(self):
+        return self.number or _("Unsent invoice for %(member)s") % {"member": self.membership.member}
+
+    def clean(self):
+        validate_club_scope(self, self.club_id, same_club_fields=("membership",))
+
+    @property
+    def is_paid(self) -> bool:
+        return self.membership.fee_status == ClubMembership.FeeStatus.PAID
+
+    @property
+    def is_overdue(self) -> bool:
+        return bool(self.sent_at) and not self.is_paid and self.due_date < timezone.now().date()
+
+    def generate_number(self) -> str:
+        """Next per-club invoice number for the current year: ``DUE-<year>-<seq>``.
+        Same shape as shop.models.Invoice's numbering, duplicated rather than shared
+        across the two apps — see that module's own numbering helpers."""
+        prefix = f"DUE-{timezone.now().year}-"
+        sequences = [int(suffix) for existing in DuesInvoice.objects.filter(club=self.club, number__startswith=prefix).values_list("number", flat=True) if (suffix := existing.removeprefix(prefix)).isdigit()]
+        return f"{prefix}{max(sequences, default=0) + 1:05d}"
+
+    def save(self, *args, **kwargs):
+        if self.number:
+            return super().save(*args, **kwargs)
+
+        # Retrying on a numbering collision (two invoices allocated the same
+        # sequence in the same instant) rather than locking: this only ever
+        # fires once, on first send, so a rare retry is cheaper than a lock
+        # held around every save.
+        for attempt in range(5):
+            self.number = self.generate_number()
+            try:
+                with transaction.atomic():
+                    return super().save(*args, **kwargs)
+            except IntegrityError:
+                self.number = ""
+                if attempt == 4:
+                    raise
 
 
 def onboarding_document_path(instance: MemberRequirementStatus, filename: str) -> str:

@@ -872,6 +872,19 @@ class RecordFeePaymentForm(forms.Form):
     note = forms.CharField(label=_("Note"), required=False, widget=forms.Textarea(attrs={"rows": 2}))
 
 
+class SendDuesInvoicesForm(forms.Form):
+    """The one shared setting for a batch of invoices sent from the Dues & billing
+    page -- see club.services.invoicing.create_or_resend_invoice. Applies to every
+    membership selected in the same submit, not chosen per row.
+
+    The widget's own `form` attr (rendered as-is by templatetags/field.html's attrs
+    passthrough) is what lets this field live inside the confirm dialog while still
+    posting through the row-checkboxes' #membership-form -- see membership_list.html's
+    send_invoices_modal."""
+
+    due_in_days = forms.IntegerField(label=_("Due in"), min_value=1, max_value=365, initial=14, help_text=_("Days from today."), widget=forms.NumberInput(attrs={"form": "membership-form"}))
+
+
 class ClubSettingsForm(forms.ModelForm):
     """A club's own self-service identity/branding editor (management:club_settings) --
     the club-facing equivalent of controlpanel's ClubForm, minus everything only
