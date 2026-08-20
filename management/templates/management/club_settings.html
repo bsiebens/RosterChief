@@ -9,14 +9,16 @@
     closely for the Colours card (merged swatch+hex row, side-by-side
     contrast-check boxes) and the Logo card (dashed drop zone) -- markup
     pulled straight from the design canvas (RosterChief Platform.dc.html),
-    not the prose summary. The live preview is scoped to surfaces that are
-    (or will genuinely be) this app rather than D9's aspirational App/
-    Website/Email tabs: the sidebar mock is what primary_color/secondary_color
-    affect today (base.html's --tenant-* custom properties); the phone mock
-    is the same colours applied ahead of the mobile app being built. The
-    colour math (content colour, contrast ratio) mirrors
-    Club._content_color_for exactly, so what's shown is the real number the
-    server computes on save, not an approximation.
+    not the prose summary. The live preview has two tabs rather than D9's
+    three: App and Website are merged into one (they were always shown
+    together anyway, and the mobile app isn't built yet -- the phone mock
+    is the same colours applied ahead of it existing); Email is real and
+    functional, a generic sample shaped like the actual branded emails this
+    app sends (club/templates/club/email/*.html, members/.../claim_approved.html),
+    not a preview of any one specific message. The colour math (content
+    colour, contrast ratio) mirrors Club._content_color_for exactly, so
+    what's shown is the real number the server computes on save, not an
+    approximation.
 {% endcomment %}
 
 {% block panel_title %}{% trans "Club identity" %}{% endblock panel_title %}
@@ -118,61 +120,76 @@
                     <div class="flex items-center justify-between gap-2">
                         <div class="card-title">{% lucide "eye" size=16 %} {% trans "Live preview" %}</div>
                         <div class="flex overflow-hidden rounded-md border border-line">
-                            <span class="preview-tab preview-tab-active">{% trans "App" %}</span>
-                            <span class="preview-tab">{% trans "Website" %}</span>
-                            <span class="preview-tab">{% trans "Email" %}</span>
+                            <button type="button" class="preview-tab preview-tab-active" data-preview-tab="app">{% trans "App & Website" %}</button>
+                            <button type="button" class="preview-tab" data-preview-tab="email">{% trans "Email" %}</button>
                         </div>
                     </div>
 
-                    <div class="mt-3 flex flex-wrap items-start gap-4">
-                        <div class="preview-phone-lg">
-                            <div id="preview-phone-header" class="preview-phone-header">
-                                <div class="preview-phone-header-row">
-                                    <span class="preview-crest preview-crest-sm">{{ club.initials|default:"CL" }}</span>
-                                    <span class="preview-phone-name">{{ club.name|default:_("Your club") }}</span>
+                    <div class="mt-3">
+                        <div id="preview-panel-app" class="flex flex-wrap items-start gap-4" data-preview-panel="app">
+                            <div class="preview-phone-lg">
+                                <div id="preview-phone-header" class="preview-phone-header">
+                                    <div class="preview-phone-header-row">
+                                        <span class="preview-crest preview-crest-sm">{{ club.initials|default:"CL" }}</span>
+                                        <span class="preview-phone-name">{{ club.name|default:_("Your club") }}</span>
+                                    </div>
+                                    <div class="preview-phone-roles">
+                                        <span class="preview-phone-role preview-phone-role-active">{% trans "Member" %}</span>
+                                        <span class="preview-phone-role">{% trans "Coach" %}</span>
+                                    </div>
                                 </div>
-                                <div class="preview-phone-roles">
-                                    <span class="preview-phone-role preview-phone-role-active">{% trans "Member" %}</span>
-                                    <span class="preview-phone-role">{% trans "Coach" %}</span>
+                                <div class="preview-phone-body">
+                                    {# A notice, not a call to action -- primary (chrome), not secondary (accent), so it doesn't visually compete with an actual button. #}
+                                    <div id="preview-phone-card" class="preview-phone-card">
+                                        <div class="preview-phone-eyebrow">{% trans "Next up" %}</div>
+                                        <div class="preview-phone-title">{% trans "U16 vs Leuven" %}</div>
+                                        <div class="preview-phone-bar"></div>
+                                    </div>
+                                    <div class="preview-phone-skeleton-card">
+                                        <div class="preview-skeleton-line"></div>
+                                        <div class="preview-skeleton-line preview-skeleton-line-short"></div>
+                                    </div>
                                 </div>
                             </div>
-                            <div class="preview-phone-body">
-                                {# A notice, not a call to action -- primary (chrome), not secondary (accent), so it doesn't visually compete with an actual button. #}
-                                <div id="preview-phone-card" class="preview-phone-card">
-                                    <div class="preview-phone-eyebrow">{% trans "Next up" %}</div>
-                                    <div class="preview-phone-title">{% trans "U16 vs Leuven" %}</div>
-                                    <div class="preview-phone-bar"></div>
+
+                            <div class="flex min-w-0 flex-1 flex-col gap-3">
+                                <div class="preview-website">
+                                    <div id="preview-website-header" class="preview-website-header">
+                                        <span class="preview-crest preview-crest-sm">{{ club.initials|default:"CL" }}</span>
+                                        <span class="preview-website-name">{{ club.name|default:_("Your club") }}</span>
+                                        <span class="preview-website-nav">{% trans "Teams · Club" %}</span>
+                                        <span id="preview-website-join" class="preview-website-join">{% trans "Join" %}</span>
+                                    </div>
+                                    <div class="preview-website-hero">
+                                        <div class="preview-website-headline">{% trans "#Fear the Sharks" %}</div>
+                                        <div class="preview-skeleton-line"></div>
+                                        <div class="preview-skeleton-line preview-skeleton-line-short"></div>
+                                    </div>
                                 </div>
-                                <div class="preview-phone-skeleton-card">
-                                    <div class="preview-skeleton-line"></div>
-                                    <div class="preview-skeleton-line preview-skeleton-line-short"></div>
+
+                                <div class="rounded-lg border border-line p-3">
+                                    <div class="mb-2 font-display text-[11px] font-bold tracking-[.12em] text-muted uppercase">{% trans "Where the brand shows up" %}</div>
+                                    <ul class="flex flex-col gap-1.5 text-[13px] text-slate">
+                                        <li class="flex items-center gap-2"><span id="preview-dot-1" class="preview-brand-dot"></span>{% trans "Sidebar, active nav item, primary buttons" %}</li>
+                                        <li class="flex items-center gap-2"><span id="preview-dot-2" class="preview-brand-dot"></span>{% trans "Public site header and join button" %}</li>
+                                        <li class="flex items-center gap-2"><span id="preview-dot-3" class="preview-brand-dot"></span>{% trans "Mobile app header and highlights" %}</li>
+                                        <li class="flex items-center gap-2"><span id="preview-dot-4" class="preview-brand-dot"></span>{% trans "Transactional email crest and buttons" %}</li>
+                                        <li class="flex items-center gap-2"><span class="preview-brand-dot preview-brand-dot-neutral"></span>{% trans "Never: status colours, tables, form fields" %}</li>
+                                    </ul>
                                 </div>
                             </div>
                         </div>
 
-                        <div class="flex min-w-0 flex-1 flex-col gap-3">
-                            <div class="preview-website">
-                                <div id="preview-website-header" class="preview-website-header">
-                                    <span class="preview-crest preview-crest-sm">{{ club.initials|default:"CL" }}</span>
-                                    <span class="preview-website-name">{{ club.name|default:_("Your club") }}</span>
-                                    <span class="preview-website-nav">{% trans "Teams · Club" %}</span>
-                                    <span id="preview-website-join" class="preview-website-join">{% trans "Join" %}</span>
-                                </div>
-                                <div class="preview-website-hero">
-                                    <div class="preview-website-headline">{% trans "#Fear the Sharks" %}</div>
-                                    <div class="preview-skeleton-line"></div>
-                                    <div class="preview-skeleton-line preview-skeleton-line-short"></div>
-                                </div>
+                        <div id="preview-panel-email" class="preview-email hidden" data-preview-panel="email">
+                            <div class="preview-email-header">
+                                <span id="preview-email-crest" class="preview-crest preview-crest-sm preview-email-crest">{{ club.initials|default:"CL" }}</span>
+                                <span class="preview-email-name">{{ club.name|default:_("Your club") }}</span>
                             </div>
-
-                            <div class="rounded-lg border border-line p-3">
-                                <div class="mb-2 font-display text-[11px] font-bold tracking-[.12em] text-muted uppercase">{% trans "Where the brand shows up" %}</div>
-                                <ul class="flex flex-col gap-1.5 text-[13px] text-slate">
-                                    <li class="flex items-center gap-2"><span id="preview-dot-1" class="preview-brand-dot"></span>{% trans "Sidebar, active nav item, primary buttons" %}</li>
-                                    <li class="flex items-center gap-2"><span id="preview-dot-2" class="preview-brand-dot"></span>{% trans "Public site header and join button" %}</li>
-                                    <li class="flex items-center gap-2"><span id="preview-dot-3" class="preview-brand-dot"></span>{% trans "Mobile app header and highlights" %}</li>
-                                    <li class="flex items-center gap-2"><span class="preview-brand-dot preview-brand-dot-neutral"></span>{% trans "Never: status colours, tables, form fields" %}</li>
-                                </ul>
+                            <div class="preview-email-body">
+                                <div class="preview-skeleton-line"></div>
+                                <div class="preview-skeleton-line preview-skeleton-line-short"></div>
+                                <span id="preview-email-button" class="preview-email-button">{% trans "View details" %}</span>
+                                <div class="preview-skeleton-line preview-skeleton-line-short"></div>
                             </div>
                         </div>
                     </div>
@@ -240,7 +257,16 @@
                 document.getElementById("preview-website-join").style.background = secondary;
                 document.getElementById("preview-website-join").style.color = secondaryContent;
 
-                ["preview-dot-1", "preview-dot-2", "preview-dot-3"].forEach((id) => {
+                // Matches the real branded emails (club/templates/club/email/*.html):
+                // a plain white header with a secondary-coloured crest badge, and a
+                // primary-coloured button in the body -- same split as _button.html's
+                // own bg=primary convention, not the phone/website mocks' solid bar.
+                document.getElementById("preview-email-crest").style.background = secondary;
+                document.getElementById("preview-email-crest").style.color = secondaryContent;
+                document.getElementById("preview-email-button").style.background = primary;
+                document.getElementById("preview-email-button").style.color = primaryContent;
+
+                ["preview-dot-1", "preview-dot-2", "preview-dot-3", "preview-dot-4"].forEach((id) => {
                     document.getElementById(id).style.background = secondary;
                 });
 
@@ -267,6 +293,16 @@
             }
 
             updatePreview();
+
+            // Live preview tabs -- toggles which .preview-panel is visible, App &
+            // Website vs Email. Both panels stay in the DOM (and colour-bound) the
+            // whole time; only which one is hidden changes.
+            document.querySelectorAll("[data-preview-tab]").forEach((tab) => {
+                tab.addEventListener("click", () => {
+                    document.querySelectorAll("[data-preview-tab]").forEach((other) => other.classList.toggle("preview-tab-active", other === tab));
+                    document.querySelectorAll("[data-preview-panel]").forEach((panel) => panel.classList.toggle("hidden", panel.dataset.previewPanel !== tab.dataset.previewTab));
+                });
+            });
         })();
     </script>
 {% endblock extra_body %}

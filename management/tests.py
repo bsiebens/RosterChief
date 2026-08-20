@@ -4686,6 +4686,19 @@ class ClubSettingsPreviewTests(ManagementTestBase):
         response = self.club_get("club_settings")
         self.assertContains(response, 'name="website"')
 
+    def test_app_and_website_share_one_tab(self):
+        response = self.club_get("club_settings")
+
+        self.assertContains(response, "App & Website")
+        self.assertContains(response, 'data-preview-tab="app"')
+        self.assertNotContains(response, 'data-preview-tab="website"')
+
+    def test_the_email_tab_renders_and_starts_hidden(self):
+        response = self.club_get("club_settings")
+
+        self.assertContains(response, 'data-preview-tab="email"')
+        self.assertContains(response, 'id="preview-panel-email" class="preview-email hidden"')
+
     def test_saving_still_updates_the_club(self):
         response = self.club_post(
             "club_settings",
