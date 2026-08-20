@@ -1709,3 +1709,30 @@
         color: var(--color-ink);
     }
 }
+
+/* --- Member attendance sparkline (management/templates/management/member_detail.html) ---
+   D7's 12-bar strip: uniform-height blocks, not a value chart -- each bar is
+   just one event's outcome (ok present, club absent, edge upcoming), not a
+   magnitude, so there's nothing for a bar's height to encode. */
+@layer components {
+    .attendance-sparkline {
+        display: flex;
+        align-items: center;
+        gap: 3px;
+    }
+
+    .attendance-bar {
+        width: 0.5rem;
+        height: 2rem;
+        border-radius: 2px;
+        background: var(--color-edge);
+    }
+
+    .attendance-bar-present {
+        background: var(--color-ok);
+    }
+
+    .attendance-bar-absent {
+        background: var(--color-club);
+    }
+}

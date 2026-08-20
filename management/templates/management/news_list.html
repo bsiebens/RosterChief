@@ -22,24 +22,26 @@
 
             <div class="card overflow-hidden divide-y">
                 {% for item in news_items %}
-                    <a href="{% querystring selected=item.pk %}" class="flex flex-col gap-1 border-l-[3px] px-4 py-3 {% if news_item and item.pk == news_item.pk %}border-club bg-row-sel{% else %}border-transparent hover:bg-subhead{% endif %}">
-                        <div class="flex flex-wrap items-center gap-2">
-                            {% if item.status == "draft" %}
-                                <span class="badge badge-sm">{% trans "Draft" %}</span>
-                            {% elif item.is_scheduled %}
-                                <span class="badge badge-info badge-sm">{% trans "Scheduled" %}</span>
-                            {% else %}
-                                <span class="badge badge-success badge-sm">{% trans "Published" %}</span>
-                            {% endif %}
-                            <span class="font-mono text-xs text-dim">
-                                {% if item.status == "draft" %}{% blocktrans with time=item.modified|timesince %}Edited {{ time }} ago{% endblocktrans %}
-                                {% else %}{{ item.published_at|date:"j M Y" }}{% endif %}
-                            </span>
-                        </div>
-                        <div class="truncate font-display text-base font-extrabold text-ink uppercase">{{ item.title }}</div>
-                        <div class="truncate text-[13px] text-muted">
-                            {% if item.created_by %}{{ item.created_by }} &middot; {% endif %}
-                            {% for team in item.teams.all %}{{ team.short_name }}{% if not forloop.last %}, {% endif %}{% empty %}{% trans "Club-wide" %}{% endfor %}
+                    {# One dense line per row (D8's actual list-pane density), not a stacked mini-card: status pill inline with the headline, everything else folded into one muted meta line below. #}
+                    <a href="{% querystring selected=item.pk %}" class="flex items-start gap-2.5 border-l-[3px] px-3.5 py-2.5 {% if news_item and item.pk == news_item.pk %}border-club bg-row-sel{% else %}border-transparent hover:bg-subhead{% endif %}">
+                        {% if item.status == "draft" %}
+                            <span class="badge badge-sm mt-0.5 shrink-0">{% trans "Draft" %}</span>
+                        {% elif item.is_scheduled %}
+                            <span class="badge badge-info badge-sm mt-0.5 shrink-0">{% trans "Scheduled" %}</span>
+                        {% else %}
+                            <span class="badge badge-success badge-sm mt-0.5 shrink-0">{% trans "Published" %}</span>
+                        {% endif %}
+                        <div class="min-w-0 flex-1">
+                            <div class="truncate font-display text-sm font-bold text-ink uppercase">{{ item.title }}</div>
+                            <div class="truncate text-xs text-muted">
+                                <span class="font-mono text-dim">
+                                    {% if item.status == "draft" %}{% blocktrans with time=item.modified|timesince %}Edited {{ time }} ago{% endblocktrans %}
+                                    {% else %}{{ item.published_at|date:"j M Y" }}{% endif %}
+                                </span>
+                                &middot;
+                                {% if item.created_by %}{{ item.created_by }} &middot; {% endif %}
+                                {% for team in item.teams.all %}{{ team.short_name }}{% if not forloop.last %}, {% endif %}{% empty %}{% trans "Club-wide" %}{% endfor %}
+                            </div>
                         </div>
                     </a>
                 {% empty %}

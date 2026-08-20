@@ -321,6 +321,96 @@ class MemberManagementTests(ManagementTestBase):
         self.assertEqual(member.first_name, "New")
 
 
+class MemberAttendanceSparklineTests(ManagementTestBase):
+    """The D7-alike attendance card on member_detail.html --
+    events.services.attendance.member_attendance_sparkline/_counts."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.team = Team.objects.create(club=cls.club, name="First Team", short_name="1st")
+        cls.position = Position.objects.create(club=cls.club, name="Forward", short_name="FW")
+        cls.player = Member.objects.create(first_name="Peter", last_name="Player")
+        ClubMembership.objects.create(club=cls.club, member=cls.player, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
+        TeamMembership.objects.create(team=cls.team, member=cls.player, season=cls.season, position=cls.position)
+
+    def setUp(self):
+        self.client.force_login(self.admin_user)
+
+    def make_attendance(self, *, status, start, showed_up=None):
+        event = Event.objects.create(club=self.club, title="Training", kind=Event.EventKind.TRAINING, start=start, season=self.season)
+        # A future event's roster is auto-synced on event.teams.add() (see
+        # events/signals.py), which already creates this row -- a past event's
+        # isn't (history is never rewritten), so get_or_create covers both.
+        event.teams.add(self.team)
+        attendance, created = Attendance.objects.get_or_create(event=event, member=self.player, defaults={"status": status, "showed_up": showed_up})
+        if not created:
+            attendance.status, attendance.showed_up = status, showed_up
+            attendance.save(update_fields=["status", "showed_up"])
+        return attendance
+
+    def test_the_card_is_hidden_for_a_member_not_rostered_this_season(self):
+        unrostered = Member.objects.create(first_name="Not", last_name="Rostered")
+        ClubMembership.objects.create(club=self.club, member=unrostered, season=self.season, status=ClubMembership.StatusChoices.PENDING)
+
+        response = self.club_get("member_detail", unrostered.pk)
+
+        self.assertNotContains(response, "attendance-sparkline")
+
+    def test_the_card_is_hidden_for_a_guardian(self):
+        guardian = Member.objects.create(first_name="Gale", last_name="Guardian")
+        ClubMembership.objects.create(club=self.club, member=guardian, season=self.season, kind=ClubMembership.Kind.GUARDIAN, status=ClubMembership.StatusChoices.ACTIVE)
+
+        response = self.club_get("member_detail", guardian.pk)
+
+        self.assertNotContains(response, "attendance-sparkline")
+
+    def test_a_past_present_event_counts_as_present(self):
+        self.make_attendance(status=Attendance.AttendanceStatus.PRESENT, start=timezone.now() - datetime.timedelta(days=2))
+
+        response = self.club_get("member_detail", self.player.pk)
+
+        self.assertEqual(response.context["attendance_counts"]["present"], 1)
+        self.assertEqual(response.context["attendance_sparkline"][0]["state"], "present")
+
+    def test_a_past_absent_event_counts_as_absent(self):
+        self.make_attendance(status=Attendance.AttendanceStatus.ABSENT, start=timezone.now() - datetime.timedelta(days=2))
+
+        response = self.club_get("member_detail", self.player.pk)
+
+        self.assertEqual(response.context["attendance_counts"]["absent"], 1)
+        self.assertEqual(response.context["attendance_sparkline"][0]["state"], "absent")
+
+    def test_a_future_event_is_upcoming_regardless_of_rsvp_status(self):
+        self.make_attendance(status=Attendance.AttendanceStatus.SELECTED, start=timezone.now() + datetime.timedelta(days=2))
+
+        response = self.club_get("member_detail", self.player.pk)
+
+        self.assertEqual(response.context["attendance_sparkline"][0]["state"], "upcoming")
+        # Only past events feed the Present/Absent/No-reply totals.
+        self.assertEqual(response.context["attendance_counts"]["present"], 0)
+        self.assertEqual(response.context["attendance_counts"]["absent"], 0)
+        self.assertEqual(response.context["attendance_counts"]["no_reply"], 0)
+
+    def test_a_past_unanswered_event_counts_as_no_reply(self):
+        self.make_attendance(status=Attendance.AttendanceStatus.NO_RESPONSE, start=timezone.now() - datetime.timedelta(days=2))
+
+        response = self.club_get("member_detail", self.player.pk)
+
+        self.assertEqual(response.context["attendance_counts"]["no_reply"], 1)
+
+    def test_the_sparkline_is_capped_at_twelve_bars_oldest_first(self):
+        for day in range(15, 0, -1):
+            self.make_attendance(status=Attendance.AttendanceStatus.PRESENT, start=timezone.now() - datetime.timedelta(days=day))
+
+        response = self.club_get("member_detail", self.player.pk)
+
+        sparkline = response.context["attendance_sparkline"]
+        self.assertEqual(len(sparkline), 12)
+        starts = [bar["event"].start for bar in sparkline]
+        self.assertEqual(starts, sorted(starts))
+
+
 class TeamManagementTests(ManagementTestBase):
     def setUp(self):
         super().setUp()

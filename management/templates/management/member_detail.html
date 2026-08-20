@@ -167,6 +167,38 @@
         </div>
     </div>
 
+    {% if show_attendance %}
+        {# D7's season card: a 12-bar attendance sparkline (present/absent/upcoming, oldest first) beside the season's Present/Absent/No-reply totals. #}
+        <div class="card card-body mt-4">
+            <h2 class="card-title">{% lucide "calendar-check" size=18 %} {% trans "Attendance" %}</h2>
+            {% if not attendance_sparkline %}
+                <p class="text-sm text-muted">{% trans "No events yet this season." %}</p>
+            {% else %}
+                <div class="flex flex-wrap items-center gap-8">
+                    <div class="attendance-sparkline">
+                        {% for bar in attendance_sparkline %}
+                            <span class="attendance-bar attendance-bar-{{ bar.state }}" title="{{ bar.event.title }} — {{ bar.event.start|date:"j M" }}"></span>
+                        {% endfor %}
+                    </div>
+                    <div class="flex gap-6">
+                        <div>
+                            <div class="font-display text-2xl leading-none font-extrabold text-ok tabular-nums">{{ attendance_counts.present }}</div>
+                            <div class="mt-1 font-display text-[11px] font-bold tracking-[.1em] text-muted uppercase">{% trans "Present" %}</div>
+                        </div>
+                        <div>
+                            <div class="font-display text-2xl leading-none font-extrabold text-club tabular-nums">{{ attendance_counts.absent }}</div>
+                            <div class="mt-1 font-display text-[11px] font-bold tracking-[.1em] text-muted uppercase">{% trans "Absent" %}</div>
+                        </div>
+                        <div>
+                            <div class="font-display text-2xl leading-none font-extrabold text-dim tabular-nums">{{ attendance_counts.no_reply }}</div>
+                            <div class="mt-1 font-display text-[11px] font-bold tracking-[.1em] text-muted uppercase">{% trans "No reply" %}</div>
+                        </div>
+                    </div>
+                </div>
+            {% endif %}
+        </div>
+    {% endif %}
+
     {% comment %}
         Onboarding checklist -- club.services.onboarding.checklist_for, paired with
         MemberRequirementStatus if one exists. Any staff can mark an item done or

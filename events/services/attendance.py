@@ -107,6 +107,40 @@ def team_attendance_rate(team, season):
     return round(100 * counts["present"] / answered) if answered else None
 
 
+def member_attendance_sparkline(member, season, *, limit=12):
+    """This member's most recent ``limit`` attendance rows in ``season``,
+    oldest first, each bucketed into the three states the member detail
+    page's sparkline draws: 'present'/'absent' for a past event (mirrors
+    team_attendance_rate's own present-vs-everything-else-that-isn't-present
+    definition -- excused/no_response/etc. all read as a miss here, same as
+    there) or 'upcoming' for one that hasn't happened yet."""
+    now = timezone.now()
+    rows = list(Attendance.objects.filter(member=member, event__season=season).select_related("event").order_by("-event__start")[:limit])
+    rows.reverse()
+
+    bars = []
+    for row in rows:
+        if row.event.start > now:
+            state = "upcoming"
+        elif row.status == Attendance.AttendanceStatus.PRESENT:
+            state = "present"
+        else:
+            state = "absent"
+        bars.append({"event": row.event, "state": state})
+    return bars
+
+
+def member_attendance_counts(member, season):
+    """Present/Absent/No-reply totals for the season, alongside the
+    sparkline -- counts every past attendance row, not just the (possibly
+    truncated) ones the sparkline itself displays."""
+    return Attendance.objects.filter(member=member, event__season=season, event__start__lt=timezone.now()).aggregate(
+        present=Count("id", filter=Q(status=Attendance.AttendanceStatus.PRESENT)),
+        absent=Count("id", filter=Q(status=Attendance.AttendanceStatus.ABSENT)),
+        no_reply=Count("id", filter=Q(status=Attendance.AttendanceStatus.NO_RESPONSE)),
+    )
+
+
 def player_attendance_rankings(team, season, *, minimum_responses=3):
     """Each player's turnout this season, best first:
     ``[{"member": Member, "rate": int, "responses": int}, ...]``. Excludes

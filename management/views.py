@@ -33,7 +33,7 @@ from controlpanel.messages import notify
 from controlpanel.mixins import RedirectOnInvalidMixin
 from controlpanel.services.statistics import club_attention, club_charts, club_statistics, unrostered_members
 from events.models import Attendance, Event, EventReferee, EventSeries, Location, Opponent
-from events.services.attendance import player_attendance_rankings, players_who_missed_recent_practices, team_attendance_rate, team_no_shows
+from events.services.attendance import member_attendance_counts, member_attendance_sparkline, player_attendance_rankings, players_who_missed_recent_practices, team_attendance_rate, team_no_shows
 from events.services.calendar import add_months, month_bounds, month_grid, season_grid, week_bounds, week_grid
 from events.services.competitions import CompetitionFetchError, fetch_game_info
 from events.services.rbihf_import import RBIHFImportError, apply_plan, build_plan, extract_team_id, fetch_html
@@ -723,7 +723,15 @@ class MemberDetailView(ClubStaffRequiredMixin, DetailView):
 
         is_admin = is_club_admin(self.request.user, self.request.club)
         referee_profile = RefereeProfile.objects.filter(member=self.object).select_related("level").first()
-        current_membership = ClubMembership.objects.filter(club=self.request.club, member=self.object, season=current_season(self.request.club)).first()
+        season = current_season(self.request.club)
+        current_membership = ClubMembership.objects.filter(club=self.request.club, member=self.object, season=season).first()
+
+        # A guardian isn't rostered anywhere, so there's never an attendance
+        # row to show -- same "member, not guardian" gate the fee-status row
+        # above already uses.
+        show_attendance = current_membership is not None and not current_membership.is_guardian
+        attendance_sparkline = member_attendance_sparkline(self.object, season) if show_attendance else []
+        attendance_counts = member_attendance_counts(self.object, season) if show_attendance else None
 
         return super().get_context_data(
             family_groups=family_groups,
@@ -740,6 +748,9 @@ class MemberDetailView(ClubStaffRequiredMixin, DetailView):
             guardians=self.object.guardians,
             referee_profile=referee_profile,
             referee_eligibility_form=MemberRefereeEligibilityForm(club=self.request.club, member=self.object) if is_admin else None,
+            show_attendance=show_attendance,
+            attendance_sparkline=attendance_sparkline,
+            attendance_counts=attendance_counts,
             **kwargs,
         )
 
