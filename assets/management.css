@@ -1804,30 +1804,29 @@
         background: var(--color-paper);
     }
 
-    .preview-frame {
-        display: flex;
-        height: 220px;
-        overflow: hidden;
-        border: 1px solid var(--color-line);
-        border-radius: var(--radius-box);
+    /* Live preview tabs -- App is the only one with real content behind it
+       (Website/Email aren't built), so these are static labels, not a real
+       tab control. */
+    .preview-tab {
+        padding: 0.3125rem 0.625rem;
+        font-family: var(--font-display);
+        font-size: 0.75rem;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--color-muted);
     }
 
-    .preview-sidebar {
-        display: flex;
-        width: 40%;
-        flex-shrink: 0;
-        flex-direction: column;
-        gap: 0.5rem;
-        padding: 0.75rem;
+    .preview-tab-active {
         background: var(--color-ink);
         color: #fff;
-        transition: background-color 0.15s ease, color 0.15s ease;
     }
 
     .preview-crest {
         display: flex;
         width: 1.5rem;
         height: 1.5rem;
+        flex-shrink: 0;
         align-items: center;
         justify-content: center;
         border-radius: 0.25rem;
@@ -1835,65 +1834,6 @@
         font-family: var(--font-display);
         font-size: 0.625rem;
         font-weight: 800;
-    }
-
-    .preview-club-name {
-        margin-bottom: 0.25rem;
-        font-family: var(--font-display);
-        font-size: 0.6875rem;
-        font-weight: 800;
-        letter-spacing: 0.04em;
-        text-transform: uppercase;
-        opacity: 0.9;
-    }
-
-    .preview-nav-item {
-        border-radius: 0.375rem;
-        padding: 0.375rem 0.5rem;
-        font-size: 0.6875rem;
-        opacity: 0.75;
-    }
-
-    .preview-nav-active {
-        opacity: 1;
-        font-weight: 700;
-        background: var(--color-club);
-        color: #fff;
-        transition: background-color 0.15s ease, color 0.15s ease;
-    }
-
-    .preview-panel {
-        display: flex;
-        flex: 1;
-        flex-direction: column;
-        gap: 0.625rem;
-        padding: 1rem;
-        background: var(--color-paper);
-    }
-
-    .preview-panel-heading {
-        font-family: var(--font-display);
-        font-size: 0.75rem;
-        font-weight: 800;
-        letter-spacing: 0.04em;
-        text-transform: uppercase;
-        color: var(--color-ink);
-    }
-
-    .preview-button {
-        align-self: flex-start;
-        border: none;
-        border-radius: var(--radius-box);
-        padding: 0.375rem 0.875rem;
-        font-family: var(--font-display);
-        font-size: 0.6875rem;
-        font-weight: 800;
-        letter-spacing: 0.04em;
-        text-transform: uppercase;
-        background: var(--color-club);
-        color: #fff;
-        cursor: default;
-        transition: background-color 0.15s ease, color 0.15s ease;
     }
 
     .preview-skeleton-line {
@@ -1906,16 +1846,22 @@
         width: 60%;
     }
 
-    /* The mobile app mock -- not built yet, but its header/role-switcher take
-       the same primary/secondary colours the sidebar mock above does, so this
-       preview stays accurate once it exists rather than needing a rework. */
-    .preview-phone {
-        width: 11rem;
+    /* The mobile app mock -- not built yet, but its header/role-switcher/
+       "Next up" card take the same primary/secondary colours a real one
+       would, so this preview stays accurate once it exists. Sized closer to
+       an actual phone aspect ratio (tall, mostly-empty screen below the
+       first couple of cards) rather than a cropped sliver. */
+    .preview-phone-lg {
+        width: 12.5rem;
         flex-shrink: 0;
         overflow: hidden;
         border: 5px solid var(--color-ink);
         border-radius: 1.375rem;
         background: var(--color-paper);
+    }
+
+    .preview-phone-lg .preview-phone-body {
+        min-height: 15rem;
     }
 
     .preview-phone-header {
@@ -1985,7 +1931,7 @@
     .preview-phone-card {
         border-radius: 0.5rem;
         padding: 0.5rem;
-        background: var(--color-club);
+        background: var(--color-ink);
         color: #fff;
         transition: background-color 0.15s ease, color 0.15s ease;
     }
@@ -2020,5 +1966,83 @@
         border-radius: 0.5rem;
         padding: 0.5rem;
         background: #fff;
+    }
+
+    /* The public-site mock -- same "not built yet, but coloured accurately"
+       reasoning as the phone mock above. */
+    .preview-website {
+        overflow: hidden;
+        border: 1px solid var(--color-line);
+        border-radius: 0.625rem;
+    }
+
+    .preview-website-header {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.625rem 0.75rem;
+        background: var(--color-ink);
+        color: #fff;
+        transition: background-color 0.15s ease, color 0.15s ease;
+    }
+
+    .preview-website-name {
+        font-family: var(--font-display);
+        font-size: 0.8125rem;
+        font-weight: 800;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+    }
+
+    .preview-website-nav {
+        margin-left: auto;
+        font-family: var(--font-display);
+        font-size: 0.625rem;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--color-on-dark);
+    }
+
+    .preview-website-join {
+        border-radius: 0.25rem;
+        padding: 0.1875rem 0.4375rem;
+        background: var(--color-club);
+        color: #fff;
+        font-family: var(--font-display);
+        font-size: 0.625rem;
+        font-weight: 800;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        transition: background-color 0.15s ease, color 0.15s ease;
+    }
+
+    .preview-website-hero {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+        padding: 0.875rem 0.75rem;
+        background: var(--color-subhead);
+    }
+
+    .preview-website-headline {
+        font-family: var(--font-display);
+        font-size: 1.375rem;
+        line-height: 0.98;
+        font-weight: 800;
+        text-transform: uppercase;
+        color: var(--color-ink);
+    }
+
+    .preview-brand-dot {
+        width: 0.5rem;
+        height: 0.5rem;
+        flex-shrink: 0;
+        border-radius: 0.125rem;
+        background: var(--color-club);
+    }
+
+    .preview-brand-dot-neutral {
+        background: var(--color-dim);
     }
 }

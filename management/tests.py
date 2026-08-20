@@ -4465,18 +4465,19 @@ class ClubSettingsPreviewTests(ManagementTestBase):
     def setUp(self):
         self.client.force_login(self.admin_user)
 
-    def test_the_preview_frame_and_colour_swatches_render(self):
+    def test_the_preview_tabs_and_colour_swatches_render(self):
         response = self.club_get("club_settings")
 
-        self.assertContains(response, "preview-sidebar")
+        self.assertContains(response, "preview-tab-active")
         self.assertContains(response, 'id="primary_color_swatch"')
         self.assertContains(response, 'id="secondary_color_swatch"')
 
-    def test_the_mobile_app_preview_renders(self):
+    def test_the_mobile_app_and_website_previews_render(self):
         response = self.club_get("club_settings")
 
-        self.assertContains(response, "preview-phone")
-        self.assertContains(response, "Coming soon")
+        self.assertContains(response, "preview-phone-lg")
+        self.assertContains(response, "preview-website")
+        self.assertContains(response, "Where the brand shows up")
 
     def test_the_website_field_is_editable(self):
         response = self.club_get("club_settings")
