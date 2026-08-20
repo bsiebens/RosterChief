@@ -5173,6 +5173,16 @@
       grid-template-columns: repeat(6, minmax(0, 1fr));
     }
   }
+  .xl\:sticky {
+    @media (width >= 80rem) {
+      position: sticky;
+    }
+  }
+  .xl\:top-4 {
+    @media (width >= 80rem) {
+      top: calc(var(--spacing) * 4);
+    }
+  }
   .xl\:grid-cols-2 {
     @media (width >= 80rem) {
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -5188,6 +5198,11 @@
       grid-template-columns: repeat(4, minmax(0, 1fr));
     }
   }
+  .xl\:grid-cols-\[1\.2fr_1fr\] {
+    @media (width >= 80rem) {
+      grid-template-columns: 1.2fr 1fr;
+    }
+  }
   .xl\:grid-cols-\[1\.6fr_1fr\] {
     @media (width >= 80rem) {
       grid-template-columns: 1.6fr 1fr;
@@ -5196,6 +5211,11 @@
   .xl\:grid-cols-\[1\.35fr_1fr\] {
     @media (width >= 80rem) {
       grid-template-columns: 1.35fr 1fr;
+    }
+  }
+  .xl\:self-start {
+    @media (width >= 80rem) {
+      align-self: flex-start;
     }
   }
   .\[\&\:\:-webkit-details-marker\]\:hidden {

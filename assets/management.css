@@ -1736,3 +1736,130 @@
         background: var(--color-club);
     }
 }
+
+/* --- Club identity live preview (management/templates/management/club_settings.html) ---
+   A mini mock of this app's own sidebar + a sample button -- genuinely what
+   primary_color/secondary_color affect (base.html's --tenant-* custom
+   properties), not a fabricated App/Website/Email mockup. Colours are set
+   inline by that template's own script as the form fields change; only
+   layout/typography lives here. */
+@layer components {
+    .club-color-swatch {
+        width: 2rem;
+        height: 1.5rem;
+        padding: 0;
+        border: 1px solid var(--color-line);
+        border-radius: 0.375rem;
+        background: none;
+        cursor: pointer;
+    }
+
+    .preview-frame {
+        display: flex;
+        height: 220px;
+        overflow: hidden;
+        border: 1px solid var(--color-line);
+        border-radius: var(--radius-box);
+    }
+
+    .preview-sidebar {
+        display: flex;
+        width: 40%;
+        flex-shrink: 0;
+        flex-direction: column;
+        gap: 0.5rem;
+        padding: 0.75rem;
+        background: var(--color-ink);
+        color: #fff;
+        transition: background-color 0.15s ease, color 0.15s ease;
+    }
+
+    .preview-crest {
+        display: flex;
+        width: 1.5rem;
+        height: 1.5rem;
+        align-items: center;
+        justify-content: center;
+        border-radius: 0.25rem;
+        background: rgba(255, 255, 255, 0.15);
+        font-family: var(--font-display);
+        font-size: 0.625rem;
+        font-weight: 800;
+    }
+
+    .preview-club-name {
+        margin-bottom: 0.25rem;
+        font-family: var(--font-display);
+        font-size: 0.6875rem;
+        font-weight: 800;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        opacity: 0.9;
+    }
+
+    .preview-nav-item {
+        border-radius: 0.375rem;
+        padding: 0.375rem 0.5rem;
+        font-size: 0.6875rem;
+        opacity: 0.75;
+    }
+
+    .preview-nav-active {
+        opacity: 1;
+        font-weight: 700;
+        background: var(--color-club);
+        color: #fff;
+        transition: background-color 0.15s ease, color 0.15s ease;
+    }
+
+    .preview-panel {
+        display: flex;
+        flex: 1;
+        flex-direction: column;
+        gap: 0.625rem;
+        padding: 1rem;
+        background: var(--color-paper);
+    }
+
+    .preview-panel-heading {
+        font-family: var(--font-display);
+        font-size: 0.75rem;
+        font-weight: 800;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--color-ink);
+    }
+
+    .preview-button {
+        align-self: flex-start;
+        border: none;
+        border-radius: var(--radius-box);
+        padding: 0.375rem 0.875rem;
+        font-family: var(--font-display);
+        font-size: 0.6875rem;
+        font-weight: 800;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        background: var(--color-club);
+        color: #fff;
+        cursor: default;
+        transition: background-color 0.15s ease, color 0.15s ease;
+    }
+
+    .preview-skeleton-line {
+        height: 0.5rem;
+        border-radius: 999px;
+        background: var(--color-line);
+    }
+
+    .preview-skeleton-line-short {
+        width: 60%;
+    }
+
+    .contrast-icon {
+        display: inline-flex;
+        width: 1rem;
+        justify-content: center;
+        font-weight: 700;
+    }
+}

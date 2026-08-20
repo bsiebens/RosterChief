@@ -4458,6 +4458,32 @@ class SponsorManagementTests(ManagementTestBase):
         self.assertNotContains(self.club_get("home"), "Sponsors")
 
 
+class ClubSettingsPreviewTests(ManagementTestBase):
+    """The D9-alike live preview on the Club identity page -- see
+    management/templates/management/club_settings.html."""
+
+    def setUp(self):
+        self.client.force_login(self.admin_user)
+
+    def test_the_preview_frame_and_colour_swatches_render(self):
+        response = self.club_get("club_settings")
+
+        self.assertContains(response, "preview-sidebar")
+        self.assertContains(response, 'id="primary_color_swatch"')
+        self.assertContains(response, 'id="secondary_color_swatch"')
+
+    def test_saving_still_updates_the_club(self):
+        response = self.club_post(
+            "club_settings",
+            {"name": "Ajax United", "legal_name": "", "contact_email": "", "primary_color": "#123456", "secondary_color": "#654321"},
+        )
+
+        self.assertRedirects(response, reverse("management:club_settings"))
+        self.club.refresh_from_db()
+        self.assertEqual(self.club.primary_color, "#123456")
+        self.assertEqual(self.club.secondary_color, "#654321")
+
+
 class BillingEndingBannerTests(ManagementTestBase):
     """The club dashboard's "billing is about to stop" warning -- see
     management.views.HomeView and management/templates/management/home.html.
