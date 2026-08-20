@@ -4,44 +4,54 @@
 {% block heading %}{% trans "Referee management" %}{% endblock heading %}
 {% block topbar_context %}<span class="text-sm text-muted">{% trans "Every upcoming home game that needs a club-arranged referee." %}</span>{% endblock topbar_context %}
 
-{% block panel %}
-    <div class="grid grid-cols-5 gap-3">
-        <div class="card p-3.5">
-            <div class="mb-2 flex items-center gap-1.5 font-mono text-[10px] tracking-[.08em] text-muted uppercase">{% lucide "calendar" size=13 %} {% trans "Games in view" %}</div>
-            <div class="font-display text-4xl leading-none font-extrabold text-ink tabular-nums">{{ kpi_total }}</div>
-        </div>
-        <div class="card p-3.5">
-            <div class="mb-2 flex items-center gap-1.5 font-mono text-[10px] tracking-[.08em] text-muted uppercase">{% lucide "circle-alert" size=13 %} {% trans "Without a referee" %}</div>
-            <div class="font-display text-4xl leading-none font-extrabold tabular-nums {% if kpi_no_referee %}text-club-dark{% else %}text-ink{% endif %}">{{ kpi_no_referee }}</div>
-        </div>
-        <div class="card p-3.5">
-            <div class="mb-2 flex items-center gap-1.5 font-mono text-[10px] tracking-[.08em] text-muted uppercase">{% lucide "circle-dashed" size=13 %} {% trans "Partially staffed" %}</div>
-            <div class="font-display text-4xl leading-none font-extrabold tabular-nums {% if kpi_understaffed %}text-warn{% else %}text-ink{% endif %}">{{ kpi_understaffed }}</div>
-        </div>
-        <div class="card p-3.5">
-            <div class="mb-2 flex items-center gap-1.5 font-mono text-[10px] tracking-[.08em] text-muted uppercase">{% lucide "circle-check" size=13 %} {% trans "Fully staffed" %}</div>
-            <div class="font-display text-4xl leading-none font-extrabold text-ink tabular-nums">{{ kpi_fully_staffed }}</div>
-        </div>
-        <div class="card p-3.5">
-            <div class="mb-2 flex items-center gap-1.5 font-mono text-[10px] tracking-[.08em] text-muted uppercase">{% lucide "euro" size=13 %} {% trans "Fees not set" %}</div>
-            <div class="font-display text-4xl leading-none font-extrabold tabular-nums {% if kpi_fees_pending %}text-warn{% else %}text-ink{% endif %}">{{ kpi_fees_pending }}</div>
+{% block filter_strip %}
+    <div class="flex flex-wrap items-center gap-3 border-b border-line bg-white px-7 py-3">
+        <div class="flex-1"></div>
+        <div class="flex items-center gap-1 rounded-full bg-steel p-1">
+            <a href="{% querystring range="week" %}" class="rounded-full px-3 py-1.5 font-display text-xs font-bold tracking-[.08em] uppercase {% if range_choice == "week" %}bg-white text-ink{% else %}text-on-dark hover:text-white{% endif %}">{% trans "This week" %}</a>
+            <a href="{% querystring range="two_weeks" %}" class="rounded-full px-3 py-1.5 font-display text-xs font-bold tracking-[.08em] uppercase {% if range_choice == "two_weeks" %}bg-white text-ink{% else %}text-on-dark hover:text-white{% endif %}">{% trans "+ next week" %}</a>
+            <a href="{% querystring range="10" %}" class="rounded-full px-3 py-1.5 font-display text-xs font-bold tracking-[.08em] uppercase {% if range_choice == "10" %}bg-white text-ink{% else %}text-on-dark hover:text-white{% endif %}">{% trans "Next 10" %}</a>
+            <a href="{% querystring range="25" %}" class="rounded-full px-3 py-1.5 font-display text-xs font-bold tracking-[.08em] uppercase {% if range_choice == "25" %}bg-white text-ink{% else %}text-on-dark hover:text-white{% endif %}">{% trans "Next 25" %}</a>
+            <a href="{% querystring range="50" %}" class="rounded-full px-3 py-1.5 font-display text-xs font-bold tracking-[.08em] uppercase {% if range_choice == "50" %}bg-white text-ink{% else %}text-on-dark hover:text-white{% endif %}">{% trans "Next 50" %}</a>
         </div>
     </div>
+{% endblock filter_strip %}
 
-    <div class="grid grid-cols-5 gap-2">
-        <a href="?range=week" class="btn btn-sm justify-center {% if range_choice == "week" %}btn-primary{% else %}btn-outline{% endif %}">{% trans "This week" %}</a>
-        <a href="?range=two_weeks" class="btn btn-sm justify-center {% if range_choice == "two_weeks" %}btn-primary{% else %}btn-outline{% endif %}">{% trans "This + next week" %}</a>
-        <a href="?range=10" class="btn btn-sm justify-center {% if range_choice == "10" %}btn-primary{% else %}btn-outline{% endif %}">{% trans "Next 10" %}</a>
-        <a href="?range=25" class="btn btn-sm justify-center {% if range_choice == "25" %}btn-primary{% else %}btn-outline{% endif %}">{% trans "Next 25" %}</a>
-        <a href="?range=50" class="btn btn-sm justify-center {% if range_choice == "50" %}btn-primary{% else %}btn-outline{% endif %}">{% trans "Next 50" %}</a>
+{% block panel %}
+    <div class="flex flex-wrap gap-3.5">
+        <div class="card min-w-0 flex-1 p-4">
+            <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Games in view" %}</div>
+            <div class="mt-1 font-display text-[34px] leading-none font-extrabold text-ink tabular-nums">{{ kpi_total }}</div>
+            <div class="mt-1 text-[13px] text-muted">{% trans "In the selected range" %}</div>
+        </div>
+        <div class="card min-w-0 flex-1 p-4">
+            <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Without a referee" %}</div>
+            <div class="mt-1 font-display text-[34px] leading-none font-extrabold tabular-nums {% if kpi_no_referee %}text-club{% else %}text-ink{% endif %}">{{ kpi_no_referee }}</div>
+            <div class="mt-1 text-[13px] text-muted">{% trans "Nobody assigned yet" %}</div>
+        </div>
+        <div class="card min-w-0 flex-1 p-4">
+            <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Partially staffed" %}</div>
+            <div class="mt-1 font-display text-[34px] leading-none font-extrabold tabular-nums {% if kpi_understaffed %}text-warn{% else %}text-ink{% endif %}">{{ kpi_understaffed }}</div>
+            <div class="mt-1 text-[13px] text-muted">{% trans "Still short a referee" %}</div>
+        </div>
+        <div class="card min-w-0 flex-1 p-4">
+            <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Fully staffed" %}</div>
+            <div class="mt-1 font-display text-[34px] leading-none font-extrabold text-ok tabular-nums">{{ kpi_fully_staffed }}</div>
+            <div class="mt-1 text-[13px] text-muted">{% trans "Nothing left to do" %}</div>
+        </div>
+        <div class="card min-w-0 flex-1 p-4">
+            <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Fees not set" %}</div>
+            <div class="mt-1 font-display text-[34px] leading-none font-extrabold tabular-nums {% if kpi_fees_pending %}text-warn{% else %}text-ink{% endif %}">{{ kpi_fees_pending }}</div>
+            <div class="mt-1 text-[13px] text-muted">{% trans "Referee fee missing" %}</div>
+        </div>
     </div>
 
     {% regroup games by start.date as day_groups %}
     {% for day in day_groups %}
-        <div class="font-display text-xs font-extrabold tracking-[.14em] text-muted uppercase">{{ day.grouper|date:"l j F" }}</div>
-        <div class="grid grid-cols-3 gap-3">
+        <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{{ day.grouper|date:"l j F" }}</div>
+        <div class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
             {% for game in day.list %}
-                <div class="card flex flex-col gap-2 p-4 {% if not game.referee_rows %}border-club-dark{% elif not game.referees_full %}border-warn{% endif %}">
+                <div class="card card-body gap-2 border-l-[3px] {% if not game.referee_rows %}border-l-club{% elif not game.referees_full %}border-l-warn{% else %}border-l-transparent{% endif %}">
                     <a class="link link-hover font-semibold text-ink" href="{% url 'management:event_detail' game.pk %}">
                         {% for team in game.teams.all %}{{ team.short_name }}{% if not forloop.last %}, {% endif %}{% endfor %}
                         {% if game.opponent %}{% trans "vs" %} {{ game.opponent }}{% endif %}
