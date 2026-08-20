@@ -219,14 +219,27 @@ class ActiveNavHighlightTests(ManagementTestBase):
         self.assertContains(response, f'class="nav-item active" href="{reverse("management:home")}"')
         self.assertNotContains(response, f'class="nav-item active" href="{reverse("management:member_list")}"')
 
-    def test_roles_positions_and_referee_setup_pages_all_highlight_settings(self):
-        # Roles/Positions/Referee levels/Referee management moved out of Members/Teams
-        # and into Settings -- club-wide setup, not day-to-day people/roster work.
-        for name in ("role_list", "position_list", "referee_level_list", "referee_management"):
+    def test_roles_positions_and_referee_levels_pages_all_highlight_settings(self):
+        # Roles/Positions/Referee levels moved out of Members/Teams and into Settings --
+        # club-wide setup, not day-to-day people/roster work.
+        for name in ("role_list", "position_list", "referee_level_list"):
             with self.subTest(name=name):
                 response = self.club_get(name)
 
                 self.assertContains(response, f'class="nav-item active" href="{reverse("management:club_settings")}"')
+
+    def test_referee_management_page_highlights_calendar(self):
+        # Referee management is the operational "who's covering this game" page, so it
+        # lives under Calendar with Events/Locations/Opponents, not under Settings.
+        response = self.club_get("referee_management")
+
+        self.assertContains(response, f'class="nav-item active" href="{reverse("management:event_list")}"')
+
+    def test_sponsor_list_page_highlights_finance(self):
+        # Sponsors sit under Finance, underneath Dues & billing.
+        response = self.club_get("sponsor_list")
+
+        self.assertContains(response, f'class="nav-item active" href="{reverse("management:membership_list")}"')
 
 
 class SidebarThemingTests(ManagementTestBase):
@@ -4447,12 +4460,12 @@ class SponsorManagementTests(ManagementTestBase):
         self.assertTrue(Sponsor.objects.filter(pk=sponsor.pk).exists())
 
     def test_nav_only_shows_sponsors_for_an_admin(self):
-        # Sponsors lives under Settings' sub-nav now, which only expands on a
-        # Settings-section page -- see ActiveNavHighlightTests's sibling comments.
-        # Settings itself is admin-only, so a coach never reaches a page that would
+        # Sponsors lives under Finance's sub-nav now, which only expands on a
+        # Finance-section page -- see ActiveNavHighlightTests's sibling comments.
+        # Finance itself is admin-only, so a coach never reaches a page that would
         # expand it in the first place -- club_get raises PermissionDenied for them.
         self.client.force_login(self.admin_user)
-        self.assertContains(self.club_get("club_settings"), "Sponsors")
+        self.assertContains(self.club_get("membership_list"), "Sponsors")
 
         self.client.force_login(self.coach_manager)
         self.assertNotContains(self.club_get("home"), "Sponsors")

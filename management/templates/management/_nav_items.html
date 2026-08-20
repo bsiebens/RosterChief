@@ -56,6 +56,11 @@
                 <a class="nav-subitem {% if nav == 'location_list' %}active{% endif %}" href="{% url 'management:location_list' %}">{% trans "Locations" %}</a>
                 <a class="nav-subitem {% if nav == 'opponent_list' %}active{% endif %}" href="{% url 'management:opponent_list' %}">{% trans "Opponents" %}</a>
             {% endif %}
+            {% if is_club_admin or can_manage_members %}
+                <a class="nav-subitem flex items-center gap-2 {% if nav == 'referee_management' %}active{% endif %}" href="{% url 'management:referee_management' %}">{% trans "Referee management" %}
+                    {% if games_missing_referees_count %}<span class="badge badge-error badge-xs">{{ games_missing_referees_count }}</span>{% endif %}
+                </a>
+            {% endif %}
         </div>
     {% endif %}
 </div>
@@ -68,6 +73,7 @@
         {% if nav_section == 'finance' %}
             <div class="flex flex-col">
                 <a class="nav-subitem {% if nav == 'membership_list' %}active{% endif %}" href="{% url 'management:membership_list' %}">{% trans "Dues & billing" %}</a>
+                <a class="nav-subitem {% if nav == 'sponsor_list' %}active{% endif %}" href="{% url 'management:sponsor_list' %}">{% trans "Sponsors" %}</a>
                 {% if shop_enabled %}
                     <a class="nav-subitem {% if nav == 'product_list' %}active{% endif %}" href="{% url 'management:product_list' %}">{% trans "Products" %}</a>
                     <a class="nav-subitem {% if nav == 'order_list' %}active{% endif %}" href="{% url 'management:order_list' %}">{% trans "Orders" %}</a>
@@ -94,11 +100,7 @@
                     <a class="nav-subitem {% if nav == 'position_list' %}active{% endif %}" href="{% url 'management:position_list' %}">{% trans "Positions" %}</a>
                 {% endif %}
                 <a class="nav-subitem {% if nav == 'referee_level_list' %}active{% endif %}" href="{% url 'management:referee_level_list' %}">{% trans "Referee levels" %}</a>
-                <a class="nav-subitem flex items-center gap-2 {% if nav == 'referee_management' %}active{% endif %}" href="{% url 'management:referee_management' %}">{% trans "Referee management" %}
-                    {% if games_missing_referees_count %}<span class="badge badge-error badge-xs">{{ games_missing_referees_count }}</span>{% endif %}
-                </a>
                 {% if is_club_admin %}
-                    <a class="nav-subitem {% if nav == 'sponsor_list' %}active{% endif %}" href="{% url 'management:sponsor_list' %}">{% trans "Sponsors" %}</a>
                     {% if forms_enabled %}
                         <a class="nav-subitem {% if nav == 'form_list' %}active{% endif %}" href="{% url 'management:form_list' %}">{% trans "Forms" %}</a>
                     {% endif %}

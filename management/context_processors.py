@@ -165,7 +165,7 @@ _TOP_SECTION = {
     "event_list": "calendar",
     "location_list": "calendar",
     "opponent_list": "calendar",
-    "sponsor_list": "settings",
+    "sponsor_list": "finance",
     "product_list": "finance",
     "order_list": "finance",
     "discount_list": "finance",
@@ -176,7 +176,7 @@ _TOP_SECTION = {
     "role_list": "settings",
     "position_list": "settings",
     "referee_level_list": "settings",
-    "referee_management": "settings",
+    "referee_management": "calendar",
 }
 
 
