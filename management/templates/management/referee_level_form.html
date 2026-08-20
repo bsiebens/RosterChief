@@ -16,11 +16,11 @@
                 {% endfor %}
 
                 <div class="grid grid-cols-2 items-start gap-4">
-                    {% for field in form %}
-                        <div class="{% if field.widget_type == "selectmultiple" %}col-span-2{% endif %}">
-                            {% form_field field %}
-                        </div>
-                    {% endfor %}
+                    {% form_field form.name %}
+                    {% form_field form.teams %}
+                </div>
+                <div class="mt-4 grid grid-cols-2 items-start gap-4">
+                    {% form_field form.inherits_from %}
                 </div>
 
                 <div class="mt-4 flex gap-2">
