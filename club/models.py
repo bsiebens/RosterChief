@@ -48,6 +48,7 @@ class Club(UUIDModel):
         blank=True,
         help_text=_("The club's public address, shown to people the club writes to or asks to get in touch -- e.g. a parent claiming a child. Falls back to nothing being shown at all, so it's worth setting."),
     )
+    website = models.URLField(_("website"), blank=True, help_text=_("The club's own site, if it has one -- shown alongside its RosterChief pages, not used for anything else yet."))
 
     logo = models.FileField(
         _("logo"),

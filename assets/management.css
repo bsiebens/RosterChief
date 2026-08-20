@@ -1737,21 +1737,71 @@
     }
 }
 
-/* --- Club identity live preview (management/templates/management/club_settings.html) ---
-   A mini mock of this app's own sidebar + a sample button -- genuinely what
-   primary_color/secondary_color affect (base.html's --tenant-* custom
-   properties), not a fabricated App/Website/Email mockup. Colours are set
-   inline by that template's own script as the form fields change; only
-   layout/typography lives here. */
+/* --- Club identity page (management/templates/management/club_settings.html) ---
+   Colours: swatch + mono hex merged into one bordered row (D9's own look),
+   not a labelled field with a decorative swatch floating below it. Live
+   preview: a mini mock of this app's own sidebar/button (the real, live
+   surface primary_color/secondary_color affect today, via base.html's
+   --tenant-* custom properties) plus a mobile app mock (the same colours
+   applied to the surface that's built next) -- not D9's fabricated App/
+   Website/Email tabs. Colours are set inline by that template's own script
+   as the form fields change; only layout/typography lives here. */
 @layer components {
+    .club-color-row {
+        display: flex;
+        align-items: center;
+        gap: 0.625rem;
+        border: 1px solid var(--color-edge);
+        border-radius: 0.5rem;
+        padding: 0.5rem 0.625rem;
+    }
+
     .club-color-swatch {
-        width: 2rem;
-        height: 1.5rem;
+        width: 1.625rem;
+        height: 1.625rem;
+        flex-shrink: 0;
         padding: 0;
-        border: 1px solid var(--color-line);
+        border: none;
         border-radius: 0.375rem;
         background: none;
         cursor: pointer;
+    }
+
+    .club-color-hex-input {
+        flex: 1;
+        min-width: 0;
+        border: none;
+        background: none;
+        outline: none;
+        padding: 0;
+        font-family: var(--font-mono);
+        font-size: 0.875rem;
+        color: var(--color-ink);
+    }
+
+    .club-contrast-box {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.5rem;
+        border-radius: 0.5rem;
+        padding: 0.625rem 0.75rem;
+        font-size: 0.8125rem;
+        transition: background-color 0.15s ease, color 0.15s ease;
+    }
+
+    .club-logo-dropzone {
+        display: flex;
+        width: 4.75rem;
+        height: 4.75rem;
+        flex-shrink: 0;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+        border: 1.5px dashed var(--color-stroke);
+        border-radius: 0.5rem;
+        background: var(--color-paper);
     }
 
     .preview-frame {
@@ -1856,10 +1906,119 @@
         width: 60%;
     }
 
-    .contrast-icon {
-        display: inline-flex;
-        width: 1rem;
+    /* The mobile app mock -- not built yet, but its header/role-switcher take
+       the same primary/secondary colours the sidebar mock above does, so this
+       preview stays accurate once it exists rather than needing a rework. */
+    .preview-phone {
+        width: 11rem;
+        flex-shrink: 0;
+        overflow: hidden;
+        border: 5px solid var(--color-ink);
+        border-radius: 1.375rem;
+        background: var(--color-paper);
+    }
+
+    .preview-phone-header {
+        padding: 0.75rem 0.625rem 0.625rem;
+        background: var(--color-ink);
+        color: #fff;
+        transition: background-color 0.15s ease, color 0.15s ease;
+    }
+
+    .preview-phone-header-row {
+        display: flex;
+        align-items: center;
+        gap: 0.375rem;
+    }
+
+    .preview-crest-sm {
+        width: 1.125rem;
+        height: 1.125rem;
+        font-size: 0.5rem;
+        border-radius: 0.25rem;
+    }
+
+    .preview-phone-name {
+        font-family: var(--font-display);
+        font-size: 0.6875rem;
+        font-weight: 800;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+    }
+
+    .preview-phone-roles {
+        display: flex;
+        gap: 2px;
+        margin-top: 0.5rem;
+        padding: 2px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.12);
+    }
+
+    .preview-phone-role {
+        flex: 1;
+        display: flex;
+        align-items: center;
         justify-content: center;
-        font-weight: 700;
+        height: 1.25rem;
+        border-radius: 999px;
+        font-family: var(--font-display);
+        font-size: 0.5625rem;
+        font-weight: 800;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--color-on-dark);
+    }
+
+    .preview-phone-role-active {
+        background: #fff;
+        color: var(--color-ink);
+    }
+
+    .preview-phone-body {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+        padding: 0.625rem;
+    }
+
+    .preview-phone-card {
+        border-radius: 0.5rem;
+        padding: 0.5rem;
+        background: var(--color-club);
+        color: #fff;
+        transition: background-color 0.15s ease, color 0.15s ease;
+    }
+
+    .preview-phone-eyebrow {
+        font-family: var(--font-display);
+        font-size: 0.5625rem;
+        font-weight: 800;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--color-info);
+    }
+
+    .preview-phone-title {
+        margin-top: 0.125rem;
+        font-family: var(--font-display);
+        font-size: 0.75rem;
+        line-height: 1.05;
+        font-weight: 800;
+        text-transform: uppercase;
+    }
+
+    .preview-phone-bar {
+        height: 1rem;
+        margin-top: 0.5rem;
+        border-radius: 0.25rem;
+        background: var(--color-ok);
+    }
+
+    .preview-phone-skeleton-card {
+        border: 1px solid var(--color-line);
+        border-radius: 0.5rem;
+        padding: 0.5rem;
+        background: #fff;
     }
 }

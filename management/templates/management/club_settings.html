@@ -5,16 +5,18 @@
     A club's own self-service identity/branding editor -- see
     management/forms.py's ClubSettingsForm for exactly which fields are
     editable here versus platform-staff-only (slug, seasons). D9 "Club
-    identity & branding" in the design handoff is the reference: two columns,
-    form fields on the left and a live preview on the right. The preview here
-    is scoped to what actually exists in this app rather than D9's aspirational
-    App/Website/Email tabs -- primary_color drives the sidebar
-    (--tenant-sidebar-bg/fg, base.html), secondary_color drives the club accent
-    (--tenant-club/-dark/-content, buttons/active nav/crest) -- so the mini
-    sidebar + button mock below is genuinely what changing these fields does,
-    not a fabricated mockup. The colour math (content colour, contrast ratio)
-    mirrors Club._content_color_for exactly, so the "computed ratio" shown is
-    the real number the server will use, not an approximation.
+    identity & branding" in the design handoff is the reference, followed
+    closely for the Colours card (merged swatch+hex row, side-by-side
+    contrast-check boxes) and the Logo card (dashed drop zone) -- markup
+    pulled straight from the design canvas (RosterChief Platform.dc.html),
+    not the prose summary. The live preview is scoped to surfaces that are
+    (or will genuinely be) this app rather than D9's aspirational App/
+    Website/Email tabs: the sidebar mock is what primary_color/secondary_color
+    affect today (base.html's --tenant-* custom properties); the phone mock
+    is the same colours applied ahead of the mobile app being built. The
+    colour math (content colour, contrast ratio) mirrors
+    Club._content_color_for exactly, so what's shown is the real number the
+    server computes on save, not an approximation.
 {% endcomment %}
 
 {% block panel_title %}{% trans "Club identity" %}{% endblock panel_title %}
@@ -39,10 +41,11 @@
             <div class="card">
                 <div class="card-body">
                     <div class="card-title">{% lucide "building-2" size=16 %} {% trans "Club" %}</div>
-                    <div class="flex flex-col gap-4">
+                    <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
                         {% form_field form.name %}
                         {% form_field form.legal_name %}
                         {% form_field form.contact_email %}
+                        {% form_field form.website %}
                     </div>
                 </div>
             </div>
@@ -53,37 +56,37 @@
                         <div class="card-title">{% lucide "palette" size=16 %} {% trans "Colours" %}</div>
                         <span class="font-mono text-xs text-dim">{% trans "Accents only" %}</span>
                     </div>
+
                     <div class="grid grid-cols-2 gap-4">
                         <div>
-                            {% form_field form.primary_color %}
-                            <div class="mt-1.5 flex items-center gap-2">
+                            <div class="mb-1.5 font-display text-[11px] font-bold tracking-[.12em] text-muted uppercase">{{ form.primary_color.label|capfirst }}</div>
+                            <label class="club-color-row">
                                 <input type="color" id="primary_color_swatch" class="club-color-swatch" value="{{ form.primary_color.value|default:"#0b1220" }}" aria-label="{% trans "Pick the primary colour" %}">
-                                <span class="font-mono text-xs text-muted">{% trans "Sidebar background" %}</span>
-                            </div>
+                                <input type="text" name="{{ form.primary_color.html_name }}" id="{{ form.primary_color.id_for_label }}" value="{{ form.primary_color.value|default:"" }}" placeholder="#0b1220" class="club-color-hex-input">
+                            </label>
+                            {% if form.primary_color.errors %}<p class="mt-1 text-xs text-club-dark">{{ form.primary_color.errors|join:" " }}</p>{% endif %}
                         </div>
                         <div>
-                            {% form_field form.secondary_color %}
-                            <div class="mt-1.5 flex items-center gap-2">
+                            <div class="mb-1.5 font-display text-[11px] font-bold tracking-[.12em] text-muted uppercase">{{ form.secondary_color.label|capfirst }}</div>
+                            <label class="club-color-row">
                                 <input type="color" id="secondary_color_swatch" class="club-color-swatch" value="{{ form.secondary_color.value|default:"#e4002b" }}" aria-label="{% trans "Pick the secondary colour" %}">
-                                <span class="font-mono text-xs text-muted">{% trans "Buttons & accents" %}</span>
-                            </div>
+                                <input type="text" name="{{ form.secondary_color.html_name }}" id="{{ form.secondary_color.id_for_label }}" value="{{ form.secondary_color.value|default:"" }}" placeholder="#e4002b" class="club-color-hex-input">
+                            </label>
+                            {% if form.secondary_color.errors %}<p class="mt-1 text-xs text-club-dark">{{ form.secondary_color.errors|join:" " }}</p>{% endif %}
                         </div>
                     </div>
 
-                    <div class="mt-3 flex flex-col gap-1.5 border-t border-rule pt-3">
-                        <div class="contrast-row flex items-center justify-between gap-2 text-xs">
-                            <span class="text-muted">{% trans "Sidebar text on sidebar background" %}</span>
-                            <span class="flex items-center gap-1 font-mono">
-                                <span id="primary-contrast-ratio">—</span>
-                                <span class="contrast-icon"></span>
-                            </span>
-                        </div>
-                        <div class="contrast-row flex items-center justify-between gap-2 text-xs">
-                            <span class="text-muted">{% trans "Button text on accent colour" %}</span>
-                            <span class="flex items-center gap-1 font-mono">
-                                <span id="secondary-contrast-ratio">—</span>
-                                <span class="contrast-icon"></span>
-                            </span>
+                    <div class="mt-4">
+                        <div class="mb-2 font-display text-[11px] font-bold tracking-[.12em] text-muted uppercase">{% trans "Contrast check" %}</div>
+                        <div class="flex gap-2">
+                            <div id="contrast-box-primary" class="club-contrast-box">
+                                <span id="contrast-label-primary"></span>
+                                <span id="contrast-ratio-primary" class="font-mono"></span>
+                            </div>
+                            <div id="contrast-box-secondary" class="club-contrast-box">
+                                <span id="contrast-label-secondary"></span>
+                                <span id="contrast-ratio-secondary" class="font-mono"></span>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -92,12 +95,17 @@
             <div class="card">
                 <div class="card-body">
                     <div class="card-title">{% lucide "image" size=16 %} {% trans "Logo" %}</div>
-                    <div class="flex items-center gap-3.5">
-                        {% if club.logo %}
-                            <img class="h-14 w-14 shrink-0 rounded-lg border border-line bg-paper object-contain p-1" src="{{ club.logo.url }}" alt="">
-                        {% else %}
-                            <span class="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg border border-line bg-paper font-display text-sm font-extrabold text-muted">{{ club.initials }}</span>
-                        {% endif %}
+                    <div class="flex items-end gap-4">
+                        <div>
+                            <div class="mb-1.5 font-display text-[11px] font-bold tracking-[.12em] text-muted uppercase">{% trans "Crest" %}</div>
+                            <div class="club-logo-dropzone">
+                                {% if club.logo %}
+                                    <img class="h-full w-full object-contain p-1.5" src="{{ club.logo.url }}" alt="">
+                                {% else %}
+                                    <span class="font-display text-sm font-extrabold text-muted">{{ club.initials }}</span>
+                                {% endif %}
+                            </div>
+                        </div>
                         <div class="flex-1">{% form_field form.logo %}</div>
                     </div>
                 </div>
@@ -108,9 +116,10 @@
             <div class="card">
                 <div class="card-body">
                     <div class="card-title">{% lucide "eye" size=16 %} {% trans "Live preview" %}</div>
-                    <p class="text-xs text-muted">{% trans "Where these colours actually show up in the management app -- updates as you edit, before you save anything." %}</p>
+                    <p class="text-xs text-muted">{% trans "Where these colours actually show up -- updates as you edit, before you save anything." %}</p>
 
-                    <div class="preview-frame mt-2">
+                    <div class="mt-2 font-display text-[11px] font-bold tracking-[.12em] text-muted uppercase">{% trans "Management app" %}</div>
+                    <div class="preview-frame mt-1.5">
                         <div id="preview-sidebar" class="preview-sidebar">
                             <div class="preview-crest">{{ club.initials|default:"CL" }}</div>
                             <div class="preview-club-name">{{ club.name|default:_("Your club") }}</div>
@@ -123,6 +132,34 @@
                             <button type="button" id="preview-button" class="preview-button">{% trans "Save changes" %}</button>
                             <div class="preview-skeleton-line"></div>
                             <div class="preview-skeleton-line preview-skeleton-line-short"></div>
+                        </div>
+                    </div>
+
+                    <div class="mt-4 flex items-center justify-between gap-2">
+                        <div class="font-display text-[11px] font-bold tracking-[.12em] text-muted uppercase">{% trans "Mobile app" %}</div>
+                        <span class="badge badge-sm badge-ghost">{% trans "Coming soon" %}</span>
+                    </div>
+                    <div class="mt-1.5 preview-phone">
+                        <div id="preview-phone-header" class="preview-phone-header">
+                            <div class="preview-phone-header-row">
+                                <span class="preview-crest preview-crest-sm">{{ club.initials|default:"CL" }}</span>
+                                <span class="preview-phone-name">{{ club.name|default:_("Your club") }}</span>
+                            </div>
+                            <div class="preview-phone-roles">
+                                <span class="preview-phone-role preview-phone-role-active">{% trans "Member" %}</span>
+                                <span class="preview-phone-role">{% trans "Coach" %}</span>
+                            </div>
+                        </div>
+                        <div class="preview-phone-body">
+                            <div id="preview-phone-card" class="preview-phone-card">
+                                <div class="preview-phone-eyebrow">{% trans "Next up" %}</div>
+                                <div class="preview-phone-title">{% trans "U16 vs Leuven" %}</div>
+                                <div class="preview-phone-bar"></div>
+                            </div>
+                            <div class="preview-phone-skeleton-card">
+                                <div class="preview-skeleton-line"></div>
+                                <div class="preview-skeleton-line preview-skeleton-line-short"></div>
+                            </div>
                         </div>
                     </div>
 
@@ -164,15 +201,15 @@
             const secondarySwatch = document.getElementById("secondary_color_swatch");
             if (!primaryText || !secondaryText) return;
 
-            const setContrastRow = (elementId, hex, contentHex) => {
+            const CONTENT_LABEL = { "#000000": "{% trans 'Black' %}", "#ffffff": "{% trans 'White' %}" };
+
+            const setContrastBox = (boxId, labelId, ratioId, hex, contentHex, onLabel) => {
                 const ratio = contrastRatio(hex, contentHex);
-                const cell = document.getElementById(elementId);
-                cell.textContent = `${ratio.toFixed(1)}:1`;
-                const row = cell.closest(".contrast-row");
-                const icon = row.querySelector(".contrast-icon");
-                icon.textContent = ratio >= 4.5 ? "✓" : "⚠";
-                icon.classList.toggle("text-ok", ratio >= 4.5);
-                icon.classList.toggle("text-warn", ratio < 4.5);
+                document.getElementById(labelId).textContent = `${CONTENT_LABEL[contentHex]} ${onLabel}`;
+                document.getElementById(ratioId).textContent = `${ratio.toFixed(1)} ${ratio >= 4.5 ? "✓" : "⚠"}`;
+                const box = document.getElementById(boxId);
+                box.style.background = hex;
+                box.style.color = contentHex;
             };
 
             const updatePreview = () => {
@@ -188,8 +225,13 @@
                 document.getElementById("preview-button").style.background = secondary;
                 document.getElementById("preview-button").style.color = secondaryContent;
 
-                setContrastRow("primary-contrast-ratio", primary, primaryContent);
-                setContrastRow("secondary-contrast-ratio", secondary, secondaryContent);
+                document.getElementById("preview-phone-header").style.background = primary;
+                document.getElementById("preview-phone-header").style.color = primaryContent;
+                document.getElementById("preview-phone-card").style.background = secondary;
+                document.getElementById("preview-phone-card").style.color = secondaryContent;
+
+                setContrastBox("contrast-box-primary", "contrast-label-primary", "contrast-ratio-primary", primary, primaryContent, "{% trans 'on primary' %}");
+                setContrastBox("contrast-box-secondary", "contrast-label-secondary", "contrast-ratio-secondary", secondary, secondaryContent, "{% trans 'on secondary' %}");
 
                 if (primarySwatch && isHex(primary)) primarySwatch.value = primary;
                 if (secondarySwatch && isHex(secondary)) secondarySwatch.value = secondary;

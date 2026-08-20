@@ -4472,16 +4472,27 @@ class ClubSettingsPreviewTests(ManagementTestBase):
         self.assertContains(response, 'id="primary_color_swatch"')
         self.assertContains(response, 'id="secondary_color_swatch"')
 
+    def test_the_mobile_app_preview_renders(self):
+        response = self.club_get("club_settings")
+
+        self.assertContains(response, "preview-phone")
+        self.assertContains(response, "Coming soon")
+
+    def test_the_website_field_is_editable(self):
+        response = self.club_get("club_settings")
+        self.assertContains(response, 'name="website"')
+
     def test_saving_still_updates_the_club(self):
         response = self.club_post(
             "club_settings",
-            {"name": "Ajax United", "legal_name": "", "contact_email": "", "primary_color": "#123456", "secondary_color": "#654321"},
+            {"name": "Ajax United", "legal_name": "", "contact_email": "", "website": "https://ajax-united.example", "primary_color": "#123456", "secondary_color": "#654321"},
         )
 
         self.assertRedirects(response, reverse("management:club_settings"))
         self.club.refresh_from_db()
         self.assertEqual(self.club.primary_color, "#123456")
         self.assertEqual(self.club.secondary_color, "#654321")
+        self.assertEqual(self.club.website, "https://ajax-united.example")
 
 
 class BillingEndingBannerTests(ManagementTestBase):
