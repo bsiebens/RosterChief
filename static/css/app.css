@@ -3922,6 +3922,9 @@
   .h-\[190px\] {
     height: 190px;
   }
+  .h-\[560px\] {
+    height: 560px;
+  }
   .h-fit {
     height: fit-content;
   }
@@ -4941,6 +4944,9 @@
   }
   .whitespace-pre-line {
     white-space: pre-line;
+  }
+  .whitespace-pre-wrap {
+    white-space: pre-wrap;
   }
   .alert-error {
     @layer daisyui.l1.l2 {

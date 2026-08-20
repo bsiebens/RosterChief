@@ -26,6 +26,7 @@ from events.models import Attendance, Competition, Event, EventReferee, EventSer
 from events.services.rbihf_import import RBIHFImportError
 from events.services.recurrence import detach_occurrence, generate_occurrences
 from management.bulk_import import TEMPLATE_COLUMNS
+from management.email_previews import EMAIL_PREVIEWS
 from management.pdf import PDFExportError, _tint_with_white, referee_form_colors, render_pdf
 from management.recurrence_ui import build_rrule, describe_rrule, parse_rrule
 from members.models import Family, FamilyMembership, Group, GroupMembership, Member, ParentClaim
@@ -4763,6 +4764,61 @@ class ClubSettingsPreviewTests(ManagementTestBase):
         self.assertEqual(self.club.primary_color, "#123456")
         self.assertEqual(self.club.secondary_color, "#654321")
         self.assertEqual(self.club.website, "https://ajax-united.example")
+
+
+class EmailPreviewListViewTests(ManagementTestBase):
+    """Settings > Email previews -- see management.email_previews."""
+
+    def setUp(self):
+        self.client.force_login(self.admin_user)
+
+    def test_renders_every_registered_preview(self):
+        response = self.club_get("email_preview_list")
+
+        self.assertEqual(response.status_code, 200)
+        for preview in EMAIL_PREVIEWS:
+            self.assertContains(response, preview.label)
+
+    def test_the_html_render_uses_the_clubs_own_branding(self):
+        self.club.name = "Ajax United"
+        self.club.secondary_color = "#123456"
+        self.club.save(update_fields=["name", "secondary_color"])
+
+        response = self.club_get("email_preview_list")
+
+        self.assertContains(response, "Ajax United")
+        self.assertContains(response, "#123456")
+
+    def test_the_subject_and_plain_text_body_render(self):
+        response = self.club_get("email_preview_list")
+
+        self.assertContains(response, "Subject:")
+        self.assertContains(response, "DUE-2026-00042")
+
+    def test_no_real_invoice_or_claim_data_is_needed(self):
+        # The whole point: a preview renders with zero DuesInvoice/ParentClaim
+        # rows in the database.
+        self.assertFalse(DuesInvoice.objects.exists())
+
+        response = self.club_get("email_preview_list")
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_non_admin_gets_403(self):
+        coach_user = User.objects.create_user(email="coach-email-preview@example.com", password="pw-secret-123")
+        coach_member = Member.objects.create(user=coach_user, first_name="Cara", last_name="Coach")
+        team = Team.objects.create(club=self.club, name="U18", short_name="U18")
+        position = Position.objects.create(club=self.club, name="Coach14", short_name="C14", staff_position=True)
+        StaffAssignment.objects.create(team=team, member=coach_member, season=self.season, position=position)
+        self.client.force_login(coach_user)
+
+        response = self.club_get("email_preview_list")
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_nav_entry_is_admin_only(self):
+        admin_response = self.club_get("club_settings")
+        self.assertContains(admin_response, reverse("management:email_preview_list"))
 
 
 class BillingEndingBannerTests(ManagementTestBase):

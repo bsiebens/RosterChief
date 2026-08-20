@@ -93,6 +93,7 @@
             <div class="flex flex-col">
                 {% if is_club_admin %}
                     <a class="nav-subitem {% if nav == 'club_settings' %}active{% endif %}" href="{% url 'management:club_settings' %}">{% trans "Club identity" %}</a>
+                    <a class="nav-subitem {% if nav == 'email_preview_list' %}active{% endif %}" href="{% url 'management:email_preview_list' %}">{% trans "Email previews" %}</a>
                 {% endif %}
                 <a class="nav-subitem {% if nav == 'onboarding_requirement_list' %}active{% endif %}" href="{% url 'management:onboarding_requirement_list' %}">{% trans "Onboarding requirements" %}</a>
                 {% if is_club_admin %}

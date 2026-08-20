@@ -52,6 +52,7 @@ from teams.models import Position, RefereeLevel, RefereeProfile, StaffAssignment
 from teams.services import eligible_roster_members
 
 from .bulk_import import build_member_import_template, parse_member_import_rows, read_member_import_workbook
+from .email_previews import EMAIL_PREVIEWS, render_preview
 from .forms import (
     AddChildForm,
     AddParentForm,
@@ -3318,6 +3319,21 @@ class ClubSettingsView(ClubAdminRequiredMixin, UpdateView):
 
     def get_context_data(self, **kwargs):
         return super().get_context_data(**kwargs)
+
+
+class EmailPreviewListView(ClubAdminRequiredMixin, TemplateView):
+    """See email_previews.EMAIL_PREVIEWS's own docstring -- every branded email
+    this app can send, rendered against sample data for this club so an admin
+    can see exactly what a member/parent would receive without sending
+    anything. Same access level as Club identity: this is a branding/comms
+    concern, not day-to-day people/roster work."""
+
+    template_name = "management/email_previews.html"
+
+    def get_context_data(self, **kwargs):
+        club = self.request.club
+        previews = [{"key": preview.key, "label": preview.label, "description": preview.description, **render_preview(preview, club=club, request=self.request)} for preview in EMAIL_PREVIEWS]
+        return super().get_context_data(previews=previews, **kwargs)
 
 
 class OnboardingRequirementListView(MemberAdminRequiredMixin, ListView):
