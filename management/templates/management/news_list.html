@@ -11,13 +11,13 @@
 
 {% block panel %}
     <div class="flex items-start gap-4">
-        <div class="flex w-[380px] shrink-0 flex-col gap-3">
-            {# D8's filter chips -- All/Drafts/Scheduled, plus Published for symmetry with the statuses this app actually has. #}
-            <div class="flex flex-wrap gap-1.5">
-                <a href="{% querystring status=None selected=None page=None %}" class="btn btn-sm gap-1.5 {% if status_filter == "all" %}btn-primary{% else %}btn-outline{% endif %}">{% trans "All" %} <span class="badge badge-sm badge-ghost">{{ counts.all }}</span></a>
-                <a href="{% querystring status="draft" selected=None page=None %}" class="btn btn-sm gap-1.5 {% if status_filter == "draft" %}btn-primary{% else %}btn-outline{% endif %}">{% trans "Drafts" %} <span class="badge badge-sm badge-ghost">{{ counts.draft }}</span></a>
-                <a href="{% querystring status="scheduled" selected=None page=None %}" class="btn btn-sm gap-1.5 {% if status_filter == "scheduled" %}btn-primary{% else %}btn-outline{% endif %}">{% trans "Scheduled" %} <span class="badge badge-sm badge-ghost">{{ counts.scheduled }}</span></a>
-                <a href="{% querystring status="published" selected=None page=None %}" class="btn btn-sm gap-1.5 {% if status_filter == "published" %}btn-primary{% else %}btn-outline{% endif %}">{% trans "Published" %} <span class="badge badge-sm badge-ghost">{{ counts.published }}</span></a>
+        <div class="flex w-[460px] shrink-0 flex-col gap-3">
+            {# D8's filter chips -- "All 42 / Drafts 3 / Scheduled 1", a raw number in the pill's own text, not a nested badge. Plus Published for symmetry with the statuses this app actually has. #}
+            <div class="flex flex-nowrap gap-1.5">
+                <a href="{% querystring status=None selected=None page=None %}" class="btn btn-sm {% if status_filter == "all" %}btn-primary{% else %}btn-outline{% endif %}">{% trans "All" %} {{ counts.all }}</a>
+                <a href="{% querystring status="draft" selected=None page=None %}" class="btn btn-sm {% if status_filter == "draft" %}btn-primary{% else %}btn-outline{% endif %}">{% trans "Drafts" %} {{ counts.draft }}</a>
+                <a href="{% querystring status="scheduled" selected=None page=None %}" class="btn btn-sm {% if status_filter == "scheduled" %}btn-primary{% else %}btn-outline{% endif %}">{% trans "Scheduled" %} {{ counts.scheduled }}</a>
+                <a href="{% querystring status="published" selected=None page=None %}" class="btn btn-sm {% if status_filter == "published" %}btn-primary{% else %}btn-outline{% endif %}">{% trans "Published" %} {{ counts.published }}</a>
             </div>
 
             <div class="card overflow-hidden divide-y">

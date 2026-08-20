@@ -167,147 +167,150 @@
         </div>
     </div>
 
-    {% if show_attendance %}
-        {# D7's season card: a 12-bar attendance sparkline (present/absent/upcoming, oldest first) beside the season's Present/Absent/No-reply totals. #}
-        <div class="card card-body mt-4">
-            <h2 class="card-title">{% lucide "calendar-check" size=18 %} {% trans "Attendance" %}</h2>
-            {% if not attendance_sparkline %}
-                <p class="text-sm text-muted">{% trans "No events yet this season." %}</p>
+    {# Attendance, Documents and Referee eligibility side by side rather than three full-width rows -- h-full keeps them matched in height regardless of which has more content. #}
+    <div class="grid grid-cols-1 gap-4 lg:grid-cols-3 mt-4">
+        {% if show_attendance %}
+            {# D7's season card: a 12-bar attendance sparkline (present/absent/upcoming, oldest first) beside the season's Present/Absent/No-reply totals. #}
+            <div class="card card-body h-full">
+                <h2 class="card-title">{% lucide "calendar-check" size=18 %} {% trans "Attendance" %}</h2>
+                {% if not attendance_sparkline %}
+                    <p class="text-sm text-muted">{% trans "No events yet this season." %}</p>
+                {% else %}
+                    <div class="flex flex-wrap items-center gap-6">
+                        <div class="attendance-sparkline">
+                            {% for bar in attendance_sparkline %}
+                                <span class="attendance-bar attendance-bar-{{ bar.state }}" title="{{ bar.event.title }} — {{ bar.event.start|date:"j M" }}"></span>
+                            {% endfor %}
+                        </div>
+                        <div class="flex gap-4">
+                            <div>
+                                <div class="font-display text-2xl leading-none font-extrabold text-ok tabular-nums">{{ attendance_counts.present }}</div>
+                                <div class="mt-1 font-display text-[11px] font-bold tracking-[.1em] text-muted uppercase">{% trans "Present" %}</div>
+                            </div>
+                            <div>
+                                <div class="font-display text-2xl leading-none font-extrabold text-club tabular-nums">{{ attendance_counts.absent }}</div>
+                                <div class="mt-1 font-display text-[11px] font-bold tracking-[.1em] text-muted uppercase">{% trans "Absent" %}</div>
+                            </div>
+                            <div>
+                                <div class="font-display text-2xl leading-none font-extrabold text-dim tabular-nums">{{ attendance_counts.no_reply }}</div>
+                                <div class="mt-1 font-display text-[11px] font-bold tracking-[.1em] text-muted uppercase">{% trans "No reply" %}</div>
+                            </div>
+                        </div>
+                    </div>
+                {% endif %}
+            </div>
+        {% endif %}
+
+        {% comment %}
+            Onboarding checklist -- club.services.onboarding.checklist_for, paired with
+            MemberRequirementStatus if one exists. Any staff can mark an item done or
+            reopen it, not just admins (same visibility as the rest of this page) --
+            see the module docstring on club/services/onboarding.py for why this stays
+            separate from ClubMembership.status/fee_status.
+        {% endcomment %}
+        <div class="card card-body h-full">
+            <h2 class="card-title">{% lucide "clipboard-check" size=18 %} {% trans "Documents" %}</h2>
+            {% if not current_membership %}
+                <p class="text-sm text-muted">{% trans "Not rostered for the current season -- nothing to check off yet." %}</p>
+            {% elif not checklist %}
+                <p class="text-sm text-muted">{% trans "This club has no onboarding requirements set up." %}</p>
             {% else %}
-                <div class="flex flex-wrap items-center gap-8">
-                    <div class="attendance-sparkline">
-                        {% for bar in attendance_sparkline %}
-                            <span class="attendance-bar attendance-bar-{{ bar.state }}" title="{{ bar.event.title }} — {{ bar.event.start|date:"j M" }}"></span>
-                        {% endfor %}
-                    </div>
-                    <div class="flex gap-6">
-                        <div>
-                            <div class="font-display text-2xl leading-none font-extrabold text-ok tabular-nums">{{ attendance_counts.present }}</div>
-                            <div class="mt-1 font-display text-[11px] font-bold tracking-[.1em] text-muted uppercase">{% trans "Present" %}</div>
+                <div class="flex flex-col gap-1">
+                    {% for requirement, status in checklist %}
+                        <div class="flex items-start justify-between gap-4 py-3">
+                            <div class="min-w-0 flex-1">
+                                <div class="flex flex-wrap items-center gap-2">
+                                    <span class="font-semibold text-ink">{{ requirement.name }}</span>
+                                    {% if status.is_complete %}
+                                        <span class="badge badge-sm badge-success">{% trans "Complete" %}</span>
+                                    {% elif status %}
+                                        <span class="badge badge-sm badge-warning">{% trans "Incomplete" %}</span>
+                                    {% else %}
+                                        <span class="badge badge-sm badge-ghost">{% trans "Not started" %}</span>
+                                    {% endif %}
+                                </div>
+                                {% if requirement.description %}<p class="mt-1 text-sm text-muted">{{ requirement.description }}</p>{% endif %}
+                                {% if status.is_complete %}
+                                    <p class="mt-1 font-mono text-xs text-dim">{% blocktrans with who=status.completed_by when=status.completed_at|date:"j M Y H:i" %}Completed by {{ who }} on {{ when }}{% endblocktrans %}</p>
+                                {% endif %}
+                                {% if status.note %}<p class="mt-1 text-sm text-slate italic">&ldquo;{{ status.note }}&rdquo;</p>{% endif %}
+                                {% if status.document %}
+                                    <a class="mt-1 inline-flex items-center gap-1 text-sm link link-hover" href="{% url 'management:member_requirement_document' pk=member.pk requirement_pk=requirement.pk %}">{% lucide "download" size=13 %} {% trans "Download document" %}</a>
+                                {% endif %}
+                            </div>
+                            <div class="flex shrink-0 items-center gap-1.5">
+                                {% if status.is_complete %}
+                                    <form method="post" action="{% url 'management:member_requirement_incomplete' pk=member.pk requirement_pk=requirement.pk %}">
+                                        {% csrf_token %}
+                                        <button class="btn btn-outline btn-xs gap-1" type="submit">{% lucide "rotate-ccw" size=12 %} {% trans "Reopen" %}</button>
+                                    </form>
+                                {% else %}
+                                    <button class="btn btn-primary btn-xs gap-1" type="button" onclick="document.getElementById('{{ requirement.pk|dom_id:"requirement_complete_modal" }}').showModal()">{% lucide "check" size=12 %} {% trans "Mark complete" %}</button>
+                                {% endif %}
+                            </div>
                         </div>
-                        <div>
-                            <div class="font-display text-2xl leading-none font-extrabold text-club tabular-nums">{{ attendance_counts.absent }}</div>
-                            <div class="mt-1 font-display text-[11px] font-bold tracking-[.1em] text-muted uppercase">{% trans "Absent" %}</div>
-                        </div>
-                        <div>
-                            <div class="font-display text-2xl leading-none font-extrabold text-dim tabular-nums">{{ attendance_counts.no_reply }}</div>
-                            <div class="mt-1 font-display text-[11px] font-bold tracking-[.1em] text-muted uppercase">{% trans "No reply" %}</div>
-                        </div>
-                    </div>
+                    {% endfor %}
                 </div>
             {% endif %}
         </div>
-    {% endif %}
 
-    {% comment %}
-        Onboarding checklist -- club.services.onboarding.checklist_for, paired with
-        MemberRequirementStatus if one exists. Any staff can mark an item done or
-        reopen it, not just admins (same visibility as the rest of this page) --
-        see the module docstring on club/services/onboarding.py for why this stays
-        separate from ClubMembership.status/fee_status.
-    {% endcomment %}
-    <div class="card card-body mt-4">
-        <h2 class="card-title">{% lucide "clipboard-check" size=18 %} {% trans "Documents" %}</h2>
-        {% if not current_membership %}
-            <p class="text-sm text-muted">{% trans "Not rostered for the current season -- nothing to check off yet." %}</p>
-        {% elif not checklist %}
-            <p class="text-sm text-muted">{% trans "This club has no onboarding requirements set up." %}</p>
-        {% else %}
-            <div class="flex flex-col gap-1">
-                {% for requirement, status in checklist %}
-                    <div class="flex items-start justify-between gap-4 py-3">
-                        <div class="min-w-0 flex-1">
-                            <div class="flex flex-wrap items-center gap-2">
-                                <span class="font-semibold text-ink">{{ requirement.name }}</span>
-                                {% if status.is_complete %}
-                                    <span class="badge badge-sm badge-success">{% trans "Complete" %}</span>
-                                {% elif status %}
-                                    <span class="badge badge-sm badge-warning">{% trans "Incomplete" %}</span>
+        {% if referee_profile or is_club_admin %}
+            <div class="card card-body h-full">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                    <h2 class="card-title">{% lucide "flag" size=18 %} {% trans "Referee eligibility" %}</h2>
+                    {% if is_club_admin %}
+                        <button class="btn btn-outline btn-sm gap-2" type="button" onclick="document.getElementById('referee_eligibility_modal').showModal()">{% lucide "pencil" size=14 %} {% trans "Edit" %}</button>
+                    {% endif %}
+                </div>
+
+                {% if referee_profile and referee_profile.level %}
+                    <dl>
+                        <div class="flex items-center justify-between gap-4 py-2">
+                            <dt class="text-sm text-muted">{% trans "Level" %}</dt>
+                            <dd class="text-sm font-semibold text-ink">{{ referee_profile.level }}</dd>
+                        </div>
+                        <div class="flex items-center justify-between gap-4 py-2">
+                            <dt class="text-sm text-muted">{% trans "Valid until" %}</dt>
+                            <dd class="flex items-center gap-2">
+                                <span class="font-mono text-sm font-semibold text-ink">{{ referee_profile.valid_until|default:"—" }}</span>
+                                {% if referee_profile.is_currently_valid %}
+                                    <span class="badge badge-sm badge-success">{% trans "Valid" %}</span>
+                                {% elif referee_profile.valid_until %}
+                                    <span class="badge badge-sm badge-error">{% trans "Expired" %}</span>
                                 {% else %}
-                                    <span class="badge badge-sm badge-ghost">{% trans "Not started" %}</span>
+                                    <span class="badge badge-sm badge-warning">{% trans "No validity set" %}</span>
                                 {% endif %}
-                            </div>
-                            {% if requirement.description %}<p class="mt-1 text-sm text-muted">{{ requirement.description }}</p>{% endif %}
-                            {% if status.is_complete %}
-                                <p class="mt-1 font-mono text-xs text-dim">{% blocktrans with who=status.completed_by when=status.completed_at|date:"j M Y H:i" %}Completed by {{ who }} on {{ when }}{% endblocktrans %}</p>
-                            {% endif %}
-                            {% if status.note %}<p class="mt-1 text-sm text-slate italic">&ldquo;{{ status.note }}&rdquo;</p>{% endif %}
-                            {% if status.document %}
-                                <a class="mt-1 inline-flex items-center gap-1 text-sm link link-hover" href="{% url 'management:member_requirement_document' pk=member.pk requirement_pk=requirement.pk %}">{% lucide "download" size=13 %} {% trans "Download document" %}</a>
-                            {% endif %}
+                            </dd>
                         </div>
-                        <div class="flex shrink-0 items-center gap-1.5">
-                            {% if status.is_complete %}
-                                <form method="post" action="{% url 'management:member_requirement_incomplete' pk=member.pk requirement_pk=requirement.pk %}">
-                                    {% csrf_token %}
-                                    <button class="btn btn-outline btn-xs gap-1" type="submit">{% lucide "rotate-ccw" size=12 %} {% trans "Reopen" %}</button>
-                                </form>
-                            {% else %}
-                                <button class="btn btn-primary btn-xs gap-1" type="button" onclick="document.getElementById('{{ requirement.pk|dom_id:"requirement_complete_modal" }}').showModal()">{% lucide "check" size=12 %} {% trans "Mark complete" %}</button>
-                            {% endif %}
+                    </dl>
+
+                    {% if referee_profile.is_eligible %}
+                        <div class="mt-2 mb-1 font-display text-xs font-bold tracking-[.1em] text-muted uppercase">{% trans "Can referee for" %}</div>
+                        <div class="flex flex-wrap gap-2">
+                            {% for team in referee_profile.eligible_teams %}
+                                <span class="badge badge-outline">{{ team.name }}</span>
+                            {% empty %}
+                                <span class="text-sm text-muted">{% trans "This level has no teams linked yet." %}</span>
+                            {% endfor %}
                         </div>
-                    </div>
-                {% endfor %}
+                    {% else %}
+                        <div class="alert alert-warning mt-2">
+                            {% lucide "triangle-alert" size=16 %}
+                            <span>{% trans "Not currently eligible to referee -- set or extend the validity date above to reinstate them." %}</span>
+                        </div>
+                    {% endif %}
+                {% else %}
+                    <p class="text-sm text-muted">{% trans "Not eligible to referee for any team." %}</p>
+                {% endif %}
             </div>
         {% endif %}
     </div>
 
-    {% if referee_profile or is_club_admin %}
-        <div class="card card-body mt-4">
-            <div class="flex flex-wrap items-center justify-between gap-2">
-                <h2 class="card-title">{% lucide "flag" size=18 %} {% trans "Referee eligibility" %}</h2>
-                {% if is_club_admin %}
-                    <button class="btn btn-outline btn-sm gap-2" type="button" onclick="document.getElementById('referee_eligibility_modal').showModal()">{% lucide "pencil" size=14 %} {% trans "Edit" %}</button>
-                {% endif %}
-            </div>
-
-            {% if referee_profile and referee_profile.level %}
-                <dl>
-                    <div class="flex items-center justify-between gap-4 py-2">
-                        <dt class="text-sm text-muted">{% trans "Level" %}</dt>
-                        <dd class="text-sm font-semibold text-ink">{{ referee_profile.level }}</dd>
-                    </div>
-                    <div class="flex items-center justify-between gap-4 py-2">
-                        <dt class="text-sm text-muted">{% trans "Valid until" %}</dt>
-                        <dd class="flex items-center gap-2">
-                            <span class="font-mono text-sm font-semibold text-ink">{{ referee_profile.valid_until|default:"—" }}</span>
-                            {% if referee_profile.is_currently_valid %}
-                                <span class="badge badge-sm badge-success">{% trans "Valid" %}</span>
-                            {% elif referee_profile.valid_until %}
-                                <span class="badge badge-sm badge-error">{% trans "Expired" %}</span>
-                            {% else %}
-                                <span class="badge badge-sm badge-warning">{% trans "No validity set" %}</span>
-                            {% endif %}
-                        </dd>
-                    </div>
-                </dl>
-
-                {% if referee_profile.is_eligible %}
-                    <div class="mt-2 mb-1 font-display text-xs font-bold tracking-[.1em] text-muted uppercase">{% trans "Can referee for" %}</div>
-                    <div class="flex flex-wrap gap-2">
-                        {% for team in referee_profile.eligible_teams %}
-                            <span class="badge badge-outline">{{ team.name }}</span>
-                        {% empty %}
-                            <span class="text-sm text-muted">{% trans "This level has no teams linked yet." %}</span>
-                        {% endfor %}
-                    </div>
-                {% else %}
-                    <div class="alert alert-warning mt-2">
-                        {% lucide "triangle-alert" size=16 %}
-                        <span>{% trans "Not currently eligible to referee -- set or extend the validity date above to reinstate them." %}</span>
-                    </div>
-                {% endif %}
-            {% else %}
-                <p class="text-sm text-muted">{% trans "Not eligible to referee for any team." %}</p>
-            {% endif %}
-        </div>
-
-        {% if is_club_admin %}
-            {% url 'management:member_referee_eligibility_update' member.pk as referee_eligibility_url %}
-            {% trans "Referee eligibility" as referee_eligibility_title %}
-            {% trans "Save" as save_label %}
-            {% include "controlpanel/_modal_form.html" with modal_id="referee_eligibility_modal" title=referee_eligibility_title form=referee_eligibility_form action_url=referee_eligibility_url submit_label=save_label submit_icon="save" %}
-        {% endif %}
+    {% if is_club_admin %}
+        {% url 'management:member_referee_eligibility_update' member.pk as referee_eligibility_url %}
+        {% trans "Referee eligibility" as referee_eligibility_title %}
+        {% trans "Save" as save_label %}
+        {% include "controlpanel/_modal_form.html" with modal_id="referee_eligibility_modal" title=referee_eligibility_title form=referee_eligibility_form action_url=referee_eligibility_url submit_label=save_label submit_icon="save" %}
     {% endif %}
 
     {% trans "Add parent" as add_parent_label %}
