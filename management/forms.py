@@ -56,7 +56,7 @@ class GroupForm(forms.ModelForm):
 class RefereeLevelForm(forms.ModelForm):
     class Meta:
         model = RefereeLevel
-        fields = ["name", "ordering", "teams", "inherits_from"]
+        fields = ["name", "teams", "inherits_from"]
         widgets = {"teams": forms.SelectMultiple(attrs={"data-searchable": "true", "data-search-placeholder": _("Type a team to search...")})}
 
     def __init__(self, *args, club=None, **kwargs):

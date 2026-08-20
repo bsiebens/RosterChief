@@ -121,22 +121,23 @@ class TeamMembership(UUIDModel):
 
 class RefereeLevel(ClubScopedModel):
     """A club-defined referee qualification tier (e.g. "Regional", "National")
-    -- admin-managed, like Position, so a club can name and reorder its own
-    levels rather than picking from a fixed list. Owns which teams it
-    qualifies a referee for: eligibility is a property of the *level*, not of
-    the individual referee -- a club typically has a handful of levels, each
-    unlocking a tier of teams/competitions, rather than hand-picking teams per
-    referee.
+    -- admin-managed, like Position, so a club can name its own levels rather
+    than picking from a fixed list. Owns which teams it qualifies a referee
+    for: eligibility is a property of the *level*, not of the individual
+    referee -- a club typically has a handful of levels, each unlocking a
+    tier of teams/competitions, rather than hand-picking teams per referee.
 
     `inherits_from` chains levels together so a higher tier doesn't need every
     lower tier's team re-added by hand: a "National" referee is automatically
     eligible for everything "Regional" (its inherits_from) covers, and so on
     down the chain -- see eligible_team_ids, the single definition every
     consumer (RefereeProfile.eligible_teams, events.services.referees) reads
-    through."""
+    through. That chain is also what expresses which tier is "higher" now --
+    there used to be a manual `ordering` field for this too, dropped once
+    inherits_from covered the same need without a second, independently-kept
+    number to keep in sync with it."""
 
     name = models.CharField(_("name"), max_length=255)
-    ordering = models.PositiveSmallIntegerField(_("ordering"), default=0, help_text=_("Lower numbers are listed first. Levels with the same number are ordered by name."))
     teams = models.ManyToManyField(Team, related_name="referee_levels", blank=True, verbose_name=_("qualifies for"), help_text=_("Members holding this level can be assigned to referee these teams' home games."))
     inherits_from = models.ForeignKey(
         "self",
@@ -151,7 +152,7 @@ class RefereeLevel(ClubScopedModel):
     class Meta:
         verbose_name = _("referee level")
         verbose_name_plural = _("referee levels")
-        ordering = ["ordering", "name"]
+        ordering = ["name"]
         constraints = [
             models.UniqueConstraint(fields=["club", "name"], name="unique_referee_level_name_per_club"),
         ]

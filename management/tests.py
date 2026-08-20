@@ -1288,14 +1288,14 @@ class RefereeLevelManagementTests(ManagementTestBase):
     def test_create_is_admin_only(self):
         self.client.force_login(self.make_non_admin_coach())
 
-        response = self.club_post("referee_level_create", {"name": "Regional", "ordering": 0, "teams": []})
+        response = self.club_post("referee_level_create", {"name": "Regional", "teams": []})
 
         self.assertEqual(response.status_code, 403)
 
     def test_admin_can_create_a_level_with_teams(self):
         self.client.force_login(self.admin_user)
 
-        response = self.club_post("referee_level_create", {"name": "Regional", "ordering": 0, "teams": [str(self.team.pk), str(self.other_team.pk)]})
+        response = self.club_post("referee_level_create", {"name": "Regional", "teams": [str(self.team.pk), str(self.other_team.pk)]})
 
         level = RefereeLevel.objects.get(club=self.club, name="Regional")
         self.assertRedirects(response, reverse("management:referee_level_list"))
@@ -1306,7 +1306,7 @@ class RefereeLevelManagementTests(ManagementTestBase):
         level.teams.add(self.team)
         self.client.force_login(self.admin_user)
 
-        self.club_post("referee_level_update", {"name": "Regional", "ordering": 0, "teams": [str(self.other_team.pk)]}, level.pk)
+        self.club_post("referee_level_update", {"name": "Regional", "teams": [str(self.other_team.pk)]}, level.pk)
 
         self.assertEqual(set(level.teams.all()), {self.other_team})
 
@@ -1324,7 +1324,7 @@ class RefereeLevelManagementTests(ManagementTestBase):
         regional.teams.add(self.team)
         self.client.force_login(self.admin_user)
 
-        response = self.club_post("referee_level_create", {"name": "National", "ordering": 0, "teams": [str(self.other_team.pk)], "inherits_from": str(regional.pk)})
+        response = self.club_post("referee_level_create", {"name": "National", "teams": [str(self.other_team.pk)], "inherits_from": str(regional.pk)})
 
         national = RefereeLevel.objects.get(club=self.club, name="National")
         self.assertRedirects(response, reverse("management:referee_level_list"))
@@ -1335,7 +1335,7 @@ class RefereeLevelManagementTests(ManagementTestBase):
         level = RefereeLevel.objects.create(club=self.club, name="Regional")
         self.client.force_login(self.admin_user)
 
-        self.club_post("referee_level_update", {"name": "Regional", "ordering": 0, "teams": [], "inherits_from": str(level.pk)}, level.pk)
+        self.club_post("referee_level_update", {"name": "Regional", "teams": [], "inherits_from": str(level.pk)}, level.pk)
 
         level.refresh_from_db()
         self.assertIsNone(level.inherits_from)
