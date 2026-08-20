@@ -12,36 +12,35 @@
 {% block panel %}
     <div class="flex items-start gap-4">
         <div class="flex w-[460px] shrink-0 flex-col gap-3">
-            {# D8's filter chips -- "All 42 / Drafts 3 / Scheduled 1", a raw number in the pill's own text, not a nested badge. Plus Published for symmetry with the statuses this app actually has. #}
+            {# D8's filter chips exactly: 28px tall, 6px radius (not a pill/button), dark ink when active rather than the club accent colour, plain hairline border otherwise. Plus Published for symmetry with the statuses this app actually has. #}
             <div class="flex flex-nowrap gap-1.5">
-                <a href="{% querystring status=None selected=None page=None %}" class="btn btn-sm {% if status_filter == "all" %}btn-primary{% else %}btn-outline{% endif %}">{% trans "All" %} {{ counts.all }}</a>
-                <a href="{% querystring status="draft" selected=None page=None %}" class="btn btn-sm {% if status_filter == "draft" %}btn-primary{% else %}btn-outline{% endif %}">{% trans "Drafts" %} {{ counts.draft }}</a>
-                <a href="{% querystring status="scheduled" selected=None page=None %}" class="btn btn-sm {% if status_filter == "scheduled" %}btn-primary{% else %}btn-outline{% endif %}">{% trans "Scheduled" %} {{ counts.scheduled }}</a>
-                <a href="{% querystring status="published" selected=None page=None %}" class="btn btn-sm {% if status_filter == "published" %}btn-primary{% else %}btn-outline{% endif %}">{% trans "Published" %} {{ counts.published }}</a>
+                <a href="{% querystring status=None selected=None page=None %}" class="flex h-7 items-center rounded-md px-2.5 font-display text-xs font-bold tracking-[.08em] uppercase {% if status_filter == "all" %}bg-ink text-white{% else %}border border-line text-muted{% endif %}">{% trans "All" %} {{ counts.all }}</a>
+                <a href="{% querystring status="draft" selected=None page=None %}" class="flex h-7 items-center rounded-md px-2.5 font-display text-xs font-bold tracking-[.08em] uppercase {% if status_filter == "draft" %}bg-ink text-white{% else %}border border-line text-muted{% endif %}">{% trans "Drafts" %} {{ counts.draft }}</a>
+                <a href="{% querystring status="scheduled" selected=None page=None %}" class="flex h-7 items-center rounded-md px-2.5 font-display text-xs font-bold tracking-[.08em] uppercase {% if status_filter == "scheduled" %}bg-ink text-white{% else %}border border-line text-muted{% endif %}">{% trans "Scheduled" %} {{ counts.scheduled }}</a>
+                <a href="{% querystring status="published" selected=None page=None %}" class="flex h-7 items-center rounded-md px-2.5 font-display text-xs font-bold tracking-[.08em] uppercase {% if status_filter == "published" %}bg-ink text-white{% else %}border border-line text-muted{% endif %}">{% trans "Published" %} {{ counts.published }}</a>
             </div>
 
-            <div class="card overflow-hidden divide-y">
+            <div class="card overflow-hidden divide-y divide-rule">
                 {% for item in news_items %}
-                    {# One dense line per row (D8's actual list-pane density), not a stacked mini-card: status pill inline with the headline, everything else folded into one muted meta line below. #}
-                    <a href="{% querystring selected=item.pk %}" class="flex items-start gap-2.5 border-l-[3px] px-3.5 py-2.5 {% if news_item and item.pk == news_item.pk %}border-club bg-row-sel{% else %}border-transparent hover:bg-subhead{% endif %}">
-                        {% if item.status == "draft" %}
-                            <span class="badge badge-sm mt-0.5 shrink-0">{% trans "Draft" %}</span>
-                        {% elif item.is_scheduled %}
-                            <span class="badge badge-info badge-sm mt-0.5 shrink-0">{% trans "Scheduled" %}</span>
-                        {% else %}
-                            <span class="badge badge-success badge-sm mt-0.5 shrink-0">{% trans "Published" %}</span>
-                        {% endif %}
-                        <div class="min-w-0 flex-1">
-                            <div class="truncate font-display text-sm font-bold text-ink uppercase">{{ item.title }}</div>
-                            <div class="truncate text-xs text-muted">
-                                <span class="font-mono text-dim">
-                                    {% if item.status == "draft" %}{% blocktrans with time=item.modified|timesince %}Edited {{ time }} ago{% endblocktrans %}
-                                    {% else %}{{ item.published_at|date:"j M Y" }}{% endif %}
-                                </span>
-                                &middot;
-                                {% if item.created_by %}{{ item.created_by }} &middot; {% endif %}
-                                {% for team in item.teams.all %}{{ team.short_name }}{% if not forloop.last %}, {% endif %}{% empty %}{% trans "Club-wide" %}{% endfor %}
-                            </div>
+                    {# D8's exact row anatomy: status pill + mono meta on their own line, a real 20px condensed headline below, then a muted author/audience line -- three lines, not a squeezed one-liner. It's a list because rows are plain hairline-divided strips, not because the type is tiny. #}
+                    <a href="{% querystring selected=item.pk %}" class="block border-l-[3px] px-5 py-3.5 {% if news_item and item.pk == news_item.pk %}border-l-club bg-row-sel{% else %}border-l-transparent hover:bg-subhead{% endif %}">
+                        <div class="mb-1 flex items-center gap-2.5">
+                            {% if item.status == "draft" %}
+                                <span class="badge badge-sm">{% trans "Draft" %}</span>
+                            {% elif item.is_scheduled %}
+                                <span class="badge badge-info badge-sm">{% trans "Scheduled" %}</span>
+                            {% else %}
+                                <span class="badge badge-success badge-sm">{% trans "Published" %}</span>
+                            {% endif %}
+                            <span class="font-mono text-[11px] text-dim">
+                                {% if item.status == "draft" %}{% blocktrans with time=item.modified|timesince %}Edited {{ time }} ago{% endblocktrans %}
+                                {% else %}{{ item.published_at|date:"j M Y" }}{% endif %}
+                            </span>
+                        </div>
+                        <div class="truncate font-display text-xl leading-[1.05] font-extrabold text-ink uppercase">{{ item.title }}</div>
+                        <div class="mt-0.5 truncate text-[13px] text-muted">
+                            {% if item.created_by %}{{ item.created_by }} &middot; {% endif %}
+                            {% for team in item.teams.all %}{{ team.short_name }}{% if not forloop.last %}, {% endif %}{% empty %}{% trans "Club-wide" %}{% endfor %}
                         </div>
                     </a>
                 {% empty %}

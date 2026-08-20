@@ -4186,6 +4186,9 @@
   .border-l-info {
     border-left-color: var(--color-info);
   }
+  .border-l-transparent {
+    border-left-color: transparent;
+  }
   .menu-active {
     :where(:not(ul, menu, details, .menu-title, .btn))& {
       @layer daisyui.l1.l2 {
