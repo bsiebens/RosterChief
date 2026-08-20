@@ -136,6 +136,7 @@ urlpatterns = [
     # Settings (admin only)
     path("settings/", views.ClubSettingsView.as_view(), name="club_settings"),
     path("settings/email-previews/", views.EmailPreviewListView.as_view(), name="email_preview_list"),
+    path("settings/email-previews/<str:key>/render/", views.EmailPreviewRenderView.as_view(), name="email_preview_render"),
     path("settings/onboarding-requirements/", views.OnboardingRequirementListView.as_view(), name="onboarding_requirement_list"),
     path("settings/onboarding-requirements/new/", views.OnboardingRequirementCreateView.as_view(), name="onboarding_requirement_create"),
     path("settings/onboarding-requirements/<uuid:pk>/edit/", views.OnboardingRequirementUpdateView.as_view(), name="onboarding_requirement_update"),

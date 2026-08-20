@@ -7,9 +7,11 @@ from django.http import FileResponse, Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.decorators import method_decorator
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils.translation import gettext_lazy as _
 from django.utils.translation import ngettext
+from django.views.decorators.clickjacking import xframe_options_sameorigin
 from django.views.generic import CreateView, DetailView, FormView, ListView, TemplateView, UpdateView, View
 
 from billing.models import Due
@@ -3326,14 +3328,45 @@ class EmailPreviewListView(ClubAdminRequiredMixin, TemplateView):
     this app can send, rendered against sample data for this club so an admin
     can see exactly what a member/parent would receive without sending
     anything. Same access level as Club identity: this is a branding/comms
-    concern, not day-to-day people/roster work."""
+    concern, not day-to-day people/roster work.
+
+    The HTML render itself is NOT embedded directly here -- see
+    EmailPreviewRenderView, which each card's iframe points its `src` at.
+    An email's markup is full of its own double-quoted style="..." attributes;
+    dropping that whole document into a srcdoc="..." attribute here relies on
+    Django's autoescaping to get every one of those quotes right, and depends
+    on browser-specific handling of an escaped, inherited-CSP srcdoc document
+    that turned out not to render reliably. A same-origin sub-request sidesteps
+    all of that -- ordinary HTML delivered as an ordinary response."""
 
     template_name = "management/email_previews.html"
 
     def get_context_data(self, **kwargs):
         club = self.request.club
-        previews = [{"key": preview.key, "label": preview.label, "description": preview.description, **render_preview(preview, club=club, request=self.request)} for preview in EMAIL_PREVIEWS]
+        previews = []
+        for preview in EMAIL_PREVIEWS:
+            rendered = render_preview(preview, club=club, request=self.request)
+            previews.append({"key": preview.key, "label": preview.label, "description": preview.description, "subject": rendered["subject"], "text": rendered["text"]})
         return super().get_context_data(previews=previews, **kwargs)
+
+
+@method_decorator(xframe_options_sameorigin, name="get")
+class EmailPreviewRenderView(ClubAdminRequiredMixin, View):
+    """The actual HTML document for one preview, served at its own URL so
+    EmailPreviewListView's iframe can `src` it directly rather than smuggling
+    it through a srcdoc="..." attribute -- see that view's docstring for why.
+    xframe_options_sameorigin overrides the site-wide X-Frame-Options: DENY
+    (settings.py has no X_FRAME_OPTIONS override, so SecurityMiddleware's
+    default applies everywhere else): this response only ever needs to be
+    framed by the page that links to it, on the same origin."""
+
+    def get(self, request, key):
+        preview = next((preview for preview in EMAIL_PREVIEWS if preview.key == key), None)
+        if preview is None:
+            raise Http404
+
+        rendered = render_preview(preview, club=request.club, request=request)
+        return HttpResponse(rendered["html"], content_type="text/html; charset=utf-8")
 
 
 class OnboardingRequirementListView(MemberAdminRequiredMixin, ListView):

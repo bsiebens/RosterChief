@@ -4779,15 +4779,11 @@ class EmailPreviewListViewTests(ManagementTestBase):
         for preview in EMAIL_PREVIEWS:
             self.assertContains(response, preview.label)
 
-    def test_the_html_render_uses_the_clubs_own_branding(self):
-        self.club.name = "Ajax United"
-        self.club.secondary_color = "#123456"
-        self.club.save(update_fields=["name", "secondary_color"])
-
+    def test_each_card_links_to_its_own_render_view(self):
         response = self.club_get("email_preview_list")
 
-        self.assertContains(response, "Ajax United")
-        self.assertContains(response, "#123456")
+        for preview in EMAIL_PREVIEWS:
+            self.assertContains(response, reverse("management:email_preview_render", args=[preview.key]))
 
     def test_the_subject_and_plain_text_body_render(self):
         response = self.club_get("email_preview_list")
@@ -4819,6 +4815,58 @@ class EmailPreviewListViewTests(ManagementTestBase):
     def test_nav_entry_is_admin_only(self):
         admin_response = self.club_get("club_settings")
         self.assertContains(admin_response, reverse("management:email_preview_list"))
+
+
+class EmailPreviewRenderViewTests(ManagementTestBase):
+    """The actual per-email HTML document each card's iframe loads via `src` --
+    see EmailPreviewListView's own docstring for why this is a same-origin
+    sub-request rather than a srcdoc="..." attribute."""
+
+    def setUp(self):
+        self.client.force_login(self.admin_user)
+
+    def test_renders_the_full_html_document(self):
+        response = self.client.get(reverse("management:email_preview_render", args=["dues_invoice"]), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "text/html; charset=utf-8")
+        self.assertContains(response, "<!DOCTYPE html>")
+        self.assertContains(response, "DUE-2026-00042")
+
+    def test_uses_the_clubs_own_branding(self):
+        self.club.name = "Ajax United"
+        self.club.secondary_color = "#123456"
+        self.club.save(update_fields=["name", "secondary_color"])
+
+        response = self.client.get(reverse("management:email_preview_render", args=["dues_invoice"]), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, "Ajax United")
+        self.assertContains(response, "#123456")
+
+    def test_allows_same_origin_framing(self):
+        # The site-wide default (SecurityMiddleware, no X_FRAME_OPTIONS override
+        # in settings.py) is DENY -- this response overrides that specifically,
+        # since EmailPreviewListView's own iframe needs to load it.
+        response = self.client.get(reverse("management:email_preview_render", args=["dues_invoice"]), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response["X-Frame-Options"], "SAMEORIGIN")
+
+    def test_an_unknown_key_404s(self):
+        response = self.client.get(reverse("management:email_preview_render", args=["not-a-real-key"]), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_non_admin_gets_403(self):
+        coach_user = User.objects.create_user(email="coach-email-render@example.com", password="pw-secret-123")
+        coach_member = Member.objects.create(user=coach_user, first_name="Cara", last_name="Coach")
+        team = Team.objects.create(club=self.club, name="U19", short_name="U19")
+        position = Position.objects.create(club=self.club, name="Coach15", short_name="C15", staff_position=True)
+        StaffAssignment.objects.create(team=team, member=coach_member, season=self.season, position=position)
+        self.client.force_login(coach_user)
+
+        response = self.client.get(reverse("management:email_preview_render", args=["dues_invoice"]), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 403)
 
 
 class BillingEndingBannerTests(ManagementTestBase):

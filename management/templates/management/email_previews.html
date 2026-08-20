@@ -20,7 +20,7 @@
             </div>
 
             <div class="bg-subhead p-4" data-view-panel="html">
-                <iframe class="h-[560px] w-full rounded-lg border border-line bg-white" srcdoc="{{ preview.html }}" title="{{ preview.label }}"></iframe>
+                <iframe class="h-[560px] w-full rounded-lg border border-line bg-white" src="{% url 'management:email_preview_render' preview.key %}" loading="lazy" title="{{ preview.label }}"></iframe>
             </div>
             <pre class="hidden overflow-x-auto p-4.5 font-mono text-sm whitespace-pre-wrap text-ink" data-view-panel="text">{{ preview.text }}</pre>
         </div>
