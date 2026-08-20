@@ -86,6 +86,14 @@ class News(ClubScopedModel):
         needs a cron job to "flip" it at the scheduled moment."""
         return self.status == self.Status.PUBLISHED and self.published_at is not None and self.published_at > timezone.now()
 
+    @property
+    def main_photo(self):
+        """The cover photo for the article preview, if one's been marked as
+        such. Filters ``self.photos.all()`` in Python rather than a fresh
+        ``.filter(is_main=True)`` query, so a prefetch_related("photos") on
+        the calling queryset is actually honoured instead of bypassed."""
+        return next((photo for photo in self.photos.all() if photo.is_main), None)
+
 
 class NewsPhoto(UUIDModel):
     news_item = models.ForeignKey(News, on_delete=models.CASCADE, related_name="photos", verbose_name=_("news item"))

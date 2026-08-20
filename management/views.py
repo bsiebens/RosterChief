@@ -1920,17 +1920,62 @@ class GroupMemberRemoveView(MemberAdminRequiredMixin, View):
 
 
 class NewsListView(ClubStaffRequiredMixin, ListView):
+    """The D8 three-pane page: a filterable list on the left (status chips --
+    all/draft/scheduled/published) and, on the right, a preview of whichever
+    item is selected (``?selected=<pk>``, defaulting to the first row of
+    whatever's currently listed so the pane is never empty). news_detail.html
+    stays a separate, unchanged permalink page for anywhere else that links
+    straight to one news item; both share _news_preview.html so the actual
+    article/photos/publish markup exists in exactly one place."""
+
     template_name = "management/news_list.html"
     context_object_name = "news_items"
-    paginate_by = 25
+    paginate_by = 20
 
     def get_queryset(self):
-        return News.objects.filter(club=self.request.club).prefetch_related("teams")
+        queryset = News.objects.filter(club=self.request.club).select_related("created_by").prefetch_related("teams")
+        status_filter = self.request.GET.get("status", "all")
+        now = timezone.now()
+        if status_filter == "draft":
+            queryset = queryset.filter(status=News.Status.DRAFT)
+        elif status_filter == "scheduled":
+            queryset = queryset.filter(status=News.Status.PUBLISHED, published_at__gt=now)
+        elif status_filter == "published":
+            queryset = queryset.filter(status=News.Status.PUBLISHED, published_at__lte=now)
+        return queryset
 
     def get_context_data(self, **kwargs):
+        club, user = self.request.club, self.request.user
+        base = News.objects.filter(club=club)
+        now = timezone.now()
+
         for news_item in self.object_list:
-            news_item.can_edit = can_edit_news(self.request.user, news_item)
-        return super().get_context_data(**kwargs)
+            news_item.can_edit = can_edit_news(user, news_item)
+
+        selected_pk = self.request.GET.get("selected")
+        selected_item = None
+        if selected_pk:
+            selected_item = News.objects.filter(club=club, pk=selected_pk).select_related("created_by").prefetch_related("teams", "photos").first()
+        if selected_item is None and self.object_list:
+            selected_item = self.object_list[0]
+        if selected_item is not None:
+            selected_item.can_edit = can_edit_news(user, selected_item)
+
+        return super().get_context_data(
+            status_filter=self.request.GET.get("status", "all"),
+            counts={
+                "all": base.count(),
+                "draft": base.filter(status=News.Status.DRAFT).count(),
+                "scheduled": base.filter(status=News.Status.PUBLISHED, published_at__gt=now).count(),
+                "published": base.filter(status=News.Status.PUBLISHED, published_at__lte=now).count(),
+            },
+            news_item=selected_item,
+            can_edit=selected_item.can_edit if selected_item else False,
+            can_publish=can_publish_news(user, club),
+            publish_form=NewsPublishForm(),
+            photo_upload_form=NewsPhotoUploadForm(),
+            **kwargs,
+        )
 
 
 class NewsCreateView(NewsAuthorRequiredMixin, CreateView):

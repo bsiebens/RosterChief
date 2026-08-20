@@ -1678,3 +1678,34 @@
         color: var(--color-club-content);
     }
 }
+
+/* --- News preview (management/templates/management/_news_preview.html) ---
+   The NL/EN language toggle above the article body -- same bg-steel pill
+   shell as member_list.html's Members/Guardians/Both selector, but a JS-
+   toggled pair of <button>s (an in-page content swap, not a page navigation
+   with its own querystring state) rather than links, so a dedicated small
+   class pair is simpler than juggling several Tailwind utilities via
+   classList from the script. */
+@layer components {
+    .news-lang-btn {
+        border-radius: 999px;
+        padding: 0.375rem 0.75rem;
+        font-family: var(--font-display);
+        font-size: 0.75rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--color-on-dark);
+        cursor: pointer;
+        transition: background-color 0.15s ease, color 0.15s ease;
+    }
+
+    .news-lang-btn:hover {
+        color: #fff;
+    }
+
+    .news-lang-btn.active {
+        background: #fff;
+        color: var(--color-ink);
+    }
+}

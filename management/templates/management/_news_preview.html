@@ -1,0 +1,170 @@
+{% load i18n lucide ui %}
+{% comment %}
+    The D8 "Editor" pane -- shared by news_list.html's split-view preview and
+    news_detail.html's standalone permalink page, so this article/photos/
+    publish markup exists in exactly one place. Expects the context both
+    views already build identically: news_item, can_edit, can_publish,
+    publish_form, photo_upload_form. Pass show_header=False from a page that
+    already renders its own status/Edit/Publish row elsewhere (news_detail.html
+    puts them in the topbar, same as every other detail page in this app) --
+    news_list.html's split view has no such per-item topbar, so it needs this
+    include to carry that row itself.
+{% endcomment %}
+<div class="flex flex-col gap-4">
+    {% if show_header|default:True %}
+        <div class="flex flex-wrap items-center justify-between gap-2 border-b border-line pb-3">
+            <div class="flex flex-wrap items-center gap-2">
+                {% if news_item.status == "draft" %}
+                    <span class="badge">{% trans "Draft" %}</span>
+                {% elif news_item.is_scheduled %}
+                    <span class="badge badge-info">{% blocktrans with date=news_item.published_at %}Scheduled for {{ date }}{% endblocktrans %}</span>
+                {% else %}
+                    <span class="badge badge-success">{% blocktrans with date=news_item.published_at %}Published {{ date }}{% endblocktrans %}</span>
+                {% endif %}
+                <span class="font-mono text-xs text-dim">{{ news_item.get_visibility_display }}</span>
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+                {% if can_edit %}
+                    <a class="btn btn-outline btn-sm gap-2" href="{% url 'management:news_update' news_item.pk %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</a>
+                    <button class="btn btn-outline btn-error btn-sm gap-2" type="button" onclick="document.getElementById('delete_news_modal').showModal()">{% lucide "trash-2" size=14 %} {% trans "Delete" %}</button>
+                {% endif %}
+                {% if can_publish %}
+                    {% if news_item.status == "draft" %}
+                        <button class="btn btn-primary btn-sm gap-2" type="button" onclick="document.getElementById('publish_modal').showModal()">{% lucide "upload" size=14 %} {% trans "Publish" %}</button>
+                    {% else %}
+                        <button class="btn btn-outline btn-warning btn-sm gap-2" type="button" onclick="document.getElementById('unpublish_modal').showModal()">{% lucide "eye-off" size=14 %} {% trans "Unpublish" %}</button>
+                    {% endif %}
+                {% endif %}
+            </div>
+        </div>
+    {% endif %}
+
+    <div class="card overflow-hidden">
+        {% if news_item.main_photo %}
+            <img class="h-[190px] w-full object-cover" src="{{ news_item.main_photo.image.url }}" alt="">
+        {% endif %}
+        <div class="card-body">
+            <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
+                <div class="flex items-center gap-1 rounded-full bg-steel p-1">
+                    <button type="button" class="news-lang-btn active" data-lang="nl">{% trans "Dutch" %}</button>
+                    <button type="button" class="news-lang-btn" data-lang="en">{% trans "English" %}</button>
+                </div>
+                {% if not news_item.title_en and not news_item.body_en %}
+                    <span class="news-lang-note hidden font-mono text-xs text-dim" data-lang-note="en">{% trans "No English translation yet -- showing Dutch." %}</span>
+                {% endif %}
+            </div>
+
+            {% if news_item.teams.all %}
+                <div class="mb-1 flex flex-wrap gap-2">
+                    {% for team in news_item.teams.all %}
+                        <span class="badge badge-neutral">{{ team.short_name }}</span>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <div class="mb-1 font-display text-xs font-bold tracking-[.14em] text-club uppercase">{% trans "Club-wide" %}</div>
+            {% endif %}
+
+            <div class="news-lang-content" data-lang-content="nl">
+                <h1 class="font-display text-3xl leading-[1.05] font-extrabold text-ink uppercase md:text-4xl">{{ news_item.title }}</h1>
+                <div class="my-3 h-[3px] w-14 bg-club"></div>
+                <p class="whitespace-pre-line text-[15px] leading-relaxed text-ink">{{ news_item.body }}</p>
+            </div>
+            <div class="news-lang-content hidden" data-lang-content="en">
+                <h1 class="font-display text-3xl leading-[1.05] font-extrabold text-ink uppercase md:text-4xl">{{ news_item.effective_title_en }}</h1>
+                <div class="my-3 h-[3px] w-14 bg-club"></div>
+                <p class="whitespace-pre-line text-[15px] leading-relaxed text-ink">{{ news_item.effective_body_en }}</p>
+            </div>
+
+            {% if news_item.created_by %}
+                <div class="mt-2 flex items-center gap-2.5 border-t border-line pt-3.5 text-sm text-muted">
+                    <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-steel font-display text-xs font-extrabold text-white">{{ news_item.created_by.first_name|slice:":1" }}{{ news_item.created_by.last_name|slice:":1" }}</span>
+                    {% blocktrans with name=news_item.created_by %}Posted by {{ name }}{% endblocktrans %}
+                </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-body">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+                <h2 class="card-title">{% lucide "image" size=18 %} {% trans "Photos" %}</h2>
+                {% if can_edit %}
+                    <button class="btn btn-outline btn-sm gap-2" type="button" onclick="document.getElementById('add_photos_modal').showModal()">{% lucide "image-plus" size=14 %} {% trans "Add photos" %}</button>
+                {% endif %}
+            </div>
+
+            <div class="mt-2 grid grid-cols-2 gap-4 md:grid-cols-4">
+                {% for photo in news_item.photos.all %}
+                    <div class="relative">
+                        <img class="aspect-square w-full rounded-box border border-line object-cover" src="{{ photo.image.url }}" alt="">
+                        {% if photo.is_main %}
+                            <span class="badge badge-success badge-sm absolute top-1.5 left-1.5">{% trans "Main" %}</span>
+                        {% endif %}
+                        {% if can_edit %}
+                            <div class="mt-1 flex flex-wrap gap-1">
+                                {% if not photo.is_main %}
+                                    <form method="post" action="{% url 'management:news_photo_set_main' news_item.pk photo.pk %}">
+                                        {% csrf_token %}
+                                        <button class="btn btn-outline btn-xs gap-1" type="submit">{% lucide "star" size=12 %} {% trans "Set main" %}</button>
+                                    </form>
+                                {% endif %}
+                                <button class="btn btn-outline btn-error btn-xs gap-1" type="button" onclick="document.getElementById('{{ photo.pk|dom_id:"delete_photo_modal" }}').showModal()">{% lucide "trash-2" size=12 %} {% trans "Delete" %}</button>
+                            </div>
+                            {% url 'management:news_photo_delete' news_item.pk photo.pk as delete_photo_url %}
+                            {% trans "Delete photo" as delete_photo_title %}
+                            {% trans "This photo will be permanently removed." as delete_photo_body %}
+                            {% trans "Delete" as delete_label %}
+                            {% include "controlpanel/_confirm_modal.html" with modal_id=photo.pk|dom_id:"delete_photo_modal" title=delete_photo_title body=delete_photo_body action_url=delete_photo_url submit_label=delete_label submit_icon="trash-2" %}
+                        {% endif %}
+                    </div>
+                {% empty %}
+                    <p class="col-span-full text-sm text-muted">{% trans "No photos yet." %}</p>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+</div>
+
+{% if can_edit %}
+    {% trans "Add photos" as add_photos_label %}
+    {% url 'management:news_photo_upload' news_item.pk as add_photos_url %}
+    {% include "controlpanel/_modal_form.html" with modal_id="add_photos_modal" title=add_photos_label form=photo_upload_form action_url=add_photos_url submit_label=add_photos_label submit_icon="image-plus" %}
+
+    {% trans "Delete news item" as delete_news_title %}
+    {% blocktrans asvar delete_news_body %}Delete “{{ news_item }}”? Its photos go with it. This cannot be undone.{% endblocktrans %}
+    {% trans "Delete" as delete_label %}
+    {% url 'management:news_delete' news_item.pk as delete_news_url %}
+    {% include "controlpanel/_confirm_modal.html" with modal_id="delete_news_modal" title=delete_news_title body=delete_news_body action_url=delete_news_url submit_label=delete_label %}
+{% endif %}
+
+{% if can_publish %}
+    {% if news_item.status == "draft" %}
+        {% trans "Publish" as publish_label %}
+        {% url 'management:news_publish' news_item.pk as publish_url %}
+        {% trans "Leave as now to publish immediately, or pick a future date/time to schedule it." as publish_blurb %}
+        {% include "controlpanel/_modal_form.html" with modal_id="publish_modal" title=publish_label form=publish_form action_url=publish_url submit_label=publish_label submit_icon="upload" blurb=publish_blurb %}
+    {% else %}
+        {% trans "Unpublish" as unpublish_label %}
+        {% blocktrans asvar unpublish_body %}This pulls “{{ news_item }}” back to a draft. It won't be visible anywhere until it's published again.{% endblocktrans %}
+        {% url 'management:news_unpublish' news_item.pk as unpublish_url %}
+        {% include "controlpanel/_confirm_modal.html" with modal_id="unpublish_modal" title=unpublish_label body=unpublish_body action_url=unpublish_url submit_label=unpublish_label submit_icon="eye-off" %}
+    {% endif %}
+{% endif %}
+
+<script>
+    (() => {
+        // Scoped to this include's own root, not document-wide -- news_list.html
+        // can end up with two copies of this template's ids on the page across
+        // navigations only in theory (each request only ever renders one
+        // selected item), but querying from a scope root costs nothing and
+        // avoids ever wiring the same listener twice if that assumption changes.
+        document.querySelectorAll(".news-lang-btn").forEach((button) => {
+            button.addEventListener("click", () => {
+                const lang = button.dataset.lang;
+                document.querySelectorAll(".news-lang-btn").forEach((b) => b.classList.toggle("active", b === button));
+                document.querySelectorAll(".news-lang-content").forEach((el) => el.classList.toggle("hidden", el.dataset.langContent !== lang));
+                document.querySelectorAll(".news-lang-note").forEach((el) => el.classList.toggle("hidden", el.dataset.langNote !== lang));
+            });
+        });
+    })();
+</script>

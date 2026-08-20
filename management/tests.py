@@ -3656,6 +3656,49 @@ class NewsManagementTests(ManagementTestBase):
 
         self.assertNotContains(response, "Rival news")
 
+    def test_the_status_filter_chips_count_each_bucket(self):
+        News.objects.create(club=self.club, title="Draft one", body="Body.")
+        News.objects.create(club=self.club, title="Draft two", body="Body.")
+        News.objects.create(club=self.club, title="Live", body="Body.", status=News.Status.PUBLISHED, published_at=timezone.now())
+        News.objects.create(club=self.club, title="Upcoming", body="Body.", status=News.Status.PUBLISHED, published_at=timezone.now() + datetime.timedelta(days=3))
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("news_list")
+
+        self.assertEqual(response.context["counts"], {"all": 4, "draft": 2, "scheduled": 1, "published": 1})
+
+    def test_the_draft_filter_chip_narrows_the_list_to_drafts(self):
+        News.objects.create(club=self.club, title="A draft", body="Body.")
+        News.objects.create(club=self.club, title="Already live", body="Body.", status=News.Status.PUBLISHED, published_at=timezone.now())
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("news_list", params={"status": "draft"})
+
+        self.assertContains(response, "A draft")
+        self.assertNotContains(response, "Already live")
+
+    def test_selecting_an_item_previews_it_on_the_right(self):
+        News.objects.create(club=self.club, title="First post", body="First body.")
+        second = News.objects.create(club=self.club, title="Second post", body="Second body.")
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("news_list", params={"selected": str(second.pk)})
+
+        self.assertEqual(response.context["news_item"], second)
+        self.assertContains(response, "Second body.")
+        self.assertNotContains(response, "First body.")
+
+    def test_the_first_item_previews_by_default_when_none_is_selected(self):
+        # News.Meta.ordering is "-created", so the most recently created row
+        # (second) sorts first and is what should preview with no ?selected=.
+        News.objects.create(club=self.club, title="First post", body="First body.")
+        second = News.objects.create(club=self.club, title="Second post", body="Second body.")
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("news_list")
+
+        self.assertEqual(response.context["news_item"], second)
+
     def test_a_coach_manager_can_create_a_draft(self):
         self.client.force_login(self.coach_manager)
 
@@ -3695,13 +3738,18 @@ class NewsManagementTests(ManagementTestBase):
         self.assertContains(response, "Season kickoff")
         self.assertContains(response, "We&#x27;re starting the season.")
 
-    def test_detail_page_hides_the_english_section_when_not_translated(self):
+    def test_detail_page_notes_a_missing_english_translation(self):
+        # The NL/EN toggle is always present now (not conditional on a
+        # translation existing) -- untranslated items instead get a fallback
+        # note, and the EN pane falls back to showing the Dutch content
+        # (News.effective_title_en/effective_body_en) rather than sitting empty.
         item = News.objects.create(club=self.club, title="Seizoensstart", body="We beginnen het seizoen.")
         self.client.force_login(self.admin_user)
 
         response = self.club_get("news_detail", item.pk)
 
-        self.assertNotContains(response, ">English<")
+        self.assertContains(response, "No English translation yet")
+        self.assertContains(response, 'data-lang-content="en"')
 
     def test_plain_staff_cannot_create_news(self):
         self.client.force_login(self.plain_staff)
