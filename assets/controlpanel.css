@@ -288,7 +288,10 @@
         align-items: center;
         justify-content: center;
         gap: 0.5rem;
-        height: 2.125rem;
+        /* Matches .input/.select's own 2.25rem -- see that rule's comment; .btn itself
+           never had the clipping problem (flex centring), this is purely so a button
+           sitting next to a field in the same row lines up. */
+        height: 2.25rem;
         padding-inline: 0.875rem;
         border-radius: var(--radius-box);
         font-family: var(--font-display);
@@ -414,7 +417,7 @@
 
     .btn-square {
         padding-inline: 0;
-        width: 2.125rem;
+        width: 2.25rem;
     }
 
     .btn-sm {
@@ -694,10 +697,17 @@
        space for its native dropdown arrow and several browsers give it a different default
        line-height than a text <input>, so the same padding alone does not guarantee the
        same rendered height. appearance: none plus a hand-drawn arrow replaces the native
-       one, since that reserved space was part of what caused the mismatch. */
+       one, since that reserved space was part of what caused the mismatch.
+
+       2.25rem, not 2.125rem: at the tighter height, a <select>'s own vertical text
+       centring (unlike .btn's flex centring below, a <select> isn't a flex container)
+       left only ~16px of content box for a 14px line -- descenders (g/y/p/q) rendered
+       clipped at the bottom in some browsers. .btn is bumped the same amount purely
+       for row alignment (a filter bar mixing buttons and inputs) -- flex centring
+       itself was never the problem. */
     .input,
     .select {
-        height: 2.125rem;
+        height: 2.25rem;
     }
 
     .select {

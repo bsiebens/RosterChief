@@ -2114,7 +2114,7 @@
     align-items: center;
     justify-content: center;
     gap: 0.5rem;
-    height: 2.125rem;
+    height: 2.25rem;
     padding-inline: 0.875rem;
     border-radius: var(--radius-box);
     font-family: var(--font-display);
@@ -2217,7 +2217,7 @@
   }
   .btn-square {
     padding-inline: 0;
-    width: 2.125rem;
+    width: 2.25rem;
   }
   .btn-sm {
     height: 1.75rem;
@@ -2435,7 +2435,7 @@
     padding: 0.5rem 0.75rem;
   }
   .input, .select {
-    height: 2.125rem;
+    height: 2.25rem;
   }
   .select {
     padding-right: 2rem;
