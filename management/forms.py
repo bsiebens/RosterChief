@@ -904,7 +904,7 @@ class OnboardingRequirementForm(forms.ModelForm):
 
     class Meta:
         model = OnboardingRequirement
-        fields = ["name", "description", "requires_document", "blocked_event_kinds", "is_active", "order"]
+        fields = ["name", "description", "requires_document", "blocked_event_kinds", "is_active"]
 
 
 class RequirementCompletionForm(forms.Form):

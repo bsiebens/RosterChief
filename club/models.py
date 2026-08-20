@@ -422,12 +422,14 @@ class OnboardingRequirement(ClubScopedModel):
     requires_document = models.BooleanField(_("requires a document"), default=False, help_text=_("Staff can attach a file (e.g. the certificate itself) when marking this complete."))
     blocked_event_kinds = models.JSONField(_("blocks selection for"), default=list, blank=True, help_text=_("Event kinds a member can't be invited to or selected for while this is open. Empty means purely informational."))
     is_active = models.BooleanField(_("active"), default=True, help_text=_("Inactive requirements no longer apply to new memberships, but existing statuses are kept."))
-    order = models.PositiveIntegerField(_("order"), default=0, help_text=_("Lower numbers show first on the checklist."))
 
     class Meta:
         verbose_name = _("onboarding requirement")
         verbose_name_plural = _("onboarding requirements")
-        ordering = ["order", "name"]
+        # Alphabetical, not a configurable sequence: every active requirement
+        # blocks equally and there's no set order to complete them in, so
+        # ordering here is purely for a stable, predictable listing.
+        ordering = ["name"]
         constraints = [
             models.UniqueConstraint(fields=["club", "name"], name="unique_onboarding_requirement_name_per_club"),
         ]

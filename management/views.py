@@ -3282,11 +3282,13 @@ def _current_membership_or_404(request, member_pk):
     return membership
 
 
-class MemberRequirementCompleteView(ClubStaffRequiredMixin, View):
-    """Mark one checklist item done for one membership -- any staff, not just
-    admins (same visibility as the rest of a member's profile), can record that
-    a document came in. Reachable from the member detail page's Documents tab
-    (the default fallback) and from the admin-only Sign-up page (via `next`)."""
+class MemberRequirementCompleteView(MemberAdminRequiredMixin, View):
+    """Mark one checklist item done for one membership -- admin/MEMBER_ADMIN
+    only, same gate as the rest of people management (a plain coach can see a
+    member's checklist on their profile, per ClubStaffRequiredMixin's read
+    access there, but not touch it). Reachable from the member detail page's
+    Documents tab (the default fallback) and from the admin-only Sign-up page
+    (via `next`)."""
 
     def post(self, request, pk, requirement_pk):
         membership = _current_membership_or_404(request, pk)
@@ -3302,11 +3304,11 @@ class MemberRequirementCompleteView(ClubStaffRequiredMixin, View):
         return _redirect_next_or(request, reverse("management:member_detail", args=[membership.member_id]))
 
 
-class MemberRequirementBypassView(ClubStaffRequiredMixin, View):
+class MemberRequirementBypassView(MemberAdminRequiredMixin, View):
     """Confirm one checklist item isn't needed for this member (e.g. they already
     have a recent photo on file) -- see club.services.onboarding.mark_bypassed.
-    Same visibility as MemberRequirementCompleteView; bypassing isn't a bigger
-    deal than completing, it's just a different reason the item stops blocking
+    Same gate as MemberRequirementCompleteView; bypassing isn't a bigger deal
+    than completing, it's just a different reason the item stops blocking
     anything."""
 
     def post(self, request, pk, requirement_pk):
@@ -3323,7 +3325,10 @@ class MemberRequirementBypassView(ClubStaffRequiredMixin, View):
         return _redirect_next_or(request, reverse("management:member_detail", args=[membership.member_id]))
 
 
-class MemberRequirementIncompleteView(ClubStaffRequiredMixin, View):
+class MemberRequirementIncompleteView(MemberAdminRequiredMixin, View):
+    """Reopen a checklist item -- same admin/MEMBER_ADMIN gate as the other
+    two mutating requirement views above."""
+
     def post(self, request, pk, requirement_pk):
         membership = _current_membership_or_404(request, pk)
         requirement = get_object_or_404(OnboardingRequirement.objects.filter(club=request.club), pk=requirement_pk)

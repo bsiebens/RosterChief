@@ -67,10 +67,10 @@ class ClubRoleAdmin(admin.ModelAdmin):
 
 @admin.register(OnboardingRequirement)
 class OnboardingRequirementAdmin(admin.ModelAdmin):
-    list_display = ["name", "club", "requires_document", "is_active", "order"]
+    list_display = ["name", "club", "requires_document", "is_active"]
     list_filter = ["club", "is_active", "requires_document"]
     search_fields = ["name", "club__name"]
-    ordering = ["club", "order", "name"]
+    ordering = ["club", "name"]
 
 
 @admin.register(MemberRequirementStatus)

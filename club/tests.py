@@ -1817,8 +1817,8 @@ class OnboardingRequirementTests(TestCase):
             club=cls.club, member=cls.member, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE, fee_status=ClubMembership.FeeStatus.PAID
         )
         cls.staff = get_user_model().objects.create_user(email="staff@example.com", password="pw-secret-123")
-        cls.photo = OnboardingRequirement.objects.create(club=cls.club, name="Photo", order=1)
-        cls.medical = OnboardingRequirement.objects.create(club=cls.club, name="Medical certificate", requires_document=True, order=2)
+        cls.photo = OnboardingRequirement.objects.create(club=cls.club, name="Photo")
+        cls.medical = OnboardingRequirement.objects.create(club=cls.club, name="Medical certificate", requires_document=True)
 
     def test_a_membership_with_no_status_rows_has_every_requirement_open(self):
         self.assertEqual(self.membership.open_requirement_count, 2)

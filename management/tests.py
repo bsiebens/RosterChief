@@ -6702,7 +6702,7 @@ class OnboardingRequirementManagementTests(ManagementTestBase):
         self.client.force_login(self.admin_user)
 
     def test_an_admin_can_create_a_requirement(self):
-        response = self.club_post("onboarding_requirement_create", {"name": "Photo", "requires_document": "", "is_active": "on", "order": "1"})
+        response = self.club_post("onboarding_requirement_create", {"name": "Photo", "requires_document": "", "is_active": "on"})
 
         self.assertRedirects(response, reverse("management:onboarding_requirement_list"))
         self.assertTrue(OnboardingRequirement.objects.filter(club=self.club, name="Photo").exists())
@@ -6713,7 +6713,7 @@ class OnboardingRequirementManagementTests(ManagementTestBase):
         ClubMembership.objects.create(club=self.club, member=coach_member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
         self.client.force_login(coach)
 
-        response = self.club_post("onboarding_requirement_create", {"name": "Photo", "order": "1"})
+        response = self.club_post("onboarding_requirement_create", {"name": "Photo"})
 
         self.assertEqual(response.status_code, 403)
         self.assertFalse(OnboardingRequirement.objects.filter(club=self.club).exists())
@@ -6779,13 +6779,14 @@ class MemberRequirementChecklistTests(ManagementTestBase):
         self.assertEqual(self.membership.status, ClubMembership.StatusChoices.ACTIVE)
         self.assertEqual(self.membership.fee_status, ClubMembership.FeeStatus.PAID)
 
-    def test_a_coach_can_still_mark_one_complete(self):
-        # Any staff can update a member's checklist -- same visibility as the rest of
-        # their profile (ClubStaffRequiredMixin), not admin-only like defining the
-        # requirement itself. That still means a *real* staff assignment though: a
-        # coach only sees members on a team they're staffed on (members_visible_to),
-        # so the fixture needs to put self.member on that coach's own roster, not
-        # just any staff role in the club.
+    def test_a_plain_coach_cannot_mark_one_complete(self):
+        # Only an admin/MEMBER_ADMIN may touch a member's checklist
+        # (MemberAdminRequiredMixin) -- a coach can still *see* it on a member's
+        # profile (ClubStaffRequiredMixin's read access there), but not mark
+        # anything done or reopen it. A *real* staff assignment on the member's
+        # own team is what would have made this coach able to reach the page at
+        # all pre-checklist-permission, so the fixture still sets that up to
+        # isolate this from a simpler "can't reach the page" 403.
         team = Team.objects.create(club=self.club, name="U16")
         coach_position = Position.objects.create(club=self.club, name="Head Coach", staff_position=True, management_position=True)
         player_position = Position.objects.create(club=self.club, name="Forward", staff_position=False)
@@ -6800,7 +6801,25 @@ class MemberRequirementChecklistTests(ManagementTestBase):
 
         response = self.club_post("member_requirement_complete", {"note": ""}, self.member.pk, self.requirement.pk)
 
-        self.assertRedirects(response, reverse("management:member_detail", args=[self.member.pk]))
+        self.assertEqual(response.status_code, 403)
+
+    def test_a_member_admin_can_mark_one_complete(self):
+        member_admin_user = User.objects.create_user(email="memberadmin-checklist@example.com", password="pw-secret-123")
+        member_admin_member = Member.objects.create(user=member_admin_user, first_name="Mia", last_name="Admin")
+        ClubMembership.objects.create(club=self.club, member=member_admin_member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        # The active membership above already granted a plain MEMBER role via
+        # club/signals.py's post_save sync -- update that row rather than
+        # creating a second one (ClubRole is unique per club/member).
+        ClubRole.objects.filter(club=self.club, member=member_admin_member).update(role=ClubRole.Roles.MEMBER_ADMIN)
+        enrol_mfa(member_admin_user)
+        self.client.force_login(member_admin_user)
+
+        response = self.club_post("member_requirement_complete", {"note": ""}, self.member.pk, self.requirement.pk)
+
+        # fetch_redirect_response=False: this member_admin has no team/family tie
+        # to self.member, so members_visible_to would 404 the redirect target --
+        # a separate, pre-existing visibility question this test isn't about.
+        self.assertRedirects(response, reverse("management:member_detail", args=[self.member.pk]), fetch_redirect_response=False)
         self.assertTrue(MemberRequirementStatus.objects.get(membership=self.membership, requirement=self.requirement).is_complete)
 
     def test_marking_incomplete_keeps_the_document_on_file(self):

@@ -203,10 +203,12 @@
 
         {% comment %}
             Onboarding checklist -- club.services.onboarding.checklist_for, paired with
-            MemberRequirementStatus if one exists. Any staff can mark an item done or
-            reopen it, not just admins (same visibility as the rest of this page) --
-            see the module docstring on club/services/onboarding.py for why this stays
-            separate from ClubMembership.status/fee_status.
+            MemberRequirementStatus if one exists. Any staff can see it (same
+            visibility as the rest of this page), but only an admin/MEMBER_ADMIN can
+            mark an item done or reopen it (MemberAdminRequiredMixin on the three
+            requirement views in management/views.py) -- see the module docstring on
+            club/services/onboarding.py for why this stays separate from
+            ClubMembership.status/fee_status.
         {% endcomment %}
         <div class="card card-body h-full">
             <h2 class="card-title">{% lucide "clipboard-check" size=18 %} {% trans "Documents" %}</h2>
@@ -238,16 +240,18 @@
                                     <a class="mt-1 inline-flex items-center gap-1 text-sm link link-hover" href="{% url 'management:member_requirement_document' pk=member.pk requirement_pk=requirement.pk %}">{% lucide "download" size=13 %} {% trans "Download document" %}</a>
                                 {% endif %}
                             </div>
-                            <div class="flex shrink-0 items-center gap-1.5">
-                                {% if status.is_complete %}
-                                    <form method="post" action="{% url 'management:member_requirement_incomplete' pk=member.pk requirement_pk=requirement.pk %}">
-                                        {% csrf_token %}
-                                        <button class="btn btn-outline btn-xs gap-1" type="submit">{% lucide "rotate-ccw" size=12 %} {% trans "Reopen" %}</button>
-                                    </form>
-                                {% else %}
-                                    <button class="btn btn-primary btn-xs gap-1" type="button" onclick="document.getElementById('{{ requirement.pk|dom_id:"requirement_complete_modal" }}').showModal()">{% lucide "check" size=12 %} {% trans "Mark complete" %}</button>
-                                {% endif %}
-                            </div>
+                            {% if can_manage_members %}
+                                <div class="flex shrink-0 items-center gap-1.5">
+                                    {% if status.is_complete %}
+                                        <form method="post" action="{% url 'management:member_requirement_incomplete' pk=member.pk requirement_pk=requirement.pk %}">
+                                            {% csrf_token %}
+                                            <button class="btn btn-outline btn-xs gap-1" type="submit">{% lucide "rotate-ccw" size=12 %} {% trans "Reopen" %}</button>
+                                        </form>
+                                    {% else %}
+                                        <button class="btn btn-primary btn-xs gap-1" type="button" onclick="document.getElementById('{{ requirement.pk|dom_id:"requirement_complete_modal" }}').showModal()">{% lucide "check" size=12 %} {% trans "Mark complete" %}</button>
+                                    {% endif %}
+                                </div>
+                            {% endif %}
                         </div>
                     {% endfor %}
                 </div>
@@ -366,6 +370,7 @@
         {% include "controlpanel/_modal_form.html" with modal_id="attach_family_modal" title=add_to_family_title form=attach_to_family_form action_url=attach_family_url submit_label=add_label submit_icon="user-plus" blurb=attach_family_blurb %}
     {% endif %}
 
+    {% if can_manage_members %}
     {% for requirement, status in checklist %}
         {% if not status.is_complete %}
             <dialog id="{{ requirement.pk|dom_id:"requirement_complete_modal" }}" class="modal">
@@ -395,6 +400,7 @@
             </dialog>
         {% endif %}
     {% endfor %}
+    {% endif %}
 {% endblock panel %}
 
 {% block extra_body %}

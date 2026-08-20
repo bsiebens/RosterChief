@@ -3,11 +3,11 @@
 
 {% comment %}
     What this club requires from every member after they sign up or renew --
-    see club/models.py's OnboardingRequirement docstring. Order matters (shown
-    as typed in `order`, ascending) -- it's the sequence staff see on a
-    member's checklist. No dedicated mockup screen for this (new feature, not
-    in the original design file) -- extrapolates the card/table vocabulary
-    used across Settings.
+    see club/models.py's OnboardingRequirement docstring. Listed alphabetically,
+    not in a configurable sequence: every active requirement blocks equally and
+    there's no set order to complete them in. No dedicated mockup screen for
+    this (new feature, not in the original design file) -- extrapolates the
+    card/table vocabulary used across Settings.
 {% endcomment %}
 
 {% block panel_title %}{% trans "Onboarding requirements" %}{% endblock panel_title %}
