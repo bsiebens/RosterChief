@@ -72,10 +72,10 @@ class StaffAssignmentAdmin(admin.ModelAdmin):
 
 @admin.register(RefereeLevel)
 class RefereeLevelAdmin(admin.ModelAdmin):
-    list_display = ["name", "club", "ordering", "team_list"]
+    list_display = ["name", "club", "ordering", "inherits_from", "team_list"]
     list_filter = ["club"]
     search_fields = ["name"]
-    autocomplete_fields = ["teams"]
+    autocomplete_fields = ["teams", "inherits_from"]
     ordering = ["club", "ordering", "name"]
 
     @admin.display(description=_("teams"))

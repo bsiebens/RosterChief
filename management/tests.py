@@ -1318,6 +1318,46 @@ class RefereeLevelManagementTests(ManagementTestBase):
 
         self.assertNotContains(response, "Rival Level")
 
+    def test_admin_can_link_a_level_to_inherit_from_another(self):
+        regional = RefereeLevel.objects.create(club=self.club, name="Regional")
+        regional.teams.add(self.team)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("referee_level_create", {"name": "National", "ordering": 0, "teams": [str(self.other_team.pk)], "inherits_from": str(regional.pk)})
+
+        national = RefereeLevel.objects.get(club=self.club, name="National")
+        self.assertRedirects(response, reverse("management:referee_level_list"))
+        self.assertEqual(national.inherits_from, regional)
+        self.assertEqual(national.eligible_team_ids(), {self.team.pk, self.other_team.pk})
+
+    def test_a_level_cannot_be_set_to_inherit_from_itself(self):
+        level = RefereeLevel.objects.create(club=self.club, name="Regional")
+        self.client.force_login(self.admin_user)
+
+        self.club_post("referee_level_update", {"name": "Regional", "ordering": 0, "teams": [], "inherits_from": str(level.pk)}, level.pk)
+
+        level.refresh_from_db()
+        self.assertIsNone(level.inherits_from)
+
+    def test_the_inherits_from_dropdown_only_offers_this_clubs_levels(self):
+        other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
+        RefereeLevel.objects.create(club=other_club, name="Rival Level")
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("referee_level_create")
+
+        self.assertNotContains(response, "Rival Level")
+
+    def test_the_list_shows_what_a_level_inherits(self):
+        regional = RefereeLevel.objects.create(club=self.club, name="Regional")
+        RefereeLevel.objects.create(club=self.club, name="National", inherits_from=regional)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("referee_level_list")
+
+        self.assertContains(response, "Regional")
+        self.assertContains(response, "everything")
+
 
 class RefereeListViewTests(ManagementTestBase):
     """The club-wide referee overview -- see management.views.RefereeListView."""

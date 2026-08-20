@@ -17,6 +17,7 @@
                 <tr>
                     <th>{% trans "Ordering" %}</th>
                     <th>{% trans "Name" %}</th>
+                    <th>{% trans "Inherits from" %}</th>
                     <th>{% trans "Qualifies for" %}</th>
                     <th></th>
                 </tr>
@@ -27,11 +28,21 @@
                         <td class="font-mono text-muted">{{ level.ordering }}</td>
                         <td class="font-semibold text-ink">{{ level.name }}</td>
                         <td>
+                            {% if level.inherits_from %}
+                                <span class="badge badge-info badge-sm">{{ level.inherits_from.name }}</span>
+                            {% else %}
+                                <span class="text-dim">—</span>
+                            {% endif %}
+                        </td>
+                        <td>
                             {% for team in level.teams.all %}
                                 <span class="badge badge-outline badge-sm">{{ team.name }}</span>
                             {% empty %}
-                                <span class="text-dim">—</span>
+                                {% if not level.inherits_from %}<span class="text-dim">—</span>{% endif %}
                             {% endfor %}
+                            {% if level.inherits_from %}
+                                <div class="mt-1 text-xs text-muted">{% blocktrans with name=level.inherits_from.name %}+ everything “{{ name }}” covers{% endblocktrans %}</div>
+                            {% endif %}
                         </td>
                         <td class="text-right">
                             {% if is_club_admin %}
@@ -41,7 +52,7 @@
                     </tr>
                 {% empty %}
                     <tr>
-                        <td colspan="4" class="text-center text-muted">{% trans "No referee levels yet." %}</td>
+                        <td colspan="5" class="text-center text-muted">{% trans "No referee levels yet." %}</td>
                     </tr>
                 {% endfor %}
             </tbody>

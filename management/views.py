@@ -1133,7 +1133,16 @@ class TeamDetailView(ClubStaffRequiredMixin, DetailView):
             no_shows=no_shows,
             # None (not an empty queryset) signals "federation-managed" to the
             # template, distinct from "club-managed, nobody eligible yet".
-            eligible_referees=(Member.objects.filter(referee_profile__level__teams=team, referee_profile__valid_until__gte=timezone.localdate()).order_by("last_name", "first_name") if team.referee_management == Team.RefereeManagement.CLUB else None),
+            # Levels resolved to ids first, not a flat level__teams=team filter --
+            # same reasoning as events.services.referees.eligible_referees, since
+            # a level may qualify for this team only via what it inherits from.
+            eligible_referees=(
+                Member.objects.filter(
+                    referee_profile__level_id__in=[level.pk for level in RefereeLevel.objects.filter(club=club) if team.pk in level.eligible_team_ids()], referee_profile__valid_until__gte=timezone.localdate()
+                ).order_by("last_name", "first_name")
+                if team.referee_management == Team.RefereeManagement.CLUB
+                else None
+            ),
             **kwargs,
         )
 
@@ -1835,7 +1844,7 @@ class RefereeLevelListView(ClubStaffRequiredMixin, ListView):
     context_object_name = "levels"
 
     def get_queryset(self):
-        return RefereeLevel.objects.filter(club=self.request.club).prefetch_related("teams")
+        return RefereeLevel.objects.filter(club=self.request.club).select_related("inherits_from").prefetch_related("teams")
 
 
 class RefereeLevelCreateView(MemberAdminRequiredMixin, CreateView):
@@ -1890,8 +1899,11 @@ class RefereeListView(ClubStaffRequiredMixin, ListView):
     context_object_name = "referees"
 
     def get_queryset(self):
+        # No prefetch for eligible_teams below select_related's level: it walks the
+        # level's own inherits_from chain (RefereeLevel.eligible_team_ids), which a
+        # single prefetch_related path can't cover anyway.
         members = members_visible_to(self.request.user, self.request.club, include_guardians=True).filter(referee_profile__isnull=False)
-        return members.select_related("referee_profile", "referee_profile__level").prefetch_related("referee_profile__level__teams").order_by("last_name", "first_name")
+        return members.select_related("referee_profile", "referee_profile__level").order_by("last_name", "first_name")
 
 
 # --- Groups: a generic named collection of members (all coaches, all team managers,

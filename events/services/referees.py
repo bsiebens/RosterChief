@@ -30,7 +30,7 @@ from django.utils.translation import gettext_lazy as _
 from events.models import ASSUMED_EVENT_DURATION, Event, EventReferee
 from events.services.attendance import effective_members
 from members.models import Member
-from teams.models import Team
+from teams.models import RefereeLevel, Team
 
 
 class RefereeAssignmentError(Exception):
@@ -52,17 +52,24 @@ def needs_referee_management(event) -> bool:
 
 def eligible_referees(event):
     """Members who could referee `event`: their RefereeProfile has a level
-    qualifying for one of its club-managed teams, and is currently valid,
-    minus whoever is already assigned. Empty unless needs_referee_management."""
+    qualifying for one of its club-managed teams (directly, or via whatever
+    that level inherits from), and is currently valid, minus whoever is
+    already assigned. Empty unless needs_referee_management.
+
+    Levels resolved to ids first (RefereeLevel.eligible_team_ids can't be
+    expressed as a single ORM lookup once inheritance is transitive) rather
+    than the old flat `level__teams__id__in` filter -- a club has a handful
+    of levels, so this stays cheap."""
     if not needs_referee_management(event):
         return Member.objects.none()
 
-    team_ids = list(event.teams.filter(referee_management=Team.RefereeManagement.CLUB).values_list("id", flat=True))
+    team_ids = set(event.teams.filter(referee_management=Team.RefereeManagement.CLUB).values_list("id", flat=True))
+    qualifying_level_ids = [level.pk for level in RefereeLevel.objects.filter(club=event.club) if level.eligible_team_ids() & team_ids]
     assigned_ids = event.referees.values_list("member_id", flat=True)
     today = timezone.localdate()
 
     return (
-        Member.objects.filter(referee_profile__level__teams__id__in=team_ids, referee_profile__valid_until__gte=today)
+        Member.objects.filter(referee_profile__level_id__in=qualifying_level_ids, referee_profile__valid_until__gte=today)
         .exclude(pk__in=assigned_ids)
         .distinct()
     )

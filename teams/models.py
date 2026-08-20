@@ -1,3 +1,4 @@
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import Q
 from django.utils import timezone
@@ -125,11 +126,27 @@ class RefereeLevel(ClubScopedModel):
     qualifies a referee for: eligibility is a property of the *level*, not of
     the individual referee -- a club typically has a handful of levels, each
     unlocking a tier of teams/competitions, rather than hand-picking teams per
-    referee."""
+    referee.
+
+    `inherits_from` chains levels together so a higher tier doesn't need every
+    lower tier's team re-added by hand: a "National" referee is automatically
+    eligible for everything "Regional" (its inherits_from) covers, and so on
+    down the chain -- see eligible_team_ids, the single definition every
+    consumer (RefereeProfile.eligible_teams, events.services.referees) reads
+    through."""
 
     name = models.CharField(_("name"), max_length=255)
     ordering = models.PositiveSmallIntegerField(_("ordering"), default=0, help_text=_("Lower numbers are listed first. Levels with the same number are ordered by name."))
     teams = models.ManyToManyField(Team, related_name="referee_levels", blank=True, verbose_name=_("qualifies for"), help_text=_("Members holding this level can be assigned to referee these teams' home games."))
+    inherits_from = models.ForeignKey(
+        "self",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="inherited_by",
+        verbose_name=_("inherits from"),
+        help_text=_("A referee holding this level is also eligible for everything the linked level covers (and, transitively, whatever that one inherits from)."),
+    )
 
     class Meta:
         verbose_name = _("referee level")
@@ -141,6 +158,33 @@ class RefereeLevel(ClubScopedModel):
 
     def __str__(self):
         return self.name
+
+    def clean(self):
+        validate_club_scope(self, self.club_id, same_club_fields=("inherits_from",))
+        current = self.inherits_from
+        seen = set()
+        while current is not None:
+            if current.pk == self.pk:
+                raise ValidationError({"inherits_from": _("This would create a loop -- a level can't inherit from itself, even indirectly.")})
+            if current.pk in seen:
+                break  # An already-broken chain elsewhere; not this field's problem to fix.
+            seen.add(current.pk)
+            current = current.inherits_from
+
+    def eligible_team_ids(self):
+        """This level's own qualifying teams, plus (transitively) every level
+        it inherits from -- so a higher tier doesn't need a lower tier's teams
+        duplicated onto it by hand, and stays correct if the lower tier's own
+        teams change later. Cycle-guarded even though clean() already blocks
+        creating one, in case of data written outside that path."""
+        team_ids = set(self.teams.values_list("id", flat=True))
+        seen = {self.pk}
+        current = self.inherits_from
+        while current is not None and current.pk not in seen:
+            team_ids.update(current.teams.values_list("id", flat=True))
+            seen.add(current.pk)
+            current = current.inherits_from
+        return team_ids
 
 
 class RefereeProfile(UUIDModel):
@@ -184,10 +228,12 @@ class RefereeProfile(UUIDModel):
     @property
     def eligible_teams(self):
         """Teams this profile currently qualifies for -- empty whenever it
-        isn't currently eligible, regardless of what level is set."""
+        isn't currently eligible, regardless of what level is set. Includes
+        whatever the level inherits from, transitively -- see
+        RefereeLevel.eligible_team_ids."""
         if not self.is_eligible:
             return Team.objects.none()
-        return self.level.teams.all()
+        return Team.objects.filter(id__in=self.level.eligible_team_ids())
 
 
 class StaffAssignment(UUIDModel):

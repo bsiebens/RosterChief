@@ -246,6 +246,65 @@ class RefereeLevelModelTests(TeamsTestCase):
 
         self.assertEqual(list(self.team.referee_levels.all()), [level])
 
+    def test_eligible_team_ids_with_no_inheritance_is_just_its_own_teams(self):
+        level = RefereeLevel.objects.create(club=self.club, name="Regional")
+        level.teams.add(self.team)
+
+        self.assertEqual(level.eligible_team_ids(), {self.team.pk})
+
+    def test_a_higher_level_inherits_its_lower_levels_teams(self):
+        other_team = Team.objects.create(club=self.club, name="Second Team", short_name="2nd")
+        regional = RefereeLevel.objects.create(club=self.club, name="Regional")
+        regional.teams.add(self.team)
+        national = RefereeLevel.objects.create(club=self.club, name="National", inherits_from=regional)
+        national.teams.add(other_team)
+
+        self.assertEqual(national.eligible_team_ids(), {self.team.pk, other_team.pk})
+        # Inheritance is one-directional -- Regional doesn't gain National's teams.
+        self.assertEqual(regional.eligible_team_ids(), {self.team.pk})
+
+    def test_inheritance_is_transitive_through_a_chain(self):
+        other_team = Team.objects.create(club=self.club, name="Second Team", short_name="2nd")
+        third_team = Team.objects.create(club=self.club, name="Third Team", short_name="3rd")
+        local = RefereeLevel.objects.create(club=self.club, name="Local")
+        local.teams.add(self.team)
+        regional = RefereeLevel.objects.create(club=self.club, name="Regional", inherits_from=local)
+        regional.teams.add(other_team)
+        national = RefereeLevel.objects.create(club=self.club, name="National", inherits_from=regional)
+        national.teams.add(third_team)
+
+        self.assertEqual(national.eligible_team_ids(), {self.team.pk, other_team.pk, third_team.pk})
+
+    def test_a_level_cannot_inherit_from_itself(self):
+        level = RefereeLevel.objects.create(club=self.club, name="Regional")
+        level.inherits_from = level
+
+        with self.assertRaises(ValidationError):
+            level.clean()
+
+    def test_a_level_cannot_indirectly_inherit_from_itself(self):
+        regional = RefereeLevel.objects.create(club=self.club, name="Regional")
+        national = RefereeLevel.objects.create(club=self.club, name="National", inherits_from=regional)
+        regional.inherits_from = national
+
+        with self.assertRaises(ValidationError):
+            regional.clean()
+
+    def test_inherits_from_must_be_the_same_club(self):
+        other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
+        other_level = RefereeLevel.objects.create(club=other_club, name="Regional")
+        level = RefereeLevel.objects.create(club=self.club, name="National", inherits_from=other_level)
+
+        with self.assertRaises(ValidationError):
+            level.clean()
+
+    def test_deleting_an_inherited_from_level_is_protected(self):
+        regional = RefereeLevel.objects.create(club=self.club, name="Regional")
+        RefereeLevel.objects.create(club=self.club, name="National", inherits_from=regional)
+
+        with self.assertRaises(ProtectedError):
+            regional.delete()
+
 
 class RefereeProfileModelTests(TeamsTestCase):
     @classmethod
@@ -290,6 +349,14 @@ class RefereeProfileModelTests(TeamsTestCase):
     def test_eligible_teams_come_from_the_level_when_eligible(self):
         profile = RefereeProfile.objects.create(member=self.member, level=self.level, valid_until=timezone.localdate() + datetime.timedelta(days=1))
         self.assertEqual(list(profile.eligible_teams), [self.team])
+
+    def test_eligible_teams_include_what_the_level_inherits(self):
+        other_team = Team.objects.create(club=self.club, name="Second Team", short_name="2nd")
+        national = RefereeLevel.objects.create(club=self.club, name="National", inherits_from=self.level)
+        national.teams.add(other_team)
+        profile = RefereeProfile.objects.create(member=self.member, level=national, valid_until=timezone.localdate() + datetime.timedelta(days=1))
+
+        self.assertEqual(set(profile.eligible_teams), {self.team, other_team})
 
     def test_deleting_a_referenced_level_is_protected(self):
         RefereeProfile.objects.create(member=self.member, level=self.level, valid_until=timezone.localdate())

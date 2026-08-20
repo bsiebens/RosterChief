@@ -56,12 +56,17 @@ class GroupForm(forms.ModelForm):
 class RefereeLevelForm(forms.ModelForm):
     class Meta:
         model = RefereeLevel
-        fields = ["name", "ordering", "teams"]
+        fields = ["name", "ordering", "teams", "inherits_from"]
         widgets = {"teams": forms.SelectMultiple(attrs={"data-searchable": "true", "data-search-placeholder": _("Type a team to search...")})}
 
     def __init__(self, *args, club=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields["teams"].queryset = Team.objects.filter(club=club)
+        # Excludes self from the dropdown -- self.instance always has a pk (UUIDModel
+        # gets its default at construction, not at save()), so this also works for a
+        # brand-new, unsaved level. clean() still catches an indirect loop (A -> B -> A).
+        self.fields["inherits_from"].queryset = RefereeLevel.objects.filter(club=club).exclude(pk=self.instance.pk)
+        self.fields["inherits_from"].empty_label = _("— none —")
 
 
 class MemberRefereeEligibilityForm(forms.ModelForm):

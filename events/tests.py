@@ -1205,6 +1205,18 @@ class RefereeServiceTests(EventsTestBase):
 
         self.assertEqual(set(eligible_referees(game)), set())
 
+    def test_eligible_referees_includes_a_higher_level_via_inheritance(self):
+        # self.level ("Regional") qualifies for self.team; a referee holding a
+        # higher level that inherits from Regional (without self.team added
+        # directly) must still show up -- see RefereeLevel.eligible_team_ids.
+        national = RefereeLevel.objects.create(club=self.club, name="National", inherits_from=self.level)
+        national_referee = Member.objects.create(first_name="Nat", last_name="Ional")
+        self.make_eligible_profile(national_referee, level=national)
+
+        game = self.make_home_game()
+
+        self.assertIn(national_referee, set(eligible_referees(game)))
+
     def test_eligible_referees_ignores_an_expired_profile(self):
         expired_referee = Member.objects.create(first_name="Ex", last_name="Pired")
         RefereeProfile.objects.create(member=expired_referee, level=self.level, valid_until=timezone.localdate() - timedelta(days=1))
