@@ -62,33 +62,39 @@
             <span>{% trans "No season covers today, so there's nothing to show fee status for yet." %}</span>
         </div>
     {% else %}
-        <div class="grid grid-cols-2 gap-3.5 sm:grid-cols-3 lg:grid-cols-6">
-            <div class="card border-hairline bg-ink p-4">
-                <div class="font-display text-xs font-bold tracking-[.12em] text-on-dark uppercase">{% trans "Registered" %}</div>
-                <div class="mt-1 font-display text-[34px] leading-none font-extrabold tabular-nums text-white">{{ kpi_total }}</div>
-                <div class="mt-1 text-[13px] text-on-dark-dim">{% trans "This season" %}</div>
+        {# Same anatomy as the Overview dashboard's own KPI row (home.html): a plain white .card, no colour-coded border -- status lives in the number's own colour (neutral ink unless there's something to flag) plus a caption line, not a border accent. #}
+        <div class="flex gap-3.5">
+            <div class="card min-w-0 flex-1 p-4">
+                <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Registered" %}</div>
+                <div class="mt-1 font-display text-[34px] leading-none font-extrabold text-ink tabular-nums">{{ kpi_total }}</div>
+                <div class="mt-1 text-[13px] text-muted">{% trans "This season" %}</div>
             </div>
-            <div class="card border-l-4 border-ok p-4">
+            <div class="card min-w-0 flex-1 p-4">
                 <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Paid" %}</div>
                 <div class="mt-1 font-display text-[34px] leading-none font-extrabold tabular-nums text-ok">{{ kpi_paid }}</div>
+                <div class="mt-1 text-[13px] text-muted">{% trans "Fully settled" %}</div>
             </div>
-            <div class="card border-l-4 p-4 {% if kpi_partial %}border-warn{% else %}border-ok{% endif %}">
+            <div class="card min-w-0 flex-1 p-4">
                 <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Partially paid" %}</div>
                 <div class="mt-1 font-display text-[34px] leading-none font-extrabold tabular-nums {% if kpi_partial %}text-warn{% else %}text-ink{% endif %}">{{ kpi_partial }}</div>
+                <div class="mt-1 text-[13px] text-muted">{% trans "Still owe a balance" %}</div>
             </div>
-            <div class="card border-l-4 p-4 {% if kpi_unpaid %}border-club{% else %}border-ok{% endif %}">
+            <div class="card min-w-0 flex-1 p-4">
                 <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Unpaid" %}</div>
                 <div class="mt-1 font-display text-[34px] leading-none font-extrabold tabular-nums {% if kpi_unpaid %}text-club{% else %}text-ink{% endif %}">{{ kpi_unpaid }}</div>
+                <div class="mt-1 text-[13px] text-muted">{% trans "Nothing paid yet" %}</div>
             </div>
-            <div class="card border-l-4 border-edge p-4">
+            <div class="card min-w-0 flex-1 p-4">
                 <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Waived" %}</div>
                 <div class="mt-1 font-display text-[34px] leading-none font-extrabold tabular-nums text-ink">{{ kpi_waived }}</div>
+                <div class="mt-1 text-[13px] text-muted">{% trans "Fee waived" %}</div>
             </div>
-            <div class="card border-l-4 p-4 {% if kpi_paid_rate is None %}border-info{% elif kpi_paid_rate < 50 %}border-club{% elif kpi_paid_rate < 85 %}border-warn{% else %}border-ok{% endif %}">
+            <div class="card min-w-0 flex-1 p-4">
                 <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Paid rate" %}</div>
                 <div class="mt-1 font-display text-[34px] leading-none font-extrabold tabular-nums {% if kpi_paid_rate is None %}text-info{% elif kpi_paid_rate < 50 %}text-club{% elif kpi_paid_rate < 85 %}text-warn{% else %}text-ok{% endif %}">
                     {% if kpi_paid_rate is None %}{% trans "N/A" %}{% else %}{{ kpi_paid_rate }}%{% endif %}
                 </div>
+                <div class="mt-1 text-[13px] text-muted">{% trans "Of everyone registered" %}</div>
             </div>
         </div>
     {% endif %}
