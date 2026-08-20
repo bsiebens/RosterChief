@@ -2335,6 +2335,19 @@ class MemberRefereeEligibilityTests(ManagementTestBase):
 
         self.assertContains(response, "Ref Eree")
 
+    def test_team_page_lists_a_referee_eligible_via_inheritance(self):
+        # self.level ("Regional") already qualifies for self.team; a higher
+        # level that inherits from it (with no teams of its own) should still
+        # show up here -- see RefereeLevel.eligible_team_ids.
+        national = RefereeLevel.objects.create(club=self.club, name="National", inherits_from=self.level)
+        national_ref = Member.objects.create(first_name="Nat", last_name="Ional")
+        RefereeProfile.objects.create(member=national_ref, level=national, valid_until=self.future_date)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("team_detail", self.team.pk)
+
+        self.assertContains(response, "Nat Ional")
+
     def test_team_page_excludes_an_expired_referee(self):
         # "Ref Eree" alone also matches the (unrelated) add-player/assign-staff
         # dropdowns, which list every active club member regardless of referee

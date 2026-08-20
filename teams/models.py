@@ -160,7 +160,15 @@ class RefereeLevel(ClubScopedModel):
         return self.name
 
     def clean(self):
-        validate_club_scope(self, self.club_id, same_club_fields=("inherits_from",))
+        # club_id is still None here for a brand-new level: RefereeLevelCreateView
+        # (like its siblings -- PositionCreateView, GroupCreateView, ...) assigns
+        # form.instance.club in form_valid(), *after* the form's is_valid() already
+        # ran clean() -- so there's nothing to compare against yet on create. The
+        # form's own inherits_from queryset (scoped to `club`) is what actually
+        # blocks a cross-club pick there; this still catches it on every other path
+        # (update, admin, direct .full_clean()) where club_id is already set.
+        if self.club_id is not None:
+            validate_club_scope(self, self.club_id, same_club_fields=("inherits_from",))
         current = self.inherits_from
         seen = set()
         while current is not None:
