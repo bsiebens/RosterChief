@@ -21,7 +21,7 @@ from billing.models import DEFAULT_GRACE_DAYS, Due, Plan, PlanPrice, Subscriptio
 from billing.services import BillingError
 from billing.services.dues import record_payment, start_trial, subscribe, waive
 from club.models import Club, ClubMembership, ClubRole, Season
-from events.models import Attendance, Event, Location
+from events.models import Attendance, Competition, Event, Location
 from features.models import Maintenance
 from members.models import Member
 from shop.models import Order
@@ -599,6 +599,68 @@ class FeatureViewTests(ControlPanelTestBase):
 
         self.assertContains(response, "On for all clubs")
         self.assertNotContains(response, reverse("controlpanel:club_feature_toggle", args=[self.club.pk, self.flag.pk]))
+
+
+class CompetitionCrudTests(ControlPanelTestBase):
+    """Manage events.models.Competition rows from the Features page -- see
+    events.services.competitions for how `module`/`name` get used."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.competition = Competition.objects.create(name="CEHL", module="events.services.competitions.cehl", sport_type=Club.SportType.OTHER)
+
+    def test_features_page_lists_competitions(self):
+        response = self.client.get(reverse("controlpanel:features"))
+
+        self.assertContains(response, "CEHL")
+        self.assertContains(response, "events.services.competitions.cehl")
+
+    def test_the_competition_forms_are_post_only(self):
+        self.assertEqual(self.client.get(reverse("controlpanel:competition_create")).status_code, 405)
+        self.assertEqual(self.client.get(reverse("controlpanel:competition_update", args=[self.competition.pk])).status_code, 405)
+
+    def test_an_invalid_competition_submission_redirects_with_a_message(self):
+        response = self.client.post(reverse("controlpanel:competition_create"), {"name": "", "module": "", "sport_type": Club.SportType.OTHER}, follow=True)
+
+        self.assertRedirects(response, reverse("controlpanel:features"))
+        self.assertContains(response, "This field is required")
+
+    def test_create_a_competition(self):
+        self.client.post(reverse("controlpanel:competition_create"), {"name": "BFL", "module": "events.services.competitions.bfl", "sport_type": Club.SportType.OTHER})
+
+        self.assertTrue(Competition.objects.filter(name="BFL").exists())
+
+    def test_edit_a_competition(self):
+        self.client.post(reverse("controlpanel:competition_update", args=[self.competition.pk]), {"name": "CEHL", "module": "events.services.competitions.cehl_v2", "sport_type": Club.SportType.OTHER})
+
+        self.competition.refresh_from_db()
+        self.assertEqual(self.competition.module, "events.services.competitions.cehl_v2")
+
+    def test_delete_a_competition(self):
+        self.client.post(reverse("controlpanel:competition_delete", args=[self.competition.pk]))
+
+        self.assertFalse(Competition.objects.filter(pk=self.competition.pk).exists())
+
+    def test_deleting_does_not_touch_an_event_that_matched_it_by_name(self):
+        # Event.competition is a plain name match, not a foreign key -- deleting the
+        # Competition row must not cascade or error.
+        season = Season.objects.create(club=self.club, start_date=datetime.date(2026, 8, 1), end_date=datetime.date(2027, 5, 31))
+        event = Event.objects.create(club=self.club, season=season, kind=Event.EventKind.GAME, title="Match", start=timezone.now(), competition="CEHL")
+
+        self.client.post(reverse("controlpanel:competition_delete", args=[self.competition.pk]))
+
+        event.refresh_from_db()
+        self.assertEqual(event.competition, "CEHL")
+
+    def test_a_non_staff_user_gets_redirected(self):
+        self.client.logout()
+        plain_user = User.objects.create_user(email="plain-competition@example.com", password="pw-secret-123")
+        self.client.force_login(plain_user)
+
+        response = self.client.get(reverse("controlpanel:features"))
+
+        self.assertNotEqual(response.status_code, 200)
 
 
 class NotifyTests(TestCase):

@@ -23,6 +23,9 @@ urlpatterns = [
     path("features/flags/new/", views.FlagCreateView.as_view(), name="flag_create"),
     path("features/flags/<int:pk>/edit/", views.FlagUpdateView.as_view(), name="flag_update"),
     path("features/switches/<int:pk>/toggle/", views.SwitchToggleView.as_view(), name="switch_toggle"),
+    path("features/competitions/new/", views.CompetitionCreateView.as_view(), name="competition_create"),
+    path("features/competitions/<int:pk>/edit/", views.CompetitionUpdateView.as_view(), name="competition_update"),
+    path("features/competitions/<int:pk>/delete/", views.CompetitionDeleteView.as_view(), name="competition_delete"),
     # Billing (platform charging the clubs)
     path("billing/", views.BillingView.as_view(), name="billing"),
     path("billing/plans/new/", views.PlanCreateView.as_view(), name="plan_create"),

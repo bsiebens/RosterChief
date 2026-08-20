@@ -18,10 +18,10 @@ from billing.services.dues import next_period_start, open_period, reactivate, re
 from billing.services.invoices import invoice_pdf, issue_invoice
 from billing.services.plans import delete_plan, plan_deletion_impact
 from club.models import Club, ClubRole
-from events.models import Location
+from events.models import Competition, Location
 from features.models import Maintenance
 
-from .forms import ClubAdminForm, ClubForm, DuePaymentForm, FlagForm, HomeLocationForm, MaintenanceForm, OpenPeriodForm, PlanForm, PlanPriceForm, PlatformAdminForm, SubscriptionForm, TrialForm
+from .forms import ClubAdminForm, ClubForm, CompetitionForm, DuePaymentForm, FlagForm, HomeLocationForm, MaintenanceForm, OpenPeriodForm, PlanForm, PlanPriceForm, PlatformAdminForm, SubscriptionForm, TrialForm
 from .messages import notify
 from .mixins import PlatformStaffRequiredMixin, PlatformSuperuserRequiredMixin, RedirectOnInvalidMixin
 from .services.admins import grant_club_admin, revoke_club_admin
@@ -285,10 +285,16 @@ class FeatureListView(PlatformStaffRequiredMixin, TemplateView):
         for flag in flags:
             flag.edit_form = FlagForm(instance=flag)
 
+        competitions = list(Competition.objects.select_related("flag").order_by("name"))
+        for competition in competitions:
+            competition.edit_form = CompetitionForm(instance=competition)
+
         return super().get_context_data(
             nav="features",
             flags=flags,
             flag_form=FlagForm(),
+            competitions=competitions,
+            competition_form=CompetitionForm(),
             switches=Switch.objects.order_by("name"),
             maintenance=Maintenance.current(),
             maintenance_form=MaintenanceForm(),
@@ -346,6 +352,58 @@ class FlagUpdateView(PlatformStaffRequiredMixin, RedirectOnInvalidMixin, UpdateV
 
     def get_success_url(self):
         return reverse("controlpanel:features")
+
+
+class CompetitionCreateView(PlatformStaffRequiredMixin, RedirectOnInvalidMixin, CreateView):
+    """Reachable only via the "New competition" modal on the features page --
+    POST-only, and there is no standalone template to render on GET or on a
+    rejected submission."""
+
+    model = Competition
+    form_class = CompetitionForm
+    http_method_names = ["post"]
+    invalid_redirect_url_name = "controlpanel:features"
+
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        notify(self.request, f"s|Competition created|Competition “{self.object.name}” created.")
+        return response
+
+    def get_success_url(self):
+        return reverse("controlpanel:features")
+
+
+class CompetitionUpdateView(PlatformStaffRequiredMixin, RedirectOnInvalidMixin, UpdateView):
+    """Reachable only via a competition's "Edit" modal on the features page --
+    POST-only, and there is no standalone template to render on GET or on a
+    rejected submission."""
+
+    model = Competition
+    form_class = CompetitionForm
+    http_method_names = ["post"]
+    invalid_redirect_url_name = "controlpanel:features"
+
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        notify(self.request, f"s|Competition updated|Competition “{self.object.name}” updated.")
+        return response
+
+    def get_success_url(self):
+        return reverse("controlpanel:features")
+
+
+class CompetitionDeleteView(PlatformStaffRequiredMixin, View):
+    """No cascading consequences to weigh (Event.competition matches by name, not
+    a foreign key -- see events.services.competitions), so this is a plain confirm
+    modal rather than PlanDeleteView's dedicated impact page."""
+
+    def post(self, request, pk):
+        competition = get_object_or_404(Competition, pk=pk)
+        name = competition.name
+        competition.delete()
+
+        notify(request, f"w|Competition deleted|Competition “{name}” has been deleted.")
+        return redirect("controlpanel:features")
 
 
 class SwitchToggleView(PlatformStaffRequiredMixin, View):

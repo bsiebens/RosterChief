@@ -9,15 +9,20 @@
     <span>{{ flags|length }} flag{{ flags|length|pluralize }}</span>
     <span class="text-edge">|</span>
     <span>{{ switches|length }} switch{{ switches|length|pluralize }}</span>
+    <span class="text-edge">|</span>
+    <span>{{ competitions|length }} competition{{ competitions|length|pluralize }}</span>
 {% endblock breadcrumb %}
 
 {% block actions %}
     <button class="btn btn-primary gap-2" type="button" onclick="document.getElementById('flag_create_modal').showModal()">{% lucide "plus" size=16 %} New feature</button>
+    <button class="btn btn-outline gap-2" type="button" onclick="document.getElementById('competition_create_modal').showModal()">{% lucide "plus" size=16 %} New competition</button>
 {% endblock actions %}
 
 {% block panel %}
     {% url 'controlpanel:flag_create' as flag_create_url %}
     {% include "controlpanel/_modal_form.html" with modal_id="flag_create_modal" title="New feature" form=flag_form action_url=flag_create_url submit_label="Create" submit_icon="plus" %}
+    {% url 'controlpanel:competition_create' as competition_create_url %}
+    {% include "controlpanel/_modal_form.html" with modal_id="competition_create_modal" title="New competition" form=competition_form action_url=competition_create_url submit_label="Create" submit_icon="plus" %}
 
     {% comment %}
         The lock-down. Clubs get a maintenance page, the scheduled jobs stand down, and the
@@ -170,5 +175,65 @@
                 </tbody>
             </table>
         </div>
+    </div>
+
+    <div class="card">
+        <div class="flex items-center gap-2.5 border-b border-line px-4 py-3">
+            {% lucide "trophy" size=16 class="shrink-0 text-muted" %}
+            <span class="font-display text-sm font-extrabold tracking-[.1em] text-ink uppercase">Competitions</span>
+            <span class="flex-1"></span>
+            <span class="font-mono text-[11px] text-muted">{{ competitions|length }} competition{{ competitions|length|pluralize }}</span>
+        </div>
+        <p class="px-4 pt-3 pb-3 text-sm text-muted">
+            Data sources a game's score/status can be fetched from — see events.services.competitions. A club only sees one in its event form once its feature flag is on for them.
+        </p>
+        <div class="overflow-x-auto">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Sport</th>
+                        <th>Module</th>
+                        <th>Flag</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for competition in competitions %}
+                        <tr>
+                            <td class="font-mono">{{ competition.name }}</td>
+                            <td>{{ competition.get_sport_type_display }}</td>
+                            <td class="max-w-xs truncate text-muted">{{ competition.module }}</td>
+                            <td>
+                                {% if competition.flag %}
+                                    <span class="badge badge-info">{{ competition.flag.name }}</span>
+                                {% else %}
+                                    <span class="badge badge-neutral">No flag — hidden everywhere</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-right">
+                                <div class="flex justify-end gap-1">
+                                    <button class="btn btn-outline btn-sm gap-1" type="button" onclick="document.getElementById('{{ competition.pk|dom_id:"competition_edit_modal" }}').showModal()">{% lucide "pencil" size=14 %} Edit</button>
+                                    <button class="btn btn-outline btn-error btn-sm gap-1" type="button" onclick="document.getElementById('{{ competition.pk|dom_id:"competition_delete_modal" }}').showModal()">{% lucide "trash-2" size=14 %} Delete</button>
+                                </div>
+                            </td>
+                        </tr>
+                    {% empty %}
+                        <tr>
+                            <td colspan="5" class="text-center text-muted">No competitions yet.</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        {% comment %} Dialogs live outside the table: <tbody> may only contain <tr> elements. {% endcomment %}
+        {% for competition in competitions %}
+            {% url 'controlpanel:competition_update' competition.pk as competition_update_url %}
+            {% include "controlpanel/_modal_form.html" with modal_id=competition.pk|dom_id:"competition_edit_modal" title="Edit "|add:competition.name form=competition.edit_form action_url=competition_update_url submit_label="Save" submit_icon="check" %}
+
+            {% url 'controlpanel:competition_delete' competition.pk as competition_delete_url %}
+            {% include "controlpanel/_confirm_modal.html" with modal_id=competition.pk|dom_id:"competition_delete_modal" title="Delete "|add:competition.name body="No club-visible data is lost — Event.competition matches by name, not a foreign key, so existing games simply stop offering a live-score fetch." action_url=competition_delete_url submit_label="Delete" %}
+        {% endfor %}
     </div>
 {% endblock panel %}

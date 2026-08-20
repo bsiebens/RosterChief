@@ -6,7 +6,7 @@ from waffle import get_waffle_flag_model
 
 from billing.models import DuePayment, Plan, PlanPrice, Subscription
 from club.models import Club
-from events.models import Location
+from events.models import Competition, Location
 
 from .services.admins import find_member_by_email
 
@@ -79,6 +79,24 @@ class FlagForm(forms.ModelForm):
         fields = ["name", "note", "everyone", "superusers", "staff", "percent"]
         help_texts = {
             "everyone": _("Yes = on for all clubs, No = off everywhere (overrides club targeting). Leave unknown to target clubs."),
+        }
+
+
+class CompetitionForm(forms.ModelForm):
+    """Metadata for events.services.competitions.fetch_game_info's per-club gate --
+    `module` is a dotted import path to a class named `name` that implements
+    `update_game_information(event=...)`; there is no such class for a new
+    competition until one is actually written, but that's fine here, same as
+    editing this by hand in the Django admin today: fetch_game_info already
+    catches the resulting ImportError/AttributeError and treats it as "nothing to
+    fetch from" rather than a 500, so this form doesn't need to validate the path
+    against real code to be safe to use."""
+
+    class Meta:
+        model = Competition
+        fields = ["name", "module", "sport_type", "flag"]
+        help_texts = {
+            "module": _("Dotted path to the Python module implementing this competition's data source, e.g. events.services.competitions.cehl."),
         }
 
 
