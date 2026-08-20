@@ -4634,6 +4634,19 @@ class EventManagementTests(ManagementTestBase):
         self.assertContains(response, reverse("management:event_delete", args=[own_event.pk]))
         self.assertNotContains(response, reverse("management:event_delete", args=[other_event.pk]))
 
+    def test_the_calendar_page_highlights_the_events_sidebar_item(self):
+        # Regression: EventListView's own "calendar_nav" context (prev/next/today
+        # for the Week/Month view) used to be keyed "nav", shadowing
+        # management.context_processors.active_nav_section's identically-named
+        # "nav" -- the value _nav_items.html reads to mark the Events sub-item
+        # active. That silently broke the highlight on this page alone.
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("event_list")
+
+        self.assertContains(response, '<a class="nav-item active" href="/manage/events/">')
+        self.assertContains(response, '<a class="nav-subitem active" href="/manage/events/">')
+
     def test_the_week_calendar_marks_a_series_occurrence_with_the_repeat_icon(self):
         series = EventSeries.objects.create(club=self.club, title="Weekly Training", kind=Event.EventKind.TRAINING, dtstart=timezone.now(), rrule="FREQ=WEEKLY;COUNT=1")
         occurrence = Event.objects.create(club=self.club, title="Weekly Training", start=timezone.now(), series=series)
@@ -6985,3 +6998,5 @@ class MemberAdminAccessTests(ManagementTestBase):
 
     def test_cannot_reach_positions(self):
         self.assertEqual(self.club_get("position_create").status_code, 403)
+
+

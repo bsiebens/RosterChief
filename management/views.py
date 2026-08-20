@@ -2206,14 +2206,14 @@ class EventListView(ClubStaffRequiredMixin, ListView):
         events = self.object_list
         if range_kind == "week":
             grid = week_grid(events, week_bounds(anchor)[0])
-            nav = {"prev": anchor - timedelta(days=7), "next": anchor + timedelta(days=7)}
+            calendar_nav = {"prev": anchor - timedelta(days=7), "next": anchor + timedelta(days=7)}
         elif range_kind == "season":
             grid = {"months": season_grid(events, selected_season)} if selected_season else None
-            nav = {}
+            calendar_nav = {}
         else:
             grid = month_grid(events, anchor)
-            nav = {"prev": add_months(anchor, -1), "next": add_months(anchor, 1)}
-        return grid, nav
+            calendar_nav = {"prev": add_months(anchor, -1), "next": add_months(anchor, 1)}
+        return grid, calendar_nav
 
     def get_context_data(self, **kwargs):
         club, user = self.request.club, self.request.user
@@ -2222,9 +2222,9 @@ class EventListView(ClubStaffRequiredMixin, ListView):
         anchor = self._anchor_date()
         selected_season = selected_season_from_request(self.request, club)
 
-        calendar, nav = (None, None)
+        calendar, calendar_nav = (None, None)
         if view_mode == "calendar":
-            calendar, nav = self._calendar_context(range_kind, anchor, selected_season)
+            calendar, calendar_nav = self._calendar_context(range_kind, anchor, selected_season)
 
         return super().get_context_data(
             seasons=Season.objects.filter(club=club).order_by("-start_date"),
@@ -2238,7 +2238,12 @@ class EventListView(ClubStaffRequiredMixin, ListView):
             anchor=anchor,
             today=timezone.localdate(),
             calendar=calendar,
-            nav=nav,
+            # Not "nav" -- that key belongs to management.context_processors.
+            # active_nav_section (the sidebar's own active-item marker, set from
+            # the URL name and used app-wide by _nav_items.html); reusing it here
+            # for the calendar's prev/next pair silently shadowed the sidebar's
+            # value and broke the Events sub-item's highlight on this page only.
+            calendar_nav=calendar_nav,
             **kwargs,
         )
 

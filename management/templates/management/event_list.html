@@ -50,9 +50,9 @@
 
             {% if calendar_range != "season" %}
                 <div class="flex items-center gap-1">
-                    <a href="{% querystring date=nav.prev|date:"Y-m-d" %}" class="btn btn-square btn-outline btn-sm" aria-label="{% trans 'Previous' %}">{% lucide "chevron-left" size=14 %}</a>
+                    <a href="{% querystring date=calendar_nav.prev|date:"Y-m-d" %}" class="btn btn-square btn-outline btn-sm" aria-label="{% trans 'Previous' %}">{% lucide "chevron-left" size=14 %}</a>
                     <a href="{% querystring date=today|date:"Y-m-d" %}" class="btn btn-outline btn-sm">{% trans "Today" %}</a>
-                    <a href="{% querystring date=nav.next|date:"Y-m-d" %}" class="btn btn-square btn-outline btn-sm" aria-label="{% trans 'Next' %}">{% lucide "chevron-right" size=14 %}</a>
+                    <a href="{% querystring date=calendar_nav.next|date:"Y-m-d" %}" class="btn btn-square btn-outline btn-sm" aria-label="{% trans 'Next' %}">{% lucide "chevron-right" size=14 %}</a>
                 </div>
             {% endif %}
         {% endif %}
