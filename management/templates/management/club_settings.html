@@ -307,6 +307,11 @@
                         other.classList.toggle("bg-white", active);
                         other.classList.toggle("text-ink", active);
                         other.classList.toggle("text-on-dark", !active);
+                        // Without this, a tab that started active (Identity, server-rendered
+                        // without hover:text-white) or was activated via a click keeps whatever
+                        // hover class its *other* state had -- hovering the active white pill
+                        // would turn its own text white too, unreadable on the white background.
+                        other.classList.toggle("hover:text-white", !active);
                     });
                     document.querySelectorAll("[data-page-panel]").forEach((panel) => {
                         const active = panel.dataset.pagePanel === tab.dataset.pageTab;
