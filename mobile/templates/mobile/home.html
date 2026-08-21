@@ -1,5 +1,5 @@
 {% extends "mobile/base.html" %}
-{% load i18n %}
+{% load i18n lucide %}
 
 {% comment %}
     M1 -- design_handoff_rosterchief_platform/README.md's M1 section. The
@@ -20,7 +20,7 @@
         <div class="scrollbar-hide -mt-1 flex gap-2 overflow-x-auto pb-0.5">
             <a class="person-chip {% if scope_everyone %}person-chip-active{% endif %}" href="?as=all">
                 <span class="person-chip-avatar">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="3"/><circle cx="17" cy="9" r="2.6"/><path d="M2.5 20c0-3.3 2.5-5.6 5.5-5.6s5.5 2.3 5.5 5.6"/><path d="M14 15c2.6.3 4.5 2.3 4.5 5"/></svg>
+                    {% lucide "users" size=12 stroke_width=2.4 %}
                 </span>
                 <span class="person-chip-label">{% trans "All" %}</span>
             </a>

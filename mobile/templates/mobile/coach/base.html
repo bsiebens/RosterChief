@@ -1,4 +1,4 @@
-{% load static i18n %}
+{% load static i18n lucide %}
 
 {% comment %}
     App shell for Coach mode (C1-C6) -- design_handoff_rosterchief_platform/README.md's
@@ -105,11 +105,16 @@
 
         <nav class="coach-tab-bar">
             <a class="coach-tab-bar-item {% if active_tab == "coach_today" %}coach-tab-bar-item-active{% endif %}" href="{% url "mobile:coach_today" %}">
-                <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9.5 12 3l9 6.5V21a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1Z"/></svg>
+                {% lucide "house" size=21 %}
                 <span class="tab-bar-label">{% trans "Today" %}</span>
             </a>
-            <a class="coach-tab-bar-item" href="{% url "mobile:me" %}">
-                <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-8 8-8s8 3.6 8 8"/></svg>
+            {% comment %}
+                hx-boost="false" -- mobile:me is a Member-shell view (bg-paper, not
+                this page's bg-ink); see base.html's own comment for why a boosted
+                cross-shell swap would leave the wrong <body> class in place.
+            {% endcomment %}
+            <a class="coach-tab-bar-item" href="{% url "mobile:me" %}" hx-boost="false">
+                {% lucide "user" size=21 %}
                 <span class="tab-bar-label">{% trans "Me" %}</span>
             </a>
         </nav>

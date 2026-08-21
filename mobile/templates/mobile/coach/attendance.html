@@ -1,5 +1,5 @@
 {% extends "mobile/coach/base.html" %}
-{% load i18n %}
+{% load i18n lucide %}
 
 {% comment %}
     C2 -- design_handoff_rosterchief_platform/README.md's C2 section: check
@@ -50,10 +50,10 @@
                         <input type="hidden" name="showed_up_{{ row.pk }}" :value="state">
                         <div class="flex h-11 w-23 shrink-0 overflow-hidden rounded-lg">
                             <button type="button" class="flex-1" :class="state === 'true' ? 'bg-ok text-white' : 'bg-rule text-dim'" @click="state = 'true'" aria-label="{% trans "In" %}">
-                                <svg class="mx-auto" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+                                {% lucide "check" size=18 stroke_width=2.4 class="mx-auto" %}
                             </button>
                             <button type="button" class="flex-1" :class="state === 'false' ? 'bg-club text-white' : 'bg-rule text-dim'" @click="state = 'false'" aria-label="{% trans "Out" %}">
-                                <svg class="mx-auto" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+                                {% lucide "x" size=18 stroke_width=2.4 class="mx-auto" %}
                             </button>
                         </div>
                     {% elif row.showed_up is not None %}

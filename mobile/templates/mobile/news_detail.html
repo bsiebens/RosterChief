@@ -1,5 +1,5 @@
 {% extends "mobile/base.html" %}
-{% load i18n %}
+{% load i18n lucide %}
 
 {% comment %}
     M4 -- design_handoff_rosterchief_platform/README.md's M4 section, "News
@@ -14,7 +14,7 @@
     <div class="-mx-4 -mt-4 flex h-[330px] flex-col justify-end p-4 text-white"
          style="background: linear-gradient(180deg, rgba(11,18,32,.6) 0%, rgba(11,18,32,0) 40%, rgba(11,18,32,.88) 100%){% if news_item.main_photo %}, url('{{ news_item.main_photo.image.url }}') center/cover no-repeat{% else %}, var(--color-navy){% endif %}">
         <a class="mb-auto flex h-11 w-11 items-center justify-center rounded-full bg-white/15" href="{% url "mobile:home" %}#news" aria-label="{% trans "Back" %}">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>
+            {% lucide "chevron-left" size=20 stroke_width=2.4 class="text-white" %}
         </a>
         <span class="mb-1.5 inline-block w-fit font-display text-xs font-extrabold tracking-wide text-club uppercase">
             {% with team=news_item.teams.first %}

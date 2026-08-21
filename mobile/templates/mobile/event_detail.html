@@ -1,5 +1,5 @@
 {% extends "mobile/base.html" %}
-{% load i18n %}
+{% load i18n lucide %}
 
 {% comment %}
     M2 -- design_handoff_rosterchief_platform/README.md's M2 section, "answer
@@ -21,7 +21,7 @@
         <div class="absolute inset-0" style="background: linear-gradient(180deg, rgba(11,18,32,.35) 0%, rgba(11,18,32,.55) 60%, rgba(11,18,32,.92) 100%)"></div>
         <div class="relative z-10 flex flex-1 flex-col justify-end p-4 text-white">
             <a class="mb-auto flex h-11 w-11 items-center justify-center rounded-full bg-white/15" href="{% url "mobile:home" %}" aria-label="{% trans "Back" %}">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>
+                {% lucide "chevron-left" size=20 stroke_width=2.4 class="text-white" %}
             </a>
             <span class="mb-2 inline-block w-fit rounded bg-club px-2 py-1 font-display text-xs font-extrabold tracking-wide text-white uppercase">
                 {% if event.kind == "game" %}{% if event.is_home_game %}{% trans "Home game" %}{% else %}{% trans "Away game" %}{% endif %}{% else %}{{ event.get_kind_display }}{% endif %}
