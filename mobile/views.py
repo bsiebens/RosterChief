@@ -755,6 +755,13 @@ class NotificationsView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
             Notification.objects.filter(club=request.club, member__in=self.managed_people, read_at__isnull=True).update(read_at=timezone.now())
             return HttpResponseRedirect(reverse("mobile:notifications"))
 
+        if action == "clear_all":
+            # A hard delete, not another read-state flip -- "Clear" empties the
+            # list itself, same as the clear-all gesture in a phone's own
+            # notification centre, rather than just marking everything read.
+            Notification.objects.filter(club=request.club, member__in=self.managed_people).delete()
+            return HttpResponseRedirect(reverse("mobile:notifications"))
+
         if action == "mark_read":
             notification = Notification.objects.filter(pk=request.POST.get("notification_id"), club=request.club, member__in=self.managed_people).first()
             if notification is None:

@@ -910,6 +910,19 @@ class NotificationsViewTests(TestCase):
         follow_up = self._get()
         self.assertEqual(follow_up.context["unread_notification_count"], 0)
 
+    def test_clear_all_deletes_every_notification_for_every_managed_person(self):
+        Notification.objects.create(club=self.club, member=self.member, title="First", body="Body.")
+        Notification.objects.create(club=self.club, member=self.child, title="Second", body="Body.")
+        stranger = Member.objects.create(first_name="Someone", last_name="Else")
+        untouched = Notification.objects.create(club=self.club, member=stranger, title="Not yours", body="Body.")
+        self.client.force_login(self.user)
+
+        response = self._post({"action": "clear_all"})
+
+        self.assertRedirects(response, reverse("mobile:notifications"), fetch_redirect_response=False)
+        self.assertEqual(Notification.objects.filter(member__in=[self.member, self.child]).count(), 0)
+        self.assertTrue(Notification.objects.filter(pk=untouched.pk).exists())
+
     def test_mark_read_marks_a_single_notification_and_redirects_back(self):
         notification = Notification.objects.create(club=self.club, member=self.member, title="First", body="Body.")
         self.client.force_login(self.user)
