@@ -221,9 +221,9 @@
                     <button class="btn btn-outline btn-sm gap-2" type="button" onclick="document.getElementById('add_staff_modal').showModal()">{% lucide "user-plus" size=14 %} {% trans "Assign staff" %}</button>
                 {% endif %}
             </div>
-            <div class="flex flex-col divide-y">
+            <div class="flex flex-col">
                 {% for assignment in staff %}
-                    <div class="flex items-center gap-3 px-4 py-2.5">
+                    <div class="flex items-center gap-3 px-4 py-2.5 {% if not forloop.last %}border-b border-rule{% endif %}">
                         <div class="avatar avatar-placeholder">
                             <div class="h-8 w-8 {% if assignment.position.management_position %}bg-club{% endif %}">
                                 <span class="text-xs">{{ assignment.member.first_name|slice:":1" }}{{ assignment.member.last_name|slice:":1" }}</span>
