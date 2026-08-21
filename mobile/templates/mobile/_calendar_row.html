@@ -5,14 +5,16 @@
     to the date marks the event kind: club-red for games, info-blue for
     training, warn-amber for everything else -- one consistent marker
     position for every kind, rather than games getting a different
-    treatment (a left border on the whole row) from the rest.
+    treatment (a left border on the whole row) from the rest. The bar uses
+    self-stretch rather than a fixed height so it matches the content
+    column's height even when the location line adds a third row of text.
 {% endcomment %}
 <a class="flex items-center gap-3 bg-white px-4 py-3" href="{% url "mobile:event_detail" row.event.pk %}">
     <div class="w-9.5 shrink-0 text-center">
         <div class="font-mono text-[10px] tracking-wide text-muted uppercase">{{ row.event.start|date:"D" }}</div>
         <div class="font-display text-2xl leading-none font-extrabold text-ink">{{ row.event.start|date:"d" }}</div>
     </div>
-    <div class="h-9.5 w-[3px] shrink-0 rounded-full {% if row.event.kind == "game" %}bg-club{% elif row.event.kind == "training" %}bg-info{% else %}bg-warn{% endif %}"></div>
+    <div class="w-[3px] shrink-0 self-stretch rounded-full {% if row.event.kind == "game" %}bg-club{% elif row.event.kind == "training" %}bg-info{% else %}bg-warn{% endif %}"></div>
     <div class="min-w-0 flex-1">
         <div class="text-sm font-semibold text-ink">{{ row.event.title }}</div>
         <div class="truncate text-xs text-muted">
