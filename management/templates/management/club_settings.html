@@ -64,55 +64,21 @@
                         <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
                             {% form_field form.name %}
                             {% form_field form.legal_name %}
-                            <div class="md:col-span-2">{% form_field form.legal_address %}</div>
-                            {% form_field form.legal_zip_code %}
-                            {% form_field form.legal_city %}
                             {% form_field form.contact_email %}
                             {% form_field form.website %}
                         </div>
-                        <p class="mt-1 text-xs text-dim">{% trans "Used on official documents (invoices, the referee payment form). Leave blank to use the club's home location instead." %}</p>
                     </div>
                 </div>
 
                 <div class="card">
                     <div class="card-body">
-                        <div class="flex items-center justify-between gap-2">
-                            <div class="card-title">{% lucide "palette" size=16 %} {% trans "Colours" %}</div>
-                            <span class="font-mono text-xs text-dim">{% trans "Accents only" %}</span>
+                        <div class="card-title">{% lucide "map-pin" size=16 %} {% trans "Legal address" %}</div>
+                        <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+                            <div class="md:col-span-2">{% form_field form.legal_address %}</div>
+                            {% form_field form.legal_zip_code %}
+                            {% form_field form.legal_city %}
                         </div>
-
-                        <div class="grid grid-cols-2 gap-4">
-                            <div>
-                                <div class="mb-1.5 font-display text-[11px] font-bold tracking-[.12em] text-muted uppercase">{{ form.primary_color.label|capfirst }}</div>
-                                <label class="club-color-row">
-                                    <input type="color" id="primary_color_swatch" class="club-color-swatch" value="{{ form.primary_color.value|default:"#0b1220" }}" aria-label="{% trans "Pick the primary colour" %}">
-                                    <input type="text" name="{{ form.primary_color.html_name }}" id="{{ form.primary_color.id_for_label }}" value="{{ form.primary_color.value|default:"" }}" placeholder="#0b1220" class="club-color-hex-input">
-                                </label>
-                                {% if form.primary_color.errors %}<p class="mt-1 text-xs text-club-dark">{{ form.primary_color.errors|join:" " }}</p>{% endif %}
-                            </div>
-                            <div>
-                                <div class="mb-1.5 font-display text-[11px] font-bold tracking-[.12em] text-muted uppercase">{{ form.secondary_color.label|capfirst }}</div>
-                                <label class="club-color-row">
-                                    <input type="color" id="secondary_color_swatch" class="club-color-swatch" value="{{ form.secondary_color.value|default:"#e4002b" }}" aria-label="{% trans "Pick the secondary colour" %}">
-                                    <input type="text" name="{{ form.secondary_color.html_name }}" id="{{ form.secondary_color.id_for_label }}" value="{{ form.secondary_color.value|default:"" }}" placeholder="#e4002b" class="club-color-hex-input">
-                                </label>
-                                {% if form.secondary_color.errors %}<p class="mt-1 text-xs text-club-dark">{{ form.secondary_color.errors|join:" " }}</p>{% endif %}
-                            </div>
-                        </div>
-
-                        <div class="mt-4">
-                            <div class="mb-2 font-display text-[11px] font-bold tracking-[.12em] text-muted uppercase">{% trans "Contrast check" %}</div>
-                            <div class="flex gap-2">
-                                <div id="contrast-box-primary" class="club-contrast-box">
-                                    <span id="contrast-label-primary"></span>
-                                    <span id="contrast-ratio-primary" class="font-mono"></span>
-                                </div>
-                                <div id="contrast-box-secondary" class="club-contrast-box">
-                                    <span id="contrast-label-secondary"></span>
-                                    <span id="contrast-ratio-secondary" class="font-mono"></span>
-                                </div>
-                            </div>
-                        </div>
+                        <p class="mt-1 text-xs text-dim">{% trans "Used on official documents (invoices, the referee payment form). Leave blank to use the club's home location instead." %}</p>
                     </div>
                 </div>
 
@@ -155,7 +121,54 @@
                 </div>
             </form>
 
-            <div class="xl:sticky xl:top-4 xl:self-start">
+            <div class="xl:sticky xl:top-4 xl:self-start flex flex-col gap-5">
+                <div class="card">
+                    <div class="card-body">
+                        <div class="flex items-center justify-between gap-2">
+                            <div class="card-title">{% lucide "palette" size=16 %} {% trans "Colours" %}</div>
+                            <span class="font-mono text-xs text-dim">{% trans "Accents only" %}</span>
+                        </div>
+
+                        {% comment %}
+                            Physically outside <form id="club-settings-form"> (moved next to the
+                            preview it drives) -- form="club-settings-form" on each text input
+                            is what still submits them with the rest of the identity form.
+                        {% endcomment %}
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <div class="mb-1.5 font-display text-[11px] font-bold tracking-[.12em] text-muted uppercase">{{ form.primary_color.label|capfirst }}</div>
+                                <label class="club-color-row">
+                                    <input type="color" id="primary_color_swatch" class="club-color-swatch" value="{{ form.primary_color.value|default:"#0b1220" }}" aria-label="{% trans "Pick the primary colour" %}">
+                                    <input type="text" form="club-settings-form" name="{{ form.primary_color.html_name }}" id="{{ form.primary_color.id_for_label }}" value="{{ form.primary_color.value|default:"" }}" placeholder="#0b1220" class="club-color-hex-input">
+                                </label>
+                                {% if form.primary_color.errors %}<p class="mt-1 text-xs text-club-dark">{{ form.primary_color.errors|join:" " }}</p>{% endif %}
+                            </div>
+                            <div>
+                                <div class="mb-1.5 font-display text-[11px] font-bold tracking-[.12em] text-muted uppercase">{{ form.secondary_color.label|capfirst }}</div>
+                                <label class="club-color-row">
+                                    <input type="color" id="secondary_color_swatch" class="club-color-swatch" value="{{ form.secondary_color.value|default:"#e4002b" }}" aria-label="{% trans "Pick the secondary colour" %}">
+                                    <input type="text" form="club-settings-form" name="{{ form.secondary_color.html_name }}" id="{{ form.secondary_color.id_for_label }}" value="{{ form.secondary_color.value|default:"" }}" placeholder="#e4002b" class="club-color-hex-input">
+                                </label>
+                                {% if form.secondary_color.errors %}<p class="mt-1 text-xs text-club-dark">{{ form.secondary_color.errors|join:" " }}</p>{% endif %}
+                            </div>
+                        </div>
+
+                        <div class="mt-4">
+                            <div class="mb-2 font-display text-[11px] font-bold tracking-[.12em] text-muted uppercase">{% trans "Contrast check" %}</div>
+                            <div class="flex gap-2">
+                                <div id="contrast-box-primary" class="club-contrast-box">
+                                    <span id="contrast-label-primary"></span>
+                                    <span id="contrast-ratio-primary" class="font-mono"></span>
+                                </div>
+                                <div id="contrast-box-secondary" class="club-contrast-box">
+                                    <span id="contrast-label-secondary"></span>
+                                    <span id="contrast-ratio-secondary" class="font-mono"></span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="card">
                     <div class="card-body">
                         <div class="card-title">{% lucide "eye" size=16 %} {% trans "Live preview" %}</div>
