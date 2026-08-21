@@ -50,6 +50,15 @@ class Club(UUIDModel):
     )
     website = models.URLField(_("website"), blank=True, help_text=_("The club's own site, if it has one -- shown alongside its RosterChief pages, not used for anything else yet."))
 
+    legal_address = models.CharField(
+        _("legal address"),
+        max_length=255,
+        blank=True,
+        help_text=_("Street address for official documents (invoices, the referee payment form). Falls back to the home location's address when left blank -- set this when the club's registered address isn't where it actually plays."),
+    )
+    legal_zip_code = models.CharField(_("legal zip code"), max_length=255, blank=True)
+    legal_city = models.CharField(_("legal city"), max_length=255, blank=True)
+
     logo = models.FileField(
         _("logo"),
         upload_to=club_logo_path,

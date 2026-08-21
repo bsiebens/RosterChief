@@ -64,9 +64,13 @@
                         <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
                             {% form_field form.name %}
                             {% form_field form.legal_name %}
+                            <div class="md:col-span-2">{% form_field form.legal_address %}</div>
+                            {% form_field form.legal_zip_code %}
+                            {% form_field form.legal_city %}
                             {% form_field form.contact_email %}
                             {% form_field form.website %}
                         </div>
+                        <p class="mt-1 text-xs text-dim">{% trans "Used on official documents (invoices, the referee payment form). Leave blank to use the club's home location instead." %}</p>
                     </div>
                 </div>
 

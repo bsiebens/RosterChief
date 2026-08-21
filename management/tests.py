@@ -4863,6 +4863,28 @@ class ClubSettingsPreviewTests(ManagementTestBase):
         self.assertEqual(self.club.secondary_color, "#654321")
         self.assertEqual(self.club.website, "https://ajax-united.example")
 
+    def test_the_legal_address_can_be_set(self):
+        response = self.club_post(
+            "club_settings",
+            {
+                "name": "Ajax United",
+                "legal_name": "",
+                "legal_address": "Registered Office 5",
+                "legal_zip_code": "9000",
+                "legal_city": "Ghent",
+                "contact_email": "",
+                "website": "",
+                "primary_color": "",
+                "secondary_color": "",
+            },
+        )
+
+        self.assertRedirects(response, reverse("management:club_settings"))
+        self.club.refresh_from_db()
+        self.assertEqual(self.club.legal_address, "Registered Office 5")
+        self.assertEqual(self.club.legal_zip_code, "9000")
+        self.assertEqual(self.club.legal_city, "Ghent")
+
 
 class ClubSettingsDocumentTabTests(ManagementTestBase):
     """The Email and PDF tabs on the Club identity page -- every branded
@@ -6197,7 +6219,7 @@ class EventRefereeFormPdfTests(ManagementTestBase):
 
         context = renderer.call_args[0][0]
         self.assertEqual(context["club"].official_name, "Ajax United VZW")
-        self.assertEqual(context["home_location"], self.home_ground)
+        self.assertEqual(context["document_address"], self.home_ground)
         self.assertEqual(list(context["referees"]), [EventReferee.objects.get(event=game)])
 
     def test_the_grand_total_sums_every_referees_total_payable(self):
@@ -6217,7 +6239,7 @@ class EventRefereeFormPdfTests(ManagementTestBase):
         game = self.make_game()
         EventReferee.objects.create(event=game, external_name="Guest Referee", assigned_by=self.admin_member)
 
-        html = render_to_string("management/event_referee_form_pdf.html", {"club": self.club, "event": game, "referees": list(game.referees.all()), "home_location": self.home_ground, "grand_total": Decimal("0")})
+        html = render_to_string("management/event_referee_form_pdf.html", {"club": self.club, "event": game, "referees": list(game.referees.all()), "document_address": self.home_ground, "grand_total": Decimal("0")})
 
         self.assertIn("Guest Referee", html)
         self.assertNotIn("External", html)
@@ -6226,7 +6248,7 @@ class EventRefereeFormPdfTests(ManagementTestBase):
         game = self.make_game()
         EventReferee.objects.create(event=game, member=self.referee, assigned_by=self.admin_member, fee=Decimal("25.00"), km=Decimal("40"), km_rate=Decimal("0.083"))
 
-        html = render_to_string("management/event_referee_form_pdf.html", {"club": self.club, "event": game, "referees": list(game.referees.all()), "home_location": self.home_ground, "grand_total": Decimal("28.320")})
+        html = render_to_string("management/event_referee_form_pdf.html", {"club": self.club, "event": game, "referees": list(game.referees.all()), "document_address": self.home_ground, "grand_total": Decimal("28.320")})
 
         self.assertIn("€28.32<", html)
         self.assertNotIn("28.320", html)
@@ -6237,14 +6259,14 @@ class EventRefereeFormPdfTests(ManagementTestBase):
         self.club.save(update_fields=["primary_color", "secondary_color"])
         game = self.make_game()
 
-        html = render_to_string("management/event_referee_form_pdf.html", {"club": self.club, "event": game, "referees": [], "home_location": self.home_ground, "grand_total": Decimal("0"), **referee_form_colors(self.club)})
+        html = render_to_string("management/event_referee_form_pdf.html", {"club": self.club, "event": game, "referees": [], "document_address": self.home_ground, "grand_total": Decimal("0"), **referee_form_colors(self.club)})
 
         self.assertIn("--accent: #0f766e", html)
 
     def test_the_pdf_falls_back_to_default_colours_when_unset(self):
         game = self.make_game()
 
-        html = render_to_string("management/event_referee_form_pdf.html", {"club": self.club, "event": game, "referees": [], "home_location": self.home_ground, "grand_total": Decimal("0"), **referee_form_colors(self.club)})
+        html = render_to_string("management/event_referee_form_pdf.html", {"club": self.club, "event": game, "referees": [], "document_address": self.home_ground, "grand_total": Decimal("0"), **referee_form_colors(self.club)})
 
         self.assertIn("--accent: #3730a3", html)
 
@@ -6254,7 +6276,7 @@ class EventRefereeFormPdfTests(ManagementTestBase):
         # silently renders with no background at all.
         game = self.make_game()
 
-        html = render_to_string("management/event_referee_form_pdf.html", {"club": self.club, "event": game, "referees": [], "home_location": self.home_ground, "grand_total": Decimal("0"), **referee_form_colors(self.club)})
+        html = render_to_string("management/event_referee_form_pdf.html", {"club": self.club, "event": game, "referees": [], "document_address": self.home_ground, "grand_total": Decimal("0"), **referee_form_colors(self.club)})
 
         self.assertNotIn("color-mix(", html)
         self.assertIn("--info-card-bg: #", html)

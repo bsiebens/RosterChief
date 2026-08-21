@@ -8,6 +8,7 @@ membership.fee_status -- never a flag duplicated here that could drift out of st
 """
 
 from datetime import timedelta
+from types import SimpleNamespace
 
 from django.conf import settings
 from django.core.mail import EmailMultiAlternatives
@@ -158,11 +159,30 @@ def render_pdf(html: str) -> bytes:
     return HTML(string=html).write_pdf()
 
 
+def resolve_document_address(club):
+    """The address to print on an official document header (a dues invoice,
+    the referee payment form) -- the club's own ``legal_address`` when set,
+    else its home ground (``events.models.Location``, ``is_home=True``), so
+    a club that hasn't set a legal address yet still gets *something* rather
+    than a blank header.
+
+    ``Location.is_home`` itself is purely about telling a home game from an
+    away one -- this is the one place its address doubles as a stand-in for
+    an actual registered/mailing address, and only when the club hasn't set
+    one of its own. Returns an object exposing ``.address``/``.zip_code``/
+    ``.city`` either way (a plain namespace for the legal-address branch, the
+    real ``Location`` for the fallback), or ``None`` when neither is set.
+    """
+    if club.legal_address:
+        return SimpleNamespace(address=club.legal_address, zip_code=club.legal_zip_code, city=club.legal_city)
+    return Location.objects.filter(club=club, is_home=True).first()
+
+
 def invoice_pdf(invoice: DuesInvoice) -> bytes:
     # Same header convention as management/event_referee_form_pdf.html: the club's
     # legal name (official_name falls back to the everyday name when unset) and its
-    # home location -- never an event-specific location, since a dues invoice isn't
-    # tied to any one event.
-    home_location = Location.objects.filter(club=invoice.club, is_home=True).first()
-    html = render_to_string("club/dues_invoice_pdf.html", {"club": invoice.club, "invoice": invoice, "membership": invoice.membership, "member": invoice.membership.member, "home_location": home_location})
+    # document address -- never an event-specific location, since a dues invoice
+    # isn't tied to any one event.
+    document_address = resolve_document_address(invoice.club)
+    html = render_to_string("club/dues_invoice_pdf.html", {"club": invoice.club, "invoice": invoice, "membership": invoice.membership, "member": invoice.membership.member, "document_address": document_address})
     return render_pdf(html)

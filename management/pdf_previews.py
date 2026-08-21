@@ -58,9 +58,9 @@ def _referee_form_pdf_context(club, request):
         opponent="Leuven",
         external_game_id="BE-2026-00417",
     )
-    home_location = SimpleNamespace(address="Sportlaan 1", zip_code="1000", city="Brussels")
+    document_address = SimpleNamespace(address="Sportlaan 1", zip_code="1000", city="Brussels")
     grand_total = sum((referee.total_payable for referee in referees), Decimal("0"))
-    return {"club": club, "event": event, "referees": referees, "home_location": home_location, "grand_total": grand_total} | referee_form_colors(club)
+    return {"club": club, "event": event, "referees": referees, "document_address": document_address, "grand_total": grand_total} | referee_form_colors(club)
 
 
 PDF_PREVIEWS = [

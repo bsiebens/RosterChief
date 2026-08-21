@@ -43,9 +43,9 @@
         <div class="header">
             <div>
                 <h1>{{ club.official_name }}</h1>
-                {% if home_location %}
-                    <div class="muted">{{ home_location.address }}</div>
-                    <div class="muted">{{ home_location.zip_code }} {{ home_location.city }}</div>
+                {% if document_address %}
+                    <div class="muted">{{ document_address.address }}</div>
+                    <div class="muted">{{ document_address.zip_code }} {{ document_address.city }}</div>
                 {% endif %}
                 {% if club.contact_email %}<div class="muted">{{ club.contact_email }}</div>{% endif %}
             </div>

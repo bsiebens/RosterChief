@@ -69,9 +69,9 @@
         <div class="header">
             <div>
                 <div class="club-name">{{ club.official_name }}</div>
-                {% if home_location %}
-                    <div class="club-address">{{ home_location.address }}</div>
-                    <div class="club-address">{{ home_location.zip_code }} {{ home_location.city }}</div>
+                {% if document_address %}
+                    <div class="club-address">{{ document_address.address }}</div>
+                    <div class="club-address">{{ document_address.zip_code }} {{ document_address.city }}</div>
                 {% endif %}
             </div>
             <div class="doc-title">

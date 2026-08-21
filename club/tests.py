@@ -40,7 +40,7 @@ from .services.access import (
     teams_staffed_by,
 )
 from .services.fees import mark_as_paid, record_payment, remaining_balance
-from .services.invoicing import create_or_resend_invoice, invoice_pdf, invoices_due_for_reminder, recipient_for
+from .services.invoicing import create_or_resend_invoice, invoice_pdf, invoices_due_for_reminder, recipient_for, resolve_document_address
 from .services.onboarding import (
     annotate_onboarding_status,
     approve_all_clean,
@@ -1682,6 +1682,48 @@ class InvoicePdfTests(TestCase):
         html = self.render()
 
         self.assertIn(self.invoice.number, html)
+
+    def test_the_legal_address_takes_precedence_over_the_home_location(self):
+        Location.objects.create(club=self.club, name="Sports Hall", address="Sportlaan 1", zip_code="1000", city="Brussels", is_home=True)
+        self.club.legal_address = "Registered Office 5"
+        self.club.legal_zip_code = "9000"
+        self.club.legal_city = "Ghent"
+        self.club.save(update_fields=["legal_address", "legal_zip_code", "legal_city"])
+
+        html = self.render()
+
+        self.assertIn("Registered Office 5", html)
+        self.assertNotIn("Sportlaan 1", html)
+
+
+class ResolveDocumentAddressTests(TestCase):
+    """club.services.invoicing.resolve_document_address -- the club's own
+    legal_address when set, else its home Location, else None."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+
+    def test_returns_none_with_neither_set(self):
+        self.assertIsNone(resolve_document_address(self.club))
+
+    def test_falls_back_to_the_home_location(self):
+        home = Location.objects.create(club=self.club, name="Sports Hall", address="Sportlaan 1", zip_code="1000", city="Brussels", is_home=True)
+
+        self.assertEqual(resolve_document_address(self.club), home)
+
+    def test_legal_address_wins_over_the_home_location(self):
+        Location.objects.create(club=self.club, name="Sports Hall", address="Sportlaan 1", zip_code="1000", city="Brussels", is_home=True)
+        self.club.legal_address = "Registered Office 5"
+        self.club.legal_zip_code = "9000"
+        self.club.legal_city = "Ghent"
+        self.club.save(update_fields=["legal_address", "legal_zip_code", "legal_city"])
+
+        address = resolve_document_address(self.club)
+
+        self.assertEqual(address.address, "Registered Office 5")
+        self.assertEqual(address.zip_code, "9000")
+        self.assertEqual(address.city, "Ghent")
 
 
 class InvoicesDueForReminderTests(TestCase):

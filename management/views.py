@@ -30,7 +30,7 @@ from club.mixins import (
 from club.models import ClubMembership, ClubRole, DuesInvoice, MemberRequirementStatus, OnboardingRequirement, Season, Sponsor
 from club.services.access import _guardians_only, can_edit_news, can_publish_news, current_season, groups_manageable_by, is_club_admin, members_visible_to, teams_managed_by, teams_staffed_by
 from club.services.fees import mark_as_paid, record_payment, remaining_balance
-from club.services.invoicing import DuesInvoicePDFError, create_or_resend_invoice, invoice_pdf, invoices_due_for_reminder, recipient_for, send_invoice_email, send_reminders
+from club.services.invoicing import DuesInvoicePDFError, create_or_resend_invoice, invoice_pdf, invoices_due_for_reminder, recipient_for, resolve_document_address, send_invoice_email, send_reminders
 from club.services.onboarding import annotate_onboarding_status, approve_all_clean, approve_one, blocking_event_kinds, checklist_for, is_signup_clean, mark_bypassed, mark_complete, mark_incomplete, members_with_open_requirements
 from controlpanel.messages import notify
 from controlpanel.mixins import RedirectOnInvalidMixin
@@ -2642,16 +2642,18 @@ class EventRefereeFeeUpdateView(ClubAdminRequiredMixin, FormView):
 class EventRefereeFormPdfView(ClubAdminRequiredMixin, View):
     """Downloadable PDF of the referee payment form for one game, modeled on
     the club's existing paper form -- club header (legal name if set, else
-    plain name; address from the club's home Location, not this specific
-    event's, so the form still reads right even if called from a page where
-    the event's own location happens to be blank) plus this game's details,
-    referees and their fee/km breakdown, and blank signature lines."""
+    plain name; address from the club's own legal address, or its home
+    Location when that's blank -- see club.services.invoicing.
+    resolve_document_address -- never this specific event's, so the form
+    still reads right even if called from a page where the event's own
+    location happens to be blank) plus this game's details, referees and
+    their fee/km breakdown, and blank signature lines."""
 
     def get(self, request, pk):
         event = get_object_or_404(Event.objects.filter(club=request.club).prefetch_related("teams", "referees__member"), pk=pk)
-        home_location = Location.objects.filter(club=request.club, is_home=True).first()
+        document_address = resolve_document_address(request.club)
         referees = list(event.referees.all())
-        context = {"club": request.club, "event": event, "referees": referees, "home_location": home_location, "grand_total": sum((referee.total_payable for referee in referees), Decimal("0"))} | referee_form_colors(request.club)
+        context = {"club": request.club, "event": event, "referees": referees, "document_address": document_address, "grand_total": sum((referee.total_payable for referee in referees), Decimal("0"))} | referee_form_colors(request.club)
 
         try:
             pdf = event_referee_form_pdf(context)
