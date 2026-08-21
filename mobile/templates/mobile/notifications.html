@@ -1,0 +1,75 @@
+{% extends "mobile/base.html" %}
+{% load i18n %}
+
+{% comment %}
+    M7 -- design_handoff_rosterchief_platform/README.md's M7 section ("Inbox").
+    See NotificationsView's own docstring for why this is a flat, generic,
+    day-grouped list rather than the mockup's per-type cards: the underlying
+    model has no type/category field, and nothing but news publishing creates
+    a notification yet. Scoped to every managed_people, not just scope_person
+    -- same as unread_notification_count itself (mobile/mixins.py).
+{% endcomment %}
+
+{% block content %}
+    {% if not managed_people %}
+        <div class="m-card p-6 text-center">
+            <p class="font-display text-lg font-extrabold text-ink uppercase">{% trans "No one to show yet" %}</p>
+            <p class="mt-1 text-sm text-muted">{% trans "Once you're linked to a member record, their notifications will show up here." %}</p>
+        </div>
+    {% else %}
+        <div class="m-card flex items-center gap-3 p-4" x-data="{ requested: false }" x-show="!requested">
+            <div class="min-w-0 flex-1">
+                <div class="text-sm font-semibold text-ink">{% trans "Enable push notifications" %}</div>
+                <div class="text-xs text-muted">{% trans "Get notified on this device as soon as something new comes in." %}</div>
+            </div>
+            <button type="button" class="btn btn-dark shrink-0" @click="window.rosterchiefPush.subscribe(); requested = true">{% trans "Enable" %}</button>
+        </div>
+
+        {% if unread_notification_count %}
+            <form method="post" action="{% url "mobile:notifications" %}">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="mark_all_read">
+                <button class="font-display text-xs font-extrabold tracking-wide text-club uppercase" type="submit">{% trans "Mark all read" %}</button>
+            </form>
+        {% endif %}
+
+        {% if not today and not earlier_this_week and not older %}
+            <div class="m-card p-6 text-center">
+                <p class="text-sm text-muted">{% trans "Nothing here yet." %}</p>
+            </div>
+        {% else %}
+            {% if today %}
+                <div>
+                    <div class="sticky top-0 z-10 bg-paper py-1 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Today" %}</div>
+                    <div class="flex flex-col gap-2">
+                        {% for row in today %}
+                            {% include "mobile/_notification_row.html" %}
+                        {% endfor %}
+                    </div>
+                </div>
+            {% endif %}
+
+            {% if earlier_this_week %}
+                <div>
+                    <div class="sticky top-0 z-10 bg-paper py-1 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Earlier this week" %}</div>
+                    <div class="flex flex-col gap-2">
+                        {% for row in earlier_this_week %}
+                            {% include "mobile/_notification_row.html" %}
+                        {% endfor %}
+                    </div>
+                </div>
+            {% endif %}
+
+            {% if older %}
+                <div>
+                    <div class="sticky top-0 z-10 bg-paper py-1 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Older" %}</div>
+                    <div class="flex flex-col gap-2">
+                        {% for row in older %}
+                            {% include "mobile/_notification_row.html" %}
+                        {% endfor %}
+                    </div>
+                </div>
+            {% endif %}
+        {% endif %}
+    {% endif %}
+{% endblock content %}

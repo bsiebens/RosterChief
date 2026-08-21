@@ -10,6 +10,7 @@ from club.models import Club, ClubMembership, DuesInvoice, Season
 from events.models import Attendance, Event
 from members.models import Family, FamilyMembership, Member
 from news.models import News
+from notifications.models import Notification
 from teams.models import Position, Team, TeamMembership
 
 from .models import PushSubscription
@@ -532,3 +533,112 @@ class EventDetailScreenTests(TestCase):
         response = self._get()
 
         self.assertEqual(response.status_code, 302)
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class NotificationsViewTests(TestCase):
+    """M7 -- design_handoff_rosterchief_platform/README.md's M7 section
+    ("Inbox"), scoped to every managed_people (see NotificationsView's own
+    docstring for why, not just scope_person)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        today = timezone.localdate()
+        cls.season = Season.objects.create(club=cls.club, start_date=today - datetime.timedelta(days=30), end_date=today + datetime.timedelta(days=300))
+        cls.user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", email="parent@example.com", user=cls.user)
+        ClubMembership.objects.create(club=cls.club, member=cls.member, season=cls.season)
+
+        cls.family = Family.objects.create(name="Bakker")
+        FamilyMembership.objects.create(family=cls.family, member=cls.member, role=FamilyMembership.FamilyRole.PARENT)
+        cls.child = Member.objects.create(first_name="Noor", last_name="Bakker")
+        FamilyMembership.objects.create(family=cls.family, member=cls.child, role=FamilyMembership.FamilyRole.CHILD)
+        ClubMembership.objects.create(club=cls.club, member=cls.child, season=cls.season)
+
+    def _get(self):
+        return self.client.get(reverse("mobile:notifications"), HTTP_HOST="ajax-united.rosterchief.app")
+
+    def _post(self, data):
+        return self.client.post(reverse("mobile:notifications"), data=data, HTTP_HOST="ajax-united.rosterchief.app")
+
+    def test_requires_login(self):
+        response = self._get()
+
+        self.assertEqual(response.status_code, 302)
+
+    def test_lists_notifications_for_every_managed_person_not_just_scope_person(self):
+        Notification.objects.create(club=self.club, member=self.member, title="For Lars", body="Body.")
+        Notification.objects.create(club=self.club, member=self.child, title="For Noor", body="Body.")
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, "For Lars")
+        self.assertContains(response, "For Noor")
+
+    def test_notification_for_someone_not_managed_is_excluded(self):
+        stranger = Member.objects.create(first_name="Someone", last_name="Else")
+        Notification.objects.create(club=self.club, member=stranger, title="Not yours", body="Body.")
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertNotContains(response, "Not yours")
+
+    def test_mark_all_read_updates_every_unread_row_and_the_unread_count(self):
+        first = Notification.objects.create(club=self.club, member=self.member, title="First", body="Body.")
+        second = Notification.objects.create(club=self.club, member=self.child, title="Second", body="Body.")
+        self.client.force_login(self.user)
+
+        response = self._post({"action": "mark_all_read"})
+
+        self.assertRedirects(response, reverse("mobile:notifications"), fetch_redirect_response=False)
+        first.refresh_from_db()
+        second.refresh_from_db()
+        self.assertIsNotNone(first.read_at)
+        self.assertIsNotNone(second.read_at)
+
+        follow_up = self._get()
+        self.assertEqual(follow_up.context["unread_notification_count"], 0)
+
+    def test_mark_read_marks_a_single_notification_and_redirects_back(self):
+        notification = Notification.objects.create(club=self.club, member=self.member, title="First", body="Body.")
+        self.client.force_login(self.user)
+
+        response = self._post({"action": "mark_read", "notification_id": str(notification.pk)})
+
+        self.assertRedirects(response, reverse("mobile:notifications"), fetch_redirect_response=False)
+        notification.refresh_from_db()
+        self.assertIsNotNone(notification.read_at)
+
+    def test_mark_read_rejects_a_notification_belonging_to_someone_not_managed(self):
+        stranger = Member.objects.create(first_name="Someone", last_name="Else")
+        notification = Notification.objects.create(club=self.club, member=stranger, title="Not yours", body="Body.")
+        self.client.force_login(self.user)
+
+        response = self._post({"action": "mark_read", "notification_id": str(notification.pk)})
+
+        self.assertEqual(response.status_code, 400)
+        notification.refresh_from_db()
+        self.assertIsNone(notification.read_at)
+
+    def test_notification_with_a_news_source_is_marked_out_and_mark_read_redirects_to_the_article(self):
+        news_item = News.objects.create(club=self.club, title="Signed: New Player", body="Body.", status=News.Status.PUBLISHED, published_at=timezone.now())
+        notification = Notification.objects.create(club=self.club, member=self.member, title="New article", body="Body.", source=news_item)
+        self.client.force_login(self.user)
+
+        response = self._get()
+        self.assertContains(response, "Club news")
+
+        redirect_response = self._post({"action": "mark_read", "notification_id": str(notification.pk)})
+        self.assertRedirects(redirect_response, reverse("mobile:news_detail", kwargs={"slug": news_item.slug}), fetch_redirect_response=False)
+
+    def test_empty_account_gets_a_graceful_empty_state(self):
+        bare_user = User.objects.create_user(email="new@example.com", password="pw-secret-123")
+        self.client.force_login(bare_user)
+
+        response = self._get()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "No one to show yet")

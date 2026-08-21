@@ -31,6 +31,7 @@ from events.services.calendar import week_bounds
 from members.models import Member
 from members.views import ClubScopedPublicMixin
 from news.models import News
+from notifications.models import Notification
 from teams.models import TeamMembership
 
 from .mixins import PersonScopeMixin
@@ -386,6 +387,76 @@ class EditProfileView(_PlaceholderScreen):
     active_tab = "me"
 
 
-class NotificationsView(_PlaceholderScreen):
+class NotificationsView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
+    """M7 -- design_handoff_rosterchief_platform/README.md's M7 section
+    ("Inbox"). The mockup shows rich per-type cards (RSVP-needed, medical
+    form missing, invoice due, line-up published, ...) with inline quick
+    actions, but notifications.models.Notification is generic -- title/body/
+    created/read_at plus an optional ``source`` -- and the only thing that
+    creates member-facing rows today is news.tasks.notify_news_published.
+    There's no type/category field to key a richer layout or the mockup's
+    "Action"/"Club" filter off, so this is deliberately a flat, generic list:
+    day-grouped ("Today"/"Earlier this week"/"Older", echoing Calendar's own
+    "This week"/"Next week" bucketing) with an unread treatment and a link to
+    the underlying News item when ``source`` happens to resolve to one.
+
+    Scoped to every one of ``self.managed_people`` (not just scope_person) --
+    same scope PersonScopeMixin.get_context_data already uses for
+    unread_notification_count, since notifications aren't really "per
+    switched person" the way RSVPs are.
+    """
+
+    template_name = "mobile/notifications.html"
     screen_title = _("Notifications")
     active_tab = "me"
+
+    def get_context_data(self, **kwargs):
+        today = []
+        earlier_this_week = []
+        older = []
+
+        if self.managed_people:
+            this_week_start, _this_week_end = week_bounds(timezone.localdate())
+            local_today = timezone.localdate()
+
+            notifications = Notification.objects.filter(club=self.request.club, member__in=self.managed_people).select_related("member").order_by("-created")
+
+            for notification in notifications:
+                source = notification.source
+                news_item = source if isinstance(source, News) else None
+                row = {"notification": notification, "news_item": news_item}
+
+                created_date = timezone.localtime(notification.created).date()
+                if created_date == local_today:
+                    today.append(row)
+                elif created_date >= this_week_start:
+                    earlier_this_week.append(row)
+                else:
+                    older.append(row)
+
+        return super().get_context_data(today=today, earlier_this_week=earlier_this_week, older=older, **kwargs)
+
+    def post(self, request, *args, **kwargs):
+        action = request.POST.get("action")
+
+        if action == "mark_all_read":
+            Notification.objects.filter(club=request.club, member__in=self.managed_people, read_at__isnull=True).update(read_at=timezone.now())
+            return HttpResponseRedirect(reverse("mobile:notifications"))
+
+        if action == "mark_read":
+            notification = Notification.objects.filter(pk=request.POST.get("notification_id"), club=request.club, member__in=self.managed_people).first()
+            if notification is None:
+                return HttpResponseBadRequest(_("You can't mark that notification as read."))
+            if notification.read_at is None:
+                notification.read_at = timezone.now()
+                notification.save(update_fields=["read_at", "modified"])
+
+            # A row whose source resolves to a News item doubles as a link to
+            # it (see the class docstring) -- the plain-POST tap that marks
+            # it read also lands the member on the article, no separate
+            # "next" field needed since the server already has the source.
+            if isinstance(notification.source, News):
+                return HttpResponseRedirect(reverse("mobile:news_detail", kwargs={"slug": notification.source.slug}))
+            return HttpResponseRedirect(reverse("mobile:notifications"))
+
+        return HttpResponseBadRequest(_("Unknown action."))
