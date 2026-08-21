@@ -21,18 +21,18 @@
     </div>
 
     <div class="m-card flex flex-col gap-2.5 p-4">
-        <div class="flex gap-3.5">
+        <div class="flex items-center gap-3.5">
             <span class="w-20 shrink-0 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Face-off" %}</span>
             <span class="text-[15px] font-semibold text-ink">{{ event.start|date:"D d M \a\t H:i" }}</span>
         </div>
         {% if event.gathering %}
-            <div class="flex gap-3.5">
+            <div class="flex items-center gap-3.5">
                 <span class="w-20 shrink-0 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Meet" %}</span>
                 <span class="text-[15px] font-semibold text-ink">{{ event.gathering|date:"H:i" }}</span>
             </div>
         {% endif %}
         {% if event.location %}
-            <div class="flex gap-3.5">
+            <div class="flex items-center gap-3.5">
                 <span class="w-20 shrink-0 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Where" %}</span>
                 <span class="text-[15px] font-semibold text-ink">
                     {{ event.location.name }}<br>
