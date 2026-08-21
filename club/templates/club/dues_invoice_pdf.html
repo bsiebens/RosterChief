@@ -42,7 +42,11 @@
     <body>
         <div class="header">
             <div>
-                <h1>{{ club.name }}</h1>
+                <h1>{{ club.official_name }}</h1>
+                {% if home_location %}
+                    <div class="muted">{{ home_location.address }}</div>
+                    <div class="muted">{{ home_location.zip_code }} {{ home_location.city }}</div>
+                {% endif %}
                 {% if club.contact_email %}<div class="muted">{{ club.contact_email }}</div>{% endif %}
             </div>
             <div class="right">

@@ -56,7 +56,7 @@ def _referee_form_pdf_context(club, request):
         start=timezone.now() + datetime.timedelta(days=7),
         teams=SimpleNamespace(all=lambda: [SimpleNamespace(short_name="U16")]),
         opponent="Leuven",
-        external_game_id="",
+        external_game_id="BE-2026-00417",
     )
     home_location = SimpleNamespace(address="Sportlaan 1", zip_code="1000", city="Brussels")
     grand_total = sum((referee.total_payable for referee in referees), Decimal("0"))

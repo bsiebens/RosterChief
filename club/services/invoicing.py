@@ -17,6 +17,7 @@ from django.utils.translation import gettext_lazy as _
 
 from club.models import ClubMembership, DuesInvoice
 from club.services.fees import remaining_balance
+from events.models import Location
 
 
 class DuesInvoicePDFError(Exception):
@@ -158,5 +159,10 @@ def render_pdf(html: str) -> bytes:
 
 
 def invoice_pdf(invoice: DuesInvoice) -> bytes:
-    html = render_to_string("club/dues_invoice_pdf.html", {"club": invoice.club, "invoice": invoice, "membership": invoice.membership, "member": invoice.membership.member})
+    # Same header convention as management/event_referee_form_pdf.html: the club's
+    # legal name (official_name falls back to the everyday name when unset) and its
+    # home location -- never an event-specific location, since a dues invoice isn't
+    # tied to any one event.
+    home_location = Location.objects.filter(club=invoice.club, is_home=True).first()
+    html = render_to_string("club/dues_invoice_pdf.html", {"club": invoice.club, "invoice": invoice, "membership": invoice.membership, "member": invoice.membership.member, "home_location": home_location})
     return render_pdf(html)

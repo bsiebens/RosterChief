@@ -3,6 +3,7 @@ import uuid
 from contextlib import contextmanager
 from decimal import Decimal
 from io import StringIO
+from unittest import mock
 
 from allauth.mfa.models import Authenticator
 from dateutil.relativedelta import relativedelta
@@ -17,7 +18,7 @@ from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
-from events.models import Event
+from events.models import Event, Location
 from members.models import Family, FamilyMembership, Member
 from teams.models import Position, StaffAssignment, Team, TeamMembership
 from teams.services import eligible_roster_members
@@ -39,7 +40,7 @@ from .services.access import (
     teams_staffed_by,
 )
 from .services.fees import mark_as_paid, record_payment, remaining_balance
-from .services.invoicing import create_or_resend_invoice, invoices_due_for_reminder, recipient_for
+from .services.invoicing import create_or_resend_invoice, invoice_pdf, invoices_due_for_reminder, recipient_for
 from .services.onboarding import (
     annotate_onboarding_status,
     approve_all_clean,
@@ -1641,6 +1642,46 @@ class CreateOrResendInvoiceTests(TestCase):
         create_or_resend_invoice(self.membership, due_in_days=14, recipient_email="jane@example.com", sent_to_guardian=False)
 
         self.assertEqual(DuesInvoice.objects.filter(membership=self.membership).count(), 1)
+
+
+class InvoicePdfTests(TestCase):
+    """club.services.invoicing.invoice_pdf -- same header convention as
+    management/event_referee_form_pdf.html: legal name, and the club's home
+    location, never any other one."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united", legal_name="Ajax United VZW")
+        cls.season = make_season(cls.club)
+        cls.member = Member.objects.create(first_name="Jane", last_name="Doe", email="jane@example.com")
+        cls.membership = ClubMembership.objects.create(club=cls.club, member=cls.member, season=cls.season, status=ClubMembership.StatusChoices.PENDING, fee_amount=Decimal("150.00"))
+        cls.invoice = create_or_resend_invoice(cls.membership, due_in_days=14, recipient_email="jane@example.com", sent_to_guardian=False)
+
+    def render(self):
+        with mock.patch("club.services.invoicing.render_pdf", side_effect=lambda html: html) as renderer:
+            invoice_pdf(self.invoice)
+        return renderer.call_args[0][0]
+
+    def test_the_header_uses_the_legal_name(self):
+        html = self.render()
+
+        self.assertIn("Ajax United VZW", html)
+
+    def test_the_header_uses_the_clubs_home_location(self):
+        Location.objects.create(club=self.club, name="Sports Hall", address="Sportlaan 1", zip_code="1000", city="Brussels", is_home=True)
+        Location.objects.create(club=self.club, name="Away ground", address="Elsewhere 2", zip_code="2000", city="Antwerp", is_home=False)
+
+        html = self.render()
+
+        self.assertIn("Sportlaan 1", html)
+        self.assertNotIn("Elsewhere 2", html)
+
+    def test_renders_fine_with_no_home_location_set(self):
+        self.assertEqual(Location.objects.filter(club=self.club, is_home=True).count(), 0)
+
+        html = self.render()
+
+        self.assertIn(self.invoice.number, html)
 
 
 class InvoicesDueForReminderTests(TestCase):
