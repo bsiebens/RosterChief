@@ -4729,7 +4729,7 @@ class ClubSettingsPreviewTests(ManagementTestBase):
     def test_the_page_tabs_and_colour_swatches_render(self):
         response = self.club_get("club_settings")
 
-        self.assertContains(response, "preview-tab-active")
+        self.assertContains(response, "rounded-full bg-steel p-1")
         self.assertContains(response, 'id="primary_color_swatch"')
         self.assertContains(response, 'id="secondary_color_swatch"')
 

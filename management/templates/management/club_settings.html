@@ -32,13 +32,20 @@
     <button class="btn btn-primary gap-2" type="submit" form="club-settings-form" data-identity-only>{% lucide "save" size=16 %} {% trans "Save changes" %}</button>
 {% endblock actions %}
 
-{% block panel %}
-    <div class="mb-1 flex w-fit overflow-hidden rounded-md border border-line">
-        <button type="button" class="preview-tab preview-tab-active" data-page-tab="identity">{% trans "Identity" %}</button>
-        <button type="button" class="preview-tab" data-page-tab="email">{% trans "Email" %}</button>
-        <button type="button" class="preview-tab" data-page-tab="pdf">{% trans "PDF" %}</button>
-    </div>
+{% block filter_strip %}
+    <div class="flex flex-wrap items-center gap-3 border-b border-line bg-white px-7 py-3">
+        <div class="flex-1"></div>
 
+        {# Calendar/List segmented toggle -- event_list.html's own pattern (in turn member_list.html's Members/Guardians/Both). #}
+        <div class="flex items-center gap-1 rounded-full bg-steel p-1">
+            <button type="button" data-page-tab="identity" class="flex items-center gap-1.5 rounded-full px-3 py-1.5 font-display text-xs font-bold tracking-[.08em] uppercase bg-white text-ink">{% lucide "building-2" size=13 %} {% trans "Identity" %}</button>
+            <button type="button" data-page-tab="email" class="flex items-center gap-1.5 rounded-full px-3 py-1.5 font-display text-xs font-bold tracking-[.08em] uppercase text-on-dark hover:text-white">{% lucide "mail" size=13 %} {% trans "Email" %}</button>
+            <button type="button" data-page-tab="pdf" class="flex items-center gap-1.5 rounded-full px-3 py-1.5 font-display text-xs font-bold tracking-[.08em] uppercase text-on-dark hover:text-white">{% lucide "file-text" size=13 %} {% trans "PDF" %}</button>
+        </div>
+    </div>
+{% endblock filter_strip %}
+
+{% block panel %}
     <div data-page-panel="identity">
         <div class="grid grid-cols-1 gap-5 xl:grid-cols-[1.2fr_1fr]">
             <form id="club-settings-form" method="post" enctype="multipart/form-data" class="flex flex-col gap-5">
@@ -295,7 +302,12 @@
             // hides on the other two rather than sitting there doing nothing.
             document.querySelectorAll("[data-page-tab]").forEach((tab) => {
                 tab.addEventListener("click", () => {
-                    document.querySelectorAll("[data-page-tab]").forEach((other) => other.classList.toggle("preview-tab-active", other === tab));
+                    document.querySelectorAll("[data-page-tab]").forEach((other) => {
+                        const active = other === tab;
+                        other.classList.toggle("bg-white", active);
+                        other.classList.toggle("text-ink", active);
+                        other.classList.toggle("text-on-dark", !active);
+                    });
                     document.querySelectorAll("[data-page-panel]").forEach((panel) => {
                         const active = panel.dataset.pagePanel === tab.dataset.pageTab;
                         panel.classList.toggle("hidden", !active);

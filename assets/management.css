@@ -1811,28 +1811,6 @@
         background: var(--color-paper);
     }
 
-    /* A real (if minimal) tab control: click toggles which panel is shown --
-       club_settings.html's own inline script uses this for its top-level
-       Identity/Email/PDF tabs. The Identity tab's own phone/website mock has
-       no tab of its own; the two are simply shown together (the mobile app
-       isn't built yet, and D9's separate App/Website tabs would only ever
-       have shown the same two mocks anyway). */
-    .preview-tab {
-        padding: 0.3125rem 0.625rem;
-        font-family: var(--font-display);
-        font-size: 0.75rem;
-        font-weight: 700;
-        letter-spacing: 0.04em;
-        text-transform: uppercase;
-        color: var(--color-muted);
-        cursor: pointer;
-    }
-
-    .preview-tab-active {
-        background: var(--color-ink);
-        color: #fff;
-    }
-
     .preview-crest {
         display: flex;
         width: 1.5rem;
