@@ -1,11 +1,15 @@
 import datetime
+from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 from django.urls import reverse
+from django.utils import timezone
 
-from club.models import Club, ClubMembership, Season
+from club.models import Club, ClubMembership, DuesInvoice, Season
+from events.models import Attendance, Event
 from members.models import Family, FamilyMembership, Member
+from news.models import News
 
 from .models import PushSubscription
 from .services.icons import render_fallback_icon
@@ -147,3 +151,173 @@ class RenderFallbackIconTests(TestCase):
         png_bytes = render_fallback_icon(club, size=64)
 
         self.assertTrue(png_bytes.startswith(b"\x89PNG"))
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class HomeViewTests(TestCase):
+    """M1 -- design_handoff_rosterchief_platform/README.md's M1 section."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        today = timezone.localdate()
+        cls.season = Season.objects.create(club=cls.club, start_date=today - datetime.timedelta(days=30), end_date=today + datetime.timedelta(days=300))
+        cls.user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", email="parent@example.com", user=cls.user)
+        ClubMembership.objects.create(club=cls.club, member=cls.member, season=cls.season)
+        cls.future = timezone.now() + datetime.timedelta(days=7)
+
+    def _get(self, url_name=None, url=None):
+        url = url or reverse(f"mobile:{url_name}")
+        return self.client.get(url, HTTP_HOST="ajax-united.rosterchief.app")
+
+    def make_event(self, **kwargs):
+        kwargs.setdefault("club", self.club)
+        kwargs.setdefault("title", "Training")
+        kwargs.setdefault("start", self.future)
+        return Event.objects.create(**kwargs)
+
+    def test_hero_shows_the_soonest_upcoming_event(self):
+        soon = self.make_event(title="Away · Herentals", start=self.future)
+        later = self.make_event(title="Practice · Ice 3", start=self.future + datetime.timedelta(days=5))
+        Attendance.objects.create(event=soon, member=self.member)
+        Attendance.objects.create(event=later, member=self.member)
+        self.client.force_login(self.user)
+
+        response = self._get("home")
+
+        self.assertEqual(response.context["hero_attendance"].event, soon)
+        self.assertContains(response, "Away")
+
+    def test_hero_is_absent_when_no_upcoming_event(self):
+        self.client.force_login(self.user)
+
+        response = self._get("home")
+
+        self.assertIsNone(response.context["hero_attendance"])
+
+    def test_needs_your_answer_only_lists_no_response_and_maybe(self):
+        answered = self.make_event(title="Already answered", start=self.future)
+        awaiting = self.make_event(title="Awaiting reply", start=self.future + datetime.timedelta(days=2))
+        maybe = self.make_event(title="Maybe reply", start=self.future + datetime.timedelta(days=4))
+        Attendance.objects.create(event=answered, member=self.member, status=Attendance.AttendanceStatus.PRESENT)
+        Attendance.objects.create(event=awaiting, member=self.member, status=Attendance.AttendanceStatus.NO_RESPONSE)
+        Attendance.objects.create(event=maybe, member=self.member, status=Attendance.AttendanceStatus.MAYBE)
+        self.client.force_login(self.user)
+
+        response = self._get("home")
+
+        needs_answer_events = {attendance.event for attendance in response.context["needs_answer"]}
+        self.assertEqual(needs_answer_events, {awaiting, maybe})
+
+    def test_needs_your_answer_excludes_the_hero_event_even_if_unanswered(self):
+        soon = self.make_event(title="Soonest", start=self.future)
+        Attendance.objects.create(event=soon, member=self.member, status=Attendance.AttendanceStatus.NO_RESPONSE)
+        self.client.force_login(self.user)
+
+        response = self._get("home")
+
+        self.assertEqual(response.context["hero_attendance"].event, soon)
+        self.assertEqual(list(response.context["needs_answer"]), [])
+
+    def test_dues_card_shows_the_outstanding_balance(self):
+        membership = ClubMembership.objects.get(club=self.club, member=self.member, season=self.season)
+        membership.fee_amount = Decimal("420.00")
+        membership.save(update_fields=["fee_amount"])
+        DuesInvoice.objects.create(club=self.club, membership=membership, amount=Decimal("420.00"), due_date=timezone.localdate() + datetime.timedelta(days=10))
+        self.client.force_login(self.user)
+
+        response = self._get("home")
+
+        self.assertEqual(response.context["dues_balance"], Decimal("420.00"))
+        self.assertContains(response, "420")
+
+    def test_dues_card_is_absent_when_nothing_is_owed(self):
+        self.client.force_login(self.user)
+
+        response = self._get("home")
+
+        self.assertIsNone(response.context["dues_membership"])
+
+    def test_news_teaser_shows_the_latest_published_item(self):
+        News.objects.create(club=self.club, title="Old news", body="Body.", status=News.Status.PUBLISHED, published_at=timezone.now() - datetime.timedelta(days=5))
+        latest = News.objects.create(club=self.club, title="Signed: New Player", body="Body.", status=News.Status.PUBLISHED, published_at=timezone.now() - datetime.timedelta(days=1))
+        News.objects.create(club=self.club, title="Still a draft", body="Body.", status=News.Status.DRAFT)
+        self.client.force_login(self.user)
+
+        response = self._get("home")
+
+        self.assertEqual(response.context["news_item"], latest)
+        self.assertContains(response, "Signed: New Player")
+
+    def test_empty_account_gets_a_graceful_empty_state(self):
+        bare_user = User.objects.create_user(email="new@example.com", password="pw-secret-123")
+        self.client.force_login(bare_user)
+
+        response = self._get("home")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.context["scope_person"])
+        self.assertContains(response, "No one to show yet")
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class EventDetailRsvpTests(TestCase):
+    """M1's quick In/Out RSVP action, posted from the Home hero card."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        today = timezone.localdate()
+        cls.season = Season.objects.create(club=cls.club, start_date=today - datetime.timedelta(days=30), end_date=today + datetime.timedelta(days=300))
+        cls.user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", email="parent@example.com", user=cls.user)
+        ClubMembership.objects.create(club=cls.club, member=cls.member, season=cls.season)
+        cls.event = Event.objects.create(club=cls.club, title="Training", start=timezone.now() + datetime.timedelta(days=7))
+        cls.attendance = Attendance.objects.create(event=cls.event, member=cls.member, status=Attendance.AttendanceStatus.NO_RESPONSE)
+
+    def _post(self, event, data):
+        return self.client.post(reverse("mobile:event_detail", kwargs={"pk": event.pk}), data=data, HTTP_HOST="ajax-united.rosterchief.app")
+
+    def test_posting_present_updates_attendance_and_redirects_home(self):
+        self.client.force_login(self.user)
+
+        response = self._post(self.event, {"status": "present"})
+
+        self.assertRedirects(response, reverse("mobile:home"), fetch_redirect_response=False)
+        self.attendance.refresh_from_db()
+        self.assertEqual(self.attendance.status, Attendance.AttendanceStatus.PRESENT)
+
+    def test_posting_absent_creates_attendance_when_none_existed(self):
+        other_event = Event.objects.create(club=self.club, title="Away game", start=timezone.now() + datetime.timedelta(days=8))
+        self.client.force_login(self.user)
+
+        self._post(other_event, {"status": "absent"})
+
+        self.assertEqual(Attendance.objects.get(event=other_event, member=self.member).status, Attendance.AttendanceStatus.ABSENT)
+
+    def test_cannot_rsvp_for_a_member_who_isnt_managed(self):
+        stranger = Member.objects.create(first_name="Someone", last_name="Else")
+        self.client.force_login(self.user)
+
+        response = self._post(self.event, {"status": "present", "member_id": str(stranger.pk)})
+
+        self.assertEqual(response.status_code, 400)
+        self.attendance.refresh_from_db()
+        self.assertEqual(self.attendance.status, Attendance.AttendanceStatus.NO_RESPONSE)
+
+    def test_rejects_an_unknown_status_value(self):
+        self.client.force_login(self.user)
+
+        response = self._post(self.event, {"status": "maybe"})
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_cannot_rsvp_for_an_event_from_another_club(self):
+        other_club = Club.objects.create(name="Other Club", slug="other-club", secondary_color="#e4002b")
+        other_event = Event.objects.create(club=other_club, title="Not ours", start=timezone.now() + datetime.timedelta(days=3))
+        self.client.force_login(self.user)
+
+        response = self._post(other_event, {"status": "present"})
+
+        self.assertEqual(response.status_code, 404)

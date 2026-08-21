@@ -1,0 +1,122 @@
+{% extends "mobile/base.html" %}
+{% load i18n %}
+
+{% comment %}
+    M1 -- design_handoff_rosterchief_platform/README.md's M1 section. Four
+    independently-optional cards, all scoped to scope_person (mobile/mixins.py):
+    a hero for the soonest upcoming event with a quick In/Out RSVP, a "needs
+    your answer" list, a season-dues card, and a news teaser.
+{% endcomment %}
+
+{% block content %}
+    {% if scope_person %}
+        {% if hero_attendance %}
+            <div class="m-card-dark overflow-hidden">
+                <div class="p-4 pb-0">
+                    <p class="font-display text-xs font-extrabold text-info uppercase tracking-wide">{% blocktrans with date=hero_attendance.event.start|date:"D d M" %}Next up &middot; {{ date }}{% endblocktrans %}</p>
+                    <p class="mt-1 font-display text-2xl leading-none font-extrabold uppercase">{{ hero_attendance.event.title }}</p>
+                </div>
+                <div class="p-4">
+                    <div class="flex flex-wrap gap-4 font-mono text-xs text-on-dark">
+                        <span>{% blocktrans with time=hero_attendance.event.start|date:"H:i" %}{{ time }} face-off{% endblocktrans %}</span>
+                        {% if hero_attendance.event.gathering %}
+                            <span>{% blocktrans with time=hero_attendance.event.gathering|date:"H:i" %}Meet {{ time }}{% endblocktrans %}</span>
+                        {% endif %}
+                        {% if hero_attendance.event.location %}<span>{{ hero_attendance.event.location.name }}</span>{% endif %}
+                    </div>
+
+                    {% if rsvp_closed %}
+                        <p class="mt-3 font-display text-xs font-extrabold text-on-dark-dim uppercase tracking-wide">{% trans "Replies are closed for this event" %}</p>
+                        <span class="pill pill-neutral mt-2">{{ hero_attendance.get_status_display }}</span>
+                    {% else %}
+                        <p class="mt-3 font-display text-xs font-extrabold text-on-dark-dim uppercase tracking-wide">{% blocktrans with name=scope_person.first_name %}{{ name }} &mdash; are you in?{% endblocktrans %}</p>
+                        <div class="mt-2 flex gap-2">
+                            <form class="flex-1" method="post" action="{% url "mobile:event_detail" hero_attendance.event.pk %}">
+                                {% csrf_token %}
+                                <input type="hidden" name="status" value="present">
+                                <button class="btn btn-positive w-full" type="submit">{% trans "In" %}</button>
+                            </form>
+                            <form class="flex-1" method="post" action="{% url "mobile:event_detail" hero_attendance.event.pk %}">
+                                {% csrf_token %}
+                                <input type="hidden" name="status" value="absent">
+                                <button class="btn w-full bg-steel text-on-dark" type="submit">{% trans "Out" %}</button>
+                            </form>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        {% endif %}
+
+        {% if needs_answer %}
+            <div class="m-card p-4">
+                <div class="flex items-center justify-between">
+                    <span class="font-display text-xs font-extrabold text-muted uppercase tracking-wide">{% trans "Needs your answer" %}</span>
+                    <span class="font-display text-lg font-extrabold text-club">{{ needs_answer|length }}</span>
+                </div>
+                <div class="mt-3 flex flex-col gap-2.5">
+                    {% for attendance in needs_answer %}
+                        {% if not forloop.first %}<div class="h-px bg-rule"></div>{% endif %}
+                        <a class="flex items-center gap-3" href="{% url "mobile:event_detail" attendance.event.pk %}">
+                            <div class="w-9.5 shrink-0 text-center">
+                                <div class="font-display text-xl leading-none font-extrabold text-ink">{{ attendance.event.start|date:"d" }}</div>
+                                <div class="font-mono text-[10px] text-muted uppercase tracking-wide">{{ attendance.event.start|date:"M" }}</div>
+                            </div>
+                            <div class="min-w-0 flex-1">
+                                <div class="text-sm font-semibold text-ink">{{ attendance.event.title }}</div>
+                                <div class="text-xs text-muted">{{ scope_person.first_name }} &middot; {{ attendance.event.start|date:"H:i" }}</div>
+                            </div>
+                            <span class="pill pill-warn shrink-0">{% trans "Reply" %}</span>
+                        </a>
+                    {% endfor %}
+                </div>
+            </div>
+        {% endif %}
+
+        {% if dues_membership %}
+            <div class="m-card flex items-center gap-3 p-4">
+                <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-danger-bg">
+                    <span class="font-display text-lg font-extrabold text-club">&euro;</span>
+                </div>
+                <div class="min-w-0 flex-1">
+                    <div class="text-sm font-semibold text-ink">{% blocktrans with name=scope_person.first_name %}Season dues &mdash; {{ name }}{% endblocktrans %}</div>
+                    <div class="text-xs text-muted">
+                        {% if dues_invoice %}
+                            {% blocktrans with amount=dues_balance|floatformat:2 due=dues_invoice.due_date|date:"d M" %}&euro; {{ amount }} &middot; due {{ due }}{% endblocktrans %}
+                        {% else %}
+                            {% blocktrans with amount=dues_balance|floatformat:2 %}&euro; {{ amount }}{% endblocktrans %}
+                        {% endif %}
+                    </div>
+                </div>
+                <span class="btn btn-dark shrink-0">{% trans "Pay" %}</span>
+            </div>
+        {% endif %}
+
+        {% if news_item %}
+            <div>
+                <div class="mb-2.5 flex items-baseline justify-between">
+                    <span class="font-display text-xs font-extrabold text-muted uppercase tracking-wide">{% trans "Club news" %}</span>
+                </div>
+                <a class="m-card block overflow-hidden" href="{% url "mobile:news_detail" news_item.slug %}">
+                    <div class="flex h-[104px] items-center justify-center bg-line text-xs text-dim">{% trans "News photo" %}</div>
+                    <div class="p-3.5">
+                        <div class="font-display text-[11px] font-extrabold text-club uppercase tracking-wide">
+                            {% if news_team %}{{ news_team.name }}{% else %}{% trans "Club news" %}{% endif %} &middot; {{ news_item.published_at|date:"d M" }}
+                        </div>
+                        <div class="mt-1 font-display text-xl leading-tight font-extrabold text-ink uppercase">{{ news_item.title }}</div>
+                    </div>
+                </a>
+            </div>
+        {% endif %}
+
+        {% if not hero_attendance and not needs_answer and not dues_membership and not news_item %}
+            <div class="m-card p-6 text-center">
+                <p class="text-sm text-muted">{% trans "Nothing to show right now." %}</p>
+            </div>
+        {% endif %}
+    {% else %}
+        <div class="m-card p-6 text-center">
+            <p class="font-display text-lg font-extrabold text-ink uppercase">{% trans "No one to show yet" %}</p>
+            <p class="mt-1 text-sm text-muted">{% trans "Once you're linked to a member record, their schedule and updates will show up here." %}</p>
+        </div>
+    {% endif %}
+{% endblock content %}
