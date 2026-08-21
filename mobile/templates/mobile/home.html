@@ -3,13 +3,16 @@
 
 {% comment %}
     M1 -- design_handoff_rosterchief_platform/README.md's M1 section. Four
-    independently-optional cards, all scoped to scope_person (mobile/mixins.py):
-    a hero for the soonest upcoming event with a quick In/Out RSVP, a "needs
-    your answer" list, a season-dues card, and a news teaser.
+    independently-optional cards, scoped to people_in_scope (mobile/mixins.py)
+    -- everyone the account manages once there's more than one (the header's
+    "All" chip, on by default), or just the one person picked from the chip
+    row. A hero for the soonest upcoming event with a quick In/Out RSVP, a
+    "needs your answer" list, a season-dues card per person who owes money,
+    and a news teaser.
 {% endcomment %}
 
 {% block content %}
-    {% if scope_person %}
+    {% if managed_people %}
         {% if hero_attendance %}
             <div class="m-card-dark overflow-hidden">
                 <div class="p-4 pb-0">
@@ -29,15 +32,17 @@
                         <p class="mt-3 font-display text-xs font-extrabold text-on-dark-dim uppercase tracking-wide">{% trans "Replies are closed for this event" %}</p>
                         <span class="pill pill-neutral mt-2">{{ hero_attendance.get_status_display }}</span>
                     {% else %}
-                        <p class="mt-3 font-display text-xs font-extrabold text-on-dark-dim uppercase tracking-wide">{% blocktrans with name=scope_person.first_name %}{{ name }} &mdash; are you in?{% endblocktrans %}</p>
+                        <p class="mt-3 font-display text-xs font-extrabold text-on-dark-dim uppercase tracking-wide">{% blocktrans with name=hero_attendance.member.first_name %}{{ name }} &mdash; are you in?{% endblocktrans %}</p>
                         <div class="mt-2 flex gap-2">
                             <form class="flex-1" method="post" action="{% url "mobile:event_detail" hero_attendance.event.pk %}">
                                 {% csrf_token %}
+                                <input type="hidden" name="member_id" value="{{ hero_attendance.member.pk }}">
                                 <input type="hidden" name="status" value="present">
                                 <button class="btn btn-positive w-full" type="submit">{% trans "In" %}</button>
                             </form>
                             <form class="flex-1" method="post" action="{% url "mobile:event_detail" hero_attendance.event.pk %}">
                                 {% csrf_token %}
+                                <input type="hidden" name="member_id" value="{{ hero_attendance.member.pk }}">
                                 <input type="hidden" name="status" value="absent">
                                 <button class="btn w-full bg-steel text-on-dark" type="submit">{% trans "Out" %}</button>
                             </form>
@@ -63,7 +68,7 @@
                             </div>
                             <div class="min-w-0 flex-1">
                                 <div class="text-sm font-semibold text-ink">{{ attendance.event.title }}</div>
-                                <div class="text-xs text-muted">{{ scope_person.first_name }} &middot; {{ attendance.event.start|date:"H:i" }}</div>
+                                <div class="text-xs text-muted">{{ attendance.member.first_name }} &middot; {{ attendance.event.start|date:"H:i" }}</div>
                             </div>
                             <span class="pill pill-warn shrink-0">{% trans "Reply" %}</span>
                         </a>
@@ -72,22 +77,26 @@
             </div>
         {% endif %}
 
-        {% if dues_membership %}
-            <div class="m-card flex items-center gap-3 p-4">
-                <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-danger-bg">
-                    <span class="font-display text-lg font-extrabold text-club">&euro;</span>
-                </div>
-                <div class="min-w-0 flex-1">
-                    <div class="text-sm font-semibold text-ink">{% blocktrans with name=scope_person.first_name %}Season dues &mdash; {{ name }}{% endblocktrans %}</div>
-                    <div class="text-xs text-muted">
-                        {% if dues_invoice %}
-                            {% blocktrans with amount=dues_balance|floatformat:2 due=dues_invoice.due_date|date:"d M" %}&euro; {{ amount }} &middot; due {{ due }}{% endblocktrans %}
-                        {% else %}
-                            {% blocktrans with amount=dues_balance|floatformat:2 %}&euro; {{ amount }}{% endblocktrans %}
-                        {% endif %}
+        {% if dues_rows %}
+            <div class="flex flex-col gap-2.5">
+                {% for row in dues_rows %}
+                    <div class="m-card flex items-center gap-3 p-4">
+                        <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-danger-bg">
+                            <span class="font-display text-lg font-extrabold text-club">&euro;</span>
+                        </div>
+                        <div class="min-w-0 flex-1">
+                            <div class="text-sm font-semibold text-ink">{% blocktrans with name=row.membership.member.first_name %}Season dues &mdash; {{ name }}{% endblocktrans %}</div>
+                            <div class="text-xs text-muted">
+                                {% if row.invoice %}
+                                    {% blocktrans with amount=row.balance|floatformat:2 due=row.invoice.due_date|date:"d M" %}&euro; {{ amount }} &middot; due {{ due }}{% endblocktrans %}
+                                {% else %}
+                                    {% blocktrans with amount=row.balance|floatformat:2 %}&euro; {{ amount }}{% endblocktrans %}
+                                {% endif %}
+                            </div>
+                        </div>
+                        <span class="btn btn-dark shrink-0">{% trans "Pay" %}</span>
                     </div>
-                </div>
-                <span class="btn btn-dark shrink-0">{% trans "Pay" %}</span>
+                {% endfor %}
             </div>
         {% endif %}
 
@@ -108,7 +117,7 @@
             </div>
         {% endif %}
 
-        {% if not hero_attendance and not needs_answer and not dues_membership and not news_item %}
+        {% if not hero_attendance and not needs_answer and not dues_rows and not news_item %}
             <div class="m-card p-6 text-center">
                 <p class="text-sm text-muted">{% trans "Nothing to show right now." %}</p>
             </div>

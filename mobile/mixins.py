@@ -21,14 +21,24 @@ class PersonScopeMixin(ClubScopedPublicMixin):
 
     ``?as=<member-id>`` re-scopes the current screen to one managed person,
     same as the design doc's horizontally-scrolling chip row -- it re-scopes in
-    place rather than navigating. Falls back to the account's own Member, then
-    to the first managed child (e.g. a parent with no Member record of their own).
+    place rather than navigating. ``?as=all`` (or, once there's more than one
+    managed person, no ``?as=`` at all) scopes to *every* managed person --
+    that's the default the moment there's actually something to aggregate; a
+    member on their own, or a parent of exactly one child, has nothing to
+    aggregate and just lands on that one record, same as before this existed.
+
+    Screens that only ever operate on one person at a time keep using
+    ``scope_person`` (``None`` in "everyone" mode); screens that can
+    meaningfully show several people at once (Home's cards, Calendar's own
+    "my schedule" listing) should use ``people_in_scope`` instead, which is
+    always the right list to filter by regardless of which mode is active.
     """
 
     def dispatch(self, request, *args, **kwargs):
         self.me = Member.objects.filter(user=request.user).first() if request.user.is_authenticated else None
         self.managed_people = self._managed_people(request)
-        self.scope_person = self._resolve_scope_person(request)
+        self.scope_everyone, self.scope_person = self._resolve_scope(request)
+        self.people_in_scope = self.managed_people if self.scope_everyone else ([self.scope_person] if self.scope_person else [])
         return super().dispatch(request, *args, **kwargs)
 
     def _managed_people(self, request):
@@ -44,13 +54,19 @@ class PersonScopeMixin(ClubScopedPublicMixin):
         )
         return [self.me, *children]
 
-    def _resolve_scope_person(self, request):
+    def _resolve_scope(self, request) -> tuple[bool, Member | None]:
+        """Returns ``(scope_everyone, scope_person)`` -- exactly one of the
+        two is ever meaningful at a time (the other is ``False``/``None``)."""
         requested_id = request.GET.get("as")
-        if requested_id:
+        if requested_id and requested_id != "all":
             for person in self.managed_people:
                 if str(person.pk) == requested_id:
-                    return person
-        return self.managed_people[0] if self.managed_people else None
+                    return False, person
+        if requested_id == "all":
+            return True, None
+        if len(self.managed_people) > 1:
+            return True, None
+        return False, (self.managed_people[0] if self.managed_people else None)
 
     def get_context_data(self, **kwargs):
         unread_notification_count = 0
@@ -61,6 +77,7 @@ class PersonScopeMixin(ClubScopedPublicMixin):
             me=self.me,
             managed_people=self.managed_people,
             scope_person=self.scope_person,
+            scope_everyone=self.scope_everyone,
             has_staff_access=self.me is not None and has_management_access(self.request.user, self.request.club),
             unread_notification_count=unread_notification_count,
             season=current_season(self.request.club),

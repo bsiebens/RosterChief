@@ -18,6 +18,7 @@
         <div class="text-sm font-semibold text-ink">{{ row.event.title }}</div>
         <div class="truncate text-xs text-muted">
             {{ row.event.start|date:"H:i" }}
+            {% if row.member %}&middot; {{ row.member.first_name }}{% endif %}
             {% for team in row.event.teams.all %}&middot; {{ team.name }}{% endfor %}
             {% if row.event.location %}&middot; {{ row.event.location.name }}{% endif %}
         </div>

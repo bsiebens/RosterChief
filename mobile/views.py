@@ -139,11 +139,18 @@ class _PlaceholderScreen(PersonScopeMixin, LoginRequiredMixin, TemplateView):
 
 class HomeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
     """M1 -- design_handoff_rosterchief_platform/README.md's M1 section: a
-    hero card for scope_person's soonest upcoming event (with a quick In/Out
-    RSVP -- see EventDetailView.post below), a "needs your answer" list of
-    upcoming events still NO_RESPONSE/MAYBE, a season-dues card when money is
-    owed, and a news teaser. Every card is independently optional -- an
-    empty-state screen is just the four `if`s below all being falsy.
+    hero card for the soonest upcoming event across everyone currently in
+    scope (with a quick In/Out RSVP -- see EventDetailView.post below), a
+    "needs your answer" list of upcoming events still NO_RESPONSE/MAYBE, a
+    season-dues card per person who owes money, and a news teaser. Every
+    card is independently optional -- an empty-state screen is just the
+    four `if`s below all being falsy.
+
+    Scoped to ``self.people_in_scope`` (mobile/mixins.py), not just
+    ``scope_person`` -- with the header's "All" chip now the default the
+    moment there's more than one managed person, this screen aggregates
+    across everyone in that case rather than showing only one person's
+    cards.
     """
 
     template_name = "mobile/home.html"
@@ -151,24 +158,22 @@ class HomeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
     active_tab = "home"
 
     def get_context_data(self, **kwargs):
-        scope_person = self.scope_person
+        people = self.people_in_scope
         now = timezone.now()
 
         hero_attendance = None
         rsvp_closed = False
         needs_answer = []
-        dues_membership = None
-        dues_balance = None
-        dues_invoice = None
+        dues_rows = []
         news_item = None
 
-        if scope_person is not None:
+        if people:
             upcoming = Attendance.objects.filter(
-                member=scope_person,
+                member__in=people,
                 event__club=self.request.club,
                 event__cancelled=False,
                 event__start__gte=now,
-            ).select_related("event", "event__location")
+            ).select_related("event", "event__location", "member")
 
             hero_attendance = upcoming.order_by("event__start").first()
             if hero_attendance is not None:
@@ -182,20 +187,17 @@ class HomeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
 
             season = current_season(self.request.club)
             if season is not None:
-                membership = (
-                    ClubMembership.objects.filter(club=self.request.club, member=scope_person, season=season)
+                memberships = (
+                    ClubMembership.objects.filter(club=self.request.club, member__in=people, season=season)
                     .exclude(fee_status=ClubMembership.FeeStatus.WAIVED)
-                    .select_related("dues_invoice")
-                    .first()
+                    .select_related("dues_invoice", "member")
                 )
-                if membership is not None:
+                for membership in memberships:
                     balance = remaining_balance(membership)
                     if balance > 0:
-                        dues_membership = membership
-                        dues_balance = balance
-                        dues_invoice = getattr(membership, "dues_invoice", None)
+                        dues_rows.append({"membership": membership, "balance": balance, "invoice": getattr(membership, "dues_invoice", None)})
 
-                team_ids = list(TeamMembership.objects.filter(member=scope_person, season=season).values_list("team_id", flat=True))
+                team_ids = list(TeamMembership.objects.filter(member__in=people, season=season).values_list("team_id", flat=True))
             else:
                 team_ids = []
 
@@ -211,9 +213,7 @@ class HomeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
             hero_attendance=hero_attendance,
             rsvp_closed=rsvp_closed,
             needs_answer=needs_answer,
-            dues_membership=dues_membership,
-            dues_balance=dues_balance,
-            dues_invoice=dues_invoice,
+            dues_rows=dues_rows,
             news_item=news_item,
             news_team=news_item.teams.first() if news_item is not None else None,
             **kwargs,
@@ -266,20 +266,25 @@ class CalendarView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
                 .order_by("start")
             )
             rows = [{"event": event, "pill_class": "pill-info", "pill_label": event.get_kind_display()} for event in events]
-        elif self.scope_person is not None:
+        elif self.people_in_scope:
             attendances = (
                 Attendance.objects.filter(
-                    member=self.scope_person,
+                    member__in=self.people_in_scope,
                     event__club=self.request.club,
                     event__cancelled=False,
                     event__start__gte=now,
                     event__start__lte=window_end,
                 )
-                .select_related("event", "event__location", "event__opponent")
+                .select_related("event", "event__location", "event__opponent", "member")
                 .prefetch_related("event__teams")
                 .order_by("event__start")
             )
-            rows = [{"event": attendance.event, "pill_class": self.STATUS_PILL_CLASSES.get(attendance.status, "pill-neutral"), "pill_label": attendance.get_status_display()} for attendance in attendances]
+            # Only worth naming whose row it is once "everyone" is aggregating more
+            # than one person -- a single scoped person's own agenda doesn't need it.
+            rows = [
+                {"event": attendance.event, "pill_class": self.STATUS_PILL_CLASSES.get(attendance.status, "pill-neutral"), "pill_label": attendance.get_status_display(), "member": attendance.member if self.scope_everyone else None}
+                for attendance in attendances
+            ]
 
         this_week, next_week = [], []
         for row in rows:
@@ -363,7 +368,10 @@ class EventDetailView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         if status not in (Attendance.AttendanceStatus.PRESENT, Attendance.AttendanceStatus.ABSENT, Attendance.AttendanceStatus.MAYBE):
             return HttpResponseBadRequest(_("Unknown RSVP status."))
 
-        member_id = request.POST.get("member_id") or (str(self.scope_person.pk) if self.scope_person else None)
+        # Every current caller (Home's hero, M2's per-person rows) always sends an
+        # explicit member_id -- this is just a defensive fallback for one that doesn't.
+        fallback_member = self.scope_person or self.me
+        member_id = request.POST.get("member_id") or (str(fallback_member.pk) if fallback_member else None)
         member = next((person for person in self.managed_people if str(person.pk) == member_id), None) if member_id else None
         if member is None:
             return HttpResponseBadRequest(_("You can't RSVP for that person."))

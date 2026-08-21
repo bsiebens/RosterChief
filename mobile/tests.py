@@ -95,6 +95,26 @@ class MobileShellTests(TestCase):
 
         self.assertEqual(response.context["scope_person"], child)
 
+    def test_all_chip_only_appears_once_theres_more_than_one_managed_person(self):
+        self.client.force_login(self.user)
+
+        response = self._get("home")
+
+        self.assertNotContains(response, 'href="?as=all"')
+
+    def test_all_chip_appears_and_is_selected_by_default_with_a_child(self):
+        family = Family.objects.create(name="Bakker")
+        FamilyMembership.objects.create(family=family, member=self.member, role=FamilyMembership.FamilyRole.PARENT)
+        child = Member.objects.create(first_name="Noor", last_name="Bakker")
+        FamilyMembership.objects.create(family=family, member=child, role=FamilyMembership.FamilyRole.CHILD)
+        ClubMembership.objects.create(club=self.club, member=child, season=Season.objects.first())
+        self.client.force_login(self.user)
+
+        response = self._get("home")
+
+        self.assertContains(response, 'href="?as=all"')
+        self.assertTrue(response.context["scope_everyone"])
+
 
 @override_settings(
     VAPID_PRIVATE_KEY="",
@@ -231,7 +251,7 @@ class HomeViewTests(TestCase):
 
         response = self._get("home")
 
-        self.assertEqual(response.context["dues_balance"], Decimal("420.00"))
+        self.assertEqual(response.context["dues_rows"][0]["balance"], Decimal("420.00"))
         self.assertContains(response, "420")
 
     def test_dues_card_is_absent_when_nothing_is_owed(self):
@@ -239,7 +259,7 @@ class HomeViewTests(TestCase):
 
         response = self._get("home")
 
-        self.assertIsNone(response.context["dues_membership"])
+        self.assertEqual(response.context["dues_rows"], [])
 
     def test_news_teaser_shows_the_latest_published_item(self):
         News.objects.create(club=self.club, title="Old news", body="Body.", status=News.Status.PUBLISHED, published_at=timezone.now() - datetime.timedelta(days=5))
@@ -261,6 +281,83 @@ class HomeViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIsNone(response.context["scope_person"])
         self.assertContains(response, "No one to show yet")
+
+    def add_child(self, first_name="Noor"):
+        family = Family.objects.create(name="Bakker")
+        FamilyMembership.objects.create(family=family, member=self.member, role=FamilyMembership.FamilyRole.PARENT)
+        child = Member.objects.create(first_name=first_name, last_name="Bakker")
+        FamilyMembership.objects.create(family=family, member=child, role=FamilyMembership.FamilyRole.CHILD)
+        ClubMembership.objects.create(club=self.club, member=child, season=self.season)
+        return child
+
+    def test_all_is_the_default_scope_once_theres_more_than_one_managed_person(self):
+        self.add_child()
+        self.client.force_login(self.user)
+
+        response = self._get("home")
+
+        self.assertTrue(response.context["scope_everyone"])
+        self.assertIsNone(response.context["scope_person"])
+
+    def test_a_lone_member_never_defaults_to_all(self):
+        # No child added -- managed_people is just [self.member].
+        self.client.force_login(self.user)
+
+        response = self._get("home")
+
+        self.assertFalse(response.context["scope_everyone"])
+        self.assertEqual(response.context["scope_person"], self.member)
+
+    def test_all_scope_aggregates_the_hero_across_every_managed_person(self):
+        child = self.add_child()
+        mine = self.make_event(title="Lars's practice", start=self.future)
+        theirs = self.make_event(title="Noor's game", start=self.future - datetime.timedelta(hours=1))
+        Attendance.objects.create(event=mine, member=self.member)
+        Attendance.objects.create(event=theirs, member=child)
+        self.client.force_login(self.user)
+
+        response = self._get("home")
+
+        self.assertEqual(response.context["hero_attendance"].event, theirs)
+        self.assertContains(response, "Noor")
+
+    def test_all_scope_combines_needs_answer_and_dues_across_everyone(self):
+        child = self.add_child()
+        mine = self.make_event(title="Lars's practice", start=self.future)
+        theirs = self.make_event(title="Noor's game", start=self.future + datetime.timedelta(days=1))
+        Attendance.objects.create(event=mine, member=self.member, status=Attendance.AttendanceStatus.NO_RESPONSE)
+        Attendance.objects.create(event=theirs, member=child, status=Attendance.AttendanceStatus.NO_RESPONSE)
+        child_membership = ClubMembership.objects.get(club=self.club, member=child, season=self.season)
+        child_membership.fee_amount = Decimal("100.00")
+        child_membership.save(update_fields=["fee_amount"])
+        self.client.force_login(self.user)
+
+        response = self._get("home")
+
+        needs_answer_events = {a.event for a in response.context["needs_answer"]}
+        self.assertEqual(needs_answer_events, {theirs})  # mine is the hero, excluded from the list
+        self.assertEqual(len(response.context["dues_rows"]), 1)
+        self.assertEqual(response.context["dues_rows"][0]["membership"].member, child)
+
+    def test_selecting_one_specific_person_narrows_back_to_just_them(self):
+        child = self.add_child()
+        theirs = self.make_event(title="Noor's game", start=self.future)
+        Attendance.objects.create(event=theirs, member=child, status=Attendance.AttendanceStatus.NO_RESPONSE)
+        self.client.force_login(self.user)
+
+        response = self._get(url=reverse("mobile:home") + f"?as={self.member.pk}")
+
+        self.assertFalse(response.context["scope_everyone"])
+        self.assertEqual(response.context["scope_person"], self.member)
+        self.assertEqual(list(response.context["needs_answer"]), [])
+
+    def test_as_all_explicitly_selects_everyone(self):
+        self.add_child()
+        self.client.force_login(self.user)
+
+        response = self._get(url=reverse("mobile:home") + "?as=all")
+
+        self.assertTrue(response.context["scope_everyone"])
 
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
@@ -305,6 +402,25 @@ class EventDetailRsvpTests(TestCase):
         response = self._post(self.event, {"status": "present", "member_id": str(stranger.pk)})
 
         self.assertEqual(response.status_code, 400)
+
+    def test_explicit_member_id_still_works_once_all_is_the_default_scope(self):
+        # Home's hero form always sends an explicit member_id -- this must keep
+        # working once a second managed person makes "All" the default scope
+        # (scope_person is None in that case, so the old implicit fallback alone
+        # would no longer resolve who's RSVPing).
+        family = Family.objects.create(name="Bakker")
+        FamilyMembership.objects.create(family=family, member=self.member, role=FamilyMembership.FamilyRole.PARENT)
+        child = Member.objects.create(first_name="Noor", last_name="Bakker")
+        FamilyMembership.objects.create(family=family, member=child, role=FamilyMembership.FamilyRole.CHILD)
+        ClubMembership.objects.create(club=self.club, member=child, season=self.season)
+        child_attendance = Attendance.objects.create(event=self.event, member=child, status=Attendance.AttendanceStatus.NO_RESPONSE)
+        self.client.force_login(self.user)
+
+        response = self._post(self.event, {"status": "present", "member_id": str(child.pk)})
+
+        self.assertRedirects(response, reverse("mobile:home"), fetch_redirect_response=False)
+        child_attendance.refresh_from_db()
+        self.assertEqual(child_attendance.status, Attendance.AttendanceStatus.PRESENT)
         self.attendance.refresh_from_db()
         self.assertEqual(self.attendance.status, Attendance.AttendanceStatus.NO_RESPONSE)
 
@@ -413,6 +529,48 @@ class CalendarViewTests(TestCase):
         response = self._get()
 
         self.assertNotIn(cancelled, self._events_in_context(response))
+
+    def add_child(self, first_name="Noor"):
+        family = Family.objects.create(name="Bakker")
+        FamilyMembership.objects.create(family=family, member=self.member, role=FamilyMembership.FamilyRole.PARENT)
+        child = Member.objects.create(first_name=first_name, last_name="Bakker")
+        FamilyMembership.objects.create(family=family, member=child, role=FamilyMembership.FamilyRole.CHILD)
+        ClubMembership.objects.create(club=self.club, member=child, season=self.season)
+        return child
+
+    def test_my_schedule_aggregates_across_every_managed_person_once_all_is_the_default(self):
+        child = self.add_child()
+        mine = self.make_event(title="Lars's practice")
+        theirs = self.make_event(title="Noor's game")
+        Attendance.objects.create(event=mine, member=self.member)
+        Attendance.objects.create(event=theirs, member=child)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertEqual(self._events_in_context(response), {mine, theirs})
+        self.assertContains(response, "Noor")
+
+    def test_selecting_one_person_narrows_my_schedule_back_to_just_them(self):
+        child = self.add_child()
+        mine = self.make_event(title="Lars's practice")
+        theirs = self.make_event(title="Noor's game")
+        Attendance.objects.create(event=mine, member=self.member)
+        Attendance.objects.create(event=theirs, member=child)
+        self.client.force_login(self.user)
+
+        response = self._get(**{"as": self.member.pk})
+
+        self.assertEqual(self._events_in_context(response), {mine})
+
+    def test_my_schedule_with_no_managed_people_shows_the_empty_state_not_a_500(self):
+        bare_user = User.objects.create_user(email="new@example.com", password="pw-secret-123")
+        self.client.force_login(bare_user)
+
+        response = self._get()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "No one to show yet")
 
     def test_events_outside_the_two_week_window_are_excluded(self):
         far_future = self.make_event(title="Far future game", start=timezone.now() + datetime.timedelta(days=30))
