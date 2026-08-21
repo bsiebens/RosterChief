@@ -326,6 +326,15 @@ class HomeViewTests(TestCase):
 
         self.assertEqual(list(response.context["news_items"]), [])
 
+    def test_news_card_shows_an_empty_state_with_a_link_to_all_news_when_there_is_none(self):
+        self.client.force_login(self.user)
+
+        response = self._get("home")
+
+        self.assertEqual(list(response.context["news_items"]), [])
+        self.assertContains(response, "No news yet.")
+        self.assertContains(response, 'href="/app/news/"')
+
     def test_empty_account_gets_a_graceful_empty_state(self):
         bare_user = User.objects.create_user(email="new@example.com", password="pw-secret-123")
         self.client.force_login(bare_user)
