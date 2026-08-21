@@ -1,0 +1,90 @@
+{% extends "mobile/base.html" %}
+{% load i18n %}
+
+{% comment %}
+    M6 -- design_handoff_rosterchief_platform/README.md's M6 section, "Edit
+    personal info". See EditProfileView's own docstring (mobile/views.py) for
+    the judgment calls: the design mock's "National register no.", "Address",
+    "Allergies / notes" and the two "Consent" toggles have no backing field on
+    Member and are omitted entirely; the guardian ("Contact 1") and open
+    onboarding-requirements ("Medical form... missing") rows are real data,
+    shown read-only.
+{% endcomment %}
+
+{% block content %}
+    <form method="post" class="flex flex-col gap-4">
+        {% csrf_token %}
+
+        <div class="-mx-4 -mt-4 flex items-center gap-1 border-b border-line bg-white px-4 py-3">
+            <a class="-ml-2.5 flex h-11 w-11 shrink-0 items-center justify-center" href="{% url "mobile:me" %}" aria-label="{% trans "Back" %}">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#0b1220" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>
+            </a>
+            <span class="min-w-0 flex-1 truncate font-display text-xl leading-none font-extrabold text-ink uppercase">{{ member.get_full_name }}</span>
+            <button type="submit" class="btn btn-primary h-9 px-3.5 text-sm">{% trans "Save" %}</button>
+        </div>
+
+        {% if open_requirement_names %}
+            <div class="rounded-box border border-warn-border bg-warn-bg p-3.5 text-sm text-warn-deep">
+                {% blocktrans count counter=open_requirement_names|length with names=open_requirement_summary %}{{ counter }} requirement still open: {{ names }}{% plural %}{{ counter }} requirements still open: {{ names }}{% endblocktrans %}
+            </div>
+        {% endif %}
+
+        <div>
+            <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Identity" %}</div>
+            <div class="m-card overflow-hidden">
+                <div class="p-3.5">
+                    <label class="mb-1 block text-xs text-muted" for="{{ form.first_name.id_for_label }}">{{ form.first_name.label }}</label>
+                    {{ form.first_name }}
+                    {% for error in form.first_name.errors %}<p class="mt-1 text-xs text-club">{{ error }}</p>{% endfor %}
+                </div>
+                <div class="h-px bg-rule"></div>
+                <div class="p-3.5">
+                    <label class="mb-1 block text-xs text-muted" for="{{ form.last_name.id_for_label }}">{{ form.last_name.label }}</label>
+                    {{ form.last_name }}
+                    {% for error in form.last_name.errors %}<p class="mt-1 text-xs text-club">{{ error }}</p>{% endfor %}
+                </div>
+                <div class="h-px bg-rule"></div>
+                <div class="p-3.5">
+                    <label class="mb-1 block text-xs text-muted" for="{{ form.date_of_birth.id_for_label }}">{{ form.date_of_birth.label }}</label>
+                    {{ form.date_of_birth }}
+                    {% for error in form.date_of_birth.errors %}<p class="mt-1 text-xs text-club">{{ error }}</p>{% endfor %}
+                </div>
+            </div>
+        </div>
+
+        <div>
+            <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Contact" %}</div>
+            <div class="m-card overflow-hidden">
+                <div class="p-3.5">
+                    <label class="mb-1 block text-xs text-muted" for="{{ form.email.id_for_label }}">{{ form.email.label }}</label>
+                    {{ form.email }}
+                    {% for error in form.email.errors %}<p class="mt-1 text-xs text-club">{{ error }}</p>{% endfor %}
+                </div>
+                <div class="h-px bg-rule"></div>
+                <div class="p-3.5">
+                    <label class="mb-1 block text-xs text-muted" for="{{ form.phone.id_for_label }}">{{ form.phone.label }}</label>
+                    {{ form.phone }}
+                    {% for error in form.phone.errors %}<p class="mt-1 text-xs text-club">{{ error }}</p>{% endfor %}
+                </div>
+            </div>
+        </div>
+
+        <div>
+            <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Emergency" %}</div>
+            <div class="m-card overflow-hidden">
+                <div class="p-3.5">
+                    <label class="mb-1 block text-xs text-muted" for="{{ form.emergency_phone.id_for_label }}">{{ form.emergency_phone.label }}</label>
+                    {{ form.emergency_phone }}
+                    {% for error in form.emergency_phone.errors %}<p class="mt-1 text-xs text-club">{{ error }}</p>{% endfor %}
+                </div>
+                {% for row in guardian_rows %}
+                    <div class="h-px bg-rule"></div>
+                    <div class="p-3.5">
+                        <div class="text-xs text-muted">{% trans "Emergency contact" %}</div>
+                        <div class="text-[15px] font-medium text-ink">{{ row.member.get_full_name }} &middot; {{ row.role }}</div>
+                    </div>
+                {% endfor %}
+            </div>
+        </div>
+    </form>
+{% endblock content %}

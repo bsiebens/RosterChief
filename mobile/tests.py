@@ -6,7 +6,7 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone, translation
 
-from club.models import Club, ClubMembership, DuesInvoice, Season
+from club.models import Club, ClubMembership, DuesInvoice, MemberRequirementStatus, OnboardingRequirement, Season
 from events.models import Attendance, Event
 from members.models import Family, FamilyMembership, Member
 from news.models import News
@@ -850,3 +850,132 @@ class MeViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "No one to show yet")
         self.assertNotContains(response, "Coach mode")
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class EditProfileViewTests(TestCase):
+    """M6 -- design_handoff_rosterchief_platform/README.md's M6 section,
+    "Edit personal info". See EditProfileView's own docstring for the
+    judgment calls: no schema fields for national register no./address/
+    allergies/consent (all omitted), guardians and open onboarding
+    requirements are shown read-only, and an unmanaged member 404s rather
+    than mirroring EventDetailView.post's 400."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        today = timezone.localdate()
+        cls.season = Season.objects.create(club=cls.club, start_date=today - datetime.timedelta(days=30), end_date=today + datetime.timedelta(days=300))
+        cls.user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", email="lars@example.com", user=cls.user)
+        ClubMembership.objects.create(club=cls.club, member=cls.member, season=cls.season)
+
+        cls.family = Family.objects.create(name="Bakker")
+        FamilyMembership.objects.create(family=cls.family, member=cls.member, role=FamilyMembership.FamilyRole.PARENT)
+        cls.child = Member.objects.create(first_name="Noor", last_name="Bakker")
+        FamilyMembership.objects.create(family=cls.family, member=cls.child, role=FamilyMembership.FamilyRole.CHILD)
+        cls.child_membership = ClubMembership.objects.create(club=cls.club, member=cls.child, season=cls.season)
+
+    def _get(self, member):
+        return self.client.get(reverse("mobile:edit_profile", kwargs={"member_id": member.pk}), HTTP_HOST="ajax-united.rosterchief.app")
+
+    def _post(self, member, data):
+        return self.client.post(reverse("mobile:edit_profile", kwargs={"member_id": member.pk}), data=data, HTTP_HOST="ajax-united.rosterchief.app")
+
+    def test_requires_login(self):
+        response = self._get(self.member)
+
+        self.assertEqual(response.status_code, 302)
+
+    def test_get_renders_the_form_prefilled_with_the_persons_current_data(self):
+        self.client.force_login(self.user)
+
+        response = self._get(self.member)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Lars")
+        self.assertContains(response, "Bakker")
+        self.assertContains(response, "lars@example.com")
+
+    def test_post_with_valid_data_updates_the_member_and_redirects_to_me(self):
+        self.client.force_login(self.user)
+
+        response = self._post(
+            self.member,
+            {"first_name": "Larsen", "last_name": "Bakker", "email": "larsen@example.com", "phone": "", "emergency_phone": ""},
+        )
+
+        self.assertRedirects(response, reverse("mobile:me"), fetch_redirect_response=False)
+        self.member.refresh_from_db()
+        self.assertEqual(self.member.first_name, "Larsen")
+        self.assertEqual(self.member.email, "larsen@example.com")
+
+    def test_post_with_invalid_data_rerenders_with_errors_and_does_not_save(self):
+        self.client.force_login(self.user)
+
+        response = self._post(
+            self.member,
+            {"first_name": "", "last_name": "Bakker", "email": "lars@example.com", "phone": "", "emergency_phone": ""},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context["form"].errors)
+        self.member.refresh_from_db()
+        self.assertEqual(self.member.first_name, "Lars")
+
+    def test_cannot_edit_a_member_who_isnt_managed(self):
+        stranger = Member.objects.create(first_name="Someone", last_name="Else")
+        self.client.force_login(self.user)
+
+        get_response = self._get(stranger)
+        post_response = self._post(stranger, {"first_name": "Hacked", "last_name": "Else", "email": "", "phone": "", "emergency_phone": ""})
+
+        self.assertEqual(get_response.status_code, 404)
+        self.assertEqual(post_response.status_code, 404)
+        stranger.refresh_from_db()
+        self.assertEqual(stranger.first_name, "Someone")
+
+    def test_a_managed_child_can_be_edited_too(self):
+        self.client.force_login(self.user)
+
+        response = self._post(
+            self.child,
+            {"first_name": "Noor", "last_name": "Bakker", "email": "noor@example.com", "phone": "", "emergency_phone": ""},
+        )
+
+        self.assertRedirects(response, reverse("mobile:me"), fetch_redirect_response=False)
+        self.child.refresh_from_db()
+        self.assertEqual(self.child.email, "noor@example.com")
+
+    def test_guardian_shows_as_a_readonly_emergency_contact_line(self):
+        self.client.force_login(self.user)
+
+        response = self._get(self.child)
+
+        self.assertContains(response, "Lars Bakker")
+        self.assertContains(response, "parent")
+
+    def test_no_emergency_contact_line_when_the_person_has_no_guardians(self):
+        self.client.force_login(self.user)
+
+        response = self._get(self.member)
+
+        self.assertNotContains(response, "Emergency contact")
+
+    def test_open_onboarding_requirement_shows_as_a_banner(self):
+        OnboardingRequirement.objects.create(club=self.club, name="Medical form")
+        self.client.force_login(self.user)
+
+        response = self._get(self.child)
+
+        self.assertContains(response, "Medical form")
+        self.assertContains(response, "still open")
+
+    def test_resolved_requirement_does_not_show_in_the_banner(self):
+        requirement = OnboardingRequirement.objects.create(club=self.club, name="Medical form")
+        MemberRequirementStatus.objects.create(membership=self.child_membership, requirement=requirement, is_complete=True)
+        self.client.force_login(self.user)
+
+        response = self._get(self.child)
+
+        self.assertNotContains(response, "still open")

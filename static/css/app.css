@@ -3519,6 +3519,12 @@
   .mb-auto {
     margin-bottom: auto;
   }
+  .-ml-2 {
+    margin-left: calc(var(--spacing) * -2);
+  }
+  .-ml-2\.5 {
+    margin-left: calc(var(--spacing) * -2.5);
+  }
   .ml-1 {
     margin-left: var(--spacing);
   }
@@ -5477,6 +5483,12 @@
       @media (hover: hover) {
         opacity: 100%;
       }
+    }
+  }
+  .focus\:outline-none {
+    &:focus {
+      --tw-outline-style: none;
+      outline-style: none;
     }
   }
   .sm\:col-span-2 {

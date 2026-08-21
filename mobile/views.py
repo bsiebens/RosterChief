@@ -14,7 +14,7 @@ import json
 
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.db.models import Count, Q
-from django.http import HttpResponse, HttpResponseBadRequest, HttpResponseRedirect, JsonResponse
+from django.http import Http404, HttpResponse, HttpResponseBadRequest, HttpResponseRedirect, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.template.loader import render_to_string
 from django.urls import reverse
@@ -27,14 +27,17 @@ from django.views.generic import TemplateView
 from club.models import ClubMembership
 from club.services.access import current_season, has_management_access, teams_managed_by
 from club.services.fees import remaining_balance
+from club.services.onboarding import checklist_for
+from controlpanel.messages import notify
 from events.models import Attendance, Event
 from events.services.calendar import week_bounds
-from members.models import Member
+from members.models import FamilyMembership, Member
 from members.views import ClubScopedPublicMixin
 from news.models import News
 from notifications.models import Notification
 from teams.models import TeamMembership
 
+from .forms import MemberProfileForm
 from .mixins import PersonScopeMixin
 from .models import PushSubscription
 from .services.icons import render_fallback_icon
@@ -484,9 +487,95 @@ class MeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         )
 
 
-class EditProfileView(_PlaceholderScreen):
+class EditProfileView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
+    """M6 -- design_handoff_rosterchief_platform/README.md's M6 section,
+    "Edit personal info". The design mock also shows a "National register
+    no.", an "Address", an "Allergies / notes" field and two "Consent"
+    toggles (photos on club channels / share contact with team parents) --
+    none of those exist on ``members.models.Member``, so (per this build's
+    "no schema changes for a screen-building pass" rule) they're simply not
+    part of this screen; MemberProfileForm (mobile/forms.py) only covers the
+    fields the model actually has.
+
+    Two more mock rows *do* have real backing data, both rendered read-only
+    (never editable here -- family links and staff document review each live
+    elsewhere in the platform, not on a member's own edit-info screen):
+      - "Contact 1" becomes every one of ``Member.guardians`` (there can be
+        more than one, unlike the mock's single row), each with its real
+        FamilyMembership role (parent/guardian/other) rather than the mock's
+        invented "mother".
+      - The "Medical form missing" banner becomes a real, club-defined
+        open-requirements list from club.services.onboarding.checklist_for,
+        scoped to this person's *current-season* ClubMembership -- shown only
+        when at least one active requirement is neither complete nor
+        bypassed (an "informational" open requirement with no current-season
+        membership at all just means the banner never renders).
+
+    Authorization: the target Member (``member_id`` URL kwarg) must be one of
+    ``self.managed_people`` -- anyone else 404s, on both GET and POST. A 404
+    (not EventDetailView.post's 400) is the deliberate choice here: that 400
+    is for a malformed *value* inside an otherwise-valid POST to a resource
+    the requester can already see (the event); this is a different resource
+    per person, named directly in the URL, so an unmanaged member should read
+    as "no such page" exactly like Event/News already do for another club's
+    objects elsewhere in this file, not as a submission-shaped error.
+    """
+
+    template_name = "mobile/edit_profile.html"
     screen_title = _("Edit info")
     active_tab = "me"
+
+    def _target_member(self):
+        member_id = str(self.kwargs["member_id"])
+        member = next((person for person in self.managed_people if str(person.pk) == member_id), None)
+        if member is None:
+            raise Http404("You can't edit that profile.")
+        return member
+
+    def get(self, request, *args, **kwargs):
+        member = self._target_member()
+        form = MemberProfileForm(instance=member)
+        return self.render_to_response(self.get_context_data(member=member, form=form))
+
+    def post(self, request, *args, **kwargs):
+        member = self._target_member()
+        form = MemberProfileForm(request.POST, instance=member)
+        if form.is_valid():
+            form.save()
+            title = _("Saved")
+            body = _("%(name)s's info was updated.") % {"name": member.get_full_name()}
+            notify(request, f"s|{title}|{body}")
+            return HttpResponseRedirect(reverse("mobile:me"))
+        return self.render_to_response(self.get_context_data(member=member, form=form))
+
+    def get_context_data(self, **kwargs):
+        member = kwargs["member"]
+
+        guardian_rows = [
+            {"member": family_membership.member, "role": family_membership.get_role_display()}
+            for family_membership in FamilyMembership.objects.filter(
+                role__in=[FamilyMembership.FamilyRole.PARENT, FamilyMembership.FamilyRole.GUARDIAN],
+                family__memberships__member=member,
+                family__memberships__role=FamilyMembership.FamilyRole.CHILD,
+            )
+            .select_related("member")
+            .distinct()
+        ]
+
+        open_requirement_names = []
+        season = current_season(self.request.club)
+        if season is not None:
+            membership = ClubMembership.objects.filter(club=self.request.club, member=member, season=season).first()
+            if membership is not None:
+                open_requirement_names = [requirement.name for requirement, status in checklist_for(membership) if status is None or not (status.is_complete or status.is_bypassed)]
+
+        return super().get_context_data(
+            screen_title=member.get_full_name(),
+            guardian_rows=guardian_rows,
+            open_requirement_names=open_requirement_names,
+            open_requirement_summary=", ".join(open_requirement_names),
+            **kwargs,
+        )
 
 
 class NotificationsView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
