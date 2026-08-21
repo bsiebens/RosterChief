@@ -6,7 +6,7 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone, translation
 
-from club.models import Club, ClubMembership, DuesInvoice, MemberRequirementStatus, OnboardingRequirement, Season
+from club.models import Club, ClubMembership, DuesInvoice, MemberRequirementStatus, OnboardingRequirement, Season, Sponsor
 from events.models import Attendance, Event
 from members.models import Family, FamilyMembership, Member
 from news.models import News
@@ -102,6 +102,17 @@ class MobileShellTests(TestCase):
         response = self.client.get(reverse("mobile:home") + f"?as={child.pk}", HTTP_HOST="ajax-united.rosterchief.app")
 
         self.assertEqual(response.context["scope_person"], child)
+
+    def test_bottom_tab_bar_highlights_the_active_screen(self):
+        self.client.force_login(self.user)
+
+        home_response = self._get("home")
+        self.assertContains(home_response, 'class="tab-bar-item tab-bar-item-active"', count=1)
+        self.assertEqual(home_response.context["active_tab"], "home")
+
+        me_response = self.client.get(reverse("mobile:me"), HTTP_HOST="ajax-united.rosterchief.app")
+        self.assertContains(me_response, 'class="tab-bar-item tab-bar-item-active"', count=1)
+        self.assertEqual(me_response.context["active_tab"], "me")
 
     def test_all_chip_only_appears_once_theres_more_than_one_managed_person(self):
         self.client.force_login(self.user)
@@ -240,6 +251,22 @@ class HomeViewTests(TestCase):
         needs_answer_events = {attendance.event for attendance in response.context["needs_answer"]}
         self.assertEqual(needs_answer_events, {awaiting, maybe})
 
+    def test_needs_your_answer_is_capped_at_five_with_a_remaining_count(self):
+        # A distinct, already-answered earlier event so it becomes the hero and
+        # none of the seven "Practice N" events below get excluded as the hero.
+        hero_event = self.make_event(title="Soonest", start=self.future)
+        Attendance.objects.create(event=hero_event, member=self.member, status=Attendance.AttendanceStatus.PRESENT)
+        for day in range(1, 8):
+            event = self.make_event(title=f"Practice {day}", start=self.future + datetime.timedelta(days=day))
+            Attendance.objects.create(event=event, member=self.member, status=Attendance.AttendanceStatus.NO_RESPONSE)
+        self.client.force_login(self.user)
+
+        response = self._get("home")
+
+        self.assertEqual(len(response.context["needs_answer"]), 5)
+        self.assertEqual(response.context["needs_answer_remaining"], 2)
+        self.assertContains(response, "+2 more in Calendar")
+
     def test_needs_your_answer_excludes_the_hero_event_even_if_unanswered(self):
         soon = self.make_event(title="Soonest", start=self.future)
         Attendance.objects.create(event=soon, member=self.member, status=Attendance.AttendanceStatus.NO_RESPONSE)
@@ -289,6 +316,39 @@ class HomeViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIsNone(response.context["scope_person"])
         self.assertContains(response, "No one to show yet")
+
+    def test_sponsors_shows_only_active_ones(self):
+        today = timezone.localdate()
+        active = Sponsor.objects.create(club=self.club, name="Active Co", start_date=today - datetime.timedelta(days=10))
+        Sponsor.objects.create(club=self.club, name="Future Co", start_date=today + datetime.timedelta(days=10))
+        Sponsor.objects.create(club=self.club, name="Past Co", start_date=today - datetime.timedelta(days=100), end_date=today - datetime.timedelta(days=1))
+        self.client.force_login(self.user)
+
+        response = self._get("home")
+
+        self.assertEqual(list(response.context["sponsors"]), [active])
+        self.assertContains(response, "Active Co")
+        self.assertNotContains(response, "Future Co")
+        self.assertNotContains(response, "Past Co")
+
+    def test_sponsors_are_absent_when_none_are_defined(self):
+        self.client.force_login(self.user)
+
+        response = self._get("home")
+
+        self.assertEqual(list(response.context["sponsors"]), [])
+        self.assertNotContains(response, "Sponsors")
+
+    def test_sponsors_still_show_for_a_brand_new_account_with_no_managed_people(self):
+        today = timezone.localdate()
+        Sponsor.objects.create(club=self.club, name="Active Co", start_date=today - datetime.timedelta(days=10))
+        bare_user = User.objects.create_user(email="new@example.com", password="pw-secret-123")
+        self.client.force_login(bare_user)
+
+        response = self._get("home")
+
+        self.assertContains(response, "No one to show yet")
+        self.assertContains(response, "Active Co")
 
     def add_child(self, first_name="Noor"):
         family = Family.objects.create(name="Bakker")
@@ -467,8 +527,8 @@ class EventDetailRsvpTests(TestCase):
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
 class CalendarViewTests(TestCase):
     """M3 -- design_handoff_rosterchief_platform/README.md's M3 section: a
-    "This week"/"Next week" agenda, scoped to scope_person's own invites by
-    default or, with ?scope=all, every club event."""
+    "This week"/"Next week" agenda. No person switcher and no club-wide
+    toggle -- always every event self.managed_people is invited to."""
 
     @classmethod
     def setUpTestData(cls):
@@ -495,12 +555,20 @@ class CalendarViewTests(TestCase):
     def _events_in_context(self, response):
         return {row["event"] for row in response.context["this_week"] + response.context["next_week"]}
 
+    def add_child(self, first_name="Noor"):
+        family = Family.objects.create(name="Bakker")
+        FamilyMembership.objects.create(family=family, member=self.member, role=FamilyMembership.FamilyRole.PARENT)
+        child = Member.objects.create(first_name=first_name, last_name="Bakker")
+        FamilyMembership.objects.create(family=family, member=child, role=FamilyMembership.FamilyRole.CHILD)
+        ClubMembership.objects.create(club=self.club, member=child, season=self.season)
+        return child
+
     def test_requires_login(self):
         response = self._get()
 
         self.assertEqual(response.status_code, 302)
 
-    def test_per_person_scope_only_shows_that_persons_invited_events(self):
+    def test_shows_only_events_the_managed_people_are_invited_to(self):
         invited = self.make_event(title="Lars's practice")
         not_invited = self.make_event(title="Someone else's practice")
         Attendance.objects.create(event=invited, member=self.member, status=Attendance.AttendanceStatus.PRESENT)
@@ -511,25 +579,7 @@ class CalendarViewTests(TestCase):
         self.assertEqual(self._events_in_context(response), {invited})
         self.assertNotContains(response, not_invited.title)
 
-    def test_all_scope_shows_every_club_event_regardless_of_invitation(self):
-        invited = self.make_event(title="Lars's practice")
-        not_invited = self.make_event(title="Whole squad practice")
-        Attendance.objects.create(event=invited, member=self.member, status=Attendance.AttendanceStatus.PRESENT)
-        self.client.force_login(self.user)
-
-        response = self._get(scope="all")
-
-        self.assertEqual(self._events_in_context(response), {invited, not_invited})
-
-    def test_all_scope_excludes_cancelled_events(self):
-        cancelled = self.make_event(title="Cancelled practice", cancelled=True)
-        self.client.force_login(self.user)
-
-        response = self._get(scope="all")
-
-        self.assertNotIn(cancelled, self._events_in_context(response))
-
-    def test_per_person_scope_excludes_cancelled_events(self):
+    def test_excludes_cancelled_events(self):
         cancelled = self.make_event(title="Cancelled practice", cancelled=True)
         Attendance.objects.create(event=cancelled, member=self.member, status=Attendance.AttendanceStatus.PRESENT)
         self.client.force_login(self.user)
@@ -538,15 +588,7 @@ class CalendarViewTests(TestCase):
 
         self.assertNotIn(cancelled, self._events_in_context(response))
 
-    def add_child(self, first_name="Noor"):
-        family = Family.objects.create(name="Bakker")
-        FamilyMembership.objects.create(family=family, member=self.member, role=FamilyMembership.FamilyRole.PARENT)
-        child = Member.objects.create(first_name=first_name, last_name="Bakker")
-        FamilyMembership.objects.create(family=family, member=child, role=FamilyMembership.FamilyRole.CHILD)
-        ClubMembership.objects.create(club=self.club, member=child, season=self.season)
-        return child
-
-    def test_my_schedule_aggregates_across_every_managed_person_once_all_is_the_default(self):
+    def test_aggregates_across_every_managed_person(self):
         child = self.add_child()
         mine = self.make_event(title="Lars's practice")
         theirs = self.make_event(title="Noor's game")
@@ -559,19 +601,15 @@ class CalendarViewTests(TestCase):
         self.assertEqual(self._events_in_context(response), {mine, theirs})
         self.assertContains(response, "Noor")
 
-    def test_selecting_one_person_narrows_my_schedule_back_to_just_them(self):
-        child = self.add_child()
-        mine = self.make_event(title="Lars's practice")
-        theirs = self.make_event(title="Noor's game")
-        Attendance.objects.create(event=mine, member=self.member)
-        Attendance.objects.create(event=theirs, member=child)
+    def test_no_person_switcher_is_rendered(self):
+        self.add_child()
         self.client.force_login(self.user)
 
-        response = self._get(**{"as": self.member.pk})
+        response = self._get()
 
-        self.assertEqual(self._events_in_context(response), {mine})
+        self.assertNotContains(response, 'href="?as=')
 
-    def test_my_schedule_with_no_managed_people_shows_the_empty_state_not_a_500(self):
+    def test_no_managed_people_shows_a_graceful_empty_state(self):
         bare_user = User.objects.create_user(email="new@example.com", password="pw-secret-123")
         self.client.force_login(bare_user)
 
@@ -590,15 +628,6 @@ class CalendarViewTests(TestCase):
         response = self._get()
 
         self.assertEqual(self._events_in_context(response), set())
-
-    def test_empty_scope_person_shows_a_graceful_empty_state(self):
-        bare_user = User.objects.create_user(email="new@example.com", password="pw-secret-123")
-        self.client.force_login(bare_user)
-
-        response = self._get()
-
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "No one to show yet")
 
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])

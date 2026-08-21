@@ -2,17 +2,14 @@
 mounted.
 """
 
-import random
 import uuid
 from datetime import date
 
-from django.db.models import Q
-from django.utils import timezone
 from ninja import Router, Schema
 
 from api.errors import require_club
 
-from .models import Sponsor
+from .services.sponsors import active_sponsors
 
 router = Router(tags=["sponsors"])
 
@@ -43,20 +40,8 @@ def _to_sponsor_out(sponsor, request) -> SponsorOut:
 
 @router.get("/", response=list[SponsorOut], summary="Active sponsors")
 def list_sponsors(request, randomize: bool = False):
-    """Sponsors currently "live": start_date has passed and either there's no
-    end_date (runs indefinitely once started) or it hasn't passed yet. Both
-    bounds are inclusive of today.
-
-    `randomize=true` shuffles the result (e.g. for a sponsor strip that
-    shouldn't always lead with the same one) -- shuffled in Python after a
-    stable-ordered fetch rather than an ORDER BY RANDOM(), which sponsor
-    counts are far too small to need and which SQLite/Postgres don't even
-    express the same way."""
+    """See club.services.sponsors.active_sponsors for what "active" means and
+    why `randomize=true` shuffles in Python rather than in SQL."""
     club = require_club(request)
-    today = timezone.localdate()
-
-    sponsors = list(Sponsor.objects.filter(club=club, start_date__lte=today).filter(Q(end_date__isnull=True) | Q(end_date__gte=today)).order_by("name"))
-    if randomize:
-        random.shuffle(sponsors)
-
+    sponsors = active_sponsors(club, randomize=randomize)
     return [_to_sponsor_out(sponsor, request) for sponsor in sponsors]

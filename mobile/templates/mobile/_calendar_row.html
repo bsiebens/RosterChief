@@ -6,7 +6,7 @@
     warn for everything else) next to the date, per the design doc's M3 row
     description.
 {% endcomment %}
-<a class="flex items-center gap-3 bg-white p-3.5 {% if row.event.kind == "game" %}border-l-4 border-club{% endif %}" href="{% url "mobile:event_detail" row.event.pk %}">
+<a class="flex items-center gap-3 bg-white px-4 py-3 {% if row.event.kind == "game" %}border-l-4 border-club{% endif %}" href="{% url "mobile:event_detail" row.event.pk %}">
     <div class="w-9.5 shrink-0 text-center">
         <div class="font-mono text-[10px] tracking-wide text-muted uppercase">{{ row.event.start|date:"D" }}</div>
         <div class="font-display text-2xl leading-none font-extrabold text-ink">{{ row.event.start|date:"d" }}</div>

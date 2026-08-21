@@ -2,11 +2,6 @@
 icon, push subscribe) they all sit on top of. Coach mode (C1-C6) is a later
 phase -- see design_handoff_rosterchief_platform/README.md -- and has no
 routes here yet.
-
-The M1-M7 views below are placeholders: each renders a "coming soon" card
-inside the real app shell (base.html), at its final URL name, so the shell
-(header, role switcher, tab bar, person switcher) can be verified end-to-end
-before every screen is built out one at a time.
 """
 
 import datetime
@@ -28,6 +23,7 @@ from club.models import ClubMembership
 from club.services.access import current_season, has_management_access, teams_managed_by
 from club.services.fees import remaining_balance
 from club.services.onboarding import checklist_for
+from club.services.sponsors import active_sponsors
 from controlpanel.messages import notify
 from events.models import Attendance, Event
 from events.services.calendar import week_bounds
@@ -124,19 +120,6 @@ class PushSubscribeView(LoginRequiredMixin, ClubScopedPublicMixin, View):
         return JsonResponse({"status": "ok"})
 
 
-class _PlaceholderScreen(PersonScopeMixin, LoginRequiredMixin, TemplateView):
-    """Stand-in for an M-screen not built yet. Each subclass below is replaced
-    entirely -- view and template -- when its screen is built; only the URL
-    name/path in mobile/urls.py needs to stay put."""
-
-    template_name = "mobile/_placeholder.html"
-    screen_title = ""
-    active_tab = ""
-
-    def get_context_data(self, **kwargs):
-        return super().get_context_data(screen_title=self.screen_title, active_tab=self.active_tab, **kwargs)
-
-
 class HomeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
     """M1 -- design_handoff_rosterchief_platform/README.md's M1 section: a
     hero card for the soonest upcoming event across everyone currently in
@@ -157,6 +140,10 @@ class HomeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
     screen_title = _("Home")
     active_tab = "home"
 
+    #: Keeps the card from crowding the dues/news cards below it off the first
+    #: screenful -- Calendar is the place to see everything still awaiting a reply.
+    NEEDS_ANSWER_LIMIT = 5
+
     def get_context_data(self, **kwargs):
         people = self.people_in_scope
         now = timezone.now()
@@ -164,6 +151,7 @@ class HomeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         hero_attendance = None
         rsvp_closed = False
         needs_answer = []
+        needs_answer_total = 0
         dues_rows = []
         news_item = None
 
@@ -183,7 +171,8 @@ class HomeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
             needs_answer_qs = upcoming.filter(status__in=[Attendance.AttendanceStatus.NO_RESPONSE, Attendance.AttendanceStatus.MAYBE]).order_by("event__start")
             if hero_attendance is not None:
                 needs_answer_qs = needs_answer_qs.exclude(pk=hero_attendance.pk)
-            needs_answer = list(needs_answer_qs)
+            needs_answer_total = needs_answer_qs.count()
+            needs_answer = list(needs_answer_qs[: self.NEEDS_ANSWER_LIMIT])
 
             season = current_season(self.request.club)
             if season is not None:
@@ -213,9 +202,15 @@ class HomeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
             hero_attendance=hero_attendance,
             rsvp_closed=rsvp_closed,
             needs_answer=needs_answer,
+            needs_answer_remaining=max(needs_answer_total - len(needs_answer), 0),
             dues_rows=dues_rows,
             news_item=news_item,
             news_team=news_item.teams.first() if news_item is not None else None,
+            # Club-wide, not person-specific -- shown regardless of managed_people,
+            # unlike every other card on this screen. Reshuffled on every request
+            # (see club.services.sponsors.active_sponsors) rather than once per
+            # session, same as the public-website sponsor strip it shares logic with.
+            sponsors=active_sponsors(self.request.club, randomize=True),
             **kwargs,
         )
 
@@ -229,10 +224,12 @@ class CalendarView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
     "Later"/past bucket, no ?month= paging) -- a simple, bounded agenda rather
     than a full season browser.
 
-    ``?scope=all`` is the design doc's extra "All members" scope on top of
-    the normal per-person chip switcher (mobile/mixins.py's scope_person):
-    every club event instead of just scope_person's own invites, since
-    there's no single person's Attendance row to key off.
+    Always scoped to every one of ``self.managed_people`` -- unlike Home,
+    this screen has no person switcher and no "every club event" toggle: it's
+    just "what is my family invited to", full stop. (The design mock's own
+    "All members"/list-vs-month/games-only controls aren't built -- they'd
+    need real functionality behind them, not just markup; flagged rather than
+    faked.)
     """
 
     template_name = "mobile/calendar.html"
@@ -251,25 +248,16 @@ class CalendarView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
     }
 
     def get_context_data(self, **kwargs):
-        scope_all = self.request.GET.get("scope") == "all"
         now = timezone.now()
         _this_week_start, this_week_end = week_bounds(timezone.localdate())
         next_week_end = this_week_end + datetime.timedelta(days=7)
         window_end = timezone.make_aware(datetime.datetime.combine(next_week_end, datetime.time.max))
 
         rows = []
-        if scope_all:
-            events = (
-                Event.objects.filter(club=self.request.club, cancelled=False, start__gte=now, start__lte=window_end)
-                .select_related("location", "opponent")
-                .prefetch_related("teams")
-                .order_by("start")
-            )
-            rows = [{"event": event, "pill_class": "pill-info", "pill_label": event.get_kind_display()} for event in events]
-        elif self.people_in_scope:
+        if self.managed_people:
             attendances = (
                 Attendance.objects.filter(
-                    member__in=self.people_in_scope,
+                    member__in=self.managed_people,
                     event__club=self.request.club,
                     event__cancelled=False,
                     event__start__gte=now,
@@ -279,10 +267,11 @@ class CalendarView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
                 .prefetch_related("event__teams")
                 .order_by("event__start")
             )
-            # Only worth naming whose row it is once "everyone" is aggregating more
-            # than one person -- a single scoped person's own agenda doesn't need it.
+            # Only worth naming whose row it is once there's more than one managed
+            # person to tell apart -- a lone member's own agenda doesn't need it.
+            show_member = len(self.managed_people) > 1
             rows = [
-                {"event": attendance.event, "pill_class": self.STATUS_PILL_CLASSES.get(attendance.status, "pill-neutral"), "pill_label": attendance.get_status_display(), "member": attendance.member if self.scope_everyone else None}
+                {"event": attendance.event, "pill_class": self.STATUS_PILL_CLASSES.get(attendance.status, "pill-neutral"), "pill_label": attendance.get_status_display(), "member": attendance.member if show_member else None}
                 for attendance in attendances
             ]
 
@@ -291,7 +280,7 @@ class CalendarView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
             bucket = this_week if timezone.localtime(row["event"].start).date() <= this_week_end else next_week
             bucket.append(row)
 
-        return super().get_context_data(scope_all=scope_all, this_week=this_week, next_week=next_week, **kwargs)
+        return super().get_context_data(this_week=this_week, next_week=next_week, **kwargs)
 
 
 class EventDetailView(PersonScopeMixin, LoginRequiredMixin, TemplateView):

@@ -70,23 +70,6 @@
                     {% if unread_notification_count %}<span class="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-club" style="border: 2px solid var(--color-navy)"></span>{% endif %}
                 </a>
             </div>
-
-            {% if managed_people|length > 1 %}
-                <div class="scrollbar-hide mt-3 flex gap-2 overflow-x-auto pb-0.5">
-                    <a class="person-chip {% if scope_everyone %}person-chip-active{% endif %}" href="?as=all">
-                        <span class="person-chip-avatar">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="3"/><circle cx="17" cy="9" r="2.6"/><path d="M2.5 20c0-3.3 2.5-5.6 5.5-5.6s5.5 2.3 5.5 5.6"/><path d="M14 15c2.6.3 4.5 2.3 4.5 5"/></svg>
-                        </span>
-                        <span class="person-chip-label">{% trans "All" %}</span>
-                    </a>
-                    {% for person in managed_people %}
-                        <a class="person-chip {% if not scope_everyone and person == scope_person %}person-chip-active{% endif %}" href="?as={{ person.pk }}">
-                            <span class="person-chip-avatar">{{ person.first_name|slice:":1" }}</span>
-                            <span class="person-chip-label">{% if person == me %}{% trans "Me" %}{% else %}{{ person.first_name }}{% endif %}</span>
-                        </a>
-                    {% endfor %}
-                </div>
-            {% endif %}
         </header>
 
         <main class="flex-1 overflow-y-auto">

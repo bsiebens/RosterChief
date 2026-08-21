@@ -380,16 +380,16 @@
         border: 1px solid #dde1e7;
     }
 
-    /* --- Person switcher chips (M1, M2, M3 -- "a person switcher on anything per-member") --- */
+    /* --- Person switcher chips (Home's own -- see mobile/templates/mobile/home.html) --- */
 
     .person-chip {
         display: flex;
         align-items: center;
-        gap: 8px;
+        gap: 6px;
         background: #fff;
         border: 1.5px solid var(--color-line);
         border-radius: 999px;
-        padding: 5px 12px 5px 5px;
+        padding: 4px 10px 4px 4px;
         color: var(--color-muted);
         flex-shrink: 0;
     }
@@ -400,8 +400,8 @@
     }
 
     .person-chip-avatar {
-        width: 28px;
-        height: 28px;
+        width: 22px;
+        height: 22px;
         border-radius: 999px;
         background: var(--color-stroke);
         color: #fff;
@@ -410,7 +410,7 @@
         justify-content: center;
         font-family: var(--font-display);
         font-weight: 800;
-        font-size: 0.875rem;
+        font-size: 0.6875rem;
         flex-shrink: 0;
     }
 
@@ -421,7 +421,7 @@
     .person-chip-label {
         font-family: var(--font-display);
         font-weight: 700;
-        font-size: 0.9375rem;
+        font-size: 0.8125rem;
         letter-spacing: 0.06em;
         text-transform: uppercase;
     }
