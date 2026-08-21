@@ -10,6 +10,7 @@ from club.models import Club, ClubMembership, DuesInvoice, Season
 from events.models import Attendance, Event
 from members.models import Family, FamilyMembership, Member
 from news.models import News
+from teams.models import Position, Team, TeamMembership
 
 from .models import PushSubscription
 from .services.icons import render_fallback_icon
@@ -306,12 +307,27 @@ class EventDetailRsvpTests(TestCase):
         self.attendance.refresh_from_db()
         self.assertEqual(self.attendance.status, Attendance.AttendanceStatus.NO_RESPONSE)
 
+    def test_posting_maybe_updates_attendance(self):
+        self.client.force_login(self.user)
+
+        self._post(self.event, {"status": "maybe"})
+
+        self.attendance.refresh_from_db()
+        self.assertEqual(self.attendance.status, Attendance.AttendanceStatus.MAYBE)
+
     def test_rejects_an_unknown_status_value(self):
         self.client.force_login(self.user)
 
-        response = self._post(self.event, {"status": "maybe"})
+        response = self._post(self.event, {"status": "excused"})
 
         self.assertEqual(response.status_code, 400)
+
+    def test_next_event_detail_redirects_back_to_the_event_instead_of_home(self):
+        self.client.force_login(self.user)
+
+        response = self._post(self.event, {"status": "present", "next": "event_detail"})
+
+        self.assertRedirects(response, reverse("mobile:event_detail", kwargs={"pk": self.event.pk}), fetch_redirect_response=False)
 
     def test_cannot_rsvp_for_an_event_from_another_club(self):
         other_club = Club.objects.create(name="Other Club", slug="other-club", secondary_color="#e4002b")
@@ -416,3 +432,103 @@ class CalendarViewTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "No one to show yet")
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class EventDetailScreenTests(TestCase):
+    """M2 -- design_handoff_rosterchief_platform/README.md's M2 section,
+    "answer for several" (the GET side; POST is covered by
+    EventDetailRsvpTests above)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        today = timezone.localdate()
+        cls.season = Season.objects.create(club=cls.club, start_date=today - datetime.timedelta(days=30), end_date=today + datetime.timedelta(days=300))
+        cls.user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", email="parent@example.com", user=cls.user)
+        ClubMembership.objects.create(club=cls.club, member=cls.member, season=cls.season)
+        cls.team = Team.objects.create(club=cls.club, name="U16", short_name="U16")
+        cls.position = Position.objects.create(club=cls.club, name="Forward", short_name="F")
+        cls.event = Event.objects.create(club=cls.club, title="Home game", start=timezone.now() + datetime.timedelta(days=7))
+        cls.event.teams.add(cls.team)
+
+    def _get(self, event=None):
+        event = event or self.event
+        return self.client.get(reverse("mobile:event_detail", kwargs={"pk": event.pk}), HTTP_HOST="ajax-united.rosterchief.app")
+
+    def test_renders_event_details(self):
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Home game")
+
+    def test_your_answers_only_lists_managed_people_invited_to_this_event(self):
+        # TeamMembership -> Event.teams (both already set up in setUpTestData) auto-creates
+        # a NO_RESPONSE Attendance row via events/signals.py -- no need to create one by hand.
+        TeamMembership.objects.create(team=self.team, member=self.member, season=self.season, position=self.position, jersey_number=17)
+
+        family = Family.objects.create(name="Bakker")
+        FamilyMembership.objects.create(family=family, member=self.member, role=FamilyMembership.FamilyRole.PARENT)
+        not_invited_child = Member.objects.create(first_name="Noor", last_name="Bakker")
+        FamilyMembership.objects.create(family=family, member=not_invited_child, role=FamilyMembership.FamilyRole.CHILD)
+        ClubMembership.objects.create(club=self.club, member=not_invited_child, season=self.season)
+        # Noor is a managed person but has no Attendance row for this event -- not invited.
+
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        answered_members = {answer["member"] for answer in response.context["your_answers"]}
+        self.assertEqual(answered_members, {self.member})
+        self.assertContains(response, "#17")
+        self.assertContains(response, "No reply")
+
+    def test_your_answers_is_empty_when_nobody_managed_is_invited(self):
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertEqual(list(response.context["your_answers"]), [])
+        self.assertContains(response, "No one you manage is invited")
+
+    def test_squad_response_counts_are_correct(self):
+        in_member = Member.objects.create(first_name="A", last_name="In")
+        out_member = Member.objects.create(first_name="B", last_name="Out")
+        no_reply_member = Member.objects.create(first_name="C", last_name="Silent")
+        Attendance.objects.create(event=self.event, member=in_member, status=Attendance.AttendanceStatus.PRESENT)
+        Attendance.objects.create(event=self.event, member=out_member, status=Attendance.AttendanceStatus.ABSENT)
+        Attendance.objects.create(event=self.event, member=no_reply_member, status=Attendance.AttendanceStatus.NO_RESPONSE)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        summary = response.context["squad_summary"]
+        self.assertEqual(summary["in_count"], 1)
+        self.assertEqual(summary["out_count"], 1)
+        self.assertEqual(summary["no_reply_count"], 1)
+        self.assertEqual(summary["total"], 3)
+
+    def test_squad_response_is_absent_for_an_event_with_no_teams(self):
+        club_wide_event = Event.objects.create(club=self.club, title="Club BBQ", start=timezone.now() + datetime.timedelta(days=3), club_wide=True)
+        self.client.force_login(self.user)
+
+        response = self._get(club_wide_event)
+
+        self.assertIsNone(response.context["squad_summary"])
+
+    def test_404_for_an_event_from_another_club(self):
+        other_club = Club.objects.create(name="Other Club", slug="other-club", secondary_color="#e4002b")
+        other_event = Event.objects.create(club=other_club, title="Not ours", start=timezone.now() + datetime.timedelta(days=3))
+        self.client.force_login(self.user)
+
+        response = self._get(other_event)
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_requires_login(self):
+        response = self._get()
+
+        self.assertEqual(response.status_code, 302)

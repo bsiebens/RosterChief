@@ -13,7 +13,7 @@ import datetime
 import json
 
 from django.contrib.auth.mixins import LoginRequiredMixin
-from django.db.models import Q
+from django.db.models import Count, Q
 from django.http import HttpResponse, HttpResponseBadRequest, HttpResponseRedirect, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.template.loader import render_to_string
@@ -284,17 +284,78 @@ class CalendarView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         return super().get_context_data(scope_all=scope_all, this_week=this_week, next_week=next_week, **kwargs)
 
 
-class EventDetailView(_PlaceholderScreen):
-    """GET is still the M2 placeholder (a later screen owns the full detail
-    page); POST is M1's quick In/Out RSVP action, reused by any future screen
-    that posts the same {status, member_id} shape at this URL."""
+class EventDetailView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
+    """M2 -- design_handoff_rosterchief_platform/README.md's M2 section:
+    "answer for several". A hero header (no event photos in this codebase --
+    a solid dark block instead, like M1's hero card), an event-detail card
+    (Face-off/Meet/Where -- the design mock's extra "Kit" row and dressing-room
+    detail have no backing Event field, so they're simply not shown), a
+    per-managed-person RSVP card scoped to ``self.managed_people`` who
+    actually have an ``Attendance`` row for this event (i.e. are invited --
+    not every managed person necessarily is), and a club/team-visible
+    squad-response aggregate (counts only, never who-answered-what) shown
+    only when the event has an actual team roster to aggregate.
 
+    POST is still M1's quick In/Out RSVP action (now also accepting "maybe"
+    for M2's three-way buttons), reused by any screen that posts the same
+    {status, member_id} shape at this URL. An optional ``next=event_detail``
+    field redirects back here instead of Home -- M2's own forms send it so a
+    parent answering for several people in a row sees each update land
+    without bouncing away; M1's/M3's existing forms don't send it, so they
+    keep redirecting to Home unchanged.
+    """
+
+    template_name = "mobile/event_detail.html"
     screen_title = _("Event")
     active_tab = "calendar"
 
+    def get_context_data(self, **kwargs):
+        event = get_object_or_404(Event.objects.select_related("location", "opponent"), pk=self.kwargs["pk"], club=self.request.club)
+        season = event.season or current_season(self.request.club)
+
+        your_answers = []
+        if self.managed_people:
+            managed_ids = [person.pk for person in self.managed_people]
+            attendances_by_member = {attendance.member_id: attendance for attendance in Attendance.objects.filter(event=event, member_id__in=managed_ids).select_related("member")}
+
+            memberships_by_member = {}
+            if season is not None:
+                memberships_by_member = {
+                    membership.member_id: membership
+                    for membership in TeamMembership.objects.filter(member_id__in=managed_ids, team__in=event.teams.all(), season=season).select_related("team", "position")
+                }
+
+            for person in self.managed_people:
+                attendance = attendances_by_member.get(person.pk)
+                if attendance is None:
+                    continue
+                your_answers.append({"member": person, "attendance": attendance, "membership": memberships_by_member.get(person.pk)})
+
+        squad_summary = None
+        if event.teams.exists():
+            counts = Attendance.objects.filter(event=event).aggregate(
+                in_count=Count("id", filter=Q(status__in=[Attendance.AttendanceStatus.PRESENT, Attendance.AttendanceStatus.SELECTED])),
+                out_count=Count("id", filter=Q(status__in=[Attendance.AttendanceStatus.ABSENT, Attendance.AttendanceStatus.NOT_SELECTED])),
+                no_reply_count=Count("id", filter=Q(status__in=[Attendance.AttendanceStatus.MAYBE, Attendance.AttendanceStatus.NO_RESPONSE])),
+            )
+            total = counts["in_count"] + counts["out_count"] + counts["no_reply_count"]
+            if total:
+                squad_summary = {
+                    "total": total,
+                    "responded": counts["in_count"] + counts["out_count"],
+                    "in_count": counts["in_count"],
+                    "out_count": counts["out_count"],
+                    "no_reply_count": counts["no_reply_count"],
+                    "in_pct": round(100 * counts["in_count"] / total),
+                    "out_pct": round(100 * counts["out_count"] / total),
+                    "no_reply_pct": round(100 * counts["no_reply_count"] / total),
+                }
+
+        return super().get_context_data(screen_title=event.title, event=event, your_answers=your_answers, squad_summary=squad_summary, **kwargs)
+
     def post(self, request, *args, **kwargs):
         status = request.POST.get("status")
-        if status not in (Attendance.AttendanceStatus.PRESENT, Attendance.AttendanceStatus.ABSENT):
+        if status not in (Attendance.AttendanceStatus.PRESENT, Attendance.AttendanceStatus.ABSENT, Attendance.AttendanceStatus.MAYBE):
             return HttpResponseBadRequest(_("Unknown RSVP status."))
 
         member_id = request.POST.get("member_id") or (str(self.scope_person.pk) if self.scope_person else None)
@@ -304,6 +365,9 @@ class EventDetailView(_PlaceholderScreen):
 
         event = get_object_or_404(Event, pk=kwargs["pk"], club=request.club)
         Attendance.objects.update_or_create(event=event, member=member, defaults={"status": status})
+
+        if request.POST.get("next") == "event_detail":
+            return HttpResponseRedirect(reverse("mobile:event_detail", kwargs={"pk": event.pk}))
         return HttpResponseRedirect(reverse("mobile:home"))
 
 
