@@ -4885,6 +4885,29 @@ class ClubSettingsPreviewTests(ManagementTestBase):
         self.assertEqual(self.club.legal_zip_code, "9000")
         self.assertEqual(self.club.legal_city, "Ghent")
 
+    def test_the_event_background_can_be_uploaded(self):
+        response = self.club_post(
+            "club_settings",
+            {
+                "name": "Ajax United",
+                "legal_name": "",
+                "contact_email": "",
+                "website": "",
+                "primary_color": "",
+                "secondary_color": "",
+                "event_background": make_image_file("event-bg.png"),
+            },
+        )
+
+        self.assertRedirects(response, reverse("management:club_settings"))
+        self.club.refresh_from_db()
+        self.assertTrue(self.club.event_background)
+
+    def test_the_event_background_field_is_editable(self):
+        response = self.club_get("club_settings")
+
+        self.assertContains(response, 'name="event_background"')
+
 
 class ClubSettingsDocumentTabTests(ManagementTestBase):
     """The Email and PDF tabs on the Club identity page -- every branded

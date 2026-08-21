@@ -6,18 +6,28 @@
     for several". See EventDetailView's own docstring (mobile/views.py) for
     the judgment calls: no event photos, no Kit/dressing-room fields (the
     Event model has none), squad response is counts-only (never who answered
-    what).
+    what). The hero's background is the club's own generic event photo
+    (Club.event_background, set on the identity page) shown in black & white
+    under a dark gradient -- individual events have no photo of their own, so
+    this is the one club-wide stand-in -- falling back to a plain dark
+    background when the club hasn't uploaded one.
 {% endcomment %}
 
 {% block content %}
-    <div class="-mx-4 -mt-4 flex h-[220px] flex-col justify-end bg-ink p-4 text-white" style="background: linear-gradient(180deg, rgba(11,18,32,.35) 0%, rgba(11,18,32,.55) 60%, rgba(11,18,32,.92) 100%), var(--color-navy)">
-        <a class="mb-auto flex h-11 w-11 items-center justify-center rounded-full bg-white/15" href="{% url "mobile:home" %}" aria-label="{% trans "Back" %}">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>
-        </a>
-        <span class="mb-2 inline-block w-fit rounded bg-club px-2 py-1 font-display text-xs font-extrabold tracking-wide text-white uppercase">
-            {% if event.kind == "game" %}{% if event.is_home_game %}{% trans "Home game" %}{% else %}{% trans "Away game" %}{% endif %}{% else %}{{ event.get_kind_display }}{% endif %}
-        </span>
-        <h1 class="font-display text-4xl leading-[.98] font-extrabold uppercase">{{ event.title }}</h1>
+    <div class="-mx-4 -mt-4 relative flex h-[220px] flex-col overflow-hidden" style="background: var(--color-navy)">
+        {% if club.event_background %}
+            <img class="absolute inset-0 h-full w-full object-cover grayscale" src="{{ club.event_background.url }}" alt="">
+        {% endif %}
+        <div class="absolute inset-0" style="background: linear-gradient(180deg, rgba(11,18,32,.35) 0%, rgba(11,18,32,.55) 60%, rgba(11,18,32,.92) 100%)"></div>
+        <div class="relative z-10 flex flex-1 flex-col justify-end p-4 text-white">
+            <a class="mb-auto flex h-11 w-11 items-center justify-center rounded-full bg-white/15" href="{% url "mobile:home" %}" aria-label="{% trans "Back" %}">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>
+            </a>
+            <span class="mb-2 inline-block w-fit rounded bg-club px-2 py-1 font-display text-xs font-extrabold tracking-wide text-white uppercase">
+                {% if event.kind == "game" %}{% if event.is_home_game %}{% trans "Home game" %}{% else %}{% trans "Away game" %}{% endif %}{% else %}{{ event.get_kind_display }}{% endif %}
+            </span>
+            <h1 class="font-display text-4xl leading-[.98] font-extrabold uppercase">{{ event.title }}</h1>
+        </div>
     </div>
 
     <div class="m-card flex flex-col gap-2.5 p-4">

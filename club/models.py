@@ -32,6 +32,10 @@ def club_logo_path(instance: Club, filename: str) -> str:
     return f"clubs/{instance.slug}/{filename}"
 
 
+def club_event_background_path(instance: Club, filename: str) -> str:
+    return f"clubs/{instance.slug}/event-background/{filename}"
+
+
 class Club(UUIDModel):
     class SportType(models.TextChoices):
         """Which sport this club plays. Only two options for now -- expand this as
@@ -67,6 +71,16 @@ class Club(UUIDModel):
         # cannot read SVGs, and club crests are commonly vector logos.
         validators=[FileExtensionValidator(allowed_extensions=["png", "jpg", "jpeg", "gif", "webp", "svg"])],
         help_text=_("Shown on the club's own pages. Without one, the club's initials are used."),
+    )
+    event_background = models.ImageField(
+        _("event background"),
+        upload_to=club_event_background_path,
+        blank=True,
+        # A real photo, unlike logo -- shown in black & white under a dark
+        # gradient (see mobile/templates/mobile/event_detail.html), so an
+        # ImageField (Pillow-validated, unlike logo's plain FileField) is the
+        # right fit here: this is never a vector crest.
+        help_text=_("A generic background photo for event screens in the mobile app, shown in black & white under a dark gradient. Without one, a plain dark background is used."),
     )
     primary_color = models.CharField(
         _("primary colour"),

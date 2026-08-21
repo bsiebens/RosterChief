@@ -35,40 +35,46 @@
 
     {% if managed_people %}
         {% if hero_attendance %}
-            <div class="m-card-dark overflow-hidden">
-                <div class="p-4 pb-0">
-                    <p class="font-display text-xs font-extrabold text-info uppercase tracking-wide">{% blocktrans with date=hero_attendance.event.start|date:"D d M" %}Next up &middot; {{ date }}{% endblocktrans %}</p>
-                    <p class="mt-1 font-display text-2xl leading-none font-extrabold uppercase">{{ hero_attendance.event.title }}</p>
-                </div>
-                <div class="p-4">
-                    <div class="flex flex-wrap gap-4 font-mono text-xs text-on-dark">
-                        <span>{% blocktrans with time=hero_attendance.event.start|date:"H:i" %}{{ time }} face-off{% endblocktrans %}</span>
-                        {% if hero_attendance.event.gathering %}
-                            <span>{% blocktrans with time=hero_attendance.event.gathering|date:"H:i" %}Meet {{ time }}{% endblocktrans %}</span>
-                        {% endif %}
-                        {% if hero_attendance.event.location %}<span>{{ hero_attendance.event.location.name }}</span>{% endif %}
+            <div class="m-card-dark relative overflow-hidden">
+                {% if club.event_background %}
+                    <img class="absolute inset-0 h-full w-full object-cover grayscale" src="{{ club.event_background.url }}" alt="">
+                {% endif %}
+                <div class="absolute inset-0" style="background: linear-gradient(180deg, rgba(11,18,32,.15) 0%, rgba(11,18,32,.75) 55%, rgba(11,18,32,.95) 100%)"></div>
+                <div class="relative z-10">
+                    <div class="p-4 pb-0">
+                        <p class="font-display text-xs font-extrabold text-info uppercase tracking-wide">{% blocktrans with date=hero_attendance.event.start|date:"D d M" %}Next up &middot; {{ date }}{% endblocktrans %}</p>
+                        <p class="mt-1 font-display text-2xl leading-none font-extrabold uppercase">{{ hero_attendance.event.title }}</p>
                     </div>
-
-                    {% if rsvp_closed %}
-                        <p class="mt-3 font-display text-xs font-extrabold text-on-dark-dim uppercase tracking-wide">{% trans "Replies are closed for this event" %}</p>
-                        <span class="pill pill-neutral mt-2">{{ hero_attendance.get_status_display }}</span>
-                    {% else %}
-                        <p class="mt-3 font-display text-xs font-extrabold text-on-dark-dim uppercase tracking-wide">{% blocktrans with name=hero_attendance.member.first_name %}{{ name }} &mdash; are you in?{% endblocktrans %}</p>
-                        <div class="mt-2 flex gap-2">
-                            <form class="flex-1" method="post" action="{% url "mobile:event_detail" hero_attendance.event.pk %}">
-                                {% csrf_token %}
-                                <input type="hidden" name="member_id" value="{{ hero_attendance.member.pk }}">
-                                <input type="hidden" name="status" value="present">
-                                <button class="btn btn-positive w-full" type="submit">{% trans "In" %}</button>
-                            </form>
-                            <form class="flex-1" method="post" action="{% url "mobile:event_detail" hero_attendance.event.pk %}">
-                                {% csrf_token %}
-                                <input type="hidden" name="member_id" value="{{ hero_attendance.member.pk }}">
-                                <input type="hidden" name="status" value="absent">
-                                <button class="btn w-full bg-steel text-on-dark" type="submit">{% trans "Out" %}</button>
-                            </form>
+                    <div class="p-4">
+                        <div class="flex flex-wrap gap-4 font-mono text-xs text-on-dark">
+                            <span>{% blocktrans with time=hero_attendance.event.start|date:"H:i" %}{{ time }} face-off{% endblocktrans %}</span>
+                            {% if hero_attendance.event.gathering %}
+                                <span>{% blocktrans with time=hero_attendance.event.gathering|date:"H:i" %}Meet {{ time }}{% endblocktrans %}</span>
+                            {% endif %}
+                            {% if hero_attendance.event.location %}<span>{{ hero_attendance.event.location.name }}</span>{% endif %}
                         </div>
-                    {% endif %}
+
+                        {% if rsvp_closed %}
+                            <p class="mt-3 font-display text-xs font-extrabold text-on-dark-dim uppercase tracking-wide">{% trans "Replies are closed for this event" %}</p>
+                            <span class="pill pill-neutral mt-2">{{ hero_attendance.get_status_display }}</span>
+                        {% else %}
+                            <p class="mt-3 font-display text-xs font-extrabold text-on-dark-dim uppercase tracking-wide">{% blocktrans with name=hero_attendance.member.first_name %}{{ name }} &mdash; are you in?{% endblocktrans %}</p>
+                            <div class="mt-2 flex gap-2">
+                                <form class="flex-1" method="post" action="{% url "mobile:event_detail" hero_attendance.event.pk %}">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="member_id" value="{{ hero_attendance.member.pk }}">
+                                    <input type="hidden" name="status" value="present">
+                                    <button class="btn btn-positive w-full" type="submit">{% trans "In" %}</button>
+                                </form>
+                                <form class="flex-1" method="post" action="{% url "mobile:event_detail" hero_attendance.event.pk %}">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="member_id" value="{{ hero_attendance.member.pk }}">
+                                    <input type="hidden" name="status" value="absent">
+                                    <button class="btn w-full bg-steel text-on-dark" type="submit">{% trans "Out" %}</button>
+                                </form>
+                            </div>
+                        {% endif %}
+                    </div>
                 </div>
             </div>
         {% endif %}

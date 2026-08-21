@@ -905,11 +905,12 @@ class ClubSettingsForm(forms.ModelForm):
 
     class Meta:
         model = Club
-        fields = ["name", "legal_name", "legal_address", "legal_zip_code", "legal_city", "contact_email", "website", "logo", "primary_color", "secondary_color"]
+        fields = ["name", "legal_name", "legal_address", "legal_zip_code", "legal_city", "contact_email", "website", "logo", "event_background", "primary_color", "secondary_color"]
         widgets = {
             "primary_color": forms.TextInput(attrs={"placeholder": "#1e40af"}),
             "secondary_color": forms.TextInput(attrs={"placeholder": "#be185d"}),
             "logo": forms.ClearableFileInput(attrs={"accept": "image/png,image/jpeg,image/gif,image/webp,image/svg+xml"}),
+            "event_background": forms.ClearableFileInput(attrs={"accept": "image/png,image/jpeg,image/gif,image/webp"}),
         }
 
 

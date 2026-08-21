@@ -2,6 +2,7 @@ import datetime
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone, translation
@@ -18,6 +19,12 @@ from .models import CalendarFeedToken, PushSubscription
 from .services.icons import render_fallback_icon
 
 User = get_user_model()
+
+ONE_PIXEL_PNG = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+
+
+def make_image_file(name="photo.png"):
+    return SimpleUploadedFile(name, ONE_PIXEL_PNG, content_type="image/png")
 
 
 def make_club(**kwargs):
@@ -230,6 +237,17 @@ class HomeViewTests(TestCase):
 
         self.assertEqual(response.context["hero_attendance"].event, soon)
         self.assertContains(response, "Away")
+
+    def test_hero_shows_the_clubs_event_background_in_grayscale_when_set(self):
+        event = self.make_event(title="Practice")
+        Attendance.objects.create(event=event, member=self.member)
+        self.club.event_background = make_image_file()
+        self.club.save(update_fields=["event_background"])
+        self.client.force_login(self.user)
+
+        response = self._get("home")
+
+        self.assertContains(response, 'class="absolute inset-0 h-full w-full object-cover grayscale"')
 
     def test_hero_is_absent_when_no_upcoming_event(self):
         self.client.force_login(self.user)
@@ -763,6 +781,23 @@ class EventDetailScreenTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Home game")
+
+    def test_hero_shows_the_clubs_event_background_in_grayscale_when_set(self):
+        self.club.event_background = make_image_file()
+        self.club.save(update_fields=["event_background"])
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, 'class="absolute inset-0 h-full w-full object-cover grayscale"')
+        self.assertContains(response, self.club.event_background.url)
+
+    def test_hero_has_no_background_image_when_the_club_has_not_set_one(self):
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertNotContains(response, "grayscale")
 
     def test_rsvp_buttons_are_replaced_by_a_readonly_pill_once_the_deadline_has_passed(self):
         closed_event = Event.objects.create(club=self.club, title="Closed game", start=timezone.now() + datetime.timedelta(days=3), deadline=timezone.now() - datetime.timedelta(hours=1))

@@ -134,6 +134,25 @@
                         </div>
                     </div>
                 </div>
+
+                <div class="card">
+                    <div class="card-body">
+                        <div class="card-title">{% lucide "image" size=16 %} {% trans "Event background" %}</div>
+                        <p class="text-sm text-muted">{% trans "A generic background photo for event screens in the mobile app -- individual events don't have a photo of their own, so this is the one club-wide stand-in. Shown in black & white under a dark gradient so text always stays readable. Without one, a plain dark background is used instead." %}</p>
+                        <div class="mt-3 flex items-end gap-4">
+                            <div>
+                                <div class="mb-1.5 font-display text-[11px] font-bold tracking-[.12em] text-muted uppercase">{% trans "Preview" %}</div>
+                                <div class="relative flex h-24 w-24 items-end overflow-hidden rounded-box bg-ink">
+                                    {% if club.event_background %}
+                                        <img class="absolute inset-0 h-full w-full object-cover grayscale" src="{{ club.event_background.url }}" alt="">
+                                    {% endif %}
+                                    <div class="absolute inset-0" style="background: linear-gradient(180deg, rgba(11,18,32,.15) 0%, rgba(11,18,32,.75) 55%, rgba(11,18,32,.95) 100%)"></div>
+                                </div>
+                            </div>
+                            <div class="flex-1">{% form_field form.event_background %}</div>
+                        </div>
+                    </div>
+                </div>
             </form>
 
             <div class="xl:sticky xl:top-4 xl:self-start">
