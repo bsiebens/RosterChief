@@ -1,0 +1,83 @@
+{% extends "mobile/coach/base.html" %}
+{% load i18n %}
+
+{% comment %}
+    C4 -- design_handoff_rosterchief_platform/README.md's C4 section: three
+    event-type tiles, title/date/location, "who" (teams), and an answers-
+    close row. See CoachCreateEventView's own docstring for what's scoped
+    down from the mock and why (no group/opponent/competition fields, no
+    "Repeat weekly" yet). The white sticky Cancel/title/Create bar breaks out
+    of the sheet's own padding (-mx-4 -mt-5), same trick calendar_feed_
+    settings.html/payments.html use for their own back-button bars.
+{% endcomment %}
+
+{% block content %}
+    <div class="-mx-4 -mt-5 flex items-center gap-3 border-b border-line bg-white px-4 py-3">
+        <a class="font-display text-sm font-extrabold tracking-wide text-muted uppercase" href="{% url "mobile:coach_today" %}">{% trans "Cancel" %}</a>
+        <span class="min-w-0 flex-1 truncate text-center font-display text-lg font-extrabold text-ink uppercase">{% trans "New event" %}</span>
+        <button class="font-display text-sm font-extrabold tracking-wide text-club uppercase" type="submit" form="coach-event-form">{% trans "Create" %}</button>
+    </div>
+
+    {% if form.non_field_errors %}
+        <div class="m-card border border-danger-border bg-danger-bg p-3 text-sm text-club-dark">
+            {% for error in form.non_field_errors %}<p>{{ error }}</p>{% endfor %}
+        </div>
+    {% endif %}
+
+    <form id="coach-event-form" method="post" action="{% url "mobile:coach_create_event" %}">
+        {% csrf_token %}
+
+        <div class="grid grid-cols-3 gap-2">
+            <label class="flex h-12 items-center justify-center rounded-lg border border-line bg-white font-display text-xs font-extrabold tracking-wide text-muted uppercase has-checked:border-ink has-checked:bg-ink has-checked:text-white">
+                <input class="sr-only" type="radio" name="kind" value="training" checked>
+                {% trans "Practice" %}
+            </label>
+            <label class="flex h-12 items-center justify-center rounded-lg border border-line bg-white font-display text-xs font-extrabold tracking-wide text-muted uppercase has-checked:border-ink has-checked:bg-ink has-checked:text-white">
+                <input class="sr-only" type="radio" name="kind" value="game">
+                {% trans "Game" %}
+            </label>
+            <label class="flex h-12 items-center justify-center rounded-lg border border-line bg-white font-display text-xs font-extrabold tracking-wide text-muted uppercase has-checked:border-ink has-checked:bg-ink has-checked:text-white">
+                <input class="sr-only" type="radio" name="kind" value="other">
+                {% trans "Other" %}
+            </label>
+        </div>
+
+        <div class="m-card flex flex-col p-4">
+            <div>
+                <label class="mb-1 block text-xs font-semibold text-muted" for="{{ form.title.id_for_label }}">{% trans "Title" %}</label>
+                {{ form.title }}
+                {% for error in form.title.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
+            </div>
+            <div class="my-3 h-px bg-rule"></div>
+            <div>
+                <label class="mb-1 block text-xs font-semibold text-muted" for="{{ form.start.id_for_label }}">{% trans "Date &amp; time" %}</label>
+                {{ form.start }}
+                {% for error in form.start.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
+            </div>
+            <div class="my-3 h-px bg-rule"></div>
+            <div>
+                <label class="mb-1 block text-xs font-semibold text-muted" for="{{ form.location.id_for_label }}">{% trans "Location" %}</label>
+                {{ form.location }}
+            </div>
+        </div>
+
+        <div class="m-card p-4">
+            <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Who" %}</div>
+            <div class="flex flex-col gap-2">
+                {% for checkbox in form.teams %}
+                    <label class="flex items-center gap-2 text-sm text-ink">
+                        {{ checkbox.tag }}
+                        {{ checkbox.choice_label }}
+                    </label>
+                {% endfor %}
+            </div>
+            {% for error in form.teams.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
+        </div>
+
+        <div class="m-card p-4">
+            <label class="mb-1 block text-xs font-semibold text-muted" for="{{ form.deadline.id_for_label }}">{% trans "Answers close" %}</label>
+            {{ form.deadline }}
+            <p class="mt-1 text-xs text-dim">{% trans "Leave blank to keep answers open until the event starts." %}</p>
+        </div>
+    </form>
+{% endblock content %}

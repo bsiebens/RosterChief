@@ -16,6 +16,10 @@
             <p class="mt-1 text-sm text-muted">{% trans "Once you're assigned to a team's staff, its schedule and roster will show up here." %}</p>
         </div>
     {% else %}
+        {% if can_manage_active_team %}
+            <a class="btn btn-dark w-full" href="{% url "mobile:coach_create_event" %}">{% trans "New event" %}</a>
+        {% endif %}
+
         <div class="grid grid-cols-3 gap-2.5">
             <div class="m-card p-3 text-center">
                 <div class="font-display text-2xl leading-none font-extrabold text-ink">{{ squad_count }}</div>

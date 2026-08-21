@@ -5,6 +5,7 @@ club/season plumbing already factored into club.services.access -- see
 mobile/coach_mixins.py's CoachScopeMixin for the shared scaffolding.
 """
 
+from django import forms
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.http import Http404, HttpResponseForbidden, HttpResponseRedirect
 from django.shortcuts import get_object_or_404
@@ -17,9 +18,12 @@ from club.services.access import current_season
 from controlpanel.messages import notify
 from events.models import Attendance, Event
 from events.services.attendance import record_check_in
+from events.tasks import notify_new_event
+from management.forms import EventForm
 from teams.models import TeamMembership
 
 from .coach_mixins import CoachScopeMixin
+from .forms import _INPUT_CLASSES
 
 #: RSVP states that count as "in" for the stat tile -- present/selected are an
 #: explicit yes, maybe is still a lean-in rather than silence.
@@ -173,4 +177,77 @@ class CoachAttendanceView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
         title = _("Attendance saved")
         body = _("%(count)d players checked in.") % {"count": checked_in}
         notify(request, f"s|{title}|{body}")
+        return HttpResponseRedirect(reverse("mobile:coach_today"))
+
+
+class CoachCreateEventView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
+    """C4 -- reuses management.forms.EventForm as-is: its own __init__ already
+    scopes ``teams`` to teams_managed_by(user, club) via EventAudienceFormMixin,
+    exactly the restriction a coach needs, so there's nothing to re-scope.
+
+    Only a subset of the mock's fields is rendered in the template (Title,
+    Kind, Teams, Location, Start, Answers close) -- everything else EventForm
+    carries (groups/club_wide/invited & excluded members/opponent/
+    competition/external id) stays unrendered and simply unset; all of it is
+    optional on the model, so an unrendered field validates cleanly empty.
+    "Repeat weekly" from the mock isn't built this stage -- the recurring-
+    series machinery (EventSeriesForm) is a separate form with its own
+    fields; wiring it in is later work, not something to fake with an inert
+    toggle here.
+
+    After a successful save: the same notify_new_event.delay(...) call
+    management.views.EventCreateView.form_valid makes -- attendance sync is
+    automatic via events/signals.py, only the notification dispatch needs
+    replicating by hand for a view that isn't a CreateView.
+    """
+
+    template_name = "mobile/coach/event_form.html"
+    screen_title = _("New event")
+    active_tab = "coach_today"
+
+    def get(self, request, *args, **kwargs):
+        if not self.can_manage_active_team:
+            return HttpResponseRedirect(reverse("mobile:coach_today"))
+        return super().get(request, *args, **kwargs)
+
+    def build_form(self, data=None):
+        instance = Event(club=self.request.club, created_by=self.me)
+        form = EventForm(data, club=self.request.club, user=self.request.user, editing=False, instance=instance)
+        # max_referees has a model default (2) but no blank=True, so the form
+        # field is required despite it -- delete it rather than render a
+        # referee-count control this screen has no use for; construct_instance
+        # skips deleted fields entirely, leaving the instance's own default.
+        del form.fields["max_referees"]
+        # The desktop searchable multi-select relies on management's own JS
+        # widget, not loaded here -- plain checkboxes work without it and
+        # read better on a phone regardless.
+        form.fields["teams"].widget = forms.CheckboxSelectMultiple()
+        if self.active_team is not None and data is None:
+            form.fields["teams"].initial = [self.active_team.pk]
+        # Same input styling as mobile.forms.MemberProfileForm (M6) -- one
+        # visual language for every text/date field across the app, not a
+        # diverging one for this screen.
+        for field_name in ("title", "start", "location", "deadline"):
+            form.fields[field_name].widget.attrs["class"] = _INPUT_CLASSES
+        return form
+
+    def get_context_data(self, **kwargs):
+        kwargs.setdefault("form", self.build_form())
+        return super().get_context_data(**kwargs)
+
+    def post(self, request, *args, **kwargs):
+        if not self.can_manage_active_team:
+            return HttpResponseForbidden()
+
+        form = self.build_form(request.POST)
+        if not form.is_valid():
+            return self.render_to_response(self.get_context_data(form=form))
+
+        event = form.save()
+        body = _("“%(event)s” created.") % {"event": event}
+        notify(request, f"s|{_('Event created')}|{body}")
+        # A deliberately-planned single event, same as the desktop create
+        # flow -- see notify_new_event's own docstring for why a recurring
+        # series' occurrences aren't wired to this.
+        notify_new_event.delay(str(event.pk))
         return HttpResponseRedirect(reverse("mobile:coach_today"))

@@ -1967,3 +1967,85 @@ class CoachAttendanceViewTests(TestCase):
         response = self.client.get(reverse("mobile:coach_attendance", kwargs={"event_id": other_event.pk}), HTTP_HOST="ajax-united.rosterchief.app")
 
         self.assertEqual(response.status_code, 404)
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class CoachCreateEventViewTests(TestCase):
+    """C4 -- reuses management.forms.EventForm as-is; see CoachCreateEventView's
+    own docstring for what's scoped down from the design mock."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        today = timezone.localdate()
+        cls.season = Season.objects.create(club=cls.club, start_date=today - datetime.timedelta(days=30), end_date=today + datetime.timedelta(days=300))
+        cls.user = User.objects.create_user(email="coach@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Sam", last_name="Coach", email="coach@example.com", user=cls.user)
+        cls.team = Team.objects.create(club=cls.club, name="U16", short_name="U16")
+        cls.position = Position.objects.create(club=cls.club, name="Head coach", short_name="HC", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=cls.team, member=cls.member, season=cls.season, position=cls.position)
+
+    def _post(self, **overrides):
+        start = timezone.localtime(timezone.now() + datetime.timedelta(days=5)).strftime("%Y-%m-%dT%H:%M")
+        data = {"kind": "training", "title": "Extra practice", "start": start, "teams": [str(self.team.pk)]}
+        data.update(overrides)
+        return self.client.post(reverse("mobile:coach_create_event"), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+    def test_requires_login(self):
+        response = self.client.get(reverse("mobile:coach_create_event"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 302)
+
+    def test_get_redirects_a_non_managing_staffer(self):
+        physio_position = Position.objects.create(club=self.club, name="Physio", short_name="PHY", staff_position=True, management_position=False)
+        physio_user = User.objects.create_user(email="physio@example.com", password="pw-secret-123")
+        physio_member = Member.objects.create(first_name="Pat", last_name="Physio", user=physio_user)
+        StaffAssignment.objects.create(team=self.team, member=physio_member, season=self.season, position=physio_position)
+        self.client.force_login(physio_user)
+
+        response = self.client.get(reverse("mobile:coach_create_event"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertRedirects(response, reverse("mobile:coach_today"), fetch_redirect_response=False)
+
+    def test_teams_field_is_scoped_to_managed_teams(self):
+        other_team = Team.objects.create(club=self.club, name="U14", short_name="U14")
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mobile:coach_create_event"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        team_choices = list(response.context["form"].fields["teams"].queryset)
+        self.assertEqual(team_choices, [self.team])
+        self.assertNotIn(other_team, team_choices)
+
+    def test_valid_post_creates_the_event_and_redirects(self):
+        self.client.force_login(self.user)
+
+        response = self._post(title="Extra practice")
+
+        event = Event.objects.get(title="Extra practice")
+        self.assertEqual(event.club, self.club)
+        self.assertEqual(event.kind, Event.EventKind.TRAINING)
+        self.assertEqual(event.created_by, self.member)
+        self.assertIn(self.team, event.teams.all())
+        self.assertRedirects(response, reverse("mobile:coach_today"), fetch_redirect_response=False)
+
+    def test_non_managing_staff_cannot_post(self):
+        physio_position = Position.objects.create(club=self.club, name="Physio", short_name="PHY", staff_position=True, management_position=False)
+        physio_user = User.objects.create_user(email="physio@example.com", password="pw-secret-123")
+        physio_member = Member.objects.create(first_name="Pat", last_name="Physio", user=physio_user)
+        StaffAssignment.objects.create(team=self.team, member=physio_member, season=self.season, position=physio_position)
+        self.client.force_login(physio_user)
+
+        response = self._post(title="Blocked practice")
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(Event.objects.filter(title="Blocked practice").exists())
+
+    def test_missing_title_reshows_the_form_with_errors(self):
+        self.client.force_login(self.user)
+
+        response = self._post(title="")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Event.objects.filter(kind=Event.EventKind.TRAINING).exists())
+        self.assertTrue(response.context["form"].errors)
