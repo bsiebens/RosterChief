@@ -187,13 +187,25 @@
         flex-shrink: 0;
     }
 
+    /* Club logo (img) or initials (span) in the app header -- always a plain
+       circle, unlike management.css's own hexagon crest mark. */
     .app-crest {
-        width: 30px;
+        width: 32px;
         height: 32px;
-        background: var(--color-club);
-        clip-path: polygon(50% 0, 100% 18%, 100% 62%, 50% 100%, 0 62%, 0 18%);
+        border-radius: 999px;
         flex-shrink: 0;
-        object-fit: contain;
+        object-fit: cover;
+    }
+
+    .app-crest-fallback {
+        background: var(--color-club);
+        color: var(--color-club-content);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: var(--font-display);
+        font-weight: 800;
+        font-size: 0.75rem;
     }
 
     /* Role switcher -- design doc "Component" table: full-width segmented pill,

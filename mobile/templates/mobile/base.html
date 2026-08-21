@@ -57,7 +57,7 @@
                     {% if club.logo %}
                         <img class="app-crest" src="{{ club.logo.url }}" alt="">
                     {% else %}
-                        <span class="app-crest"></span>
+                        <span class="app-crest app-crest-fallback">{{ club.initials }}</span>
                     {% endif %}
                     <span class="min-w-0">
                         <span class="block truncate font-display text-[19px] leading-none font-extrabold text-white uppercase">{{ club.name }}</span>

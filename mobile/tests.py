@@ -51,6 +51,14 @@ class MobileShellTests(TestCase):
         self.assertContains(response, self.club.name)
         self.assertContains(response, 'rel="manifest"')
 
+    def test_header_crest_falls_back_to_round_initials_without_a_logo(self):
+        self.client.force_login(self.user)
+
+        response = self._get("home")
+
+        self.assertContains(response, 'class="app-crest app-crest-fallback"')
+        self.assertContains(response, self.club.initials)
+
     def test_manifest_names_the_club_and_points_at_its_icon(self):
         response = self._get("manifest")
 
