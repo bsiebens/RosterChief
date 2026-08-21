@@ -19,7 +19,7 @@
         </div>
     {% else %}
         <div class="-mx-4 -mt-4 flex items-center gap-3 bg-ink px-4 pt-4 pb-5 text-white">
-            <span class="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-club font-display text-xl font-extrabold text-white">{{ me.first_name|slice:":1" }}{{ me.last_name|slice:":1" }}</span>
+            {% include "mobile/_avatar.html" with person=me size_class="h-14 w-14" text_class="text-xl" bg_class="bg-club" %}
             <div class="min-w-0 flex-1">
                 <div class="font-display text-xl leading-none font-extrabold uppercase">{{ me.get_full_name }}</div>
                 {% if member_since or team_manager_label %}
@@ -38,7 +38,7 @@
                 {% for row in people_rows %}
                     {% if not forloop.first %}<div class="h-px bg-rule"></div>{% endif %}
                     <a class="flex items-center gap-3 p-3.5" href="{% url "mobile:edit_profile" row.person.pk %}">
-                        <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-steel font-display text-sm font-extrabold text-white">{{ row.person.first_name|slice:":1" }}{{ row.person.last_name|slice:":1" }}</span>
+                        {% include "mobile/_avatar.html" with person=row.person %}
                         <div class="min-w-0 flex-1">
                             <div class="text-[15px] font-semibold text-ink">
                                 {{ row.person.get_full_name }}

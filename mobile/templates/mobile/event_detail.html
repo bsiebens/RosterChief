@@ -50,7 +50,7 @@
                     {% if not forloop.first %}<div class="h-px bg-rule"></div>{% endif %}
                     <div>
                         <div class="mb-2 flex items-center gap-2.5">
-                            <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-steel font-display text-sm font-extrabold text-white">{{ answer.member.first_name|slice:":1" }}{{ answer.member.last_name|slice:":1" }}</span>
+                            {% include "mobile/_avatar.html" with person=answer.member size_class="h-8 w-8" %}
                             <div class="min-w-0 flex-1">
                                 <div class="text-[15px] font-semibold text-ink">{{ answer.member.get_full_name }}</div>
                                 {% if answer.membership %}

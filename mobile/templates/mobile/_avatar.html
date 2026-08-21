@@ -1,0 +1,11 @@
+{% comment %}
+    Avatar-initials circle -- the one idiom repeated across every M-screen
+    (event_detail's "Your answers" rows, me.html's own header + "People I
+    manage" rows, news_detail's byline). Expects ``person`` (anything with
+    first_name/last_name) in scope; all other vars are optional and default
+    to the most common case (me.html's "People I manage" rows):
+      - size_class: the h-*/w-* pair, default "h-10 w-10"
+      - text_class: the initials' font size, default "text-sm"
+      - bg_class: the circle's background, default "bg-steel"
+{% endcomment %}
+<span class="flex {{ size_class|default:"h-10 w-10" }} shrink-0 items-center justify-center rounded-full {{ bg_class|default:"bg-steel" }} font-display {{ text_class|default:"text-sm" }} font-extrabold text-white">{{ person.first_name|slice:":1" }}{{ person.last_name|slice:":1" }}</span>
