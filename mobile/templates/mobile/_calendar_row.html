@@ -1,27 +1,26 @@
 {% load i18n %}
 {% comment %}
     One M3 agenda row -- included from calendar.html once per bucket. Expects
-    ``row`` ({event, pill_class, pill_label}) in scope. A 4px club-red left
-    border marks games; other kinds get a 3px colour bar (info for training,
-    warn for everything else) next to the date, per the design doc's M3 row
-    description.
+    ``row`` ({event, pill_class, pill_label}) in scope. A 3px colour bar next
+    to the date marks the event kind: club-red for games, info-blue for
+    training, warn-amber for everything else -- one consistent marker
+    position for every kind, rather than games getting a different
+    treatment (a left border on the whole row) from the rest.
 {% endcomment %}
-<a class="flex items-center gap-3 bg-white px-4 py-3 {% if row.event.kind == "game" %}border-l-4 border-club{% endif %}" href="{% url "mobile:event_detail" row.event.pk %}">
+<a class="flex items-center gap-3 bg-white px-4 py-3" href="{% url "mobile:event_detail" row.event.pk %}">
     <div class="w-9.5 shrink-0 text-center">
         <div class="font-mono text-[10px] tracking-wide text-muted uppercase">{{ row.event.start|date:"D" }}</div>
         <div class="font-display text-2xl leading-none font-extrabold text-ink">{{ row.event.start|date:"d" }}</div>
     </div>
-    {% if row.event.kind != "game" %}
-        <div class="h-9.5 w-[3px] shrink-0 rounded-full {% if row.event.kind == "training" %}bg-info{% else %}bg-warn{% endif %}"></div>
-    {% endif %}
+    <div class="h-9.5 w-[3px] shrink-0 rounded-full {% if row.event.kind == "game" %}bg-club{% elif row.event.kind == "training" %}bg-info{% else %}bg-warn{% endif %}"></div>
     <div class="min-w-0 flex-1">
         <div class="text-sm font-semibold text-ink">{{ row.event.title }}</div>
         <div class="truncate text-xs text-muted">
             {{ row.event.start|date:"H:i" }}
             {% if row.member %}&middot; {{ row.member.first_name }}{% endif %}
             {% for team in row.event.teams.all %}&middot; {{ team.name }}{% endfor %}
-            {% if row.event.location %}&middot; {{ row.event.location.name }}{% endif %}
         </div>
+        {% if row.event.location %}<div class="truncate text-xs text-muted">{{ row.event.location.name }}</div>{% endif %}
     </div>
     <span class="pill {{ row.pill_class }} shrink-0">{{ row.pill_label }}</span>
 </a>
