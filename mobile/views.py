@@ -276,9 +276,13 @@ class CalendarView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
     week/month grid events.services.calendar was built for) grouped under
     "This week"/"Next week". Browsing-window judgment call: the design doc
     doesn't specify month navigation for the mobile screen, so this only ever
-    shows *upcoming* events across the current and next calendar week (no
-    "Later"/past bucket, no ?month= paging) -- a simple, bounded agenda rather
-    than a full season browser.
+    shows *upcoming* events within the next 14 days (no "Later"/past bucket,
+    no ?month= paging) -- a simple, bounded agenda rather than a full season
+    browser. The window is always >= 14 days from today, not just "through
+    next calendar week's Sunday" -- pinning it to the calendar week alone
+    would shrink the effective lookahead to as little as 8-9 days whenever
+    today falls late in the week, silently dropping events a member would
+    expect to still see (see get_context_data's window_end_date).
 
     Always scoped to every one of ``self.managed_people`` -- unlike Home,
     this screen has no person switcher and no "every club event" toggle: it's
@@ -311,9 +315,14 @@ class CalendarView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
 
     def get_context_data(self, **kwargs):
         now = timezone.now()
-        _this_week_start, this_week_end = week_bounds(timezone.localdate())
-        next_week_end = this_week_end + datetime.timedelta(days=7)
-        window_end = timezone.make_aware(datetime.datetime.combine(next_week_end, datetime.time.max))
+        today = timezone.localdate()
+        _this_week_start, this_week_end = week_bounds(today)
+        # At least 14 days out from today, not just "through next calendar week's
+        # Sunday" -- that alone shrinks to as little as 8-9 days when today falls
+        # late in the week (e.g. today=Friday puts next_week_end only 9 days out),
+        # silently dropping events a member would reasonably expect to still see.
+        window_end_date = max(this_week_end + datetime.timedelta(days=7), today + datetime.timedelta(days=13))
+        window_end = timezone.make_aware(datetime.datetime.combine(window_end_date, datetime.time.max))
         kind_filter = self.request.GET.get("kind")
 
         rows = []
@@ -377,6 +386,7 @@ class EventDetailView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
     def get_context_data(self, **kwargs):
         event = get_object_or_404(Event.objects.select_related("location", "opponent"), pk=self.kwargs["pk"], club=self.request.club)
         season = event.season or current_season(self.request.club)
+        rsvp_closed = event.deadline is not None and event.deadline < timezone.now()
 
         your_answers = []
         if self.managed_people:
@@ -416,7 +426,7 @@ class EventDetailView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
                     "no_reply_pct": round(100 * counts["no_reply_count"] / total),
                 }
 
-        return super().get_context_data(screen_title=event.title, event=event, your_answers=your_answers, squad_summary=squad_summary, **kwargs)
+        return super().get_context_data(screen_title=event.title, event=event, rsvp_closed=rsvp_closed, your_answers=your_answers, squad_summary=squad_summary, **kwargs)
 
     def post(self, request, *args, **kwargs):
         status = request.POST.get("status")
@@ -432,6 +442,13 @@ class EventDetailView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
             return HttpResponseBadRequest(_("You can't RSVP for that person."))
 
         event = get_object_or_404(Event, pk=kwargs["pk"], club=request.club)
+        # Mirrors the read-only treatment Home's hero and this same screen's own
+        # "Your answers" card already show once the deadline has passed (see
+        # get_context_data's rsvp_closed) -- enforced here too, since a disabled
+        # button in the UI is only a hint, not a guarantee against a direct POST.
+        if event.deadline is not None and event.deadline < timezone.now():
+            return HttpResponseBadRequest(_("Replies are closed for this event."))
+
         Attendance.objects.update_or_create(event=event, member=member, defaults={"status": status})
 
         if request.POST.get("next") == "event_detail":

@@ -65,34 +65,38 @@
                                 <span class="pill pill-warn shrink-0">{% trans "No reply" %}</span>
                             {% endif %}
                         </div>
-                        <div class="flex gap-1.5">
-                            {% trans "In" as label_in %}
-                            {% trans "Maybe" as label_maybe %}
-                            {% trans "Out" as label_out %}
-                            {% with status=answer.attendance.status %}
-                                <form class="flex-1" method="post" action="{% url "mobile:event_detail" event.pk %}">
-                                    {% csrf_token %}
-                                    <input type="hidden" name="member_id" value="{{ answer.member.pk }}">
-                                    <input type="hidden" name="status" value="present">
-                                    <input type="hidden" name="next" value="event_detail">
-                                    <button type="submit" class="btn h-11 w-full text-[15px] {% if status == "present" %}btn-positive{% else %}bg-paper border border-stroke text-muted{% endif %}">{{ label_in }}</button>
-                                </form>
-                                <form class="flex-1" method="post" action="{% url "mobile:event_detail" event.pk %}">
-                                    {% csrf_token %}
-                                    <input type="hidden" name="member_id" value="{{ answer.member.pk }}">
-                                    <input type="hidden" name="status" value="maybe">
-                                    <input type="hidden" name="next" value="event_detail">
-                                    <button type="submit" class="btn h-11 w-full text-[15px] {% if status == "maybe" %}bg-steel text-white{% else %}bg-paper border border-stroke text-muted{% endif %}">{{ label_maybe }}</button>
-                                </form>
-                                <form class="flex-1" method="post" action="{% url "mobile:event_detail" event.pk %}">
-                                    {% csrf_token %}
-                                    <input type="hidden" name="member_id" value="{{ answer.member.pk }}">
-                                    <input type="hidden" name="status" value="absent">
-                                    <input type="hidden" name="next" value="event_detail">
-                                    <button type="submit" class="btn h-11 w-full text-[15px] {% if status == "absent" %}bg-club text-white{% else %}bg-paper border border-stroke text-muted{% endif %}">{{ label_out }}</button>
-                                </form>
-                            {% endwith %}
-                        </div>
+                        {% if rsvp_closed %}
+                            <span class="pill pill-neutral">{{ answer.attendance.get_status_display }}</span>
+                        {% else %}
+                            <div class="flex gap-1.5">
+                                {% trans "In" as label_in %}
+                                {% trans "Maybe" as label_maybe %}
+                                {% trans "Out" as label_out %}
+                                {% with status=answer.attendance.status %}
+                                    <form class="flex-1" method="post" action="{% url "mobile:event_detail" event.pk %}">
+                                        {% csrf_token %}
+                                        <input type="hidden" name="member_id" value="{{ answer.member.pk }}">
+                                        <input type="hidden" name="status" value="present">
+                                        <input type="hidden" name="next" value="event_detail">
+                                        <button type="submit" class="btn h-11 w-full text-[15px] {% if status == "present" %}btn-positive{% else %}bg-paper border border-stroke text-muted{% endif %}">{{ label_in }}</button>
+                                    </form>
+                                    <form class="flex-1" method="post" action="{% url "mobile:event_detail" event.pk %}">
+                                        {% csrf_token %}
+                                        <input type="hidden" name="member_id" value="{{ answer.member.pk }}">
+                                        <input type="hidden" name="status" value="maybe">
+                                        <input type="hidden" name="next" value="event_detail">
+                                        <button type="submit" class="btn h-11 w-full text-[15px] {% if status == "maybe" %}bg-steel text-white{% else %}bg-paper border border-stroke text-muted{% endif %}">{{ label_maybe }}</button>
+                                    </form>
+                                    <form class="flex-1" method="post" action="{% url "mobile:event_detail" event.pk %}">
+                                        {% csrf_token %}
+                                        <input type="hidden" name="member_id" value="{{ answer.member.pk }}">
+                                        <input type="hidden" name="status" value="absent">
+                                        <input type="hidden" name="next" value="event_detail">
+                                        <button type="submit" class="btn h-11 w-full text-[15px] {% if status == "absent" %}bg-club text-white{% else %}bg-paper border border-stroke text-muted{% endif %}">{{ label_out }}</button>
+                                    </form>
+                                {% endwith %}
+                            </div>
+                        {% endif %}
                     </div>
                 {% endfor %}
             </div>

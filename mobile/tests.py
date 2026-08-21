@@ -551,6 +551,26 @@ class EventDetailRsvpTests(TestCase):
 
         self.assertEqual(response.status_code, 404)
 
+    def test_cannot_rsvp_once_the_deadline_has_passed(self):
+        closed_event = Event.objects.create(club=self.club, title="Cup final", start=timezone.now() + datetime.timedelta(days=3), deadline=timezone.now() - datetime.timedelta(hours=1))
+        closed_attendance = Attendance.objects.create(event=closed_event, member=self.member, status=Attendance.AttendanceStatus.NO_RESPONSE)
+        self.client.force_login(self.user)
+
+        response = self._post(closed_event, {"status": "present"})
+
+        self.assertEqual(response.status_code, 400)
+        closed_attendance.refresh_from_db()
+        self.assertEqual(closed_attendance.status, Attendance.AttendanceStatus.NO_RESPONSE)
+
+    def test_can_still_rsvp_before_the_deadline(self):
+        open_event = Event.objects.create(club=self.club, title="Cup final", start=timezone.now() + datetime.timedelta(days=3), deadline=timezone.now() + datetime.timedelta(hours=1))
+        Attendance.objects.create(event=open_event, member=self.member, status=Attendance.AttendanceStatus.NO_RESPONSE)
+        self.client.force_login(self.user)
+
+        response = self._post(open_event, {"status": "present"})
+
+        self.assertRedirects(response, reverse("mobile:home"), fetch_redirect_response=False)
+
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
 class CalendarViewTests(TestCase):
@@ -697,6 +717,21 @@ class CalendarViewTests(TestCase):
 
         self.assertEqual(self._events_in_context(response), set())
 
+    def test_window_covers_at_least_fourteen_days_regardless_of_which_weekday_today_is(self):
+        # Regression: the window used to be pinned to "through next calendar
+        # week's Sunday", which shrank to as little as 8-9 days whenever today
+        # fell late in the week -- an event 13 days out (a noon start, so
+        # today's own time-of-day can't push it across a date boundary) must
+        # always still show, whatever day the test happens to run on.
+        thirteen_days_out = timezone.make_aware(datetime.datetime.combine(timezone.localdate() + datetime.timedelta(days=13), datetime.time(12, 0)))
+        event = self.make_event(title="Two weeks out", start=thirteen_days_out)
+        Attendance.objects.create(event=event, member=self.member)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertIn(event, self._events_in_context(response))
+
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
 class EventDetailScreenTests(TestCase):
@@ -728,6 +763,16 @@ class EventDetailScreenTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Home game")
+
+    def test_rsvp_buttons_are_replaced_by_a_readonly_pill_once_the_deadline_has_passed(self):
+        closed_event = Event.objects.create(club=self.club, title="Closed game", start=timezone.now() + datetime.timedelta(days=3), deadline=timezone.now() - datetime.timedelta(hours=1))
+        Attendance.objects.create(event=closed_event, member=self.member, status=Attendance.AttendanceStatus.NO_RESPONSE)
+        self.client.force_login(self.user)
+
+        response = self._get(closed_event)
+
+        self.assertTrue(response.context["rsvp_closed"])
+        self.assertNotContains(response, 'name="status" value="present"')
 
     def test_your_answers_only_lists_managed_people_invited_to_this_event(self):
         # TeamMembership -> Event.teams (both already set up in setUpTestData) auto-creates
