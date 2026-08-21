@@ -14,13 +14,15 @@ from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from django.views.generic import TemplateView
 
-from club.services.access import current_season
+from club.services.access import can_add_news, current_season
 from controlpanel.messages import notify
 from events.models import Attendance, Event
 from events.services.attendance import record_check_in
 from events.tasks import notify_new_event
-from management.forms import EventForm
-from teams.models import TeamMembership
+from management.forms import EventForm, NewsForm
+from news.models import News
+from news.services import notify_editors_of_pending_review
+from teams.models import Team, TeamMembership
 
 from .coach_mixins import CoachScopeMixin
 from .forms import _INPUT_CLASSES
@@ -250,4 +252,81 @@ class CoachCreateEventView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
         # flow -- see notify_new_event's own docstring for why a recurring
         # series' occurrences aren't wired to this.
         notify_new_event.delay(str(event.pk))
+        return HttpResponseRedirect(reverse("mobile:coach_today"))
+
+
+class CoachCreateNewsView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
+    """C5 -- reuses management.forms.NewsForm, re-scoped to the coach's own
+    managed team(s). NewsForm.__init__ defaults ``teams`` to every club team
+    -- fine for an editor/admin, but a real gap for a coach, who should only
+    ever be able to post as their own team, never "on behalf of" one they
+    don't run.
+
+    Gated with club.services.access.can_add_news, which already includes
+    is_coach_manager -- no new authorization logic needed. On submit, the
+    post is handed straight to News.submit_for_review() (plus the same
+    notify_editors_of_pending_review call the desktop's own
+    NewsSubmitForReviewView makes) rather than left a silent draft, so it
+    actually reaches an editor's queue -- can_publish_news stays editor/
+    admin-only, so "Send for review" is the honest label here, not "Publish"
+    the way the design mock has it.
+
+    title_en/body_en (the optional English fallback) and a cover photo
+    aren't part of this screen -- both text fields are blank=True on the
+    model (a coach posting from their phone isn't expected to also draft an
+    English translation), and News has no image field for a cover at all to
+    begin with. ``visibility`` is left at the model's own default
+    (INTERNAL -- team families, in-app only) rather than building the mock's
+    "also on club website" toggle: a coach's post always lands as
+    PENDING_REVIEW first, and an editor reviewing it can widen visibility
+    before publishing if a public-site placement is actually warranted --
+    that's a real gate, not a decorative row, so it isn't reproduced here as
+    one.
+    """
+
+    template_name = "mobile/coach/news_form.html"
+    screen_title = _("New post")
+    active_tab = "coach_today"
+
+    def get(self, request, *args, **kwargs):
+        if not can_add_news(request.user, request.club):
+            return HttpResponseRedirect(reverse("mobile:coach_today"))
+        return super().get(request, *args, **kwargs)
+
+    def build_form(self, data=None):
+        instance = News(club=self.request.club, created_by=self.me)
+        form = NewsForm(data, club=self.request.club, instance=instance)
+        del form.fields["title_en"]
+        del form.fields["body_en"]
+        del form.fields["visibility"]
+        # A coach's post is always about their own team(s) -- never empty
+        # (which News.teams's own help_text defines as "club-wide", an
+        # editor/admin-only claim), and never any other team in the club.
+        form.fields["teams"].queryset = Team.objects.filter(pk__in=[team.pk for team in self.managed_teams])
+        form.fields["teams"].required = True
+        form.fields["teams"].widget = forms.CheckboxSelectMultiple()
+        if self.active_team is not None and data is None:
+            form.fields["teams"].initial = [self.active_team.pk]
+        for field_name in ("title", "body"):
+            form.fields[field_name].widget.attrs["class"] = _INPUT_CLASSES
+        return form
+
+    def get_context_data(self, **kwargs):
+        kwargs.setdefault("form", self.build_form())
+        return super().get_context_data(**kwargs)
+
+    def post(self, request, *args, **kwargs):
+        if not can_add_news(request.user, request.club):
+            return HttpResponseForbidden()
+
+        form = self.build_form(request.POST)
+        if not form.is_valid():
+            return self.render_to_response(self.get_context_data(form=form))
+
+        news_item = form.save()
+        news_item.submit_for_review()
+        notify_editors_of_pending_review(news_item)
+
+        body = _("“%(news)s” is ready for review.") % {"news": news_item}
+        notify(request, f"s|{_('Sent for review')}|{body}")
         return HttpResponseRedirect(reverse("mobile:coach_today"))

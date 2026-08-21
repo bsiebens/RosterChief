@@ -17,7 +17,10 @@
         </div>
     {% else %}
         {% if can_manage_active_team %}
-            <a class="btn btn-dark w-full" href="{% url "mobile:coach_create_event" %}">{% trans "New event" %}</a>
+            <div class="flex gap-2">
+                <a class="btn btn-dark flex-1" href="{% url "mobile:coach_create_event" %}">{% trans "New event" %}</a>
+                <a class="btn btn-secondary flex-1" href="{% url "mobile:coach_create_news" %}">{% trans "New post" %}</a>
+            </div>
         {% endif %}
 
         <div class="grid grid-cols-3 gap-2.5">

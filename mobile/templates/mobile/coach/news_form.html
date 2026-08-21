@@ -1,0 +1,58 @@
+{% extends "mobile/coach/base.html" %}
+{% load i18n %}
+
+{% comment %}
+    C5 -- design_handoff_rosterchief_platform/README.md's C5 section: title,
+    body, and which of the coach's own teams this is for. See
+    CoachCreateNewsView's own docstring for what's scoped down from the mock
+    (no cover photo -- News has no such field; no English fallback; no
+    audience/visibility toggle) and why the button reads "Send for review"
+    rather than the mock's "Publish" -- a coach's post always needs an
+    editor's sign-off first.
+{% endcomment %}
+
+{% block content %}
+    <div class="-mx-4 -mt-5 flex items-center gap-3 border-b border-line bg-white px-4 py-3">
+        <a class="font-display text-sm font-extrabold tracking-wide text-muted uppercase" href="{% url "mobile:coach_today" %}">{% trans "Cancel" %}</a>
+        <span class="min-w-0 flex-1 truncate text-center font-display text-lg font-extrabold text-ink uppercase">{% trans "New post" %}</span>
+        <button class="font-display text-sm font-extrabold tracking-wide text-club uppercase" type="submit" form="coach-news-form">{% trans "Send" %}</button>
+    </div>
+
+    {% if form.non_field_errors %}
+        <div class="m-card border border-danger-border bg-danger-bg p-3 text-sm text-club-dark">
+            {% for error in form.non_field_errors %}<p>{{ error }}</p>{% endfor %}
+        </div>
+    {% endif %}
+
+    <form id="coach-news-form" method="post" action="{% url "mobile:coach_create_news" %}">
+        {% csrf_token %}
+
+        <div class="m-card flex flex-col p-4">
+            <div>
+                <label class="mb-1 block text-xs font-semibold text-muted" for="{{ form.title.id_for_label }}">{% trans "Headline" %}</label>
+                {{ form.title }}
+                {% for error in form.title.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
+            </div>
+            <div class="my-3 h-px bg-rule"></div>
+            <div>
+                <label class="mb-1 block text-xs font-semibold text-muted" for="{{ form.body.id_for_label }}">{% trans "Body" %}</label>
+                {{ form.body }}
+                {% for error in form.body.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
+            </div>
+        </div>
+
+        <div class="m-card p-4">
+            <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Audience" %}</div>
+            <div class="flex flex-col gap-2">
+                {% for checkbox in form.teams %}
+                    <label class="flex items-center gap-2 text-sm text-ink">
+                        {{ checkbox.tag }}
+                        {{ checkbox.choice_label }}
+                    </label>
+                {% endfor %}
+            </div>
+            {% for error in form.teams.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
+            <p class="mt-2 text-xs text-dim">{% trans "Sent to an editor for review before it goes out to families." %}</p>
+        </div>
+    </form>
+{% endblock content %}

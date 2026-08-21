@@ -2049,3 +2049,86 @@ class CoachCreateEventViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertFalse(Event.objects.filter(kind=Event.EventKind.TRAINING).exists())
         self.assertTrue(response.context["form"].errors)
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class CoachCreateNewsViewTests(TestCase):
+    """C5 -- reuses management.forms.NewsForm, re-scoped to the coach's own
+    managed team(s); see CoachCreateNewsView's own docstring for what's
+    scoped down from the design mock."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        today = timezone.localdate()
+        cls.season = Season.objects.create(club=cls.club, start_date=today - datetime.timedelta(days=30), end_date=today + datetime.timedelta(days=300))
+        cls.user = User.objects.create_user(email="coach@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Sam", last_name="Coach", email="coach@example.com", user=cls.user)
+        cls.team = Team.objects.create(club=cls.club, name="U16", short_name="U16")
+        cls.position = Position.objects.create(club=cls.club, name="Head coach", short_name="HC", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=cls.team, member=cls.member, season=cls.season, position=cls.position)
+
+    def _post(self, **overrides):
+        data = {"title": "Big win Saturday", "body": "Great game everyone.", "teams": [str(self.team.pk)]}
+        data.update(overrides)
+        return self.client.post(reverse("mobile:coach_create_news"), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+    def test_requires_login(self):
+        response = self.client.get(reverse("mobile:coach_create_news"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 302)
+
+    def test_get_redirects_a_non_managing_staffer(self):
+        physio_position = Position.objects.create(club=self.club, name="Physio", short_name="PHY", staff_position=True, management_position=False)
+        physio_user = User.objects.create_user(email="physio@example.com", password="pw-secret-123")
+        physio_member = Member.objects.create(first_name="Pat", last_name="Physio", user=physio_user)
+        StaffAssignment.objects.create(team=self.team, member=physio_member, season=self.season, position=physio_position)
+        self.client.force_login(physio_user)
+
+        response = self.client.get(reverse("mobile:coach_create_news"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertRedirects(response, reverse("mobile:coach_today"), fetch_redirect_response=False)
+
+    def test_teams_field_is_scoped_to_managed_teams(self):
+        other_team = Team.objects.create(club=self.club, name="U14", short_name="U14")
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mobile:coach_create_news"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        team_choices = list(response.context["form"].fields["teams"].queryset)
+        self.assertEqual(team_choices, [self.team])
+        self.assertNotIn(other_team, team_choices)
+
+    def test_valid_post_creates_a_pending_review_post_scoped_to_the_team(self):
+        self.client.force_login(self.user)
+
+        response = self._post(title="Big win Saturday")
+
+        news_item = News.objects.get(title="Big win Saturday")
+        self.assertEqual(news_item.club, self.club)
+        self.assertEqual(news_item.created_by, self.member)
+        self.assertEqual(news_item.status, News.Status.PENDING_REVIEW)
+        self.assertEqual(news_item.visibility, News.Visibility.INTERNAL)
+        self.assertIn(self.team, news_item.teams.all())
+        self.assertRedirects(response, reverse("mobile:coach_today"), fetch_redirect_response=False)
+
+    def test_a_team_is_required_never_defaults_to_club_wide(self):
+        self.client.force_login(self.user)
+
+        response = self._post(title="No team picked", teams=[])
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(News.objects.filter(title="No team picked").exists())
+        self.assertTrue(response.context["form"].errors)
+
+    def test_non_managing_staff_cannot_post(self):
+        physio_position = Position.objects.create(club=self.club, name="Physio", short_name="PHY", staff_position=True, management_position=False)
+        physio_user = User.objects.create_user(email="physio@example.com", password="pw-secret-123")
+        physio_member = Member.objects.create(first_name="Pat", last_name="Physio", user=physio_user)
+        StaffAssignment.objects.create(team=self.team, member=physio_member, season=self.season, position=physio_position)
+        self.client.force_login(physio_user)
+
+        response = self._post(title="Blocked post")
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(News.objects.filter(title="Blocked post").exists())

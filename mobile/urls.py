@@ -26,4 +26,5 @@ urlpatterns = [
     path("coach/", coach_views.CoachTodayView.as_view(), name="coach_today"),
     path("coach/attendance/<uuid:event_id>/", coach_views.CoachAttendanceView.as_view(), name="coach_attendance"),
     path("coach/events/new/", coach_views.CoachCreateEventView.as_view(), name="coach_create_event"),
+    path("coach/news/new/", coach_views.CoachCreateNewsView.as_view(), name="coach_create_news"),
 ]
