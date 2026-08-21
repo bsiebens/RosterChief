@@ -19,10 +19,13 @@ import datetime
 
 from django.utils import timezone
 
-#: The week grid's default visible hours -- expanded automatically (see week_grid)
-#: if an event falls outside it, so nothing is ever clipped out of view.
-DEFAULT_DAY_START_HOUR = 8
-DEFAULT_DAY_END_HOUR = 22
+#: The week grid's visible hours -- the full day, always, so nothing is ever
+#: scrolled out of view regardless of what time events happen to fall at (this
+#: used to default to a narrower 08:00-22:00 window, only widening for events
+#: outside it -- a very early or very late one still left the grid clipped at
+#: the other end, e.g. midnight..22:00 rather than the full day).
+DEFAULT_DAY_START_HOUR = 0
+DEFAULT_DAY_END_HOUR = 24
 
 #: Floor on a block's rendered height, in percent of the visible hour span -- a very
 #: short event (a 15-minute weigh-in) would otherwise render as a sliver too thin to

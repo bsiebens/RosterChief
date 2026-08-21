@@ -1388,27 +1388,28 @@ class CalendarGridTests(EventsTestBase):
     def test_add_months_rolls_over_the_year(self):
         self.assertEqual(add_months(date(2026, 11, 15), 2), date(2027, 1, 1))
 
-    def test_week_grid_places_an_event_within_the_default_hours(self):
+    def test_week_grid_always_covers_the_full_day(self):
         monday = date(2026, 8, 17)
         event = self.make_event(start=self.at(monday, 10), end=self.at(monday, 11, 30))
 
         grid = week_grid([event], monday)
 
-        self.assertEqual(grid["day_start_hour"], 8)
-        self.assertEqual(grid["day_end_hour"], 22)
-        span = 22 - 8
+        self.assertEqual(grid["day_start_hour"], 0)
+        self.assertEqual(grid["day_end_hour"], 24)
+        self.assertEqual(grid["hours"], list(range(0, 25)))
+        span = 24
         block = grid["days"][0]["blocks"][0]
-        self.assertAlmostEqual(block["top_pct"], 100 * (10 - 8) / span, places=2)
+        self.assertAlmostEqual(block["top_pct"], 100 * 10 / span, places=2)
         self.assertAlmostEqual(block["height_pct"], 100 * 1.5 / span, places=2)
 
-    def test_week_grid_expands_the_hours_for_an_early_or_late_event(self):
+    def test_week_grid_still_covers_an_event_starting_at_midnight_or_ending_near_it(self):
         monday = date(2026, 8, 17)
-        event = self.make_event(start=self.at(monday, 6), end=self.at(monday, 23))
+        event = self.make_event(start=self.at(monday, 0), end=self.at(monday, 23, 45))
 
         grid = week_grid([event], monday)
 
-        self.assertEqual(grid["day_start_hour"], 6)
-        self.assertEqual(grid["day_end_hour"], 23)
+        self.assertEqual(grid["day_start_hour"], 0)
+        self.assertEqual(grid["day_end_hour"], 24)
 
     def test_week_grid_excludes_events_outside_the_week(self):
         monday = date(2026, 8, 17)
