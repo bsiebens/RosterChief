@@ -15,6 +15,11 @@ JOB_REGISTRY = {
         "description": _("Materialises recurring event occurrences up to the rolling horizon, so the calendar never runs dry."),
         "schedule": _("Daily at 03:00"),
     },
+    "events.tasks.send_deadline_reminders": {
+        "label": _("Send deadline reminders"),
+        "description": _("Nudges whoever still hasn't answered an event, one week before its answer deadline (or its start, when no deadline is set)."),
+        "schedule": _("Daily at 07:00"),
+    },
     "billing.tasks.renew_subscriptions": {
         "label": _("Renew subscriptions"),
         "description": _("Opens the next billing period for clubs whose current one is running out."),

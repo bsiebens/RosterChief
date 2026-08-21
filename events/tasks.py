@@ -3,6 +3,8 @@
 notifying members when a new event needs their RSVP.
 """
 
+import datetime
+
 from celery import shared_task
 from django.utils import timezone
 from django.utils.translation import gettext as _
@@ -12,6 +14,10 @@ from events.services import generate_occurrences, horizon
 from features.models import Maintenance
 from members.models import Member
 from notifications.services import notify_members
+
+#: How long before an event's answer deadline (or, when it has none, its own
+#: start) send_deadline_reminders below nudges whoever still hasn't answered.
+DEADLINE_REMINDER_LEAD_TIME = datetime.timedelta(days=7)
 
 
 @shared_task(name="events.tasks.extend_event_series")
@@ -57,3 +63,53 @@ def notify_new_event(event_id):
     body = _("New %(kind)s: %(when)s. Let us know if you can make it.") % {"kind": event.get_kind_display(), "when": when}
     notifications = notify_members(members, club=event.club, title=event.title, body=body, source=event)
     return f"Notified {len(notifications)} member(s)."
+
+
+@shared_task(name="events.tasks.send_deadline_reminders")
+def send_deadline_reminders():
+    """One reminder push per event, DEADLINE_REMINDER_LEAD_TIME before whichever
+    cutoff matters -- the event's own answer deadline, or its start when no
+    deadline is set -- to whoever still hasn't answered.
+
+    Unlike notify_new_event above (fired once, on-demand, from a staff
+    member manually planning a single event), this is the periodic sweep
+    that also catches a recurring series' occurrences, which never go
+    through that on-creation path at all -- bulk-generating a season's
+    worth of practices in one go and notifying everyone about each
+    individually would be exactly the flood notify_new_event's own
+    docstring says to avoid. Idempotent via Event.deadline_reminder_sent_at:
+    safe to run as often as CELERY_BEAT_SCHEDULE likes without
+    double-notifying, and if a run is ever missed, the next one still
+    catches anything whose window hasn't fully closed yet.
+    """
+    if Maintenance.is_on():
+        raise RuntimeError("Platform is in maintenance mode; this job stood down.")
+
+    now = timezone.now()
+    events_reminded = 0
+    members_notified = 0
+
+    candidates = Event.objects.filter(cancelled=False, deadline_reminder_sent_at__isnull=True, start__gt=now).select_related("club")
+    for event in candidates:
+        cutoff = event.deadline or event.start
+        reminder_at = cutoff - DEADLINE_REMINDER_LEAD_TIME
+        if not (reminder_at <= now < cutoff):
+            continue
+
+        member_ids = Attendance.objects.filter(event=event, status=Attendance.AttendanceStatus.NO_RESPONSE).values_list("member_id", flat=True)
+        members = Member.objects.filter(id__in=member_ids)
+        if members:
+            when = timezone.localtime(event.start).strftime("%a %d %b, %H:%M")
+            body = _("Reminder: %(kind)s on %(when)s still needs your answer.") % {"kind": event.get_kind_display(), "when": when}
+            notify_members(members, club=event.club, title=event.title, body=body, source=event)
+            members_notified += len(members)
+
+        # Marked processed even when nobody was NO_RESPONSE at the time -- the
+        # window only opens once per event, not "keep checking until someone
+        # answers" (that would just mean it fires the moment they stop being
+        # NO_RESPONSE for an unrelated reason, e.g. answering after the window).
+        event.deadline_reminder_sent_at = now
+        event.save(update_fields=["deadline_reminder_sent_at", "modified"])
+        events_reminded += 1
+
+    return f"Reminded {members_notified} member(s) across {events_reminded} event(s)."

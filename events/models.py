@@ -98,6 +98,13 @@ class Event(ClubScopedModel):
 
     max_referees = models.PositiveSmallIntegerField(_("max referees"), default=2, help_text=_("How many referees can be assigned to this game. Only meaningful for home games -- ignored otherwise."))
 
+    deadline_reminder_sent_at = models.DateTimeField(
+        _("deadline reminder sent at"),
+        null=True,
+        blank=True,
+        help_text=_("Set once events.tasks.send_deadline_reminders has nudged whoever still hasn't answered -- keeps that job from reminding the same event twice."),
+    )
+
     class Meta:
         verbose_name = _("event")
         verbose_name_plural = _("events")

@@ -3,6 +3,7 @@ from decimal import Decimal
 from io import StringIO
 
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
 from django.db import IntegrityError
@@ -12,7 +13,9 @@ from waffle import get_waffle_flag_model
 
 from club.models import Club, ClubMembership, OnboardingRequirement, Season
 from club.services.onboarding import mark_bypassed, mark_complete
+from features.models import Maintenance
 from members.models import Group, GroupMembership, Member
+from notifications.models import Notification
 from teams.models import Position, RefereeLevel, RefereeProfile, Team, TeamMembership
 
 from .admin import EventAdminForm
@@ -33,6 +36,7 @@ from .services import (
 from .services.calendar import add_months, month_bounds, month_grid, season_grid, week_bounds, week_grid
 from .services.rbihf_import import RBIHFImportError, apply_plan, build_plan, extract_team_id, parse_fixtures, suggested_location, suggested_opponent
 from .services.referees import RefereeAssignmentError, add_external_referee, assign_referee, conflicting_events, eligible_referees, needs_referee_management, remove_referee, set_referee_fee
+from .tasks import send_deadline_reminders
 
 
 class EventsTestBase(TestCase):
@@ -1481,3 +1485,96 @@ class CalendarGridTests(EventsTestBase):
         cell = next(cell for week in september["weeks"] for cell in week if cell["date"] == date(2026, 9, 5))
         self.assertEqual(cell["count"], 1)
         self.assertNotIn("events", cell)
+
+
+class SendDeadlineRemindersTests(EventsTestBase):
+    """events.tasks.send_deadline_reminders -- one reminder push per event,
+    a week before whichever cutoff matters (its own deadline, or its start
+    when no deadline is set), to whoever's still NO_RESPONSE. This is the
+    periodic sweep that also catches a recurring series' occurrences, which
+    never go through notify_new_event's on-creation path at all."""
+
+    def setUp(self):
+        # Maintenance.save() writes through to the cache (see that model's own
+        # docstring) -- a DB rollback between tests doesn't clear it, so the
+        # maintenance-mode test below would otherwise leak into every test that
+        # happens to run after it.
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def make_event_with_roster(self, **kwargs):
+        event = self.make_event(**kwargs)
+        event.teams.add(self.team)
+        return event
+
+    def test_reminds_within_the_window_before_the_deadline(self):
+        event = self.make_event_with_roster(start=timezone.now() + timedelta(days=10), deadline=timezone.now() + timedelta(days=6))
+
+        result = send_deadline_reminders()
+
+        self.assertTrue(Notification.objects.filter(member=self.alice, title=event.title).exists())
+        self.assertTrue(Notification.objects.filter(member=self.bob, title=event.title).exists())
+        self.assertIn("Reminded 2 member(s) across 1 event(s)", result)
+
+    def test_falls_back_to_the_event_start_when_no_deadline_is_set(self):
+        event = self.make_event_with_roster(start=timezone.now() + timedelta(days=6), deadline=None)
+
+        send_deadline_reminders()
+
+        self.assertTrue(Notification.objects.filter(member=self.alice, title=event.title).exists())
+
+    def test_does_not_remind_before_the_window_opens(self):
+        self.make_event_with_roster(start=timezone.now() + timedelta(days=30), deadline=timezone.now() + timedelta(days=20))
+
+        send_deadline_reminders()
+
+        self.assertFalse(Notification.objects.exists())
+
+    def test_does_not_remind_after_the_deadline_has_passed(self):
+        # Deadline already gone, but the event itself hasn't started yet -- the
+        # window is closed, not "still open and overdue".
+        self.make_event_with_roster(start=timezone.now() + timedelta(days=2), deadline=timezone.now() - timedelta(hours=1))
+
+        send_deadline_reminders()
+
+        self.assertFalse(Notification.objects.exists())
+
+    def test_only_notifies_members_who_have_not_answered(self):
+        event = self.make_event_with_roster(start=timezone.now() + timedelta(days=10), deadline=timezone.now() + timedelta(days=6))
+        Attendance.objects.filter(event=event, member=self.alice).update(status=Attendance.AttendanceStatus.PRESENT)
+
+        send_deadline_reminders()
+
+        self.assertFalse(Notification.objects.filter(member=self.alice).exists())
+        self.assertTrue(Notification.objects.filter(member=self.bob).exists())
+
+    def test_does_not_notify_the_same_event_twice(self):
+        self.make_event_with_roster(start=timezone.now() + timedelta(days=10), deadline=timezone.now() + timedelta(days=6))
+
+        send_deadline_reminders()
+        Notification.objects.all().delete()
+        send_deadline_reminders()
+
+        self.assertFalse(Notification.objects.exists())
+
+    def test_marks_the_event_processed_even_when_nobody_needed_notifying(self):
+        event = self.make_event_with_roster(start=timezone.now() + timedelta(days=10), deadline=timezone.now() + timedelta(days=6))
+        Attendance.objects.filter(event=event).update(status=Attendance.AttendanceStatus.PRESENT)
+
+        send_deadline_reminders()
+
+        event.refresh_from_db()
+        self.assertIsNotNone(event.deadline_reminder_sent_at)
+
+    def test_skips_a_cancelled_event(self):
+        self.make_event_with_roster(start=timezone.now() + timedelta(days=10), deadline=timezone.now() + timedelta(days=6), cancelled=True)
+
+        send_deadline_reminders()
+
+        self.assertFalse(Notification.objects.exists())
+
+    def test_raises_during_maintenance_instead_of_silently_skipping(self):
+        Maintenance.start(user=None)
+
+        with self.assertRaises(RuntimeError):
+            send_deadline_reminders()
