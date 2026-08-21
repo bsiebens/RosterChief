@@ -3,16 +3,16 @@
 
 {% comment %}
     M3 -- design_handoff_rosterchief_platform/README.md's M3 section: a full-
-    width chronological agenda, grouped under "This week"/"Next week" (see
-    CalendarView's own docstring for the browsing-window judgment call --
-    current + next calendar week, no further paging). No person switcher and
-    no club-wide toggle here -- always every event self.managed_people is
-    invited to, full stop. A real, working ?kind= filter (All/Games/
-    Practices) stands in for the design mock's "Games only" pill; its List/
-    Month toggle isn't reproduced -- that's a second view mode, not a filter.
-    -mx-4 (on the row groups only, not this filter row) breaks the rows out
-    of base.html's shared page padding so they run edge-to-edge, matching
-    the design canvas's own M3 markup.
+    width chronological agenda, grouped under "This week"/"Next week", then
+    everything further out grouped by calendar month (see CalendarView's own
+    docstring -- later_months is a list of {month_start, rows}). No person
+    switcher and no club-wide toggle here -- always every event
+    self.managed_people is invited to, full stop. A real, working ?kind=
+    filter (All/Games/Practices) stands in for the design mock's "Games only"
+    pill; its List/Month toggle isn't reproduced -- that's a second view
+    mode, not a filter. -mx-4 (on the row groups only, not this filter row)
+    breaks the rows out of base.html's shared page padding so they run
+    edge-to-edge, matching the design canvas's own M3 markup.
 {% endcomment %}
 
 {% block header_extra %}
@@ -42,15 +42,15 @@
                     <p class="mt-1 text-sm text-muted">{% trans "Once you're linked to a member record, their schedule will show up here." %}</p>
                 </div>
             </div>
-        {% elif not this_week and not next_week %}
+        {% elif not this_week and not next_week and not later_months %}
             <div class="mx-4">
                 <div class="m-card p-6 text-center">
                     {% if kind_filter == "game" %}
-                        <p class="text-sm text-muted">{% trans "No games in the next two weeks." %}</p>
+                        <p class="text-sm text-muted">{% trans "No games scheduled." %}</p>
                     {% elif kind_filter == "training" %}
-                        <p class="text-sm text-muted">{% trans "No practices in the next two weeks." %}</p>
+                        <p class="text-sm text-muted">{% trans "No practices scheduled." %}</p>
                     {% else %}
-                        <p class="text-sm text-muted">{% trans "Nothing scheduled in the next two weeks." %}</p>
+                        <p class="text-sm text-muted">{% trans "Nothing scheduled." %}</p>
                     {% endif %}
                 </div>
             </div>
@@ -76,6 +76,17 @@
                     </div>
                 </div>
             {% endif %}
+
+            {% for month in later_months %}
+                <div>
+                    <div class="sticky top-0 z-10 bg-paper px-4 py-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{{ month.month_start|date:"F Y" }}</div>
+                    <div class="flex flex-col gap-px bg-line">
+                        {% for row in month.rows %}
+                            {% include "mobile/_calendar_row.html" %}
+                        {% endfor %}
+                    </div>
+                </div>
+            {% endfor %}
         {% endif %}
     </div>
 {% endblock content %}

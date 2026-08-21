@@ -619,7 +619,10 @@ class CalendarViewTests(TestCase):
         return Event.objects.create(**kwargs)
 
     def _events_in_context(self, response):
-        return {row["event"] for row in response.context["this_week"] + response.context["next_week"]}
+        rows = response.context["this_week"] + response.context["next_week"]
+        for month in response.context["later_months"]:
+            rows += month["rows"]
+        return {row["event"] for row in rows}
 
     def add_child(self, first_name="Noor"):
         family = Family.objects.create(name="Bakker")
@@ -724,10 +727,8 @@ class CalendarViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "No one to show yet")
 
-    def test_events_outside_the_two_week_window_are_excluded(self):
-        far_future = self.make_event(title="Far future game", start=timezone.now() + datetime.timedelta(days=30))
+    def test_past_events_are_excluded(self):
         past = self.make_event(title="Past practice", start=timezone.now() - datetime.timedelta(days=1))
-        Attendance.objects.create(event=far_future, member=self.member)
         Attendance.objects.create(event=past, member=self.member)
         self.client.force_login(self.user)
 
@@ -735,12 +736,42 @@ class CalendarViewTests(TestCase):
 
         self.assertEqual(self._events_in_context(response), set())
 
+    def test_events_beyond_next_week_are_grouped_by_month(self):
+        far_future = self.make_event(title="Far future game", start=timezone.now() + datetime.timedelta(days=45))
+        Attendance.objects.create(event=far_future, member=self.member)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertIn(far_future, self._events_in_context(response))
+        later_months = response.context["later_months"]
+        self.assertEqual(len(later_months), 1)
+        month_start = timezone.localtime(far_future.start).date().replace(day=1)
+        self.assertEqual(later_months[0]["month_start"], month_start)
+        self.assertEqual([row["event"] for row in later_months[0]["rows"]], [far_future])
+        self.assertContains(response, month_start.strftime("%B %Y"))
+
+    def test_further_out_events_are_split_across_separate_month_groups(self):
+        # >=32 days apart guarantees two different calendar months regardless
+        # of which day-of-month "today" happens to be (the longest month is
+        # 31 days), so this can't flake depending on when the suite runs.
+        this_month = self.make_event(title="This month game", start=timezone.now() + datetime.timedelta(days=45))
+        next_month = self.make_event(title="Next month game", start=timezone.now() + datetime.timedelta(days=80))
+        Attendance.objects.create(event=this_month, member=self.member)
+        Attendance.objects.create(event=next_month, member=self.member)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        later_months = response.context["later_months"]
+        self.assertEqual(len(later_months), 2)
+
     def test_window_covers_at_least_fourteen_days_regardless_of_which_weekday_today_is(self):
-        # Regression: the window used to be pinned to "through next calendar
-        # week's Sunday", which shrank to as little as 8-9 days whenever today
-        # fell late in the week -- an event 13 days out (a noon start, so
-        # today's own time-of-day can't push it across a date boundary) must
-        # always still show, whatever day the test happens to run on.
+        # An event 13 days out (a noon start, so today's own time-of-day can't
+        # push it across a date boundary) must always still show up somewhere
+        # on the agenda, whatever day the test happens to run on -- whether
+        # that's "Next week" or (on weekdays where the calendar week ends
+        # sooner) the first month group.
         thirteen_days_out = timezone.make_aware(datetime.datetime.combine(timezone.localdate() + datetime.timedelta(days=13), datetime.time(12, 0)))
         event = self.make_event(title="Two weeks out", start=thirteen_days_out)
         Attendance.objects.create(event=event, member=self.member)

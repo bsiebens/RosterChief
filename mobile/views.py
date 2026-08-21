@@ -5,6 +5,7 @@ routes here yet.
 """
 
 import datetime
+import itertools
 import json
 
 from django.contrib.auth.mixins import LoginRequiredMixin
@@ -274,15 +275,12 @@ class HomeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
 class CalendarView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
     """M3 -- README's M3 section: a chronological agenda list (not the desktop
     week/month grid events.services.calendar was built for) grouped under
-    "This week"/"Next week". Browsing-window judgment call: the design doc
-    doesn't specify month navigation for the mobile screen, so this only ever
-    shows *upcoming* events within the next 14 days (no "Later"/past bucket,
-    no ?month= paging) -- a simple, bounded agenda rather than a full season
-    browser. The window is always >= 14 days from today, not just "through
-    next calendar week's Sunday" -- pinning it to the calendar week alone
-    would shrink the effective lookahead to as little as 8-9 days whenever
-    today falls late in the week, silently dropping events a member would
-    expect to still see (see get_context_data's window_end_date).
+    "This week"/"Next week", then everything further out grouped by calendar
+    month (a "later_months" list of {month_start, rows}, each its own sticky
+    header) -- an unbounded agenda rather than a fixed lookahead window, since
+    a hard cutoff just hid events a member would reasonably expect to still
+    find here. No ?month= paging beyond that grouping -- there's no season
+    browser here, just "everything upcoming, readably grouped".
 
     Always scoped to every one of ``self.managed_people`` -- unlike Home,
     this screen has no person switcher and no "every club event" toggle: it's
@@ -317,12 +315,7 @@ class CalendarView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         now = timezone.now()
         today = timezone.localdate()
         _this_week_start, this_week_end = week_bounds(today)
-        # At least 14 days out from today, not just "through next calendar week's
-        # Sunday" -- that alone shrinks to as little as 8-9 days when today falls
-        # late in the week (e.g. today=Friday puts next_week_end only 9 days out),
-        # silently dropping events a member would reasonably expect to still see.
-        window_end_date = max(this_week_end + datetime.timedelta(days=7), today + datetime.timedelta(days=13))
-        window_end = timezone.make_aware(datetime.datetime.combine(window_end_date, datetime.time.max))
+        next_week_end = this_week_end + datetime.timedelta(days=7)
         kind_filter = self.request.GET.get("kind")
 
         rows = []
@@ -333,7 +326,6 @@ class CalendarView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
                     event__club=self.request.club,
                     event__cancelled=False,
                     event__start__gte=now,
-                    event__start__lte=window_end,
                 )
                 .select_related("event", "event__location", "event__opponent", "member")
                 .prefetch_related("event__teams")
@@ -350,12 +342,24 @@ class CalendarView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
                 for attendance in attendances
             ]
 
-        this_week, next_week = [], []
+        this_week, next_week, later_rows = [], [], []
         for row in rows:
-            bucket = this_week if timezone.localtime(row["event"].start).date() <= this_week_end else next_week
-            bucket.append(row)
+            event_date = timezone.localtime(row["event"].start).date()
+            if event_date <= this_week_end:
+                this_week.append(row)
+            elif event_date <= next_week_end:
+                next_week.append(row)
+            else:
+                later_rows.append(row)
 
-        return super().get_context_data(this_week=this_week, next_week=next_week, kind_filter=kind_filter if kind_filter in self.KIND_FILTERS else "", **kwargs)
+        # ``rows`` is already start-ordered, so a plain groupby (no sorting) is
+        # enough to split later_rows into one chronological run per month.
+        later_months = [
+            {"month_start": month_start, "rows": list(month_rows)}
+            for month_start, month_rows in itertools.groupby(later_rows, key=lambda row: timezone.localtime(row["event"].start).date().replace(day=1))
+        ]
+
+        return super().get_context_data(this_week=this_week, next_week=next_week, later_months=later_months, kind_filter=kind_filter if kind_filter in self.KIND_FILTERS else "", **kwargs)
 
 
 class EventDetailView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
