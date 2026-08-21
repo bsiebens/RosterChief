@@ -208,6 +208,17 @@
         font-size: 0.75rem;
     }
 
+    /* Scrolls normally, just without the visible scrollbar chrome -- for the
+       person-switcher's horizontally-scrolling chip row. */
+    .scrollbar-hide {
+        scrollbar-width: none; /* Firefox */
+        -ms-overflow-style: none; /* old Edge */
+    }
+
+    .scrollbar-hide::-webkit-scrollbar {
+        display: none; /* Chrome/Safari/WebKit */
+    }
+
     /* Role switcher -- design doc "Component" table: full-width segmented pill,
        bg-steel track, active segment bg-white text-ink (member mode). Only rendered
        when the account holds >=1 staff role -- see mobile/templates/mobile/base.html. */
