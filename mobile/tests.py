@@ -2132,3 +2132,113 @@ class CoachCreateNewsViewTests(TestCase):
 
         self.assertEqual(response.status_code, 403)
         self.assertFalse(News.objects.filter(title="Blocked post").exists())
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class CoachAddPlayerViewTests(TestCase):
+    """C6 -- bulk-add players to the active team's roster; see
+    CoachAddPlayerView's own docstring for what's scoped down from the
+    design mock."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        today = timezone.localdate()
+        cls.season = Season.objects.create(club=cls.club, start_date=today - datetime.timedelta(days=30), end_date=today + datetime.timedelta(days=300))
+        cls.user = User.objects.create_user(email="coach@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Sam", last_name="Coach", email="coach@example.com", user=cls.user)
+        cls.team = Team.objects.create(club=cls.club, name="U16", short_name="U16")
+        cls.position = Position.objects.create(club=cls.club, name="Head coach", short_name="HC", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=cls.team, member=cls.member, season=cls.season, position=cls.position)
+
+    def make_eligible_member(self, first_name="Anna", last_name="Player"):
+        member = Member.objects.create(first_name=first_name, last_name=last_name)
+        ClubMembership.objects.create(club=self.club, member=member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE, kind=ClubMembership.Kind.MEMBER)
+        return member
+
+    def test_requires_login(self):
+        response = self.client.get(reverse("mobile:coach_add_player"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 302)
+
+    def test_get_redirects_a_non_managing_staffer(self):
+        physio_position = Position.objects.create(club=self.club, name="Physio", short_name="PHY", staff_position=True, management_position=False)
+        physio_user = User.objects.create_user(email="physio@example.com", password="pw-secret-123")
+        physio_member = Member.objects.create(first_name="Pat", last_name="Physio", user=physio_user)
+        StaffAssignment.objects.create(team=self.team, member=physio_member, season=self.season, position=physio_position)
+        self.client.force_login(physio_user)
+
+        response = self.client.get(reverse("mobile:coach_add_player"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertRedirects(response, reverse("mobile:coach_today"), fetch_redirect_response=False)
+
+    def test_lists_eligible_members_not_already_on_the_roster(self):
+        eligible = self.make_eligible_member()
+        already_on_roster = self.make_eligible_member(first_name="On", last_name="Roster")
+        TeamMembership.objects.create(team=self.team, member=already_on_roster, season=self.season)
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mobile:coach_add_player"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        candidates = response.context["candidates"]
+        self.assertIn(eligible, candidates)
+        self.assertNotIn(already_on_roster, candidates)
+
+    def test_no_team_filter_excludes_members_on_any_team_this_season(self):
+        on_other_team = self.make_eligible_member(first_name="Other", last_name="Team")
+        other_team = Team.objects.create(club=self.club, name="U14", short_name="U14")
+        TeamMembership.objects.create(team=other_team, member=on_other_team, season=self.season)
+        unrostered = self.make_eligible_member(first_name="No", last_name="Team")
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mobile:coach_add_player") + "?filter=no_team", HTTP_HOST="ajax-united.rosterchief.app")
+
+        candidates = response.context["candidates"]
+        self.assertIn(unrostered, candidates)
+        self.assertNotIn(on_other_team, candidates)
+
+    def test_suggested_filter_matches_last_seasons_roster(self):
+        previous_season = Season.objects.create(club=self.club, start_date=self.season.start_date - datetime.timedelta(days=365), end_date=self.season.start_date - datetime.timedelta(days=1))
+        returning = self.make_eligible_member(first_name="Returning", last_name="Player")
+        TeamMembership.objects.create(team=self.team, member=returning, season=previous_season)
+        new_signup = self.make_eligible_member(first_name="New", last_name="Signup")
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mobile:coach_add_player") + "?filter=suggested", HTTP_HOST="ajax-united.rosterchief.app")
+
+        candidates = response.context["candidates"]
+        self.assertEqual(list(candidates), [returning])
+        self.assertNotIn(new_signup, candidates)
+
+    def test_post_adds_selected_members_to_the_roster(self):
+        first = self.make_eligible_member(first_name="First", last_name="Pick")
+        second = self.make_eligible_member(first_name="Second", last_name="Pick")
+        self.client.force_login(self.user)
+
+        response = self.client.post(reverse("mobile:coach_add_player"), {"member": [str(first.pk), str(second.pk)]}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertRedirects(response, reverse("mobile:coach_today"), fetch_redirect_response=False)
+        self.assertTrue(TeamMembership.objects.filter(team=self.team, season=self.season, member=first).exists())
+        self.assertTrue(TeamMembership.objects.filter(team=self.team, season=self.season, member=second).exists())
+
+    def test_post_ignores_a_member_id_outside_the_eligible_pool(self):
+        ineligible = Member.objects.create(first_name="Not", last_name="Eligible")
+        self.client.force_login(self.user)
+
+        response = self.client.post(reverse("mobile:coach_add_player"), {"member": [str(ineligible.pk)]}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertRedirects(response, reverse("mobile:coach_today"), fetch_redirect_response=False)
+        self.assertFalse(TeamMembership.objects.filter(team=self.team, member=ineligible).exists())
+
+    def test_non_managing_staff_cannot_post(self):
+        physio_position = Position.objects.create(club=self.club, name="Physio", short_name="PHY", staff_position=True, management_position=False)
+        physio_user = User.objects.create_user(email="physio@example.com", password="pw-secret-123")
+        physio_member = Member.objects.create(first_name="Pat", last_name="Physio", user=physio_user)
+        StaffAssignment.objects.create(team=self.team, member=physio_member, season=self.season, position=physio_position)
+        candidate = self.make_eligible_member()
+        self.client.force_login(physio_user)
+
+        response = self.client.post(reverse("mobile:coach_add_player"), {"member": [str(candidate.pk)]}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(TeamMembership.objects.filter(team=self.team, member=candidate).exists())

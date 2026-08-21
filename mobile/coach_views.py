@@ -12,8 +12,10 @@ from django.shortcuts import get_object_or_404
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
+from django.utils.translation import ngettext
 from django.views.generic import TemplateView
 
+from club.models import Season
 from club.services.access import can_add_news, current_season
 from controlpanel.messages import notify
 from events.models import Attendance, Event
@@ -23,6 +25,7 @@ from management.forms import EventForm, NewsForm
 from news.models import News
 from news.services import notify_editors_of_pending_review
 from teams.models import Team, TeamMembership
+from teams.services import eligible_roster_members
 
 from .coach_mixins import CoachScopeMixin
 from .forms import _INPUT_CLASSES
@@ -329,4 +332,90 @@ class CoachCreateNewsView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
 
         body = _("“%(news)s” is ready for review.") % {"news": news_item}
         notify(request, f"s|{_('Sent for review')}|{body}")
+        return HttpResponseRedirect(reverse("mobile:coach_today"))
+
+
+class CoachAddPlayerView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
+    """C6 -- bulk-add players to the active team's roster: a checkbox per
+    candidate rather than management.forms.TeamMembershipForm's one-member-
+    at-a-time shape, which doesn't fit a "tap a few names, add them" flow
+    anyway (the mock itself shows plain checkboxes, no inline position
+    picker). A coach sets jersey number/position afterward on the desktop --
+    same as any roster spot added blank via the Sign-up page today
+    (TeamMembership.position's own help_text already documents this as a
+    normal, expected state, not a shortcut this screen invents).
+
+    The pool is teams.services.eligible_roster_members(club) minus whoever's
+    already on this team+season -- the same two rules TeamMembershipForm
+    applies internally, just reused directly rather than through the form.
+    "Suggested" (on this team last season) is real, computed data. "Age
+    eligible" from the mock isn't built -- neither Club nor Team carries an
+    age-group field to compare a birth date against, so faking that filter
+    would just mean it silently matched nothing.
+    """
+
+    template_name = "mobile/coach/add_player.html"
+    screen_title = _("Add players")
+    active_tab = "coach_today"
+
+    #: ?filter= values this screen understands -- anything else (including no
+    #: param at all) means "All".
+    FILTERS = {"suggested", "no_team"}
+
+    def get(self, request, *args, **kwargs):
+        if not self.can_manage_active_team:
+            return HttpResponseRedirect(reverse("mobile:coach_today"))
+        return super().get(request, *args, **kwargs)
+
+    def _candidate_pool(self, season):
+        taken = TeamMembership.objects.filter(team=self.active_team, season=season).values_list("member_id", flat=True)
+        return eligible_roster_members(self.request.club).exclude(pk__in=taken)
+
+    def get_context_data(self, **kwargs):
+        season = current_season(self.request.club)
+        candidates = []
+        squad_count = 0
+
+        filter_param = self.request.GET.get("filter")
+        if filter_param not in self.FILTERS:
+            filter_param = ""
+
+        if self.active_team is not None and season is not None:
+            squad_count = TeamMembership.objects.filter(team=self.active_team, season=season).count()
+            pool = self._candidate_pool(season)
+
+            if filter_param == "no_team":
+                pool = pool.exclude(team_memberships__season=season)
+            elif filter_param == "suggested":
+                previous_season = Season.before(self.request.club, season)
+                pool = pool.filter(team_memberships__team=self.active_team, team_memberships__season=previous_season) if previous_season is not None else pool.none()
+
+            candidates = list(pool.distinct().order_by("last_name", "first_name"))
+
+        return super().get_context_data(
+            candidates=candidates,
+            squad_count=squad_count,
+            filter_param=filter_param,
+            **kwargs,
+        )
+
+    def post(self, request, *args, **kwargs):
+        if not self.can_manage_active_team:
+            return HttpResponseForbidden()
+
+        season = current_season(request.club)
+        if self.active_team is None or season is None:
+            return HttpResponseForbidden()
+
+        pool_ids = {str(pk) for pk in self._candidate_pool(season).values_list("pk", flat=True)}
+        added = 0
+        for member_id in request.POST.getlist("member"):
+            if member_id not in pool_ids:
+                continue
+            TeamMembership.objects.get_or_create(team=self.active_team, season=season, member_id=member_id)
+            added += 1
+
+        if added:
+            body = ngettext("%(count)d player added to the roster.", "%(count)d players added to the roster.", added) % {"count": added}
+            notify(request, f"s|{_('Roster updated')}|{body}")
         return HttpResponseRedirect(reverse("mobile:coach_today"))
