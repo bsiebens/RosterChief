@@ -20,7 +20,7 @@
     <p class="text-sm text-muted">{% trans "Subscribe this link in your phone or computer's calendar app to see everyone you manage's schedule alongside your own. It includes every event they're invited to, not just the ones they've replied to." %}</p>
 
     <div class="m-card p-4">
-        <a class="btn btn-primary flex w-full items-center justify-center" href="{{ webcal_url }}">{% trans "Add to calendar" %}</a>
+        <a class="btn btn-primary flex w-full items-center justify-center" href="{{ webcal_url }}" hx-boost="false">{% trans "Add to calendar" %}</a>
         <p class="mt-2 text-center text-xs text-dim">{% trans "Opens directly in Apple/macOS Calendar. On Android or a desktop calendar app, copy the link below and add it as a new calendar by URL." %}</p>
 
         <div class="mt-4" x-data="{ copied: false }">

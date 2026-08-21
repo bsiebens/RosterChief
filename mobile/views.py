@@ -535,7 +535,7 @@ class MeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
     "Payments & dues" does lead somewhere -- PaymentsView below -- with its
     "N OPEN" pill only rendered once there's actually a balance owed.
 
-    "Teams I coach" is new, beyond the mockup: one row per current-season
+    "Teams I coach/manage" is new, beyond the mockup: one row per current-season
     StaffAssignment self.me holds (team + position/role), each linking
     straight into Coach mode for that team (mobile:coach_today?team=<pk>,
     which mobile.coach_mixins.CoachScopeMixin's own ?team= handling already

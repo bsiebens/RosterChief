@@ -12,6 +12,17 @@
     account with >=1 current-season staff assignment -- mobile/mixins.py's
     PersonScopeMixin) -- Coach mode (C1-C6, mobile/coach_views.py) is being
     built out screen by screen; only what's actually shipped is linked to.
+
+    hx-boost="true" on <body>: every same-shell link/form becomes an AJAX
+    navigation (swapping <body>'s children, pushing the URL) instead of a
+    full browser reload -- the SPA-like feel without an SPA. Only <body>'s
+    *children* swap, not the tag itself, so anything that crosses into the
+    differently-styled Coach shell (coach/base.html: bg-ink vs this page's
+    bg-paper, its own hx-headers/data attrs) is marked hx-boost="false" to
+    force a real navigation instead -- a boosted cross-shell swap would leave
+    the OLD shell's <body> class/attributes in place under the NEW shell's
+    content. See coach/base.html's own comment for the same rule mirrored
+    the other direction.
 {% endcomment %}
 <!DOCTYPE html>
 <html lang="{{ LANGUAGE_CODE|default:"en" }}">
@@ -51,7 +62,7 @@
         {% block extra_head %}{% endblock extra_head %}
     </head>
 
-    <body class="flex h-screen flex-col overflow-hidden bg-paper font-sans text-slate" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' data-vapid-public-key="{{ vapid_public_key }}" data-csrftoken="{{ csrf_token }}">
+    <body class="flex h-screen flex-col overflow-hidden bg-paper font-sans text-slate" hx-boost="true" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' data-vapid-public-key="{{ vapid_public_key }}" data-csrftoken="{{ csrf_token }}">
         <header class="app-header">
             <div class="flex items-center gap-2.5">
                 <a class="flex items-center gap-2.5" href="{% url "mobile:home" %}">
@@ -78,7 +89,7 @@
             {% if has_coach_access %}
                 <div class="role-switcher">
                     <a class="role-switcher-item role-switcher-item-active" href="{% url "mobile:home" %}">{% trans "Member" %}</a>
-                    <a class="role-switcher-item" href="{% url "mobile:coach_today" %}">{% trans "Coach" %}</a>
+                    <a class="role-switcher-item" href="{% url "mobile:coach_today" %}" hx-boost="false">{% trans "Manager" %}</a>
                 </div>
             {% endif %}
             {% block header_extra %}{% endblock header_extra %}

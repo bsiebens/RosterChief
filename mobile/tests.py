@@ -1348,7 +1348,7 @@ class MeViewTests(TestCase):
 
         response = self._get()
 
-        self.assertNotContains(response, "Teams I coach")
+        self.assertNotContains(response, "Teams I coach/manage")
 
     def test_teams_card_lists_each_current_season_staff_assignment(self):
         team = Team.objects.create(club=self.club, name="U16", short_name="U16")
@@ -1358,7 +1358,7 @@ class MeViewTests(TestCase):
 
         response = self._get()
 
-        self.assertContains(response, "Teams I coach")
+        self.assertContains(response, "Teams I coach/manage")
         self.assertContains(response, "U16")
         self.assertContains(response, "Physio")
         self.assertContains(response, reverse("mobile:coach_today") + "?team=" + str(team.pk))

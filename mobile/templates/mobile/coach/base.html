@@ -13,13 +13,16 @@
     mobile:icon/mobile:service_worker PWA plumbing as Member mode -- one app, one
     manifest, two modes, not two separate PWAs.
 
-    The tab bar only ever links to screens that actually exist. Today (C1) is the only
-    coach screen built so far, so it's the only coach item -- Me reuses the *existing*
-    member mobile:me page rather than a separate coach-Me screen (see CoachTodayView's
-    own docstring). No dead links: as C2/C4/C5/C6 land, they get their own tab/entry
-    point then, not stubbed in ahead of time (same principle mobile/templates/mobile/
-    me.html's own comment already applies to "Household & contacts"/"Coach mode" before
-    this existed).
+    The tab bar deliberately stays minimal (Today + Me) even with all six coach screens
+    built -- C2/C3/C4/C5/C6 are reached from Today's own action buttons and "needs you"
+    list, not separate tab items; Me reuses the *existing* member mobile:me page rather
+    than a separate coach-Me screen (see CoachTodayView's own docstring).
+
+    hx-boost="true" on <body>: every same-shell link/form becomes an AJAX navigation
+    instead of a full browser reload -- see mobile/templates/mobile/base.html's own
+    comment for the full reasoning. Only <body>'s children swap, not the tag itself, so
+    anything that crosses back into the Member shell (bg-paper, its own data attrs) is
+    marked hx-boost="false" to force a real navigation instead.
 {% endcomment %}
 <!DOCTYPE html>
 <html lang="{{ LANGUAGE_CODE|default:"en" }}">
@@ -54,7 +57,7 @@
         {% block extra_head %}{% endblock extra_head %}
     </head>
 
-    <body class="flex h-screen flex-col overflow-hidden bg-ink font-sans text-slate" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' data-csrftoken="{{ csrf_token }}">
+    <body class="flex h-screen flex-col overflow-hidden bg-ink font-sans text-slate" hx-boost="true" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' data-csrftoken="{{ csrf_token }}">
         <header class="coach-header">
             <div class="flex items-center gap-2.5">
                 {% if club.logo %}
@@ -79,8 +82,8 @@
             {% endif %}
 
             <div class="role-switcher">
-                <a class="role-switcher-item" href="{% url "mobile:home" %}">{% trans "Member" %}</a>
-                <a class="role-switcher-item role-switcher-item-active" href="{% url "mobile:coach_today" %}">{% trans "Coach" %}</a>
+                <a class="role-switcher-item" href="{% url "mobile:home" %}" hx-boost="false">{% trans "Member" %}</a>
+                <a class="role-switcher-item role-switcher-item-active" href="{% url "mobile:coach_today" %}">{% trans "Manager" %}</a>
             </div>
 
             {% block header_extra %}{% endblock header_extra %}
