@@ -5,10 +5,12 @@
     M5 -- design_handoff_rosterchief_platform/README.md's M5 section, "Me &
     my people". See MeView's own docstring (mobile/views.py) for the judgment
     calls: no license/eligibility field backing "licence OK", so each row's
-    meta line is real roster data instead; "Household & contacts" and
-    "Payments & dues" have no screen to lead to and are omitted, same for the
-    mockup's "Coach mode" promo (base.html's own precedent -- no Coach mode
-    screens exist yet, so it's never rendered, not even as a dead/inert link).
+    meta line is real roster data instead; "Household & contacts" has no
+    screen to lead to and is omitted, same for the mockup's "Coach mode"
+    promo (base.html's own precedent -- no Coach mode screens exist yet, so
+    it's never rendered, not even as a dead/inert link). "Payments & dues"
+    does lead somewhere (mobile:payments) and carries its "N OPEN" pill only
+    once open_dues_count is actually > 0.
     The avatar/name/subtitle row lives in header_extra -- merged into the
     shared navy app-header (base.html) rather than a separately-coloured
     block of its own, matching the design canvas's own M5 markup.
@@ -67,6 +69,16 @@
         <div class="m-card overflow-hidden">
             <a class="flex items-center gap-3 p-3.5" href="{% url "mobile:edit_profile" me.pk %}">
                 <span class="flex-1 text-[15px] font-semibold text-ink">{% trans "Personal details" %}</span>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" class="shrink-0 text-dim" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>
+            </a>
+            <div class="h-px bg-rule"></div>
+            <a class="flex items-center gap-3 p-3.5" href="{% url "mobile:payments" %}">
+                <span class="flex-1 text-[15px] font-semibold text-ink">{% trans "Payments & dues" %}</span>
+                {% if open_dues_count %}
+                    <span class="pill pill-danger shrink-0">
+                        {% blocktrans count counter=open_dues_count %}{{ counter }} OPEN{% plural %}{{ counter }} OPEN{% endblocktrans %}
+                    </span>
+                {% endif %}
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" class="shrink-0 text-dim" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>
             </a>
             <div class="h-px bg-rule"></div>

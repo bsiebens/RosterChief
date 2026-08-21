@@ -18,6 +18,7 @@ urlpatterns = [
     path("news/", views.NewsListView.as_view(), name="news_list"),
     path("news/<slug:slug>/", views.NewsDetailView.as_view(), name="news_detail"),
     path("me/", views.MeView.as_view(), name="me"),
+    path("me/payments/", views.PaymentsView.as_view(), name="payments"),
     path("me/calendar-sync/", views.CalendarFeedSettingsView.as_view(), name="calendar_feed_settings"),
     path("me/<uuid:member_id>/edit/", views.EditProfileView.as_view(), name="edit_profile"),
     path("notifications/", views.NotificationsView.as_view(), name="notifications"),

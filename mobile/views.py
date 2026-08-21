@@ -23,7 +23,7 @@ from django.views.generic import TemplateView
 
 from club.models import ClubMembership
 from club.services.access import current_season, has_management_access, teams_managed_by
-from club.services.fees import remaining_balance
+from club.services.fees import open_dues_rows
 from club.services.onboarding import checklist_for
 from club.services.sponsors import active_sponsors
 from controlpanel.messages import notify
@@ -229,16 +229,7 @@ class HomeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
 
             season = current_season(self.request.club)
             if season is not None:
-                memberships = (
-                    ClubMembership.objects.filter(club=self.request.club, member__in=people, season=season)
-                    .exclude(fee_status=ClubMembership.FeeStatus.WAIVED)
-                    .select_related("dues_invoice", "member")
-                )
-                for membership in memberships:
-                    balance = remaining_balance(membership)
-                    if balance > 0:
-                        dues_rows.append({"membership": membership, "balance": balance, "invoice": getattr(membership, "dues_invoice", None)})
-
+                dues_rows = open_dues_rows(self.request.club, people, season)
                 team_ids = list(TeamMembership.objects.filter(member__in=people, season=season).values_list("team_id", flat=True))
             else:
                 team_ids = []
@@ -538,10 +529,12 @@ class MeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
     roster), and a settings-ish card linking into M6 (edit_profile) for
     ``self.me`` and into M7 (notifications).
 
-    The mockup's "Household & contacts" and "Payments & dues" rows, and its
-    "Coach mode" promo card, have nowhere to lead in this build (no dedicated
-    screen, no Coach mode screens at all yet -- see base.html's own comment)
-    and are deliberately omitted rather than built as dead or inert links.
+    The mockup's "Household & contacts" row and its "Coach mode" promo card
+    have nowhere to lead in this build (no dedicated screen, no Coach mode
+    screens at all yet -- see base.html's own comment) and are deliberately
+    omitted rather than built as dead or inert links. "Payments & dues" does
+    lead somewhere -- PaymentsView below -- with its "N OPEN" pill only
+    rendered once there's actually a balance owed.
 
     There's no license/eligibility field on Member or ClubMembership to power
     the mockup's "licence OK" text, so each managed person's meta line is
@@ -591,12 +584,34 @@ class MeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
                 }
             people_rows = [{"person": person, "membership": memberships_by_member.get(person.pk)} for person in self.managed_people]
 
+        open_dues_count = len(open_dues_rows(club, self.managed_people, season))
+
         return super().get_context_data(
             member_since=member_since,
             team_manager_label=team_manager_label,
             people_rows=people_rows,
+            open_dues_count=open_dues_count,
             **kwargs,
         )
+
+
+class PaymentsView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
+    """M5's "Payments & dues" row -- every open season-dues balance across
+    ``self.managed_people``, one card per person owed, in the same €-badge /
+    amount+due-date / Pay layout as Home's dues card (club.services.fees.
+    open_dues_rows is the shared source for both). No online payment gateway
+    exists yet, so "Pay" is the same non-functional stub as Home's -- this
+    screen's job is visibility ("what do I owe, and when"), not collection.
+    """
+
+    template_name = "mobile/payments.html"
+    screen_title = _("Payments & dues")
+    active_tab = "me"
+
+    def get_context_data(self, **kwargs):
+        season = current_season(self.request.club)
+        dues_rows = open_dues_rows(self.request.club, self.managed_people, season)
+        return super().get_context_data(dues_rows=dues_rows, **kwargs)
 
 
 class EditProfileView(PersonScopeMixin, LoginRequiredMixin, TemplateView):

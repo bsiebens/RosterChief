@@ -39,7 +39,7 @@ from .services.access import (
     teams_managed_by,
     teams_staffed_by,
 )
-from .services.fees import mark_as_paid, record_payment, remaining_balance
+from .services.fees import mark_as_paid, open_dues_rows, record_payment, remaining_balance
 from .services.invoicing import create_or_resend_invoice, invoice_pdf, invoices_due_for_reminder, recipient_for, resolve_document_address
 from .services.onboarding import (
     annotate_onboarding_status,
@@ -1560,6 +1560,69 @@ class FeeServiceTests(TestCase):
         payment = record_payment(self.membership, amount=Decimal("50.00"), recorded_by=user)
 
         self.assertEqual(payment.recorded_by, user)
+
+
+class OpenDuesRowsTests(TestCase):
+    """club.services.fees.open_dues_rows -- the shared source behind mobile's
+    Home dues card and its Payments & dues screen (mobile/views.py's HomeView
+    and PaymentsView)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        cls.season = make_season(cls.club)
+        cls.member = Member.objects.create(first_name="Jane", last_name="Doe")
+
+    def test_returns_nothing_without_a_season(self):
+        ClubMembership.objects.create(club=self.club, member=self.member, season=self.season, fee_amount=Decimal("150.00"))
+
+        self.assertEqual(open_dues_rows(self.club, [self.member], None), [])
+
+    def test_returns_nothing_without_any_people(self):
+        self.assertEqual(open_dues_rows(self.club, [], self.season), [])
+
+    def test_a_membership_with_a_remaining_balance_is_included(self):
+        membership = ClubMembership.objects.create(club=self.club, member=self.member, season=self.season, fee_amount=Decimal("150.00"))
+
+        rows = open_dues_rows(self.club, [self.member], self.season)
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["membership"], membership)
+        self.assertEqual(rows[0]["balance"], Decimal("150.00"))
+        self.assertIsNone(rows[0]["invoice"])
+
+    def test_a_fully_paid_membership_is_excluded(self):
+        membership = ClubMembership.objects.create(club=self.club, member=self.member, season=self.season, fee_amount=Decimal("150.00"))
+        record_payment(membership, amount=Decimal("150.00"))
+
+        self.assertEqual(open_dues_rows(self.club, [self.member], self.season), [])
+
+    def test_a_waived_membership_is_excluded_even_with_an_unpaid_balance(self):
+        ClubMembership.objects.create(club=self.club, member=self.member, season=self.season, fee_amount=Decimal("150.00"), fee_status=ClubMembership.FeeStatus.WAIVED)
+
+        self.assertEqual(open_dues_rows(self.club, [self.member], self.season), [])
+
+    def test_a_membership_with_no_fee_priced_is_excluded(self):
+        ClubMembership.objects.create(club=self.club, member=self.member, season=self.season)
+
+        self.assertEqual(open_dues_rows(self.club, [self.member], self.season), [])
+
+    def test_the_linked_invoice_is_included_when_one_exists(self):
+        membership = ClubMembership.objects.create(club=self.club, member=self.member, season=self.season, fee_amount=Decimal("150.00"))
+        invoice = DuesInvoice.objects.create(club=self.club, membership=membership, amount=Decimal("150.00"), due_date=timezone.now().date(), sent_at=timezone.now())
+
+        rows = open_dues_rows(self.club, [self.member], self.season)
+
+        self.assertEqual(rows[0]["invoice"], invoice)
+
+    def test_only_includes_the_given_people(self):
+        other_member = Member.objects.create(first_name="Tom", last_name="Roe")
+        ClubMembership.objects.create(club=self.club, member=self.member, season=self.season, fee_amount=Decimal("150.00"))
+        ClubMembership.objects.create(club=self.club, member=other_member, season=self.season, fee_amount=Decimal("150.00"))
+
+        rows = open_dues_rows(self.club, [self.member], self.season)
+
+        self.assertEqual([row["membership"].member for row in rows], [self.member])
 
 
 class RecipientForTests(TestCase):

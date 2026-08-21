@@ -16,6 +16,23 @@ def remaining_balance(membership):
     return max(membership.fee_amount - membership.amount_paid, Decimal("0.00"))
 
 
+def open_dues_rows(club, people, season):
+    """Every season-dues row still owed by ``people`` in ``season`` -- shared by
+    mobile's Home dues card and its Payments & dues screen so the two never
+    drift out of sync on what counts as "still open". WAIVED memberships and
+    fully-paid balances are excluded."""
+    if season is None or not people:
+        return []
+
+    memberships = ClubMembership.objects.filter(club=club, member__in=people, season=season).exclude(fee_status=ClubMembership.FeeStatus.WAIVED).select_related("dues_invoice", "member")
+    rows = []
+    for membership in memberships:
+        balance = remaining_balance(membership)
+        if balance > 0:
+            rows.append({"membership": membership, "balance": balance, "invoice": getattr(membership, "dues_invoice", None)})
+    return rows
+
+
 def record_payment(membership, *, amount, method=FeePayment.Method.BANK_TRANSFER, reference="", note="", recorded_by=None):
     """Record money received against one membership's fee. Several payments may
     land on one membership -- a family paying in two installments must not read as

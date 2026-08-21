@@ -1,0 +1,23 @@
+{% load i18n %}
+{% comment %}
+    One open season-dues card. Expects ``row`` ({membership, balance, invoice})
+    in scope -- included from both home.html's dues card and payments.html so
+    the two surfaces render identically (see club.services.fees.open_dues_rows,
+    their shared data source).
+{% endcomment %}
+<div class="m-card flex items-center gap-3 p-4">
+    <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-danger-bg">
+        <span class="font-display text-lg font-extrabold text-club">&euro;</span>
+    </div>
+    <div class="min-w-0 flex-1">
+        <div class="text-sm font-semibold text-ink">{% blocktrans with name=row.membership.member.first_name %}Season dues &mdash; {{ name }}{% endblocktrans %}</div>
+        <div class="text-xs text-muted">
+            {% if row.invoice %}
+                {% blocktrans with amount=row.balance|floatformat:2 due=row.invoice.due_date|date:"d M" %}&euro; {{ amount }} &middot; due {{ due }}{% endblocktrans %}
+            {% else %}
+                {% blocktrans with amount=row.balance|floatformat:2 %}&euro; {{ amount }}{% endblocktrans %}
+            {% endif %}
+        </div>
+    </div>
+    <span class="btn btn-dark shrink-0">{% trans "Pay" %}</span>
+</div>

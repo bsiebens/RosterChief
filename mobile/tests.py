@@ -1238,8 +1238,9 @@ class MeViewTests(TestCase):
     """M5 -- design_handoff_rosterchief_platform/README.md's M5 section, "Me
     & my people". See MeView's own docstring for the judgment calls: no
     licence/eligibility field backing "licence OK" (real roster data used
-    instead), "Household & contacts"/"Payments & dues"/"Coach mode" all
-    omitted since none has anywhere to lead in this build.
+    instead), "Household & contacts"/"Coach mode" omitted since neither has
+    anywhere to lead in this build; "Payments & dues" does (PaymentsView,
+    tested separately below).
     """
 
     @classmethod
@@ -1332,6 +1333,101 @@ class MeViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "No one to show yet")
         self.assertNotContains(response, "Coach mode")
+
+    def test_payments_row_links_to_the_payments_screen(self):
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, reverse("mobile:payments"))
+
+    def test_open_dues_pill_is_hidden_with_nothing_owed(self):
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertNotContains(response, "OPEN")
+
+    def test_open_dues_pill_shows_the_open_count(self):
+        membership = ClubMembership.objects.get(club=self.club, member=self.child, season=self.season)
+        membership.fee_amount = Decimal("150.00")
+        membership.save()
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertEqual(response.context["open_dues_count"], 1)
+        self.assertContains(response, "1 OPEN")
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class PaymentsViewTests(TestCase):
+    """M5's "Payments & dues" row -- every open season-dues balance across
+    every managed person, reusing club.services.fees.open_dues_rows (see
+    club.tests.OpenDuesRowsTests for the exclusion rules themselves)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        today = timezone.localdate()
+        cls.season = Season.objects.create(club=cls.club, start_date=today - datetime.timedelta(days=30), end_date=today + datetime.timedelta(days=300))
+        cls.user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", email="parent@example.com", user=cls.user)
+        cls.membership = ClubMembership.objects.create(club=cls.club, member=cls.member, season=cls.season)
+
+    def _get(self):
+        return self.client.get(reverse("mobile:payments"), HTTP_HOST="ajax-united.rosterchief.app")
+
+    def test_requires_login(self):
+        response = self._get()
+
+        self.assertEqual(response.status_code, 302)
+
+    def test_back_link_returns_to_me(self):
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, reverse("mobile:me"))
+
+    def test_nothing_owed_shows_a_settled_up_empty_state(self):
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, "All settled up")
+
+    def test_an_open_balance_shows_the_amount_and_a_pay_button(self):
+        self.membership.fee_amount = Decimal("150.00")
+        self.membership.save()
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertEqual(len(response.context["dues_rows"]), 1)
+        self.assertContains(response, "150.00")
+        self.assertContains(response, "Pay")
+        self.assertNotContains(response, "All settled up")
+
+    def test_a_fully_paid_balance_does_not_show(self):
+        self.membership.fee_amount = Decimal("150.00")
+        self.membership.fee_status = ClubMembership.FeeStatus.PAID
+        self.membership.amount_paid = Decimal("150.00")
+        self.membership.save()
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertEqual(response.context["dues_rows"], [])
+
+    def test_only_shows_balances_for_managed_people(self):
+        other_member = Member.objects.create(first_name="Tom", last_name="Roe")
+        ClubMembership.objects.create(club=self.club, member=other_member, season=self.season, fee_amount=Decimal("200.00"))
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertEqual(response.context["dues_rows"], [])
 
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])

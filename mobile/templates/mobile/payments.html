@@ -1,0 +1,32 @@
+{% extends "mobile/base.html" %}
+{% load i18n %}
+
+{% comment %}
+    M5's "Payments & dues" row -- every open season-dues balance across every
+    managed person, one card per open row via mobile/_dues_row.html (the same
+    partial Home's dues card uses, so the two never drift apart visually).
+    White sticky back-header, same pattern as calendar_feed_settings.html --
+    not a tab of its own, active_tab stays "me" (PaymentsView's own docstring).
+{% endcomment %}
+
+{% block content %}
+    <div class="-mx-4 -mt-4 flex items-center gap-1 border-b border-line bg-white px-4 py-3">
+        <a class="-ml-2.5 flex h-11 w-11 shrink-0 items-center justify-center" href="{% url "mobile:me" %}" aria-label="{% trans "Back" %}">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#0b1220" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>
+        </a>
+        <span class="min-w-0 flex-1 truncate font-display text-xl leading-none font-extrabold text-ink uppercase">{% trans "Payments & dues" %}</span>
+    </div>
+
+    {% if dues_rows %}
+        <div class="flex flex-col gap-2.5">
+            {% for row in dues_rows %}
+                {% include "mobile/_dues_row.html" %}
+            {% endfor %}
+        </div>
+    {% else %}
+        <div class="m-card p-6 text-center">
+            <p class="font-display text-lg font-extrabold text-ink uppercase">{% trans "All settled up" %}</p>
+            <p class="mt-1 text-sm text-muted">{% trans "There's nothing open right now." %}</p>
+        </div>
+    {% endif %}
+{% endblock content %}
