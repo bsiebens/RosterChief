@@ -257,6 +257,13 @@
         color: var(--color-ink);
     }
 
+    /* Coach mode's own active segment -- design doc: "the role switcher with
+       Coach active (bg-ice)", distinct from member mode's white/ink one above. */
+    .role-switcher-item-active-ice {
+        background: var(--color-ice);
+        color: var(--color-ice-ink);
+    }
+
     /* Bottom tab bar -- design doc: "bg-white border-t border-line pt-2 pb-[26px]
        (member)... four equal items, 48px tall". pb uses the safe-area inset instead of
        the doc's fixed 26px, which was standing in for it. */
@@ -447,15 +454,16 @@
     }
 
     /* --- Coach mode shell (C1-C6) ---------------------------------------------------
-       Ice-blue header (never club-themed -- same --color-ice token the rest of Coach
-       mode already uses) is the mode's own signature, distinct at a glance from the
-       member shell's club-themed navy header. .coach-sheet sits flush below it, edge to
-       edge like the member shell's own header/body join -- no rounded overlap. */
+       Dark ink header (never club-themed) with the role switcher's own active segment
+       in ice-blue (see .role-switcher-item-active-ice above) -- that's the mode's
+       signature accent, not the header background itself. .coach-sheet sits flush
+       below it, edge to edge like the member shell's own header/body join -- no
+       rounded overlap. */
 
     .coach-header {
         padding: max(env(safe-area-inset-top), 14px) 16px 14px;
-        background: var(--color-ice);
-        color: var(--color-ice-ink);
+        background: var(--color-ink);
+        color: #fff;
         flex-shrink: 0;
     }
 

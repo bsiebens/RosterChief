@@ -4,17 +4,24 @@
     App shell for Coach mode (C1-C6) -- design_handoff_rosterchief_platform/README.md's
     "Coach mode (mobile, dark chrome)" section. Standalone from mobile/templates/mobile/
     base.html (Member mode's shell) rather than a shared parent: the two have almost no
-    markup in common beyond the outer <html>/<body> skeleton -- an ice-blue header
-    (never club-themed, the mode's own signature colour, see assets/mobile.css's own
-    comment) instead of the member shell's club-themed navy, and a dark .coach-tab-bar
-    instead of the white one.
+    markup in common beyond the outer <html>/<body> skeleton -- dark ink header instead
+    of the member shell's club-themed navy, with the role switcher's own active segment
+    in ice-blue (assets/mobile.css's .role-switcher-item-active-ice) as the mode's own
+    accent -- and a dark .coach-tab-bar instead of the white one.
 
     Reuses the SAME stylesheet (static/css/mobile.css) and the same mobile:manifest/
     mobile:icon/mobile:service_worker PWA plumbing as Member mode -- one app, one
     manifest, two modes, not two separate PWAs.
 
-    Tab bar: Today / Squad / Schedule, plus a raised "+" action in the middle that opens
-    a small popup menu (New event / New post / Add player) rather than committing to one
+    The top info row (crest + team name) carries the same min-h-11 as the member
+    header's own top row (implicitly 44px there, via its bell button) -- the role
+    switcher pill sits directly below that row in both shells, so switching modes never
+    shifts its position. The team-picker pill row (multi-team accounts only) renders
+    *after* the switcher for the same reason -- were it above, the switcher would jump
+    down whenever it appears.
+
+    Tab bar: Today / Squad / Schedule, plus a raised "+" action at the end that opens a
+    small popup menu (New event / New post / Add player) rather than committing to one
     destination -- coach mode has three genuinely different "add" actions and picking a
     single one for the button would just hide the other two. No Me tab here -- the
     account's own settings live in Member mode's mobile:me, reached via the role
@@ -31,7 +38,7 @@
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-        <meta name="theme-color" content="#14b8e8">
+        <meta name="theme-color" content="#0b1220">
         <meta name="apple-mobile-web-app-capable" content="yes">
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
         <meta name="mobile-web-app-capable" content="yes">
@@ -61,32 +68,32 @@
 
     <body class="flex h-screen flex-col overflow-hidden bg-ink font-sans text-slate" hx-boost="true" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' data-csrftoken="{{ csrf_token }}">
         <header class="coach-header">
-            <div class="flex items-center gap-2.5">
+            <div class="flex min-h-11 items-center gap-2.5">
                 {% if club.logo %}
                     <img class="app-crest" src="{{ club.logo.url }}" alt="">
                 {% else %}
                     <span class="app-crest app-crest-fallback">{{ club.initials }}</span>
                 {% endif %}
                 <span class="min-w-0 flex-1">
-                    <span class="block truncate font-display text-[19px] leading-none font-extrabold text-ice-ink uppercase">{{ active_team.name|default:club.name }}</span>
-                    {% if me and active_team_role %}<span class="block font-mono text-xs text-ice-ink/70">{{ active_team_role }} &middot; {{ me.first_name }}</span>{% endif %}
+                    <span class="block truncate font-display text-[19px] leading-none font-extrabold text-white uppercase">{{ active_team.name|default:club.name }}</span>
+                    {% if me and active_team_role %}<span class="block font-mono text-xs text-on-dark">{{ active_team_role }} &middot; {{ me.first_name }}</span>{% endif %}
                 </span>
+            </div>
+
+            <div class="role-switcher">
+                <a class="role-switcher-item" href="{% url "mobile:home" %}" hx-boost="false">{% trans "Member" %}</a>
+                <a class="role-switcher-item role-switcher-item-active-ice" href="{% url "mobile:coach_today" %}">{% trans "Manager" %}</a>
             </div>
 
             {% if staffed_teams|length > 1 %}
                 <div class="mt-3 flex gap-2 overflow-x-auto scrollbar-hide">
                     {% for team in staffed_teams %}
-                        <a class="shrink-0 rounded-full px-3 py-1.5 font-display text-xs font-extrabold tracking-wide uppercase {% if team == active_team %}bg-ink text-ice{% else %}bg-white/40 text-ice-ink{% endif %}" href="?team={{ team.pk }}">
+                        <a class="shrink-0 rounded-full px-3 py-1.5 font-display text-xs font-extrabold tracking-wide uppercase {% if team == active_team %}bg-ice text-ice-ink{% else %}bg-steel text-on-dark{% endif %}" href="?team={{ team.pk }}">
                             {{ team.short_name }}
                         </a>
                     {% endfor %}
                 </div>
             {% endif %}
-
-            <div class="role-switcher">
-                <a class="role-switcher-item" href="{% url "mobile:home" %}" hx-boost="false">{% trans "Member" %}</a>
-                <a class="role-switcher-item role-switcher-item-active" href="{% url "mobile:coach_today" %}">{% trans "Manager" %}</a>
-            </div>
 
             {% block header_extra %}{% endblock header_extra %}
         </header>
@@ -114,6 +121,10 @@
                 {% lucide "users" size=21 %}
                 <span class="tab-bar-label">{% trans "Squad" %}</span>
             </a>
+            <a class="coach-tab-bar-item {% if active_tab == "coach_schedule" %}coach-tab-bar-item-active{% endif %}" href="{% url "mobile:coach_schedule" %}">
+                {% lucide "calendar" size=21 %}
+                <span class="tab-bar-label">{% trans "Schedule" %}</span>
+            </a>
 
             {% if can_manage_active_team %}
                 <div class="coach-tab-bar-add" x-data="{ open: false }">
@@ -135,11 +146,6 @@
             {% else %}
                 <div class="coach-tab-bar-add"></div>
             {% endif %}
-
-            <a class="coach-tab-bar-item {% if active_tab == "coach_schedule" %}coach-tab-bar-item-active{% endif %}" href="{% url "mobile:coach_schedule" %}">
-                {% lucide "calendar" size=21 %}
-                <span class="tab-bar-label">{% trans "Schedule" %}</span>
-            </a>
         </nav>
 
         <script src="{% static "js/mobile-app.js" %}" defer></script>

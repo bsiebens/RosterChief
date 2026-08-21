@@ -13,10 +13,10 @@
 {% block header_extra %}
     <div class="mt-3">
         <div class="flex items-center justify-between">
-            <span class="font-display text-xl leading-none font-extrabold text-ice-ink uppercase">{% trans "Attendance" %}</span>
-            <span class="font-mono text-sm text-ice-ink/70">{{ checked_in_count }}/{{ total_count }}</span>
+            <span class="font-display text-xl leading-none font-extrabold text-white uppercase">{% trans "Attendance" %}</span>
+            <span class="font-mono text-sm text-on-dark">{{ checked_in_count }}/{{ total_count }}</span>
         </div>
-        <div class="mt-1 text-xs text-ice-ink/65">{{ event.title }} &middot; {{ event.start|date:"D d M H:i" }}</div>
+        <div class="mt-1 text-xs text-on-dark-dim">{{ event.title }} &middot; {{ event.start|date:"D d M H:i" }}</div>
         <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-steel">
             <div class="h-full bg-ice" style="width: {% widthratio checked_in_count total_count|default:1 100 %}%"></div>
         </div>

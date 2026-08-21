@@ -64,7 +64,7 @@
 
     <body class="flex h-screen flex-col overflow-hidden bg-paper font-sans text-slate" hx-boost="true" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' data-vapid-public-key="{{ vapid_public_key }}" data-csrftoken="{{ csrf_token }}">
         <header class="app-header">
-            <div class="flex items-center gap-2.5">
+            <div class="flex min-h-11 items-center gap-2.5">
                 <a class="flex items-center gap-2.5" href="{% url "mobile:home" %}">
                     {% if club.logo %}
                         <img class="app-crest" src="{{ club.logo.url }}" alt="">

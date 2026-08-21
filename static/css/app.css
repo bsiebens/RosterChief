@@ -4028,6 +4028,9 @@
   .min-h-6 {
     min-height: calc(var(--spacing) * 6);
   }
+  .min-h-11 {
+    min-height: calc(var(--spacing) * 11);
+  }
   .min-h-screen {
     min-height: 100vh;
   }
