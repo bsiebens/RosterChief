@@ -1,10 +1,11 @@
 {% load i18n %}
 {% comment %}
     One M7 notification row -- included from notifications.html once per day
-    bucket. Expects ``row`` ({notification, news_item}) in scope. The whole
-    row is the tap target (a submit button styled full-width, since a POST
-    form can't wrap another form/link) -- tapping always marks it read, and
-    also navigates to the linked News item when there is one (see
+    bucket. Expects ``row`` ({notification, source_label}) in scope. The
+    whole row is the tap target (a submit button styled full-width, since a
+    POST form can't wrap another form/link) -- tapping always marks it read,
+    and also navigates to the linked News/Event when its source resolves to
+    one (see mobile.views._notification_source_link and
     NotificationsView.post). A club-coloured bar marks it unread, same
     treatment as management/templates/management/home.html's own
     notifications card.
@@ -18,7 +19,7 @@
         <span class="min-w-0 flex-1">
             <span class="block text-sm font-semibold text-ink">{{ row.notification.title }}</span>
             <span class="block truncate text-xs text-muted">{{ row.notification.body|truncatechars:120 }}</span>
-            {% if row.news_item %}<span class="block font-display text-[11px] font-extrabold text-club uppercase tracking-wide">{% trans "Club news" %}</span>{% endif %}
+            {% if row.source_label %}<span class="block font-display text-[11px] font-extrabold text-club uppercase tracking-wide">{{ row.source_label }}</span>{% endif %}
         </span>
         <span class="shrink-0 font-mono text-[11px] text-dim">{% blocktrans with time=row.notification.created|timesince %}{{ time }} ago{% endblocktrans %}</span>
     </button>

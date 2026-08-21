@@ -5158,6 +5158,18 @@ class EventManagementTests(ManagementTestBase):
         self.assertRedirects(response, reverse("management:event_detail", args=[event.pk]))
         self.assertIn(self.own_team, event.teams.all())
 
+    def test_creating_an_event_notifies_the_invited_roster(self):
+        position = Position.objects.create(club=self.club, name="Forward", short_name="F")
+        player = Member.objects.create(first_name="Poul", last_name="Player")
+        TeamMembership.objects.create(team=self.own_team, member=player, season=self.season, position=position)
+        self.client.force_login(self.own_team_coach)
+
+        self.club_post("event_create", self.event_data())
+
+        event = Event.objects.get(title="Training")
+        notification = Notification.objects.get(member=player, content_type__model="event", object_id=str(event.pk))
+        self.assertEqual(notification.title, "Training")
+
     def test_creating_an_event_with_a_same_club_location_does_not_raise_a_cross_club_error(self):
         # Regression: Event.clean() rejects a location from another club by
         # comparing against self.club_id, which was still None on a brand-new

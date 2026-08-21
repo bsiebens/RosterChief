@@ -897,6 +897,17 @@ class NotificationsViewTests(TestCase):
         redirect_response = self._post({"action": "mark_read", "notification_id": str(notification.pk)})
         self.assertRedirects(redirect_response, reverse("mobile:news_detail", kwargs={"slug": news_item.slug}), fetch_redirect_response=False)
 
+    def test_notification_with_an_event_source_is_labelled_and_mark_read_redirects_to_it(self):
+        event = Event.objects.create(club=self.club, title="Practice", start=timezone.now() + datetime.timedelta(days=1))
+        notification = Notification.objects.create(club=self.club, member=self.member, title="New event", body="Body.", source=event)
+        self.client.force_login(self.user)
+
+        response = self._get()
+        self.assertContains(response, "New event")
+
+        redirect_response = self._post({"action": "mark_read", "notification_id": str(notification.pk)})
+        self.assertRedirects(redirect_response, reverse("mobile:event_detail", kwargs={"pk": event.pk}), fetch_redirect_response=False)
+
     def test_empty_account_gets_a_graceful_empty_state(self):
         bare_user = User.objects.create_user(email="new@example.com", password="pw-secret-123")
         self.client.force_login(bare_user)

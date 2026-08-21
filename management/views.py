@@ -42,6 +42,7 @@ from events.services.competitions import CompetitionFetchError, fetch_game_info
 from events.services.rbihf_import import RBIHFImportError, apply_plan, build_plan, extract_team_id, fetch_html
 from events.services.recurrence import cancel_occurrence, detach_occurrence, generate_occurrences, propagate_series
 from events.services.referees import RefereeAssignmentError, add_external_referee, assign_referee, conflicting_events, eligible_referees, needs_referee_management, remove_referee, set_referee_fee
+from events.tasks import notify_new_event
 from formbuilder.models import Form as FormBuilderForm
 from formbuilder.models import Submission
 from members.forms import ClaimRejectForm, ClaimReviewForm
@@ -2795,6 +2796,10 @@ class EventCreateView(ClubStaffRequiredMixin, CreateView):
         response = super().form_valid(form)
         body = _("“%(event)s” created.") % {"event": self.object}
         notify(self.request, f"s|{_('Event created')}|{body}")
+        # A deliberately-planned single event, not every Event row that ends up
+        # created (see notify_new_event's own docstring for why a recurring
+        # series' occurrences and bulk fixture imports aren't wired to this).
+        notify_new_event.delay(str(self.object.pk))
         return response
 
     def get_success_url(self):

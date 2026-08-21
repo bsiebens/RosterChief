@@ -669,18 +669,32 @@ class EditProfileView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         )
 
 
+def _notification_source_link(source):
+    """(label, url) for a notification's ``source`` when it's something this
+    app has a detail page for -- (None, None) otherwise. One place both
+    NotificationsView.get_context_data (the row's own label) and .post (the
+    tap-to-mark-read redirect target) read from, so a new source type only
+    needs adding here."""
+    if isinstance(source, News):
+        return _("Club news"), reverse("mobile:news_detail", kwargs={"slug": source.slug})
+    if isinstance(source, Event):
+        return _("Event"), reverse("mobile:event_detail", kwargs={"pk": source.pk})
+    return None, None
+
+
 class NotificationsView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
     """M7 -- design_handoff_rosterchief_platform/README.md's M7 section
     ("Inbox"). The mockup shows rich per-type cards (RSVP-needed, medical
     form missing, invoice due, line-up published, ...) with inline quick
     actions, but notifications.models.Notification is generic -- title/body/
-    created/read_at plus an optional ``source`` -- and the only thing that
-    creates member-facing rows today is news.tasks.notify_news_published.
-    There's no type/category field to key a richer layout or the mockup's
-    "Action"/"Club" filter off, so this is deliberately a flat, generic list:
-    day-grouped ("Today"/"Earlier this week"/"Older", echoing Calendar's own
-    "This week"/"Next week" bucketing) with an unread treatment and a link to
-    the underlying News item when ``source`` happens to resolve to one.
+    created/read_at plus an optional ``source`` -- and the only things that
+    create member-facing rows today are news.tasks.notify_news_published and
+    events.tasks.notify_new_event. There's no type/category field to key a
+    richer layout or the mockup's "Action"/"Club" filter off, so this is
+    deliberately a flat, generic list: day-grouped ("Today"/"Earlier this
+    week"/"Older", echoing Calendar's own "This week"/"Next week" bucketing)
+    with an unread treatment and a link to the underlying News/Event when
+    ``source`` resolves to one (see _notification_source_link above).
 
     Scoped to every one of ``self.managed_people`` (not just scope_person) --
     same scope PersonScopeMixin.get_context_data already uses for
@@ -704,9 +718,8 @@ class NotificationsView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
             notifications = Notification.objects.filter(club=self.request.club, member__in=self.managed_people).select_related("member").order_by("-created")
 
             for notification in notifications:
-                source = notification.source
-                news_item = source if isinstance(source, News) else None
-                row = {"notification": notification, "news_item": news_item}
+                source_label, _url = _notification_source_link(notification.source)
+                row = {"notification": notification, "source_label": source_label}
 
                 created_date = timezone.localtime(notification.created).date()
                 if created_date == local_today:
@@ -733,12 +746,12 @@ class NotificationsView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
                 notification.read_at = timezone.now()
                 notification.save(update_fields=["read_at", "modified"])
 
-            # A row whose source resolves to a News item doubles as a link to
-            # it (see the class docstring) -- the plain-POST tap that marks
-            # it read also lands the member on the article, no separate
-            # "next" field needed since the server already has the source.
-            if isinstance(notification.source, News):
-                return HttpResponseRedirect(reverse("mobile:news_detail", kwargs={"slug": notification.source.slug}))
-            return HttpResponseRedirect(reverse("mobile:notifications"))
+            # A row whose source resolves to something this app has a detail
+            # page for doubles as a link to it (see _notification_source_link)
+            # -- the plain-POST tap that marks it read also lands the member
+            # there, no separate "next" field needed since the server already
+            # has the source.
+            _label, url = _notification_source_link(notification.source)
+            return HttpResponseRedirect(url or reverse("mobile:notifications"))
 
         return HttpResponseBadRequest(_("Unknown action."))
