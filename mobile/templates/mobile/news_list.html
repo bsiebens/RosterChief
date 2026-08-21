@@ -6,8 +6,15 @@
     member-visible (internal or both) news item, newest first, full-width
     like Calendar's own agenda rows (see NewsListView's docstring for why
     this isn't filtered to just this account's teams the way Home's own
-    teaser is).
+    teaser is). The "News" title lives in header_extra, merged into the
+    shared navy app-header the same way Calendar's/Me's own titles are.
 {% endcomment %}
+
+{% block header_extra %}
+    <div class="mt-3">
+        <span class="font-display text-2xl font-extrabold text-white uppercase">{% trans "News" %}</span>
+    </div>
+{% endblock header_extra %}
 
 {% block content %}
     <div class="-mx-4">

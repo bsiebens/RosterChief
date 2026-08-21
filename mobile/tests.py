@@ -929,6 +929,13 @@ class NewsListViewTests(TestCase):
 
         self.assertEqual(response.status_code, 302)
 
+    def test_header_shows_a_news_title_merged_into_the_shared_header(self):
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, '<span class="font-display text-2xl font-extrabold text-white uppercase">News</span>')
+
     def test_lists_every_internal_or_both_item_regardless_of_team(self):
         team_item = News.objects.create(club=self.club, title="Team news", body="Body.", status=News.Status.PUBLISHED, published_at=timezone.now())
         team = Team.objects.create(club=self.club, name="U16", short_name="U16")
