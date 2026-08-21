@@ -9,7 +9,7 @@ from django.utils import timezone, translation
 from icalendar import Calendar as ICalCalendar
 
 from club.models import Club, ClubMembership, DuesInvoice, MemberRequirementStatus, OnboardingRequirement, Season, Sponsor
-from events.models import Attendance, Event
+from events.models import Attendance, Event, Lineup, LineupSlot, LineupUnit
 from members.models import Family, FamilyMembership, Member
 from news.models import News
 from notifications.models import Notification
@@ -1852,6 +1852,25 @@ class CoachTodayViewTests(TestCase):
         self.assertContains(response, "Also yours")
         self.assertContains(response, "My own game")
 
+    def test_unpublished_lineup_shows_in_needs_you_for_a_game_session(self):
+        event = Event.objects.create(club=self.club, title="Big game", kind=Event.EventKind.GAME, start=timezone.now() + datetime.timedelta(minutes=5))
+        event.teams.add(self.team)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, "Line-up not published")
+
+    def test_published_lineup_does_not_show_in_needs_you(self):
+        event = Event.objects.create(club=self.club, title="Big game", kind=Event.EventKind.GAME, start=timezone.now() + datetime.timedelta(minutes=5))
+        event.teams.add(self.team)
+        Lineup.objects.create(event=event, team=self.team, published_at=timezone.now())
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertNotContains(response, "Line-up not published")
+
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
 class CoachAttendanceViewTests(TestCase):
@@ -2242,3 +2261,162 @@ class CoachAddPlayerViewTests(TestCase):
 
         self.assertEqual(response.status_code, 403)
         self.assertFalse(TeamMembership.objects.filter(team=self.team, member=candidate).exists())
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class CoachLineupViewTests(TestCase):
+    """C3 -- design_handoff_rosterchief_platform/README.md's C3 section; see
+    CoachLineupView's own docstring for the tap-to-place -> native-select
+    simplification and its known rough edges."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        today = timezone.localdate()
+        cls.season = Season.objects.create(club=cls.club, start_date=today - datetime.timedelta(days=30), end_date=today + datetime.timedelta(days=300))
+        cls.user = User.objects.create_user(email="coach@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Sam", last_name="Coach", email="coach@example.com", user=cls.user)
+        cls.team = Team.objects.create(club=cls.club, name="U16", short_name="U16")
+        cls.position = Position.objects.create(club=cls.club, name="Head coach", short_name="HC", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=cls.team, member=cls.member, season=cls.season, position=cls.position)
+
+        cls.player = Member.objects.create(first_name="Anna", last_name="Player")
+        TeamMembership.objects.create(team=cls.team, member=cls.player, season=cls.season)
+        cls.event = Event.objects.create(club=cls.club, title="Big game", kind=Event.EventKind.GAME, start=timezone.now() + datetime.timedelta(days=2))
+        cls.event.teams.add(cls.team)
+        Attendance.objects.update_or_create(event=cls.event, member=cls.player, defaults={"status": Attendance.AttendanceStatus.PRESENT})
+
+    def make_physio(self):
+        physio_position = Position.objects.create(club=self.club, name="Physio", short_name="PHY", staff_position=True, management_position=False)
+        physio_user = User.objects.create_user(email="physio@example.com", password="pw-secret-123")
+        physio_member = Member.objects.create(first_name="Pat", last_name="Physio", user=physio_user)
+        StaffAssignment.objects.create(team=self.team, member=physio_member, season=self.season, position=physio_position)
+        return physio_user
+
+    def test_requires_login(self):
+        response = self.client.get(reverse("mobile:coach_lineup", kwargs={"event_id": self.event.pk}), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 302)
+
+    def test_get_creates_a_lineup_lazily(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mobile:coach_lineup", kwargs={"event_id": self.event.pk}), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(Lineup.objects.filter(event=self.event).exists())
+
+    def test_a_non_game_event_is_not_reachable(self):
+        practice = Event.objects.create(club=self.club, title="Practice", kind=Event.EventKind.TRAINING, start=timezone.now() + datetime.timedelta(days=2))
+        practice.teams.add(self.team)
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mobile:coach_lineup", kwargs={"event_id": practice.pk}), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_add_line_creates_a_unit_with_one_slot(self):
+        self.client.force_login(self.user)
+
+        response = self.client.post(reverse("mobile:coach_lineup_add_unit", kwargs={"event_id": self.event.pk}), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertRedirects(response, reverse("mobile:coach_lineup", kwargs={"event_id": self.event.pk}), fetch_redirect_response=False)
+        lineup = Lineup.objects.get(event=self.event)
+        self.assertEqual(lineup.units.count(), 1)
+        self.assertEqual(lineup.units.first().slots.count(), 1)
+
+    def test_add_slot_grows_an_existing_unit(self):
+        self.client.force_login(self.user)
+        lineup = Lineup.objects.create(event=self.event, team=self.team)
+        unit = LineupUnit.objects.create(lineup=lineup, label="Line 1")
+
+        response = self.client.post(reverse("mobile:coach_lineup_add_slot", kwargs={"unit_id": unit.pk}), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertRedirects(response, reverse("mobile:coach_lineup", kwargs={"event_id": self.event.pk}), fetch_redirect_response=False)
+        self.assertEqual(unit.slots.count(), 1)
+
+    def test_save_places_the_selected_member_in_the_slot(self):
+        self.client.force_login(self.user)
+        lineup = Lineup.objects.create(event=self.event, team=self.team)
+        unit = LineupUnit.objects.create(lineup=lineup, label="Line 1")
+        slot = LineupSlot.objects.create(unit=unit)
+
+        response = self.client.post(
+            reverse("mobile:coach_lineup", kwargs={"event_id": self.event.pk}),
+            {f"slot_{slot.pk}": str(self.player.pk)},
+            HTTP_HOST="ajax-united.rosterchief.app",
+        )
+
+        self.assertRedirects(response, reverse("mobile:coach_lineup", kwargs={"event_id": self.event.pk}), fetch_redirect_response=False)
+        slot.refresh_from_db()
+        self.assertEqual(slot.member, self.player)
+
+    def test_save_clears_a_slot_when_empty_is_submitted(self):
+        self.client.force_login(self.user)
+        lineup = Lineup.objects.create(event=self.event, team=self.team)
+        unit = LineupUnit.objects.create(lineup=lineup, label="Line 1")
+        slot = LineupSlot.objects.create(unit=unit, member=self.player)
+
+        response = self.client.post(
+            reverse("mobile:coach_lineup", kwargs={"event_id": self.event.pk}),
+            {f"slot_{slot.pk}": ""},
+            HTTP_HOST="ajax-united.rosterchief.app",
+        )
+
+        self.assertRedirects(response, reverse("mobile:coach_lineup", kwargs={"event_id": self.event.pk}), fetch_redirect_response=False)
+        slot.refresh_from_db()
+        self.assertIsNone(slot.member)
+
+    def test_save_ignores_a_member_id_outside_the_available_pool(self):
+        outsider = Member.objects.create(first_name="Not", last_name="Available")
+        self.client.force_login(self.user)
+        lineup = Lineup.objects.create(event=self.event, team=self.team)
+        unit = LineupUnit.objects.create(lineup=lineup, label="Line 1")
+        slot = LineupSlot.objects.create(unit=unit)
+
+        self.client.post(
+            reverse("mobile:coach_lineup", kwargs={"event_id": self.event.pk}),
+            {f"slot_{slot.pk}": str(outsider.pk)},
+            HTTP_HOST="ajax-united.rosterchief.app",
+        )
+
+        slot.refresh_from_db()
+        self.assertIsNone(slot.member)
+
+    def test_publish_marks_the_lineup_published(self):
+        self.client.force_login(self.user)
+        lineup = Lineup.objects.create(event=self.event, team=self.team)
+
+        response = self.client.post(reverse("mobile:coach_lineup_publish", kwargs={"event_id": self.event.pk}), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertRedirects(response, reverse("mobile:coach_lineup", kwargs={"event_id": self.event.pk}), fetch_redirect_response=False)
+        lineup.refresh_from_db()
+        self.assertIsNotNone(lineup.published_at)
+
+    def test_non_managing_staff_sees_a_read_only_view(self):
+        physio_user = self.make_physio()
+        self.client.force_login(physio_user)
+
+        response = self.client.get(reverse("mobile:coach_lineup", kwargs={"event_id": self.event.pk}), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "Save line-up")
+
+    def test_non_managing_staff_cannot_save(self):
+        physio_user = self.make_physio()
+        self.client.force_login(physio_user)
+
+        response = self.client.post(reverse("mobile:coach_lineup", kwargs={"event_id": self.event.pk}), {}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_non_managing_staff_cannot_publish(self):
+        physio_user = self.make_physio()
+        lineup = Lineup.objects.create(event=self.event, team=self.team)
+        self.client.force_login(physio_user)
+
+        response = self.client.post(reverse("mobile:coach_lineup_publish", kwargs={"event_id": self.event.pk}), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 403)
+        lineup.refresh_from_db()
+        self.assertIsNone(lineup.published_at)

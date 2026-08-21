@@ -198,6 +198,72 @@ class Attendance(UUIDModel):
         return f"{self.event} - {self.member}"
 
 
+class Lineup(UUIDModel):
+    """A game's line-up -- coach mode's C3 screen (mobile/coach_views.py's
+    CoachLineupView). One per event; ``units`` (Line 1, Defence pair 1, ...)
+    hold ordered ``slots``, each optionally filled by a member. Publishing
+    (events.services.lineup.publish_lineup) flips every slotted member's
+    Attendance.status to SELECTED and every other available roster member's
+    to NOT_SELECTED -- the reason those two statuses exist on Attendance in
+    the first place, previously unused."""
+
+    event = models.OneToOneField(Event, on_delete=models.CASCADE, related_name="lineup", verbose_name=_("event"))
+    team = models.ForeignKey(Team, on_delete=models.CASCADE, related_name="lineups", verbose_name=_("team"))
+    published_at = models.DateTimeField(_("published at"), null=True, blank=True)
+    created_by = models.ForeignKey(Member, on_delete=models.SET_NULL, null=True, blank=True, related_name="created_lineups", verbose_name=_("created by"))
+
+    class Meta:
+        verbose_name = _("line-up")
+        verbose_name_plural = _("line-ups")
+
+    def __str__(self):
+        return f"{self.team} - {self.event}"
+
+    def clean(self):
+        validate_club_scope(self, self.event.club_id if self.event_id else None, same_club_fields=("team",))
+
+
+class LineupUnit(UUIDModel):
+    """One group of slots within a Lineup -- "Line 1", "Defence pair 1", ...
+    Coach-entered labels, not a fixed sport structure: neither Club nor Team
+    carries a sport field to derive one from."""
+
+    lineup = models.ForeignKey(Lineup, on_delete=models.CASCADE, related_name="units", verbose_name=_("line-up"))
+    label = models.CharField(_("label"), max_length=100)
+    ordering = models.PositiveSmallIntegerField(_("ordering"), default=0)
+
+    class Meta:
+        verbose_name = _("line-up unit")
+        verbose_name_plural = _("line-up units")
+        ordering = ["ordering"]
+
+    def __str__(self):
+        return self.label
+
+
+class LineupSlot(UUIDModel):
+    """One position within a LineupUnit, optionally filled by a member.
+    Placement/swapping is tap-to-place (mobile/coach_views.py's
+    CoachLineupPlaceView), not drag-and-drop -- see that view's own
+    docstring for why. A member is only ever in one slot per lineup at a
+    time; enforcing that (clearing any prior slot of theirs on placement) is
+    the placement service's job, not a DB constraint -- "which unit a member
+    is in" spans this table's own FK, awkward to express as a single
+    UniqueConstraint."""
+
+    unit = models.ForeignKey(LineupUnit, on_delete=models.CASCADE, related_name="slots", verbose_name=_("unit"))
+    ordering = models.PositiveSmallIntegerField(_("ordering"), default=0)
+    member = models.ForeignKey(Member, on_delete=models.SET_NULL, null=True, blank=True, related_name="lineup_slots", verbose_name=_("member"))
+
+    class Meta:
+        verbose_name = _("line-up slot")
+        verbose_name_plural = _("line-up slots")
+        ordering = ["ordering"]
+
+    def __str__(self):
+        return f"{self.unit} - {self.member or 'empty'}"
+
+
 class EventReferee(UUIDModel):
     """One referee assigned to one (home) game -- either a club member
     (``member`` set) or an external referee logged by name only

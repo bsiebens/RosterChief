@@ -47,7 +47,12 @@
                 <div class="px-4 pb-4">
                     <p class="font-display text-xl leading-none font-extrabold uppercase">{{ tonight_event.title }}</p>
                     {% if can_manage_active_team %}
-                        <a class="btn mt-3 w-full bg-ice text-ice-ink" href="{% url "mobile:coach_attendance" tonight_event.pk %}">{% trans "Check attendance" %}</a>
+                        <div class="mt-3 flex gap-2">
+                            <a class="btn flex-1 bg-ice text-ice-ink" href="{% url "mobile:coach_attendance" tonight_event.pk %}">{% trans "Check attendance" %}</a>
+                            {% if tonight_event.kind == "game" %}
+                                <a class="btn flex-1 bg-steel text-on-dark" href="{% url "mobile:coach_lineup" tonight_event.pk %}">{% trans "Line-up" %}</a>
+                            {% endif %}
+                        </div>
                     {% endif %}
                 </div>
             </div>
@@ -64,6 +69,8 @@
                         </div>
                         {% if item.severity == "warn" and session_event and can_manage_active_team %}
                             <a class="shrink-0 font-display text-xs font-extrabold tracking-wide text-club uppercase" href="{% url "mobile:coach_attendance" session_event.pk %}">{% trans "Review" %}</a>
+                        {% elif item.severity == "club" and session_event and can_manage_active_team %}
+                            <a class="shrink-0 font-display text-xs font-extrabold tracking-wide text-club uppercase" href="{% url "mobile:coach_lineup" session_event.pk %}">{% trans "Build" %}</a>
                         {% endif %}
                     </div>
                 {% endfor %}

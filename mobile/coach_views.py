@@ -13,15 +13,17 @@ from django.urls import reverse
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from django.utils.translation import ngettext
-from django.views.generic import TemplateView
+from django.views.generic import TemplateView, View
 
 from club.models import Season
 from club.services.access import can_add_news, current_season
 from controlpanel.messages import notify
-from events.models import Attendance, Event
+from events.models import Attendance, Event, Lineup, LineupSlot, LineupUnit
 from events.services.attendance import record_check_in
+from events.services.lineup import UNAVAILABLE_STATUSES, clear_slot, place_member, publish_lineup
 from events.tasks import notify_new_event
 from management.forms import EventForm, NewsForm
+from members.models import Member
 from news.models import News
 from news.services import notify_editors_of_pending_review
 from teams.models import Team, TeamMembership
@@ -44,10 +46,9 @@ class CoachTodayView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
     coach's own obligations, not the whole roster's).
 
     "Needs you" is scoped down from the design mock to what has real backing
-    data today: a silent-players count for the next session. The mock's
-    line-up-not-published row and member-blocker row are deferred -- no
-    Lineup model or coach-facing member-edit screen exists yet for either to
-    link to (see the coach-mode implementation plan's later stages).
+    data today: a silent-players count and (for a game) an unpublished-
+    line-up flag for the next session. The mock's member-blocker row stays
+    deferred -- no coach-facing member-edit screen exists yet to link to.
     """
 
     template_name = "mobile/coach/today.html"
@@ -80,6 +81,10 @@ class CoachTodayView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
                 silent_count = attendances.filter(status=Attendance.AttendanceStatus.NO_RESPONSE).count()
                 if silent_count > 0:
                     needs_you.append({"severity": "warn", "title": _("Silent players"), "detail": _("%(count)d haven't answered yet") % {"count": silent_count}})
+                if session_event.kind == Event.EventKind.GAME:
+                    lineup = Lineup.objects.filter(event=session_event).first()
+                    if lineup is None or lineup.published_at is None:
+                        needs_you.append({"severity": "club", "title": _("Line-up not published"), "detail": _("Build it before the game.")})
 
         hero_attendance = None
         rsvp_closed = False
@@ -419,3 +424,114 @@ class CoachAddPlayerView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
             body = ngettext("%(count)d player added to the roster.", "%(count)d players added to the roster.", added) % {"count": added}
             notify(request, f"s|{_('Roster updated')}|{body}")
         return HttpResponseRedirect(reverse("mobile:coach_today"))
+
+
+class CoachLineupView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
+    """C3 -- a game's line-up: units (Line 1, Defence pair 1, ...) of ordered
+    slots, each assigned via a native <select> rather than the design mock's
+    drag-and-drop (see events.services.lineup's own module docstring for
+    why). One batch "Save line-up" submit, not a live per-tap POST -- this
+    codebase has no established htmx interaction pattern yet to build one on
+    (htmx.js is loaded but nothing uses it), and a reliable plain form beats
+    a first, unproven real-time interaction for a screen already this large.
+
+    Known rough edge, accepted for this stage: clicking "+ Add line"/"+ Add
+    slot" reloads the page via its own POST, which does NOT also save
+    whatever the coach had just picked in the other slots' <select>s (those
+    two actions don't read the assignment fields at all) -- add lines/slots
+    before filling them in, not after, or save first.
+
+    A Lineup is created lazily on first visit (get_or_create) -- there's no
+    separate "start a line-up" step. Viewing is open to anyone staffing the
+    team; every mutation (save/add line/add slot/publish) is gated on
+    can_manage_active_team, hidden in the template and 403'd here regardless.
+    """
+
+    template_name = "mobile/coach/lineup.html"
+    screen_title = _("Line-up")
+    active_tab = "coach_today"
+
+    def get_event(self):
+        if self.active_team is None:
+            raise Http404
+        return get_object_or_404(Event, pk=self.kwargs["event_id"], club=self.request.club, teams=self.active_team, kind=Event.EventKind.GAME)
+
+    def get_context_data(self, **kwargs):
+        event = self.get_event()
+        lineup, _created = Lineup.objects.get_or_create(event=event, defaults={"team": self.active_team, "created_by": self.me})
+        units = list(lineup.units.prefetch_related("slots__member"))
+        available = list(Attendance.objects.filter(event=event).exclude(status__in=UNAVAILABLE_STATUSES).select_related("member").order_by("member__last_name", "member__first_name"))
+        unavailable = list(Attendance.objects.filter(event=event, status__in=UNAVAILABLE_STATUSES).select_related("member"))
+
+        return super().get_context_data(
+            event=event,
+            lineup=lineup,
+            units=units,
+            available=available,
+            unavailable=unavailable,
+            **kwargs,
+        )
+
+    def post(self, request, *args, **kwargs):
+        if not self.can_manage_active_team:
+            return HttpResponseForbidden()
+
+        event = self.get_event()
+        lineup, _created = Lineup.objects.get_or_create(event=event, defaults={"team": self.active_team, "created_by": self.me})
+        available_ids = {str(pk) for pk in Attendance.objects.filter(event=event).exclude(status__in=UNAVAILABLE_STATUSES).values_list("member_id", flat=True)}
+
+        for slot in LineupSlot.objects.filter(unit__lineup=lineup):
+            submitted = request.POST.get(f"slot_{slot.pk}", "")
+            if submitted == str(slot.member_id or ""):
+                continue
+            if not submitted:
+                clear_slot(slot)
+            elif submitted in available_ids:
+                place_member(lineup, slot, Member.objects.get(pk=submitted))
+
+        notify(request, f"s|{_('Line-up saved')}|{_('Your changes have been saved.')}")
+        return HttpResponseRedirect(reverse("mobile:coach_lineup", kwargs={"event_id": event.pk}))
+
+
+class CoachLineupAddUnitView(CoachScopeMixin, LoginRequiredMixin, View):
+    """A blank "+ Add line" -- one new unit, auto-labelled and seeded with a
+    single empty slot; grown further via CoachLineupAddSlotView. No fixed
+    sport structure to seed from (see LineupUnit's own docstring)."""
+
+    def post(self, request, *args, **kwargs):
+        if not self.can_manage_active_team:
+            return HttpResponseForbidden()
+
+        event = get_object_or_404(Event, pk=kwargs["event_id"], club=request.club, teams=self.active_team, kind=Event.EventKind.GAME)
+        lineup, _created = Lineup.objects.get_or_create(event=event, defaults={"team": self.active_team, "created_by": self.me})
+        ordering = lineup.units.count()
+        unit = LineupUnit.objects.create(lineup=lineup, label=_("Line %(number)d") % {"number": ordering + 1}, ordering=ordering)
+        LineupSlot.objects.create(unit=unit, ordering=0)
+        return HttpResponseRedirect(reverse("mobile:coach_lineup", kwargs={"event_id": event.pk}))
+
+
+class CoachLineupAddSlotView(CoachScopeMixin, LoginRequiredMixin, View):
+    """One more empty slot on an existing unit."""
+
+    def post(self, request, *args, **kwargs):
+        if not self.can_manage_active_team:
+            return HttpResponseForbidden()
+
+        unit = get_object_or_404(LineupUnit, pk=kwargs["unit_id"], lineup__team=self.active_team)
+        LineupSlot.objects.create(unit=unit, ordering=unit.slots.count())
+        return HttpResponseRedirect(reverse("mobile:coach_lineup", kwargs={"event_id": unit.lineup.event_id}))
+
+
+class CoachLineupPublishView(CoachScopeMixin, LoginRequiredMixin, View):
+    """Writes the line-up into the game record and notifies the selected
+    players -- events.services.lineup.publish_lineup does the actual work."""
+
+    def post(self, request, *args, **kwargs):
+        if not self.can_manage_active_team:
+            return HttpResponseForbidden()
+
+        event = get_object_or_404(Event, pk=kwargs["event_id"], club=request.club, teams=self.active_team, kind=Event.EventKind.GAME)
+        lineup = get_object_or_404(Lineup, event=event)
+        publish_lineup(lineup)
+        notify(request, f"s|{_('Line-up published')}|{_('Selected players have been notified.')}")
+        return HttpResponseRedirect(reverse("mobile:coach_lineup", kwargs={"event_id": event.pk}))

@@ -19,7 +19,7 @@ from notifications.models import Notification
 from teams.models import Position, RefereeLevel, RefereeProfile, Team, TeamMembership
 
 from .admin import EventAdminForm
-from .models import Attendance, Competition, Event, EventReferee, EventSeries, Location, Opponent
+from .models import Attendance, Competition, Event, EventReferee, EventSeries, Lineup, LineupSlot, LineupUnit, Location, Opponent
 from .services import (
     cancel_occurrence,
     detach_occurrence,
@@ -34,6 +34,7 @@ from .services import (
     team_no_shows,
 )
 from .services.calendar import add_months, month_bounds, month_grid, season_grid, week_bounds, week_grid
+from .services.lineup import clear_slot, place_member, publish_lineup
 from .services.rbihf_import import RBIHFImportError, apply_plan, build_plan, extract_team_id, parse_fixtures, suggested_location, suggested_opponent
 from .services.referees import RefereeAssignmentError, add_external_referee, assign_referee, conflicting_events, eligible_referees, needs_referee_management, remove_referee, set_referee_fee
 from .tasks import send_deadline_reminders
@@ -369,6 +370,101 @@ class AttendanceSyncTests(EventsTestBase):
         event.teams.set([self.team])
 
         self.assertEqual(event.attendances.count(), 0)
+
+
+class LineupServiceTests(EventsTestBase):
+    """events.services.lineup -- place_member/clear_slot/publish_lineup, the
+    write path behind coach mode's C3 screen (mobile/coach_views.py)."""
+
+    def make_game_with_lineup(self, **event_kwargs):
+        event_kwargs.setdefault("kind", Event.EventKind.GAME)
+        event = self.make_event(**event_kwargs)
+        event.teams.add(self.team)
+        lineup = Lineup.objects.create(event=event, team=self.team)
+        unit = LineupUnit.objects.create(lineup=lineup, label="Line 1")
+        slot = LineupSlot.objects.create(unit=unit)
+        return event, lineup, unit, slot
+
+    def test_place_member_fills_the_slot(self):
+        _event, lineup, _unit, slot = self.make_game_with_lineup()
+
+        place_member(lineup, slot, self.alice)
+
+        slot.refresh_from_db()
+        self.assertEqual(slot.member, self.alice)
+
+    def test_place_member_vacates_the_members_other_slot_in_the_same_lineup(self):
+        _event, lineup, unit, slot = self.make_game_with_lineup()
+        other_slot = LineupSlot.objects.create(unit=unit, ordering=1, member=self.alice)
+
+        place_member(lineup, slot, self.alice)
+
+        other_slot.refresh_from_db()
+        self.assertIsNone(other_slot.member)
+        slot.refresh_from_db()
+        self.assertEqual(slot.member, self.alice)
+
+    def test_place_member_bumps_whoever_was_already_in_the_slot(self):
+        _event, lineup, _unit, slot = self.make_game_with_lineup()
+        slot.member = self.bob
+        slot.save()
+
+        place_member(lineup, slot, self.alice)
+
+        slot.refresh_from_db()
+        self.assertEqual(slot.member, self.alice)
+        # Bumped, not swapped -- Bob doesn't land in any other slot.
+        self.assertFalse(LineupSlot.objects.filter(unit__lineup=lineup, member=self.bob).exists())
+
+    def test_clear_slot_empties_it(self):
+        _event, _lineup, _unit, slot = self.make_game_with_lineup()
+        slot.member = self.alice
+        slot.save()
+
+        clear_slot(slot)
+
+        slot.refresh_from_db()
+        self.assertIsNone(slot.member)
+
+    def test_publish_sets_published_at(self):
+        _event, lineup, _unit, _slot = self.make_game_with_lineup()
+
+        publish_lineup(lineup)
+
+        lineup.refresh_from_db()
+        self.assertIsNotNone(lineup.published_at)
+
+    def test_publish_selects_slotted_members_and_not_selects_the_rest(self):
+        event, lineup, _unit, slot = self.make_game_with_lineup()
+        slot.member = self.alice
+        slot.save()
+        Attendance.objects.update_or_create(event=event, member=self.alice, defaults={"status": Attendance.AttendanceStatus.PRESENT})
+        Attendance.objects.update_or_create(event=event, member=self.bob, defaults={"status": Attendance.AttendanceStatus.PRESENT})
+
+        publish_lineup(lineup)
+
+        self.assertEqual(Attendance.objects.get(event=event, member=self.alice).status, Attendance.AttendanceStatus.SELECTED)
+        self.assertEqual(Attendance.objects.get(event=event, member=self.bob).status, Attendance.AttendanceStatus.NOT_SELECTED)
+
+    def test_publish_leaves_unavailable_members_untouched(self):
+        event, lineup, _unit, _slot = self.make_game_with_lineup()
+        Attendance.objects.update_or_create(event=event, member=self.bob, defaults={"status": Attendance.AttendanceStatus.ABSENT})
+
+        publish_lineup(lineup)
+
+        self.assertEqual(Attendance.objects.get(event=event, member=self.bob).status, Attendance.AttendanceStatus.ABSENT)
+
+    def test_publish_notifies_only_selected_members(self):
+        event, lineup, _unit, slot = self.make_game_with_lineup()
+        slot.member = self.alice
+        slot.save()
+        Attendance.objects.update_or_create(event=event, member=self.alice, defaults={"status": Attendance.AttendanceStatus.PRESENT})
+        Attendance.objects.update_or_create(event=event, member=self.bob, defaults={"status": Attendance.AttendanceStatus.PRESENT})
+
+        publish_lineup(lineup)
+
+        notified_member_ids = set(Notification.objects.filter(member__in=[self.alice, self.bob]).values_list("member_id", flat=True))
+        self.assertEqual(notified_member_ids, {self.alice.pk})
 
 
 class RosterChangeSyncTests(EventsTestBase):

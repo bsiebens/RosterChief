@@ -1,0 +1,75 @@
+{% extends "mobile/coach/base.html" %}
+{% load i18n %}
+
+{% comment %}
+    C3 -- design_handoff_rosterchief_platform/README.md's C3 section: units
+    (Line 1, Defence pair 1, ...) of ordered slots, each filled via a native
+    <select> rather than the mock's drag-and-drop -- see
+    CoachLineupView's own docstring for why, and for the known "+ Add line"/
+    "+ Add slot" rough edge (they don't save the other slots' picks first).
+    The mock's "fully dark screen" is approximated with dark cards
+    throughout rather than overriding the shared .coach-sheet's own light
+    background -- a real per-screen shell hook is more infrastructure than
+    one screen justifies.
+{% endcomment %}
+
+{% block header_extra %}
+    <div class="mt-3 flex items-center justify-between">
+        <span class="font-display text-xl leading-none font-extrabold text-white uppercase">{% trans "Line-up" %}</span>
+        {% if lineup.published_at %}<span class="pill pill-info">{% trans "Published" %}</span>{% endif %}
+    </div>
+    <div class="mt-1 text-xs text-on-dark-dim">{{ event.title }} &middot; {{ event.start|date:"D d M H:i" }}</div>
+{% endblock header_extra %}
+
+{% block content %}
+    <form method="post" action="{% url "mobile:coach_lineup" event.pk %}">
+        {% csrf_token %}
+        <div class="flex flex-col gap-3">
+            {% for unit in units %}
+                <div class="m-card-dark p-3">
+                    <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-ice uppercase">{{ unit.label }}</div>
+                    <div class="flex flex-col gap-2">
+                        {% for slot in unit.slots.all %}
+                            <select class="h-10 w-full rounded-lg border border-steel bg-steel px-2 text-sm text-white" name="slot_{{ slot.pk }}" {% if not can_manage_active_team %}disabled{% endif %}>
+                                <option value="">{% trans "Empty" %}</option>
+                                {% for attendance in available %}
+                                    <option value="{{ attendance.member.pk }}" {% if slot.member_id == attendance.member.pk %}selected{% endif %}>{{ attendance.member.get_full_name }}</option>
+                                {% endfor %}
+                            </select>
+                        {% endfor %}
+                    </div>
+                    {% if can_manage_active_team %}
+                        <button class="mt-2 font-display text-xs font-extrabold tracking-wide text-ice uppercase" type="submit" formaction="{% url "mobile:coach_lineup_add_slot" unit.pk %}">{% trans "+ Add slot" %}</button>
+                    {% endif %}
+                </div>
+            {% empty %}
+                <div class="m-card-dark p-6 text-center text-sm text-on-dark-dim">{% trans "No lines yet." %}</div>
+            {% endfor %}
+        </div>
+
+        {% if can_manage_active_team %}
+            <div class="mt-3 flex gap-2">
+                <button class="btn flex-1 bg-steel text-on-dark" type="submit" formaction="{% url "mobile:coach_lineup_add_unit" event.pk %}">{% trans "+ Add line" %}</button>
+                <button class="btn btn-dark flex-1" type="submit">{% trans "Save line-up" %}</button>
+            </div>
+        {% endif %}
+    </form>
+
+    {% if unavailable %}
+        <div class="mt-1">
+            <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-on-dark-dim uppercase">{% trans "Unavailable" %}</div>
+            <div class="flex flex-wrap gap-2">
+                {% for attendance in unavailable %}
+                    <span class="rounded-full bg-steel px-3 py-1.5 text-xs text-on-dark-faint opacity-50">{{ attendance.member.get_full_name }} &middot; {{ attendance.get_status_display }}</span>
+                {% endfor %}
+            </div>
+        </div>
+    {% endif %}
+
+    {% if can_manage_active_team and not lineup.published_at %}
+        <form class="mt-2" method="post" action="{% url "mobile:coach_lineup_publish" event.pk %}">
+            {% csrf_token %}
+            <button class="btn w-full bg-ice text-ice-ink" type="submit">{% trans "Publish" %}</button>
+        </form>
+    {% endif %}
+{% endblock content %}
