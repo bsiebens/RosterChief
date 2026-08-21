@@ -54,7 +54,7 @@ from teams.models import Position, RefereeLevel, RefereeProfile, StaffAssignment
 from teams.services import eligible_roster_members
 
 from .bulk_import import build_member_import_template, parse_member_import_rows, read_member_import_workbook
-from .email_previews import EMAIL_PREVIEWS, render_preview
+from .email_previews import EMAIL_PREVIEWS, EMAIL_PREVIEWS_BY_KEY, render_preview
 from .forms import (
     AddChildForm,
     AddParentForm,
@@ -96,6 +96,7 @@ from .forms import (
     bulk_add_member_label,
 )
 from .pdf import PDFExportError, event_referee_form_pdf, membership_list_pdf, referee_form_colors
+from .pdf_previews import PDF_PREVIEWS, PDF_PREVIEWS_BY_KEY, render_pdf_preview
 from .recurrence_ui import describe_rrule
 
 
@@ -3320,53 +3321,55 @@ class ClubSettingsView(ClubAdminRequiredMixin, UpdateView):
         return reverse("management:club_settings")
 
     def get_context_data(self, **kwargs):
-        return super().get_context_data(**kwargs)
-
-
-class EmailPreviewListView(ClubAdminRequiredMixin, TemplateView):
-    """See email_previews.EMAIL_PREVIEWS's own docstring -- every branded email
-    this app can send, rendered against sample data for this club so an admin
-    can see exactly what a member/parent would receive without sending
-    anything. Same access level as Club identity: this is a branding/comms
-    concern, not day-to-day people/roster work.
-
-    The HTML render itself is NOT embedded directly here -- see
-    EmailPreviewRenderView, which each card's iframe points its `src` at.
-    An email's markup is full of its own double-quoted style="..." attributes;
-    dropping that whole document into a srcdoc="..." attribute here relies on
-    Django's autoescaping to get every one of those quotes right, and depends
-    on browser-specific handling of an escaped, inherited-CSP srcdoc document
-    that turned out not to render reliably. A same-origin sub-request sidesteps
-    all of that -- ordinary HTML delivered as an ordinary response."""
-
-    template_name = "management/email_previews.html"
-
-    def get_context_data(self, **kwargs):
         club = self.request.club
-        previews = []
+        email_previews = []
         for preview in EMAIL_PREVIEWS:
             rendered = render_preview(preview, club=club, request=self.request)
-            previews.append({"key": preview.key, "label": preview.label, "description": preview.description, "subject": rendered["subject"], "text": rendered["text"]})
-        return super().get_context_data(previews=previews, **kwargs)
+            email_previews.append({"key": preview.key, "label": preview.label, "description": preview.description, "subject": rendered["subject"], "text": rendered["text"]})
+        pdf_previews = [{"key": preview.key, "label": preview.label, "description": preview.description} for preview in PDF_PREVIEWS]
+        return super().get_context_data(email_previews=email_previews, pdf_previews=pdf_previews, **kwargs)
 
 
 @method_decorator(xframe_options_sameorigin, name="get")
 class EmailPreviewRenderView(ClubAdminRequiredMixin, View):
-    """The actual HTML document for one preview, served at its own URL so
-    EmailPreviewListView's iframe can `src` it directly rather than smuggling
-    it through a srcdoc="..." attribute -- see that view's docstring for why.
+    """The actual HTML document for one email preview, served at its own URL
+    so the Email tab's iframe can `src` it directly rather than smuggling it
+    through a srcdoc="..." attribute. An email's markup is full of its own
+    double-quoted style="..." attributes; dropping that whole document into
+    a srcdoc="..." attribute relies on Django's autoescaping to get every one
+    of those quotes right, and on browser-specific handling of an escaped,
+    inherited-CSP srcdoc document that turned out not to render reliably. A
+    same-origin sub-request sidesteps all of that -- ordinary HTML delivered
+    as an ordinary response.
+
     xframe_options_sameorigin overrides the site-wide X-Frame-Options: DENY
     (settings.py has no X_FRAME_OPTIONS override, so SecurityMiddleware's
     default applies everywhere else): this response only ever needs to be
     framed by the page that links to it, on the same origin."""
 
     def get(self, request, key):
-        preview = next((preview for preview in EMAIL_PREVIEWS if preview.key == key), None)
+        preview = EMAIL_PREVIEWS_BY_KEY.get(key)
         if preview is None:
             raise Http404
 
         rendered = render_preview(preview, club=request.club, request=request)
         return HttpResponse(rendered["html"], content_type="text/html; charset=utf-8")
+
+
+@method_decorator(xframe_options_sameorigin, name="get")
+class PDFPreviewRenderView(ClubAdminRequiredMixin, View):
+    """The PDF tab's sibling of EmailPreviewRenderView -- the underlying HTML
+    WeasyPrint would turn into a PDF (see pdf_previews.PDF_PREVIEWS's own
+    docstring for why that's shown directly rather than actually running
+    WeasyPrint), served the same same-origin-iframe-friendly way."""
+
+    def get(self, request, key):
+        preview = PDF_PREVIEWS_BY_KEY.get(key)
+        if preview is None:
+            raise Http404
+
+        html = render_pdf_preview(preview, club=request.club, request=request)
+        return HttpResponse(html, content_type="text/html; charset=utf-8")
 
 
 class OnboardingRequirementListView(MemberAdminRequiredMixin, ListView):

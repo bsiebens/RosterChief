@@ -1,15 +1,15 @@
-"""Sample renders of every branded email this app can send -- the Settings >
-Email previews page (management/templates/management/email_previews.html),
+"""Sample renders of every branded email this app can send -- the Email tab
+on the Club identity page (management/templates/management/club_settings.html),
 so a club can see exactly what a member/parent receives without anything
 actually being sent.
 
 Each entry renders the *real* templates the real send functions use (see
-members.services.claims.send_claim_approved_email and
-club.services.invoicing.send_invoice_email/send_reminder_email) against a
-hand-built sample context -- never a real Member/ClubMembership/DuesInvoice
-row, so this needs nothing from the database beyond the current club itself,
-and can't leak anything real. Adding a new branded email later means adding
-one entry here, not touching the view or template.
+club.services.invoicing.send_invoice_email/send_reminder_email, and allauth's
+own password-reset flow via templates/account/email/password_reset_key_message.html)
+against a hand-built sample context -- never a real Member/ClubMembership/
+DuesInvoice row, so this needs nothing from the database beyond the current
+club itself, and can't leak anything real. Adding a new branded email later
+means adding one entry here, not touching the view or template.
 """
 
 import datetime
@@ -34,16 +34,6 @@ class EmailPreview:
     build_context: Callable[..., dict]
 
 
-def _claim_approved_context(club, request):
-    return {
-        "club": club,
-        "child": "Jamie Doe",
-        "parent_first_name": "Alex",
-        "set_password_url": f"https://{club.slug}.rosterchief.app/accounts/password/reset/key/example/",
-        "request": request,
-    }
-
-
 def _dues_invoice_context(club, request, *, overdue):
     today = timezone.now().date()
     due_date = today - datetime.timedelta(days=5) if overdue else today + datetime.timedelta(days=14)
@@ -51,6 +41,21 @@ def _dues_invoice_context(club, request, *, overdue):
     membership = SimpleNamespace(season="2026-2027")
     member = SimpleNamespace(first_name="Jamie")
     return {"club": club, "invoice": invoice, "membership": membership, "member": member, "request": request}
+
+
+def _password_reset_context(club, request):
+    # Mirrors allauth.account.internal.flows.password_reset.request_password_reset's
+    # own context -- current_site is only used by the *stock* .txt template's
+    # base_message.txt wrapper (our .html override doesn't reference it, but the
+    # .txt preview does), username only matters when ACCOUNT_LOGIN_METHODS
+    # includes "username" (it doesn't here -- login is email-only), so it's left
+    # out entirely rather than faked.
+    return {
+        "club": club,
+        "current_site": SimpleNamespace(name="RosterChief", domain="rosterchief.app"),
+        "password_reset_url": f"https://{club.slug}.rosterchief.app/accounts/password/reset/key/example/",
+        "request": request,
+    }
 
 
 EMAIL_PREVIEWS = [
@@ -73,15 +78,17 @@ EMAIL_PREVIEWS = [
         build_context=lambda club, request: _dues_invoice_context(club, request, overdue=True),
     ),
     EmailPreview(
-        key="claim_approved",
-        label=_("Parent claim approved"),
-        description=_("Sent when a staff member approves a parent or guardian's claim to a child, from the Parent claims page."),
-        subject_template="members/email/claim_approved_subject.txt",
-        text_template="members/email/claim_approved.txt",
-        html_template="members/email/claim_approved.html",
-        build_context=_claim_approved_context,
+        key="password_reset",
+        label=_("Password reset"),
+        description=_("Sent by the “Forgot your password?” link on the sign-in page."),
+        subject_template="account/email/password_reset_key_subject.txt",
+        text_template="account/email/password_reset_key_message.txt",
+        html_template="account/email/password_reset_key_message.html",
+        build_context=_password_reset_context,
     ),
 ]
+
+EMAIL_PREVIEWS_BY_KEY = {preview.key: preview for preview in EMAIL_PREVIEWS}
 
 
 def render_preview(preview: EmailPreview, *, club, request) -> dict:

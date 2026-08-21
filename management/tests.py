@@ -28,6 +28,7 @@ from events.services.recurrence import detach_occurrence, generate_occurrences
 from management.bulk_import import TEMPLATE_COLUMNS
 from management.email_previews import EMAIL_PREVIEWS
 from management.pdf import PDFExportError, _tint_with_white, referee_form_colors, render_pdf
+from management.pdf_previews import PDF_PREVIEWS
 from management.recurrence_ui import build_rrule, describe_rrule, parse_rrule
 from members.models import Family, FamilyMembership, Group, GroupMembership, Member, ParentClaim
 from members.services.claims import children_awaiting_a_parent
@@ -4717,12 +4718,15 @@ class SponsorManagementTests(ManagementTestBase):
 
 class ClubSettingsPreviewTests(ManagementTestBase):
     """The D9-alike live preview on the Club identity page -- see
-    management/templates/management/club_settings.html."""
+    management/templates/management/club_settings.html. The Identity tab's
+    own mock (phone/website, JS colour-bound) is separate from the Email/PDF
+    tabs (real templates, server-rendered) -- see ClubSettingsDocumentTabTests
+    for those."""
 
     def setUp(self):
         self.client.force_login(self.admin_user)
 
-    def test_the_preview_tabs_and_colour_swatches_render(self):
+    def test_the_page_tabs_and_colour_swatches_render(self):
         response = self.club_get("club_settings")
 
         self.assertContains(response, "preview-tab-active")
@@ -4740,18 +4744,12 @@ class ClubSettingsPreviewTests(ManagementTestBase):
         response = self.club_get("club_settings")
         self.assertContains(response, 'name="website"')
 
-    def test_app_and_website_share_one_tab(self):
+    def test_identity_email_and_pdf_are_the_three_page_tabs(self):
         response = self.club_get("club_settings")
 
-        self.assertContains(response, "App & Website")
-        self.assertContains(response, 'data-preview-tab="app"')
-        self.assertNotContains(response, 'data-preview-tab="website"')
-
-    def test_the_email_tab_renders_and_starts_hidden(self):
-        response = self.club_get("club_settings")
-
-        self.assertContains(response, 'data-preview-tab="email"')
-        self.assertContains(response, 'id="preview-panel-email" class="preview-email hidden"')
+        self.assertContains(response, 'data-page-tab="identity"')
+        self.assertContains(response, 'data-page-tab="email"')
+        self.assertContains(response, 'data-page-tab="pdf"')
 
     def test_saving_still_updates_the_club(self):
         response = self.club_post(
@@ -4766,60 +4764,79 @@ class ClubSettingsPreviewTests(ManagementTestBase):
         self.assertEqual(self.club.website, "https://ajax-united.example")
 
 
-class EmailPreviewListViewTests(ManagementTestBase):
-    """Settings > Email previews -- see management.email_previews."""
+class ClubSettingsDocumentTabTests(ManagementTestBase):
+    """The Email and PDF tabs on the Club identity page -- every branded
+    email (management.email_previews) and generated PDF (management.pdf_previews)
+    this club can send, rendered against sample data. See
+    EmailPreviewRenderViewTests/PDFPreviewRenderViewTests for the actual
+    per-document render each card's iframe loads."""
 
     def setUp(self):
         self.client.force_login(self.admin_user)
 
-    def test_renders_every_registered_preview(self):
-        response = self.club_get("email_preview_list")
+    def test_renders_every_registered_email_and_pdf_preview(self):
+        response = self.club_get("club_settings")
 
         self.assertEqual(response.status_code, 200)
         for preview in EMAIL_PREVIEWS:
             self.assertContains(response, preview.label)
+        for preview in PDF_PREVIEWS:
+            self.assertContains(response, preview.label)
 
     def test_each_card_links_to_its_own_render_view(self):
-        response = self.club_get("email_preview_list")
+        response = self.club_get("club_settings")
 
         for preview in EMAIL_PREVIEWS:
             self.assertContains(response, reverse("management:email_preview_render", args=[preview.key]))
+        for preview in PDF_PREVIEWS:
+            self.assertContains(response, reverse("management:pdf_preview_render", args=[preview.key]))
 
-    def test_the_subject_and_plain_text_body_render(self):
-        response = self.club_get("email_preview_list")
+    def test_the_subject_and_plain_text_body_render_for_emails(self):
+        response = self.club_get("club_settings")
 
         self.assertContains(response, "Subject:")
         self.assertContains(response, "DUE-2026-00042")
 
-    def test_no_real_invoice_or_claim_data_is_needed(self):
-        # The whole point: a preview renders with zero DuesInvoice/ParentClaim
-        # rows in the database.
-        self.assertFalse(DuesInvoice.objects.exists())
+    def test_pdf_cards_have_no_plain_text_toggle(self):
+        # PDFs have no plain-text body to switch to -- unlike an email card,
+        # a PDF card is just the one iframe. Exactly one toggle button per
+        # email preview, none contributed by the PDF ones.
+        response = self.club_get("club_settings")
 
-        response = self.club_get("email_preview_list")
+        self.assertEqual(response.content.decode().count('data-view-btn="text"'), len(EMAIL_PREVIEWS))
+
+    def test_claim_approved_was_dropped(self):
+        # Not directly used right now -- see management/email_previews.py.
+        response = self.club_get("club_settings")
+
+        self.assertNotContains(response, "Parent claim approved")
+
+    def test_no_real_data_is_needed(self):
+        # The whole point: previews render with zero DuesInvoice/Event rows
+        # in the database.
+        self.assertFalse(DuesInvoice.objects.exists())
+        self.assertFalse(Event.objects.filter(club=self.club).exists())
+
+        response = self.club_get("club_settings")
 
         self.assertEqual(response.status_code, 200)
 
     def test_non_admin_gets_403(self):
-        coach_user = User.objects.create_user(email="coach-email-preview@example.com", password="pw-secret-123")
+        coach_user = User.objects.create_user(email="coach-doc-preview@example.com", password="pw-secret-123")
         coach_member = Member.objects.create(user=coach_user, first_name="Cara", last_name="Coach")
         team = Team.objects.create(club=self.club, name="U18", short_name="U18")
         position = Position.objects.create(club=self.club, name="Coach14", short_name="C14", staff_position=True)
         StaffAssignment.objects.create(team=team, member=coach_member, season=self.season, position=position)
         self.client.force_login(coach_user)
 
-        response = self.club_get("email_preview_list")
+        response = self.club_get("club_settings")
 
         self.assertEqual(response.status_code, 403)
-
-    def test_nav_entry_is_admin_only(self):
-        admin_response = self.club_get("club_settings")
-        self.assertContains(admin_response, reverse("management:email_preview_list"))
 
 
 class EmailPreviewRenderViewTests(ManagementTestBase):
     """The actual per-email HTML document each card's iframe loads via `src` --
-    see EmailPreviewListView's own docstring for why this is a same-origin
+    see EmailPreviewRenderView's own docstring for why this is a same-origin
     sub-request rather than a srcdoc="..." attribute."""
 
     def setUp(self):
@@ -4843,10 +4860,16 @@ class EmailPreviewRenderViewTests(ManagementTestBase):
         self.assertContains(response, "Ajax United")
         self.assertContains(response, "#123456")
 
+    def test_the_password_reset_preview_renders(self):
+        response = self.client.get(reverse("management:email_preview_render", args=["password_reset"]), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Reset your password")
+
     def test_allows_same_origin_framing(self):
         # The site-wide default (SecurityMiddleware, no X_FRAME_OPTIONS override
         # in settings.py) is DENY -- this response overrides that specifically,
-        # since EmailPreviewListView's own iframe needs to load it.
+        # since the Email tab's own iframe needs to load it.
         response = self.client.get(reverse("management:email_preview_render", args=["dues_invoice"]), HTTP_HOST="ajax-united.rosterchief.app")
 
         self.assertEqual(response["X-Frame-Options"], "SAMEORIGIN")
@@ -4865,6 +4888,51 @@ class EmailPreviewRenderViewTests(ManagementTestBase):
         self.client.force_login(coach_user)
 
         response = self.client.get(reverse("management:email_preview_render", args=["dues_invoice"]), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 403)
+
+
+class PDFPreviewRenderViewTests(ManagementTestBase):
+    """The actual per-PDF HTML document each PDF card's iframe loads via
+    `src` -- the same underlying HTML WeasyPrint would turn into a PDF, shown
+    directly rather than round-tripping through WeasyPrint for a preview."""
+
+    def setUp(self):
+        self.client.force_login(self.admin_user)
+
+    def test_renders_the_dues_invoice_pdf_html(self):
+        response = self.client.get(reverse("management:pdf_preview_render", args=["dues_invoice"]), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "<!DOCTYPE html>")
+        self.assertContains(response, "DUE-2026-00042")
+
+    def test_renders_the_referee_form_pdf_html(self):
+        response = self.client.get(reverse("management:pdf_preview_render", args=["referee_form"]), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Referee payment form")
+        self.assertContains(response, "Jamie Doe")
+
+    def test_allows_same_origin_framing(self):
+        response = self.client.get(reverse("management:pdf_preview_render", args=["dues_invoice"]), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response["X-Frame-Options"], "SAMEORIGIN")
+
+    def test_an_unknown_key_404s(self):
+        response = self.client.get(reverse("management:pdf_preview_render", args=["not-a-real-key"]), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_non_admin_gets_403(self):
+        coach_user = User.objects.create_user(email="coach-pdf-render@example.com", password="pw-secret-123")
+        coach_member = Member.objects.create(user=coach_user, first_name="Cara", last_name="Coach")
+        team = Team.objects.create(club=self.club, name="U20", short_name="U20")
+        position = Position.objects.create(club=self.club, name="Coach16", short_name="C16", staff_position=True)
+        StaffAssignment.objects.create(team=team, member=coach_member, season=self.season, position=position)
+        self.client.force_login(coach_user)
+
+        response = self.client.get(reverse("management:pdf_preview_render", args=["dues_invoice"]), HTTP_HOST="ajax-united.rosterchief.app")
 
         self.assertEqual(response.status_code, 403)
 

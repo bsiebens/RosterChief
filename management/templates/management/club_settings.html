@@ -9,124 +9,128 @@
     closely for the Colours card (merged swatch+hex row, side-by-side
     contrast-check boxes) and the Logo card (dashed drop zone) -- markup
     pulled straight from the design canvas (RosterChief Platform.dc.html),
-    not the prose summary. The live preview has two tabs rather than D9's
-    three: App and Website are merged into one (they were always shown
-    together anyway, and the mobile app isn't built yet -- the phone mock
-    is the same colours applied ahead of it existing); Email is real and
-    functional, a generic sample shaped like the actual branded emails this
-    app sends (club/templates/club/email/*.html, members/.../claim_approved.html),
-    not a preview of any one specific message. The colour math (content
+    not the prose summary.
+
+    Three top-level tabs, not just a preview card: Identity (the settings
+    form, plus a small live-updating App & Website mock -- colours from the
+    unsaved form inputs, via the script below) is D9 as designed. Email and
+    PDF are real, not mocks -- every branded email (management/email_previews.py)
+    and generated PDF (management/pdf_previews.py) this club can actually send,
+    rendered with sample data. Those two read the club's *saved* colours
+    (server-rendered in an iframe, see EmailPreviewRenderView/PDFPreviewRenderView),
+    so -- unlike the Identity tab's own mock -- they only reflect a colour
+    change after it's saved, not as you type. The colour math (content
     colour, contrast ratio) mirrors Club._content_color_for exactly, so
-    what's shown is the real number the server computes on save, not an
-    approximation.
+    what's shown on the Identity tab is the real number the server computes
+    on save, not an approximation.
 {% endcomment %}
 
 {% block panel_title %}{% trans "Club identity" %}{% endblock panel_title %}
 {% block heading %}{% trans "Club identity" %}{% endblock heading %}
 
 {% block actions %}
-    <button class="btn btn-primary gap-2" type="submit" form="club-settings-form">{% lucide "save" size=16 %} {% trans "Save changes" %}</button>
+    <button class="btn btn-primary gap-2" type="submit" form="club-settings-form" data-identity-only>{% lucide "save" size=16 %} {% trans "Save changes" %}</button>
 {% endblock actions %}
 
 {% block panel %}
-    <div class="grid grid-cols-1 gap-5 xl:grid-cols-[1.2fr_1fr]">
-        <form id="club-settings-form" method="post" enctype="multipart/form-data" class="flex flex-col gap-5">
-            {% csrf_token %}
+    <div class="mb-1 flex w-fit overflow-hidden rounded-md border border-line">
+        <button type="button" class="preview-tab preview-tab-active" data-page-tab="identity">{% trans "Identity" %}</button>
+        <button type="button" class="preview-tab" data-page-tab="email">{% trans "Email" %}</button>
+        <button type="button" class="preview-tab" data-page-tab="pdf">{% trans "PDF" %}</button>
+    </div>
 
-            {% for error in form.non_field_errors %}
-                <div class="alert alert-error">
-                    {% lucide "circle-x" size=18 %}
-                    <span>{{ error }}</span>
-                </div>
-            {% endfor %}
+    <div data-page-panel="identity">
+        <div class="grid grid-cols-1 gap-5 xl:grid-cols-[1.2fr_1fr]">
+            <form id="club-settings-form" method="post" enctype="multipart/form-data" class="flex flex-col gap-5">
+                {% csrf_token %}
 
-            <div class="card">
-                <div class="card-body">
-                    <div class="card-title">{% lucide "building-2" size=16 %} {% trans "Club" %}</div>
-                    <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
-                        {% form_field form.name %}
-                        {% form_field form.legal_name %}
-                        {% form_field form.contact_email %}
-                        {% form_field form.website %}
+                {% for error in form.non_field_errors %}
+                    <div class="alert alert-error">
+                        {% lucide "circle-x" size=18 %}
+                        <span>{{ error }}</span>
                     </div>
-                </div>
-            </div>
+                {% endfor %}
 
-            <div class="card">
-                <div class="card-body">
-                    <div class="flex items-center justify-between gap-2">
-                        <div class="card-title">{% lucide "palette" size=16 %} {% trans "Colours" %}</div>
-                        <span class="font-mono text-xs text-dim">{% trans "Accents only" %}</span>
-                    </div>
-
-                    <div class="grid grid-cols-2 gap-4">
-                        <div>
-                            <div class="mb-1.5 font-display text-[11px] font-bold tracking-[.12em] text-muted uppercase">{{ form.primary_color.label|capfirst }}</div>
-                            <label class="club-color-row">
-                                <input type="color" id="primary_color_swatch" class="club-color-swatch" value="{{ form.primary_color.value|default:"#0b1220" }}" aria-label="{% trans "Pick the primary colour" %}">
-                                <input type="text" name="{{ form.primary_color.html_name }}" id="{{ form.primary_color.id_for_label }}" value="{{ form.primary_color.value|default:"" }}" placeholder="#0b1220" class="club-color-hex-input">
-                            </label>
-                            {% if form.primary_color.errors %}<p class="mt-1 text-xs text-club-dark">{{ form.primary_color.errors|join:" " }}</p>{% endif %}
-                        </div>
-                        <div>
-                            <div class="mb-1.5 font-display text-[11px] font-bold tracking-[.12em] text-muted uppercase">{{ form.secondary_color.label|capfirst }}</div>
-                            <label class="club-color-row">
-                                <input type="color" id="secondary_color_swatch" class="club-color-swatch" value="{{ form.secondary_color.value|default:"#e4002b" }}" aria-label="{% trans "Pick the secondary colour" %}">
-                                <input type="text" name="{{ form.secondary_color.html_name }}" id="{{ form.secondary_color.id_for_label }}" value="{{ form.secondary_color.value|default:"" }}" placeholder="#e4002b" class="club-color-hex-input">
-                            </label>
-                            {% if form.secondary_color.errors %}<p class="mt-1 text-xs text-club-dark">{{ form.secondary_color.errors|join:" " }}</p>{% endif %}
+                <div class="card">
+                    <div class="card-body">
+                        <div class="card-title">{% lucide "building-2" size=16 %} {% trans "Club" %}</div>
+                        <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+                            {% form_field form.name %}
+                            {% form_field form.legal_name %}
+                            {% form_field form.contact_email %}
+                            {% form_field form.website %}
                         </div>
                     </div>
+                </div>
 
-                    <div class="mt-4">
-                        <div class="mb-2 font-display text-[11px] font-bold tracking-[.12em] text-muted uppercase">{% trans "Contrast check" %}</div>
-                        <div class="flex gap-2">
-                            <div id="contrast-box-primary" class="club-contrast-box">
-                                <span id="contrast-label-primary"></span>
-                                <span id="contrast-ratio-primary" class="font-mono"></span>
+                <div class="card">
+                    <div class="card-body">
+                        <div class="flex items-center justify-between gap-2">
+                            <div class="card-title">{% lucide "palette" size=16 %} {% trans "Colours" %}</div>
+                            <span class="font-mono text-xs text-dim">{% trans "Accents only" %}</span>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <div class="mb-1.5 font-display text-[11px] font-bold tracking-[.12em] text-muted uppercase">{{ form.primary_color.label|capfirst }}</div>
+                                <label class="club-color-row">
+                                    <input type="color" id="primary_color_swatch" class="club-color-swatch" value="{{ form.primary_color.value|default:"#0b1220" }}" aria-label="{% trans "Pick the primary colour" %}">
+                                    <input type="text" name="{{ form.primary_color.html_name }}" id="{{ form.primary_color.id_for_label }}" value="{{ form.primary_color.value|default:"" }}" placeholder="#0b1220" class="club-color-hex-input">
+                                </label>
+                                {% if form.primary_color.errors %}<p class="mt-1 text-xs text-club-dark">{{ form.primary_color.errors|join:" " }}</p>{% endif %}
                             </div>
-                            <div id="contrast-box-secondary" class="club-contrast-box">
-                                <span id="contrast-label-secondary"></span>
-                                <span id="contrast-ratio-secondary" class="font-mono"></span>
+                            <div>
+                                <div class="mb-1.5 font-display text-[11px] font-bold tracking-[.12em] text-muted uppercase">{{ form.secondary_color.label|capfirst }}</div>
+                                <label class="club-color-row">
+                                    <input type="color" id="secondary_color_swatch" class="club-color-swatch" value="{{ form.secondary_color.value|default:"#e4002b" }}" aria-label="{% trans "Pick the secondary colour" %}">
+                                    <input type="text" name="{{ form.secondary_color.html_name }}" id="{{ form.secondary_color.id_for_label }}" value="{{ form.secondary_color.value|default:"" }}" placeholder="#e4002b" class="club-color-hex-input">
+                                </label>
+                                {% if form.secondary_color.errors %}<p class="mt-1 text-xs text-club-dark">{{ form.secondary_color.errors|join:" " }}</p>{% endif %}
                             </div>
                         </div>
-                    </div>
-                </div>
-            </div>
 
-            <div class="card">
-                <div class="card-body">
-                    <div class="card-title">{% lucide "image" size=16 %} {% trans "Logo" %}</div>
-                    <div class="flex items-end gap-4">
-                        <div>
-                            <div class="mb-1.5 font-display text-[11px] font-bold tracking-[.12em] text-muted uppercase">{% trans "Crest" %}</div>
-                            <div class="club-logo-dropzone">
-                                {% if club.logo %}
-                                    <img class="h-full w-full object-contain p-1.5" src="{{ club.logo.url }}" alt="">
-                                {% else %}
-                                    <span class="font-display text-sm font-extrabold text-muted">{{ club.initials }}</span>
-                                {% endif %}
+                        <div class="mt-4">
+                            <div class="mb-2 font-display text-[11px] font-bold tracking-[.12em] text-muted uppercase">{% trans "Contrast check" %}</div>
+                            <div class="flex gap-2">
+                                <div id="contrast-box-primary" class="club-contrast-box">
+                                    <span id="contrast-label-primary"></span>
+                                    <span id="contrast-ratio-primary" class="font-mono"></span>
+                                </div>
+                                <div id="contrast-box-secondary" class="club-contrast-box">
+                                    <span id="contrast-label-secondary"></span>
+                                    <span id="contrast-ratio-secondary" class="font-mono"></span>
+                                </div>
                             </div>
                         </div>
-                        <div class="flex-1">{% form_field form.logo %}</div>
                     </div>
                 </div>
-            </div>
-        </form>
 
-        <div class="xl:sticky xl:top-4 xl:self-start">
-            <div class="card">
-                <div class="card-body">
-                    <div class="flex items-center justify-between gap-2">
+                <div class="card">
+                    <div class="card-body">
+                        <div class="card-title">{% lucide "image" size=16 %} {% trans "Logo" %}</div>
+                        <div class="flex items-end gap-4">
+                            <div>
+                                <div class="mb-1.5 font-display text-[11px] font-bold tracking-[.12em] text-muted uppercase">{% trans "Crest" %}</div>
+                                <div class="club-logo-dropzone">
+                                    {% if club.logo %}
+                                        <img class="h-full w-full object-contain p-1.5" src="{{ club.logo.url }}" alt="">
+                                    {% else %}
+                                        <span class="font-display text-sm font-extrabold text-muted">{{ club.initials }}</span>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            <div class="flex-1">{% form_field form.logo %}</div>
+                        </div>
+                    </div>
+                </div>
+            </form>
+
+            <div class="xl:sticky xl:top-4 xl:self-start">
+                <div class="card">
+                    <div class="card-body">
                         <div class="card-title">{% lucide "eye" size=16 %} {% trans "Live preview" %}</div>
-                        <div class="flex overflow-hidden rounded-md border border-line">
-                            <button type="button" class="preview-tab preview-tab-active" data-preview-tab="app">{% trans "App & Website" %}</button>
-                            <button type="button" class="preview-tab" data-preview-tab="email">{% trans "Email" %}</button>
-                        </div>
-                    </div>
 
-                    <div class="mt-3">
-                        <div id="preview-panel-app" class="flex flex-wrap items-start gap-4" data-preview-panel="app">
+                        <div class="mt-3 flex flex-wrap items-start gap-4">
                             <div class="preview-phone-lg">
                                 <div id="preview-phone-header" class="preview-phone-header">
                                     <div class="preview-phone-header-row">
@@ -173,29 +177,30 @@
                                         <li class="flex items-center gap-2"><span id="preview-dot-1" class="preview-brand-dot"></span>{% trans "Sidebar, active nav item, primary buttons" %}</li>
                                         <li class="flex items-center gap-2"><span id="preview-dot-2" class="preview-brand-dot"></span>{% trans "Public site header and join button" %}</li>
                                         <li class="flex items-center gap-2"><span id="preview-dot-3" class="preview-brand-dot"></span>{% trans "Mobile app header and highlights" %}</li>
-                                        <li class="flex items-center gap-2"><span id="preview-dot-4" class="preview-brand-dot"></span>{% trans "Transactional email crest and buttons" %}</li>
+                                        <li class="flex items-center gap-2"><span id="preview-dot-4" class="preview-brand-dot"></span>{% trans "Emails and PDFs -- see the Email/PDF tabs above" %}</li>
                                         <li class="flex items-center gap-2"><span class="preview-brand-dot preview-brand-dot-neutral"></span>{% trans "Never: status colours, tables, form fields" %}</li>
                                     </ul>
                                 </div>
-                            </div>
-                        </div>
-
-                        <div id="preview-panel-email" class="preview-email hidden" data-preview-panel="email">
-                            <div class="preview-email-header">
-                                <span id="preview-email-crest" class="preview-crest preview-crest-sm preview-email-crest">{{ club.initials|default:"CL" }}</span>
-                                <span class="preview-email-name">{{ club.name|default:_("Your club") }}</span>
-                            </div>
-                            <div class="preview-email-body">
-                                <div class="preview-skeleton-line"></div>
-                                <div class="preview-skeleton-line preview-skeleton-line-short"></div>
-                                <span id="preview-email-button" class="preview-email-button">{% trans "View details" %}</span>
-                                <div class="preview-skeleton-line preview-skeleton-line-short"></div>
                             </div>
                         </div>
                     </div>
                 </div>
             </div>
         </div>
+    </div>
+
+    <div class="hidden flex-col gap-4" data-page-panel="email">
+        {% for preview in email_previews %}
+            {% url 'management:email_preview_render' preview.key as render_url %}
+            {% include "management/_document_preview_card.html" with preview=preview render_url=render_url show_text_toggle=True %}
+        {% endfor %}
+    </div>
+
+    <div class="hidden flex-col gap-4" data-page-panel="pdf">
+        {% for preview in pdf_previews %}
+            {% url 'management:pdf_preview_render' preview.key as render_url %}
+            {% include "management/_document_preview_card.html" with preview=preview render_url=render_url show_text_toggle=False %}
+        {% endfor %}
     </div>
 {% endblock panel %}
 
@@ -257,15 +262,6 @@
                 document.getElementById("preview-website-join").style.background = secondary;
                 document.getElementById("preview-website-join").style.color = secondaryContent;
 
-                // Matches the real branded emails (club/templates/club/email/*.html):
-                // a plain white header with a secondary-coloured crest badge, and a
-                // primary-coloured button in the body -- same split as _button.html's
-                // own bg=primary convention, not the phone/website mocks' solid bar.
-                document.getElementById("preview-email-crest").style.background = secondary;
-                document.getElementById("preview-email-crest").style.color = secondaryContent;
-                document.getElementById("preview-email-button").style.background = primary;
-                document.getElementById("preview-email-button").style.color = primaryContent;
-
                 ["preview-dot-1", "preview-dot-2", "preview-dot-3", "preview-dot-4"].forEach((id) => {
                     document.getElementById(id).style.background = secondary;
                 });
@@ -294,13 +290,29 @@
 
             updatePreview();
 
-            // Live preview tabs -- toggles which .preview-panel is visible, App &
-            // Website vs Email. Both panels stay in the DOM (and colour-bound) the
-            // whole time; only which one is hidden changes.
-            document.querySelectorAll("[data-preview-tab]").forEach((tab) => {
+            // Top-level page tabs -- Identity/Email/PDF. "Save changes" (the
+            // topbar action) only applies to the Identity tab's own form, so it
+            // hides on the other two rather than sitting there doing nothing.
+            document.querySelectorAll("[data-page-tab]").forEach((tab) => {
                 tab.addEventListener("click", () => {
-                    document.querySelectorAll("[data-preview-tab]").forEach((other) => other.classList.toggle("preview-tab-active", other === tab));
-                    document.querySelectorAll("[data-preview-panel]").forEach((panel) => panel.classList.toggle("hidden", panel.dataset.previewPanel !== tab.dataset.previewTab));
+                    document.querySelectorAll("[data-page-tab]").forEach((other) => other.classList.toggle("preview-tab-active", other === tab));
+                    document.querySelectorAll("[data-page-panel]").forEach((panel) => {
+                        const active = panel.dataset.pagePanel === tab.dataset.pageTab;
+                        panel.classList.toggle("hidden", !active);
+                        panel.classList.toggle("flex", active && panel.dataset.pagePanel !== "identity");
+                    });
+                    document.querySelectorAll("[data-identity-only]").forEach((el) => el.classList.toggle("hidden", tab.dataset.pageTab !== "identity"));
+                });
+            });
+
+            // Email/PDF cards' own HTML/Plain text toggle -- scoped per card so
+            // several cards on the same tab each keep independent state.
+            document.querySelectorAll("[data-doc-card]").forEach((card) => {
+                card.querySelectorAll("[data-view-btn]").forEach((button) => {
+                    button.addEventListener("click", () => {
+                        card.querySelectorAll("[data-view-btn]").forEach((b) => b.classList.toggle("active", b === button));
+                        card.querySelectorAll("[data-view-panel]").forEach((el) => el.classList.toggle("hidden", el.dataset.viewPanel !== button.dataset.viewBtn));
+                    });
                 });
             });
         })();

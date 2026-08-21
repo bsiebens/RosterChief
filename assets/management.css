@@ -1811,10 +1811,12 @@
         background: var(--color-paper);
     }
 
-    /* Live preview tabs -- a real (if minimal) tab control: click toggles which
-       .preview-panel is shown (club_settings.html's own inline script). App and
-       Website share one tab since the mobile app isn't built yet and the two
-       mocks were already always shown together underneath it. */
+    /* A real (if minimal) tab control: click toggles which panel is shown --
+       club_settings.html's own inline script uses this for its top-level
+       Identity/Email/PDF tabs. The Identity tab's own phone/website mock has
+       no tab of its own; the two are simply shown together (the mobile app
+       isn't built yet, and D9's separate App/Website tabs would only ever
+       have shown the same two mocks anyway). */
     .preview-tab {
         padding: 0.3125rem 0.625rem;
         font-family: var(--font-display);
@@ -2053,59 +2055,5 @@
 
     .preview-brand-dot-neutral {
         background: var(--color-dim);
-    }
-
-    /* The Email tab -- a generic sample, not any one real message. Shaped like
-       templates/email/_base.html's actual output (plain white header with a
-       coloured crest badge, a primary-coloured button in the body) rather than
-       the phone/website mocks' solid colour bar: that's genuinely how every
-       branded email (club/templates/club/email/*.html, members/.../claim_approved.html)
-       looks, so this preview is accurate, not another approximation. */
-    .preview-email {
-        overflow: hidden;
-        border: 1px solid var(--color-line);
-        border-radius: 0.625rem;
-    }
-
-    .preview-email-header {
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-        padding: 0.625rem 0.75rem;
-        background: #fff;
-        border-bottom: 1px solid var(--color-line);
-    }
-
-    .preview-email-crest {
-        transition: background-color 0.15s ease, color 0.15s ease;
-    }
-
-    .preview-email-name {
-        font-family: var(--font-display);
-        font-size: 0.8125rem;
-        font-weight: 800;
-        letter-spacing: 0.04em;
-        text-transform: uppercase;
-        color: var(--color-ink);
-    }
-
-    .preview-email-body {
-        display: flex;
-        flex-direction: column;
-        gap: 0.5rem;
-        padding: 0.875rem 0.75rem;
-    }
-
-    .preview-email-button {
-        align-self: flex-start;
-        border-radius: 0.25rem;
-        padding: 0.3125rem 0.75rem;
-        margin: 0.125rem 0;
-        font-family: var(--font-display);
-        font-size: 0.6875rem;
-        font-weight: 800;
-        letter-spacing: 0.04em;
-        text-transform: uppercase;
-        transition: background-color 0.15s ease, color 0.15s ease;
     }
 }
