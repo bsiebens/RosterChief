@@ -282,15 +282,21 @@ class CalendarView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
 
     Always scoped to every one of ``self.managed_people`` -- unlike Home,
     this screen has no person switcher and no "every club event" toggle: it's
-    just "what is my family invited to", full stop. (The design mock's own
-    "All members"/list-vs-month/games-only controls aren't built -- they'd
-    need real functionality behind them, not just markup; flagged rather than
-    faked.)
+    just "what is my family invited to", full stop. A ``?kind=`` filter (All/
+    Games/Practices, the two dominant event kinds) narrows that down -- a
+    real, working version of the design mock's own "Games only" pill, not
+    reproducing its List/Month toggle (that needs a whole second view mode,
+    not a filter) or its per-person "All members" (removed on purpose, see
+    above).
     """
 
     template_name = "mobile/calendar.html"
     screen_title = _("Calendar")
     active_tab = "calendar"
+
+    #: ?kind= values this screen actually understands, mapped to the Event.EventKind
+    #: they filter on -- anything else (including no param at all) means "All".
+    KIND_FILTERS = {"game": Event.EventKind.GAME, "training": Event.EventKind.TRAINING}
 
     #: Pill styling for a per-person RSVP status (assets/mobile.css's .pill-*).
     STATUS_PILL_CLASSES = {
@@ -308,6 +314,7 @@ class CalendarView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         _this_week_start, this_week_end = week_bounds(timezone.localdate())
         next_week_end = this_week_end + datetime.timedelta(days=7)
         window_end = timezone.make_aware(datetime.datetime.combine(next_week_end, datetime.time.max))
+        kind_filter = self.request.GET.get("kind")
 
         rows = []
         if self.managed_people:
@@ -323,6 +330,9 @@ class CalendarView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
                 .prefetch_related("event__teams")
                 .order_by("event__start")
             )
+            if kind_filter in self.KIND_FILTERS:
+                attendances = attendances.filter(event__kind=self.KIND_FILTERS[kind_filter])
+
             # Only worth naming whose row it is once there's more than one managed
             # person to tell apart -- a lone member's own agenda doesn't need it.
             show_member = len(self.managed_people) > 1
@@ -336,7 +346,7 @@ class CalendarView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
             bucket = this_week if timezone.localtime(row["event"].start).date() <= this_week_end else next_week
             bucket.append(row)
 
-        return super().get_context_data(this_week=this_week, next_week=next_week, **kwargs)
+        return super().get_context_data(this_week=this_week, next_week=next_week, kind_filter=kind_filter if kind_filter in self.KIND_FILTERS else "", **kwargs)
 
 
 class EventDetailView(PersonScopeMixin, LoginRequiredMixin, TemplateView):

@@ -596,6 +596,13 @@ class CalendarViewTests(TestCase):
 
         self.assertEqual(response.status_code, 302)
 
+    def test_header_shows_a_calendar_title_merged_into_the_shared_header(self):
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, '<span class="font-display text-2xl font-extrabold text-white uppercase">Calendar</span>')
+
     def test_shows_only_events_the_managed_people_are_invited_to(self):
         invited = self.make_event(title="Lars's practice")
         not_invited = self.make_event(title="Someone else's practice")
@@ -636,6 +643,39 @@ class CalendarViewTests(TestCase):
         response = self._get()
 
         self.assertNotContains(response, 'href="?as=')
+
+    def test_games_filter_shows_only_games(self):
+        game = self.make_event(title="vs Leuven", kind=Event.EventKind.GAME)
+        practice = self.make_event(title="Ice 3", kind=Event.EventKind.TRAINING)
+        Attendance.objects.create(event=game, member=self.member)
+        Attendance.objects.create(event=practice, member=self.member)
+        self.client.force_login(self.user)
+
+        response = self._get(kind="game")
+
+        self.assertEqual(self._events_in_context(response), {game})
+        self.assertEqual(response.context["kind_filter"], "game")
+
+    def test_practices_filter_shows_only_practices(self):
+        game = self.make_event(title="vs Leuven", kind=Event.EventKind.GAME)
+        practice = self.make_event(title="Ice 3", kind=Event.EventKind.TRAINING)
+        Attendance.objects.create(event=game, member=self.member)
+        Attendance.objects.create(event=practice, member=self.member)
+        self.client.force_login(self.user)
+
+        response = self._get(kind="training")
+
+        self.assertEqual(self._events_in_context(response), {practice})
+
+    def test_unrecognized_kind_falls_back_to_all(self):
+        event = self.make_event(title="Social night", kind=Event.EventKind.SOCIAL)
+        Attendance.objects.create(event=event, member=self.member)
+        self.client.force_login(self.user)
+
+        response = self._get(kind="bogus")
+
+        self.assertEqual(self._events_in_context(response), {event})
+        self.assertEqual(response.context["kind_filter"], "")
 
     def test_no_managed_people_shows_a_graceful_empty_state(self):
         bare_user = User.objects.create_user(email="new@example.com", password="pw-secret-123")
@@ -1091,6 +1131,13 @@ class MeViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Lars Bakker")
         self.assertContains(response, "(me)")
+
+    def test_header_is_merged_into_the_shared_navy_header_not_a_separate_block(self):
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertNotContains(response, "bg-ink")
 
     def test_every_managed_child_appears_in_the_list(self):
         self.client.force_login(self.user)

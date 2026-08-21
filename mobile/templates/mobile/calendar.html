@@ -7,13 +7,33 @@
     CalendarView's own docstring for the browsing-window judgment call --
     current + next calendar week, no further paging). No person switcher and
     no club-wide toggle here -- always every event self.managed_people is
-    invited to, full stop. -mx-4 breaks the rows out of base.html's shared
-    page padding so they run edge-to-edge, matching the design canvas's own
-    M3 markup (the desktop List/Month/"Games only" controls in that mock
-    aren't reproduced here -- no real functionality behind them yet).
+    invited to, full stop. A real, working ?kind= filter (All/Games/
+    Practices) stands in for the design mock's "Games only" pill; its List/
+    Month toggle isn't reproduced -- that's a second view mode, not a filter.
+    -mx-4 (on the row groups only, not this filter row) breaks the rows out
+    of base.html's shared page padding so they run edge-to-edge, matching
+    the design canvas's own M3 markup.
 {% endcomment %}
 
+{% block header_extra %}
+    <div class="mt-3">
+        <span class="font-display text-2xl font-extrabold text-white uppercase">{% trans "Calendar" %}</span>
+    </div>
+{% endblock header_extra %}
+
 {% block content %}
+    <div class="flex gap-2">
+        <a class="flex h-9 flex-1 items-center justify-center rounded-full font-display text-xs font-extrabold tracking-wide uppercase {% if not kind_filter %}bg-ink text-white{% else %}border border-line bg-white text-muted{% endif %}" href="{% url "mobile:calendar" %}">
+            {% trans "All" %}
+        </a>
+        <a class="flex h-9 flex-1 items-center justify-center rounded-full font-display text-xs font-extrabold tracking-wide uppercase {% if kind_filter == "game" %}bg-ink text-white{% else %}border border-line bg-white text-muted{% endif %}" href="?kind=game">
+            {% trans "Games" %}
+        </a>
+        <a class="flex h-9 flex-1 items-center justify-center rounded-full font-display text-xs font-extrabold tracking-wide uppercase {% if kind_filter == "training" %}bg-ink text-white{% else %}border border-line bg-white text-muted{% endif %}" href="?kind=training">
+            {% trans "Practices" %}
+        </a>
+    </div>
+
     <div class="-mx-4">
         {% if not managed_people %}
             <div class="mx-4">
@@ -25,7 +45,13 @@
         {% elif not this_week and not next_week %}
             <div class="mx-4">
                 <div class="m-card p-6 text-center">
-                    <p class="text-sm text-muted">{% trans "Nothing scheduled in the next two weeks." %}</p>
+                    {% if kind_filter == "game" %}
+                        <p class="text-sm text-muted">{% trans "No games in the next two weeks." %}</p>
+                    {% elif kind_filter == "training" %}
+                        <p class="text-sm text-muted">{% trans "No practices in the next two weeks." %}</p>
+                    {% else %}
+                        <p class="text-sm text-muted">{% trans "Nothing scheduled in the next two weeks." %}</p>
+                    {% endif %}
                 </div>
             </div>
         {% else %}

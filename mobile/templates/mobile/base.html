@@ -70,6 +70,7 @@
                     {% if unread_notification_count %}<span class="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-club" style="border: 2px solid var(--color-navy)"></span>{% endif %}
                 </a>
             </div>
+            {% block header_extra %}{% endblock header_extra %}
         </header>
 
         <main class="flex-1 overflow-y-auto">

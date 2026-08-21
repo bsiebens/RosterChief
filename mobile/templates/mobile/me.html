@@ -9,19 +9,17 @@
     "Payments & dues" have no screen to lead to and are omitted, same for the
     mockup's "Coach mode" promo (base.html's own precedent -- no Coach mode
     screens exist yet, so it's never rendered, not even as a dead/inert link).
+    The avatar/name/subtitle row lives in header_extra -- merged into the
+    shared navy app-header (base.html) rather than a separately-coloured
+    block of its own, matching the design canvas's own M5 markup.
 {% endcomment %}
 
-{% block content %}
-    {% if not managed_people %}
-        <div class="m-card p-6 text-center">
-            <p class="font-display text-lg font-extrabold text-ink uppercase">{% trans "No one to show yet" %}</p>
-            <p class="mt-1 text-sm text-muted">{% trans "Once you're linked to a member record, your profile will show up here." %}</p>
-        </div>
-    {% else %}
-        <div class="-mx-4 -mt-4 flex items-center gap-3 bg-ink px-4 pt-4 pb-5 text-white">
+{% block header_extra %}
+    {% if managed_people %}
+        <div class="mt-3 flex items-center gap-3">
             {% include "mobile/_avatar.html" with person=me size_class="h-14 w-14" text_class="text-xl" bg_class="bg-club" %}
             <div class="min-w-0 flex-1">
-                <div class="font-display text-xl leading-none font-extrabold uppercase">{{ me.get_full_name }}</div>
+                <div class="font-display text-xl leading-none font-extrabold text-white uppercase">{{ me.get_full_name }}</div>
                 {% if member_since or team_manager_label %}
                     <div class="mt-1.5 text-[13px] text-on-dark-dim">
                         {% if member_since %}{% blocktrans with year=member_since|date:"Y" %}Member since {{ year }}{% endblocktrans %}{% endif %}
@@ -31,7 +29,16 @@
                 {% endif %}
             </div>
         </div>
+    {% endif %}
+{% endblock header_extra %}
 
+{% block content %}
+    {% if not managed_people %}
+        <div class="m-card p-6 text-center">
+            <p class="font-display text-lg font-extrabold text-ink uppercase">{% trans "No one to show yet" %}</p>
+            <p class="mt-1 text-sm text-muted">{% trans "Once you're linked to a member record, your profile will show up here." %}</p>
+        </div>
+    {% else %}
         <div>
             <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "People I manage" %}</div>
             <div class="m-card overflow-hidden">
