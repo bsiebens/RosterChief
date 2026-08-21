@@ -1,0 +1,55 @@
+{% extends "mobile/base.html" %}
+{% load i18n %}
+
+{% comment %}
+    M4 -- design_handoff_rosterchief_platform/README.md's M4 section, "News
+    article". See NewsDetailView's own docstring (mobile/views.py) for the
+    judgment calls: visibility mirrors news.tasks.notify_news_published's
+    gate, language is Django's active-language detection (not a member-facing
+    toggle), and the body is plain user content -- rendered as-is, not
+    wrapped in {% trans %}.
+{% endcomment %}
+
+{% block content %}
+    <div class="-mx-4 -mt-4 flex h-[330px] flex-col justify-end p-4 text-white"
+         style="background: linear-gradient(180deg, rgba(11,18,32,.6) 0%, rgba(11,18,32,0) 40%, rgba(11,18,32,.88) 100%){% if news_item.main_photo %}, url('{{ news_item.main_photo.image.url }}') center/cover no-repeat{% else %}, var(--color-navy){% endif %}">
+        <a class="mb-auto flex h-11 w-11 items-center justify-center rounded-full bg-white/15" href="{% url "mobile:home" %}#news" aria-label="{% trans "Back" %}">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>
+        </a>
+        <span class="mb-1.5 inline-block w-fit font-display text-xs font-extrabold tracking-wide text-club uppercase">
+            {% with team=news_item.teams.first %}
+                {% if team %}{{ team.short_name }}{% else %}{% trans "Club news" %}{% endif %}
+            {% endwith %}
+            &middot; {{ news_item.published_at|date:"d M Y" }}
+        </span>
+        <h1 class="font-display text-4xl leading-[.96] font-extrabold uppercase">{{ article_title }}</h1>
+    </div>
+
+    <div class="flex flex-col gap-3.5">
+        <div class="whitespace-pre-line text-[15px] leading-relaxed text-ink">{{ article_body }}</div>
+
+        {% with teams=news_item.teams.all %}
+            {% if teams %}
+                <div class="flex flex-wrap gap-2">
+                    {% for team in teams %}
+                        <span class="pill pill-neutral">{{ team.short_name }}</span>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <div>
+                    <span class="pill pill-neutral">{% trans "Club news" %}</span>
+                </div>
+            {% endif %}
+        {% endwith %}
+
+        <div class="flex items-center gap-2.5 border-t border-line pt-3.5">
+            {% if news_item.created_by %}
+                <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-navy font-display text-sm font-extrabold text-white">{{ news_item.created_by.first_name|slice:":1" }}{{ news_item.created_by.last_name|slice:":1" }}</span>
+                <span class="flex-1 text-sm font-semibold text-ink">{% blocktrans with name=news_item.created_by.get_full_name %}Posted by {{ name }}{% endblocktrans %}</span>
+            {% else %}
+                <span class="flex-1"></span>
+            {% endif %}
+            <button type="button" class="btn btn-secondary h-[38px] px-3.5 text-sm" onclick="navigator.share ? navigator.share({title: '{{ article_title|escapejs }}', url: window.location.href}).catch(() => {}) : null">{% trans "Share" %}</button>
+        </div>
+    </div>
+{% endblock content %}

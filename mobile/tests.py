@@ -4,7 +4,7 @@ from decimal import Decimal
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 from django.urls import reverse
-from django.utils import timezone
+from django.utils import timezone, translation
 
 from club.models import Club, ClubMembership, DuesInvoice, Season
 from events.models import Attendance, Event
@@ -642,3 +642,117 @@ class NotificationsViewTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "No one to show yet")
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class NewsDetailScreenTests(TestCase):
+    """M4 -- design_handoff_rosterchief_platform/README.md's M4 section,
+    "News article". Visibility mirrors news.tasks.notify_news_published's own
+    gate (see NewsDetailView's docstring); language is Django's own
+    active-language detection, not a member-facing toggle."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        today = timezone.localdate()
+        cls.season = Season.objects.create(club=cls.club, start_date=today - datetime.timedelta(days=30), end_date=today + datetime.timedelta(days=300))
+        cls.user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", email="parent@example.com", user=cls.user)
+        ClubMembership.objects.create(club=cls.club, member=cls.member, season=cls.season)
+
+    def _get(self, news_item):
+        return self.client.get(reverse("mobile:news_detail", kwargs={"slug": news_item.slug}), HTTP_HOST="ajax-united.rosterchief.app")
+
+    def test_a_published_item_renders(self):
+        news_item = News.objects.create(club=self.club, title="Season Kickoff", body="We start training next week.", status=News.Status.PUBLISHED, published_at=timezone.now())
+        self.client.force_login(self.user)
+
+        response = self._get(news_item)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Season Kickoff")
+        self.assertContains(response, "We start training next week.")
+
+    def test_a_draft_item_404s(self):
+        news_item = News.objects.create(club=self.club, title="Draft item", body="Not live yet.", status=News.Status.DRAFT)
+        self.client.force_login(self.user)
+
+        response = self._get(news_item)
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_a_future_scheduled_item_404s(self):
+        news_item = News.objects.create(
+            club=self.club,
+            title="Scheduled item",
+            body="Not live yet.",
+            status=News.Status.PUBLISHED,
+            published_at=timezone.now() + datetime.timedelta(days=1),
+        )
+        self.client.force_login(self.user)
+
+        response = self._get(news_item)
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_english_fallback_is_not_used_when_no_translation_exists_and_the_active_language_is_dutch(self):
+        news_item = News.objects.create(club=self.club, title="Seizoensstart", body="We beginnen volgende week.", status=News.Status.PUBLISHED, published_at=timezone.now())
+        self.client.force_login(self.user)
+
+        with translation.override("nl"):
+            response = self._get(news_item)
+
+        self.assertContains(response, "Seizoensstart")
+        self.assertContains(response, "We beginnen volgende week.")
+
+    def test_english_translation_shows_when_the_active_language_is_english(self):
+        news_item = News.objects.create(
+            club=self.club,
+            title="Seizoensstart",
+            body="We beginnen volgende week.",
+            title_en="Season kickoff",
+            body_en="We start next week.",
+            status=News.Status.PUBLISHED,
+            published_at=timezone.now(),
+        )
+        self.client.force_login(self.user)
+
+        with translation.override("en"):
+            response = self._get(news_item)
+
+        self.assertContains(response, "Season kickoff")
+        self.assertContains(response, "We start next week.")
+
+    def test_teams_show_as_tags_when_present(self):
+        team = Team.objects.create(club=self.club, name="U16", short_name="U16")
+        news_item = News.objects.create(club=self.club, title="Team news", body="Body.", status=News.Status.PUBLISHED, published_at=timezone.now())
+        news_item.teams.add(team)
+        self.client.force_login(self.user)
+
+        response = self._get(news_item)
+
+        self.assertContains(response, "U16")
+        self.assertNotContains(response, "Club news")
+
+    def test_club_wide_item_shows_club_news_when_no_teams(self):
+        news_item = News.objects.create(club=self.club, title="Club-wide news", body="Body.", status=News.Status.PUBLISHED, published_at=timezone.now())
+        self.client.force_login(self.user)
+
+        response = self._get(news_item)
+
+        self.assertContains(response, "Club news")
+
+    def test_posted_by_shows_when_created_by_is_set(self):
+        news_item = News.objects.create(club=self.club, title="Byline test", body="Body.", status=News.Status.PUBLISHED, published_at=timezone.now(), created_by=self.member)
+        self.client.force_login(self.user)
+
+        response = self._get(news_item)
+
+        self.assertContains(response, "Posted by Lars Bakker")
+
+    def test_requires_login(self):
+        news_item = News.objects.create(club=self.club, title="Season Kickoff", body="Body.", status=News.Status.PUBLISHED, published_at=timezone.now())
+
+        response = self._get(news_item)
+
+        self.assertEqual(response.status_code, 302)

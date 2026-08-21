@@ -19,6 +19,7 @@ from django.shortcuts import get_object_or_404
 from django.template.loader import render_to_string
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.translation import get_language
 from django.utils.translation import gettext_lazy as _
 from django.views import View
 from django.views.generic import TemplateView
@@ -372,9 +373,46 @@ class EventDetailView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         return HttpResponseRedirect(reverse("mobile:home"))
 
 
-class NewsDetailView(_PlaceholderScreen):
+class NewsDetailView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
+    """M4 -- design_handoff_rosterchief_platform/README.md's M4 section: a
+    photo-hero permalink for a single published News item. Visibility mirrors
+    news.tasks.notify_news_published's own gate -- PUBLISHED *and* actually
+    live (published_at in the past) -- so a scheduled-but-not-yet-live item
+    404s here exactly like it does everywhere else a member could reach it,
+    rather than leaking a preview of it early.
+
+    Language is Django's own active-language detection, not a member-facing
+    toggle (unlike management's split-view Dutch/English editing tool) --
+    English shows only when the request's active language actually is "en";
+    everything else (including no active language at all) shows the native
+    (Dutch) text.
+    """
+
+    template_name = "mobile/news_detail.html"
     screen_title = _("News")
     active_tab = "news"
+
+    def get_context_data(self, **kwargs):
+        news_item = get_object_or_404(
+            News.objects.prefetch_related("teams", "photos"),
+            club=self.request.club,
+            slug=self.kwargs["slug"],
+            status=News.Status.PUBLISHED,
+            published_at__lte=timezone.now(),
+        )
+
+        if get_language() == "en":
+            title, body = news_item.effective_title_en, news_item.effective_body_en
+        else:
+            title, body = news_item.title, news_item.body
+
+        return super().get_context_data(
+            screen_title=title,
+            news_item=news_item,
+            article_title=title,
+            article_body=body,
+            **kwargs,
+        )
 
 
 class MeView(_PlaceholderScreen):
