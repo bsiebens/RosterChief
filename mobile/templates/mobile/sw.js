@@ -7,7 +7,7 @@
 // offline would be actively misleading. The offline attendance queue
 // described in the design doc is Coach mode, a later phase.
 
-const SHELL_CACHE = "rosterchief-shell-v1";
+const SHELL_CACHE = "rosterchief-shell-v2";
 const SHELL_ASSETS = ["/static/css/mobile.css", "/static/js/htmx.js", "/static/js/alpine.js", "/static/js/mobile-app.js"];
 
 self.addEventListener("install", (event) => {
@@ -24,7 +24,20 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
     if (event.request.method !== "GET" || !SHELL_ASSETS.some((asset) => event.request.url.endsWith(asset))) return;
-    event.respondWith(caches.match(event.request).then((cached) => cached || fetch(event.request)));
+    // Network-first, not cache-first: this app ships CSS/JS fixes constantly during
+    // active development, and a cache-first shell would leave an already-installed
+    // browser stuck on stale assets indefinitely (nothing ever re-triggers a fetch
+    // once something is cached). Falling back to the cache only when the network
+    // request itself fails still gives the offline-shell behaviour this exists for.
+    event.respondWith(
+        fetch(event.request)
+            .then((response) => {
+                const responseCopy = response.clone();
+                caches.open(SHELL_CACHE).then((cache) => cache.put(event.request, responseCopy));
+                return response;
+            })
+            .catch(() => caches.match(event.request)),
+    );
 });
 
 self.addEventListener("push", (event) => {
