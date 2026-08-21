@@ -11,7 +11,7 @@ from events.models import Attendance, Event
 from members.models import Family, FamilyMembership, Member
 from news.models import News
 from notifications.models import Notification
-from teams.models import Position, Team, TeamMembership
+from teams.models import Position, StaffAssignment, Team, TeamMembership
 
 from .models import PushSubscription
 from .services.icons import render_fallback_icon
@@ -756,3 +756,97 @@ class NewsDetailScreenTests(TestCase):
         response = self._get(news_item)
 
         self.assertEqual(response.status_code, 302)
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class MeViewTests(TestCase):
+    """M5 -- design_handoff_rosterchief_platform/README.md's M5 section, "Me
+    & my people". See MeView's own docstring for the judgment calls: no
+    licence/eligibility field backing "licence OK" (real roster data used
+    instead), "Household & contacts"/"Payments & dues"/"Coach mode" all
+    omitted since none has anywhere to lead in this build.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        today = timezone.localdate()
+        cls.season = Season.objects.create(club=cls.club, start_date=today - datetime.timedelta(days=30), end_date=today + datetime.timedelta(days=300))
+        cls.user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", email="parent@example.com", user=cls.user)
+        ClubMembership.objects.create(club=cls.club, member=cls.member, season=cls.season)
+
+        cls.family = Family.objects.create(name="Bakker")
+        FamilyMembership.objects.create(family=cls.family, member=cls.member, role=FamilyMembership.FamilyRole.PARENT)
+        cls.child = Member.objects.create(first_name="Noor", last_name="Bakker")
+        FamilyMembership.objects.create(family=cls.family, member=cls.child, role=FamilyMembership.FamilyRole.CHILD)
+        ClubMembership.objects.create(club=cls.club, member=cls.child, season=cls.season)
+
+    def _get(self):
+        return self.client.get(reverse("mobile:me"), HTTP_HOST="ajax-united.rosterchief.app")
+
+    def test_requires_login(self):
+        response = self._get()
+
+        self.assertEqual(response.status_code, 302)
+
+    def test_own_record_shows_the_me_suffix(self):
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Lars Bakker")
+        self.assertContains(response, "(me)")
+
+    def test_every_managed_child_appears_in_the_list(self):
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, "Noor Bakker")
+
+    def test_a_persons_row_links_to_their_edit_profile_url(self):
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, reverse("mobile:edit_profile", kwargs={"member_id": self.member.pk}))
+        self.assertContains(response, reverse("mobile:edit_profile", kwargs={"member_id": self.child.pk}))
+
+    def test_a_managed_persons_current_season_team_and_number_show_as_the_meta_line(self):
+        team = Team.objects.create(club=self.club, name="U16", short_name="U16")
+        TeamMembership.objects.create(team=team, member=self.child, season=self.season, jersey_number=9)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, "U16")
+        self.assertContains(response, "#9")
+
+    def test_coach_mode_promo_is_never_rendered(self):
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertNotContains(response, "Coach mode")
+
+    def test_team_manager_label_shows_for_a_current_season_management_staff_assignment(self):
+        team = Team.objects.create(club=self.club, name="U16", short_name="U16")
+        position = Position.objects.create(club=self.club, name="Head coach", short_name="HC", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=team, member=self.member, season=self.season, position=position)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, "Team manager U16")
+
+    def test_empty_account_gets_a_graceful_empty_state(self):
+        bare_user = User.objects.create_user(email="new@example.com", password="pw-secret-123")
+        self.client.force_login(bare_user)
+
+        response = self._get()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "No one to show yet")
+        self.assertNotContains(response, "Coach mode")

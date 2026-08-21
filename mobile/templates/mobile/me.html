@@ -1,0 +1,74 @@
+{% extends "mobile/base.html" %}
+{% load i18n %}
+
+{% comment %}
+    M5 -- design_handoff_rosterchief_platform/README.md's M5 section, "Me &
+    my people". See MeView's own docstring (mobile/views.py) for the judgment
+    calls: no license/eligibility field backing "licence OK", so each row's
+    meta line is real roster data instead; "Household & contacts" and
+    "Payments & dues" have no screen to lead to and are omitted, same for the
+    mockup's "Coach mode" promo (base.html's own precedent -- no Coach mode
+    screens exist yet, so it's never rendered, not even as a dead/inert link).
+{% endcomment %}
+
+{% block content %}
+    {% if not managed_people %}
+        <div class="m-card p-6 text-center">
+            <p class="font-display text-lg font-extrabold text-ink uppercase">{% trans "No one to show yet" %}</p>
+            <p class="mt-1 text-sm text-muted">{% trans "Once you're linked to a member record, your profile will show up here." %}</p>
+        </div>
+    {% else %}
+        <div class="-mx-4 -mt-4 flex items-center gap-3 bg-ink px-4 pt-4 pb-5 text-white">
+            <span class="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-club font-display text-xl font-extrabold text-white">{{ me.first_name|slice:":1" }}{{ me.last_name|slice:":1" }}</span>
+            <div class="min-w-0 flex-1">
+                <div class="font-display text-xl leading-none font-extrabold uppercase">{{ me.get_full_name }}</div>
+                {% if member_since or team_manager_label %}
+                    <div class="mt-1.5 text-[13px] text-on-dark-dim">
+                        {% if member_since %}{% blocktrans with year=member_since|date:"Y" %}Member since {{ year }}{% endblocktrans %}{% endif %}
+                        {% if member_since and team_manager_label %}&middot;{% endif %}
+                        {{ team_manager_label }}
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <div>
+            <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "People I manage" %}</div>
+            <div class="m-card overflow-hidden">
+                {% for row in people_rows %}
+                    {% if not forloop.first %}<div class="h-px bg-rule"></div>{% endif %}
+                    <a class="flex items-center gap-3 p-3.5" href="{% url "mobile:edit_profile" row.person.pk %}">
+                        <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-steel font-display text-sm font-extrabold text-white">{{ row.person.first_name|slice:":1" }}{{ row.person.last_name|slice:":1" }}</span>
+                        <div class="min-w-0 flex-1">
+                            <div class="text-[15px] font-semibold text-ink">
+                                {{ row.person.get_full_name }}
+                                {% if row.person == me %}<span class="text-xs text-muted">{% trans "(me)" %}</span>{% endif %}
+                            </div>
+                            {% if row.membership %}
+                                <div class="text-xs text-muted">
+                                    {{ row.membership.team.short_name }}
+                                    {% if row.membership.jersey_number %}&middot; #{{ row.membership.jersey_number }}{% endif %}
+                                </div>
+                            {% endif %}
+                        </div>
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" class="shrink-0 text-dim" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>
+                    </a>
+                {% endfor %}
+            </div>
+        </div>
+
+        <div class="m-card overflow-hidden">
+            <a class="flex items-center gap-3 p-3.5" href="{% url "mobile:edit_profile" me.pk %}">
+                <span class="flex-1 text-[15px] font-semibold text-ink">{% trans "Personal details" %}</span>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" class="shrink-0 text-dim" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>
+            </a>
+            <div class="h-px bg-rule"></div>
+            <a class="flex items-center gap-3 p-3.5" href="{% url "mobile:notifications" %}">
+                <span class="flex-1 text-[15px] font-semibold text-ink">{% trans "Notifications" %}</span>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" class="shrink-0 text-dim" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>
+            </a>
+        </div>
+
+        <p class="pb-2 text-center text-xs text-dim">{% blocktrans with club_name=club.name %}RosterChief &middot; {{ club_name }} &middot; v1.0{% endblocktrans %}</p>
+    {% endif %}
+{% endblock content %}

@@ -25,7 +25,7 @@ from django.views import View
 from django.views.generic import TemplateView
 
 from club.models import ClubMembership
-from club.services.access import current_season
+from club.services.access import current_season, has_management_access, teams_managed_by
 from club.services.fees import remaining_balance
 from events.models import Attendance, Event
 from events.services.calendar import week_bounds
@@ -415,9 +415,73 @@ class NewsDetailView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         )
 
 
-class MeView(_PlaceholderScreen):
+class MeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
+    """M5 -- design_handoff_rosterchief_platform/README.md's M5 section, "Me
+    & my people". A header for ``self.me`` (member-since year plus a staff
+    label, see below), a "People I manage" card (one row per managed_people,
+    each with their current-season team + jersey number when they're on a
+    roster), and a settings-ish card linking into M6 (edit_profile) for
+    ``self.me`` and into M7 (notifications).
+
+    The mockup's "Household & contacts" and "Payments & dues" rows, and its
+    "Coach mode" promo card, have nowhere to lead in this build (no dedicated
+    screen, no Coach mode screens at all yet -- see base.html's own comment)
+    and are deliberately omitted rather than built as dead or inert links.
+
+    There's no license/eligibility field on Member or ClubMembership to power
+    the mockup's "licence OK" text, so each managed person's meta line is
+    real roster data instead: current-season team + jersey number when
+    they're on one, nothing extra otherwise.
+    """
+
+    template_name = "mobile/me.html"
     screen_title = _("Me")
     active_tab = "me"
+
+    def get_context_data(self, **kwargs):
+        club = self.request.club
+        season = current_season(club)
+
+        member_since = None
+        team_manager_label = None
+
+        if self.me is not None and season is not None:
+            membership = ClubMembership.objects.filter(club=club, member=self.me, season=season).first()
+            if membership is not None:
+                member_since = membership.created
+
+        # PersonScopeMixin.get_context_data computes this same check for the
+        # ``has_staff_access`` context var, but only as a context value, not
+        # an attribute on self -- recomputed here since it's needed before
+        # that runs.
+        if self.me is not None and has_management_access(self.request.user, club):
+            # teams_managed_by returns *every* club team for an ADMIN (see its
+            # own docstring) -- fine for authority checks, but a wall of team
+            # names makes a poor header subtitle, so it only gets spelled out
+            # for someone managing a small, specific handful; anyone else
+            # (including a full club admin) just reads as "Staff".
+            managed_teams = list(teams_managed_by(self.request.user, club))
+            if 1 <= len(managed_teams) <= 2:
+                team_manager_label = _("Team manager %(teams)s") % {"teams": ", ".join(sorted(team.short_name for team in managed_teams))}
+            else:
+                team_manager_label = _("Staff")
+
+        people_rows = []
+        if self.managed_people:
+            memberships_by_member = {}
+            if season is not None:
+                memberships_by_member = {
+                    membership.member_id: membership
+                    for membership in TeamMembership.objects.filter(member__in=self.managed_people, season=season).select_related("team")
+                }
+            people_rows = [{"person": person, "membership": memberships_by_member.get(person.pk)} for person in self.managed_people]
+
+        return super().get_context_data(
+            member_since=member_since,
+            team_manager_label=team_manager_label,
+            people_rows=people_rows,
+            **kwargs,
+        )
 
 
 class EditProfileView(_PlaceholderScreen):
