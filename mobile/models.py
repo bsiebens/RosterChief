@@ -1,8 +1,15 @@
+import secrets
+
+from django.conf import settings
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 
 from members.models import Member
-from rosterchief.base import ClubScopedModel, validate_club_scope
+from rosterchief.base import ClubScopedModel, UUIDModel, validate_club_scope
+
+
+def _generate_feed_token() -> str:
+    return secrets.token_urlsafe(32)
 
 
 class PushSubscription(ClubScopedModel):
@@ -36,3 +43,33 @@ class PushSubscription(ClubScopedModel):
 
     def as_subscription_info(self) -> dict:
         return {"endpoint": self.endpoint, "keys": {"p256dh": self.p256dh, "auth": self.auth}}
+
+
+class CalendarFeedToken(UUIDModel):
+    """The secret key one account's combined iCal subscription feed
+    (mobile.views.CalendarFeedView) is served under -- one per account, every
+    managed person's events combined into it (see that view's own docstring).
+
+    Not club-scoped, unlike PushSubscription: ``User`` is the one global
+    model in this platform (CLAUDE.md), and the same token works under
+    whichever club subdomain the feed URL is fetched from -- the view
+    resolves ``request.club`` and this account's Member/managed people
+    within it exactly like every other screen already does, so an account
+    active in more than one club still needs only the one token.
+    """
+
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="calendar_feed_token", verbose_name=_("user"))
+    token = models.CharField(_("token"), max_length=64, unique=True, editable=False, default=_generate_feed_token)
+
+    class Meta:
+        verbose_name = _("calendar feed token")
+        verbose_name_plural = _("calendar feed tokens")
+
+    def __str__(self):
+        return f"Calendar feed — {self.user}"
+
+    def regenerate(self) -> None:
+        """Invalidates the old URL immediately -- e.g. a shared/leaked link
+        someone wants to revoke (mobile.views.CalendarFeedSettingsView)."""
+        self.token = _generate_feed_token()
+        self.save(update_fields=["token", "modified"])

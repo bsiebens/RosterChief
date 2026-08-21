@@ -175,6 +175,12 @@
         padding-top: env(safe-area-inset-top);
         padding-bottom: env(safe-area-inset-bottom);
     }
+
+    /* Standard Alpine convention -- hides an x-cloak'd element until Alpine has
+       initialized, so an x-show/x-if starting state never flashes unstyled. */
+    [x-cloak] {
+        display: none !important;
+    }
 }
 
 @layer components {

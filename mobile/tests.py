@@ -5,6 +5,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone, translation
+from icalendar import Calendar as ICalCalendar
 
 from club.models import Club, ClubMembership, DuesInvoice, MemberRequirementStatus, OnboardingRequirement, Season, Sponsor
 from events.models import Attendance, Event
@@ -13,7 +14,7 @@ from news.models import News
 from notifications.models import Notification
 from teams.models import Position, StaffAssignment, Team, TeamMembership
 
-from .models import PushSubscription
+from .models import CalendarFeedToken, PushSubscription
 from .services.icons import render_fallback_icon
 
 User = get_user_model()
@@ -1262,3 +1263,148 @@ class EditProfileViewTests(TestCase):
         response = self._get(self.child)
 
         self.assertNotContains(response, "still open")
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "other-club.rosterchief.app", "testserver"])
+class CalendarFeedViewTests(TestCase):
+    """The .ics subscription feed -- URL-token authenticated, combined across
+    every managed person, regardless of RSVP status."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        cls.season = Season.objects.create(club=cls.club, start_date=timezone.localdate() - datetime.timedelta(days=30), end_date=timezone.localdate() + datetime.timedelta(days=300))
+        cls.user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", user=cls.user)
+        ClubMembership.objects.create(club=cls.club, member=cls.member, season=cls.season)
+        cls.token = CalendarFeedToken.objects.create(user=cls.user)
+
+    def _get(self, token=None, host="ajax-united.rosterchief.app"):
+        return self.client.get(f"/app/calendar/{token or self.token.token}.ics", HTTP_HOST=host)
+
+    def test_no_login_required(self):
+        event = Event.objects.create(club=self.club, title="Practice", start=timezone.now() + datetime.timedelta(days=1))
+        Attendance.objects.create(event=event, member=self.member)
+
+        response = self._get()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "text/calendar; charset=utf-8")
+
+    def test_404_for_an_unknown_token(self):
+        response = self._get(token="not-a-real-token")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_includes_events_regardless_of_rsvp_status(self):
+        in_event = Event.objects.create(club=self.club, title="Confirmed", start=timezone.now() + datetime.timedelta(days=1))
+        out_event = Event.objects.create(club=self.club, title="Declined", start=timezone.now() + datetime.timedelta(days=2))
+        no_reply_event = Event.objects.create(club=self.club, title="No reply yet", start=timezone.now() + datetime.timedelta(days=3))
+        Attendance.objects.create(event=in_event, member=self.member, status=Attendance.AttendanceStatus.PRESENT)
+        Attendance.objects.create(event=out_event, member=self.member, status=Attendance.AttendanceStatus.ABSENT)
+        Attendance.objects.create(event=no_reply_event, member=self.member, status=Attendance.AttendanceStatus.NO_RESPONSE)
+
+        response = self._get()
+
+        calendar = ICalCalendar.from_ical(response.content)
+        summaries = {str(component.get("summary")) for component in calendar.walk("VEVENT")}
+        self.assertEqual(summaries, {"Confirmed", "Declined", "No reply yet"})
+
+    def test_includes_events_for_managed_children_with_their_name_in_the_summary(self):
+        family = Family.objects.create(name="Bakker")
+        FamilyMembership.objects.create(family=family, member=self.member, role=FamilyMembership.FamilyRole.PARENT)
+        child = Member.objects.create(first_name="Noor", last_name="Bakker")
+        FamilyMembership.objects.create(family=family, member=child, role=FamilyMembership.FamilyRole.CHILD)
+        ClubMembership.objects.create(club=self.club, member=child, season=self.season)
+        event = Event.objects.create(club=self.club, title="Practice", start=timezone.now() + datetime.timedelta(days=1))
+        Attendance.objects.create(event=event, member=child)
+
+        response = self._get()
+
+        calendar = ICalCalendar.from_ical(response.content)
+        summaries = {str(component.get("summary")) for component in calendar.walk("VEVENT")}
+        self.assertIn("Practice — Noor", summaries)
+
+    def test_cancelled_events_stay_in_the_feed_marked_cancelled(self):
+        event = Event.objects.create(club=self.club, title="Rained out", start=timezone.now() + datetime.timedelta(days=1), cancelled=True)
+        Attendance.objects.create(event=event, member=self.member)
+
+        response = self._get()
+
+        calendar = ICalCalendar.from_ical(response.content)
+        component = next(iter(calendar.walk("VEVENT")))
+        self.assertEqual(str(component.get("status")), "CANCELLED")
+
+    def test_excludes_events_that_already_ended(self):
+        Event.objects.create(club=self.club, title="Yesterday", start=timezone.now() - datetime.timedelta(days=2))
+        Attendance.objects.create(event=Event.objects.get(title="Yesterday"), member=self.member)
+
+        response = self._get()
+
+        calendar = ICalCalendar.from_ical(response.content)
+        self.assertEqual(list(calendar.walk("VEVENT")), [])
+
+    def test_keeps_a_still_in_progress_event(self):
+        event = Event.objects.create(club=self.club, title="Right now", start=timezone.now() - datetime.timedelta(minutes=30), end=timezone.now() + datetime.timedelta(minutes=30))
+        Attendance.objects.create(event=event, member=self.member)
+
+        response = self._get()
+
+        calendar = ICalCalendar.from_ical(response.content)
+        summaries = {str(component.get("summary")) for component in calendar.walk("VEVENT")}
+        self.assertIn("Right now", summaries)
+
+    def test_scoped_to_the_club_the_url_is_fetched_on(self):
+        # The same token/account can be a member of more than one club -- the
+        # feed must only ever show whichever club's subdomain it was fetched
+        # on, the same tenant scoping every other page in this app relies on.
+        other_club = Club.objects.create(name="Other Club", slug="other-club", secondary_color="#e4002b")
+        other_season = Season.objects.create(club=other_club, start_date=timezone.localdate() - datetime.timedelta(days=30), end_date=timezone.localdate() + datetime.timedelta(days=300))
+        ClubMembership.objects.create(club=other_club, member=self.member, season=other_season)
+        this_event = Event.objects.create(club=self.club, title="This club", start=timezone.now() + datetime.timedelta(days=1))
+        other_event = Event.objects.create(club=other_club, title="Not this club", start=timezone.now() + datetime.timedelta(days=1))
+        Attendance.objects.create(event=this_event, member=self.member)
+        Attendance.objects.create(event=other_event, member=self.member)
+
+        response = self._get(host="other-club.rosterchief.app")
+
+        calendar = ICalCalendar.from_ical(response.content)
+        summaries = {str(component.get("summary")) for component in calendar.walk("VEVENT")}
+        self.assertEqual(summaries, {"Not this club"})
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class CalendarFeedSettingsViewTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        cls.user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", user=cls.user)
+
+    def _get(self):
+        return self.client.get(reverse("mobile:calendar_feed_settings"), HTTP_HOST="ajax-united.rosterchief.app")
+
+    def test_requires_login(self):
+        response = self._get()
+
+        self.assertEqual(response.status_code, 302)
+
+    def test_creates_a_token_on_first_visit_and_shows_its_url(self):
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        token = CalendarFeedToken.objects.get(user=self.user)
+        self.assertContains(response, f"{token.token}.ics")
+        self.assertContains(response, "webcal://")
+
+    def test_reset_issues_a_new_token_invalidating_the_old_one(self):
+        self.client.force_login(self.user)
+        old_token = CalendarFeedToken.objects.create(user=self.user)
+        old_value = old_token.token
+
+        response = self.client.post(reverse("mobile:calendar_feed_settings"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertRedirects(response, reverse("mobile:calendar_feed_settings"), fetch_redirect_response=False)
+        old_token.refresh_from_db()
+        self.assertNotEqual(old_token.token, old_value)

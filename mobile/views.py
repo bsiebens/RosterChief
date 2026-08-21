@@ -36,7 +36,8 @@ from teams.models import TeamMembership
 
 from .forms import MemberProfileForm
 from .mixins import PersonScopeMixin
-from .models import PushSubscription
+from .models import CalendarFeedToken, PushSubscription
+from .services.calendar_feed import build_feed
 from .services.icons import render_fallback_icon
 
 
@@ -119,6 +120,54 @@ class PushSubscribeView(LoginRequiredMixin, ClubScopedPublicMixin, View):
             return HttpResponseBadRequest("Malformed unsubscribe payload.")
         PushSubscription.objects.filter(endpoint=endpoint).delete()
         return JsonResponse({"status": "ok"})
+
+
+class CalendarFeedView(ClubScopedPublicMixin, View):
+    """The .ics subscription feed a calendar app polls -- URL-token
+    authenticated, not LoginRequiredMixin (a calendar app can't do
+    interactive login). See mobile.services.calendar_feed.build_feed for the
+    feed's own shape/scope, and CalendarFeedToken's own docstring for why one
+    token covers every club the account belongs to."""
+
+    def get(self, request, token):
+        feed_token = get_object_or_404(CalendarFeedToken.objects.select_related("user"), token=token)
+        me = Member.objects.filter(user=feed_token.user).first()
+        people = []
+        if me is not None:
+            children = Member.objects.filter(
+                family_memberships__role=FamilyMembership.FamilyRole.CHILD,
+                family_memberships__family__memberships__member=me,
+                family_memberships__family__memberships__role__in=[FamilyMembership.FamilyRole.PARENT, FamilyMembership.FamilyRole.GUARDIAN],
+                member_of__club=request.club,
+            ).distinct()
+            people = [me, *children]
+
+        feed = build_feed(request.club, people)
+        return HttpResponse(feed, content_type="text/calendar; charset=utf-8")
+
+
+class CalendarFeedSettingsView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
+    """M5's "Calendar sync" row -- the webcal://.../https:// subscription
+    links for this account's combined feed, plus a reset action that
+    immediately invalidates the old URL (e.g. a link shared/leaked by
+    accident)."""
+
+    template_name = "mobile/calendar_feed_settings.html"
+    screen_title = _("Calendar sync")
+    active_tab = "me"
+
+    def get_context_data(self, **kwargs):
+        feed_token, _created = CalendarFeedToken.objects.get_or_create(user=self.request.user)
+        feed_url = self.request.build_absolute_uri(reverse("mobile:calendar_feed", kwargs={"token": feed_token.token}))
+        return super().get_context_data(feed_url=feed_url, webcal_url=feed_url.replace("https://", "webcal://", 1).replace("http://", "webcal://", 1), **kwargs)
+
+    def post(self, request, *args, **kwargs):
+        feed_token, _created = CalendarFeedToken.objects.get_or_create(user=request.user)
+        feed_token.regenerate()
+        title = _("Calendar link reset")
+        body = _("Your old calendar link no longer works. Re-subscribe using the new one below.")
+        notify(request, f"s|{title}|{body}")
+        return HttpResponseRedirect(reverse("mobile:calendar_feed_settings"))
 
 
 class HomeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):

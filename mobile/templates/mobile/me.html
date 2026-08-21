@@ -67,6 +67,11 @@
                 <span class="flex-1 text-[15px] font-semibold text-ink">{% trans "Notifications" %}</span>
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" class="shrink-0 text-dim" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>
             </a>
+            <div class="h-px bg-rule"></div>
+            <a class="flex items-center gap-3 p-3.5" href="{% url "mobile:calendar_feed_settings" %}">
+                <span class="flex-1 text-[15px] font-semibold text-ink">{% trans "Calendar sync" %}</span>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" class="shrink-0 text-dim" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>
+            </a>
         </div>
 
         <p class="pb-2 text-center text-xs text-dim">{% blocktrans with club_name=club.name %}RosterChief &middot; {{ club_name }} &middot; v1.0{% endblocktrans %}</p>
