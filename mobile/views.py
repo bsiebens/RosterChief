@@ -33,7 +33,7 @@ from members.models import FamilyMembership, Member
 from members.views import ClubScopedPublicMixin
 from news.models import News
 from notifications.models import Notification
-from teams.models import TeamMembership
+from teams.models import StaffAssignment, TeamMembership
 
 from .forms import MemberProfileForm
 from .mixins import PersonScopeMixin
@@ -530,11 +530,18 @@ class MeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
     ``self.me`` and into M7 (notifications).
 
     The mockup's "Household & contacts" row and its "Coach mode" promo card
-    have nowhere to lead in this build (no dedicated screen, no Coach mode
-    screens at all yet -- see base.html's own comment) and are deliberately
-    omitted rather than built as dead or inert links. "Payments & dues" does
-    lead somewhere -- PaymentsView below -- with its "N OPEN" pill only
-    rendered once there's actually a balance owed.
+    have nowhere to lead in this build (no dedicated screen) and are
+    deliberately omitted rather than built as dead or inert links.
+    "Payments & dues" does lead somewhere -- PaymentsView below -- with its
+    "N OPEN" pill only rendered once there's actually a balance owed.
+
+    "Teams I coach" is new, beyond the mockup: one row per current-season
+    StaffAssignment self.me holds (team + position/role), each linking
+    straight into Coach mode for that team (mobile:coach_today?team=<pk>,
+    which mobile.coach_mixins.CoachScopeMixin's own ?team= handling already
+    resolves and persists). Shown for any staffed team, not just ones
+    self.me *manages* -- Coach mode's own screens already render read-only
+    for a non-management position, so there's nothing to hide here.
 
     There's no license/eligibility field on Member or ClubMembership to power
     the mockup's "licence OK" text, so each managed person's meta line is
@@ -586,11 +593,16 @@ class MeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
 
         open_dues_count = len(open_dues_rows(club, self.managed_people, season))
 
+        staff_assignments = []
+        if self.me is not None and season is not None:
+            staff_assignments = list(StaffAssignment.objects.filter(member=self.me, season=season).select_related("team", "position").order_by("team__name"))
+
         return super().get_context_data(
             member_since=member_since,
             team_manager_label=team_manager_label,
             people_rows=people_rows,
             open_dues_count=open_dues_count,
+            staff_assignments=staff_assignments,
             **kwargs,
         )
 

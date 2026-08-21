@@ -1343,6 +1343,26 @@ class MeViewTests(TestCase):
 
         self.assertContains(response, "Team manager U16")
 
+    def test_no_teams_card_without_a_staff_assignment(self):
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertNotContains(response, "Teams I coach")
+
+    def test_teams_card_lists_each_current_season_staff_assignment(self):
+        team = Team.objects.create(club=self.club, name="U16", short_name="U16")
+        position = Position.objects.create(club=self.club, name="Physio", short_name="PHY", staff_position=True, management_position=False)
+        StaffAssignment.objects.create(team=team, member=self.member, season=self.season, position=position)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, "Teams I coach")
+        self.assertContains(response, "U16")
+        self.assertContains(response, "Physio")
+        self.assertContains(response, reverse("mobile:coach_today") + "?team=" + str(team.pk))
+
     def test_empty_account_gets_a_graceful_empty_state(self):
         bare_user = User.objects.create_user(email="new@example.com", password="pw-secret-123")
         self.client.force_login(bare_user)
