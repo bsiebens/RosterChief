@@ -1,0 +1,419 @@
+/* RosterChief member app -- the installed PWA (see design_handoff_rosterchief_platform/
+ * README.md, "Member mode (mobile, 402x874 reference)"). Its own stylesheet, not shared
+ * with management.css/controlpanel.css/app.css: the component vocabulary (app header,
+ * role switcher, bottom tab bar, hero card) has nothing in common with the desktop
+ * surfaces' daisyUI-shaped one.
+ *
+ * Design tokens copied from management.css's own @theme (built against the same design
+ * doc) rather than re-derived -- same colours, same self-hosted fonts (shared
+ * static/fonts/ directory, one download for every stylesheet). Two differences:
+ *   - --radius-box is 14px here (mobile cards), not management's 0.75rem/12px (desktop
+ *     "rounded-xl" cards) -- see the design doc's own radius table.
+ *   - --color-ice/--color-ice-ink get their own names (management just calls the same
+ *     #14B8E8 hex "info", since it has no coach-mode concept) -- the design doc is
+ *     explicit that Coach mode uses ice "regardless of club", so it needs a name that
+ *     survives club theming rather than colliding with a generic status colour.
+ *
+ * Club theming (design doc, "Club theming"): mobile/templates/mobile/base.html sets
+ * --tenant-club/--tenant-club-content from Club.secondary_color (app header active tab,
+ * primary buttons, hero eyebrow) and --tenant-navy from Club.primary_color where the
+ * club overrides the platform navy header -- same --tenant-* custom-property pattern
+ * management/templates/management/base.html already uses, so both surfaces stay
+ * consistent with each other and with the identity page's own live preview.
+ */
+@import "tailwindcss";
+
+@source "../mobile";
+
+@theme {
+    --font-display: "Barlow Condensed", ui-sans-serif, system-ui, sans-serif;
+    --font-sans: "Barlow", ui-sans-serif, system-ui, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
+
+    --color-ink: #0b1220;
+    --color-navy: var(--tenant-navy, #101e36);
+    --color-steel: #1b2b47;
+    --color-hairline: #1e2b42;
+    --color-paper: #f4f5f7;
+    --color-line: #e3e6eb;
+    --color-rule: #eef0f3;
+    --color-edge: #d6dae1;
+    --color-stroke: #c9cfd8;
+    --color-muted: #6c7787;
+    --color-dim: #8b95a4;
+    --color-slate: #3a4658;
+    --color-on-dark: #93a0b4;
+    --color-on-dark-dim: #7c8aa0;
+    --color-on-dark-faint: #5c6b85;
+
+    --color-club: var(--tenant-club, #e4002b);
+    --color-club-dark: var(--tenant-club-dark, #b00021);
+    --color-club-content: var(--tenant-club-content, #ffffff);
+
+    --color-ok: #14a05a;
+    --color-ok-bg: #e6f6ee;
+    --color-ok-border: #bfe7d3;
+    --color-ok-text: #0c7a43;
+
+    --color-warn: #f0a22e;
+    --color-warn-bg: #fff5e4;
+    --color-warn-border: #f6e0b8;
+    --color-warn-text: #9a6410;
+    --color-warn-deep: #7a4e08;
+
+    --color-danger-bg: #fdecec;
+    --color-danger-border: #f5c9ce;
+
+    --color-info: #14b8e8;
+    --color-info-bg: #eaf7fc;
+    --color-info-border: #c3e7f4;
+    --color-info-text: #0a6f91;
+
+    /* Coach-mode accent -- never club-themed, see the file banner. */
+    --color-ice: #14b8e8;
+    --color-ice-ink: #04212c;
+
+    --color-row-sel: #fff7f8;
+    --color-row-focus: #f4f9ff;
+    --color-row-warn: #fffdf6;
+    --color-subhead: #f8f9fa;
+
+    --radius-box: 0.875rem; /* 14px -- mobile card radius, see the file banner */
+}
+
+/* --- fonts: identical set to management.css/controlpanel.css, same self-hosted files. --- */
+
+@font-face {
+    font-family: "Barlow";
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url("../fonts/barlow-latin-400-normal.woff2") format("woff2");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+    font-family: "Barlow";
+    font-style: normal;
+    font-weight: 500;
+    font-display: swap;
+    src: url("../fonts/barlow-latin-500-normal.woff2") format("woff2");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+    font-family: "Barlow";
+    font-style: normal;
+    font-weight: 600;
+    font-display: swap;
+    src: url("../fonts/barlow-latin-600-normal.woff2") format("woff2");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+    font-family: "Barlow";
+    font-style: normal;
+    font-weight: 700;
+    font-display: swap;
+    src: url("../fonts/barlow-latin-700-normal.woff2") format("woff2");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+    font-family: "Barlow Condensed";
+    font-style: normal;
+    font-weight: 600;
+    font-display: swap;
+    src: url("../fonts/barlow-condensed-latin-600-normal.woff2") format("woff2");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+    font-family: "Barlow Condensed";
+    font-style: normal;
+    font-weight: 700;
+    font-display: swap;
+    src: url("../fonts/barlow-condensed-latin-700-normal.woff2") format("woff2");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+    font-family: "Barlow Condensed";
+    font-style: normal;
+    font-weight: 800;
+    font-display: swap;
+    src: url("../fonts/barlow-condensed-latin-800-normal.woff2") format("woff2");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+    font-family: "IBM Plex Mono";
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url("../fonts/ibm-plex-mono-latin-400-normal.woff2") format("woff2");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+    font-family: "IBM Plex Mono";
+    font-style: normal;
+    font-weight: 500;
+    font-display: swap;
+    src: url("../fonts/ibm-plex-mono-latin-500-normal.woff2") format("woff2");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@layer base {
+    body {
+        background: var(--color-paper);
+        color: var(--color-slate);
+        font-family: var(--font-sans);
+        /* env(safe-area-inset-*) support -- design doc: "The app content starts below a
+           54px status-bar inset and ends above a 26-30px home-indicator inset -- preserve
+           those safe areas via env(safe-area-inset-*), not fixed padding." */
+        padding-top: env(safe-area-inset-top);
+        padding-bottom: env(safe-area-inset-bottom);
+    }
+}
+
+@layer components {
+    /* --- App shell -------------------------------------------------------------- */
+
+    .app-header {
+        padding: max(env(safe-area-inset-top), 14px) 16px 14px;
+        background: var(--color-navy);
+        color: #fff;
+        flex-shrink: 0;
+    }
+
+    .app-crest {
+        width: 30px;
+        height: 32px;
+        background: var(--color-club);
+        clip-path: polygon(50% 0, 100% 18%, 100% 62%, 50% 100%, 0 62%, 0 18%);
+        flex-shrink: 0;
+        object-fit: contain;
+    }
+
+    /* Role switcher -- design doc "Component" table: full-width segmented pill,
+       bg-steel track, active segment bg-white text-ink (member mode). Only rendered
+       when the account holds >=1 staff role -- see mobile/templates/mobile/base.html. */
+    .role-switcher {
+        display: flex;
+        background: var(--color-steel);
+        border-radius: 999px;
+        padding: 4px;
+        gap: 4px;
+        margin-top: 10px;
+    }
+
+    .role-switcher-item {
+        flex: 1;
+        height: 36px;
+        border-radius: 999px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: var(--font-display);
+        font-weight: 800;
+        font-size: 0.875rem;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--color-on-dark);
+    }
+
+    .role-switcher-item-active {
+        background: #fff;
+        color: var(--color-ink);
+    }
+
+    /* Bottom tab bar -- design doc: "bg-white border-t border-line pt-2 pb-[26px]
+       (member)... four equal items, 48px tall". pb uses the safe-area inset instead of
+       the doc's fixed 26px, which was standing in for it. */
+    .tab-bar {
+        flex-shrink: 0;
+        background: #fff;
+        border-top: 1px solid var(--color-line);
+        padding: 8px 8px max(env(safe-area-inset-bottom), 26px);
+        display: flex;
+    }
+
+    .tab-bar-item {
+        flex: 1;
+        height: 48px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 3px;
+        color: var(--color-dim);
+    }
+
+    .tab-bar-item-active {
+        color: var(--color-club);
+    }
+
+    .tab-bar-label {
+        font-family: var(--font-display);
+        font-weight: 700;
+        font-size: 0.75rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+    }
+
+    /* --- Buttons ------------------------------------------------------------------ */
+
+    .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
+        height: 46px; /* design doc: "height 46px mobile" */
+        padding-inline: 1.25rem;
+        border-radius: 0.5rem;
+        font-family: var(--font-display);
+        font-weight: 800;
+        font-size: 1rem;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        border: none;
+        cursor: pointer;
+        white-space: nowrap;
+    }
+
+    .btn:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+    }
+
+    .btn-primary {
+        background: var(--color-club);
+        color: #fff;
+    }
+
+    .btn-dark {
+        background: var(--color-ink);
+        color: #fff;
+    }
+
+    .btn-positive {
+        background: var(--color-ok);
+        color: #fff;
+    }
+
+    .btn-secondary {
+        background: #fff;
+        border: 1.5px solid var(--color-stroke);
+        color: var(--color-ink);
+    }
+
+    .btn-ghost-on-dark {
+        background: rgba(255, 255, 255, 0.15);
+        color: #fff;
+    }
+
+    /* --- Status pills --------------------------------------------------------------- */
+
+    .pill {
+        border-radius: 999px;
+        padding: 5px 10px;
+        font-family: var(--font-display);
+        font-weight: 700;
+        font-size: 0.75rem;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        display: inline-flex;
+        align-items: center;
+    }
+
+    .pill-ok {
+        background: var(--color-ok-bg);
+        color: var(--color-ok-text);
+        border: 1px solid var(--color-ok-border);
+    }
+
+    .pill-danger {
+        background: var(--color-danger-bg);
+        color: var(--color-club-dark);
+        border: 1px solid var(--color-danger-border);
+    }
+
+    .pill-warn {
+        background: var(--color-warn-bg);
+        color: var(--color-warn-text);
+        border: 1px solid var(--color-warn-border);
+    }
+
+    .pill-info {
+        background: var(--color-info-bg);
+        color: var(--color-info-text);
+        border: 1px solid var(--color-info-border);
+    }
+
+    .pill-neutral {
+        background: var(--color-rule);
+        color: #4a5566;
+        border: 1px solid #dde1e7;
+    }
+
+    /* --- Person switcher chips (M1, M2, M3 -- "a person switcher on anything per-member") --- */
+
+    .person-chip {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        background: #fff;
+        border: 1.5px solid var(--color-line);
+        border-radius: 999px;
+        padding: 5px 12px 5px 5px;
+        color: var(--color-muted);
+        flex-shrink: 0;
+    }
+
+    .person-chip-active {
+        border-color: var(--color-ink);
+        color: var(--color-ink);
+    }
+
+    .person-chip-avatar {
+        width: 28px;
+        height: 28px;
+        border-radius: 999px;
+        background: var(--color-stroke);
+        color: #fff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: var(--font-display);
+        font-weight: 800;
+        font-size: 0.875rem;
+        flex-shrink: 0;
+    }
+
+    .person-chip-active .person-chip-avatar {
+        background: var(--color-club);
+    }
+
+    .person-chip-label {
+        font-family: var(--font-display);
+        font-weight: 700;
+        font-size: 0.9375rem;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+    }
+
+    /* --- Cards ---------------------------------------------------------------------- */
+
+    .m-card {
+        background: #fff;
+        border: 1px solid var(--color-line);
+        border-radius: var(--radius-box);
+    }
+
+    .m-card-dark {
+        background: var(--color-ink);
+        color: #fff;
+        border-radius: var(--radius-box);
+    }
+}

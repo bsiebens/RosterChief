@@ -1,0 +1,122 @@
+{% load static i18n %}
+
+{% comment %}
+    App shell for Member mode (M1-M7) -- design_handoff_rosterchief_platform/README.md.
+    Standalone, like management/base.html and controlpanel/base.html: its own
+    stylesheet (assets/mobile.css), no daisyUI, no shared nav. Mobile-first,
+    viewport-fit=cover + env(safe-area-inset-*) throughout (see mobile.css's own
+    file banner) rather than the iOS bezel in the design canvas, which is
+    presentation-only.
+
+    The Coach/Member role switcher described in the design doc is deliberately
+    NOT rendered yet: it would switch into a mode with no screens built (Coach
+    mode is an explicitly separate, later phase). Re-add it here once C1-C6 ship.
+{% endcomment %}
+<!DOCTYPE html>
+<html lang="{{ LANGUAGE_CODE|default:"en" }}">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+        <meta name="theme-color" content="{{ club.primary_color|default:"#101e36" }}">
+        <meta name="apple-mobile-web-app-capable" content="yes">
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+        <meta name="mobile-web-app-capable" content="yes">
+
+        <title>{% block title %}{{ screen_title }} &middot; {{ club.name }}{% endblock title %}</title>
+
+        <link rel="manifest" href="{% url "mobile:manifest" %}">
+        <link rel="apple-touch-icon" href="{% url "mobile:icon" size=192 %}">
+        <link rel="icon" href="{% url "mobile:icon" size=192 %}">
+        <link rel="stylesheet" href="{% static "css/mobile.css" %}">
+
+        {% if club.secondary_color %}
+            <style>
+                :root {
+                    --tenant-club: {{ club.secondary_color }};
+                    --tenant-club-dark: color-mix(in srgb, {{ club.secondary_color }} 80%, black);
+                    --tenant-club-content: {{ club.secondary_content_color }};
+                }
+            </style>
+        {% endif %}
+        {% if club.primary_color %}
+            <style>
+                :root { --tenant-navy: {{ club.primary_color }}; }
+            </style>
+        {% endif %}
+
+        <script src="{% static "js/htmx.js" %}" defer></script>
+        <script src="{% static "js/alpine.js" %}" defer></script>
+
+        {% block extra_head %}{% endblock extra_head %}
+    </head>
+
+    <body class="flex h-screen flex-col overflow-hidden bg-paper font-sans text-slate" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' data-vapid-public-key="{{ vapid_public_key }}" data-csrftoken="{{ csrf_token }}">
+        <header class="app-header">
+            <div class="flex items-center gap-2.5">
+                <a class="flex items-center gap-2.5" href="{% url "mobile:home" %}">
+                    {% if club.logo %}
+                        <img class="app-crest" src="{{ club.logo.url }}" alt="">
+                    {% else %}
+                        <span class="app-crest"></span>
+                    {% endif %}
+                    <span class="min-w-0">
+                        <span class="block truncate font-display text-[19px] leading-none font-extrabold text-white uppercase">{{ club.name }}</span>
+                        {% if season %}<span class="block font-mono text-xs text-on-dark">{% blocktrans with name=season.name %}Season {{ name }}{% endblocktrans %}</span>{% endif %}
+                    </span>
+                </a>
+                <div class="flex-1"></div>
+                <a class="relative flex h-11 w-11 shrink-0 items-center justify-center" href="{% url "mobile:notifications" %}" aria-label="{% trans "Notifications" %}">
+                    <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+                    {% if unread_notification_count %}<span class="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-club" style="border: 2px solid var(--color-navy)"></span>{% endif %}
+                </a>
+            </div>
+
+            {% if managed_people|length > 1 %}
+                <div class="mt-3 flex gap-2 overflow-x-auto pb-0.5">
+                    {% for person in managed_people %}
+                        <a class="person-chip {% if person == scope_person %}person-chip-active{% endif %}" href="?as={{ person.pk }}">
+                            <span class="person-chip-avatar">{{ person.first_name|slice:":1" }}</span>
+                            <span class="person-chip-label">{% if person == me %}{% trans "Me" %}{% else %}{{ person.first_name }}{% endif %}</span>
+                        </a>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        </header>
+
+        <main class="flex-1 overflow-y-auto">
+            <div class="flex flex-col gap-4 px-4 py-4">
+                {% if messages %}
+                    <div class="flex flex-col gap-2">
+                        {% for message in messages %}
+                            <div class="m-card p-3 text-sm font-medium text-ink">{{ message }}</div>
+                        {% endfor %}
+                    </div>
+                {% endif %}
+
+                {% block content %}{% endblock content %}
+            </div>
+        </main>
+
+        <nav class="tab-bar">
+            <a class="tab-bar-item {% if active_tab == "home" %}tab-bar-item-active{% endif %}" href="{% url "mobile:home" %}">
+                <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9.5 12 3l9 6.5V21a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1Z"/></svg>
+                <span class="tab-bar-label">{% trans "Home" %}</span>
+            </a>
+            <a class="tab-bar-item {% if active_tab == "calendar" %}tab-bar-item-active{% endif %}" href="{% url "mobile:calendar" %}">
+                <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+                <span class="tab-bar-label">{% trans "Calendar" %}</span>
+            </a>
+            <a class="tab-bar-item {% if active_tab == "news" %}tab-bar-item-active{% endif %}" href="{% url "mobile:home" %}#news">
+                <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 20H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h9l5 5v9a2 2 0 0 1-2 2Z"/><path d="M9 13h6M9 17h6M9 9h1"/></svg>
+                <span class="tab-bar-label">{% trans "News" %}</span>
+            </a>
+            <a class="tab-bar-item {% if active_tab == "me" %}tab-bar-item-active{% endif %}" href="{% url "mobile:me" %}">
+                <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-8 8-8s8 3.6 8 8"/></svg>
+                <span class="tab-bar-label">{% trans "Me" %}</span>
+            </a>
+        </nav>
+
+        <script src="{% static "js/mobile-app.js" %}" defer></script>
+        {% block extra_body %}{% endblock extra_body %}
+    </body>
+</html>

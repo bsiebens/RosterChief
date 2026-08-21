@@ -78,8 +78,11 @@ INSTALLED_APPS = [
     "features.apps.FeaturesConfig",
     "controlpanel.apps.ControlpanelConfig",
     # Club-facing UI for team managers, coaches and admins -- not controlpanel (platform
-    # staff managing every club) and not the future parent/player app.
+    # staff managing every club) and not the mobile member/parent app below.
     "management.apps.ManagementConfig",
+    # The installed PWA -- Member mode first (see design_handoff_rosterchief_platform/
+    # README.md); Coach mode is a later phase, deliberately not built yet.
+    "mobile.apps.MobileConfig",
     # Public, read-only JSON API for a club's own external website -- see api/urls.py.
     "api.apps.ApiConfig",
 ]
@@ -417,6 +420,15 @@ SERVER_EMAIL = config("DJANGO_SERVER_EMAIL", default=DEFAULT_FROM_EMAIL)
 
 #: Where a club admin is told to direct a billing question. Shown in reminder emails.
 BILLING_CONTACT_EMAIL = config("ROSTERCHIEF_BILLING_CONTACT_EMAIL", default=DEFAULT_FROM_EMAIL)
+
+# Web Push (mobile app, see mobile/services/push.py) -- one VAPID keypair for the whole
+# platform, not per club: it identifies the *sender* (RosterChief) to a browser's push
+# service, the same way DEFAULT_FROM_EMAIL identifies the sender of an email, and has
+# nothing to do with club branding. Generate a pair with `uv run vapid --gen`. Blank in
+# dev is fine -- mobile.services.push.send_push_to_member no-ops without a private key.
+VAPID_PUBLIC_KEY = config("DJANGO_VAPID_PUBLIC_KEY", default="")
+VAPID_PRIVATE_KEY = config("DJANGO_VAPID_PRIVATE_KEY", default="")
+VAPID_ADMIN_EMAIL = config("DJANGO_VAPID_ADMIN_EMAIL", default="admin@rosterchief.app")
 
 
 # Phone numbers (django-phonenumber-field)

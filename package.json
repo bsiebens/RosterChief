@@ -3,14 +3,18 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "npm run build:app && npm run build:controlpanel && npm run build:management",
+    "build": "npm run build:app && npm run build:controlpanel && npm run build:management && npm run build:mobile",
     "build:app": "tailwindcss -i ./assets/app.css -o ./static/css/app.css --minify",
     "build:controlpanel": "tailwindcss -i ./assets/controlpanel.css -o ./static/css/controlpanel.css --minify",
     "build:management": "tailwindcss -i ./assets/management.css -o ./static/css/management.css --minify",
+    "build:mobile": "tailwindcss -i ./assets/mobile.css -o ./static/css/mobile.css --minify",
     "watch": "tailwindcss -i ./assets/app.css -o ./static/css/app.css --watch",
     "watch:controlpanel": "tailwindcss -i ./assets/controlpanel.css -o ./static/css/controlpanel.css --watch",
     "watch:management": "tailwindcss -i ./assets/management.css -o ./static/css/management.css --watch",
-    "vendor:chart": "node -e \"const fs=require('fs');const s=fs.readFileSync('node_modules/chart.js/dist/chart.umd.js','utf8').split('\\n').filter(l=>!l.startsWith('//# sourceMappingURL=')).join('\\n');fs.writeFileSync('static/js/chart.js',s)\""
+    "watch:mobile": "tailwindcss -i ./assets/mobile.css -o ./static/css/mobile.css --watch",
+    "vendor:chart": "node -e \"const fs=require('fs');const s=fs.readFileSync('node_modules/chart.js/dist/chart.umd.js','utf8').split('\\n').filter(l=>!l.startsWith('//# sourceMappingURL=')).join('\\n');fs.writeFileSync('static/js/chart.js',s)\"",
+    "vendor:htmx": "node -e \"const fs=require('fs');const s=fs.readFileSync('node_modules/htmx.org/dist/htmx.min.js','utf8').split('\\n').filter(l=>!l.startsWith('//# sourceMappingURL=')).join('\\n');fs.writeFileSync('static/js/htmx.js',s)\"",
+    "vendor:alpine": "node -e \"const fs=require('fs');const s=fs.readFileSync('node_modules/alpinejs/dist/cdn.min.js','utf8').split('\\n').filter(l=>!l.startsWith('//# sourceMappingURL=')).join('\\n');fs.writeFileSync('static/js/alpine.js',s)\""
   },
   "devDependencies": {
     "@fontsource-variable/jetbrains-mono": "^5.2.8",
@@ -25,6 +29,8 @@
     "tailwindcss": "^4.1.0"
   },
   "dependencies": {
-    "chart.js": "^4.5.1"
+    "alpinejs": "^3.15.0",
+    "chart.js": "^4.5.1",
+    "htmx.org": "^2.0.4"
   }
 }
