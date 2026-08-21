@@ -2751,6 +2751,9 @@
   .-top-1 {
     top: calc(var(--spacing) * -1);
   }
+  .top-0 {
+    top: 0;
+  }
   .top-1 {
     top: var(--spacing);
   }
@@ -3881,6 +3884,9 @@
   .h-9 {
     height: calc(var(--spacing) * 9);
   }
+  .h-9\.5 {
+    height: calc(var(--spacing) * 9.5);
+  }
   .h-10 {
     height: calc(var(--spacing) * 10);
   }
@@ -4045,6 +4051,9 @@
   }
   .w-80 {
     width: calc(var(--spacing) * 80);
+  }
+  .w-\[3px\] {
+    width: 3px;
   }
   .w-\[7px\] {
     width: 7px;
@@ -4310,6 +4319,9 @@
   .gap-10 {
     gap: calc(var(--spacing) * 10);
   }
+  .gap-px {
+    gap: 1px;
+  }
   .space-y-2 {
     :where(& > :not(:last-child)) {
       --tw-space-y-reverse: 0;
@@ -4518,6 +4530,9 @@
   }
   .bg-base-200 {
     background-color: var(--color-base-200);
+  }
+  .bg-info {
+    background-color: var(--color-info);
   }
   .bg-secondary {
     background-color: var(--color-secondary);

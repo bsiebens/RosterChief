@@ -321,3 +321,98 @@ class EventDetailRsvpTests(TestCase):
         response = self._post(other_event, {"status": "present"})
 
         self.assertEqual(response.status_code, 404)
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class CalendarViewTests(TestCase):
+    """M3 -- design_handoff_rosterchief_platform/README.md's M3 section: a
+    "This week"/"Next week" agenda, scoped to scope_person's own invites by
+    default or, with ?scope=all, every club event."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        today = timezone.localdate()
+        cls.season = Season.objects.create(club=cls.club, start_date=today - datetime.timedelta(days=30), end_date=today + datetime.timedelta(days=300))
+        cls.user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", email="parent@example.com", user=cls.user)
+        ClubMembership.objects.create(club=cls.club, member=cls.member, season=cls.season)
+        cls.soon = timezone.now() + datetime.timedelta(days=1)
+
+    def _get(self, **params):
+        url = reverse("mobile:calendar")
+        if params:
+            url += "?" + "&".join(f"{key}={value}" for key, value in params.items())
+        return self.client.get(url, HTTP_HOST="ajax-united.rosterchief.app")
+
+    def make_event(self, **kwargs):
+        kwargs.setdefault("club", self.club)
+        kwargs.setdefault("title", "Training")
+        kwargs.setdefault("start", self.soon)
+        return Event.objects.create(**kwargs)
+
+    def _events_in_context(self, response):
+        return {row["event"] for row in response.context["this_week"] + response.context["next_week"]}
+
+    def test_requires_login(self):
+        response = self._get()
+
+        self.assertEqual(response.status_code, 302)
+
+    def test_per_person_scope_only_shows_that_persons_invited_events(self):
+        invited = self.make_event(title="Lars's practice")
+        not_invited = self.make_event(title="Someone else's practice")
+        Attendance.objects.create(event=invited, member=self.member, status=Attendance.AttendanceStatus.PRESENT)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertEqual(self._events_in_context(response), {invited})
+        self.assertNotContains(response, not_invited.title)
+
+    def test_all_scope_shows_every_club_event_regardless_of_invitation(self):
+        invited = self.make_event(title="Lars's practice")
+        not_invited = self.make_event(title="Whole squad practice")
+        Attendance.objects.create(event=invited, member=self.member, status=Attendance.AttendanceStatus.PRESENT)
+        self.client.force_login(self.user)
+
+        response = self._get(scope="all")
+
+        self.assertEqual(self._events_in_context(response), {invited, not_invited})
+
+    def test_all_scope_excludes_cancelled_events(self):
+        cancelled = self.make_event(title="Cancelled practice", cancelled=True)
+        self.client.force_login(self.user)
+
+        response = self._get(scope="all")
+
+        self.assertNotIn(cancelled, self._events_in_context(response))
+
+    def test_per_person_scope_excludes_cancelled_events(self):
+        cancelled = self.make_event(title="Cancelled practice", cancelled=True)
+        Attendance.objects.create(event=cancelled, member=self.member, status=Attendance.AttendanceStatus.PRESENT)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertNotIn(cancelled, self._events_in_context(response))
+
+    def test_events_outside_the_two_week_window_are_excluded(self):
+        far_future = self.make_event(title="Far future game", start=timezone.now() + datetime.timedelta(days=30))
+        past = self.make_event(title="Past practice", start=timezone.now() - datetime.timedelta(days=1))
+        Attendance.objects.create(event=far_future, member=self.member)
+        Attendance.objects.create(event=past, member=self.member)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertEqual(self._events_in_context(response), set())
+
+    def test_empty_scope_person_shows_a_graceful_empty_state(self):
+        bare_user = User.objects.create_user(email="new@example.com", password="pw-secret-123")
+        self.client.force_login(bare_user)
+
+        response = self._get()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "No one to show yet")

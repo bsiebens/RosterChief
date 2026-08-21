@@ -1,0 +1,57 @@
+{% extends "mobile/base.html" %}
+{% load i18n %}
+
+{% comment %}
+    M3 -- design_handoff_rosterchief_platform/README.md's M3 section: a
+    chronological agenda, grouped under "This week"/"Next week", scoped to
+    scope_person's own invites by default or, with the "All members" toggle
+    below, every club event. See CalendarView's own docstring for the
+    browsing-window judgment call (current + next calendar week, no further
+    paging).
+{% endcomment %}
+
+{% block content %}
+    <div class="flex gap-2">
+        <a class="flex h-9 flex-1 items-center justify-center rounded-full font-display text-xs font-extrabold tracking-wide uppercase {% if not scope_all %}bg-ink text-white{% else %}border border-line bg-white text-muted{% endif %}"
+           href="?{% if request.GET.as %}as={{ request.GET.as }}{% endif %}">
+            {% trans "My schedule" %}
+        </a>
+        <a class="flex h-9 flex-1 items-center justify-center rounded-full font-display text-xs font-extrabold tracking-wide uppercase {% if scope_all %}bg-ink text-white{% else %}border border-line bg-white text-muted{% endif %}"
+           href="?scope=all{% if request.GET.as %}&as={{ request.GET.as }}{% endif %}">
+            {% trans "All members" %}
+        </a>
+    </div>
+
+    {% if not scope_all and not scope_person %}
+        <div class="m-card p-6 text-center">
+            <p class="font-display text-lg font-extrabold text-ink uppercase">{% trans "No one to show yet" %}</p>
+            <p class="mt-1 text-sm text-muted">{% trans "Once you're linked to a member record, their schedule will show up here." %}</p>
+        </div>
+    {% elif not this_week and not next_week %}
+        <div class="m-card p-6 text-center">
+            <p class="text-sm text-muted">{% trans "Nothing scheduled in the next two weeks." %}</p>
+        </div>
+    {% else %}
+        {% if this_week %}
+            <div>
+                <div class="sticky top-0 z-10 bg-paper py-1 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "This week" %}</div>
+                <div class="flex flex-col gap-px overflow-hidden rounded-box bg-line">
+                    {% for row in this_week %}
+                        {% include "mobile/_calendar_row.html" %}
+                    {% endfor %}
+                </div>
+            </div>
+        {% endif %}
+
+        {% if next_week %}
+            <div>
+                <div class="sticky top-0 z-10 bg-paper py-1 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Next week" %}</div>
+                <div class="flex flex-col gap-px overflow-hidden rounded-box bg-line">
+                    {% for row in next_week %}
+                        {% include "mobile/_calendar_row.html" %}
+                    {% endfor %}
+                </div>
+            </div>
+        {% endif %}
+    {% endif %}
+{% endblock content %}

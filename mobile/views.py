@@ -9,6 +9,7 @@ inside the real app shell (base.html), at its final URL name, so the shell
 before every screen is built out one at a time.
 """
 
+import datetime
 import json
 
 from django.contrib.auth.mixins import LoginRequiredMixin
@@ -26,6 +27,7 @@ from club.models import ClubMembership
 from club.services.access import current_season
 from club.services.fees import remaining_balance
 from events.models import Attendance, Event
+from events.services.calendar import week_bounds
 from members.models import Member
 from members.views import ClubScopedPublicMixin
 from news.models import News
@@ -213,9 +215,73 @@ class HomeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         )
 
 
-class CalendarView(_PlaceholderScreen):
+class CalendarView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
+    """M3 -- README's M3 section: a chronological agenda list (not the desktop
+    week/month grid events.services.calendar was built for) grouped under
+    "This week"/"Next week". Browsing-window judgment call: the design doc
+    doesn't specify month navigation for the mobile screen, so this only ever
+    shows *upcoming* events across the current and next calendar week (no
+    "Later"/past bucket, no ?month= paging) -- a simple, bounded agenda rather
+    than a full season browser.
+
+    ``?scope=all`` is the design doc's extra "All members" scope on top of
+    the normal per-person chip switcher (mobile/mixins.py's scope_person):
+    every club event instead of just scope_person's own invites, since
+    there's no single person's Attendance row to key off.
+    """
+
+    template_name = "mobile/calendar.html"
     screen_title = _("Calendar")
     active_tab = "calendar"
+
+    #: Pill styling for a per-person RSVP status (assets/mobile.css's .pill-*).
+    STATUS_PILL_CLASSES = {
+        Attendance.AttendanceStatus.PRESENT: "pill-ok",
+        Attendance.AttendanceStatus.SELECTED: "pill-ok",
+        Attendance.AttendanceStatus.ABSENT: "pill-danger",
+        Attendance.AttendanceStatus.NOT_SELECTED: "pill-neutral",
+        Attendance.AttendanceStatus.EXCUSED: "pill-neutral",
+        Attendance.AttendanceStatus.MAYBE: "pill-warn",
+        Attendance.AttendanceStatus.NO_RESPONSE: "pill-warn",
+    }
+
+    def get_context_data(self, **kwargs):
+        scope_all = self.request.GET.get("scope") == "all"
+        now = timezone.now()
+        _this_week_start, this_week_end = week_bounds(timezone.localdate())
+        next_week_end = this_week_end + datetime.timedelta(days=7)
+        window_end = timezone.make_aware(datetime.datetime.combine(next_week_end, datetime.time.max))
+
+        rows = []
+        if scope_all:
+            events = (
+                Event.objects.filter(club=self.request.club, cancelled=False, start__gte=now, start__lte=window_end)
+                .select_related("location", "opponent")
+                .prefetch_related("teams")
+                .order_by("start")
+            )
+            rows = [{"event": event, "pill_class": "pill-info", "pill_label": event.get_kind_display()} for event in events]
+        elif self.scope_person is not None:
+            attendances = (
+                Attendance.objects.filter(
+                    member=self.scope_person,
+                    event__club=self.request.club,
+                    event__cancelled=False,
+                    event__start__gte=now,
+                    event__start__lte=window_end,
+                )
+                .select_related("event", "event__location", "event__opponent")
+                .prefetch_related("event__teams")
+                .order_by("event__start")
+            )
+            rows = [{"event": attendance.event, "pill_class": self.STATUS_PILL_CLASSES.get(attendance.status, "pill-neutral"), "pill_label": attendance.get_status_display()} for attendance in attendances]
+
+        this_week, next_week = [], []
+        for row in rows:
+            bucket = this_week if timezone.localtime(row["event"].start).date() <= this_week_end else next_week
+            bucket.append(row)
+
+        return super().get_context_data(scope_all=scope_all, this_week=this_week, next_week=next_week, **kwargs)
 
 
 class EventDetailView(_PlaceholderScreen):
