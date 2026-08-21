@@ -73,6 +73,16 @@ class PersonScopeMixin(ClubScopedPublicMixin):
         if self.managed_people:
             unread_notification_count = Notification.objects.filter(club=self.request.club, member__in=self.managed_people, read_at__isnull=True).count()
 
+        # Every screen sets these as class attributes (see e.g. HomeView.active_tab),
+        # but only a subclass that explicitly forwards them into its own
+        # get_context_data actually gets them into the template -- easy to forget
+        # (most screens' own get_context_data never touch either one), so default
+        # them here instead. setdefault, not an outright override: a screen with a
+        # dynamic title (EventDetailView's event.title) already passes its own
+        # screen_title through kwargs, and that must win.
+        kwargs.setdefault("active_tab", getattr(self, "active_tab", ""))
+        kwargs.setdefault("screen_title", getattr(self, "screen_title", ""))
+
         return super().get_context_data(
             me=self.me,
             managed_people=self.managed_people,
