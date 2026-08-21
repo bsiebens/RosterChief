@@ -1,4 +1,5 @@
 import datetime
+import json
 import os
 import sys
 from decimal import Decimal
@@ -4172,6 +4173,37 @@ class NewsManagementTests(ManagementTestBase):
         self.club_post("news_publish", {"published_at": timezone.now().strftime("%Y-%m-%dT%H:%M")}, item.pk)
 
         self.assertEqual(len(mail.outbox), 0)
+
+    def test_notify_members_checkbox_creates_an_in_app_notification_and_pushes_it(self):
+        # End-to-end: the publish-time toggle all the way through to the mobile
+        # app's own inbox and its push channel -- not just the email side
+        # test_notify_members_checkbox_emails_the_audience above already covers.
+        from mobile.models import PushSubscription
+
+        member_user = User.objects.create_user(email="jamie@example.com", password="pw-secret-123")
+        member = Member.objects.create(first_name="Jamie", last_name="Doe", email="jamie@example.com", user=member_user)
+        ClubMembership.objects.create(club=self.club, member=member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        PushSubscription.objects.create(club=self.club, member=member, endpoint="https://push.example.com/jamie", p256dh="key1", auth="key2")
+        item = News.objects.create(club=self.club, title="Signed: New Player", body="Body.")
+        self.client.force_login(self.editor)
+
+        with (
+            override_settings(VAPID_PRIVATE_KEY="test-private-key", VAPID_ADMIN_EMAIL="admin@example.com"),
+            mock.patch("mobile.services.push.webpush") as webpush_mock,
+        ):
+            self.club_post("news_publish", {"published_at": timezone.now().strftime("%Y-%m-%dT%H:%M"), "notify_members": "on"}, item.pk)
+
+        notification = Notification.objects.get(member=member, title="Signed: New Player")
+        self.assertIsNotNone(notification.sent_at)
+        webpush_mock.assert_called_once()
+        self.assertEqual(json.loads(webpush_mock.call_args.kwargs["data"])["title"], "Signed: New Player")
+
+        # And it actually shows up in the member's own mobile inbox, not just the DB row.
+        self.client.logout()
+        self.client.force_login(member_user)
+        response = self.client.get(reverse("mobile:notifications"), HTTP_HOST="ajax-united.rosterchief.app")
+        self.assertContains(response, "Signed: New Player")
+        self.assertEqual(response.context["unread_notification_count"], 1)
 
     def test_a_coach_manager_can_submit_a_draft_for_review(self):
         item = News.objects.create(club=self.club, title="Draft item", body="Body.")
