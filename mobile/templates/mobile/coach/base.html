@@ -1,0 +1,117 @@
+{% load static i18n %}
+
+{% comment %}
+    App shell for Coach mode (C1-C6) -- design_handoff_rosterchief_platform/README.md's
+    "Coach mode (mobile, dark chrome)" section. Standalone from mobile/templates/mobile/
+    base.html (Member mode's shell) rather than a shared parent: the two have almost no
+    markup in common beyond the outer <html>/<body> skeleton -- dark ink header instead
+    of navy, a light .coach-sheet body that overlaps the header by 20px (the mode's own
+    signature, see assets/mobile.css's own comment), and a dark .coach-tab-bar instead of
+    the white one.
+
+    Reuses the SAME stylesheet (static/css/mobile.css) and the same mobile:manifest/
+    mobile:icon/mobile:service_worker PWA plumbing as Member mode -- one app, one
+    manifest, two modes, not two separate PWAs.
+
+    The tab bar only ever links to screens that actually exist. Today (C1) is the only
+    coach screen built so far, so it's the only coach item -- Me reuses the *existing*
+    member mobile:me page rather than a separate coach-Me screen (see CoachTodayView's
+    own docstring). No dead links: as C2/C4/C5/C6 land, they get their own tab/entry
+    point then, not stubbed in ahead of time (same principle mobile/templates/mobile/
+    me.html's own comment already applies to "Household & contacts"/"Coach mode" before
+    this existed).
+{% endcomment %}
+<!DOCTYPE html>
+<html lang="{{ LANGUAGE_CODE|default:"en" }}">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+        <meta name="theme-color" content="#0b1220">
+        <meta name="apple-mobile-web-app-capable" content="yes">
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+        <meta name="mobile-web-app-capable" content="yes">
+
+        <title>{% block title %}{{ screen_title }} &middot; {{ club.name }}{% endblock title %}</title>
+
+        <link rel="manifest" href="{% url "mobile:manifest" %}">
+        <link rel="apple-touch-icon" href="{% url "mobile:icon" size=192 %}">
+        <link rel="icon" href="{% url "mobile:icon" size=192 %}">
+        <link rel="stylesheet" href="{% static "css/mobile.css" %}">
+
+        {% if club.secondary_color %}
+            <style>
+                :root {
+                    --tenant-club: {{ club.secondary_color }};
+                    --tenant-club-dark: color-mix(in srgb, {{ club.secondary_color }} 80%, black);
+                    --tenant-club-content: {{ club.secondary_content_color }};
+                }
+            </style>
+        {% endif %}
+
+        <script src="{% static "js/htmx.js" %}" defer></script>
+        <script src="{% static "js/alpine.js" %}" defer></script>
+
+        {% block extra_head %}{% endblock extra_head %}
+    </head>
+
+    <body class="flex h-screen flex-col overflow-hidden bg-ink font-sans text-slate" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' data-csrftoken="{{ csrf_token }}">
+        <header class="coach-header">
+            <div class="flex items-center gap-2.5">
+                {% if club.logo %}
+                    <img class="app-crest" src="{{ club.logo.url }}" alt="">
+                {% else %}
+                    <span class="app-crest app-crest-fallback">{{ club.initials }}</span>
+                {% endif %}
+                <span class="min-w-0 flex-1">
+                    <span class="block truncate font-display text-[19px] leading-none font-extrabold text-white uppercase">{{ active_team.name|default:club.name }}</span>
+                    {% if me %}<span class="block font-mono text-xs text-on-dark">{% trans "Head coach" %} &middot; {{ me.first_name }}</span>{% endif %}
+                </span>
+            </div>
+
+            {% if staffed_teams|length > 1 %}
+                <div class="mt-3 flex gap-2 overflow-x-auto scrollbar-hide">
+                    {% for team in staffed_teams %}
+                        <a class="shrink-0 rounded-full px-3 py-1.5 font-display text-xs font-extrabold tracking-wide uppercase {% if team == active_team %}bg-ice text-ice-ink{% else %}bg-steel text-on-dark{% endif %}" href="?team={{ team.pk }}">
+                            {{ team.short_name }}
+                        </a>
+                    {% endfor %}
+                </div>
+            {% endif %}
+
+            <div class="role-switcher">
+                <a class="role-switcher-item" href="{% url "mobile:home" %}">{% trans "Member" %}</a>
+                <a class="role-switcher-item role-switcher-item-active" href="{% url "mobile:coach_today" %}">{% trans "Coach" %}</a>
+            </div>
+
+            {% block header_extra %}{% endblock header_extra %}
+        </header>
+
+        <main class="coach-sheet">
+            <div class="flex flex-col gap-4 px-4 py-5">
+                {% if messages %}
+                    <div class="flex flex-col gap-2">
+                        {% for message in messages %}
+                            <div class="m-card p-3 text-sm font-medium text-ink">{{ message }}</div>
+                        {% endfor %}
+                    </div>
+                {% endif %}
+
+                {% block content %}{% endblock content %}
+            </div>
+        </main>
+
+        <nav class="coach-tab-bar">
+            <a class="coach-tab-bar-item {% if active_tab == "coach_today" %}coach-tab-bar-item-active{% endif %}" href="{% url "mobile:coach_today" %}">
+                <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9.5 12 3l9 6.5V21a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1Z"/></svg>
+                <span class="tab-bar-label">{% trans "Today" %}</span>
+            </a>
+            <a class="coach-tab-bar-item" href="{% url "mobile:me" %}">
+                <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-8 8-8s8 3.6 8 8"/></svg>
+                <span class="tab-bar-label">{% trans "Me" %}</span>
+            </a>
+        </nav>
+
+        <script src="{% static "js/mobile-app.js" %}" defer></script>
+        {% block extra_body %}{% endblock extra_body %}
+    </body>
+</html>

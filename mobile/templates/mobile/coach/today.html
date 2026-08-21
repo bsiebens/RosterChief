@@ -1,0 +1,99 @@
+{% extends "mobile/coach/base.html" %}
+{% load i18n %}
+
+{% comment %}
+    C1 -- design_handoff_rosterchief_platform/README.md's C1 section: three
+    stat tiles, a tonight's-session card (only rendered when one exists),
+    a "needs you" list, and an "Also yours" card for the coach's own
+    member-side RSVP. See CoachTodayView's own docstring for what's scoped
+    down from the mock and why.
+{% endcomment %}
+
+{% block content %}
+    {% if not staffed_teams %}
+        <div class="m-card p-6 text-center">
+            <p class="font-display text-lg font-extrabold text-ink uppercase">{% trans "Not staffing a team yet" %}</p>
+            <p class="mt-1 text-sm text-muted">{% trans "Once you're assigned to a team's staff, its schedule and roster will show up here." %}</p>
+        </div>
+    {% else %}
+        <div class="grid grid-cols-3 gap-2.5">
+            <div class="m-card p-3 text-center">
+                <div class="font-display text-2xl leading-none font-extrabold text-ink">{{ squad_count }}</div>
+                <div class="mt-1 font-display text-[10px] font-extrabold tracking-wide text-muted uppercase">{% trans "Squad" %}</div>
+            </div>
+            <div class="m-card p-3 text-center">
+                <div class="font-display text-2xl leading-none font-extrabold text-ink">{{ in_count }}</div>
+                <div class="mt-1 font-display text-[10px] font-extrabold tracking-wide text-muted uppercase">{% trans "In" %}</div>
+            </div>
+            <div class="m-card p-3 text-center">
+                <div class="font-display text-2xl leading-none font-extrabold text-club">{{ silent_count }}</div>
+                <div class="mt-1 font-display text-[10px] font-extrabold tracking-wide text-muted uppercase">{% trans "Silent" %}</div>
+            </div>
+        </div>
+
+        {% if tonight_event %}
+            <div class="m-card-dark overflow-hidden">
+                <div class="flex items-center justify-between px-4 py-2.5">
+                    <span class="font-display text-xs font-extrabold text-ice uppercase tracking-wide">{% blocktrans with time=tonight_event.start|date:"H:i" %}Tonight &middot; {{ time }}{% endblocktrans %}</span>
+                </div>
+                <div class="px-4 pb-4">
+                    <p class="font-display text-xl leading-none font-extrabold uppercase">{{ tonight_event.title }}</p>
+                    {% if can_manage_active_team %}
+                        <a class="btn mt-3 w-full bg-ice text-ice-ink" href="{% url "mobile:coach_attendance" tonight_event.pk %}">{% trans "Check attendance" %}</a>
+                    {% endif %}
+                </div>
+            </div>
+        {% endif %}
+
+        {% if needs_you %}
+            <div class="m-card overflow-hidden">
+                <div class="border-b border-line px-4 py-3 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Needs you" %}</div>
+                {% for item in needs_you %}
+                    <div class="flex items-center gap-3 border-l-4 {% if item.severity == "club" %}border-club{% elif item.severity == "ice" %}border-ice{% else %}border-warn{% endif %} px-4 py-3">
+                        <div class="min-w-0 flex-1">
+                            <div class="text-sm font-semibold text-ink">{{ item.title }}</div>
+                            <div class="text-xs text-muted">{{ item.detail }}</div>
+                        </div>
+                        {% if item.severity == "warn" and session_event and can_manage_active_team %}
+                            <a class="shrink-0 font-display text-xs font-extrabold tracking-wide text-club uppercase" href="{% url "mobile:coach_attendance" session_event.pk %}">{% trans "Review" %}</a>
+                        {% endif %}
+                    </div>
+                {% endfor %}
+            </div>
+        {% endif %}
+
+        {% if hero_attendance %}
+            <div>
+                <div class="mb-2.5 font-display text-xs font-extrabold text-muted uppercase tracking-wide">{% trans "Also yours" %}</div>
+                <div class="m-card-dark p-4">
+                    <p class="font-display text-xs font-extrabold text-info uppercase tracking-wide">{% blocktrans with date=hero_attendance.event.start|date:"D d M H:i" %}Your own next event &middot; {{ date }}{% endblocktrans %}</p>
+                    <p class="mt-1 font-display text-xl leading-none font-extrabold uppercase">{{ hero_attendance.event.title }}</p>
+                    {% if rsvp_closed %}
+                        <span class="pill pill-neutral mt-3">{{ hero_attendance.get_status_display }}</span>
+                    {% else %}
+                        <div class="mt-3 flex gap-2">
+                            <form class="flex-1" method="post" action="{% url "mobile:event_detail" hero_attendance.event.pk %}">
+                                {% csrf_token %}
+                                <input type="hidden" name="member_id" value="{{ hero_attendance.member.pk }}">
+                                <input type="hidden" name="status" value="present">
+                                <button class="btn btn-positive w-full" type="submit">{% trans "In" %}</button>
+                            </form>
+                            <form class="flex-1" method="post" action="{% url "mobile:event_detail" hero_attendance.event.pk %}">
+                                {% csrf_token %}
+                                <input type="hidden" name="member_id" value="{{ hero_attendance.member.pk }}">
+                                <input type="hidden" name="status" value="absent">
+                                <button class="btn w-full bg-steel text-on-dark" type="submit">{% trans "Out" %}</button>
+                            </form>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        {% endif %}
+
+        {% if not tonight_event and not needs_you and not hero_attendance %}
+            <div class="m-card p-6 text-center">
+                <p class="text-sm text-muted">{% trans "Nothing needs your attention right now." %}</p>
+            </div>
+        {% endif %}
+    {% endif %}
+{% endblock content %}

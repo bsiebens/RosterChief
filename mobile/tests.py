@@ -87,6 +87,25 @@ class MobileShellTests(TestCase):
         self.assertIn("javascript", response["Content-Type"])
         self.assertIn("addEventListener", response.content.decode())
 
+    def test_mode_switcher_shows_for_an_account_with_a_staff_assignment(self):
+        today = timezone.localdate()
+        current_season = Season.objects.create(club=self.club, start_date=today - datetime.timedelta(days=10), end_date=today + datetime.timedelta(days=300))
+        team = Team.objects.create(club=self.club, name="U16", short_name="U16")
+        position = Position.objects.create(club=self.club, name="Head coach", short_name="HC", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=team, member=self.member, season=current_season, position=position)
+        self.client.force_login(self.user)
+
+        response = self._get("home")
+
+        self.assertContains(response, reverse("mobile:coach_today"))
+
+    def test_mode_switcher_hidden_without_a_staff_assignment(self):
+        self.client.force_login(self.user)
+
+        response = self._get("home")
+
+        self.assertNotContains(response, reverse("mobile:coach_today"))
+
     def test_person_switcher_lists_managed_children_alongside_me(self):
         family = Family.objects.create(name="Bakker")
         FamilyMembership.objects.create(family=family, member=self.member, role=FamilyMembership.FamilyRole.PARENT)
@@ -1702,3 +1721,249 @@ class CalendarFeedSettingsViewTests(TestCase):
         self.assertRedirects(response, reverse("mobile:calendar_feed_settings"), fetch_redirect_response=False)
         old_token.refresh_from_db()
         self.assertNotEqual(old_token.token, old_value)
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class CoachTodayViewTests(TestCase):
+    """C1 -- design_handoff_rosterchief_platform/README.md's C1 section, plus
+    mobile/coach_mixins.py's CoachScopeMixin (team resolution, session
+    persistence, can_manage_active_team) exercised through this, the first
+    Coach-mode screen."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        today = timezone.localdate()
+        cls.season = Season.objects.create(club=cls.club, start_date=today - datetime.timedelta(days=30), end_date=today + datetime.timedelta(days=300))
+        cls.user = User.objects.create_user(email="coach@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Sam", last_name="Coach", email="coach@example.com", user=cls.user)
+        cls.team = Team.objects.create(club=cls.club, name="U16", short_name="U16")
+        cls.position = Position.objects.create(club=cls.club, name="Head coach", short_name="HC", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=cls.team, member=cls.member, season=cls.season, position=cls.position)
+
+    def _get(self, **params):
+        url = reverse("mobile:coach_today")
+        if params:
+            url += "?" + "&".join(f"{key}={value}" for key, value in params.items())
+        return self.client.get(url, HTTP_HOST="ajax-united.rosterchief.app")
+
+    def test_requires_login(self):
+        response = self._get()
+
+        self.assertEqual(response.status_code, 302)
+
+    def test_no_staff_assignment_shows_a_graceful_empty_state(self):
+        bare_user = User.objects.create_user(email="new@example.com", password="pw-secret-123")
+        self.client.force_login(bare_user)
+
+        response = self._get()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Not staffing a team yet")
+
+    def test_shows_the_active_team_and_squad_count(self):
+        other_member = Member.objects.create(first_name="Anna", last_name="Player")
+        TeamMembership.objects.create(team=self.team, member=self.member, season=self.season)
+        TeamMembership.objects.create(team=self.team, member=other_member, season=self.season)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, "U16")
+        self.assertEqual(response.context["squad_count"], 2)
+
+    def test_defaults_to_the_first_staffed_team_with_no_prior_selection(self):
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertEqual(response.context["active_team"], self.team)
+
+    def test_team_query_param_switches_and_persists_the_active_team(self):
+        second_team = Team.objects.create(club=self.club, name="U14", short_name="U14")
+        StaffAssignment.objects.create(team=second_team, member=self.member, season=self.season, position=self.position)
+        self.client.force_login(self.user)
+
+        response = self._get(team=second_team.pk)
+        self.assertEqual(response.context["active_team"], second_team)
+
+        # No ?team= this time -- the session should keep it on the second team.
+        response = self._get()
+        self.assertEqual(response.context["active_team"], second_team)
+
+    def test_tonights_session_card_shows_for_an_event_starting_today(self):
+        # A small offset, not "+2 hours" -- late enough in the evening (this
+        # environment is UTC+2), a couple hours out would roll into tomorrow
+        # and silently break the "starts today" premise this test is about.
+        event = Event.objects.create(club=self.club, title="Practice", kind=Event.EventKind.TRAINING, start=timezone.now() + datetime.timedelta(minutes=5))
+        event.teams.add(self.team)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertEqual(response.context["tonight_event"], event)
+        self.assertContains(response, "Practice")
+
+    def test_no_session_today_omits_the_tonight_card(self):
+        event = Event.objects.create(club=self.club, title="Next week", kind=Event.EventKind.TRAINING, start=timezone.now() + datetime.timedelta(days=5))
+        event.teams.add(self.team)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertIsNone(response.context["tonight_event"])
+        self.assertEqual(response.context["session_event"], event)
+        self.assertNotContains(response, "Tonight")
+
+    def test_silent_players_are_counted_and_listed_in_needs_you(self):
+        other_member = Member.objects.create(first_name="Anna", last_name="Player")
+        TeamMembership.objects.create(team=self.team, member=other_member, season=self.season)
+        event = Event.objects.create(club=self.club, title="Practice", kind=Event.EventKind.TRAINING, start=timezone.now() + datetime.timedelta(minutes=5))
+        event.teams.add(self.team)
+        Attendance.objects.update_or_create(event=event, member=other_member, defaults={"status": Attendance.AttendanceStatus.NO_RESPONSE})
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertEqual(response.context["silent_count"], 1)
+        self.assertContains(response, "Silent players")
+
+    def test_check_attendance_cta_hidden_for_non_managing_staff(self):
+        physio_position = Position.objects.create(club=self.club, name="Physio", short_name="PHY", staff_position=True, management_position=False)
+        physio_user = User.objects.create_user(email="physio@example.com", password="pw-secret-123")
+        physio_member = Member.objects.create(first_name="Pat", last_name="Physio", user=physio_user)
+        StaffAssignment.objects.create(team=self.team, member=physio_member, season=self.season, position=physio_position)
+        event = Event.objects.create(club=self.club, title="Practice", kind=Event.EventKind.TRAINING, start=timezone.now() + datetime.timedelta(minutes=5))
+        event.teams.add(self.team)
+        self.client.force_login(physio_user)
+
+        response = self._get()
+
+        self.assertFalse(response.context["can_manage_active_team"])
+        self.assertNotContains(response, "Check attendance")
+
+    def test_also_yours_card_shows_the_coachs_own_rsvp(self):
+        event = Event.objects.create(club=self.club, title="My own game", kind=Event.EventKind.GAME, start=timezone.now() + datetime.timedelta(days=1))
+        Attendance.objects.create(event=event, member=self.member, status=Attendance.AttendanceStatus.NO_RESPONSE)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, "Also yours")
+        self.assertContains(response, "My own game")
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class CoachAttendanceViewTests(TestCase):
+    """C2 -- bench attendance: events.services.attendance.record_check_in
+    written through for the first time anywhere in the codebase."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        today = timezone.localdate()
+        cls.season = Season.objects.create(club=cls.club, start_date=today - datetime.timedelta(days=30), end_date=today + datetime.timedelta(days=300))
+        cls.user = User.objects.create_user(email="coach@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Sam", last_name="Coach", email="coach@example.com", user=cls.user)
+        cls.team = Team.objects.create(club=cls.club, name="U16", short_name="U16")
+        cls.position = Position.objects.create(club=cls.club, name="Head coach", short_name="HC", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=cls.team, member=cls.member, season=cls.season, position=cls.position)
+
+        cls.player = Member.objects.create(first_name="Anna", last_name="Player")
+        cls.player_membership = TeamMembership.objects.create(team=cls.team, member=cls.player, season=cls.season, jersey_number=9)
+        cls.event = Event.objects.create(club=cls.club, title="Practice", kind=Event.EventKind.TRAINING, start=timezone.now() + datetime.timedelta(hours=2))
+        cls.event.teams.add(cls.team)
+        cls.attendance, _created = Attendance.objects.update_or_create(event=cls.event, member=cls.player, defaults={"status": Attendance.AttendanceStatus.PRESENT})
+
+    def _get(self, **params):
+        url = reverse("mobile:coach_attendance", kwargs={"event_id": self.event.pk})
+        if params:
+            url += "?" + "&".join(f"{key}={value}" for key, value in params.items())
+        return self.client.get(url, HTTP_HOST="ajax-united.rosterchief.app")
+
+    def test_requires_login(self):
+        response = self._get()
+
+        self.assertEqual(response.status_code, 302)
+
+    def test_shows_the_roster_with_jersey_numbers(self):
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, "Anna Player")
+        self.assertContains(response, "9")
+
+    def test_save_records_check_ins_via_record_check_in(self):
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse("mobile:coach_attendance", kwargs={"event_id": self.event.pk}),
+            {f"showed_up_{self.attendance.pk}": "true"},
+            HTTP_HOST="ajax-united.rosterchief.app",
+        )
+
+        self.assertRedirects(response, reverse("mobile:coach_today"), fetch_redirect_response=False)
+        self.attendance.refresh_from_db()
+        self.assertTrue(self.attendance.showed_up)
+
+    def test_non_managing_staff_cannot_save(self):
+        physio_position = Position.objects.create(club=self.club, name="Physio", short_name="PHY", staff_position=True, management_position=False)
+        physio_user = User.objects.create_user(email="physio@example.com", password="pw-secret-123")
+        physio_member = Member.objects.create(first_name="Pat", last_name="Physio", user=physio_user)
+        StaffAssignment.objects.create(team=self.team, member=physio_member, season=self.season, position=physio_position)
+        self.client.force_login(physio_user)
+
+        response = self.client.post(
+            reverse("mobile:coach_attendance", kwargs={"event_id": self.event.pk}),
+            {f"showed_up_{self.attendance.pk}": "true"},
+            HTTP_HOST="ajax-united.rosterchief.app",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.attendance.refresh_from_db()
+        self.assertIsNone(self.attendance.showed_up)
+
+    def test_non_managing_staff_sees_a_read_only_view(self):
+        physio_position = Position.objects.create(club=self.club, name="Physio", short_name="PHY", staff_position=True, management_position=False)
+        physio_user = User.objects.create_user(email="physio2@example.com", password="pw-secret-123")
+        physio_member = Member.objects.create(first_name="Pat", last_name="Physio", user=physio_user)
+        StaffAssignment.objects.create(team=self.team, member=physio_member, season=self.season, position=physio_position)
+        self.client.force_login(physio_user)
+
+        response = self._get()
+
+        self.assertNotContains(response, "Save attendance")
+
+    def test_silent_filter_narrows_to_no_response_rows(self):
+        silent_member = Member.objects.create(first_name="Ben", last_name="Silent")
+        TeamMembership.objects.create(team=self.team, member=silent_member, season=self.season)
+        Attendance.objects.update_or_create(event=self.event, member=silent_member, defaults={"status": Attendance.AttendanceStatus.NO_RESPONSE})
+        self.client.force_login(self.user)
+
+        response = self._get(filter="silent")
+
+        rows = response.context["rows"]
+        self.assertEqual([row.member for row in rows], [silent_member])
+
+    def test_goalies_filter_matches_on_position_name(self):
+        goalie_position = Position.objects.create(club=self.club, name="Goalie", short_name="G", staff_position=False)
+        goalie = Member.objects.create(first_name="Gina", last_name="Keeper")
+        TeamMembership.objects.create(team=self.team, member=goalie, season=self.season, position=goalie_position)
+        Attendance.objects.update_or_create(event=self.event, member=goalie, defaults={"status": Attendance.AttendanceStatus.NO_RESPONSE})
+        self.client.force_login(self.user)
+
+        response = self._get(filter="goalies")
+
+        rows = response.context["rows"]
+        self.assertEqual([row.member for row in rows], [goalie])
+
+    def test_event_from_another_team_is_not_reachable(self):
+        other_team = Team.objects.create(club=self.club, name="U14", short_name="U14")
+        other_event = Event.objects.create(club=self.club, title="Other practice", kind=Event.EventKind.TRAINING, start=timezone.now() + datetime.timedelta(hours=2))
+        other_event.teams.add(other_team)
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mobile:coach_attendance", kwargs={"event_id": other_event.pk}), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 404)

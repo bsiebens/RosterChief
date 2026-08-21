@@ -7,7 +7,7 @@ them) don't each re-derive this.
 
 from django.conf import settings
 
-from club.services.access import current_season, has_management_access
+from club.services.access import current_season, has_management_access, teams_staffed_by
 from members.models import FamilyMembership, Member
 from members.views import ClubScopedPublicMixin
 from notifications.models import Notification
@@ -89,6 +89,12 @@ class PersonScopeMixin(ClubScopedPublicMixin):
             scope_person=self.scope_person,
             scope_everyone=self.scope_everyone,
             has_staff_access=self.me is not None and has_management_access(self.request.user, self.request.club),
+            # Narrower than has_staff_access above: an ADMIN/EDITOR with no
+            # personal StaffAssignment satisfies that (desktop management
+            # access), but the design doc is explicit the Coach/Member
+            # switcher itself only appears for an account holding an actual
+            # staff assignment -- see mobile/coach_mixins.py's CoachScopeMixin.
+            has_coach_access=self.me is not None and teams_staffed_by(self.request.user, self.request.club).exists(),
             unread_notification_count=unread_notification_count,
             season=current_season(self.request.club),
             vapid_public_key=settings.VAPID_PUBLIC_KEY,

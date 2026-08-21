@@ -1,0 +1,72 @@
+{% extends "mobile/coach/base.html" %}
+{% load i18n %}
+
+{% comment %}
+    C2 -- design_handoff_rosterchief_platform/README.md's C2 section: check
+    off who actually showed up, a separate axis from their RSVP (see
+    CoachAttendanceView's own docstring). The mock's "fixed white footer"
+    Save button is a plain in-flow button instead -- every other coach/member
+    sub-page in this codebase keeps its action inline rather than adding a
+    second fixed bar above the shell's own tab bar.
+{% endcomment %}
+
+{% block header_extra %}
+    <div class="mt-3">
+        <div class="flex items-center justify-between">
+            <span class="font-display text-xl leading-none font-extrabold text-white uppercase">{% trans "Attendance" %}</span>
+            <span class="font-mono text-sm text-on-dark">{{ checked_in_count }}/{{ total_count }}</span>
+        </div>
+        <div class="mt-1 text-xs text-on-dark-dim">{{ event.title }} &middot; {{ event.start|date:"D d M H:i" }}</div>
+        <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-steel">
+            <div class="h-full bg-ice" style="width: {% widthratio checked_in_count total_count|default:1 100 %}%"></div>
+        </div>
+    </div>
+{% endblock header_extra %}
+
+{% block content %}
+    <div class="flex gap-2">
+        <a class="flex h-9 flex-1 items-center justify-center rounded-full font-display text-xs font-extrabold tracking-wide uppercase {% if not filter_param %}bg-ink text-white{% else %}border border-line bg-white text-muted{% endif %}" href="?">
+            {% trans "All" %} {{ total_count }}
+        </a>
+        <a class="flex h-9 flex-1 items-center justify-center rounded-full font-display text-xs font-extrabold tracking-wide uppercase {% if filter_param == "silent" %}bg-ink text-white{% else %}border border-line bg-white text-muted{% endif %}" href="?filter=silent">
+            {% trans "Silent" %} {{ silent_count }}
+        </a>
+        <a class="flex h-9 flex-1 items-center justify-center rounded-full font-display text-xs font-extrabold tracking-wide uppercase {% if filter_param == "goalies" %}bg-ink text-white{% else %}border border-line bg-white text-muted{% endif %}" href="?filter=goalies">
+            {% trans "Goalies" %}
+        </a>
+    </div>
+
+    <form method="post" action="{% url "mobile:coach_attendance" event.pk %}">
+        {% csrf_token %}
+        <div class="m-card flex flex-col overflow-hidden">
+            {% for row in rows %}
+                <div class="flex items-center gap-3 px-4 py-2.5 {% if not forloop.last %}border-b border-rule{% endif %} {% if row.is_silent %}bg-warn-bg{% endif %}" {% if can_manage_active_team %}x-data="{ state: '{{ row.showed_up|yesno:'true,false,' }}' }"{% endif %}>
+                    <div class="w-8 shrink-0 text-center font-display text-lg font-extrabold text-ink tabular-nums">{{ row.membership.jersey_number|default:"—" }}</div>
+                    <div class="min-w-0 flex-1">
+                        <div class="text-sm font-semibold text-ink">{{ row.member.get_full_name }}</div>
+                        <div class="text-xs text-muted">{{ row.membership.position|default:"—" }}</div>
+                    </div>
+                    {% if can_manage_active_team %}
+                        <input type="hidden" name="showed_up_{{ row.pk }}" :value="state">
+                        <div class="flex h-11 w-23 shrink-0 overflow-hidden rounded-lg">
+                            <button type="button" class="flex-1" :class="state === 'true' ? 'bg-ok text-white' : 'bg-rule text-dim'" @click="state = 'true'" aria-label="{% trans "In" %}">
+                                <svg class="mx-auto" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+                            </button>
+                            <button type="button" class="flex-1" :class="state === 'false' ? 'bg-club text-white' : 'bg-rule text-dim'" @click="state = 'false'" aria-label="{% trans "Out" %}">
+                                <svg class="mx-auto" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+                            </button>
+                        </div>
+                    {% elif row.showed_up is not None %}
+                        <span class="pill {% if row.showed_up %}pill-ok{% else %}pill-danger{% endif %} shrink-0">{% if row.showed_up %}{% trans "In" %}{% else %}{% trans "Out" %}{% endif %}</span>
+                    {% endif %}
+                </div>
+            {% empty %}
+                <div class="px-4 py-6 text-center text-sm text-muted">{% trans "No one matches this filter." %}</div>
+            {% endfor %}
+        </div>
+
+        {% if can_manage_active_team %}
+            <button class="btn btn-dark mt-4 w-full" type="submit">{% trans "Save attendance" %}</button>
+        {% endif %}
+    </form>
+{% endblock content %}

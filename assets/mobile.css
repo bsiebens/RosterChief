@@ -445,4 +445,49 @@
         color: #fff;
         border-radius: var(--radius-box);
     }
+
+    /* --- Coach mode shell (C1-C6) ---------------------------------------------------
+       Dark-chrome mirror of the member .app-header/.tab-bar pair above. .coach-sheet is
+       the mode's signature: a light body that overlaps the ink header by 20px via a
+       matching negative margin, so the header appears to sit "behind" a rounded sheet
+       rather than the two stacking edge-to-edge like the member shell's navy header does. */
+
+    .coach-header {
+        padding: max(env(safe-area-inset-top), 14px) 16px 14px;
+        background: var(--color-ink);
+        color: #fff;
+        flex-shrink: 0;
+    }
+
+    .coach-sheet {
+        background: var(--color-paper);
+        border-radius: 20px 20px 0 0;
+        margin-top: -20px;
+        position: relative;
+        flex: 1;
+        overflow-y: auto;
+    }
+
+    .coach-tab-bar {
+        flex-shrink: 0;
+        background: var(--color-ink);
+        border-top: 1px solid var(--color-hairline);
+        padding: 8px 8px max(env(safe-area-inset-bottom), 26px);
+        display: flex;
+    }
+
+    .coach-tab-bar-item {
+        flex: 1;
+        height: 48px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 3px;
+        color: var(--color-on-dark);
+    }
+
+    .coach-tab-bar-item-active {
+        color: var(--color-ice);
+    }
 }

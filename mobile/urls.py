@@ -1,6 +1,6 @@
 from django.urls import path
 
-from . import views
+from . import coach_views, views
 
 app_name = "mobile"
 
@@ -22,4 +22,7 @@ urlpatterns = [
     path("me/calendar-sync/", views.CalendarFeedSettingsView.as_view(), name="calendar_feed_settings"),
     path("me/<uuid:member_id>/edit/", views.EditProfileView.as_view(), name="edit_profile"),
     path("notifications/", views.NotificationsView.as_view(), name="notifications"),
+    # Coach mode (C1-C6).
+    path("coach/", coach_views.CoachTodayView.as_view(), name="coach_today"),
+    path("coach/attendance/<uuid:event_id>/", coach_views.CoachAttendanceView.as_view(), name="coach_attendance"),
 ]
