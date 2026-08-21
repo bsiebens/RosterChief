@@ -51,19 +51,23 @@ def _send_email(notification: Notification, emails: list[str]) -> None:
             continue
 
 
-def notify_members(members, *, club, title: str, body: str, source=None) -> list[Notification]:
-    """One Notification per member, emailed to everyone recipient_emails()
-    resolves for them. Always creates the row, even when nobody was reachable
-    -- that's still true history for a future in-app feed, not a failure to
-    silently drop."""
+def notify_members(members, *, club, title: str, body: str, source=None, send_email: bool = True) -> list[Notification]:
+    """One Notification per member. Emailed to everyone recipient_emails()
+    resolves for them, unless send_email is False -- e.g. a staff review
+    queue (see news.services.notify_editors_of_pending_review), which is
+    in-app only: it doesn't need every editor emailed on every submission,
+    just the topbar/dashboard entry. Always creates the row, even when
+    nobody was reachable or emailing was skipped -- that's still true
+    history for the in-app feed, not a failure to silently drop."""
     notifications = []
     for member in members:
         notification = Notification.objects.create(club=club, member=member, title=title, body=body, source=source)
-        emails = recipient_emails(member)
-        if emails:
-            _send_email(notification, emails)
-            notification.sent_at = timezone.now()
-            notification.sent_to_emails = emails
-            notification.save(update_fields=["sent_at", "sent_to_emails", "modified"])
+        if send_email:
+            emails = recipient_emails(member)
+            if emails:
+                _send_email(notification, emails)
+                notification.sent_at = timezone.now()
+                notification.sent_to_emails = emails
+                notification.save(update_fields=["sent_at", "sent_to_emails", "modified"])
         notifications.append(notification)
     return notifications

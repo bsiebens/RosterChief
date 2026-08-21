@@ -168,6 +168,35 @@
 
         {# --- right: this weekend + news ----------------------------------- #}
         <div class="flex flex-col gap-5">
+            {% if recent_notifications is not None %}
+                {# Same anatomy as "Needs attention" on the left -- see management.context_processors.notification_bell, also shown as a dropdown from the topbar bell on every page; this is the fuller list. #}
+                <div class="card flex flex-col">
+                    <div class="flex items-center justify-between border-b border-line px-4.5 py-3.5">
+                        <span class="font-display text-base font-extrabold tracking-[.08em] text-ink uppercase">{% trans "Notifications" %}</span>
+                        {% if unread_notification_count %}
+                            <form method="post" action="{% url 'management:notification_mark_all_read' %}">
+                                {% csrf_token %}
+                                <button class="text-xs font-semibold text-club hover:underline" type="submit">{% trans "Mark all read" %}</button>
+                            </form>
+                        {% endif %}
+                    </div>
+                    <div class="flex flex-col">
+                        {% for notification in recent_notifications %}
+                            <div class="flex items-center gap-3.5 border-b border-rule px-4.5 py-3.5">
+                                <span class="h-8.5 w-1.5 shrink-0 rounded-sm {% if not notification.read_at %}bg-club{% else %}bg-line{% endif %}"></span>
+                                <div class="flex-1">
+                                    <div class="text-[15px] font-semibold text-ink">{{ notification.title }}</div>
+                                    <div class="text-[13px] text-muted">{{ notification.body|truncatechars:120 }}</div>
+                                </div>
+                                <span class="shrink-0 font-mono text-xs text-dim">{{ notification.created|timesince }} {% trans "ago" %}</span>
+                            </div>
+                        {% empty %}
+                            <div class="px-4.5 py-6 text-center text-sm text-muted">{% trans "Nothing yet." %}</div>
+                        {% endfor %}
+                    </div>
+                </div>
+            {% endif %}
+
             <div class="rounded-xl bg-ink p-4.5 text-white">
                 <div class="mb-3.5 font-display text-base font-extrabold tracking-[.08em] uppercase">{% trans "Upcoming" %}</div>
                 <div class="flex flex-col gap-3">

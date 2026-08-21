@@ -20,6 +20,7 @@ class News(ClubScopedModel):
 
     class Status(models.TextChoices):
         DRAFT = "draft", _("draft")
+        PENDING_REVIEW = "pending_review", _("pending review")
         PUBLISHED = "published", _("published")
 
     title = models.CharField(_("title"), max_length=255)
@@ -41,7 +42,7 @@ class News(ClubScopedModel):
     teams = models.ManyToManyField(Team, related_name="news_items", blank=True, verbose_name=_("teams"), help_text=_("Leave empty for club-wide news."))
 
     visibility = models.CharField(_("visibility"), max_length=10, choices=Visibility.choices, default=Visibility.INTERNAL)
-    status = models.CharField(_("status"), max_length=10, choices=Status.choices, default=Status.DRAFT)
+    status = models.CharField(_("status"), max_length=20, choices=Status.choices, default=Status.DRAFT)
     published_at = models.DateTimeField(_("publish date"), null=True, blank=True, help_text=_("When this goes live. In the future to schedule it ahead of time."))
 
     created_by = models.ForeignKey(Member, on_delete=models.SET_NULL, null=True, blank=True, related_name="news_items", verbose_name=_("created by"))
@@ -56,6 +57,15 @@ class News(ClubScopedModel):
 
     def __str__(self):
         return self.title
+
+    def submit_for_review(self):
+        """A non-editor author (see club.services.access.can_add_news vs
+        can_publish_news) hands a draft off to an editor/admin instead of
+        publishing it themselves -- see news.services.notify_editors_of_pending_review,
+        which this doesn't call itself: the notification is the view's job,
+        same as publish()/unpublish() never send anything either."""
+        self.status = self.Status.PENDING_REVIEW
+        self.save(update_fields=["status"])
 
     def publish(self, at=None):
         self.status, self.published_at = self.Status.PUBLISHED, at or timezone.now()

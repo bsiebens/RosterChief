@@ -33,6 +33,7 @@ from management.recurrence_ui import build_rrule, describe_rrule, parse_rrule
 from members.models import Family, FamilyMembership, Group, GroupMembership, Member, ParentClaim
 from members.services.claims import children_awaiting_a_parent
 from news.models import News, NewsPhoto
+from notifications.models import Notification
 from shop.models import Order
 from teams.models import Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
 from teams.services import eligible_roster_members
@@ -4172,6 +4173,46 @@ class NewsManagementTests(ManagementTestBase):
 
         self.assertEqual(len(mail.outbox), 0)
 
+    def test_a_coach_manager_can_submit_a_draft_for_review(self):
+        item = News.objects.create(club=self.club, title="Draft item", body="Body.")
+        self.client.force_login(self.coach_manager)
+
+        self.club_post("news_submit_for_review", {}, item.pk)
+
+        item.refresh_from_db()
+        self.assertEqual(item.status, News.Status.PENDING_REVIEW)
+
+    def test_submitting_for_review_notifies_editors_in_app_only(self):
+        editor_member = Member.objects.get(user=self.editor)
+        item = News.objects.create(club=self.club, title="Draft item", body="Body.")
+        self.client.force_login(self.coach_manager)
+
+        self.club_post("news_submit_for_review", {}, item.pk)
+
+        self.assertTrue(Notification.objects.filter(member=editor_member, title__contains="Draft item").exists())
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_plain_staff_cannot_submit_for_review(self):
+        item = News.objects.create(club=self.club, title="Draft item", body="Body.")
+        self.client.force_login(self.plain_staff)
+
+        response = self.club_post("news_submit_for_review", {}, item.pk)
+
+        self.assertEqual(response.status_code, 403)
+        item.refresh_from_db()
+        self.assertEqual(item.status, News.Status.DRAFT)
+
+    def test_an_editor_still_publishes_directly_without_a_review_step(self):
+        # The button _news_preview.html shows for can_publish is Publish, never
+        # Send for review -- editors skip the queue entirely.
+        item = News.objects.create(club=self.club, title="Draft item", body="Body.")
+        self.client.force_login(self.editor)
+
+        response = self.club_get("news_detail", item.pk)
+
+        self.assertContains(response, reverse("management:news_publish", args=[item.pk]))
+        self.assertNotContains(response, reverse("management:news_submit_for_review", args=[item.pk]))
+
     def test_unpublishing_reverts_to_draft(self):
         item = News.objects.create(club=self.club, title="Live item", body="Body.")
         item.publish()
@@ -7095,6 +7136,92 @@ class SidebarCounterTests(ManagementTestBase):
         self.assertIsNone(response.context["games_missing_referees_count"])
         self.assertNotContains(response, reverse("management:parent_claim_list"))
         self.assertNotContains(response, reverse("management:referee_management"))
+
+
+class NotificationBellTests(ManagementTestBase):
+    """The topbar bell (every page) and the dashboard's fuller list -- see
+    management.context_processors.notification_bell. Unlike SidebarCounterTests'
+    admin-only badges above, any signed-in staff member with a Member row can
+    have notifications."""
+
+    def setUp(self):
+        super().setUp()
+        self.client.force_login(self.admin_user)
+
+    def test_none_when_nothing_is_pending_but_zero_is_shown_once_therere_notifications(self):
+        response = self.club_get("home")
+
+        self.assertEqual(response.context["unread_notification_count"], 0)
+        self.assertEqual(list(response.context["recent_notifications"]), [])
+
+    def test_unread_count_and_recent_list_reflect_real_notifications(self):
+        Notification.objects.create(club=self.club, member=self.admin_member, title="Big win", body="We won 3-0.")
+
+        response = self.club_get("home")
+
+        self.assertEqual(response.context["unread_notification_count"], 1)
+        self.assertContains(response, "Big win")
+
+    def test_a_read_notification_does_not_count_as_unread(self):
+        Notification.objects.create(club=self.club, member=self.admin_member, title="Old news", body="Body.", read_at=timezone.now())
+
+        response = self.club_get("home")
+
+        self.assertEqual(response.context["unread_notification_count"], 0)
+
+    def test_only_this_members_own_notifications_show(self):
+        other_member = Member.objects.create(first_name="Other", last_name="Staff")
+        Notification.objects.create(club=self.club, member=other_member, title="Not for you", body="Body.")
+
+        response = self.club_get("home")
+
+        self.assertEqual(response.context["unread_notification_count"], 0)
+        self.assertNotContains(response, "Not for you")
+
+    def test_the_bell_badge_renders_on_every_page_not_just_the_dashboard(self):
+        Notification.objects.create(club=self.club, member=self.admin_member, title="Big win", body="We won 3-0.")
+
+        response = self.club_get("member_list")
+
+        self.assertContains(response, 'id="notification-menu"')
+
+    def test_anonymous_gets_no_bell(self):
+        self.client.logout()
+
+        response = self.client.get(reverse("account_login"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertNotContains(response, 'id="notification-menu"')
+
+
+class NotificationMarkAllReadViewTests(ManagementTestBase):
+    def setUp(self):
+        super().setUp()
+        self.client.force_login(self.admin_user)
+
+    def test_marks_every_unread_notification_read(self):
+        first = Notification.objects.create(club=self.club, member=self.admin_member, title="One", body="Body.")
+        second = Notification.objects.create(club=self.club, member=self.admin_member, title="Two", body="Body.")
+
+        self.club_post("notification_mark_all_read", {})
+
+        first.refresh_from_db()
+        second.refresh_from_db()
+        self.assertIsNotNone(first.read_at)
+        self.assertIsNotNone(second.read_at)
+
+    def test_does_not_touch_another_members_notification(self):
+        other_member = Member.objects.create(first_name="Other", last_name="Staff")
+        other_notification = Notification.objects.create(club=self.club, member=other_member, title="Not yours", body="Body.")
+
+        self.club_post("notification_mark_all_read", {})
+
+        other_notification.refresh_from_db()
+        self.assertIsNone(other_notification.read_at)
+
+    def test_redirects_to_next_when_given(self):
+        response = self.club_post("notification_mark_all_read", {"next": reverse("management:member_list")})
+
+        self.assertRedirects(response, reverse("management:member_list"))
 
 
 class ManagementListPaginationTests(ManagementTestBase):

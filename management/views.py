@@ -49,7 +49,9 @@ from members.models import Family, FamilyMembership, Group, GroupMembership, Mem
 from members.services.claims import ClaimError, approve_claim, children_awaiting_a_parent, reject_claim, send_claim_approved_email, suggested_children
 from members.services.family import add_child_to_family, add_parent_to_family, attach_to_family, detach_from_family, get_or_create_login_user, grant_login, register_family
 from news.models import News, NewsPhoto
+from news.services import notify_editors_of_pending_review
 from news.tasks import notify_news_published
+from notifications.models import Notification
 from shop.models import Discount, Invoice, Order, Product
 from teams.models import Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
 from teams.services import eligible_roster_members
@@ -212,6 +214,23 @@ def group_by_family(members):
         group["all"] = group["guardians"] + group["children"] + group["others"]
 
     return groups, ungrouped
+
+
+class NotificationMarkAllReadView(ClubStaffRequiredMixin, View):
+    """The topbar bell dropdown's "Mark all read" action -- every one of the
+    signed-in staff member's own unread notifications in this club, not just
+    the handful the dropdown actually shows (see
+    management.context_processors.notification_bell's [:8] slice)."""
+
+    def post(self, request):
+        member = Member.objects.filter(user=request.user).first()
+        if member is not None:
+            Notification.objects.filter(club=request.club, member=member, read_at__isnull=True).update(read_at=timezone.now())
+
+        next_url = request.POST.get("next")
+        if next_url and url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}, require_https=request.is_secure()):
+            return redirect(next_url)
+        return redirect("management:home")
 
 
 class MemberListView(ClubStaffRequiredMixin, ListView):
@@ -2065,7 +2084,11 @@ class NewsListView(ClubStaffRequiredMixin, ListView):
         status_filter = self.request.GET.get("status", "all")
         now = timezone.now()
         if status_filter == "draft":
-            queryset = queryset.filter(status=News.Status.DRAFT)
+            # Pending review rolls into the Drafts chip -- see _news_preview.html
+            # for how it's still told apart there (its own badge colour), rather
+            # than adding a fifth, rarely-used chip next to the four D8 already
+            # fits on one line.
+            queryset = queryset.filter(status__in=[News.Status.DRAFT, News.Status.PENDING_REVIEW])
         elif status_filter == "scheduled":
             queryset = queryset.filter(status=News.Status.PUBLISHED, published_at__gt=now)
         elif status_filter == "published":
@@ -2093,7 +2116,7 @@ class NewsListView(ClubStaffRequiredMixin, ListView):
             status_filter=self.request.GET.get("status", "all"),
             counts={
                 "all": base.count(),
-                "draft": base.filter(status=News.Status.DRAFT).count(),
+                "draft": base.filter(status__in=[News.Status.DRAFT, News.Status.PENDING_REVIEW]).count(),
                 "scheduled": base.filter(status=News.Status.PUBLISHED, published_at__gt=now).count(),
                 "published": base.filter(status=News.Status.PUBLISHED, published_at__lte=now).count(),
             },
@@ -2182,6 +2205,25 @@ class NewsDeleteView(NewsEditRequiredMixin, View):
         body = _("“%(news)s” has been deleted.") % {"news": title}
         notify(request, f"w|{_('News item deleted')}|{body}")
         return redirect("management:news_list")
+
+
+class NewsSubmitForReviewView(NewsEditRequiredMixin, View):
+    """A non-editor author's hand-off to an editor/admin -- the button
+    _news_preview.html shows instead of Publish when can_publish is False.
+    Gated the same as editing (can_edit_news, broad while it's a draft), not
+    can_publish_news -- that's exactly who this exists for."""
+
+    def get_news_item(self):
+        return get_object_or_404(News.objects.filter(club=self.request.club), pk=self.kwargs["pk"])
+
+    def post(self, request, pk):
+        news_item = self.get_news_item()
+        news_item.submit_for_review()
+        notify_editors_of_pending_review(news_item)
+
+        body = _("“%(news)s” is ready for review.") % {"news": news_item}
+        notify(request, f"s|{_('Sent for review')}|{body}")
+        return redirect("management:news_detail", pk=news_item.pk)
 
 
 class NewsPublishView(NewsPublisherRequiredMixin, RedirectOnInvalidMixin, FormView):

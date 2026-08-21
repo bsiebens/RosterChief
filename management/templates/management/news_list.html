@@ -27,14 +27,16 @@
                         <div class="mb-1 flex items-center gap-2.5">
                             {% if item.status == "draft" %}
                                 <span class="badge badge-sm">{% trans "Draft" %}</span>
+                            {% elif item.status == "pending_review" %}
+                                <span class="badge badge-warning badge-sm">{% trans "Pending review" %}</span>
                             {% elif item.is_scheduled %}
                                 <span class="badge badge-info badge-sm">{% trans "Scheduled" %}</span>
                             {% else %}
                                 <span class="badge badge-success badge-sm">{% trans "Published" %}</span>
                             {% endif %}
                             <span class="font-mono text-[11px] text-dim">
-                                {% if item.status == "draft" %}{% blocktrans with time=item.modified|timesince %}Edited {{ time }} ago{% endblocktrans %}
-                                {% else %}{{ item.published_at|date:"j M Y" }}{% endif %}
+                                {% if item.status == "published" %}{{ item.published_at|date:"j M Y" }}
+                                {% else %}{% blocktrans with time=item.modified|timesince %}Edited {{ time }} ago{% endblocktrans %}{% endif %}
                             </span>
                         </div>
                         <div class="truncate font-display text-xl leading-[1.05] font-extrabold text-ink uppercase">{{ item.title }}</div>

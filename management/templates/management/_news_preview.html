@@ -16,6 +16,8 @@
             <div class="flex flex-wrap items-center gap-2">
                 {% if news_item.status == "draft" %}
                     <span class="badge">{% trans "Draft" %}</span>
+                {% elif news_item.status == "pending_review" %}
+                    <span class="badge badge-warning">{% trans "Pending review" %}</span>
                 {% elif news_item.is_scheduled %}
                     <span class="badge badge-info">{% blocktrans with date=news_item.published_at %}Scheduled for {{ date }}{% endblocktrans %}</span>
                 {% else %}
@@ -29,11 +31,17 @@
                     <button class="btn btn-outline btn-error btn-sm gap-2" type="button" onclick="document.getElementById('delete_news_modal').showModal()">{% lucide "trash-2" size=14 %} {% trans "Delete" %}</button>
                 {% endif %}
                 {% if can_publish %}
-                    {% if news_item.status == "draft" %}
-                        <button class="btn btn-primary btn-sm gap-2" type="button" onclick="document.getElementById('publish_modal').showModal()">{% lucide "upload" size=14 %} {% trans "Publish" %}</button>
-                    {% else %}
+                    {% if news_item.status == "published" %}
                         <button class="btn btn-outline btn-warning btn-sm gap-2" type="button" onclick="document.getElementById('unpublish_modal').showModal()">{% lucide "eye-off" size=14 %} {% trans "Unpublish" %}</button>
+                    {% else %}
+                        <button class="btn btn-primary btn-sm gap-2" type="button" onclick="document.getElementById('publish_modal').showModal()">{% lucide "upload" size=14 %} {% trans "Publish" %}</button>
                     {% endif %}
+                {% elif can_edit and news_item.status == "draft" %}
+                    {# Whoever can edit but not publish (a coach_manager, not an editor/admin -- see club.services.access.can_add_news vs can_publish_news) hands it off instead. #}
+                    <form method="post" action="{% url 'management:news_submit_for_review' news_item.pk %}">
+                        {% csrf_token %}
+                        <button class="btn btn-primary btn-sm gap-2" type="submit">{% lucide "send" size=14 %} {% trans "Send for review" %}</button>
+                    </form>
                 {% endif %}
             </div>
         </div>

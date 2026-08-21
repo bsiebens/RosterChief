@@ -298,3 +298,30 @@ def sidebar_counters(request):
         "pending_parent_claims_count": ParentClaim.objects.filter(club=club, status=ParentClaim.Status.PENDING).count(),
         "games_missing_referees_count": games_missing_referees_count(club, limit=int(RefereeManagementDashboardView.DEFAULT_RANGE)),
     }
+
+
+def notification_bell(request):
+    """The topbar bell's badge count and dropdown contents -- every signed-in
+    staff member can have notifications (not just admins, unlike
+    sidebar_counters' admin-only queues above), since notifications.Notification
+    is keyed to whichever Member they are, not to a role.
+
+    None (not 0) when there's no club/signed-in user/Member row to key off --
+    same "hidden means not applicable, 0 means an empty inbox" distinction
+    sidebar_counters draws."""
+    club = getattr(request, "club", None)
+    if club is None or not request.user.is_authenticated:
+        return {"unread_notification_count": None, "recent_notifications": None}
+
+    from members.models import Member
+    from notifications.models import Notification
+
+    member = Member.objects.filter(user=request.user).first()
+    if member is None:
+        return {"unread_notification_count": None, "recent_notifications": None}
+
+    notifications = Notification.objects.filter(club=club, member=member).order_by("-created")[:8]
+    return {
+        "unread_notification_count": Notification.objects.filter(club=club, member=member, read_at__isnull=True).count(),
+        "recent_notifications": notifications,
+    }

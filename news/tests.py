@@ -7,12 +7,13 @@ from django.db import IntegrityError
 from django.test import TestCase
 from django.utils import timezone
 
-from club.models import Club, ClubMembership, Season
+from club.models import Club, ClubMembership, ClubRole, Season
 from members.models import Member
 from notifications.models import Notification
 from teams.models import Position, Team, TeamMembership
 
 from .models import News, NewsPhoto
+from .services import notify_editors_of_pending_review
 from .tasks import notify_news_published
 
 User = get_user_model()
@@ -75,6 +76,13 @@ class NewsModelTests(TestCase):
         self.assertEqual(item.status, News.Status.PUBLISHED)
         self.assertEqual(item.published_at, future)
         self.assertTrue(item.is_scheduled)
+
+    def test_submit_for_review_moves_a_draft_to_pending_review(self):
+        item = News.objects.create(club=self.club, title="Item", body="Body.")
+
+        item.submit_for_review()
+
+        self.assertEqual(item.status, News.Status.PENDING_REVIEW)
 
     def test_unpublish_clears_the_publish_date(self):
         item = News.objects.create(club=self.club, title="Item", body="Body.")
@@ -211,3 +219,47 @@ class NotifyNewsPublishedTests(TestCase):
         notification = Notification.objects.get(member=member)
         self.assertEqual(notification.body, "Bold text.")
         self.assertEqual(len(mail.outbox), 1)
+
+
+class NotifyEditorsOfPendingReviewTests(TestCase):
+    """news.services.notify_editors_of_pending_review -- in-app only (no
+    email), every ADMIN/EDITOR for the club."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+
+    def make_role(self, first_name, role):
+        member = Member.objects.create(first_name=first_name, last_name="Staff")
+        ClubRole.objects.create(club=self.club, member=member, role=role)
+        return member
+
+    def test_notifies_admins_and_editors(self):
+        admin = self.make_role("Ada", ClubRole.Roles.ADMIN)
+        editor = self.make_role("Ed", ClubRole.Roles.EDITOR)
+        author = self.make_role("Cara", ClubRole.Roles.MEMBER)
+        news_item = News.objects.create(club=self.club, title="Draft item", body="Body.", created_by=author)
+
+        notify_editors_of_pending_review(news_item)
+
+        self.assertTrue(Notification.objects.filter(member=admin).exists())
+        self.assertTrue(Notification.objects.filter(member=editor).exists())
+        self.assertFalse(Notification.objects.filter(member=author).exists())
+
+    def test_sends_no_email(self):
+        self.make_role("Ada", ClubRole.Roles.ADMIN)
+        news_item = News.objects.create(club=self.club, title="Draft item", body="Body.")
+
+        notify_editors_of_pending_review(news_item)
+
+        self.assertEqual(len(mail.outbox), 0)
+        self.assertIsNone(Notification.objects.first().sent_at)
+
+    def test_the_notification_names_the_author(self):
+        self.make_role("Ada", ClubRole.Roles.ADMIN)
+        author = Member.objects.create(first_name="Cara", last_name="Coach")
+        news_item = News.objects.create(club=self.club, title="Draft item", body="Body.", created_by=author)
+
+        notify_editors_of_pending_review(news_item)
+
+        self.assertIn("Cara Coach", Notification.objects.first().body)

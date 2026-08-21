@@ -6,6 +6,7 @@ app_name = "management"
 
 urlpatterns = [
     path("", views.HomeView.as_view(), name="home"),
+    path("notifications/mark-all-read/", views.NotificationMarkAllReadView.as_view(), name="notification_mark_all_read"),
     # People
     path("members/", views.MemberListView.as_view(), name="member_list"),
     path("memberships/", views.MembershipListView.as_view(), name="membership_list"),
@@ -86,6 +87,7 @@ urlpatterns = [
     path("news/<uuid:pk>/", views.NewsDetailView.as_view(), name="news_detail"),
     path("news/<uuid:pk>/edit/", views.NewsUpdateView.as_view(), name="news_update"),
     path("news/<uuid:pk>/delete/", views.NewsDeleteView.as_view(), name="news_delete"),
+    path("news/<uuid:pk>/submit-for-review/", views.NewsSubmitForReviewView.as_view(), name="news_submit_for_review"),
     path("news/<uuid:pk>/publish/", views.NewsPublishView.as_view(), name="news_publish"),
     path("news/<uuid:pk>/unpublish/", views.NewsUnpublishView.as_view(), name="news_unpublish"),
     path("news/<uuid:pk>/photos/", views.NewsPhotoUploadView.as_view(), name="news_photo_upload"),

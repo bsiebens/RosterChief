@@ -79,7 +79,7 @@
                         Opens upward (bottom-full): the trigger sits at the very bottom of the
                         sidebar, so a menu opening down would run off the viewport.
                     {% endcomment %}
-                    <details id="user-menu" class="relative border-t border-sidebar-hairline pt-3.5">
+                    <details id="user-menu" class="dismissable-details relative border-t border-sidebar-hairline pt-3.5">
                         <summary class="flex cursor-pointer list-none items-center gap-2.5 [&::-webkit-details-marker]:hidden">
                             <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-sidebar-chip font-display text-[13px] font-extrabold text-sidebar-fg">{% if user.member %}{{ user.member.first_name|slice:":1" }}{{ user.member.last_name|slice:":1" }}{% else %}?{% endif %}</span>
                             <span class="min-w-0 flex-1">
@@ -103,6 +103,40 @@
                     <span class="font-display text-2xl font-extrabold text-ink uppercase">{% block heading %}{% block topbar_title %}Management{% endblock topbar_title %}{% endblock heading %}</span>
                     {% block topbar_context %}{% endblock topbar_context %}
                     <div class="flex-1"></div>
+                    {% if unread_notification_count is not None %}
+                        {# Same <details>/<summary> convention as the sidebar's own user-menu below -- no JS needed to open it, only the shared outside-click/Escape listener to close it. #}
+                        <details id="notification-menu" class="dismissable-details relative">
+                            <summary class="btn btn-outline btn-square list-none [&::-webkit-details-marker]:hidden" aria-label="{% trans "Notifications" %}">
+                                {% lucide "bell" size=16 %}
+                                {% if unread_notification_count %}
+                                    <span class="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-club px-1 font-mono text-[9px] font-bold text-white">{{ unread_notification_count }}</span>
+                                {% endif %}
+                            </summary>
+                            <div class="absolute top-full right-0 z-20 mt-2 w-80 rounded-xl border border-line bg-white p-1.5 shadow-lg">
+                                <div class="flex items-center justify-between px-2.5 py-2">
+                                    <span class="font-display text-xs font-bold tracking-[.08em] text-ink uppercase">{% trans "Notifications" %}</span>
+                                    {% if unread_notification_count %}
+                                        <form method="post" action="{% url 'management:notification_mark_all_read' %}">
+                                            {% csrf_token %}
+                                            <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                                            <button class="text-xs text-club hover:underline" type="submit">{% trans "Mark all read" %}</button>
+                                        </form>
+                                    {% endif %}
+                                </div>
+                                <div class="flex max-h-96 flex-col overflow-y-auto">
+                                    {% for notification in recent_notifications %}
+                                        <div class="flex flex-col gap-0.5 rounded-lg px-2.5 py-2 {% if not notification.read_at %}bg-subhead{% endif %}">
+                                            <span class="text-[13px] font-semibold text-ink">{{ notification.title }}</span>
+                                            <span class="text-xs text-muted">{{ notification.body|truncatechars:100 }}</span>
+                                            <span class="font-mono text-[10px] text-dim">{{ notification.created|timesince }} {% trans "ago" %}</span>
+                                        </div>
+                                    {% empty %}
+                                        <p class="px-2.5 py-6 text-center text-sm text-muted">{% trans "Nothing yet." %}</p>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                        </details>
+                    {% endif %}
                     <div class="flex items-center gap-2">
                         {% block actions %}{% endblock actions %}
                     </div>
@@ -140,13 +174,19 @@
 
         <script>
             (() => {
-                const menu = document.getElementById("user-menu");
-                if (!menu) return;
+                // <details>, not a click-driven dropdown -- no JS needed to open either
+                // the user menu or the notification bell, only this shared outside-
+                // click/Escape listener to close whichever one is open (a <details>
+                // stays open until its own <summary> is clicked again otherwise).
+                const menus = document.querySelectorAll(".dismissable-details");
+                if (!menus.length) return;
                 document.addEventListener("click", (event) => {
-                    if (menu.open && !menu.contains(event.target)) menu.open = false;
+                    menus.forEach((menu) => {
+                        if (menu.open && !menu.contains(event.target)) menu.open = false;
+                    });
                 });
                 document.addEventListener("keydown", (event) => {
-                    if (event.key === "Escape") menu.open = false;
+                    if (event.key === "Escape") menus.forEach((menu) => { menu.open = false; });
                 });
             })();
 

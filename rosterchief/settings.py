@@ -204,6 +204,7 @@ TEMPLATES = [
                 "management.context_processors.news_permissions",
                 "management.context_processors.feature_sections",
                 "management.context_processors.sidebar_counters",
+                "management.context_processors.notification_bell",
             ],
         },
     },
