@@ -69,6 +69,7 @@ INSTALLED_APPS = [
     "teams.apps.TeamsConfig",
     "events.apps.EventsConfig",
     "news.apps.NewsConfig",
+    "notifications.apps.NotificationsConfig",
     "formbuilder.apps.FormbuilderConfig",
     "shop.apps.ShopConfig",
     # Platform billing: RosterChief charging the clubs. Not tenant data — see billing/models.py.

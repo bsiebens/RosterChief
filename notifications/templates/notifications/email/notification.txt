@@ -1,0 +1,7 @@
+{% load i18n %}{{ notification.title }}
+
+{{ notification.body }}
+{% if club.contact_email %}
+{% blocktrans with email=club.contact_email %}Questions? Reply to this note or write to {{ email }}.{% endblocktrans %}
+{% endif %}
+{% blocktrans with club=club.name %}— {{ club }}{% endblocktrans %}

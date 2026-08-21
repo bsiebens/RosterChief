@@ -863,6 +863,12 @@ class NewsPublishForm(forms.Form):
         widget=forms.DateTimeInput(attrs={"type": "datetime-local"}),
         help_text=_("Leave as now to publish immediately, or pick a future date/time to schedule it."),
     )
+    notify_members = forms.BooleanField(
+        label=_("Notify linked members"),
+        required=False,
+        initial=False,
+        help_text=_("Emails everyone this item reaches (its teams' current rosters, or every active member if it's club-wide) -- and, always, their parent/guardian. Sent when this actually goes live, not necessarily right now."),
+    )
 
 
 class RecordFeePaymentForm(forms.Form):

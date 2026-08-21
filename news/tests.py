@@ -1,13 +1,25 @@
 import datetime
 
+from django.contrib.auth import get_user_model
+from django.core import mail
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError
 from django.test import TestCase
 from django.utils import timezone
 
-from club.models import Club
+from club.models import Club, ClubMembership, Season
+from members.models import Member
+from notifications.models import Notification
+from teams.models import Position, Team, TeamMembership
 
 from .models import News, NewsPhoto
+from .tasks import notify_news_published
+
+User = get_user_model()
+
+
+def make_season(club, start_year=2026):
+    return Season.objects.create(club=club, start_date=datetime.date(start_year, 8, 1), end_date=datetime.date(start_year + 1, 5, 31))
 
 
 def make_photo(news_item, *, is_main=False):
@@ -121,3 +133,81 @@ class NewsPhotoModelTests(TestCase):
         make_photo(other_item, is_main=True)
 
         self.assertEqual(NewsPhoto.objects.filter(is_main=True).count(), 2)
+
+
+class NotifyNewsPublishedTests(TestCase):
+    """news.tasks.notify_news_published -- the audience is this item's teams'
+    current rosters, or every active member if it's club-wide."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        cls.season = make_season(cls.club)
+        cls.position = Position.objects.create(club=cls.club, name="Player", short_name="P")
+
+    def make_member(self, first_name, *, status=ClubMembership.StatusChoices.ACTIVE, kind=ClubMembership.Kind.MEMBER, email=None):
+        member = Member.objects.create(first_name=first_name, last_name="Member", email=email or f"{first_name.lower()}@example.com")
+        if email:
+            User.objects.create_user(email=email, password="pw-secret-123")
+            member.user = User.objects.get(email=email)
+            member.save(update_fields=["user"])
+        ClubMembership.objects.create(club=self.club, member=member, season=self.season, status=status, kind=kind)
+        return member
+
+    def test_club_wide_news_notifies_every_active_member(self):
+        member = self.make_member("Jamie", email="jamie@example.com")
+        news_item = News.objects.create(club=self.club, title="Big news", body="Something happened.", status=News.Status.PUBLISHED, published_at=timezone.now())
+
+        result = notify_news_published(news_item.pk)
+
+        self.assertTrue(Notification.objects.filter(club=self.club, member=member, title="Big news").exists())
+        self.assertIn("Notified 1", result)
+
+    def test_team_scoped_news_only_notifies_that_teams_roster(self):
+        team = Team.objects.create(club=self.club, name="U16", short_name="U16")
+        other_team = Team.objects.create(club=self.club, name="U18", short_name="U18")
+        on_team = self.make_member("Jamie", email="jamie@example.com")
+        off_team = self.make_member("Alex", email="alex@example.com")
+        TeamMembership.objects.create(team=team, member=on_team, season=self.season, position=self.position)
+        TeamMembership.objects.create(team=other_team, member=off_team, season=self.season, position=self.position)
+        news_item = News.objects.create(club=self.club, title="Team news", body="Training moved.", status=News.Status.PUBLISHED, published_at=timezone.now())
+        news_item.teams.add(team)
+
+        notify_news_published(news_item.pk)
+
+        self.assertTrue(Notification.objects.filter(member=on_team).exists())
+        self.assertFalse(Notification.objects.filter(member=off_team).exists())
+
+    def test_excludes_an_inactive_member(self):
+        self.make_member("Jamie", status=ClubMembership.StatusChoices.PENDING, email="jamie@example.com")
+        news_item = News.objects.create(club=self.club, title="News", body="Body.", status=News.Status.PUBLISHED, published_at=timezone.now())
+
+        notify_news_published(news_item.pk)
+
+        self.assertFalse(Notification.objects.exists())
+
+    def test_excludes_a_guardian(self):
+        self.make_member("Alex", kind=ClubMembership.Kind.GUARDIAN, email="alex@example.com")
+        news_item = News.objects.create(club=self.club, title="News", body="Body.", status=News.Status.PUBLISHED, published_at=timezone.now())
+
+        notify_news_published(news_item.pk)
+
+        self.assertFalse(Notification.objects.exists())
+
+    def test_skips_a_news_item_that_is_no_longer_published(self):
+        news_item = News.objects.create(club=self.club, title="News", body="Body.", status=News.Status.DRAFT)
+
+        result = notify_news_published(news_item.pk)
+
+        self.assertEqual(result, "Skipped: not published.")
+        self.assertFalse(Notification.objects.exists())
+
+    def test_the_body_is_plain_text_not_markdown(self):
+        member = self.make_member("Jamie", email="jamie@example.com")
+        news_item = News.objects.create(club=self.club, title="News", body="**Bold** text.", status=News.Status.PUBLISHED, published_at=timezone.now())
+
+        notify_news_published(news_item.pk)
+
+        notification = Notification.objects.get(member=member)
+        self.assertEqual(notification.body, "Bold text.")
+        self.assertEqual(len(mail.outbox), 1)

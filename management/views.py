@@ -49,6 +49,7 @@ from members.models import Family, FamilyMembership, Group, GroupMembership, Mem
 from members.services.claims import ClaimError, approve_claim, children_awaiting_a_parent, reject_claim, send_claim_approved_email, suggested_children
 from members.services.family import add_child_to_family, add_parent_to_family, attach_to_family, detach_from_family, get_or_create_login_user, grant_login, register_family
 from news.models import News, NewsPhoto
+from news.tasks import notify_news_published
 from shop.models import Discount, Invoice, Order, Product
 from teams.models import Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
 from teams.services import eligible_roster_members
@@ -2194,6 +2195,12 @@ class NewsPublishView(NewsPublisherRequiredMixin, RedirectOnInvalidMixin, FormVi
     def form_valid(self, form):
         news_item = get_object_or_404(News.objects.filter(club=self.request.club), pk=self.kwargs["pk"])
         news_item.publish(at=form.cleaned_data["published_at"])
+
+        if form.cleaned_data["notify_members"]:
+            # eta in the past (the common, "publish now" case) just runs right
+            # away -- see news.tasks' own module docstring for why there's no
+            # separate immediate/scheduled branch here.
+            notify_news_published.apply_async(args=[str(news_item.pk)], eta=news_item.published_at)
 
         if news_item.is_scheduled:
             body = _("“%(news)s” is scheduled to go live on %(date)s.") % {"news": news_item, "date": news_item.published_at}

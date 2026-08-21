@@ -4145,6 +4145,33 @@ class NewsManagementTests(ManagementTestBase):
         item.refresh_from_db()
         self.assertFalse(item.is_scheduled)
 
+    def test_notify_members_checkbox_emails_the_audience(self):
+        member = Member.objects.create(first_name="Jamie", last_name="Doe", email="jamie@example.com")
+        ClubMembership.objects.create(club=self.club, member=member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        User.objects.create_user(email="jamie@example.com", password="pw-secret-123")
+        member.user = User.objects.get(email="jamie@example.com")
+        member.save(update_fields=["user"])
+        item = News.objects.create(club=self.club, title="Draft item", body="Body.")
+        self.client.force_login(self.editor)
+
+        self.club_post("news_publish", {"published_at": timezone.now().strftime("%Y-%m-%dT%H:%M"), "notify_members": "on"}, item.pk)
+
+        # Not asserting an exact outbox size: the base fixture's own staff
+        # members (self.editor etc.) may also be active MEMBER-kind club
+        # members in this same season, so they legitimately get one too.
+        sent_to = [address for message in mail.outbox for address in message.to]
+        self.assertIn("jamie@example.com", sent_to)
+
+    def test_leaving_notify_members_unchecked_sends_nothing(self):
+        member = Member.objects.create(first_name="Jamie", last_name="Doe", email="jamie@example.com")
+        ClubMembership.objects.create(club=self.club, member=member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        item = News.objects.create(club=self.club, title="Draft item", body="Body.")
+        self.client.force_login(self.editor)
+
+        self.club_post("news_publish", {"published_at": timezone.now().strftime("%Y-%m-%dT%H:%M")}, item.pk)
+
+        self.assertEqual(len(mail.outbox), 0)
+
     def test_unpublishing_reverts_to_draft(self):
         item = News.objects.create(club=self.club, title="Live item", body="Body.")
         item.publish()

@@ -1,0 +1,1 @@
+{% load i18n %}{% blocktrans with club=club.name title=notification.title %}{{ club }} — {{ title }}{% endblocktrans %}
