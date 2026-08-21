@@ -1,0 +1,48 @@
+{% extends "mobile/base.html" %}
+{% load i18n %}
+
+{% comment %}
+    "All news" -- what Home's own news card links to. Every published,
+    member-visible (internal or both) news item, newest first, full-width
+    like Calendar's own agenda rows (see NewsListView's docstring for why
+    this isn't filtered to just this account's teams the way Home's own
+    teaser is).
+{% endcomment %}
+
+{% block content %}
+    <div class="-mx-4">
+        {% if page.object_list %}
+            <div class="flex flex-col gap-px bg-line">
+                {% for item in page.object_list %}
+                    <a class="flex flex-col gap-1 bg-white px-4 py-3" href="{% url "mobile:news_detail" item.slug %}">
+                        <div class="font-display text-[11px] font-extrabold text-club uppercase tracking-wide">
+                            {% with team=item.teams.first %}{% if team %}{{ team.name }}{% else %}{% trans "Club news" %}{% endif %}{% endwith %} &middot; {{ item.published_at|date:"d M Y" }}
+                        </div>
+                        <div class="text-[15px] font-semibold text-ink">{{ item.title }}</div>
+                    </a>
+                {% endfor %}
+            </div>
+
+            {% if page.has_other_pages %}
+                <div class="flex items-center justify-between px-4 py-3">
+                    {% if page.has_previous %}
+                        <a class="font-display text-xs font-extrabold tracking-wide text-club uppercase" href="?page={{ page.previous_page_number }}">{% trans "Newer" %}</a>
+                    {% else %}
+                        <span></span>
+                    {% endif %}
+                    {% if page.has_next %}
+                        <a class="font-display text-xs font-extrabold tracking-wide text-club uppercase" href="?page={{ page.next_page_number }}">{% trans "Older" %}</a>
+                    {% else %}
+                        <span></span>
+                    {% endif %}
+                </div>
+            {% endif %}
+        {% else %}
+            <div class="mx-4">
+                <div class="m-card p-6 text-center">
+                    <p class="text-sm text-muted">{% trans "No news yet." %}</p>
+                </div>
+            </div>
+        {% endif %}
+    </div>
+{% endblock content %}

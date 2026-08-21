@@ -296,16 +296,34 @@ class HomeViewTests(TestCase):
 
         self.assertEqual(response.context["dues_rows"], [])
 
-    def test_news_teaser_shows_the_latest_published_item(self):
-        News.objects.create(club=self.club, title="Old news", body="Body.", status=News.Status.PUBLISHED, published_at=timezone.now() - datetime.timedelta(days=5))
+    def test_news_teaser_shows_the_latest_published_items_newest_first(self):
+        oldest = News.objects.create(club=self.club, title="Old news", body="Body.", status=News.Status.PUBLISHED, published_at=timezone.now() - datetime.timedelta(days=5))
         latest = News.objects.create(club=self.club, title="Signed: New Player", body="Body.", status=News.Status.PUBLISHED, published_at=timezone.now() - datetime.timedelta(days=1))
         News.objects.create(club=self.club, title="Still a draft", body="Body.", status=News.Status.DRAFT)
         self.client.force_login(self.user)
 
         response = self._get("home")
 
-        self.assertEqual(response.context["news_item"], latest)
+        self.assertEqual(list(response.context["news_items"]), [latest, oldest])
         self.assertContains(response, "Signed: New Player")
+
+    def test_news_teaser_caps_at_three_with_a_link_to_all_news(self):
+        for day in range(5):
+            News.objects.create(club=self.club, title=f"Item {day}", body="Body.", status=News.Status.PUBLISHED, published_at=timezone.now() - datetime.timedelta(days=day))
+        self.client.force_login(self.user)
+
+        response = self._get("home")
+
+        self.assertEqual(len(response.context["news_items"]), 3)
+        self.assertContains(response, 'href="/app/news/"')
+
+    def test_news_teaser_excludes_external_only_items(self):
+        News.objects.create(club=self.club, title="Public site only", body="Body.", status=News.Status.PUBLISHED, published_at=timezone.now(), visibility=News.Visibility.EXTERNAL)
+        self.client.force_login(self.user)
+
+        response = self._get("home")
+
+        self.assertEqual(list(response.context["news_items"]), [])
 
     def test_empty_account_gets_a_graceful_empty_state(self):
         bare_user = User.objects.create_user(email="new@example.com", password="pw-secret-123")
@@ -837,6 +855,76 @@ class NotificationsViewTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "No one to show yet")
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class NewsListViewTests(TestCase):
+    """"All news" -- what Home's own news card links to. Every published,
+    internal-or-both news item, not filtered to any particular team."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        cls.user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", user=cls.user)
+
+    def _get(self, **params):
+        url = reverse("mobile:news_list")
+        if params:
+            url += "?" + "&".join(f"{key}={value}" for key, value in params.items())
+        return self.client.get(url, HTTP_HOST="ajax-united.rosterchief.app")
+
+    def test_requires_login(self):
+        response = self._get()
+
+        self.assertEqual(response.status_code, 302)
+
+    def test_lists_every_internal_or_both_item_regardless_of_team(self):
+        team_item = News.objects.create(club=self.club, title="Team news", body="Body.", status=News.Status.PUBLISHED, published_at=timezone.now())
+        team = Team.objects.create(club=self.club, name="U16", short_name="U16")
+        team_item.teams.add(team)
+        club_item = News.objects.create(club=self.club, title="Club-wide news", body="Body.", status=News.Status.PUBLISHED, published_at=timezone.now())
+        both_item = News.objects.create(club=self.club, title="Both audiences", body="Body.", status=News.Status.PUBLISHED, published_at=timezone.now(), visibility=News.Visibility.BOTH)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertEqual(set(response.context["page"].object_list), {team_item, club_item, both_item})
+
+    def test_excludes_external_only_draft_and_future_scheduled_items(self):
+        News.objects.create(club=self.club, title="External only", body="Body.", status=News.Status.PUBLISHED, published_at=timezone.now(), visibility=News.Visibility.EXTERNAL)
+        News.objects.create(club=self.club, title="Draft", body="Body.", status=News.Status.DRAFT)
+        News.objects.create(club=self.club, title="Scheduled", body="Body.", status=News.Status.PUBLISHED, published_at=timezone.now() + datetime.timedelta(days=3))
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertEqual(list(response.context["page"].object_list), [])
+
+    def test_paginates_at_twenty_per_page(self):
+        for day in range(25):
+            News.objects.create(club=self.club, title=f"Item {day}", body="Body.", status=News.Status.PUBLISHED, published_at=timezone.now() - datetime.timedelta(days=day))
+        self.client.force_login(self.user)
+
+        first_page = self._get()
+        second_page = self._get(page=2)
+
+        self.assertEqual(len(first_page.context["page"].object_list), 20)
+        self.assertEqual(len(second_page.context["page"].object_list), 5)
+
+    def test_empty_state_when_nothing_to_show(self):
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, "No news yet.")
+
+    def test_news_tab_is_active(self):
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertEqual(response.context["active_tab"], "news")
 
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])

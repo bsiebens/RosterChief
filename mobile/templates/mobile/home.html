@@ -126,24 +126,40 @@
             </div>
         {% endif %}
 
-        {% if news_item %}
+        {% if news_items %}
             <div>
                 <div class="mb-2.5 flex items-baseline justify-between">
                     <span class="font-display text-xs font-extrabold text-muted uppercase tracking-wide">{% trans "Club news" %}</span>
+                    <a class="text-xs font-semibold text-club" href="{% url "mobile:news_list" %}">{% trans "All news" %}</a>
                 </div>
-                <a class="m-card block overflow-hidden" href="{% url "mobile:news_detail" news_item.slug %}">
-                    <div class="flex h-[104px] items-center justify-center bg-line text-xs text-dim">{% trans "News photo" %}</div>
-                    <div class="p-3.5">
-                        <div class="font-display text-[11px] font-extrabold text-club uppercase tracking-wide">
-                            {% if news_team %}{{ news_team.name }}{% else %}{% trans "Club news" %}{% endif %} &middot; {{ news_item.published_at|date:"d M" }}
+                {% with lead=news_items.0 %}
+                    <a class="m-card block overflow-hidden" href="{% url "mobile:news_detail" lead.slug %}">
+                        <div class="flex h-[104px] items-center justify-center bg-line text-xs text-dim">{% trans "News photo" %}</div>
+                        <div class="p-3.5">
+                            <div class="font-display text-[11px] font-extrabold text-club uppercase tracking-wide">
+                                {% with team=lead.teams.first %}{% if team %}{{ team.name }}{% else %}{% trans "Club news" %}{% endif %}{% endwith %} &middot; {{ lead.published_at|date:"d M" }}
+                            </div>
+                            <div class="mt-1 font-display text-xl leading-tight font-extrabold text-ink uppercase">{{ lead.title }}</div>
                         </div>
-                        <div class="mt-1 font-display text-xl leading-tight font-extrabold text-ink uppercase">{{ news_item.title }}</div>
+                    </a>
+                {% endwith %}
+                {% if news_items|length > 1 %}
+                    <div class="m-card mt-2.5 overflow-hidden">
+                        {% for item in news_items|slice:"1:" %}
+                            {% if not forloop.first %}<div class="h-px bg-rule"></div>{% endif %}
+                            <a class="block p-3.5" href="{% url "mobile:news_detail" item.slug %}">
+                                <div class="font-display text-[11px] font-extrabold text-club uppercase tracking-wide">
+                                    {% with team=item.teams.first %}{% if team %}{{ team.name }}{% else %}{% trans "Club news" %}{% endif %}{% endwith %} &middot; {{ item.published_at|date:"d M" }}
+                                </div>
+                                <div class="text-sm font-semibold text-ink">{{ item.title }}</div>
+                            </a>
+                        {% endfor %}
                     </div>
-                </a>
+                {% endif %}
             </div>
         {% endif %}
 
-        {% if not hero_attendance and not needs_answer and not dues_rows and not news_item %}
+        {% if not hero_attendance and not needs_answer and not dues_rows and not news_items %}
             <div class="m-card p-6 text-center">
                 <p class="text-sm text-muted">{% trans "Nothing to show right now." %}</p>
             </div>

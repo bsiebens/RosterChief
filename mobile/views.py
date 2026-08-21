@@ -8,6 +8,7 @@ import datetime
 import json
 
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.core.paginator import Paginator
 from django.db.models import Count, Q
 from django.http import Http404, HttpResponse, HttpResponseBadRequest, HttpResponseRedirect, JsonResponse
 from django.shortcuts import get_object_or_404
@@ -143,6 +144,8 @@ class HomeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
     #: Keeps the card from crowding the dues/news cards below it off the first
     #: screenful -- Calendar is the place to see everything still awaiting a reply.
     NEEDS_ANSWER_LIMIT = 5
+    #: Same reasoning -- mobile:news_list is the place to see everything.
+    NEWS_LIMIT = 3
 
     def get_context_data(self, **kwargs):
         people = self.people_in_scope
@@ -153,7 +156,7 @@ class HomeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         needs_answer = []
         needs_answer_total = 0
         dues_rows = []
-        news_item = None
+        news_items = []
 
         if people:
             upcoming = Attendance.objects.filter(
@@ -190,12 +193,17 @@ class HomeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
             else:
                 team_ids = []
 
-            news_item = (
-                News.objects.filter(club=self.request.club, status=News.Status.PUBLISHED, published_at__lte=now)
+            news_items = list(
+                News.objects.filter(
+                    club=self.request.club,
+                    status=News.Status.PUBLISHED,
+                    published_at__lte=now,
+                    visibility__in=[News.Visibility.INTERNAL, News.Visibility.BOTH],
+                )
                 .filter(Q(teams__isnull=True) | Q(teams__id__in=team_ids))
+                .prefetch_related("teams")
                 .order_by("-published_at")
-                .distinct()
-                .first()
+                .distinct()[: self.NEWS_LIMIT]
             )
 
         return super().get_context_data(
@@ -204,8 +212,7 @@ class HomeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
             needs_answer=needs_answer,
             needs_answer_remaining=max(needs_answer_total - len(needs_answer), 0),
             dues_rows=dues_rows,
-            news_item=news_item,
-            news_team=news_item.teams.first() if news_item is not None else None,
+            news_items=news_items,
             # Club-wide, not person-specific -- shown regardless of managed_people,
             # unlike every other card on this screen. Reshuffled on every request
             # (see club.services.sponsors.active_sponsors) rather than once per
@@ -371,6 +378,34 @@ class EventDetailView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         if request.POST.get("next") == "event_detail":
             return HttpResponseRedirect(reverse("mobile:event_detail", kwargs={"pk": event.pk}))
         return HttpResponseRedirect(reverse("mobile:home"))
+
+
+class NewsListView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
+    """"All news" -- what Home's own news card links to once there's more than
+    NEWS_LIMIT items to show. Unlike Home's own teaser (team-relevant items
+    only), this is the full browsable archive: every published, member-visible
+    news item for the club, newest first, regardless of which team it's about.
+    Same visibility rule as Home -- internal or both, never external-only
+    (that's the public website's own audience, not this app's)."""
+
+    template_name = "mobile/news_list.html"
+    screen_title = _("News")
+    active_tab = "news"
+    PAGE_SIZE = 20
+
+    def get_context_data(self, **kwargs):
+        news_items = (
+            News.objects.filter(
+                club=self.request.club,
+                status=News.Status.PUBLISHED,
+                published_at__lte=timezone.now(),
+                visibility__in=[News.Visibility.INTERNAL, News.Visibility.BOTH],
+            )
+            .prefetch_related("teams")
+            .order_by("-published_at")
+        )
+        page = Paginator(news_items, self.PAGE_SIZE).get_page(self.request.GET.get("page"))
+        return super().get_context_data(page=page, **kwargs)
 
 
 class NewsDetailView(PersonScopeMixin, LoginRequiredMixin, TemplateView):

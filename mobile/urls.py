@@ -14,6 +14,7 @@ urlpatterns = [
     path("", views.HomeView.as_view(), name="home"),
     path("calendar/", views.CalendarView.as_view(), name="calendar"),
     path("events/<uuid:pk>/", views.EventDetailView.as_view(), name="event_detail"),
+    path("news/", views.NewsListView.as_view(), name="news_list"),
     path("news/<slug:slug>/", views.NewsDetailView.as_view(), name="news_detail"),
     path("me/", views.MeView.as_view(), name="me"),
     path("me/<uuid:member_id>/edit/", views.EditProfileView.as_view(), name="edit_profile"),
