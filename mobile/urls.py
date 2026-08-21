@@ -24,6 +24,8 @@ urlpatterns = [
     path("notifications/", views.NotificationsView.as_view(), name="notifications"),
     # Coach mode (C1-C6).
     path("coach/", coach_views.CoachTodayView.as_view(), name="coach_today"),
+    path("coach/squad/", coach_views.CoachSquadView.as_view(), name="coach_squad"),
+    path("coach/schedule/", coach_views.CoachScheduleView.as_view(), name="coach_schedule"),
     path("coach/attendance/<uuid:event_id>/", coach_views.CoachAttendanceView.as_view(), name="coach_attendance"),
     path("coach/events/new/", coach_views.CoachCreateEventView.as_view(), name="coach_create_event"),
     path("coach/news/new/", coach_views.CoachCreateNewsView.as_view(), name="coach_create_news"),

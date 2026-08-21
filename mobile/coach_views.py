@@ -26,7 +26,7 @@ from management.forms import EventForm, NewsForm
 from members.models import Member
 from news.models import News
 from news.services import notify_editors_of_pending_review
-from teams.models import Team, TeamMembership
+from teams.models import StaffAssignment, Team, TeamMembership
 from teams.services import eligible_roster_members
 
 from .coach_mixins import CoachScopeMixin
@@ -535,3 +535,46 @@ class CoachLineupPublishView(CoachScopeMixin, LoginRequiredMixin, View):
         publish_lineup(lineup)
         notify(request, f"s|{_('Line-up published')}|{_('Selected players have been notified.')}")
         return HttpResponseRedirect(reverse("mobile:coach_lineup", kwargs={"event_id": event.pk}))
+
+
+class CoachSquadView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
+    """Bottom-tab "Squad" -- the active team's roster and staff for the
+    current season, view-only beyond the "Add player" entry point (which
+    reuses CoachAddPlayerView/C6). No per-row edit here (jersey number,
+    position, captaincy) -- that stays a desktop-only action for now via
+    management.forms.TeamMembershipForm; this screen is about seeing the
+    squad, not managing individual rows from a phone.
+    """
+
+    template_name = "mobile/coach/squad.html"
+    screen_title = _("Squad")
+    active_tab = "coach_squad"
+
+    def get_context_data(self, **kwargs):
+        season = current_season(self.request.club)
+        roster, staff = [], []
+        if self.active_team is not None and season is not None:
+            roster = list(TeamMembership.objects.filter(team=self.active_team, season=season).select_related("member", "position").order_by("position__ordering", "member__last_name"))
+            staff = list(StaffAssignment.objects.filter(team=self.active_team, season=season).select_related("member", "position").order_by("position__ordering", "member__last_name"))
+
+        return super().get_context_data(roster=roster, staff=staff, **kwargs)
+
+
+class CoachScheduleView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
+    """Bottom-tab "Schedule" -- every upcoming event for the active team, full
+    stop (not Today's own "just the next session" scope). Each row jumps
+    straight into the coach-relevant action -- Bench attendance for a
+    practice, the Line-up for a game -- rather than mobile:event_detail (the
+    Member-shell RSVP page a coach browsing their own team's schedule has no
+    use for)."""
+
+    template_name = "mobile/coach/schedule.html"
+    screen_title = _("Schedule")
+    active_tab = "coach_schedule"
+
+    def get_context_data(self, **kwargs):
+        events = []
+        if self.active_team is not None:
+            events = list(Event.objects.filter(teams=self.active_team, cancelled=False, start__gte=timezone.now()).order_by("start"))
+
+        return super().get_context_data(events=events, **kwargs)

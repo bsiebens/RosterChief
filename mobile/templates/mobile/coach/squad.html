@@ -1,0 +1,62 @@
+{% extends "mobile/coach/base.html" %}
+{% load i18n lucide %}
+
+{% comment %}
+    Bottom-tab "Squad" -- roster + staff for the active team, current season.
+    See CoachSquadView's own docstring for why there's no per-row edit here
+    (jersey number/position/captaincy stays a desktop-only action for now).
+{% endcomment %}
+
+{% block content %}
+    {% if not active_team %}
+        <div class="m-card p-6 text-center">
+            <p class="font-display text-lg font-extrabold text-ink uppercase">{% trans "Not staffing a team yet" %}</p>
+        </div>
+    {% else %}
+        <div>
+            <div class="mb-2 flex items-center justify-between">
+                <span class="font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Roster" %}</span>
+                {% if can_manage_active_team %}
+                    <a class="flex items-center gap-1 font-display text-xs font-extrabold tracking-wide text-club uppercase" href="{% url "mobile:coach_add_player" %}">
+                        {% lucide "user-plus" size=14 %} {% trans "Add" %}
+                    </a>
+                {% endif %}
+            </div>
+            <div class="m-card overflow-hidden">
+                {% for membership in roster %}
+                    {% if not forloop.first %}<div class="h-px bg-rule"></div>{% endif %}
+                    <div class="flex items-center gap-3 p-3.5">
+                        <div class="w-8 shrink-0 text-center font-display text-lg font-extrabold text-ink tabular-nums">{{ membership.jersey_number|default:"—" }}</div>
+                        <div class="min-w-0 flex-1">
+                            <div class="text-[15px] font-semibold text-ink">
+                                {{ membership.member.get_full_name }}
+                                {% if membership.is_captain %}<span class="ml-1 font-display text-xs font-extrabold text-club-dark">C</span>{% endif %}
+                                {% if membership.is_alternate_captain %}<span class="ml-1 font-display text-xs font-extrabold text-club-dark">A</span>{% endif %}
+                            </div>
+                            <div class="text-xs text-muted">{{ membership.position|default:"—" }}</div>
+                        </div>
+                    </div>
+                {% empty %}
+                    <div class="p-6 text-center text-sm text-muted">{% trans "No one on the roster for this season yet." %}</div>
+                {% endfor %}
+            </div>
+        </div>
+
+        <div>
+            <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Staff" %}</div>
+            <div class="m-card overflow-hidden">
+                {% for assignment in staff %}
+                    {% if not forloop.first %}<div class="h-px bg-rule"></div>{% endif %}
+                    <div class="flex items-center gap-3 p-3.5">
+                        <div class="min-w-0 flex-1">
+                            <div class="text-[15px] font-semibold text-ink">{{ assignment.member.get_full_name }}</div>
+                            <div class="text-xs text-muted">{{ assignment.position }}</div>
+                        </div>
+                    </div>
+                {% empty %}
+                    <div class="p-6 text-center text-sm text-muted">{% trans "No staff assigned for this season yet." %}</div>
+                {% endfor %}
+            </div>
+        </div>
+    {% endif %}
+{% endblock content %}

@@ -8,6 +8,7 @@ several people the way Member mode's person switcher does.
 from club.services.access import current_season, teams_managed_by, teams_staffed_by
 from members.models import Member
 from members.views import ClubScopedPublicMixin
+from teams.models import StaffAssignment
 
 #: Session key remembering which team was last active, so navigating between
 #: coach screens (or leaving and coming back) doesn't reset the picker to
@@ -33,6 +34,11 @@ class CoachScopeMixin(ClubScopedPublicMixin):
     disabled -- a coach on staff but without a management position (e.g. a
     physio) can see Coach mode but shouldn't see edit affordances they don't
     have the authority to use.
+
+    ``active_team_role`` is ``self.me``'s own StaffAssignment.position on
+    ``active_team`` this season (e.g. "Team manager", "Physio") -- the
+    header shows this instead of a hardcoded "Head coach", since not every
+    staffed team is one the account holder actually coaches.
     """
 
     def dispatch(self, request, *args, **kwargs):
@@ -41,7 +47,14 @@ class CoachScopeMixin(ClubScopedPublicMixin):
         self.managed_teams = list(teams_managed_by(request.user, request.club)) if request.user.is_authenticated else []
         self.active_team = self._resolve_active_team(request)
         self.can_manage_active_team = self.active_team is not None and self.active_team in self.managed_teams
+        self.active_team_role = self._resolve_active_team_role(request)
         return super().dispatch(request, *args, **kwargs)
+
+    def _resolve_active_team_role(self, request):
+        if self.me is None or self.active_team is None:
+            return None
+        assignment = StaffAssignment.objects.filter(member=self.me, team=self.active_team, season=current_season(request.club)).select_related("position").first()
+        return assignment.position if assignment is not None else None
 
     def _resolve_active_team(self, request):
         requested_id = request.GET.get("team")
@@ -66,6 +79,7 @@ class CoachScopeMixin(ClubScopedPublicMixin):
             staffed_teams=self.staffed_teams,
             active_team=self.active_team,
             can_manage_active_team=self.can_manage_active_team,
+            active_team_role=self.active_team_role,
             season=current_season(self.request.club),
             **kwargs,
         )
