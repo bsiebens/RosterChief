@@ -18,6 +18,15 @@
             <p class="mt-1 text-sm text-muted">{% trans "Once you're assigned to a team's staff, its schedule and roster will show up here." %}</p>
         </div>
     {% else %}
+        {% if session_event %}
+            <div class="flex items-center justify-between">
+                <span class="font-display text-xs font-extrabold text-on-dark-dim uppercase tracking-wide">
+                    {% if tonight_event %}{% trans "Stats for tonight" %}{% else %}{% blocktrans with date=session_event.start|date:"D d M" %}Stats for {{ date }}{% endblocktrans %}{% endif %}
+                </span>
+                <span class="truncate font-display text-xs font-extrabold text-ice uppercase tracking-wide">{{ session_event.title }}</span>
+            </div>
+        {% endif %}
+
         <div class="grid grid-cols-3 gap-2.5">
             <div class="m-card p-3 text-center">
                 <div class="font-display text-2xl leading-none font-extrabold text-ink">{{ squad_count }}</div>
@@ -33,18 +42,21 @@
             </div>
         </div>
 
-        {% if tonight_event %}
+        {% if session_event %}
             <div class="m-card-dark overflow-hidden">
                 <div class="flex items-center justify-between px-4 py-2.5">
-                    <span class="font-display text-xs font-extrabold text-ice uppercase tracking-wide">{% blocktrans with time=tonight_event.start|date:"H:i" %}Tonight &middot; {{ time }}{% endblocktrans %}</span>
+                    <span class="font-display text-xs font-extrabold text-ice uppercase tracking-wide">
+                        {% if tonight_event %}{% blocktrans with time=session_event.start|date:"H:i" %}Tonight &middot; {{ time }}{% endblocktrans %}{% else %}{% blocktrans with date=session_event.start|date:"D d M H:i" %}Next up &middot; {{ date }}{% endblocktrans %}{% endif %}
+                    </span>
                 </div>
                 <div class="px-4 pb-4">
-                    <p class="font-display text-xl leading-none font-extrabold uppercase">{{ tonight_event.title }}</p>
+                    <p class="font-display text-xl leading-none font-extrabold uppercase">{{ session_event.title }}</p>
+                    {% if session_event.location %}<p class="mt-1 text-sm text-on-dark-dim">{{ session_event.location.name }}</p>{% endif %}
                     {% if can_manage_active_team %}
                         <div class="mt-3 flex gap-2">
-                            <a class="btn flex-1 bg-ice text-ice-ink" href="{% url "mobile:coach_attendance" tonight_event.pk %}">{% trans "Check attendance" %}</a>
-                            {% if tonight_event.kind == "game" %}
-                                <a class="btn flex-1 bg-steel text-on-dark" href="{% url "mobile:coach_lineup" tonight_event.pk %}">{% trans "Line-up" %}</a>
+                            <a class="btn flex-1 bg-ice text-ice-ink" href="{% url "mobile:coach_attendance" session_event.pk %}">{% trans "Check attendance" %}</a>
+                            {% if session_event.kind == "game" %}
+                                <a class="btn flex-1 bg-steel text-on-dark" href="{% url "mobile:coach_lineup" session_event.pk %}">{% trans "Line-up" %}</a>
                             {% endif %}
                         </div>
                     {% endif %}
@@ -61,10 +73,8 @@
                             <div class="text-sm font-semibold text-ink">{{ item.title }}</div>
                             <div class="text-xs text-muted">{{ item.detail }}</div>
                         </div>
-                        {% if item.severity == "warn" and session_event and can_manage_active_team %}
-                            <a class="shrink-0 font-display text-xs font-extrabold tracking-wide text-club uppercase" href="{% url "mobile:coach_attendance" session_event.pk %}">{% trans "Review" %}</a>
-                        {% elif item.severity == "club" and session_event and can_manage_active_team %}
-                            <a class="shrink-0 font-display text-xs font-extrabold tracking-wide text-club uppercase" href="{% url "mobile:coach_lineup" session_event.pk %}">{% trans "Build" %}</a>
+                        {% if item.action_url %}
+                            <a class="shrink-0 font-display text-xs font-extrabold tracking-wide text-club uppercase" href="{{ item.action_url }}">{{ item.action_label }}</a>
                         {% endif %}
                     </div>
                 {% endfor %}
@@ -86,7 +96,7 @@
             </div>
         {% endif %}
 
-        {% if not tonight_event and not needs_you and not hero_attendance %}
+        {% if not session_event and not needs_you and not hero_attendance %}
             <div class="m-card p-6 text-center">
                 <p class="text-sm text-muted">{% trans "Nothing needs your attention right now." %}</p>
             </div>

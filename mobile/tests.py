@@ -15,6 +15,7 @@ from news.models import News
 from notifications.models import Notification
 from teams.models import Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership
 
+from .coach_views import CoachTodayView
 from .models import CalendarFeedToken, PushSubscription
 from .services.icons import render_fallback_icon
 
@@ -2405,7 +2406,7 @@ class CoachTodayViewTests(TestCase):
         self.assertEqual(response.context["tonight_event"], event)
         self.assertContains(response, "Practice")
 
-    def test_no_session_today_omits_the_tonight_card(self):
+    def test_no_session_today_still_shows_the_next_upcoming_one(self):
         event = Event.objects.create(club=self.club, title="Next week", kind=Event.EventKind.TRAINING, start=timezone.now() + datetime.timedelta(days=5))
         event.teams.add(self.team)
         self.client.force_login(self.user)
@@ -2415,6 +2416,8 @@ class CoachTodayViewTests(TestCase):
         self.assertIsNone(response.context["tonight_event"])
         self.assertEqual(response.context["session_event"], event)
         self.assertNotContains(response, "Tonight")
+        self.assertContains(response, "Next up")
+        self.assertContains(response, "Next week")
 
     def test_silent_players_are_counted_and_listed_in_needs_you(self):
         other_member = Member.objects.create(first_name="Anna", last_name="Player")
@@ -2471,6 +2474,54 @@ class CoachTodayViewTests(TestCase):
         response = self._get()
 
         self.assertNotContains(response, "Line-up not published")
+
+    def test_a_later_games_missing_lineup_shows_even_when_the_next_session_is_a_practice(self):
+        # session_event (the very next thing on the calendar) is a practice --
+        # the game further out still needs flagging, not just whatever's soonest.
+        practice = Event.objects.create(club=self.club, title="Practice", kind=Event.EventKind.TRAINING, start=timezone.now() + datetime.timedelta(minutes=5))
+        practice.teams.add(self.team)
+        game = Event.objects.create(club=self.club, title="Saturday's game", kind=Event.EventKind.GAME, start=timezone.now() + datetime.timedelta(days=3))
+        game.teams.add(self.team)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertEqual(response.context["session_event"], practice)
+        self.assertContains(response, "Saturday&#x27;s game")
+        self.assertContains(response, "Line-up not published")
+
+    def test_several_upcoming_games_each_missing_a_lineup_are_all_listed(self):
+        first = Event.objects.create(club=self.club, title="Game one", kind=Event.EventKind.GAME, start=timezone.now() + datetime.timedelta(days=1))
+        first.teams.add(self.team)
+        second = Event.objects.create(club=self.club, title="Game two", kind=Event.EventKind.GAME, start=timezone.now() + datetime.timedelta(days=3))
+        second.teams.add(self.team)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, "Game one")
+        self.assertContains(response, "Game two")
+        self.assertContains(response, "Line-up not published", count=2)
+
+    def test_missing_lineup_build_link_points_at_the_specific_game(self):
+        game = Event.objects.create(club=self.club, title="Big game", kind=Event.EventKind.GAME, start=timezone.now() + datetime.timedelta(days=1))
+        game.teams.add(self.team)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, reverse("mobile:coach_lineup", kwargs={"event_id": game.pk}))
+
+    def test_missing_lineup_check_is_capped(self):
+        cap = CoachTodayView.UPCOMING_GAMES_CHECKED
+        for day in range(cap + 1):
+            game = Event.objects.create(club=self.club, title=f"Game {day}", kind=Event.EventKind.GAME, start=timezone.now() + datetime.timedelta(days=day + 1))
+            game.teams.add(self.team)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, "Line-up not published", count=cap)
 
     def test_header_shows_the_persons_actual_role_not_a_hardcoded_label(self):
         self.client.force_login(self.user)

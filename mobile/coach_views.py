@@ -38,21 +38,31 @@ IN_STATUSES = [Attendance.AttendanceStatus.PRESENT, Attendance.AttendanceStatus.
 
 class CoachTodayView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
     """C1 -- three stat tiles (Squad/In/Silent) for the active team's next
-    upcoming session, a "tonight's session" card when one is scheduled today,
-    a "needs you" list, and an "Also yours" card surfacing the coach's own
-    member-side RSVP obligation (the same hero_attendance/rsvp_closed pattern
-    mobile.views.HomeView already computes, scoped to self.me only -- a
-    coach's own obligations, not the whole roster's).
+    upcoming session, a session card for it (today's, if there's one on the
+    calendar today, otherwise whichever is soonest), a "needs you" list, and
+    an "Also yours" card surfacing the coach's own member-side RSVP
+    obligation (the same hero_attendance/rsvp_closed pattern mobile.views.
+    HomeView already computes, scoped to self.me only -- a coach's own
+    obligations, not the whole roster's).
 
     "Needs you" is scoped down from the design mock to what has real backing
-    data today: a silent-players count and (for a game) an unpublished-
-    line-up flag for the next session. The mock's member-blocker row stays
-    deferred -- no coach-facing member-edit screen exists yet to link to.
+    data today: a silent-players count for the next session, plus an
+    unpublished-line-up flag for *every* upcoming game within
+    UPCOMING_GAMES_CHECKED (not just whichever happens to be the very next
+    session -- a practice landing before Saturday's game shouldn't hide that
+    the game's own line-up still needs building). The mock's member-blocker
+    row stays deferred -- no coach-facing member-edit screen exists yet to
+    link to.
     """
 
     template_name = "mobile/coach/today.html"
     screen_title = _("Today")
     active_tab = "coach_today"
+
+    #: How many of the team's soonest upcoming games to check for a missing
+    #: line-up -- unbounded would mean querying arbitrarily far into a full
+    #: season; this many is already more advance notice than useful.
+    UPCOMING_GAMES_CHECKED = 5
 
     def get_context_data(self, **kwargs):
         now = timezone.now()
@@ -79,11 +89,30 @@ class CoachTodayView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
                 in_count = attendances.filter(status__in=IN_STATUSES).count()
                 silent_count = attendances.filter(status=Attendance.AttendanceStatus.NO_RESPONSE).count()
                 if silent_count > 0:
-                    needs_you.append({"severity": "warn", "title": _("Silent players"), "detail": _("%(count)d haven't answered yet") % {"count": silent_count}})
-                if session_event.kind == Event.EventKind.GAME:
-                    lineup = Lineup.objects.filter(event=session_event).first()
-                    if lineup is None or lineup.published_at is None:
-                        needs_you.append({"severity": "club", "title": _("Line-up not published"), "detail": _("Build it before the game.")})
+                    needs_you.append(
+                        {
+                            "severity": "warn",
+                            "title": _("Silent players"),
+                            "detail": _("%(count)d haven't answered yet") % {"count": silent_count},
+                            "action_label": _("Review"),
+                            "action_url": reverse("mobile:coach_attendance", kwargs={"event_id": session_event.pk}) if self.can_manage_active_team else "",
+                        }
+                    )
+
+            upcoming_games = list(upcoming.filter(kind=Event.EventKind.GAME)[: self.UPCOMING_GAMES_CHECKED])
+            published_event_ids = set(Lineup.objects.filter(event__in=upcoming_games, published_at__isnull=False).values_list("event_id", flat=True))
+            for game in upcoming_games:
+                if game.pk in published_event_ids:
+                    continue
+                needs_you.append(
+                    {
+                        "severity": "club",
+                        "title": _("Line-up not published"),
+                        "detail": _("%(title)s · %(date)s") % {"title": game.title, "date": timezone.localtime(game.start).strftime("%a %d %b, %H:%M")},
+                        "action_label": _("Build"),
+                        "action_url": reverse("mobile:coach_lineup", kwargs={"event_id": game.pk}) if self.can_manage_active_team else "",
+                    }
+                )
 
         hero_attendance = None
         rsvp_closed = False
