@@ -26,6 +26,7 @@ from club.services.onboarding import mark_complete
 from events.models import Attendance, Competition, Event, EventReferee, EventSeries, Location, Opponent, RefereeSignup
 from events.services.rbihf_import import RBIHFImportError
 from events.services.recurrence import detach_occurrence, generate_occurrences
+from events.services.referees import add_external_referee
 from management.bulk_import import TEMPLATE_COLUMNS
 from management.email_previews import EMAIL_PREVIEWS
 from management.pdf import PDFExportError, _tint_with_white, referee_form_colors, render_pdf
@@ -6586,6 +6587,39 @@ class RefereeManagementDashboardTests(ManagementTestBase):
         response = self.club_get("referee_management")
 
         self.assertContains(response, "Self sign-up")
+
+    def test_workload_stats_count_games_refereed_this_season(self):
+        game_one = self.make_game()
+        game_two = self.make_game(title="Second game", start=timezone.now() + datetime.timedelta(days=2))
+        EventReferee.objects.create(event=game_one, member=self.referee, assigned_by=self.admin_member, fee=Decimal("20.00"))
+        EventReferee.objects.create(event=game_two, member=self.referee, assigned_by=self.admin_member, fee=Decimal("15.00"))
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("referee_management")
+
+        self.assertEqual(response.context["kpi_active_referees"], 1)
+        self.assertEqual(response.context["kpi_total_assignments"], 2)
+        stats = response.context["referee_stats"]
+        self.assertEqual(stats[0]["games"], 2)
+        self.assertEqual(stats[0]["total_fees"], Decimal("35.00"))
+        self.assertContains(response, "Games refereed per referee")
+
+    def test_workload_stats_exclude_external_referees(self):
+        game = self.make_game()
+        add_external_referee(game, "Guest Ref", assigned_by=self.admin_member)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("referee_management")
+
+        self.assertEqual(response.context["kpi_active_referees"], 0)
+
+    def test_workload_stats_empty_state(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("referee_management")
+
+        self.assertEqual(response.context["referee_stats"], [])
+        self.assertContains(response, "No referee assignments recorded yet this season.")
 
 
 class FeatureGatedSectionsTests(ManagementTestBase):

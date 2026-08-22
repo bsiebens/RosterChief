@@ -1,5 +1,5 @@
 {% extends "management/base.html" %}
-{% load i18n lucide ui %}
+{% load i18n lucide static ui %}
 
 {% block heading %}{% trans "Referee management" %}{% endblock heading %}
 {% block topbar_context %}<span class="text-sm text-muted">{% trans "Every upcoming home game that needs a club-arranged referee." %}</span>{% endblock topbar_context %}
@@ -43,6 +43,53 @@
             <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Fees not set" %}</div>
             <div class="mt-1 font-display text-[34px] leading-none font-extrabold tabular-nums {% if kpi_fees_pending %}text-warn{% else %}text-ink{% endif %}">{{ kpi_fees_pending }}</div>
             <div class="mt-1 text-[13px] text-muted">{% trans "Referee fee missing" %}</div>
+        </div>
+    </div>
+
+    {% comment %}
+        Season workload -- separate from the "games in view" KPIs above
+        (which track the upcoming range picked by the filter strip), this is
+        about who's actually done the refereeing this season, all-time
+        within it, not just what's still upcoming.
+    {% endcomment %}
+    <div class="grid grid-cols-1 gap-3.5 lg:grid-cols-3">
+        <div class="card p-4.5 lg:col-span-2">
+            <div class="mb-1 font-display text-base font-extrabold tracking-[.08em] text-ink uppercase">{% trans "Games refereed per referee" %}</div>
+            <p class="mb-3 text-sm text-muted">{% trans "This season." %}</p>
+            {% if referee_stats %}
+                <div class="h-56">
+                    <canvas id="referee-games-chart"></canvas>
+                </div>
+            {% else %}
+                <p class="py-6 text-center text-sm text-muted">{% trans "No referee assignments recorded yet this season." %}</p>
+            {% endif %}
+        </div>
+        <div class="card p-4.5">
+            <div class="mb-3 font-display text-base font-extrabold tracking-[.08em] text-ink uppercase">{% trans "Season at a glance" %}</div>
+            <dl>
+                <div class="flex items-center justify-between py-1.5">
+                    <dt class="text-[13px] text-muted">{% trans "Active referees" %}</dt>
+                    <dd class="font-mono text-sm font-semibold text-ink">{{ kpi_active_referees }}</dd>
+                </div>
+                <div class="flex items-center justify-between py-1.5">
+                    <dt class="text-[13px] text-muted">{% trans "Games refereed" %}</dt>
+                    <dd class="font-mono text-sm font-semibold text-ink">{{ kpi_total_assignments }}</dd>
+                </div>
+                <div class="flex items-center justify-between py-1.5">
+                    <dt class="text-[13px] text-muted">{% trans "Average per referee" %}</dt>
+                    <dd class="font-mono text-sm font-semibold text-ink">{{ kpi_avg_games_per_referee }}</dd>
+                </div>
+            </dl>
+            {% if referee_stats %}
+                <div class="mt-2 max-h-40 overflow-y-auto border-t border-rule">
+                    {% for row in referee_stats %}
+                        <div class="flex items-center justify-between gap-3 py-1.5 {% if not forloop.last %}border-b border-rule{% endif %}">
+                            <span class="truncate text-[13px] text-ink">{{ row.member__first_name }} {{ row.member__last_name }}</span>
+                            <span class="shrink-0 font-mono text-xs text-muted">{% blocktrans count counter=row.games %}{{ counter }} game{% plural %}{{ counter }} games{% endblocktrans %}{% if row.total_fees %} &middot; &euro;{{ row.total_fees|floatformat:2 }}{% endif %}</span>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% endif %}
         </div>
     </div>
 
@@ -104,3 +151,40 @@
         </div>
     {% endfor %}
 {% endblock panel %}
+
+{% block extra_body %}
+    {% trans "Games" as games_label %}
+    {{ charts|json_script:"referee-chart-data" }}
+    <script src="{% static 'js/chart.js' %}"></script>
+    <script>
+        (() => {
+            const data = JSON.parse(document.getElementById("referee-chart-data").textContent);
+            // Same pattern as management/home.html's own charts -- Chart.js paints to a
+            // canvas, so it needs the club accent resolved, not the CSS variable itself.
+            const clubColor = getComputedStyle(document.documentElement).getPropertyValue("--color-club").trim() || "#E4002B";
+            const ink = "#3A4658";
+            const grid = "#EEF0F3";
+
+            const gamesCanvas = document.getElementById("referee-games-chart");
+            if (gamesCanvas && data.referee_games.labels.length) {
+                new Chart(gamesCanvas, {
+                    type: "bar",
+                    data: {
+                        labels: data.referee_games.labels,
+                        datasets: [{label: "{{ games_label|escapejs }}", data: data.referee_games.games, backgroundColor: clubColor}],
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        indexAxis: "y",
+                        plugins: {legend: {display: false}},
+                        scales: {
+                            x: {beginAtZero: true, ticks: {color: ink, precision: 0}, grid: {color: grid}},
+                            y: {ticks: {color: ink}, grid: {display: false}},
+                        },
+                    },
+                });
+            }
+        })();
+    </script>
+{% endblock extra_body %}

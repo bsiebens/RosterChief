@@ -2,7 +2,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from django.db import IntegrityError, transaction
-from django.db.models import Count, ProtectedError, Q
+from django.db.models import Count, ProtectedError, Q, Sum
 from django.http import FileResponse, Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -2693,6 +2693,28 @@ def upcoming_games_needing_referee_management(club):
     )
 
 
+def referee_workload_stats(club):
+    """Games refereed (and fees paid) per member this season -- external
+    referees excluded (member is None for those, nothing to group by).
+    Current season only, same scope as everything else on this dashboard
+    being "the season we're in", not all-time history. Ordered by games
+    descending -- the dashboard's own bar chart and table both read off
+    this directly, no separate sort."""
+    season = current_season(club)
+    queryset = EventReferee.objects.filter(event__club=club, member__isnull=False)
+    if season is not None:
+        # By date range, not event__season=season -- most events are created
+        # with that field left blank (help_text: "derived from the start
+        # date when left blank"), so matching the FK directly would silently
+        # exclude almost everything.
+        queryset = queryset.filter(event__start__date__gte=season.start_date, event__start__date__lte=season.end_date)
+    return list(
+        queryset.values("member__id", "member__first_name", "member__last_name")
+        .annotate(games=Count("id"), total_fees=Sum("fee"))
+        .order_by("-games", "member__last_name")
+    )
+
+
 def games_missing_referees_count(club, limit=10):
     """How many of the next `limit` upcoming club-managed home games have nobody
     assigned yet -- the same games RefereeManagementDashboardView's own
@@ -2765,6 +2787,19 @@ class RefereeManagementDashboardView(MemberAdminRequiredMixin, TemplateView):
                     candidate.conflict_titles = ", ".join(conflict.title for conflict in conflicts)
                     game.referee_candidates.append(candidate)
 
+        stats = referee_workload_stats(club)
+        kpi_active_referees = len(stats)
+        kpi_total_assignments = sum(row["games"] for row in stats)
+        kpi_avg_games_per_referee = round(kpi_total_assignments / kpi_active_referees, 1) if kpi_active_referees else 0
+        # Top 15 for the chart's own readability -- the table below it lists
+        # every referee, so nothing is actually hidden, just not plotted.
+        charts = {
+            "referee_games": {
+                "labels": [f"{row['member__first_name']} {row['member__last_name']}" for row in stats[:15]],
+                "games": [row["games"] for row in stats[:15]],
+            }
+        }
+
         return super().get_context_data(
             games=games,
             range_choice=range_choice,
@@ -2773,6 +2808,11 @@ class RefereeManagementDashboardView(MemberAdminRequiredMixin, TemplateView):
             kpi_understaffed=kpi_understaffed,
             kpi_fully_staffed=kpi_fully_staffed,
             kpi_fees_pending=kpi_fees_pending,
+            referee_stats=stats,
+            kpi_active_referees=kpi_active_referees,
+            kpi_total_assignments=kpi_total_assignments,
+            kpi_avg_games_per_referee=kpi_avg_games_per_referee,
+            charts=charts,
             **kwargs,
         )
 
