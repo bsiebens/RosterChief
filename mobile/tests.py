@@ -1044,7 +1044,8 @@ class CalendarRefereeSignupTests(TestCase):
         response = self._get()
 
         self.assertContains(response, "Referee")
-        self.assertContains(response, "I'll ref")
+        self.assertContains(response, "Reply needed")
+        self.assertContains(response, f'href="{reverse("mobile:event_detail", kwargs={"pk": self.game.pk})}"')
 
     def test_declined_signup_is_not_shown(self):
         signup = RefereeSignup.objects.get(event=self.game, member=self.member)
@@ -1054,9 +1055,9 @@ class CalendarRefereeSignupTests(TestCase):
 
         response = self._get()
 
-        self.assertNotContains(response, "I'll ref")
+        self.assertNotContains(response, "Reply needed")
 
-    def test_accepted_signup_shows_a_confirmed_pill_with_no_actions(self):
+    def test_accepted_signup_shows_a_confirmed_pill(self):
         signup = RefereeSignup.objects.get(event=self.game, member=self.member)
         signup.status = RefereeSignup.Status.ACCEPTED
         signup.save()
@@ -1065,14 +1066,14 @@ class CalendarRefereeSignupTests(TestCase):
         response = self._get()
 
         self.assertContains(response, "Confirmed")
-        self.assertNotContains(response, "I'll ref")
+        self.assertNotContains(response, "Reply needed")
 
     def test_training_filter_excludes_referee_rows(self):
         self.client.force_login(self.user)
 
         response = self._get(kind="training")
 
-        self.assertNotContains(response, "I'll ref")
+        self.assertNotContains(response, "Reply needed")
 
     def test_a_managed_childs_invite_shows_up_and_names_them(self):
         family = Family.objects.create(name="Eree")

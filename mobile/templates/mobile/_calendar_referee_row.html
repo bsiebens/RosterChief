@@ -12,13 +12,12 @@
     Expects ``row`` ({event, referee_signup, referee_member}) in scope --
     referee_member is only set once there's more than one managed person to
     tell apart, same rule mobile/_calendar_row.html's own ``member`` uses.
-    Accept/Decline are two small forms, not a single multi-button one --
-    and, unlike this app's RSVP forms, boosted (no hx-boost="false"):
-    nothing here is Alpine-owned/toggled, so there's no htmx/Alpine conflict
-    to dodge, and a boosted POST avoids the jarring full-page reload a plain
-    form submit would cause on a page the user is mid-scroll on.
+    Just a link to the event, same as every other calendar row -- no
+    Accept/Decline here; event_detail.html's own "Refereeing" card (same
+    signup) is where that action lives, so this row and every other one
+    share one interaction model (tap through, act on the event page).
 {% endcomment %}
-<div class="flex items-center gap-3 bg-white px-4 py-3">
+<a class="flex items-center gap-3 bg-white px-4 py-3" href="{% url "mobile:event_detail" row.event.pk %}">
     <div class="w-9.5 shrink-0 text-center">
         <div class="font-mono text-[10px] tracking-wide text-muted uppercase">{{ row.event.start|date:"D" }}</div>
         <div class="font-display text-2xl leading-none font-extrabold text-ink">{{ row.event.start|date:"d" }}</div>
@@ -36,20 +35,7 @@
             {% if row.event.location %}&middot; {{ row.event.location.name }}{% endif %}
         </div>
     </div>
-    {% if row.referee_signup.status == "accepted" %}
-        <span class="pill pill-referee shrink-0">{% trans "Confirmed" %}</span>
-    {% else %}
-        <div class="flex shrink-0 gap-1.5">
-            <form method="post" action="{% url "mobile:referee_signup_respond" row.referee_signup.pk %}">
-                {% csrf_token %}
-                <input type="hidden" name="response" value="accept">
-                <button type="submit" class="pill pill-referee">{% trans "I'll ref" %}</button>
-            </form>
-            <form method="post" action="{% url "mobile:referee_signup_respond" row.referee_signup.pk %}">
-                {% csrf_token %}
-                <input type="hidden" name="response" value="decline">
-                <button type="submit" class="pill pill-neutral">{% trans "Can't" %}</button>
-            </form>
-        </div>
-    {% endif %}
-</div>
+    <span class="pill {% if row.referee_signup.status == "accepted" %}pill-referee{% else %}pill-neutral{% endif %} shrink-0">
+        {% if row.referee_signup.status == "accepted" %}{% trans "Confirmed" %}{% else %}{% trans "Reply needed" %}{% endif %}
+    </span>
+</a>
