@@ -10,6 +10,12 @@ Registered from ``EventsConfig.ready``. Triggers:
   events;
 * a club membership going active/inactive re-syncs every future club_wide
   event for that club.
+
+Joining a team/group specifically (not a plain field edit, not a removal)
+also sends one summary notification (events.services.attendance.
+notify_newly_invited) for however many upcoming events that just put on the
+member's calendar -- one notification, not one per event, even if a whole
+recurring series is already scheduled.
 """
 
 from django.core.exceptions import ValidationError
@@ -19,8 +25,8 @@ from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 from club.models import ClubMembership
-from events.models import Event, EventSeries
-from events.services import sync_event_attendances
+from events.models import Attendance, Event, EventSeries
+from events.services import notify_newly_invited, sync_event_attendances
 from events.services.referees import sync_referee_invites
 from members.models import Group, GroupMembership
 from teams.models import Team, TeamMembership
@@ -86,16 +92,40 @@ def sync_referee_invites_on_teams_change(sender, instance, action, reverse, **kw
 @receiver(post_delete, sender=TeamMembership)
 def sync_on_roster_change(sender, instance, **kwargs):
     now = timezone.now()
-    for event in Event.objects.filter(teams=instance.team_id, start__gte=now).distinct():
+    events = list(Event.objects.filter(teams=instance.team_id, start__gte=now).distinct())
+
+    # Only a fresh addition to the roster has anything new to tell the member
+    # about -- a plain field edit (jersey number, position) re-saves the same
+    # row (kwargs["created"] is False), and a removal has nothing new to add.
+    # post_delete carries no "created" key at all, hence the default.
+    newly_invited = []
+    if kwargs.get("created", False):
+        already_invited_ids = set(Attendance.objects.filter(member=instance.member, event__in=events).values_list("event_id", flat=True))
+        newly_invited = [event for event in events if event.pk not in already_invited_ids]
+
+    for event in events:
         sync_event_attendances(event)
+
+    if newly_invited:
+        notify_newly_invited(instance.member, club=instance.team.club, events=newly_invited)
 
 
 @receiver(post_save, sender=GroupMembership)
 @receiver(post_delete, sender=GroupMembership)
 def sync_on_group_membership_change(sender, instance, **kwargs):
     now = timezone.now()
-    for event in Event.objects.filter(groups=instance.group_id, start__gte=now).distinct():
+    events = list(Event.objects.filter(groups=instance.group_id, start__gte=now).distinct())
+
+    newly_invited = []
+    if kwargs.get("created", False):
+        already_invited_ids = set(Attendance.objects.filter(member=instance.member, event__in=events).values_list("event_id", flat=True))
+        newly_invited = [event for event in events if event.pk not in already_invited_ids]
+
+    for event in events:
         sync_event_attendances(event)
+
+    if newly_invited:
+        notify_newly_invited(instance.member, club=instance.group.club, events=newly_invited)
 
 
 @receiver(post_save, sender=ClubMembership)

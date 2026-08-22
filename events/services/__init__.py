@@ -1,5 +1,6 @@
 from .attendance import (
     effective_members,
+    notify_newly_invited,
     player_attendance_rankings,
     players_who_missed_recent_practices,
     record_check_in,
@@ -24,6 +25,7 @@ __all__ = [
     "effective_members",
     "generate_occurrences",
     "horizon",
+    "notify_newly_invited",
     "occurrence_datetimes",
     "player_attendance_rankings",
     "players_who_missed_recent_practices",

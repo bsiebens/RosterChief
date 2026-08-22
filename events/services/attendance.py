@@ -18,11 +18,14 @@ deliberate staff decision that should win regardless.
 
 from django.db.models import Count, Q
 from django.utils import timezone
+from django.utils.translation import gettext_lazy as _
+from django.utils.translation import ngettext
 
 from club.models import ClubMembership, Season
 from club.services.onboarding import blocked_member_ids_for_event
 from events.models import Attendance, Event
 from members.models import Member
+from notifications.services import notify_members
 from teams.models import TeamMembership
 
 
@@ -83,6 +86,22 @@ def sync_event_attendances(event):
     to_remove = existing_ids - desired_ids
     if to_remove:
         event.attendances.filter(member_id__in=to_remove).delete()
+
+
+def notify_newly_invited(member, *, club, events):
+    """One notification (push+email), not one per event -- used when a
+    roster/group change (events/signals.py's sync_on_roster_change/
+    sync_on_group_membership_change) adds ``member`` to a team/group that
+    already has upcoming events on the calendar. A flood of one-per-event
+    pushes for, say, joining a team mid-season with a whole recurring
+    practice series already scheduled would be worse than useless -- same
+    reasoning as news.tasks._dedupe_by_recipients's single-summary
+    preference over a flood, just per-recipient instead of cross-family."""
+    if not events:
+        return
+    title = _("New events on your calendar")
+    body = ngettext("%(count)d new event has been added to your calendar.", "%(count)d new events have been added to your calendar.", len(events)) % {"count": len(events)}
+    notify_members([member], club=club, title=title, body=body)
 
 
 def record_check_in(attendance, *, showed_up):

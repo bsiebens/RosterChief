@@ -567,6 +567,66 @@ class RosterChangeSyncTests(EventsTestBase):
 
         self.assertTrue(past.attendances.filter(member=self.alice).exists())
 
+    def test_joining_a_team_notifies_the_member_of_new_events(self):
+        event = self.make_event()
+        event.teams.set([self.team])
+        dave = Member.objects.create(first_name="Dave", last_name="Dogwood")
+
+        TeamMembership.objects.create(team=self.team, member=dave, season=self.season, position=self.position)
+
+        notification = Notification.objects.get(member=dave)
+        self.assertEqual(notification.title, "New events on your calendar")
+        self.assertIn("1 new event", notification.body)
+
+    def test_joining_a_team_with_several_upcoming_events_sends_one_summary_notification(self):
+        first = self.make_event(title="First")
+        first.teams.set([self.team])
+        second = self.make_event(title="Second", start=self.future + timedelta(days=1))
+        second.teams.set([self.team])
+        dave = Member.objects.create(first_name="Dave", last_name="Dogwood")
+
+        TeamMembership.objects.create(team=self.team, member=dave, season=self.season, position=self.position)
+
+        self.assertEqual(Notification.objects.filter(member=dave).count(), 1)
+        notification = Notification.objects.get(member=dave)
+        self.assertIn("2 new events", notification.body)
+
+    def test_joining_a_team_with_no_upcoming_events_does_not_notify(self):
+        dave = Member.objects.create(first_name="Dave", last_name="Dogwood")
+
+        TeamMembership.objects.create(team=self.team, member=dave, season=self.season, position=self.position)
+
+        self.assertFalse(Notification.objects.filter(member=dave).exists())
+
+    def test_leaving_a_team_does_not_notify(self):
+        event = self.make_event()
+        event.teams.set([self.team])
+
+        TeamMembership.objects.get(team=self.team, member=self.alice).delete()
+
+        self.assertFalse(Notification.objects.filter(member=self.alice).exists())
+
+    def test_editing_a_membership_field_does_not_notify(self):
+        event = self.make_event()
+        event.teams.set([self.team])
+        membership = TeamMembership.objects.get(team=self.team, member=self.alice)
+
+        membership.jersey_number = 42
+        membership.save()
+
+        self.assertFalse(Notification.objects.filter(member=self.alice).exists())
+
+    def test_joining_a_group_notifies_the_member_of_new_events(self):
+        group = Group.objects.create(club=self.club, name="Committee")
+        event = self.make_event()
+        event.groups.set([group])
+        carol = Member.objects.create(first_name="Carol", last_name="Cedar")
+
+        GroupMembership.objects.create(group=group, member=carol)
+
+        notification = Notification.objects.get(member=carol)
+        self.assertIn("1 new event", notification.body)
+
 
 class RecurrenceTestBase(EventsTestBase):
     @classmethod
