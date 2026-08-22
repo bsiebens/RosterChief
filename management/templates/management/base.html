@@ -9,6 +9,13 @@
     assets/management.css's --color-club/--color-club-dark tokens, set per request
     from Club.secondary_color. Desktop only, matching the design's own scope for this
     surface -- no mobile nav here, unlike the club-facing chrome this replaces.
+
+    The page itself scrolls (body/document), not a boxed-in <main> under a fixed-
+    height shell -- the sidebar and topbar are sticky (top-0) instead, same reasoning
+    (and same fix) as mobile/templates/mobile/base.html's own shell: a fixed shell
+    with an inner overflow-y-auto <main> reads as two separate scrollable areas
+    nested inside each other, most noticeable on a tall page like the week calendar
+    (event_list.html's own .cal-week-body, sized well past a screenful of hours).
 {% endcomment %}
 <!DOCTYPE html>
 <html lang="en">
@@ -47,9 +54,9 @@
         {% block extra_head %}{% endblock extra_head %}
     </head>
 
-    <body class="flex h-screen flex-col overflow-hidden bg-paper font-sans text-slate">
-        <div class="flex flex-1 overflow-hidden">
-            <aside class="flex w-[236px] shrink-0 flex-col bg-sidebar-bg py-5">
+    <body class="flex min-h-screen flex-col bg-paper font-sans text-slate">
+        <div class="flex flex-1">
+            <aside class="sticky top-0 flex h-screen w-[236px] shrink-0 flex-col overflow-y-auto bg-sidebar-bg py-5">
                 <a class="flex items-center gap-2.5 px-[18px] pb-[22px]" href="{% url 'management:home' %}">
                     {% if club.logo %}
                         <img class="crest h-[30px] w-7 shrink-0 object-cover" src="{{ club.logo.url }}" alt="">
@@ -99,7 +106,7 @@
             </aside>
 
             <div class="flex min-w-0 flex-1 flex-col">
-                <header class="flex h-16 shrink-0 items-center gap-4 border-b border-line bg-white px-7">
+                <header class="sticky top-0 z-10 flex h-16 shrink-0 items-center gap-4 border-b border-line bg-white px-7">
                     <span class="font-display text-2xl font-extrabold text-ink uppercase">{% block heading %}{% block topbar_title %}Management{% endblock topbar_title %}{% endblock heading %}</span>
                     {% block topbar_context %}{% endblock topbar_context %}
                     <div class="flex-1"></div>
@@ -144,7 +151,7 @@
 
                 {% block filter_strip %}{% endblock filter_strip %}
 
-                <main class="flex-1 overflow-y-auto">
+                <main class="flex-1">
                     <div class="flex flex-col gap-4 px-7 py-6">
                         {% if billing_notice.is_urgent and nav != "home" %}
                             {% include "management/_billing_notice.html" %}
