@@ -26,6 +26,12 @@ The `isort` `known-first-party` roadmap lists nine apps. The build split the ori
 two apps (`formbuilder`, `shop`) are added **beyond the original roadmap** — add all new
 labels to `known-first-party` in `pyproject.toml` when they land. The target decomposition:
 
+> Several rows below (`teams`, `events`, `members`, `club`'s `Season`/`ClubRole`) are marked
+> "planned" but have since been built out considerably further than this table reflects —
+> it hasn't been kept in lockstep with every session's work. Only `formbuilder` and the new
+> `evaluations` row have been corrected here; treat the rest as directional, not current,
+> and verify against the actual tree (per `CLAUDE.md`) before relying on a "planned" marker.
+
 | App              | Status       | Responsibility                                            | Models |
 |------------------|--------------|-----------------------------------------------------------|--------|
 | `authentication` | **built**    | Login identity + tenancy/role services (global, cross-club) | `User` |
@@ -36,9 +42,10 @@ labels to `known-first-party` in `pyproject.toml` when they land. The target dec
 | `news`           | **built**    | Club news: coach_manager-authored, editor-released         | `News`, `NewsPhoto` |
 | `pages`          | planned      | Flat CMS pages for the public site                        | `Page` |
 | `home`           | planned      | Homepage composition / featured content                   | `HomeConfig` (per-club) or config-only |
-| `formbuilder`    | planned      | Admin-defined dynamic forms + submissions + reporting     | `Form`, `Field`, `Submission`, `Answer` |
+| `formbuilder`    | **partial**  | Admin-defined dynamic forms + submissions + reporting — models, dynamic-form-class builder, and the submit service are built (§5.6); no view/template renders a form for someone to fill in yet | `Form`, `Field`, `Submission`, `Answer` |
 | `shop`           | planned      | Cart-like shop, orders, payments, PDF invoices            | `Product`, `Cart`, `CartItem`, `Order`, `OrderLine`, `Payment`, `Invoice` |
 | `search`         | planned      | Site search (likely no models; index/config only)         | — |
+| `evaluations`    | **design only** | Player evaluations: customizable rubric (reuses `formbuilder`), restricted to a new `EVALUATOR` role/ADMIN, player profile (skills + attendance + notes) (§5.8) | `EvaluationSettings`, `PlayerEvaluation` |
 
 **`User` stays global** (one login identity across the whole platform); everything else
 that belongs to a club is tenant-scoped (§2.4). This is why `Member` — a *person within a
@@ -217,17 +224,26 @@ platform-operator layer (`is_staff` / `is_superuser` in Django admin).
 ```
 ClubRole(ClubScopedModel)              # ClubScopedModel -> carries `club` (§2.4)
   member  FK Member (CASCADE, related_name="roles")
-  role    CharField (TextChoices: MEMBER | EDITOR | TREASURER | BOARD)
+  role    CharField (TextChoices: MEMBER | EDITOR | TREASURER | BOARD | EVALUATOR)
   Meta: unique_together (club, member, role)
 ```
 
-| Role        | Grants (representative)                                                       |
-|-------------|------------------------------------------------------------------------------|
-| *Public*    | Anonymous — no row; read-only public site of that club.                      |
-| `MEMBER`    | View own + family data, own rosters/attendance, own orders/invoices, submit member-only forms. |
-| `EDITOR`    | Manage that club's `news`, `pages`, `formbuilder` content.                    |
-| `TREASURER` | Manage that club's `shop`: products, orders, payments, issue/void invoices.   |
-| `BOARD`     | Full management of that club: members, roles, all of the above.              |
+> ⚠️ **This table is aspirational, not current.** The actually-implemented
+> `ClubRole.Roles` (`club/models.py`) is `ADMIN | MEMBER | EDITOR | MEMBER_ADMIN` — no
+> `TREASURER`/`BOARD` yet, and `MEMBER_ADMIN` (full read/write on people, short of
+> Finance/Club identity/role-granting — see `club.services.access.can_manage_members`)
+> isn't reflected below either. Treat this table as the target shape; verify the real
+> enum before writing code against it. `EVALUATOR` (§5.8) is **new, not yet added** to
+> either the aspirational list here or the real code enum.
+
+| Role         | Grants (representative)                                                       |
+|--------------|--------------------------------------------------------------------------------|
+| *Public*     | Anonymous — no row; read-only public site of that club.                       |
+| `MEMBER`     | View own + family data, own rosters/attendance, own orders/invoices, submit member-only forms. |
+| `EDITOR`     | Manage that club's `news`, `pages`, `formbuilder` content.                     |
+| `TREASURER`  | Manage that club's `shop`: products, orders, payments, issue/void invoices.    |
+| `BOARD`      | Full management of that club: members, roles, all of the above.                |
+| `EVALUATOR`  | Write + view **every** player evaluation club-wide (§5.8) — independent of `MEMBER_ADMIN`/coach `StaffAssignment`, since evaluating isn't the same trust boundary as either (a technical director might get this without full people-management access; a team's own coach doesn't get it just for coaching that team — see §5.8's own access note). Never granted to the evaluated player or their guardians. |
 
 `news` is the one place a `ClubRole` and a derived role (`COACH_MANAGER`, see below)
 share a single workflow rather than each owning a separate permission: drafting is
@@ -1111,6 +1127,67 @@ per-member entitlements would extend this — add an eligibility rule / code fie
 auto-apply service on top of the same model when that need is real, rather than a parallel
 mechanism.
 
+### 5.8 `evaluations` — player evaluations  *(new app, design only)*
+
+Coaching-staff-only assessment of a player: a customizable rubric (skills, ratings, notes),
+recorded per team/season, feeding a player profile alongside their attendance history —
+**never visible to the evaluated player or their guardians**, regardless of how they're
+otherwise permitted (a parent with `EVALUATOR` sees every *other* child's evaluations but
+not their own kid's — see the access note below).
+
+**Built on `formbuilder` (§5.6), not a parallel form engine.** `formbuilder`'s `Form`/
+`Field`/`Submission`/`Answer` already do everything a rubric needs (admin-defined fields,
+normalized answers, a submit service) — reuse them literally. The one thing `formbuilder`
+can't express is *who the submission is about*: `Submission.member` is the **submitter**
+(here, the evaluator), and a generic form has no notion of a separate subject. Rather than
+growing `formbuilder.Submission` an evaluation-specific field, `evaluations` owns a thin
+envelope that pairs a `Submission` with the player it was about:
+
+```
+EvaluationSettings(club OneToOne)      # which Form is *the* current rubric
+  form   FK formbuilder.Form (PROTECT)
+
+PlayerEvaluation(UUIDModel)            # the "this was about whom, on which roster" envelope
+  player      FK members.Member (CASCADE, related_name="evaluations_received")
+  team        FK teams.Team (CASCADE)
+  season      FK club.Season (PROTECT)
+  submission  OneToOne FK formbuilder.Submission (CASCADE)  # evaluator + Answers live here
+  Meta: ordering = ["-created"]
+```
+
+- **Rubric changes don't corrupt history.** Swapping the active rubric re-points
+  `EvaluationSettings.form` at a new `Form`; existing `PlayerEvaluation`s keep referencing
+  their original `Form`/`Field`s (already immutable/`PROTECT`-ed once submissions exist —
+  §5.6's own design notes), so an old evaluation still renders with the questions it was
+  actually scored against.
+- **One rubric, club-wide** (not per team/age-group) — simplest, and keeps every age group
+  on a comparable scale. Revisit only if a club actually needs per-team rubrics.
+- **Entry point**: an "Evaluate" action from the team roster (same "act from the page the
+  data lives on" pattern as the referee-assignment panel, §5.3) renders the active rubric's
+  `Form` for one player (`formbuilder.services.form_factory.build_form`) and, on submit,
+  calls `formbuilder.services.submission.submit_form` then wraps the resulting `Submission`
+  in a `PlayerEvaluation` — one transaction.
+- **Player profile** (a tab on the member detail page, gated the same as everything else
+  here): evaluation history (each `PlayerEvaluation`'s answers + evaluator + date), games
+  played **per team** ("U12: 14 games · U14: 6 games" — `Attendance` grouped by
+  `event__teams`, no new tracking), and attendance rate (already-existing `Attendance`
+  data, same definition `team_attendance_rate` uses, §5.2). No trend chart in v1.
+
+**Access.** A new `ClubRole.EVALUATOR` (§3.2), club-wide and independent of `MEMBER_ADMIN`
+and coach `StaffAssignment` — evaluating is its own trust boundary, not "manages people" or
+"coaches this team." `club/services/access.py` gets `can_evaluate_players(user, club) =
+is_club_admin(user, club) or has_club_role(user, club, ClubRole.Roles.EVALUATOR)`. Gated at
+the view/mixin level (a `EvaluatorRequiredMixin`, mirroring `MemberAdminRequiredMixin`) —
+nothing evaluation-related is ever built into a mobile/member-facing context, not hidden
+behind a flag: the member app's views simply never query it.
+
+**Build order**: (1) the `EVALUATOR` role + `can_evaluate_players`; (2) `EvaluationSettings`
++ `PlayerEvaluation` models + migration; (3) the "Evaluate" entry point + submit flow; (4)
+the player-profile tab. `formbuilder`'s own model/service layer (§5.6) is **already built**
+— no prerequisite work needed there beyond, eventually, its own missing render/submit *view*
+if a public-facing form ever needs one (evaluations builds its own player-scoped one instead
+of waiting on that).
+
 ---
 
 ## 6. Entity-relationship overview
@@ -1183,6 +1260,17 @@ Legend: `───<` one-to-many, `>───<` many-to-many via a through model
    presets on a `pending` order (each = a snapshotting `AppliedDiscount` row) before
    `finalize()`, rather than typing values. Presets stack against the same subtotal base;
    optional per-row value override for one-offs. Adds an `Order.pending → finalized` step.
+10. ✅ **Referee self-service sign-up** — **built**, superseding the "still open" note this
+    replaces. A `RefereeSignup(event, member, status: invited|accepted|declined)` model
+    tracks the invite/response; `sync_referee_invites` (wired from the same signal points
+    as attendance sync, §5.3) auto-invites every eligible referee the moment a home game
+    needs one. Accepting calls the existing `assign_referee(event, member, assigned_by=
+    None)` — capacity-checked in the one place admin assignment already enforces it, so it
+    lands as a real `EventReferee` row with no separate sync step (`assigned_by=None`
+    marks it self-service, exactly the extension point this doc's earlier note predicted).
+    Surfaced on the mobile Calendar and event detail page, scoped to every managed person
+    (not just the account's own `self.me`) — a referee-eligible child is exactly as real
+    as a referee-eligible parent.
 
 Infrastructure/config for the above (media storage, dependencies + exact setup) is
 specified in **§8**.
@@ -1205,12 +1293,13 @@ specified in **§8**.
   (checkout-date anchor, recommended, frozen total) or by *paying* before it (payment-date
   anchor, mutable total)? Doc implements checkout-date; confirm no club needs the literal
   "paid before date" semantics (§5.7.1).
-- **Referee self-service sign-up** — `EventReferee` (§5.3) is admin-assigned only for now
-  (a team manager/coach can see the panel but not use it); a referee cannot yet subscribe
-  themself to a game. Adding it later means making `assigned_by` nullable (null =
-  self-subscribed) and a permission mixin scoping a referee to their own eligible games — no
-  new model needed. Not built because this app has no self-service (member-facing) surface
-  of any kind yet; the first one deserves its own pass rather than riding along here.
+- **Player evaluations** (§5.8) — designed, not built. Open question worth confirming
+  before implementation: should `PlayerEvaluation` be strictly one-per-(player, team,
+  season, evaluator) or allow several evaluators to each leave their own entry for the same
+  player/season (the design as written allows the latter — no uniqueness constraint — since
+  a rubric answered once per submission is `formbuilder`'s own natural shape, and multiple
+  coaches' perspectives on the same player seems like a feature, not a bug, but it hasn't
+  been explicitly confirmed).
 
 ---
 
