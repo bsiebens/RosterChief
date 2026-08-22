@@ -1,0 +1,48 @@
+{% load i18n %}
+{% comment %}
+    Quick 2-way RSVP (In/Out) for a hero card -- Home's own (M1) and Coach
+    Today's "Also yours" card share this exact markup. Picking "Out" first
+    asks for an optional reason (Attendance.note) before submitting -- private
+    by construction, not by a visibility flag: nothing anywhere renders
+    another member's own note, so writing it here and reading it back in
+    event_detail's "Your answers" (this same member/family) and Coach mode's
+    bench attendance (mobile/templates/mobile/coach/attendance.html) is the
+    entire access story, no extra permission check needed.
+
+    Expects ``hero_attendance`` in scope. ``cross_shell`` (optional, truthy)
+    adds hx-boost="false" to both forms -- pass this when included from Coach
+    mode, since mobile:event_detail is a Member-shell view (see coach/
+    today.html's own comment on why that matters).
+
+    Neither button is colour-coded (no green "In") -- nobody has answered yet
+    at this point (that's the whole reason for the "are you in?" prompt), so
+    a green default would misleadingly read as an already-recorded answer.
+    Both are the same neutral steel tone and, via min-w-0, exactly the same
+    width -- flex-1 alone doesn't guarantee that once one button's label is
+    longer ("Out" vs "In"): flex items default to min-width:auto, so the
+    longer label's own intrinsic width can win a bigger share of the row
+    unless min-width is forced to 0 on both.
+{% endcomment %}
+<div class="mt-3" x-data="{ asking: false, reason: '{{ hero_attendance.note|default:""|escapejs }}' }">
+    <div class="flex gap-2" x-show="!asking">
+        <form class="min-w-0 flex-1" method="post" action="{% url "mobile:event_detail" hero_attendance.event.pk %}" {% if cross_shell %}hx-boost="false"{% endif %}>
+            {% csrf_token %}
+            <input type="hidden" name="member_id" value="{{ hero_attendance.member.pk }}">
+            <input type="hidden" name="status" value="present">
+            <button class="btn w-full bg-steel text-on-dark" type="submit">{% trans "In" %}</button>
+        </form>
+        <button class="btn w-full min-w-0 flex-1 bg-steel text-on-dark" type="button" @click="asking = true">{% trans "Out" %}</button>
+    </div>
+
+    <form x-show="asking" x-cloak method="post" action="{% url "mobile:event_detail" hero_attendance.event.pk %}" {% if cross_shell %}hx-boost="false"{% endif %}>
+        {% csrf_token %}
+        <input type="hidden" name="member_id" value="{{ hero_attendance.member.pk }}">
+        <input type="hidden" name="status" value="absent">
+        <label class="mb-1 block text-xs font-semibold text-on-dark-dim">{% trans "Reason (optional -- only you and the coach can see this)" %}</label>
+        <textarea class="h-16 w-full rounded-lg border border-steel bg-steel p-2 text-sm text-white placeholder:text-on-dark-dim" name="note" x-model="reason" placeholder="{% trans "e.g. sick, family event..." %}"></textarea>
+        <div class="mt-2 flex gap-2">
+            <button class="btn flex-1 bg-steel text-on-dark" type="button" @click="asking = false">{% trans "Cancel" %}</button>
+            <button class="btn btn-dark flex-1" type="submit">{% trans "Confirm" %}</button>
+        </div>
+    </form>
+</div>

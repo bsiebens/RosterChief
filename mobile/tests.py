@@ -565,6 +565,43 @@ class EventDetailRsvpTests(TestCase):
         self.attendance.refresh_from_db()
         self.assertEqual(self.attendance.status, Attendance.AttendanceStatus.MAYBE)
 
+    def test_posting_absent_with_a_reason_stores_the_note(self):
+        self.client.force_login(self.user)
+
+        self._post(self.event, {"status": "absent", "note": "Sick this week"})
+
+        self.attendance.refresh_from_db()
+        self.assertEqual(self.attendance.status, Attendance.AttendanceStatus.ABSENT)
+        self.assertEqual(self.attendance.note, "Sick this week")
+
+    def test_note_is_stripped_of_surrounding_whitespace(self):
+        self.client.force_login(self.user)
+
+        self._post(self.event, {"status": "absent", "note": "  Sick this week  \n"})
+
+        self.attendance.refresh_from_db()
+        self.assertEqual(self.attendance.note, "Sick this week")
+
+    def test_posting_present_clears_a_previous_absent_reason(self):
+        self.attendance.status = Attendance.AttendanceStatus.ABSENT
+        self.attendance.note = "Sick this week"
+        self.attendance.save()
+        self.client.force_login(self.user)
+
+        self._post(self.event, {"status": "present"})
+
+        self.attendance.refresh_from_db()
+        self.assertEqual(self.attendance.status, Attendance.AttendanceStatus.PRESENT)
+        self.assertEqual(self.attendance.note, "")
+
+    def test_a_note_submitted_alongside_a_non_absent_status_is_ignored(self):
+        self.client.force_login(self.user)
+
+        self._post(self.event, {"status": "present", "note": "This shouldn't be saved"})
+
+        self.attendance.refresh_from_db()
+        self.assertEqual(self.attendance.note, "")
+
     def test_rejects_an_unknown_status_value(self):
         self.client.force_login(self.user)
 
@@ -880,6 +917,14 @@ class EventDetailScreenTests(TestCase):
         self.assertContains(response, "#17")
         self.assertContains(response, "No reply")
 
+    def test_your_answers_shows_your_own_absence_reason(self):
+        Attendance.objects.create(event=self.event, member=self.member, status=Attendance.AttendanceStatus.ABSENT, note="Sick this week")
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, "Sick this week")
+
     def test_your_answers_is_empty_when_nobody_managed_is_invited(self):
         self.client.force_login(self.user)
 
@@ -904,6 +949,18 @@ class EventDetailScreenTests(TestCase):
         self.assertEqual(summary["out_count"], 1)
         self.assertEqual(summary["no_reply_count"], 1)
         self.assertEqual(summary["total"], 3)
+
+    def test_squad_response_never_leaks_another_members_absence_reason(self):
+        # Squad response is counts-only by design -- a reason belongs to the
+        # member/family who wrote it and to Coach mode, never to the rest of
+        # the squad's own event page.
+        out_member = Member.objects.create(first_name="B", last_name="Out")
+        Attendance.objects.create(event=self.event, member=out_member, status=Attendance.AttendanceStatus.ABSENT, note="Family holiday")
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertNotContains(response, "Family holiday")
 
     def test_squad_response_is_absent_for_an_event_with_no_teams(self):
         club_wide_event = Event.objects.create(club=self.club, title="Club BBQ", start=timezone.now() + datetime.timedelta(days=3), club_wide=True)

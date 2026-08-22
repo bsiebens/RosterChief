@@ -45,6 +45,9 @@
                     <div class="min-w-0 flex-1">
                         <div class="text-sm font-semibold text-ink">{{ row.member.get_full_name }}</div>
                         <div class="text-xs text-muted">{{ row.membership.position|default:"—" }}</div>
+                        {% if row.status == "absent" and row.note %}
+                            <div class="mt-0.5 truncate text-xs text-club-dark italic">&ldquo;{{ row.note }}&rdquo;</div>
+                        {% endif %}
                     </div>
                     {% if can_manage_active_team %}
                         <input type="hidden" name="showed_up_{{ row.pk }}" :value="state">

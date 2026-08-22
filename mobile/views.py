@@ -444,7 +444,15 @@ class EventDetailView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         if event.deadline is not None and event.deadline < timezone.now():
             return HttpResponseBadRequest(_("Replies are closed for this event."))
 
-        Attendance.objects.update_or_create(event=event, member=member, defaults={"status": status})
+        # A reason is only ever meaningful attached to "Out" -- clearing it the
+        # moment someone flips back to In/Maybe avoids a stale "sick" note
+        # hanging around under an answer it no longer explains. Private by
+        # construction, not by a visibility flag: nothing renders another
+        # member's own note anywhere -- only this member/family's own screens
+        # (event_detail's "Your answers") and Coach mode's bench attendance
+        # (mobile/templates/mobile/coach/attendance.html) ever read it.
+        note = request.POST.get("note", "").strip() if status == Attendance.AttendanceStatus.ABSENT else ""
+        Attendance.objects.update_or_create(event=event, member=member, defaults={"status": status, "note": note})
 
         if request.POST.get("next") == "event_detail":
             return HttpResponseRedirect(reverse("mobile:event_detail", kwargs={"pk": event.pk}))

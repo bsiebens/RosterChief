@@ -81,26 +81,13 @@
                         <span class="pill pill-neutral mt-3">{{ hero_attendance.get_status_display }}</span>
                     {% else %}
                         {% comment %}
-                            hx-boost="false" -- mobile:event_detail is a Member-shell view
-                            (bg-paper, not this page's bg-ink); boosting would swap its
-                            response into this page's <body> without updating the <body>
-                            tag's own class, leaving the wrong background. See base.html's
+                            hx-boost="false" (passed as cross_shell below) -- mobile:event_detail
+                            is a Member-shell view (bg-paper, not this page's bg-ink); boosting
+                            would swap its response into this page's <body> without updating the
+                            <body> tag's own class, leaving the wrong background. See base.html's
                             own comment for the full reasoning.
                         {% endcomment %}
-                        <div class="mt-3 flex gap-2">
-                            <form class="flex-1" method="post" action="{% url "mobile:event_detail" hero_attendance.event.pk %}" hx-boost="false">
-                                {% csrf_token %}
-                                <input type="hidden" name="member_id" value="{{ hero_attendance.member.pk }}">
-                                <input type="hidden" name="status" value="present">
-                                <button class="btn btn-positive w-full" type="submit">{% trans "In" %}</button>
-                            </form>
-                            <form class="flex-1" method="post" action="{% url "mobile:event_detail" hero_attendance.event.pk %}" hx-boost="false">
-                                {% csrf_token %}
-                                <input type="hidden" name="member_id" value="{{ hero_attendance.member.pk }}">
-                                <input type="hidden" name="status" value="absent">
-                                <button class="btn w-full bg-steel text-on-dark" type="submit">{% trans "Out" %}</button>
-                            </form>
-                        </div>
+                        {% include "mobile/_hero_rsvp.html" with cross_shell=True %}
                     {% endif %}
                 </div>
             </div>
