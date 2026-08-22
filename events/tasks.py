@@ -9,8 +9,9 @@ from celery import shared_task
 from django.utils import timezone
 from django.utils.translation import gettext as _
 
-from events.models import Attendance, Event, EventSeries
+from events.models import Attendance, Event, EventSeries, Lineup
 from events.services import generate_occurrences, horizon
+from events.services.lineup import publish_lineup
 from features.models import Maintenance
 from members.models import Member
 from notifications.services import notify_members
@@ -113,3 +114,24 @@ def send_deadline_reminders():
         events_reminded += 1
 
     return f"Reminded {members_notified} member(s) across {events_reminded} event(s)."
+
+
+@shared_task(name="events.tasks.publish_scheduled_lineups")
+def publish_scheduled_lineups():
+    """The periodic sweep behind a coach's "schedule for later" option on the
+    Publish action (mobile/coach_views.py's CoachLineupPublishView, events.
+    services.lineup.schedule_lineup_publish) -- catches any line-up whose
+    scheduled_publish_at has arrived and actually publishes it. Runs
+    frequently (see CELERY_BEAT_SCHEDULE), unlike this module's other daily
+    jobs, since a schedule set for a specific time should take effect close
+    to it, not up to a day late."""
+    if Maintenance.is_on():
+        raise RuntimeError("Platform is in maintenance mode; this job stood down.")
+
+    due = Lineup.objects.filter(published_at__isnull=True, scheduled_publish_at__isnull=False, scheduled_publish_at__lte=timezone.now())
+    count = 0
+    for lineup in due:
+        publish_lineup(lineup)
+        count += 1
+
+    return f"Published {count} scheduled line-up(s)."

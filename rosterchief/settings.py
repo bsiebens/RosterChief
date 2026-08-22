@@ -310,6 +310,9 @@ CELERY_TIMEZONE = TIME_ZONE
 CELERY_BEAT_SCHEDULE = {
     "extend-event-series": {"task": "events.tasks.extend_event_series", "schedule": crontab(hour=3, minute=0)},
     "send-deadline-reminders": {"task": "events.tasks.send_deadline_reminders", "schedule": crontab(hour=7, minute=0)},
+    # Every 15 minutes, not daily like the jobs above -- a coach's scheduled
+    # publish time should take effect close to it, not up to a day late.
+    "publish-scheduled-lineups": {"task": "events.tasks.publish_scheduled_lineups", "schedule": crontab(minute="*/15")},
     "renew-subscriptions": {"task": "billing.tasks.renew_subscriptions", "schedule": crontab(hour=4, minute=0)},
     "send-billing-reminders": {"task": "billing.tasks.send_billing_reminders", "schedule": crontab(hour=5, minute=0)},
     "archive-overdue-clubs": {"task": "billing.tasks.archive_overdue_clubs", "schedule": crontab(hour=6, minute=0)},

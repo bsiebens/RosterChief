@@ -211,6 +211,12 @@ class Lineup(UUIDModel):
     event = models.OneToOneField(Event, on_delete=models.CASCADE, related_name="lineup", verbose_name=_("event"))
     team = models.ForeignKey(Team, on_delete=models.CASCADE, related_name="lineups", verbose_name=_("team"))
     published_at = models.DateTimeField(_("published at"), null=True, blank=True)
+    scheduled_publish_at = models.DateTimeField(
+        _("scheduled publish at"),
+        null=True,
+        blank=True,
+        help_text=_("If set (and not yet published), this line-up publishes itself automatically at this time -- events.tasks.publish_scheduled_lineups is the periodic sweep that catches it."),
+    )
     created_by = models.ForeignKey(Member, on_delete=models.SET_NULL, null=True, blank=True, related_name="created_lineups", verbose_name=_("created by"))
 
     class Meta:

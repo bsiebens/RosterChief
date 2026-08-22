@@ -36,9 +36,15 @@ def publish_lineup(lineup):
     previously unused anywhere. Every selected member becomes SELECTED; every
     other member with an Attendance row for this event who was actually
     available (not out/silent, see UNAVAILABLE_STATUSES) becomes
-    NOT_SELECTED. Notifies only the selected players."""
+    NOT_SELECTED. Notifies only the selected players.
+
+    Clears scheduled_publish_at regardless of whether this run came from a
+    coach tapping Publish directly or from the scheduled sweep (events.tasks.
+    publish_scheduled_lineups) catching a due one -- once published, there's
+    nothing left pending either way."""
     lineup.published_at = timezone.now()
-    lineup.save(update_fields=["published_at"])
+    lineup.scheduled_publish_at = None
+    lineup.save(update_fields=["published_at", "scheduled_publish_at"])
 
     selected_member_ids = set(LineupSelection.objects.filter(lineup=lineup).values_list("member_id", flat=True))
 
@@ -50,6 +56,24 @@ def publish_lineup(lineup):
         body = _("You're in the line-up for %(event)s.") % {"event": lineup.event.title}
         notify_members(selected_members, club=lineup.event.club, title=_("Line-up published"), body=body, source=lineup.event)
 
+    return lineup
+
+
+def schedule_lineup_publish(lineup, when):
+    """Sets ``lineup`` to publish itself automatically at ``when`` (an aware
+    datetime in the future) instead of waiting for a manual Publish tap --
+    events.tasks.publish_scheduled_lineups is the periodic sweep that
+    actually calls publish_lineup once that time arrives. Overwrites any
+    previous schedule rather than erroring -- picking a new time is the
+    whole point of letting a coach come back and adjust it."""
+    lineup.scheduled_publish_at = when
+    lineup.save(update_fields=["scheduled_publish_at"])
+    return lineup
+
+
+def cancel_scheduled_publish(lineup):
+    lineup.scheduled_publish_at = None
+    lineup.save(update_fields=["scheduled_publish_at"])
     return lineup
 
 

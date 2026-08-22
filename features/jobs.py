@@ -20,6 +20,11 @@ JOB_REGISTRY = {
         "description": _("Nudges whoever still hasn't answered an event, one week before its answer deadline (or its start, when no deadline is set)."),
         "schedule": _("Daily at 07:00"),
     },
+    "events.tasks.publish_scheduled_lineups": {
+        "label": _("Publish scheduled line-ups"),
+        "description": _("Publishes any line-up whose coach-picked publish time has arrived."),
+        "schedule": _("Every 15 minutes"),
+    },
     "billing.tasks.renew_subscriptions": {
         "label": _("Renew subscriptions"),
         "description": _("Opens the next billing period for clubs whose current one is running out."),

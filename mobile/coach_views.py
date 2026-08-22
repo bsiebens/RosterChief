@@ -11,6 +11,7 @@ from django.http import Http404, HttpResponseForbidden, HttpResponseRedirect
 from django.shortcuts import get_object_or_404
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from django.utils.translation import gettext_lazy as _
 from django.utils.translation import ngettext
 from django.views.generic import TemplateView, View
@@ -20,7 +21,7 @@ from club.services.access import can_add_news, current_season
 from controlpanel.messages import notify
 from events.models import Attendance, Event, Lineup, LineupSelection
 from events.services.attendance import record_check_in
-from events.services.lineup import UNAVAILABLE_STATUSES, publish_lineup, toggle_selection
+from events.services.lineup import UNAVAILABLE_STATUSES, cancel_scheduled_publish, publish_lineup, schedule_lineup_publish, toggle_selection
 from events.tasks import notify_new_event
 from management.forms import EventForm, NewsForm
 from news.models import News
@@ -539,8 +540,12 @@ class CoachLineupView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
 
 
 class CoachLineupPublishView(CoachScopeMixin, LoginRequiredMixin, View):
-    """Writes the line-up into the game record and notifies the selected
-    players -- events.services.lineup.publish_lineup does the actual work."""
+    """Publish now, schedule for a later time, or cancel a pending schedule --
+    events.services.lineup.publish_lineup/schedule_lineup_publish/
+    cancel_scheduled_publish do the actual work; events.tasks.
+    publish_scheduled_lineups is the periodic sweep that catches a schedule
+    once its time arrives. ``action`` picks which (default "publish_now",
+    so the plain "Publish" button posts with no extra fields)."""
 
     def post(self, request, *args, **kwargs):
         if not self.can_manage_active_team:
@@ -548,8 +553,24 @@ class CoachLineupPublishView(CoachScopeMixin, LoginRequiredMixin, View):
 
         event = get_object_or_404(Event, pk=kwargs["event_id"], club=request.club, teams=self.active_team, kind=Event.EventKind.GAME)
         lineup = get_object_or_404(Lineup, event=event)
-        publish_lineup(lineup)
-        notify(request, f"s|{_('Line-up published')}|{_('Selected players have been notified.')}")
+        action = request.POST.get("action", "publish_now")
+
+        if action == "schedule":
+            when = parse_datetime(request.POST.get("publish_at", ""))
+            if when is not None and timezone.is_naive(when):
+                when = timezone.make_aware(when)
+            if when is None or when <= timezone.now():
+                notify(request, f"e|{_('Could not schedule')}|{_('Pick a date and time in the future.')}")
+            else:
+                schedule_lineup_publish(lineup, when)
+                notify(request, f"s|{_('Publish scheduled')}|{_('The line-up will publish itself automatically at that time.')}")
+        elif action == "cancel_schedule":
+            cancel_scheduled_publish(lineup)
+            notify(request, f"s|{_('Schedule cancelled')}|{_('Publish it manually whenever you are ready.')}")
+        else:
+            publish_lineup(lineup)
+            notify(request, f"s|{_('Line-up published')}|{_('Selected players have been notified.')}")
+
         return HttpResponseRedirect(reverse("mobile:coach_lineup", kwargs={"event_id": event.pk}))
 
 

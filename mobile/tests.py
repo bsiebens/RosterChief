@@ -3202,6 +3202,50 @@ class CoachLineupViewTests(TestCase):
         lineup.refresh_from_db()
         self.assertIsNotNone(lineup.published_at)
 
+    def test_schedule_sets_scheduled_publish_at_without_publishing(self):
+        self.client.force_login(self.user)
+        lineup = Lineup.objects.create(event=self.event, team=self.team)
+        publish_at = timezone.now() + datetime.timedelta(days=1)
+
+        response = self.client.post(
+            reverse("mobile:coach_lineup_publish", kwargs={"event_id": self.event.pk}),
+            {"action": "schedule", "publish_at": publish_at.strftime("%Y-%m-%dT%H:%M")},
+            HTTP_HOST="ajax-united.rosterchief.app",
+        )
+
+        self.assertRedirects(response, reverse("mobile:coach_lineup", kwargs={"event_id": self.event.pk}), fetch_redirect_response=False)
+        lineup.refresh_from_db()
+        self.assertIsNone(lineup.published_at)
+        self.assertIsNotNone(lineup.scheduled_publish_at)
+
+    def test_schedule_rejects_a_time_in_the_past(self):
+        self.client.force_login(self.user)
+        lineup = Lineup.objects.create(event=self.event, team=self.team)
+        publish_at = timezone.now() - datetime.timedelta(days=1)
+
+        self.client.post(
+            reverse("mobile:coach_lineup_publish", kwargs={"event_id": self.event.pk}),
+            {"action": "schedule", "publish_at": publish_at.strftime("%Y-%m-%dT%H:%M")},
+            HTTP_HOST="ajax-united.rosterchief.app",
+        )
+
+        lineup.refresh_from_db()
+        self.assertIsNone(lineup.scheduled_publish_at)
+
+    def test_cancel_schedule_clears_the_scheduled_time(self):
+        self.client.force_login(self.user)
+        lineup = Lineup.objects.create(event=self.event, team=self.team, scheduled_publish_at=timezone.now() + datetime.timedelta(days=1))
+
+        response = self.client.post(
+            reverse("mobile:coach_lineup_publish", kwargs={"event_id": self.event.pk}),
+            {"action": "cancel_schedule"},
+            HTTP_HOST="ajax-united.rosterchief.app",
+        )
+
+        self.assertRedirects(response, reverse("mobile:coach_lineup", kwargs={"event_id": self.event.pk}), fetch_redirect_response=False)
+        lineup.refresh_from_db()
+        self.assertIsNone(lineup.scheduled_publish_at)
+
     def test_non_managing_staff_sees_a_read_only_view(self):
         physio_user = self.make_physio()
         self.client.force_login(physio_user)

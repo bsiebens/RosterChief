@@ -35,7 +35,7 @@ from .services import (
     team_no_shows,
 )
 from .services.calendar import add_months, month_bounds, month_grid, season_grid, week_bounds, week_grid
-from .services.lineup import notify_dropout, publish_lineup, selected_members_by_position, toggle_selection
+from .services.lineup import cancel_scheduled_publish, notify_dropout, publish_lineup, schedule_lineup_publish, selected_members_by_position, toggle_selection
 from .services.rbihf_import import RBIHFImportError, apply_plan, build_plan, extract_team_id, parse_fixtures, suggested_location, suggested_opponent
 from .services.referees import (
     RefereeAssignmentError,
@@ -50,7 +50,7 @@ from .services.referees import (
     set_referee_fee,
     sync_referee_invites,
 )
-from .tasks import send_deadline_reminders
+from .tasks import publish_scheduled_lineups, send_deadline_reminders
 
 
 class EventsTestBase(TestCase):
@@ -484,6 +484,36 @@ class LineupServiceTests(EventsTestBase):
 
         lineup.refresh_from_db()
         self.assertIsNotNone(lineup.published_at)
+
+    def test_publish_clears_a_pending_schedule(self):
+        _event, lineup = self.make_game_with_lineup()
+        lineup.scheduled_publish_at = timezone.now() + timedelta(days=1)
+        lineup.save()
+
+        publish_lineup(lineup)
+
+        lineup.refresh_from_db()
+        self.assertIsNone(lineup.scheduled_publish_at)
+
+    def test_schedule_lineup_publish_sets_the_time(self):
+        _event, lineup = self.make_game_with_lineup()
+        when = timezone.now() + timedelta(days=1)
+
+        schedule_lineup_publish(lineup, when)
+
+        lineup.refresh_from_db()
+        self.assertEqual(lineup.scheduled_publish_at, when)
+        self.assertIsNone(lineup.published_at)
+
+    def test_cancel_scheduled_publish_clears_the_time(self):
+        _event, lineup = self.make_game_with_lineup()
+        lineup.scheduled_publish_at = timezone.now() + timedelta(days=1)
+        lineup.save()
+
+        cancel_scheduled_publish(lineup)
+
+        lineup.refresh_from_db()
+        self.assertIsNone(lineup.scheduled_publish_at)
 
     def test_publish_selects_picked_members_and_not_selects_the_rest(self):
         event, lineup = self.make_game_with_lineup()
@@ -1950,3 +1980,70 @@ class SendDeadlineRemindersTests(EventsTestBase):
 
         with self.assertRaises(RuntimeError):
             send_deadline_reminders()
+
+
+class PublishScheduledLineupsTests(EventsTestBase):
+    """events.tasks.publish_scheduled_lineups -- the periodic sweep behind a
+    coach's "schedule for later" Publish option (mobile/coach_views.py's
+    CoachLineupPublishView, events.services.lineup.schedule_lineup_publish)."""
+
+    def setUp(self):
+        # Same Maintenance-cache leak concern as SendDeadlineRemindersTests above.
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def make_game_with_lineup(self, **event_kwargs):
+        event_kwargs.setdefault("kind", Event.EventKind.GAME)
+        event = self.make_event(**event_kwargs)
+        event.teams.add(self.team)
+        return event, Lineup.objects.create(event=event, team=self.team)
+
+    def test_publishes_a_lineup_whose_time_has_arrived(self):
+        _event, lineup = self.make_game_with_lineup()
+        lineup.scheduled_publish_at = timezone.now() - timedelta(minutes=1)
+        lineup.save()
+
+        result = publish_scheduled_lineups()
+
+        lineup.refresh_from_db()
+        self.assertIsNotNone(lineup.published_at)
+        self.assertIsNone(lineup.scheduled_publish_at)
+        self.assertIn("Published 1 scheduled line-up(s)", result)
+
+    def test_leaves_a_not_yet_due_schedule_alone(self):
+        _event, lineup = self.make_game_with_lineup()
+        lineup.scheduled_publish_at = timezone.now() + timedelta(days=1)
+        lineup.save()
+
+        publish_scheduled_lineups()
+
+        lineup.refresh_from_db()
+        self.assertIsNone(lineup.published_at)
+        self.assertIsNotNone(lineup.scheduled_publish_at)
+
+    def test_ignores_a_lineup_with_no_schedule_at_all(self):
+        _event, lineup = self.make_game_with_lineup()
+
+        result = publish_scheduled_lineups()
+
+        lineup.refresh_from_db()
+        self.assertIsNone(lineup.published_at)
+        self.assertIn("Published 0 scheduled line-up(s)", result)
+
+    def test_already_published_lineup_is_not_touched_again(self):
+        _event, lineup = self.make_game_with_lineup()
+        published_at = timezone.now() - timedelta(days=1)
+        lineup.published_at = published_at
+        lineup.scheduled_publish_at = timezone.now() - timedelta(minutes=1)
+        lineup.save()
+
+        publish_scheduled_lineups()
+
+        lineup.refresh_from_db()
+        self.assertEqual(lineup.published_at, published_at)
+
+    def test_raises_during_maintenance_instead_of_silently_skipping(self):
+        Maintenance.start(user=None)
+
+        with self.assertRaises(RuntimeError):
+            publish_scheduled_lineups()
