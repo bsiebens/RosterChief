@@ -2793,6 +2793,9 @@
   .right-\[3px\] {
     right: 3px;
   }
+  .bottom-0 {
+    bottom: 0;
+  }
   .bottom-full {
     bottom: 100%;
   }

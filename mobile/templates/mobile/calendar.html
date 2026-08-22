@@ -60,7 +60,7 @@
         {% else %}
             {% if this_week %}
                 <div>
-                    <div class="sticky top-0 z-10 bg-paper px-4 py-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "This week" %}</div>
+                    <div class="bg-paper px-4 py-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "This week" %}</div>
                     <div class="flex flex-col gap-px bg-line">
                         {% for row in this_week %}
                             {% if row.referee_signup %}{% include "mobile/_calendar_referee_row.html" %}{% else %}{% include "mobile/_calendar_row.html" %}{% endif %}
@@ -71,7 +71,7 @@
 
             {% if next_week %}
                 <div>
-                    <div class="sticky top-0 z-10 bg-paper px-4 py-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Next week" %}</div>
+                    <div class="bg-paper px-4 py-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Next week" %}</div>
                     <div class="flex flex-col gap-px bg-line">
                         {% for row in next_week %}
                             {% if row.referee_signup %}{% include "mobile/_calendar_referee_row.html" %}{% else %}{% include "mobile/_calendar_row.html" %}{% endif %}
@@ -82,7 +82,7 @@
 
             {% for month in later_months %}
                 <div>
-                    <div class="sticky top-0 z-10 bg-paper px-4 py-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{{ month.month_start|date:"F Y" }}</div>
+                    <div class="bg-paper px-4 py-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{{ month.month_start|date:"F Y" }}</div>
                     <div class="flex flex-col gap-px bg-line">
                         {% for row in month.rows %}
                             {% if row.referee_signup %}{% include "mobile/_calendar_referee_row.html" %}{% else %}{% include "mobile/_calendar_row.html" %}{% endif %}

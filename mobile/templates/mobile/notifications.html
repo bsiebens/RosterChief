@@ -51,7 +51,7 @@
         {% else %}
             {% if today %}
                 <div>
-                    <div class="sticky top-0 z-10 bg-paper py-1 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Today" %}</div>
+                    <div class="bg-paper py-1 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Today" %}</div>
                     <div class="flex flex-col gap-2">
                         {% for row in today %}
                             {% include "mobile/_notification_row.html" %}
@@ -62,7 +62,7 @@
 
             {% if earlier_this_week %}
                 <div>
-                    <div class="sticky top-0 z-10 bg-paper py-1 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Earlier this week" %}</div>
+                    <div class="bg-paper py-1 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Earlier this week" %}</div>
                     <div class="flex flex-col gap-2">
                         {% for row in earlier_this_week %}
                             {% include "mobile/_notification_row.html" %}
@@ -73,7 +73,7 @@
 
             {% if older %}
                 <div>
-                    <div class="sticky top-0 z-10 bg-paper py-1 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Older" %}</div>
+                    <div class="bg-paper py-1 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Older" %}</div>
                     <div class="flex flex-col gap-2">
                         {% for row in older %}
                             {% include "mobile/_notification_row.html" %}

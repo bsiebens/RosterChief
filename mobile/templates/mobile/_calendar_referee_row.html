@@ -10,9 +10,11 @@
     on their own behalf, not something a parent does for a child.
 
     Expects ``row`` ({event, referee_signup}) in scope. Accept/Decline are
-    two small forms, not a single multi-button one, so hx-boost="false" can
-    sit on each without a formaction/htmx-boost mismatch (see event_detail.
-    html's own top-of-file comment for that failure mode).
+    two small forms, not a single multi-button one -- and, unlike this
+    app's RSVP forms, boosted (no hx-boost="false"): nothing here is
+    Alpine-owned/toggled, so there's no htmx/Alpine conflict to dodge, and a
+    boosted POST avoids the jarring full-page reload a plain form submit
+    would cause on a page the user is mid-scroll on.
 {% endcomment %}
 <div class="flex items-center gap-3 bg-white px-4 py-3">
     <div class="w-9.5 shrink-0 text-center">
@@ -35,12 +37,12 @@
         <span class="pill pill-referee shrink-0">{% trans "Confirmed" %}</span>
     {% else %}
         <div class="flex shrink-0 gap-1.5">
-            <form method="post" action="{% url "mobile:referee_signup_respond" row.referee_signup.pk %}" hx-boost="false">
+            <form method="post" action="{% url "mobile:referee_signup_respond" row.referee_signup.pk %}">
                 {% csrf_token %}
                 <input type="hidden" name="response" value="accept">
                 <button type="submit" class="pill pill-referee">{% trans "I'll ref" %}</button>
             </form>
-            <form method="post" action="{% url "mobile:referee_signup_respond" row.referee_signup.pk %}" hx-boost="false">
+            <form method="post" action="{% url "mobile:referee_signup_respond" row.referee_signup.pk %}">
                 {% csrf_token %}
                 <input type="hidden" name="response" value="decline">
                 <button type="submit" class="pill pill-neutral">{% trans "Can't" %}</button>

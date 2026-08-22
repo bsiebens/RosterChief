@@ -395,12 +395,15 @@ class CalendarView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
 
 
 class RefereeSignupRespondView(PersonScopeMixin, LoginRequiredMixin, View):
-    """Accept/decline a referee invite from a Calendar row
-    (mobile/_calendar_referee_row.html) -- routes through
-    events.services.referees.accept_referee_signup/decline_referee_signup,
-    so capacity is enforced in the one place the desktop admin flow already
-    enforces it, and the referee-management screen sees the result with no
-    separate sync step."""
+    """Accept/decline a referee invite -- from a Calendar row
+    (mobile/_calendar_referee_row.html) or the same event's own detail page
+    (event_detail.html's own "Refereeing" card, for the same signup). Routes
+    through events.services.referees.accept_referee_signup/
+    decline_referee_signup, so capacity is enforced in the one place the
+    desktop admin flow already enforces it, and the referee-management
+    screen sees the result with no separate sync step. Boosted (no explicit
+    hx-boost="false") -- unlike event_detail's own RSVP forms, nothing here
+    is Alpine-owned/toggled, so there's no htmx/Alpine conflict to dodge."""
 
     def post(self, request, *args, **kwargs):
         signup = get_object_or_404(RefereeSignup, pk=kwargs["signup_id"], member=self.me, event__club=request.club)
@@ -418,6 +421,8 @@ class RefereeSignupRespondView(PersonScopeMixin, LoginRequiredMixin, View):
         else:
             return HttpResponseBadRequest(_("Unknown response."))
 
+        if request.POST.get("next") == "event_detail":
+            return HttpResponseRedirect(reverse("mobile:event_detail", kwargs={"pk": signup.event_id}))
         return HttpResponseRedirect(reverse("mobile:calendar"))
 
 
@@ -455,6 +460,14 @@ class EventDetailView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         # itself gets its own card.
         lineup = Lineup.objects.filter(event=event, published_at__isnull=False).first()
         lineup_categories = selected_members_by_position(lineup) if lineup is not None else []
+
+        # Same self.me-only scope as the Calendar row this mirrors
+        # (mobile/_calendar_referee_row.html) -- a referee is an adult
+        # acting on their own behalf, never something a parent does for a
+        # managed child. Declined signups are excluded -- nothing left to do.
+        referee_signup = None
+        if self.me is not None:
+            referee_signup = RefereeSignup.objects.filter(event=event, member=self.me, status__in=[RefereeSignup.Status.INVITED, RefereeSignup.Status.ACCEPTED]).first()
 
         your_answers = []
         if self.managed_people:
@@ -494,7 +507,17 @@ class EventDetailView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
                     "no_reply_pct": round(100 * counts["no_reply_count"] / total),
                 }
 
-        return super().get_context_data(screen_title=event.title, event=event, rsvp_closed=rsvp_closed, lineup=lineup, lineup_categories=lineup_categories, your_answers=your_answers, squad_summary=squad_summary, **kwargs)
+        return super().get_context_data(
+            screen_title=event.title,
+            event=event,
+            rsvp_closed=rsvp_closed,
+            lineup=lineup,
+            lineup_categories=lineup_categories,
+            referee_signup=referee_signup,
+            your_answers=your_answers,
+            squad_summary=squad_summary,
+            **kwargs,
+        )
 
     def post(self, request, *args, **kwargs):
         status = request.POST.get("status")

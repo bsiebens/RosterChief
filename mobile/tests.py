@@ -1097,9 +1097,9 @@ class RefereeSignupRespondViewTests(TestCase):
         cls.game = Event.objects.create(club=cls.club, title="Home game", kind=Event.EventKind.GAME, location=cls.home_ground, start=timezone.now() + datetime.timedelta(days=1))
         cls.game.teams.add(cls.team)
 
-    def _post(self, response_value):
+    def _post(self, response_value, **extra):
         signup = RefereeSignup.objects.get(event=self.game, member=self.member)
-        return self.client.post(reverse("mobile:referee_signup_respond", kwargs={"signup_id": signup.pk}), {"response": response_value}, HTTP_HOST="ajax-united.rosterchief.app")
+        return self.client.post(reverse("mobile:referee_signup_respond", kwargs={"signup_id": signup.pk}), {"response": response_value, **extra}, HTTP_HOST="ajax-united.rosterchief.app")
 
     def test_requires_login(self):
         response = self._post("accept")
@@ -1136,6 +1136,13 @@ class RefereeSignupRespondViewTests(TestCase):
         self.assertRedirects(response, reverse("mobile:calendar"), fetch_redirect_response=False)
         signup = RefereeSignup.objects.get(event=self.game, member=self.member)
         self.assertEqual(signup.status, RefereeSignup.Status.DECLINED)
+
+    def test_next_event_detail_redirects_back_to_the_event_instead_of_calendar(self):
+        self.client.force_login(self.user)
+
+        response = self._post("accept", next="event_detail")
+
+        self.assertRedirects(response, reverse("mobile:event_detail", kwargs={"pk": self.game.pk}), fetch_redirect_response=False)
 
     def test_cannot_respond_to_someone_elses_signup(self):
         stranger_user = User.objects.create_user(email="stranger@example.com", password="pw-secret-123")
@@ -1298,6 +1305,42 @@ class EventDetailScreenTests(TestCase):
         response = self._get()
 
         self.assertNotContains(response, 'name="status" value="dropout"')
+
+    def test_no_referee_card_when_not_invited(self):
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertIsNone(response.context["referee_signup"])
+        self.assertNotContains(response, "Refereeing")
+
+    def test_pending_referee_invite_shows_accept_decline(self):
+        RefereeSignup.objects.create(event=self.event, member=self.member, status=RefereeSignup.Status.INVITED)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, "Refereeing")
+        self.assertContains(response, "I'll ref")
+        self.assertNotContains(response, "Confirmed")
+
+    def test_accepted_referee_signup_shows_a_confirmed_pill_with_no_actions(self):
+        RefereeSignup.objects.create(event=self.event, member=self.member, status=RefereeSignup.Status.ACCEPTED)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, "Confirmed")
+        self.assertNotContains(response, "I'll ref")
+
+    def test_declined_referee_signup_is_not_shown(self):
+        RefereeSignup.objects.create(event=self.event, member=self.member, status=RefereeSignup.Status.DECLINED)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertIsNone(response.context["referee_signup"])
+        self.assertNotContains(response, "Refereeing")
 
     def test_squad_response_counts_are_correct(self):
         in_member = Member.objects.create(first_name="A", last_name="In")

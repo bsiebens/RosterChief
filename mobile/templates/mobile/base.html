@@ -23,6 +23,14 @@
     the OLD shell's <body> class/attributes in place under the NEW shell's
     content. See coach/base.html's own comment for the same rule mirrored
     the other direction.
+
+    The page itself scrolls (body/document), not a boxed-in <main> -- header
+    and tab bar are sticky (top-0/bottom-0) rather than the earlier fixed-
+    height-shell-with-an-inner-overflow-auto-region approach, which read as
+    two separate scrollable areas nested inside each other (most noticeable
+    on Calendar's long agenda). A side benefit: htmx's boosted navigation
+    scrolls the window back to top by default, which now actually resets
+    what the user sees -- with the old inner <main> scroll it didn't.
 {% endcomment %}
 <!DOCTYPE html>
 <html lang="{{ LANGUAGE_CODE|default:"en" }}">
@@ -62,8 +70,8 @@
         {% block extra_head %}{% endblock extra_head %}
     </head>
 
-    <body class="flex h-screen flex-col overflow-hidden bg-paper font-sans text-slate" hx-boost="true" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' data-vapid-public-key="{{ vapid_public_key }}" data-csrftoken="{{ csrf_token }}">
-        <header class="app-header">
+    <body class="flex min-h-screen flex-col bg-paper font-sans text-slate" hx-boost="true" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' data-vapid-public-key="{{ vapid_public_key }}" data-csrftoken="{{ csrf_token }}">
+        <header class="app-header sticky top-0 z-20">
             <div class="flex min-h-11 items-center gap-2.5">
                 <a class="flex items-center gap-2.5" href="{% url "mobile:home" %}">
                     {% if club.logo %}
@@ -95,7 +103,7 @@
             {% block header_extra %}{% endblock header_extra %}
         </header>
 
-        <main class="flex-1 overflow-y-auto">
+        <main class="flex-1">
             <div class="flex flex-col gap-4 px-4 py-4">
                 {% if messages %}
                     <div class="flex flex-col gap-2">
@@ -109,7 +117,7 @@
             </div>
         </main>
 
-        <nav class="tab-bar">
+        <nav class="tab-bar sticky bottom-0 z-20">
             <a class="tab-bar-item {% if active_tab == "home" %}tab-bar-item-active{% endif %}" href="{% url "mobile:home" %}">
                 {% lucide "house" size=21 %}
                 <span class="tab-bar-label">{% trans "Home" %}</span>
