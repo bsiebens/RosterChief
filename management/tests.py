@@ -23,7 +23,7 @@ from billing.services.dues import record_payment, subscribe
 from club.models import Club, ClubMembership, ClubRole, DuesInvoice, FeePayment, MemberRequirementStatus, OnboardingRequirement, Season, Sponsor
 from club.services.invoicing import DuesInvoicePDFError
 from club.services.onboarding import mark_complete
-from events.models import Attendance, Competition, Event, EventReferee, EventSeries, Location, Opponent
+from events.models import Attendance, Competition, Event, EventReferee, EventSeries, Location, Opponent, RefereeSignup
 from events.services.rbihf_import import RBIHFImportError
 from events.services.recurrence import detach_occurrence, generate_occurrences
 from management.bulk_import import TEMPLATE_COLUMNS
@@ -6553,6 +6553,39 @@ class RefereeManagementDashboardTests(ManagementTestBase):
         )
 
         self.assertRedirects(response, reverse("management:event_detail", args=[game.pk]))
+
+    def test_shows_a_pending_self_service_invite(self):
+        # make_game()'s own event.teams.add(...) already triggers
+        # events.services.referees.sync_referee_invites via events/signals.py --
+        # self.referee (eligible for self.team) gets invited automatically.
+        game = self.make_game()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("referee_management")
+
+        self.assertTrue(RefereeSignup.objects.filter(event=game, member=self.referee, status=RefereeSignup.Status.INVITED).exists())
+        self.assertContains(response, "Invited, no response yet")
+        self.assertContains(response, str(self.referee))
+
+    def test_no_pending_invite_shown_once_the_game_is_full(self):
+        game = self.make_game(max_referees=1)
+        EventReferee.objects.create(event=game, member=self.referee, assigned_by=self.admin_member)
+        other_referee = Member.objects.create(first_name="Other", last_name="Ref")
+        RefereeSignup.objects.create(event=game, member=other_referee, status=RefereeSignup.Status.INVITED)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("referee_management")
+
+        self.assertNotContains(response, "Invited, no response yet")
+
+    def test_self_signed_up_referee_is_flagged_distinctly_from_an_admin_assignment(self):
+        game = self.make_game()
+        EventReferee.objects.create(event=game, member=self.referee, assigned_by=None)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("referee_management")
+
+        self.assertContains(response, "Self sign-up")
 
 
 class FeatureGatedSectionsTests(ManagementTestBase):

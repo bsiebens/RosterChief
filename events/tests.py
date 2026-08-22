@@ -19,7 +19,7 @@ from notifications.models import Notification
 from teams.models import Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership
 
 from .admin import EventAdminForm
-from .models import Attendance, Competition, Event, EventReferee, EventSeries, Lineup, LineupSelection, Location, Opponent
+from .models import Attendance, Competition, Event, EventReferee, EventSeries, Lineup, LineupSelection, Location, Opponent, RefereeSignup
 from .services import (
     cancel_occurrence,
     detach_occurrence,
@@ -36,7 +36,19 @@ from .services import (
 from .services.calendar import add_months, month_bounds, month_grid, season_grid, week_bounds, week_grid
 from .services.lineup import notify_dropout, publish_lineup, selected_members_by_position, toggle_selection
 from .services.rbihf_import import RBIHFImportError, apply_plan, build_plan, extract_team_id, parse_fixtures, suggested_location, suggested_opponent
-from .services.referees import RefereeAssignmentError, add_external_referee, assign_referee, conflicting_events, eligible_referees, needs_referee_management, remove_referee, set_referee_fee
+from .services.referees import (
+    RefereeAssignmentError,
+    accept_referee_signup,
+    add_external_referee,
+    assign_referee,
+    conflicting_events,
+    decline_referee_signup,
+    eligible_referees,
+    needs_referee_management,
+    remove_referee,
+    set_referee_fee,
+    sync_referee_invites,
+)
 from .tasks import send_deadline_reminders
 
 
@@ -1486,6 +1498,109 @@ class RefereeServiceTests(EventsTestBase):
         assignment.refresh_from_db()
         self.assertEqual(assignment.km_total, Decimal("0"))
         self.assertEqual(assignment.total_payable, Decimal("25.00"))
+
+
+class RefereeSignupServiceTests(EventsTestBase):
+    """events.services.referees.sync_referee_invites/accept_referee_signup/
+    decline_referee_signup -- the self-service sign-up flow, layered on top
+    of the same assign_referee/eligible_referees the admin flow uses."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.home_ground = Location.objects.create(club=cls.club, name="Home Ground", address="1 St", city="Town", zip_code="1000", country="BE", is_home=True)
+        cls.level = RefereeLevel.objects.create(club=cls.club, name="Regional")
+        cls.level.teams.add(cls.team)
+        cls.referee = Member.objects.create(first_name="Ref", last_name="Eree")
+        cls.referee_profile = RefereeProfile.objects.create(member=cls.referee, level=cls.level, valid_until=timezone.localdate() + timedelta(days=30))
+
+    def make_home_game(self, **kwargs):
+        kwargs.setdefault("kind", Event.EventKind.GAME)
+        kwargs.setdefault("location", self.home_ground)
+        event = self.make_event(**kwargs)
+        event.teams.add(self.team)
+        return event
+
+    def test_creating_a_home_game_invites_eligible_referees(self):
+        # sync_referee_invites is wired from events/signals.py's post_save(Event)
+        # -- make_home_game's own .save() (via make_event) already triggers it.
+        game = self.make_home_game()
+
+        self.assertTrue(RefereeSignup.objects.filter(event=game, member=self.referee, status=RefereeSignup.Status.INVITED).exists())
+
+    def test_creating_a_home_game_notifies_eligible_referees(self):
+        self.make_home_game()
+
+        self.assertTrue(Notification.objects.filter(member=self.referee, title="Referee needed").exists())
+
+    def test_sync_does_not_reinvite_someone_who_already_responded(self):
+        game = self.make_home_game()
+        signup = RefereeSignup.objects.get(event=game, member=self.referee)
+        signup.status = RefereeSignup.Status.DECLINED
+        signup.responded_at = timezone.now()
+        signup.save()
+
+        sync_referee_invites(game)
+
+        signup.refresh_from_db()
+        self.assertEqual(signup.status, RefereeSignup.Status.DECLINED)
+
+    def test_sync_is_a_noop_for_an_away_game(self):
+        away_ground = Location.objects.create(club=self.club, name="Away Ground", address="2 St", city="Town", zip_code="1000", country="BE")
+        game = self.make_home_game(location=away_ground)
+
+        self.assertFalse(RefereeSignup.objects.filter(event=game).exists())
+
+    def test_accept_creates_a_real_event_referee_assignment(self):
+        game = self.make_home_game()
+        signup = RefereeSignup.objects.get(event=game, member=self.referee)
+
+        accept_referee_signup(signup)
+
+        assignment = EventReferee.objects.get(event=game, member=self.referee)
+        self.assertIsNone(assignment.assigned_by)
+        signup.refresh_from_db()
+        self.assertEqual(signup.status, RefereeSignup.Status.ACCEPTED)
+        self.assertIsNotNone(signup.responded_at)
+
+    def test_accept_raises_when_the_game_is_already_full(self):
+        game = self.make_home_game(max_referees=1)
+        add_external_referee(game, "Guest Referee", assigned_by=None)
+        signup = RefereeSignup.objects.get(event=game, member=self.referee)
+
+        with self.assertRaises(RefereeAssignmentError):
+            accept_referee_signup(signup)
+
+        signup.refresh_from_db()
+        self.assertEqual(signup.status, RefereeSignup.Status.INVITED)
+
+    def test_decline_marks_the_signup_declined(self):
+        game = self.make_home_game()
+        signup = RefereeSignup.objects.get(event=game, member=self.referee)
+
+        decline_referee_signup(signup)
+
+        signup.refresh_from_db()
+        self.assertEqual(signup.status, RefereeSignup.Status.DECLINED)
+        self.assertIsNotNone(signup.responded_at)
+
+    def test_decline_after_accepting_removes_the_self_service_assignment(self):
+        game = self.make_home_game()
+        signup = RefereeSignup.objects.get(event=game, member=self.referee)
+        accept_referee_signup(signup)
+
+        decline_referee_signup(signup)
+
+        self.assertFalse(EventReferee.objects.filter(event=game, member=self.referee).exists())
+
+    def test_decline_never_removes_an_admin_made_assignment_for_the_same_member(self):
+        game = self.make_home_game()
+        signup = RefereeSignup.objects.get(event=game, member=self.referee)
+        EventReferee.objects.create(event=game, member=self.referee, assigned_by=self.alice)
+
+        decline_referee_signup(signup)
+
+        self.assertTrue(EventReferee.objects.filter(event=game, member=self.referee, assigned_by=self.alice).exists())
 
 
 class CalendarGridTests(EventsTestBase):

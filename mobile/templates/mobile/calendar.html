@@ -7,7 +7,10 @@
     everything further out grouped by calendar month (see CalendarView's own
     docstring -- later_months is a list of {month_start, rows}). No person
     switcher and no club-wide toggle here -- always every event
-    self.managed_people is invited to, full stop. A real, working ?kind=
+    self.managed_people is invited to, plus (merged into the same
+    chronological list, own accent colour) any home game self.me is
+    eligible to referee -- see mobile/_calendar_referee_row.html. A real,
+    working ?kind=
     filter (All/Games/Practices) stands in for the design mock's "Games only"
     pill; its List/Month toggle isn't reproduced -- that's a second view
     mode, not a filter. -mx-4 (on the row groups only, not this filter row)
@@ -60,7 +63,7 @@
                     <div class="sticky top-0 z-10 bg-paper px-4 py-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "This week" %}</div>
                     <div class="flex flex-col gap-px bg-line">
                         {% for row in this_week %}
-                            {% include "mobile/_calendar_row.html" %}
+                            {% if row.referee_signup %}{% include "mobile/_calendar_referee_row.html" %}{% else %}{% include "mobile/_calendar_row.html" %}{% endif %}
                         {% endfor %}
                     </div>
                 </div>
@@ -71,7 +74,7 @@
                     <div class="sticky top-0 z-10 bg-paper px-4 py-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Next week" %}</div>
                     <div class="flex flex-col gap-px bg-line">
                         {% for row in next_week %}
-                            {% include "mobile/_calendar_row.html" %}
+                            {% if row.referee_signup %}{% include "mobile/_calendar_referee_row.html" %}{% else %}{% include "mobile/_calendar_row.html" %}{% endif %}
                         {% endfor %}
                     </div>
                 </div>
@@ -82,7 +85,7 @@
                     <div class="sticky top-0 z-10 bg-paper px-4 py-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{{ month.month_start|date:"F Y" }}</div>
                     <div class="flex flex-col gap-px bg-line">
                         {% for row in month.rows %}
-                            {% include "mobile/_calendar_row.html" %}
+                            {% if row.referee_signup %}{% include "mobile/_calendar_referee_row.html" %}{% else %}{% include "mobile/_calendar_row.html" %}{% endif %}
                         {% endfor %}
                     </div>
                 </div>

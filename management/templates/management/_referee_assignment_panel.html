@@ -3,8 +3,16 @@
     Shared by the event detail page and the referee management dashboard --
     context: event, referees (EventReferee rows -- fee/km/km_rate read straight
     off the model instance, no separate form object needed), referee_candidates,
-    referees_full, can_manage_referees, and an optional next_url to return to
-    after a POST (defaults to the event detail page when blank).
+    referees_full, pending_signups (RefereeSignup rows still INVITED -- the
+    self-service counterpart, events.services.referees.sync_referee_invites/
+    accept_referee_signup), can_manage_referees, and an optional next_url to
+    return to after a POST (defaults to the event detail page when blank).
+
+    A referee row with no assigned_by (events.services.referees.
+    accept_referee_signup passes assigned_by=None) is one who signed
+    themselves up rather than one an admin picked -- flagged "Self sign-up"
+    instead of "Assigned by ..." so that stays visible here without a
+    separate screen.
 
     The fee is entered right here, inline, rather than behind a "Fee" button
     that opened a second (and on the dashboard, nested-inside-a-dialog) modal
@@ -33,7 +41,11 @@
                     {% if referee.is_external %}<span class="badge badge-neutral badge-xs">{% trans "External" %}</span>{% endif %}
                     {% if can_manage_referees and not referee.fee %}<span class="badge badge-warning badge-xs">{% trans "Fee not set" %}</span>{% endif %}
                 </div>
-                {% if referee.assigned_by %}<span class="text-xs text-muted">{% blocktrans with name=referee.assigned_by %}Assigned by {{ name }}{% endblocktrans %}</span>{% endif %}
+                {% if referee.assigned_by %}
+                    <span class="text-xs text-muted">{% blocktrans with name=referee.assigned_by %}Assigned by {{ name }}{% endblocktrans %}</span>
+                {% elif not referee.is_external %}
+                    <span class="badge badge-outline badge-xs w-fit">{% trans "Self sign-up" %}</span>
+                {% endif %}
             </div>
 
             {% if can_manage_referees %}
@@ -75,6 +87,13 @@
         <li class="py-2.5 text-sm text-muted">{% trans "No referees assigned yet." %}</li>
     {% endfor %}
 </ul>
+
+{% if pending_signups %}
+    <p class="mt-2 text-xs text-muted">
+        {% blocktrans count counter=pending_signups|length %}Invited, no response yet: {% plural %}Invited, no response yet: {% endblocktrans %}
+        {% for signup in pending_signups %}{{ signup.member }}{% if not forloop.last %}, {% endif %}{% endfor %}
+    </p>
+{% endif %}
 
 {% if can_manage_referees and not referees_full %}
     <div class="mt-3 flex flex-col gap-2 border-t border-rule pt-3">

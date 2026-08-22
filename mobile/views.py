@@ -27,9 +27,10 @@ from club.services.fees import open_dues_rows
 from club.services.onboarding import checklist_for
 from club.services.sponsors import active_sponsors
 from controlpanel.messages import notify
-from events.models import Attendance, Event, Lineup
+from events.models import Attendance, Event, Lineup, RefereeSignup
 from events.services.calendar import week_bounds
 from events.services.lineup import notify_dropout, selected_members_by_position
+from events.services.referees import RefereeAssignmentError, accept_referee_signup, decline_referee_signup
 from members.models import FamilyMembership, Member
 from members.views import ClubScopedPublicMixin
 from news.models import News
@@ -348,6 +349,31 @@ class CalendarView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
                 for attendance in attendances
             ]
 
+        # Referee sign-ups are scoped to self.me only, never managed_people --
+        # a referee is an adult with their own account, not something a
+        # parent does on a child's behalf, unlike every RSVP row above.
+        # Merged into the same chronological list (own dict shape, no
+        # pill_class/member) rather than a separate section, so it reads on
+        # the actual day it falls on -- distinct styling is what sets it
+        # apart (mobile/_calendar_referee_row.html), not a different place
+        # on the screen. Declined invites are dropped; accepted ones stay
+        # visible as a confirmed commitment.
+        if self.me is not None and kind_filter != "training":
+            signups = (
+                RefereeSignup.objects.filter(
+                    member=self.me,
+                    event__club=self.request.club,
+                    event__cancelled=False,
+                    event__start__gte=now,
+                    status__in=[RefereeSignup.Status.INVITED, RefereeSignup.Status.ACCEPTED],
+                )
+                .select_related("event", "event__location", "event__opponent")
+                .prefetch_related("event__teams")
+            )
+            rows += [{"event": signup.event, "referee_signup": signup} for signup in signups]
+
+        rows.sort(key=lambda row: row["event"].start)
+
         this_week, next_week, later_rows = [], [], []
         for row in rows:
             event_date = timezone.localtime(row["event"].start).date()
@@ -366,6 +392,33 @@ class CalendarView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         ]
 
         return super().get_context_data(this_week=this_week, next_week=next_week, later_months=later_months, kind_filter=kind_filter if kind_filter in self.KIND_FILTERS else "", **kwargs)
+
+
+class RefereeSignupRespondView(PersonScopeMixin, LoginRequiredMixin, View):
+    """Accept/decline a referee invite from a Calendar row
+    (mobile/_calendar_referee_row.html) -- routes through
+    events.services.referees.accept_referee_signup/decline_referee_signup,
+    so capacity is enforced in the one place the desktop admin flow already
+    enforces it, and the referee-management screen sees the result with no
+    separate sync step."""
+
+    def post(self, request, *args, **kwargs):
+        signup = get_object_or_404(RefereeSignup, pk=kwargs["signup_id"], member=self.me, event__club=request.club)
+        response = request.POST.get("response")
+
+        if response == "accept":
+            try:
+                accept_referee_signup(signup)
+                notify(request, f"s|{_('Referee sign-up confirmed')}|{_('Thanks for signing up -- see you there.')}")
+            except RefereeAssignmentError as exc:
+                notify(request, f"e|{_('Could not sign you up')}|{exc}")
+        elif response == "decline":
+            decline_referee_signup(signup)
+            notify(request, f"s|{_('Declined')}|{_('No problem -- thanks for letting us know.')}")
+        else:
+            return HttpResponseBadRequest(_("Unknown response."))
+
+        return HttpResponseRedirect(reverse("mobile:calendar"))
 
 
 class EventDetailView(PersonScopeMixin, LoginRequiredMixin, TemplateView):

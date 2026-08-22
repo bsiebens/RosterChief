@@ -14,6 +14,7 @@ urlpatterns = [
     # Member mode (M1-M7).
     path("", views.HomeView.as_view(), name="home"),
     path("calendar/", views.CalendarView.as_view(), name="calendar"),
+    path("referee-signups/<uuid:signup_id>/respond/", views.RefereeSignupRespondView.as_view(), name="referee_signup_respond"),
     path("events/<uuid:pk>/", views.EventDetailView.as_view(), name="event_detail"),
     path("news/", views.NewsListView.as_view(), name="news_list"),
     path("news/<slug:slug>/", views.NewsDetailView.as_view(), name="news_detail"),

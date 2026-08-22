@@ -2,7 +2,7 @@ from django import forms
 from django.contrib import admin
 from django.utils.translation import gettext_lazy as _
 
-from .models import Attendance, Competition, Event, EventReferee, EventSeries, Lineup, LineupSelection, Location, Opponent
+from .models import Attendance, Competition, Event, EventReferee, EventSeries, Lineup, LineupSelection, Location, Opponent, RefereeSignup
 
 
 @admin.register(Opponent)
@@ -138,3 +138,11 @@ class EventRefereeAdmin(admin.ModelAdmin):
     @admin.display(description=_("total payable"))
     def total_payable(self, obj):
         return obj.total_payable
+
+
+@admin.register(RefereeSignup)
+class RefereeSignupAdmin(admin.ModelAdmin):
+    list_display = ["event", "member", "status", "responded_at"]
+    list_filter = ["status"]
+    search_fields = ["event__title", "member__first_name", "member__last_name"]
+    raw_id_fields = ["event", "member"]

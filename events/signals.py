@@ -21,6 +21,7 @@ from django.utils.translation import gettext_lazy as _
 from club.models import ClubMembership
 from events.models import Event, EventSeries
 from events.services import sync_event_attendances
+from events.services.referees import sync_referee_invites
 from members.models import Group, GroupMembership
 from teams.models import Team, TeamMembership
 
@@ -50,6 +51,7 @@ def validate_groups_same_club(sender, instance, action, reverse, pk_set, **kwarg
 @receiver(post_save, sender=Event)
 def sync_on_event_save(sender, instance, **kwargs):
     sync_event_attendances(instance)
+    sync_referee_invites(instance)
 
 
 @receiver(m2m_changed, sender=Event.teams.through)
@@ -66,6 +68,18 @@ def sync_on_audience_change(sender, instance, action, reverse, model, pk_set, **
         # Reverse relation edited (e.g. member.invited_to_events.add(event)).
         for event in Event.objects.filter(pk__in=pk_set or []):
             sync_event_attendances(event)
+
+
+@receiver(m2m_changed, sender=Event.teams.through)
+def sync_referee_invites_on_teams_change(sender, instance, action, reverse, **kwargs):
+    # Referee eligibility only depends on `teams` (needs_referee_management),
+    # not groups/invited/excluded_members -- a separate, narrower receiver
+    # rather than folding into sync_on_audience_change above, which is about
+    # attendance specifically. reverse (team.scheduled_events.add(...)) isn't
+    # a used path -- see validate_teams_same_club's own comment.
+    if action not in M2M_SYNC_ACTIONS or reverse or not isinstance(instance, Event):
+        return
+    sync_referee_invites(instance)
 
 
 @receiver(post_save, sender=TeamMembership)

@@ -73,6 +73,14 @@
     --color-ice: #14b8e8;
     --color-ice-ink: #04212c;
 
+    /* Referee sign-up accent -- deliberately distinct from game/training/other's
+       club-red/info-blue/warn-amber (mobile/_calendar_row.html) so a "needs a
+       referee" row stands out from the member's own RSVP rows at a glance. */
+    --color-referee: #7c4dff;
+    --color-referee-bg: #f1ecff;
+    --color-referee-border: #d9caff;
+    --color-referee-text: #5b2fd6;
+
     --color-row-sel: #fff7f8;
     --color-row-focus: #f4f9ff;
     --color-row-warn: #fffdf6;
@@ -391,6 +399,12 @@
         background: var(--color-rule);
         color: #4a5566;
         border: 1px solid #dde1e7;
+    }
+
+    .pill-referee {
+        background: var(--color-referee-bg);
+        color: var(--color-referee-text);
+        border: 1px solid var(--color-referee-border);
     }
 
     /* --- Person switcher chips (Home's own -- see mobile/templates/mobile/home.html) --- */

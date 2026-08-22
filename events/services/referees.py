@@ -27,9 +27,10 @@ from django.db import transaction
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
-from events.models import ASSUMED_EVENT_DURATION, Event, EventReferee
+from events.models import ASSUMED_EVENT_DURATION, Event, EventReferee, RefereeSignup
 from events.services.attendance import effective_members
 from members.models import Member
+from notifications.services import notify_members
 from teams.models import RefereeLevel, Team
 
 
@@ -147,3 +148,56 @@ def set_referee_fee(referee, *, fee=None, km=None, km_rate=None):
     referee.km_rate = km_rate
     referee.save(update_fields=["fee", "km", "km_rate"])
     return referee
+
+
+def sync_referee_invites(event):
+    """Invites every currently-eligible, not-yet-invited referee to `event` --
+    the referee-facing counterpart to events.sync_event_attendances, wired
+    from the same signal points (events/signals.py's post_save(Event) and
+    the Event.teams m2m). Idempotent: only creates rows for members with no
+    RefereeSignup at all yet for this event, so an unrelated edit (or a
+    second team added later) never re-notifies someone who already
+    responded -- or re-invites someone who already said no."""
+    if not needs_referee_management(event):
+        return []
+
+    already_invited_ids = set(RefereeSignup.objects.filter(event=event).values_list("member_id", flat=True))
+    new_members = [member for member in eligible_referees(event) if member.pk not in already_invited_ids]
+    if not new_members:
+        return []
+
+    RefereeSignup.objects.bulk_create([RefereeSignup(event=event, member=member) for member in new_members])
+    body = _("%(event)s needs a referee -- can you take it?") % {"event": event.title}
+    notify_members(new_members, club=event.club, title=_("Referee needed"), body=body, source=event)
+    return new_members
+
+
+@transaction.atomic
+def accept_referee_signup(signup):
+    """Confirms `signup`'s member as an actual referee for the game --
+    routed through the exact same assign_referee every admin assignment
+    uses (assigned_by=None marks it self-service), so capacity is enforced
+    once, in one place, and the desktop referee-management screen sees the
+    new assignment with no separate sync step. Raises RefereeAssignmentError
+    unchanged if the game's already full -- `signup` is left INVITED so the
+    referee can retry if a slot frees up."""
+    assign_referee(signup.event, signup.member, assigned_by=None)
+    signup.status = RefereeSignup.Status.ACCEPTED
+    signup.responded_at = timezone.now()
+    signup.save(update_fields=["status", "responded_at"])
+    return signup
+
+
+@transaction.atomic
+def decline_referee_signup(signup):
+    """Declines `signup`. If they'd already accepted, also removes their
+    self-service EventReferee row (assigned_by is None -- never touches an
+    admin-made assignment for the same member/event, though assign_referee's
+    own "already assigned" guard makes that pairing impossible anyway) so
+    the desktop screen stops counting someone who's since said they can't
+    make it after all."""
+    EventReferee.objects.filter(event=signup.event, member=signup.member, assigned_by__isnull=True).delete()
+    signup.status = RefereeSignup.Status.DECLINED
+    signup.responded_at = timezone.now()
+    signup.save(update_fields=["status", "responded_at"])
+    return signup

@@ -304,6 +304,42 @@ class EventReferee(UUIDModel):
         return (self.fee or Decimal("0")) + self.km_total
 
 
+class RefereeSignup(UUIDModel):
+    """One eligible referee's invite/response for one home game -- the
+    self-service counterpart to admin assignment (EventReferee). Created
+    automatically (events.services.referees.sync_referee_invites, wired from
+    events/signals.py) the moment a home game needs a club-arranged referee,
+    for every currently-eligible member (teams.RefereeProfile). Accepting
+    (events.services.referees.accept_referee_signup) creates a real
+    EventReferee row via the same capacity-checked assign_referee every admin
+    assignment goes through (assigned_by=None marks it self-service) -- this
+    table only ever tracks the invite/response, never payment/capacity, so
+    the desktop referee-management screen stays the single source of truth
+    for who's actually refereeing.
+    """
+
+    class Status(models.TextChoices):
+        INVITED = "invited", _("invited")
+        ACCEPTED = "accepted", _("accepted")
+        DECLINED = "declined", _("declined")
+
+    event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="referee_signups", verbose_name=_("event"))
+    member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="referee_signups", verbose_name=_("member"))
+    status = models.CharField(_("status"), max_length=20, choices=Status.choices, default=Status.INVITED)
+    responded_at = models.DateTimeField(_("responded at"), null=True, blank=True)
+
+    class Meta:
+        verbose_name = _("referee sign-up")
+        verbose_name_plural = _("referee sign-ups")
+        ordering = ["event", "member__last_name", "member__first_name"]
+        constraints = [
+            models.UniqueConstraint(fields=["event", "member"], name="unique_referee_signup_per_event_per_member"),
+        ]
+
+    def __str__(self):
+        return f"{self.event} - {self.member} ({self.status})"
+
+
 class Competition(models.Model):
     """A competition has a name with a specific URL to fetch data from. These are managed centrally."""
 

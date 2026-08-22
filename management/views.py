@@ -35,7 +35,7 @@ from club.services.onboarding import annotate_onboarding_status, approve_all_cle
 from controlpanel.messages import notify
 from controlpanel.mixins import RedirectOnInvalidMixin
 from controlpanel.services.statistics import club_attention, club_charts, club_statistics, unrostered_members
-from events.models import Attendance, Event, EventReferee, EventSeries, Location, Opponent
+from events.models import Attendance, Event, EventReferee, EventSeries, Location, Opponent, RefereeSignup
 from events.services.attendance import member_attendance_counts, member_attendance_sparkline, player_attendance_rankings, players_who_missed_recent_practices, team_attendance_rate, team_no_shows
 from events.services.calendar import add_months, month_bounds, month_grid, season_grid, week_bounds, week_grid
 from events.services.competitions import CompetitionFetchError, fetch_game_info
@@ -2501,6 +2501,7 @@ class EventDetailView(ClubStaffRequiredMixin, DetailView):
         referees = []
         referee_candidates = []
         referees_full = False
+        pending_signups = []
         if referee_management_needed:
             referees = list(event.referees.select_related("member", "assigned_by").order_by("member__last_name", "member__first_name"))
             referees_full = len(referees) >= event.max_referees
@@ -2510,6 +2511,8 @@ class EventDetailView(ClubStaffRequiredMixin, DetailView):
                     candidate.has_conflict = bool(conflicts)
                     candidate.conflict_titles = ", ".join(conflict.title for conflict in conflicts)
                     referee_candidates.append(candidate)
+            if can_manage_referees:
+                pending_signups = list(event.referee_signups.filter(status=RefereeSignup.Status.INVITED).select_related("member"))
 
         return super().get_context_data(
             can_manage=can_manage,
@@ -2521,6 +2524,7 @@ class EventDetailView(ClubStaffRequiredMixin, DetailView):
             referees=referees,
             referee_candidates=referee_candidates,
             referees_full=referees_full,
+            pending_signups=pending_signups,
             **kwargs,
         )
 
@@ -2745,6 +2749,7 @@ class RefereeManagementDashboardView(MemberAdminRequiredMixin, TemplateView):
             game.referees_full = len(game.referee_rows) >= game.max_referees
             game.referee_candidates = []
             game.fees_pending = any(not referee.fee for referee in game.referee_rows)
+            game.pending_signups = list(game.referee_signups.filter(status=RefereeSignup.Status.INVITED).select_related("member")) if not game.referees_full else []
             if not game.referee_rows:
                 kpi_no_referee += 1
             elif not game.referees_full:

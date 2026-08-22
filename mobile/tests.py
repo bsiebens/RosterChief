@@ -9,11 +9,11 @@ from django.utils import timezone, translation
 from icalendar import Calendar as ICalCalendar
 
 from club.models import Club, ClubMembership, DuesInvoice, MemberRequirementStatus, OnboardingRequirement, Season, Sponsor
-from events.models import Attendance, Event, Lineup, LineupSelection
+from events.models import Attendance, Event, EventReferee, Lineup, LineupSelection, Location, RefereeSignup
 from members.models import Family, FamilyMembership, Member
 from news.models import News
 from notifications.models import Notification
-from teams.models import Position, StaffAssignment, Team, TeamMembership
+from teams.models import Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership
 
 from .models import CalendarFeedToken, PushSubscription
 from .services.icons import render_fallback_icon
@@ -1006,6 +1006,145 @@ class CalendarViewTests(TestCase):
         response = self._get()
 
         self.assertIn(event, self._events_in_context(response))
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class CalendarRefereeSignupTests(TestCase):
+    """M3's Calendar merges in the signed-in account's own referee sign-ups
+    (self.me only, never managed_people) -- see mobile/_calendar_referee_row.
+    html and CalendarView's own docstring."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        today = timezone.localdate()
+        cls.season = Season.objects.create(club=cls.club, start_date=today - datetime.timedelta(days=30), end_date=today + datetime.timedelta(days=300))
+        cls.user = User.objects.create_user(email="ref@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Ref", last_name="Eree", email="ref@example.com", user=cls.user)
+        ClubMembership.objects.create(club=cls.club, member=cls.member, season=cls.season)
+
+        cls.home_ground = Location.objects.create(club=cls.club, name="Home Rink", address="1 St", city="Town", zip_code="1000", country="BE", is_home=True)
+        cls.team = Team.objects.create(club=cls.club, name="U16", short_name="U16")
+        cls.level = RefereeLevel.objects.create(club=cls.club, name="Regional")
+        cls.level.teams.add(cls.team)
+        RefereeProfile.objects.create(member=cls.member, level=cls.level, valid_until=today + datetime.timedelta(days=30))
+
+        cls.game = Event.objects.create(club=cls.club, title="Home game", kind=Event.EventKind.GAME, location=cls.home_ground, start=timezone.now() + datetime.timedelta(days=1))
+        cls.game.teams.add(cls.team)  # triggers sync_referee_invites via events/signals.py
+
+    def _get(self, **params):
+        url = reverse("mobile:calendar")
+        if params:
+            url += "?" + "&".join(f"{key}={value}" for key, value in params.items())
+        return self.client.get(url, HTTP_HOST="ajax-united.rosterchief.app")
+
+    def test_invited_game_shows_up_on_the_calendar(self):
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, "Referee")
+        self.assertContains(response, "I'll ref")
+
+    def test_declined_signup_is_not_shown(self):
+        signup = RefereeSignup.objects.get(event=self.game, member=self.member)
+        signup.status = RefereeSignup.Status.DECLINED
+        signup.save()
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertNotContains(response, "I'll ref")
+
+    def test_accepted_signup_shows_a_confirmed_pill_with_no_actions(self):
+        signup = RefereeSignup.objects.get(event=self.game, member=self.member)
+        signup.status = RefereeSignup.Status.ACCEPTED
+        signup.save()
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, "Confirmed")
+        self.assertNotContains(response, "I'll ref")
+
+    def test_training_filter_excludes_referee_rows(self):
+        self.client.force_login(self.user)
+
+        response = self._get(kind="training")
+
+        self.assertNotContains(response, "I'll ref")
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class RefereeSignupRespondViewTests(TestCase):
+    """mobile:referee_signup_respond -- Accept/Decline from the Calendar."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        today = timezone.localdate()
+        cls.season = Season.objects.create(club=cls.club, start_date=today - datetime.timedelta(days=30), end_date=today + datetime.timedelta(days=300))
+        cls.user = User.objects.create_user(email="ref@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Ref", last_name="Eree", email="ref@example.com", user=cls.user)
+        ClubMembership.objects.create(club=cls.club, member=cls.member, season=cls.season)
+
+        cls.home_ground = Location.objects.create(club=cls.club, name="Home Rink", address="1 St", city="Town", zip_code="1000", country="BE", is_home=True)
+        cls.team = Team.objects.create(club=cls.club, name="U16", short_name="U16")
+        cls.level = RefereeLevel.objects.create(club=cls.club, name="Regional")
+        cls.level.teams.add(cls.team)
+        RefereeProfile.objects.create(member=cls.member, level=cls.level, valid_until=today + datetime.timedelta(days=30))
+
+        cls.game = Event.objects.create(club=cls.club, title="Home game", kind=Event.EventKind.GAME, location=cls.home_ground, start=timezone.now() + datetime.timedelta(days=1))
+        cls.game.teams.add(cls.team)
+
+    def _post(self, response_value):
+        signup = RefereeSignup.objects.get(event=self.game, member=self.member)
+        return self.client.post(reverse("mobile:referee_signup_respond", kwargs={"signup_id": signup.pk}), {"response": response_value}, HTTP_HOST="ajax-united.rosterchief.app")
+
+    def test_requires_login(self):
+        response = self._post("accept")
+
+        self.assertEqual(response.status_code, 302)
+
+    def test_accept_creates_a_real_assignment(self):
+        self.client.force_login(self.user)
+
+        response = self._post("accept")
+
+        self.assertRedirects(response, reverse("mobile:calendar"), fetch_redirect_response=False)
+        self.assertTrue(EventReferee.objects.filter(event=self.game, member=self.member).exists())
+        signup = RefereeSignup.objects.get(event=self.game, member=self.member)
+        self.assertEqual(signup.status, RefereeSignup.Status.ACCEPTED)
+
+    def test_accept_shows_an_error_when_the_game_is_already_full(self):
+        self.game.max_referees = 0
+        self.game.save(update_fields=["max_referees"])
+        self.client.force_login(self.user)
+
+        response = self._post("accept")
+
+        self.assertRedirects(response, reverse("mobile:calendar"), fetch_redirect_response=False)
+        self.assertFalse(EventReferee.objects.filter(event=self.game, member=self.member).exists())
+        signup = RefereeSignup.objects.get(event=self.game, member=self.member)
+        self.assertEqual(signup.status, RefereeSignup.Status.INVITED)
+
+    def test_decline_marks_the_signup_declined(self):
+        self.client.force_login(self.user)
+
+        response = self._post("decline")
+
+        self.assertRedirects(response, reverse("mobile:calendar"), fetch_redirect_response=False)
+        signup = RefereeSignup.objects.get(event=self.game, member=self.member)
+        self.assertEqual(signup.status, RefereeSignup.Status.DECLINED)
+
+    def test_cannot_respond_to_someone_elses_signup(self):
+        stranger_user = User.objects.create_user(email="stranger@example.com", password="pw-secret-123")
+        Member.objects.create(first_name="Not", last_name="You", email="stranger@example.com", user=stranger_user)
+        self.client.force_login(stranger_user)
+
+        response = self._post("accept")
+
+        self.assertEqual(response.status_code, 404)
 
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])

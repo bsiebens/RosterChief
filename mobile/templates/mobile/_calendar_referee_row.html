@@ -1,0 +1,50 @@
+{% load i18n lucide %}
+{% comment %}
+    One referee sign-up row on M3's Calendar -- a home game the signed-in
+    account is eligible (and, once responded, confirmed) to referee for.
+    Merged into the same chronological list as the account's own RSVP rows
+    (mobile/_calendar_row.html), but in the referee accent (assets/mobile.
+    css's --color-referee/.pill-referee) so it reads as a different kind of
+    commitment at a glance -- and scoped to self.me only (mobile/views.py's
+    CalendarView), never managed_people, since a referee is an adult acting
+    on their own behalf, not something a parent does for a child.
+
+    Expects ``row`` ({event, referee_signup}) in scope. Accept/Decline are
+    two small forms, not a single multi-button one, so hx-boost="false" can
+    sit on each without a formaction/htmx-boost mismatch (see event_detail.
+    html's own top-of-file comment for that failure mode).
+{% endcomment %}
+<div class="flex items-center gap-3 bg-white px-4 py-3">
+    <div class="w-9.5 shrink-0 text-center">
+        <div class="font-mono text-[10px] tracking-wide text-muted uppercase">{{ row.event.start|date:"D" }}</div>
+        <div class="font-display text-2xl leading-none font-extrabold text-ink">{{ row.event.start|date:"d" }}</div>
+    </div>
+    <div class="w-[3px] shrink-0 self-stretch rounded-full" style="background: var(--color-referee)"></div>
+    <div class="min-w-0 flex-1">
+        <div class="flex items-center gap-1 text-sm font-semibold text-ink">
+            {% lucide "flag" size=13 stroke_width=2.4 class="shrink-0 text-referee" %}
+            <span class="truncate">{% trans "Referee" %} &middot; {{ row.event.title }}</span>
+        </div>
+        <div class="truncate text-xs text-muted">
+            {{ row.event.start|date:"H:i" }}
+            {% for team in row.event.teams.all %}&middot; {{ team.name }}{% endfor %}
+            {% if row.event.location %}&middot; {{ row.event.location.name }}{% endif %}
+        </div>
+    </div>
+    {% if row.referee_signup.status == "accepted" %}
+        <span class="pill pill-referee shrink-0">{% trans "Confirmed" %}</span>
+    {% else %}
+        <div class="flex shrink-0 gap-1.5">
+            <form method="post" action="{% url "mobile:referee_signup_respond" row.referee_signup.pk %}" hx-boost="false">
+                {% csrf_token %}
+                <input type="hidden" name="response" value="accept">
+                <button type="submit" class="pill pill-referee">{% trans "I'll ref" %}</button>
+            </form>
+            <form method="post" action="{% url "mobile:referee_signup_respond" row.referee_signup.pk %}" hx-boost="false">
+                {% csrf_token %}
+                <input type="hidden" name="response" value="decline">
+                <button type="submit" class="pill pill-neutral">{% trans "Can't" %}</button>
+            </form>
+        </div>
+    {% endif %}
+</div>

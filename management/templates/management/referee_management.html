@@ -90,7 +90,7 @@
                             {% if game.opponent %}{% trans "vs" %} {{ game.opponent }}{% endif %}
                         </h3>
                         <div class="mb-4 font-mono text-sm text-muted">{{ game.start|date:"j M Y H:i" }}</div>
-                        {% include "management/_referee_assignment_panel.html" with event=game referees=game.referee_rows referee_candidates=game.referee_candidates referees_full=game.referees_full can_manage_referees=True next_url=request.get_full_path %}
+                        {% include "management/_referee_assignment_panel.html" with event=game referees=game.referee_rows referee_candidates=game.referee_candidates referees_full=game.referees_full pending_signups=game.pending_signups can_manage_referees=True next_url=request.get_full_path %}
                     </div>
                     <form method="dialog" class="modal-backdrop"><button>close</button></form>
                 </dialog>
