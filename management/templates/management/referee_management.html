@@ -50,43 +50,36 @@
         Season workload -- separate from the "games in view" KPIs above
         (which track the upcoming range picked by the filter strip), this is
         about who's actually done the refereeing this season, all-time
-        within it, not just what's still upcoming.
+        within it, not just what's still upcoming. Deliberately one compact
+        row, not a tall section of its own -- the games-needing-a-referee
+        list below is the actual point of this page, so this shouldn't push
+        it below the fold. Fees ride along as a chart tooltip (see
+        extra_body) rather than a separate list, for the same reason.
     {% endcomment %}
-    <div class="flex flex-col gap-3.5">
-        <div class="flex flex-wrap gap-3.5">
-            <div class="card min-w-0 flex-1 p-4">
-                <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Active referees" %}</div>
-                <div class="mt-1 font-display text-[34px] leading-none font-extrabold text-ink tabular-nums">{{ kpi_active_referees }}</div>
-                <div class="mt-1 text-[13px] text-muted">{% trans "This season" %}</div>
-            </div>
-            <div class="card min-w-0 flex-1 p-4">
-                <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Games refereed" %}</div>
-                <div class="mt-1 font-display text-[34px] leading-none font-extrabold text-ink tabular-nums">{{ kpi_total_assignments }}</div>
-                <div class="mt-1 text-[13px] text-muted">{% trans "This season" %}</div>
-            </div>
-            <div class="card min-w-0 flex-1 p-4">
-                <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Average per referee" %}</div>
-                <div class="mt-1 font-display text-[34px] leading-none font-extrabold text-ink tabular-nums">{{ kpi_avg_games_per_referee }}</div>
-                <div class="mt-1 text-[13px] text-muted">{% trans "This season" %}</div>
-            </div>
+    <div class="flex flex-wrap gap-3.5">
+        <div class="card min-w-0 flex-1 p-4">
+            <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Active referees" %}</div>
+            <div class="mt-1 font-display text-[34px] leading-none font-extrabold text-ink tabular-nums">{{ kpi_active_referees }}</div>
+            <div class="mt-1 text-[13px] text-muted">{% trans "This season" %}</div>
         </div>
-        <div class="card p-4.5">
-            <div class="mb-1 font-display text-base font-extrabold tracking-[.08em] text-ink uppercase">{% trans "Games refereed per referee" %}</div>
-            <p class="mb-3 text-sm text-muted">{% trans "This season." %}</p>
+        <div class="card min-w-0 flex-1 p-4">
+            <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Games refereed" %}</div>
+            <div class="mt-1 font-display text-[34px] leading-none font-extrabold text-ink tabular-nums">{{ kpi_total_assignments }}</div>
+            <div class="mt-1 text-[13px] text-muted">{% trans "This season" %}</div>
+        </div>
+        <div class="card min-w-0 flex-1 p-4">
+            <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Average per referee" %}</div>
+            <div class="mt-1 font-display text-[34px] leading-none font-extrabold text-ink tabular-nums">{{ kpi_avg_games_per_referee }}</div>
+            <div class="mt-1 text-[13px] text-muted">{% trans "This season" %}</div>
+        </div>
+        <div class="card min-w-0 flex-[3] p-4">
+            <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Games refereed per referee" %}</div>
             {% if referee_stats %}
-                <div class="h-56">
+                <div class="mt-1 h-20">
                     <canvas id="referee-games-chart"></canvas>
                 </div>
-                <div class="mt-3 max-h-40 overflow-y-auto border-t border-rule">
-                    {% for row in referee_stats %}
-                        <div class="flex items-center justify-between gap-3 py-1.5 {% if not forloop.last %}border-b border-rule{% endif %}">
-                            <span class="truncate text-[13px] text-ink">{{ row.member__first_name }} {{ row.member__last_name }}</span>
-                            <span class="shrink-0 font-mono text-xs text-muted">{% blocktrans count counter=row.games %}{{ counter }} game{% plural %}{{ counter }} games{% endblocktrans %}{% if row.total_fees %} &middot; &euro;{{ row.total_fees|floatformat:2 }}{% endif %}</span>
-                        </div>
-                    {% endfor %}
-                </div>
             {% else %}
-                <p class="py-6 text-center text-sm text-muted">{% trans "No referee assignments recorded yet this season." %}</p>
+                <p class="mt-1 text-[13px] text-muted">{% trans "No referee assignments recorded yet this season." %}</p>
             {% endif %}
         </div>
     </div>
@@ -175,10 +168,21 @@
                         responsive: true,
                         maintainAspectRatio: false,
                         indexAxis: "y",
-                        plugins: {legend: {display: false}},
+                        plugins: {
+                            legend: {display: false},
+                            tooltip: {
+                                callbacks: {
+                                    label: (context) => {
+                                        const fee = data.referee_games.fees[context.dataIndex];
+                                        const label = `{{ games_label|escapejs }}: ${context.parsed.x}`;
+                                        return fee ? `${label} — €${fee.toFixed(2)}` : label;
+                                    },
+                                },
+                            },
+                        },
                         scales: {
                             x: {beginAtZero: true, ticks: {color: ink, precision: 0}, grid: {color: grid}},
-                            y: {ticks: {color: ink}, grid: {display: false}},
+                            y: {ticks: {color: ink, font: {size: 11}}, grid: {display: false}},
                         },
                     },
                 });

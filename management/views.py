@@ -2791,12 +2791,16 @@ class RefereeManagementDashboardView(MemberAdminRequiredMixin, TemplateView):
         kpi_active_referees = len(stats)
         kpi_total_assignments = sum(row["games"] for row in stats)
         kpi_avg_games_per_referee = round(kpi_total_assignments / kpi_active_referees, 1) if kpi_active_referees else 0
-        # Top 15 for the chart's own readability -- the table below it lists
-        # every referee, so nothing is actually hidden, just not plotted.
+        # Top 15 for the chart's own readability -- fees ride along per bar
+        # for the tooltip (see referee_management.html's extra_body) rather
+        # than a separate list underneath, to keep this a compact single row
+        # next to the KPIs, not a second tall section pushing the actual
+        # games-needing-a-referee list off screen.
         charts = {
             "referee_games": {
                 "labels": [f"{row['member__first_name']} {row['member__last_name']}" for row in stats[:15]],
                 "games": [row["games"] for row in stats[:15]],
+                "fees": [float(row["total_fees"] or 0) for row in stats[:15]],
             }
         }
 
