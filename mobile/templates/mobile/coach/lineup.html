@@ -2,21 +2,20 @@
 {% load i18n %}
 
 {% comment %}
-    C3 -- design_handoff_rosterchief_platform/README.md's C3 section: units
-    (Line 1, Defence pair 1, ...) of ordered slots, each filled via a native
-    <select> rather than the mock's drag-and-drop -- see
-    CoachLineupView's own docstring for why, and for the known "+ Add line"/
-    "+ Add slot" rough edge (they don't save the other slots' picks first).
-    The mock's "fully dark screen" is approximated with dark cards
-    throughout rather than overriding the shared .coach-sheet's own light
-    background -- a real per-screen shell hook is more infrastructure than
-    one screen justifies.
+    C3 -- design_handoff_rosterchief_platform/README.md's C3 section, kept
+    deliberately simple per product feedback: a plain yes/no toggle per
+    available roster player, grouped by position ("category") rather than
+    the mock's lines/slots -- see CoachLineupView's own docstring for why an
+    earlier tap-to-place build was replaced. The mock's "fully dark screen"
+    is approximated with dark cards throughout rather than overriding the
+    shared .coach-sheet's own light background -- a real per-screen shell
+    hook is more infrastructure than one screen justifies.
 
-    Both forms are hx-boost="false" -- the first has three submit buttons
-    sharing one <form> via formaction overrides (Save/​+Add slot/​+Add line),
-    and htmx's boost reads the form's own action rather than the actual
-    submitter's formaction override, so a boosted click would always post
-    to the wrong endpoint. A plain navigation sidesteps that entirely.
+    The one form is hx-boost="false", same reasoning as every other
+    write-action form in this app (see mobile/templates/mobile/event_detail.
+    html's own top-of-file comment) -- each row's Yes/No pair is
+    Alpine-owned (x-data toggling a hidden input), and this codebase hasn't
+    established an htmx interaction pattern to layer on top of that safely.
 {% endcomment %}
 
 {% block header_extra %}
@@ -31,33 +30,36 @@
     <form method="post" action="{% url "mobile:coach_lineup" event.pk %}" hx-boost="false">
         {% csrf_token %}
         <div class="flex flex-col gap-3">
-            {% for unit in units %}
+            {% for category in categories %}
                 <div class="m-card-dark p-3">
-                    <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-ice uppercase">{{ unit.label }}</div>
+                    <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-ice uppercase">{{ category.label }}</div>
                     <div class="flex flex-col gap-2">
-                        {% for slot in unit.slots.all %}
-                            <select class="h-10 w-full rounded-lg border border-steel bg-steel px-2 text-sm text-white" name="slot_{{ slot.pk }}" {% if not can_manage_active_team %}disabled{% endif %}>
-                                <option value="">{% trans "Empty" %}</option>
-                                {% for attendance in available %}
-                                    <option value="{{ attendance.member.pk }}" {% if slot.member_id == attendance.member.pk %}selected{% endif %}>{{ attendance.member.get_full_name }}</option>
-                                {% endfor %}
-                            </select>
+                        {% for row in category.rows %}
+                            <div class="flex items-center gap-3" {% if can_manage_active_team %}x-data="{ state: '{{ row.selected|yesno:'true,false' }}' }"{% endif %}>
+                                <div class="min-w-0 flex-1 text-sm text-white">
+                                    {{ row.member.get_full_name }}
+                                    {% if row.membership.jersey_number %}<span class="text-on-dark-dim">&middot; #{{ row.membership.jersey_number }}</span>{% endif %}
+                                </div>
+                                {% if can_manage_active_team %}
+                                    <input type="hidden" name="selected_{{ row.member.pk }}" :value="state">
+                                    <div class="flex h-9 w-24 shrink-0 overflow-hidden rounded-lg">
+                                        <button type="button" class="flex-1 font-display text-xs font-extrabold tracking-wide uppercase" :class="state === 'true' ? 'bg-ok text-white' : 'bg-steel text-on-dark-dim'" @click="state = 'true'">{% trans "Yes" %}</button>
+                                        <button type="button" class="flex-1 font-display text-xs font-extrabold tracking-wide uppercase" :class="state === 'false' ? 'bg-club text-white' : 'bg-steel text-on-dark-dim'" @click="state = 'false'">{% trans "No" %}</button>
+                                    </div>
+                                {% elif row.selected %}
+                                    <span class="pill pill-ok shrink-0">{% trans "Yes" %}</span>
+                                {% endif %}
+                            </div>
                         {% endfor %}
                     </div>
-                    {% if can_manage_active_team %}
-                        <button class="mt-2 font-display text-xs font-extrabold tracking-wide text-ice uppercase" type="submit" formaction="{% url "mobile:coach_lineup_add_slot" unit.pk %}">{% trans "+ Add slot" %}</button>
-                    {% endif %}
                 </div>
             {% empty %}
-                <div class="m-card-dark p-6 text-center text-sm text-on-dark-dim">{% trans "No lines yet." %}</div>
+                <div class="m-card-dark p-6 text-center text-sm text-on-dark-dim">{% trans "No available players to pick from." %}</div>
             {% endfor %}
         </div>
 
         {% if can_manage_active_team %}
-            <div class="mt-3 flex gap-2">
-                <button class="btn flex-1 bg-steel text-on-dark" type="submit" formaction="{% url "mobile:coach_lineup_add_unit" event.pk %}">{% trans "+ Add line" %}</button>
-                <button class="btn btn-dark flex-1" type="submit">{% trans "Save line-up" %}</button>
-            </div>
+            <button class="btn btn-dark mt-3 w-full" type="submit">{% trans "Save line-up" %}</button>
         {% endif %}
     </form>
 

@@ -200,12 +200,13 @@ class Attendance(UUIDModel):
 
 class Lineup(UUIDModel):
     """A game's line-up -- coach mode's C3 screen (mobile/coach_views.py's
-    CoachLineupView). One per event; ``units`` (Line 1, Defence pair 1, ...)
-    hold ordered ``slots``, each optionally filled by a member. Publishing
-    (events.services.lineup.publish_lineup) flips every slotted member's
-    Attendance.status to SELECTED and every other available roster member's
-    to NOT_SELECTED -- the reason those two statuses exist on Attendance in
-    the first place, previously unused."""
+    CoachLineupView): a plain yes/no pick per roster player (``selections``),
+    not lines/slots -- a coach doesn't need to think in terms of who's on
+    which line, just who's in. Publishing (events.services.lineup.
+    publish_lineup) flips every selected member's Attendance.status to
+    SELECTED and every other available roster member's to NOT_SELECTED --
+    the reason those two statuses exist on Attendance in the first place,
+    previously unused."""
 
     event = models.OneToOneField(Event, on_delete=models.CASCADE, related_name="lineup", verbose_name=_("event"))
     team = models.ForeignKey(Team, on_delete=models.CASCADE, related_name="lineups", verbose_name=_("team"))
@@ -223,45 +224,25 @@ class Lineup(UUIDModel):
         validate_club_scope(self, self.event.club_id if self.event_id else None, same_club_fields=("team",))
 
 
-class LineupUnit(UUIDModel):
-    """One group of slots within a Lineup -- "Line 1", "Defence pair 1", ...
-    Coach-entered labels, not a fixed sport structure: neither Club nor Team
-    carries a sport field to derive one from."""
+class LineupSelection(UUIDModel):
+    """One roster player the coach has marked "in" for a Lineup -- presence
+    of the row *is* the yes; there's no separate flag and no "no" row.
+    Grouped by the member's own roster position ("category") when displayed,
+    both in coach mode and on the published member-side view -- see
+    events.services.lineup for the publish-time read of this set."""
 
-    lineup = models.ForeignKey(Lineup, on_delete=models.CASCADE, related_name="units", verbose_name=_("line-up"))
-    label = models.CharField(_("label"), max_length=100)
-    ordering = models.PositiveSmallIntegerField(_("ordering"), default=0)
-
-    class Meta:
-        verbose_name = _("line-up unit")
-        verbose_name_plural = _("line-up units")
-        ordering = ["ordering"]
-
-    def __str__(self):
-        return self.label
-
-
-class LineupSlot(UUIDModel):
-    """One position within a LineupUnit, optionally filled by a member.
-    Placement/swapping is tap-to-place (mobile/coach_views.py's
-    CoachLineupPlaceView), not drag-and-drop -- see that view's own
-    docstring for why. A member is only ever in one slot per lineup at a
-    time; enforcing that (clearing any prior slot of theirs on placement) is
-    the placement service's job, not a DB constraint -- "which unit a member
-    is in" spans this table's own FK, awkward to express as a single
-    UniqueConstraint."""
-
-    unit = models.ForeignKey(LineupUnit, on_delete=models.CASCADE, related_name="slots", verbose_name=_("unit"))
-    ordering = models.PositiveSmallIntegerField(_("ordering"), default=0)
-    member = models.ForeignKey(Member, on_delete=models.SET_NULL, null=True, blank=True, related_name="lineup_slots", verbose_name=_("member"))
+    lineup = models.ForeignKey(Lineup, on_delete=models.CASCADE, related_name="selections", verbose_name=_("line-up"))
+    member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="lineup_selections", verbose_name=_("member"))
 
     class Meta:
-        verbose_name = _("line-up slot")
-        verbose_name_plural = _("line-up slots")
-        ordering = ["ordering"]
+        verbose_name = _("line-up selection")
+        verbose_name_plural = _("line-up selections")
+        constraints = [
+            models.UniqueConstraint(fields=["lineup", "member"], name="unique_selection_per_lineup_per_member"),
+        ]
 
     def __str__(self):
-        return f"{self.unit} - {self.member or 'empty'}"
+        return f"{self.lineup} - {self.member}"
 
 
 class EventReferee(UUIDModel):

@@ -31,7 +31,5 @@ urlpatterns = [
     path("coach/news/new/", coach_views.CoachCreateNewsView.as_view(), name="coach_create_news"),
     path("coach/roster/add/", coach_views.CoachAddPlayerView.as_view(), name="coach_add_player"),
     path("coach/lineup/<uuid:event_id>/", coach_views.CoachLineupView.as_view(), name="coach_lineup"),
-    path("coach/lineup/<uuid:event_id>/units/add/", coach_views.CoachLineupAddUnitView.as_view(), name="coach_lineup_add_unit"),
-    path("coach/lineup/units/<uuid:unit_id>/slots/add/", coach_views.CoachLineupAddSlotView.as_view(), name="coach_lineup_add_slot"),
     path("coach/lineup/<uuid:event_id>/publish/", coach_views.CoachLineupPublishView.as_view(), name="coach_lineup_publish"),
 ]

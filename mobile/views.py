@@ -29,7 +29,7 @@ from club.services.sponsors import active_sponsors
 from controlpanel.messages import notify
 from events.models import Attendance, Event, Lineup
 from events.services.calendar import week_bounds
-from events.services.lineup import notify_dropout
+from events.services.lineup import notify_dropout, selected_members_by_position
 from members.models import FamilyMembership, Member
 from members.views import ClubScopedPublicMixin
 from news.models import News
@@ -400,7 +400,8 @@ class EventDetailView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         # A published line-up supersedes ordinary RSVP -- the roster's locked
         # in, so "Your answers" below switches to read-only and the line-up
         # itself gets its own card.
-        lineup = Lineup.objects.filter(event=event, published_at__isnull=False).prefetch_related("units__slots__member").first()
+        lineup = Lineup.objects.filter(event=event, published_at__isnull=False).first()
+        lineup_categories = selected_members_by_position(lineup) if lineup is not None else []
 
         your_answers = []
         if self.managed_people:
@@ -440,7 +441,7 @@ class EventDetailView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
                     "no_reply_pct": round(100 * counts["no_reply_count"] / total),
                 }
 
-        return super().get_context_data(screen_title=event.title, event=event, rsvp_closed=rsvp_closed, lineup=lineup, your_answers=your_answers, squad_summary=squad_summary, **kwargs)
+        return super().get_context_data(screen_title=event.title, event=event, rsvp_closed=rsvp_closed, lineup=lineup, lineup_categories=lineup_categories, your_answers=your_answers, squad_summary=squad_summary, **kwargs)
 
     def post(self, request, *args, **kwargs):
         status = request.POST.get("status")

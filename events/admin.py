@@ -2,7 +2,7 @@ from django import forms
 from django.contrib import admin
 from django.utils.translation import gettext_lazy as _
 
-from .models import Attendance, Competition, Event, EventReferee, EventSeries, Lineup, LineupSlot, LineupUnit, Location, Opponent
+from .models import Attendance, Competition, Event, EventReferee, EventSeries, Lineup, LineupSelection, Location, Opponent
 
 
 @admin.register(Opponent)
@@ -118,18 +118,11 @@ class LineupAdmin(admin.ModelAdmin):
     raw_id_fields = ["event", "team", "created_by"]
 
 
-@admin.register(LineupUnit)
-class LineupUnitAdmin(admin.ModelAdmin):
-    list_display = ["lineup", "label", "ordering"]
-    search_fields = ["lineup__event__title", "label"]
-    raw_id_fields = ["lineup"]
-
-
-@admin.register(LineupSlot)
-class LineupSlotAdmin(admin.ModelAdmin):
-    list_display = ["unit", "ordering", "member"]
-    search_fields = ["unit__label", "member__first_name", "member__last_name"]
-    raw_id_fields = ["unit", "member"]
+@admin.register(LineupSelection)
+class LineupSelectionAdmin(admin.ModelAdmin):
+    list_display = ["lineup", "member"]
+    search_fields = ["lineup__event__title", "member__first_name", "member__last_name"]
+    raw_id_fields = ["lineup", "member"]
 
 
 @admin.register(EventReferee)

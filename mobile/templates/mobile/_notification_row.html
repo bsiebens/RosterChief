@@ -6,19 +6,20 @@
     POST form can't wrap another form/link) -- tapping always marks it read,
     and also navigates to the linked News/Event when its source resolves to
     one (see mobile.views._notification_source_link and
-    NotificationsView.post). A club-coloured bar marks it unread, same
-    treatment as management/templates/management/home.html's own
-    notifications card.
+    NotificationsView.post). A club-coloured bar marks it unread -- full
+    height via self-stretch, same technique as mobile/_calendar_row.html's
+    own kind marker, so it still spans the row now that the body text below
+    is shown in full (no truncatechars) and can wrap to several lines.
 {% endcomment %}
 <form method="post" action="{% url "mobile:notifications" %}" hx-boost="false">
     {% csrf_token %}
     <input type="hidden" name="action" value="mark_read">
     <input type="hidden" name="notification_id" value="{{ row.notification.pk }}">
     <button type="submit" class="m-card flex w-full items-center gap-3 p-3.5 text-left">
-        <span class="h-8.5 w-1.5 shrink-0 rounded-sm {% if not row.notification.read_at %}bg-club{% else %}bg-line{% endif %}"></span>
+        <span class="w-[3px] shrink-0 self-stretch rounded-full {% if not row.notification.read_at %}bg-club{% else %}bg-line{% endif %}"></span>
         <span class="min-w-0 flex-1">
             <span class="block text-sm font-semibold text-ink">{{ row.notification.title }}</span>
-            <span class="block truncate text-xs text-muted">{{ row.notification.body|truncatechars:120 }}</span>
+            <span class="block text-xs text-muted">{{ row.notification.body }}</span>
             {% if row.source_label %}<span class="block font-display text-[11px] font-extrabold text-club uppercase tracking-wide">{{ row.source_label }}</span>{% endif %}
         </span>
         <span class="shrink-0 font-mono text-[11px] text-dim">{% blocktrans with time=row.notification.created|timesince %}{{ time }} ago{% endblocktrans %}</span>

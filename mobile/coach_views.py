@@ -18,12 +18,11 @@ from django.views.generic import TemplateView, View
 from club.models import Season
 from club.services.access import can_add_news, current_season
 from controlpanel.messages import notify
-from events.models import Attendance, Event, Lineup, LineupSlot, LineupUnit
+from events.models import Attendance, Event, Lineup, LineupSelection
 from events.services.attendance import record_check_in
-from events.services.lineup import UNAVAILABLE_STATUSES, clear_slot, place_member, publish_lineup
+from events.services.lineup import UNAVAILABLE_STATUSES, publish_lineup, toggle_selection
 from events.tasks import notify_new_event
 from management.forms import EventForm, NewsForm
-from members.models import Member
 from news.models import News
 from news.services import notify_editors_of_pending_review
 from teams.models import StaffAssignment, Team, TeamMembership
@@ -427,24 +426,18 @@ class CoachAddPlayerView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
 
 
 class CoachLineupView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
-    """C3 -- a game's line-up: units (Line 1, Defence pair 1, ...) of ordered
-    slots, each assigned via a native <select> rather than the design mock's
-    drag-and-drop (see events.services.lineup's own module docstring for
-    why). One batch "Save line-up" submit, not a live per-tap POST -- this
-    codebase has no established htmx interaction pattern yet to build one on
-    (htmx.js is loaded but nothing uses it), and a reliable plain form beats
-    a first, unproven real-time interaction for a screen already this large.
-
-    Known rough edge, accepted for this stage: clicking "+ Add line"/"+ Add
-    slot" reloads the page via its own POST, which does NOT also save
-    whatever the coach had just picked in the other slots' <select>s (those
-    two actions don't read the assignment fields at all) -- add lines/slots
-    before filling them in, not after, or save first.
+    """C3 -- a game's line-up, kept deliberately simple: a plain yes/no pick
+    per available roster player, grouped by their roster position ("category")
+    so the coach reads it the same way the roster itself is grouped -- no
+    lines, no slots, no drag-and-drop (an earlier build had units/slots with
+    tap-to-place; replaced because it was harder to read than it needed to
+    be for what's really just a selection call). One batch "Save line-up"
+    submit, not a live per-tap POST -- same reasoning as coach/attendance.html.
 
     A Lineup is created lazily on first visit (get_or_create) -- there's no
     separate "start a line-up" step. Viewing is open to anyone staffing the
-    team; every mutation (save/add line/add slot/publish) is gated on
-    can_manage_active_team, hidden in the template and 403'd here regardless.
+    team; saving/publishing is gated on can_manage_active_team, hidden in the
+    template and 403'd here regardless.
     """
 
     template_name = "mobile/coach/lineup.html"
@@ -456,18 +449,39 @@ class CoachLineupView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
             raise Http404
         return get_object_or_404(Event, pk=self.kwargs["event_id"], club=self.request.club, teams=self.active_team, kind=Event.EventKind.GAME)
 
+    def _categories(self, event, lineup):
+        """Available roster players, grouped by position -- same "category"
+        the member-side published view groups by (mobile/views.py's
+        EventDetailView). A player with no TeamMembership for this team/
+        season (a guest call-up) lands in a catch-all "No position set"
+        bucket rather than being dropped."""
+        season = current_season(self.request.club)
+        memberships_by_member = {}
+        if season is not None:
+            memberships_by_member = {tm.member_id: tm for tm in TeamMembership.objects.filter(team=self.active_team, season=season).select_related("position")}
+
+        selected_ids = set(LineupSelection.objects.filter(lineup=lineup).values_list("member_id", flat=True))
+        available = Attendance.objects.filter(event=event).exclude(status__in=UNAVAILABLE_STATUSES).select_related("member").order_by("member__last_name", "member__first_name")
+
+        buckets = {}
+        for attendance in available:
+            membership = memberships_by_member.get(attendance.member_id)
+            position = membership.position if membership else None
+            key = position.pk if position else None
+            bucket = buckets.setdefault(key, {"label": position.name if position else _("No position set"), "ordering": position.ordering if position else 9999, "rows": []})
+            bucket["rows"].append({"member": attendance.member, "membership": membership, "selected": attendance.member_id in selected_ids})
+
+        return sorted(buckets.values(), key=lambda bucket: (bucket["ordering"], bucket["label"]))
+
     def get_context_data(self, **kwargs):
         event = self.get_event()
         lineup, _created = Lineup.objects.get_or_create(event=event, defaults={"team": self.active_team, "created_by": self.me})
-        units = list(lineup.units.prefetch_related("slots__member"))
-        available = list(Attendance.objects.filter(event=event).exclude(status__in=UNAVAILABLE_STATUSES).select_related("member").order_by("member__last_name", "member__first_name"))
         unavailable = list(Attendance.objects.filter(event=event, status__in=UNAVAILABLE_STATUSES).select_related("member"))
 
         return super().get_context_data(
             event=event,
             lineup=lineup,
-            units=units,
-            available=available,
+            categories=self._categories(event, lineup),
             unavailable=unavailable,
             **kwargs,
         )
@@ -478,48 +492,21 @@ class CoachLineupView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
 
         event = self.get_event()
         lineup, _created = Lineup.objects.get_or_create(event=event, defaults={"team": self.active_team, "created_by": self.me})
-        available_ids = {str(pk) for pk in Attendance.objects.filter(event=event).exclude(status__in=UNAVAILABLE_STATUSES).values_list("member_id", flat=True)}
+        selected_ids = set(LineupSelection.objects.filter(lineup=lineup).values_list("member_id", flat=True))
+        available = Attendance.objects.filter(event=event).exclude(status__in=UNAVAILABLE_STATUSES).select_related("member")
 
-        for slot in LineupSlot.objects.filter(unit__lineup=lineup):
-            submitted = request.POST.get(f"slot_{slot.pk}", "")
-            if submitted == str(slot.member_id or ""):
-                continue
-            if not submitted:
-                clear_slot(slot)
-            elif submitted in available_ids:
-                place_member(lineup, slot, Member.objects.get(pk=submitted))
+        selected_count = 0
+        for attendance in available:
+            wants_selected = request.POST.get(f"selected_{attendance.member_id}") == "true"
+            if wants_selected != (attendance.member_id in selected_ids):
+                toggle_selection(lineup, attendance.member)
+            if wants_selected:
+                selected_count += 1
 
-        notify(request, f"s|{_('Line-up saved')}|{_('Your changes have been saved.')}")
+        title = _("Line-up saved")
+        body = _("%(count)d player(s) selected.") % {"count": selected_count}
+        notify(request, f"s|{title}|{body}")
         return HttpResponseRedirect(reverse("mobile:coach_lineup", kwargs={"event_id": event.pk}))
-
-
-class CoachLineupAddUnitView(CoachScopeMixin, LoginRequiredMixin, View):
-    """A blank "+ Add line" -- one new unit, auto-labelled and seeded with a
-    single empty slot; grown further via CoachLineupAddSlotView. No fixed
-    sport structure to seed from (see LineupUnit's own docstring)."""
-
-    def post(self, request, *args, **kwargs):
-        if not self.can_manage_active_team:
-            return HttpResponseForbidden()
-
-        event = get_object_or_404(Event, pk=kwargs["event_id"], club=request.club, teams=self.active_team, kind=Event.EventKind.GAME)
-        lineup, _created = Lineup.objects.get_or_create(event=event, defaults={"team": self.active_team, "created_by": self.me})
-        ordering = lineup.units.count()
-        unit = LineupUnit.objects.create(lineup=lineup, label=_("Line %(number)d") % {"number": ordering + 1}, ordering=ordering)
-        LineupSlot.objects.create(unit=unit, ordering=0)
-        return HttpResponseRedirect(reverse("mobile:coach_lineup", kwargs={"event_id": event.pk}))
-
-
-class CoachLineupAddSlotView(CoachScopeMixin, LoginRequiredMixin, View):
-    """One more empty slot on an existing unit."""
-
-    def post(self, request, *args, **kwargs):
-        if not self.can_manage_active_team:
-            return HttpResponseForbidden()
-
-        unit = get_object_or_404(LineupUnit, pk=kwargs["unit_id"], lineup__team=self.active_team)
-        LineupSlot.objects.create(unit=unit, ordering=unit.slots.count())
-        return HttpResponseRedirect(reverse("mobile:coach_lineup", kwargs={"event_id": unit.lineup.event_id}))
 
 
 class CoachLineupPublishView(CoachScopeMixin, LoginRequiredMixin, View):

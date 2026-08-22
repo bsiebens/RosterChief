@@ -9,7 +9,7 @@ from django.utils import timezone, translation
 from icalendar import Calendar as ICalCalendar
 
 from club.models import Club, ClubMembership, DuesInvoice, MemberRequirementStatus, OnboardingRequirement, Season, Sponsor
-from events.models import Attendance, Event, Lineup, LineupSlot, LineupUnit
+from events.models import Attendance, Event, Lineup, LineupSelection
 from members.models import Family, FamilyMembership, Member
 from news.models import News
 from notifications.models import Notification
@@ -1113,24 +1113,23 @@ class EventDetailScreenTests(TestCase):
 
     def test_unpublished_lineup_is_not_shown(self):
         lineup = Lineup.objects.create(event=self.event, team=self.team)
-        unit = LineupUnit.objects.create(lineup=lineup, label="Line 1")
-        LineupSlot.objects.create(unit=unit, member=self.member)
+        LineupSelection.objects.create(lineup=lineup, member=self.member)
         self.client.force_login(self.user)
 
         response = self._get()
 
         self.assertIsNone(response.context["lineup"])
 
-    def test_published_lineup_shows_its_units_and_slotted_members(self):
+    def test_published_lineup_shows_its_selected_members_grouped_by_position(self):
+        TeamMembership.objects.create(team=self.team, member=self.member, season=self.season, position=self.position)
         lineup = Lineup.objects.create(event=self.event, team=self.team, published_at=timezone.now())
-        unit = LineupUnit.objects.create(lineup=lineup, label="Line 1")
-        LineupSlot.objects.create(unit=unit, member=self.member)
+        LineupSelection.objects.create(lineup=lineup, member=self.member)
         self.client.force_login(self.user)
 
         response = self._get()
 
         self.assertEqual(response.context["lineup"], lineup)
-        self.assertContains(response, "Line 1")
+        self.assertContains(response, "Forward")
         self.assertContains(response, self.member.get_full_name())
 
     def test_rsvp_buttons_are_replaced_by_a_readonly_pill_once_the_lineup_is_published(self):
@@ -1254,6 +1253,15 @@ class NotificationsViewTests(TestCase):
 
         self.assertContains(response, "For Lars")
         self.assertContains(response, "For Noor")
+
+    def test_body_text_is_shown_in_full_not_truncated(self):
+        long_body = "This is a long notification body. " * 10
+        Notification.objects.create(club=self.club, member=self.member, title="Long one", body=long_body)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, long_body)
 
     def test_notification_for_someone_not_managed_is_excluded(self):
         stranger = Member.objects.create(first_name="Someone", last_name="Else")
@@ -2749,8 +2757,8 @@ class CoachAddPlayerViewTests(TestCase):
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
 class CoachLineupViewTests(TestCase):
     """C3 -- design_handoff_rosterchief_platform/README.md's C3 section; see
-    CoachLineupView's own docstring for the tap-to-place -> native-select
-    simplification and its known rough edges."""
+    CoachLineupView's own docstring for the plain yes/no-per-player design
+    (no lines/slots)."""
 
     @classmethod
     def setUpTestData(cls):
@@ -2798,73 +2806,52 @@ class CoachLineupViewTests(TestCase):
 
         self.assertEqual(response.status_code, 404)
 
-    def test_add_line_creates_a_unit_with_one_slot(self):
+    def test_get_groups_available_players_by_position(self):
         self.client.force_login(self.user)
 
-        response = self.client.post(reverse("mobile:coach_lineup_add_unit", kwargs={"event_id": self.event.pk}), HTTP_HOST="ajax-united.rosterchief.app")
+        response = self.client.get(reverse("mobile:coach_lineup", kwargs={"event_id": self.event.pk}), HTTP_HOST="ajax-united.rosterchief.app")
 
-        self.assertRedirects(response, reverse("mobile:coach_lineup", kwargs={"event_id": self.event.pk}), fetch_redirect_response=False)
-        lineup = Lineup.objects.get(event=self.event)
-        self.assertEqual(lineup.units.count(), 1)
-        self.assertEqual(lineup.units.first().slots.count(), 1)
+        categories = response.context["categories"]
+        self.assertEqual(len(categories), 1)
+        self.assertEqual(categories[0]["label"], "No position set")
+        self.assertEqual([row["member"] for row in categories[0]["rows"]], [self.player])
+        self.assertFalse(categories[0]["rows"][0]["selected"])
 
-    def test_add_slot_grows_an_existing_unit(self):
-        self.client.force_login(self.user)
-        lineup = Lineup.objects.create(event=self.event, team=self.team)
-        unit = LineupUnit.objects.create(lineup=lineup, label="Line 1")
-
-        response = self.client.post(reverse("mobile:coach_lineup_add_slot", kwargs={"unit_id": unit.pk}), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertRedirects(response, reverse("mobile:coach_lineup", kwargs={"event_id": self.event.pk}), fetch_redirect_response=False)
-        self.assertEqual(unit.slots.count(), 1)
-
-    def test_save_places_the_selected_member_in_the_slot(self):
+    def test_save_selects_the_submitted_players(self):
         self.client.force_login(self.user)
         lineup = Lineup.objects.create(event=self.event, team=self.team)
-        unit = LineupUnit.objects.create(lineup=lineup, label="Line 1")
-        slot = LineupSlot.objects.create(unit=unit)
 
         response = self.client.post(
             reverse("mobile:coach_lineup", kwargs={"event_id": self.event.pk}),
-            {f"slot_{slot.pk}": str(self.player.pk)},
+            {f"selected_{self.player.pk}": "true"},
             HTTP_HOST="ajax-united.rosterchief.app",
         )
 
         self.assertRedirects(response, reverse("mobile:coach_lineup", kwargs={"event_id": self.event.pk}), fetch_redirect_response=False)
-        slot.refresh_from_db()
-        self.assertEqual(slot.member, self.player)
+        self.assertTrue(LineupSelection.objects.filter(lineup=lineup, member=self.player).exists())
 
-    def test_save_clears_a_slot_when_empty_is_submitted(self):
+    def test_save_deselects_a_player_when_not_submitted(self):
         self.client.force_login(self.user)
         lineup = Lineup.objects.create(event=self.event, team=self.team)
-        unit = LineupUnit.objects.create(lineup=lineup, label="Line 1")
-        slot = LineupSlot.objects.create(unit=unit, member=self.player)
+        LineupSelection.objects.create(lineup=lineup, member=self.player)
 
-        response = self.client.post(
-            reverse("mobile:coach_lineup", kwargs={"event_id": self.event.pk}),
-            {f"slot_{slot.pk}": ""},
-            HTTP_HOST="ajax-united.rosterchief.app",
-        )
+        response = self.client.post(reverse("mobile:coach_lineup", kwargs={"event_id": self.event.pk}), {}, HTTP_HOST="ajax-united.rosterchief.app")
 
         self.assertRedirects(response, reverse("mobile:coach_lineup", kwargs={"event_id": self.event.pk}), fetch_redirect_response=False)
-        slot.refresh_from_db()
-        self.assertIsNone(slot.member)
+        self.assertFalse(LineupSelection.objects.filter(lineup=lineup, member=self.player).exists())
 
     def test_save_ignores_a_member_id_outside_the_available_pool(self):
         outsider = Member.objects.create(first_name="Not", last_name="Available")
         self.client.force_login(self.user)
         lineup = Lineup.objects.create(event=self.event, team=self.team)
-        unit = LineupUnit.objects.create(lineup=lineup, label="Line 1")
-        slot = LineupSlot.objects.create(unit=unit)
 
         self.client.post(
             reverse("mobile:coach_lineup", kwargs={"event_id": self.event.pk}),
-            {f"slot_{slot.pk}": str(outsider.pk)},
+            {f"selected_{outsider.pk}": "true"},
             HTTP_HOST="ajax-united.rosterchief.app",
         )
 
-        slot.refresh_from_db()
-        self.assertIsNone(slot.member)
+        self.assertFalse(LineupSelection.objects.filter(lineup=lineup, member=outsider).exists())
 
     def test_publish_marks_the_lineup_published(self):
         self.client.force_login(self.user)
