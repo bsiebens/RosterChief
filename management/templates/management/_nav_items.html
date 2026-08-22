@@ -100,6 +100,12 @@
                     <a class="nav-subitem {% if nav == 'position_list' %}active{% endif %}" href="{% url 'management:position_list' %}">{% trans "Positions" %}</a>
                 {% endif %}
                 <a class="nav-subitem {% if nav == 'referee_level_list' %}active{% endif %}" href="{% url 'management:referee_level_list' %}">{% trans "Referee levels" %}</a>
+                {% comment %}
+                    Deliberately not behind a waffle flag like Forms above -- this is a standing
+                    "not built yet" reminder, so it stays visible rather than disappearing until
+                    someone remembers to flip a flag on. See management.views.EvaluationsComingSoonView.
+                {% endcomment %}
+                <a class="nav-subitem flex items-center gap-1.5 {% if nav == 'evaluations' %}active{% endif %}" href="{% url 'management:evaluations' %}">{% trans "Evaluations" %} <span class="badge badge-neutral badge-xs">{% trans "Soon" %}</span></a>
                 {% if is_club_admin %}
                     {% if forms_enabled %}
                         <a class="nav-subitem {% if nav == 'form_list' %}active{% endif %}" href="{% url 'management:form_list' %}">{% trans "Forms" %}</a>

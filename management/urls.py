@@ -135,6 +135,8 @@ urlpatterns = [
     # Forms
     path("forms/", views.FormListView.as_view(), name="form_list"),
     path("forms/<uuid:pk>/submissions/", views.SubmissionListView.as_view(), name="submission_list"),
+    # Evaluations (placeholder -- see ARCHITECTURE.md §5.8, nothing built yet)
+    path("evaluations/", views.EvaluationsComingSoonView.as_view(), name="evaluations"),
     # Settings (admin only)
     path("settings/", views.ClubSettingsView.as_view(), name="club_settings"),
     path("settings/email-previews/<str:key>/render/", views.EmailPreviewRenderView.as_view(), name="email_preview_render"),

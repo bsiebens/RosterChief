@@ -6716,6 +6716,42 @@ class FeatureGatedSectionsTests(ManagementTestBase):
         self.assertNotContains(response, "Forms")
 
 
+class EvaluationsComingSoonViewTests(ManagementTestBase):
+    """Placeholder nav entry/page for player evaluations (design: ARCHITECTURE.md
+    §5.8) -- see management.views.EvaluationsComingSoonView."""
+
+    def make_plain_staff(self, email="physio-eval@example.com"):
+        staff_user = User.objects.create_user(email=email, password="pw-secret-123")
+        staff_member = Member.objects.create(user=staff_user, first_name="Pat", last_name="Physio")
+        ClubMembership.objects.create(club=self.club, member=staff_member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        team = Team.objects.create(club=self.club, name="Physio Team", short_name="PHY")
+        position = Position.objects.create(club=self.club, name="Physio", short_name="PH", staff_position=True, management_position=False)
+        StaffAssignment.objects.create(team=team, member=staff_member, season=self.season, position=position)
+        return staff_user
+
+    def test_member_admin_can_reach_it(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("evaluations")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Player evaluations")
+
+    def test_plain_staff_gets_403(self):
+        self.client.force_login(self.make_plain_staff())
+
+        response = self.club_get("evaluations")
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_nav_shows_the_placeholder_unconditionally_no_flag_needed(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("club_settings")
+
+        self.assertContains(response, "Evaluations")
+
+
 RBIHF_SAMPLE_HTML = """<html><body>
 <div class="block"><div class="block-header"><h2>Sportoase Antwerp Phantoms</h2></div></div>
 <div class="block"><div class="block-header"><h2 id="games-upcoming">Upcoming games</h2></div>

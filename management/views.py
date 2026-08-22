@@ -3405,6 +3405,22 @@ class SubmissionListView(FeatureRequiredMixin, StubListMixin, ListView):
         return Submission.objects.filter(form__club=self.request.club, form_id=self.kwargs["pk"])
 
 
+class EvaluationsComingSoonView(MemberAdminRequiredMixin, TemplateView):
+    """Placeholder nav entry for player evaluations (design: ARCHITECTURE.md
+    §5.8) -- nothing else is built yet. Deliberately *not* a FeatureRequiredMixin/
+    waffle-flagged stub like the shop/forms sections above: those hide their nav
+    item until a platform operator turns the flag on for a club, which is exactly
+    wrong for a standing "don't forget to build this" reminder -- this stays
+    visible to every MEMBER_ADMIN/ADMIN on every club unconditionally. Reuses
+    _generic_list.html (StubListMixin's own template) with an empty object_list
+    rather than a real queryset, since there's no model behind this yet at all."""
+
+    template_name = "management/_generic_list.html"
+
+    def get_context_data(self, **kwargs):
+        return super().get_context_data(page_title=_("Player evaluations"), object_list=[], **kwargs)
+
+
 class ClubSettingsView(ClubAdminRequiredMixin, UpdateView):
     """A club's own self-service identity/branding editor -- the "Club identity"
     settings sub-item. Singleton by construction: always edits request.club, never
