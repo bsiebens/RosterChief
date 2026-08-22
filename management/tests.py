@@ -6747,7 +6747,7 @@ class EvaluationsComingSoonViewTests(ManagementTestBase):
     def test_nav_shows_the_placeholder_unconditionally_no_flag_needed(self):
         self.client.force_login(self.admin_user)
 
-        response = self.club_get("club_settings")
+        response = self.club_get("member_list")
 
         self.assertContains(response, "Evaluations")
 

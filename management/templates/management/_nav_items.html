@@ -32,6 +32,14 @@
             <a class="nav-subitem {% if nav == 'family_list' %}active{% endif %}" href="{% url 'management:family_list' %}">{% trans "Households" %}</a>
             {% if can_manage_members %}
                 <a class="nav-subitem {% if nav == 'group_list' %}active{% endif %}" href="{% url 'management:group_list' %}">{% trans "Groups" %}</a>
+                {% comment %}
+                    Placeholder -- nothing else is built yet (see ARCHITECTURE.md §5.8 and
+                    management.views.EvaluationsComingSoonView). Deliberately not behind a
+                    waffle flag like Forms below -- this is a standing "not built yet"
+                    reminder, so it stays visible rather than disappearing until someone
+                    remembers to flip a flag on.
+                {% endcomment %}
+                <a class="nav-subitem flex items-center gap-1.5 {% if nav == 'evaluations' %}active{% endif %}" href="{% url 'management:evaluations' %}">{% trans "Evaluations" %} <span class="badge badge-neutral badge-xs">{% trans "Soon" %}</span></a>
             {% endif %}
         </div>
     {% endif %}
@@ -100,12 +108,6 @@
                     <a class="nav-subitem {% if nav == 'position_list' %}active{% endif %}" href="{% url 'management:position_list' %}">{% trans "Positions" %}</a>
                 {% endif %}
                 <a class="nav-subitem {% if nav == 'referee_level_list' %}active{% endif %}" href="{% url 'management:referee_level_list' %}">{% trans "Referee levels" %}</a>
-                {% comment %}
-                    Deliberately not behind a waffle flag like Forms above -- this is a standing
-                    "not built yet" reminder, so it stays visible rather than disappearing until
-                    someone remembers to flip a flag on. See management.views.EvaluationsComingSoonView.
-                {% endcomment %}
-                <a class="nav-subitem flex items-center gap-1.5 {% if nav == 'evaluations' %}active{% endif %}" href="{% url 'management:evaluations' %}">{% trans "Evaluations" %} <span class="badge badge-neutral badge-xs">{% trans "Soon" %}</span></a>
                 {% if is_club_admin %}
                     {% if forms_enabled %}
                         <a class="nav-subitem {% if nav == 'form_list' %}active{% endif %}" href="{% url 'management:form_list' %}">{% trans "Forms" %}</a>
