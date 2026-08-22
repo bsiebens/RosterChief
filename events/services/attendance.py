@@ -22,7 +22,8 @@ from django.utils.translation import gettext_lazy as _
 from django.utils.translation import ngettext
 
 from club.models import ClubMembership, Season
-from club.services.onboarding import blocked_member_ids_for_event
+from club.services.access import current_season
+from club.services.onboarding import blocked_member_ids_for_event, open_requirements_blocking
 from events.models import Attendance, Event
 from members.models import Member
 from notifications.services import notify_members
@@ -86,6 +87,50 @@ def sync_event_attendances(event):
     to_remove = existing_ids - desired_ids
     if to_remove:
         event.attendances.filter(member_id__in=to_remove).delete()
+
+
+def blocked_upcoming_events_for_member(member, club):
+    """Upcoming events ``member`` would normally see (via a team roster or a
+    group they're in) but has no ``Attendance`` row for, because an open
+    onboarding requirement blocks that event's kind -- the read side of
+    ``effective_members()``'s own exclusion, which otherwise makes the event
+    vanish for them with no explanation at all. Built for the member-facing
+    "why can't I sign up" card (mobile/views.py) rather than the event simply
+    never appearing.
+
+    Returns ``[(event, [blocking OnboardingRequirement, ...]), ...]``, soonest
+    first. A member explicitly ``invited_members`` on an event never appears
+    here -- that bypasses blocking entirely (see ``effective_members``'s own
+    docstring), so they already have a normal Attendance row for it."""
+    season = current_season(club)
+    if season is None:
+        return []
+
+    team_ids = list(TeamMembership.objects.filter(member=member, season=season).values_list("team_id", flat=True))
+    group_ids = list(member.group_memberships.values_list("group_id", flat=True))
+    if not team_ids and not group_ids:
+        return []
+
+    candidates = list(
+        Event.objects.filter(club=club, cancelled=False, start__gte=timezone.now())
+        .filter(Q(teams__id__in=team_ids) | Q(groups__id__in=group_ids))
+        .exclude(excluded_members=member)
+        .distinct()
+        .order_by("start")
+    )
+    if not candidates:
+        return []
+
+    existing_ids = set(Attendance.objects.filter(member=member, event__in=candidates).values_list("event_id", flat=True))
+
+    results = []
+    for event in candidates:
+        if event.pk in existing_ids:
+            continue
+        requirements = open_requirements_blocking(member, club, season, event.kind)
+        if requirements:
+            results.append((event, requirements))
+    return results
 
 
 def notify_newly_invited(member, *, club, events):

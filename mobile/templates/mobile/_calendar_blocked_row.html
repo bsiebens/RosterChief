@@ -1,0 +1,40 @@
+{% load i18n lucide %}
+{% comment %}
+    One "can't sign up yet" row on M3's Calendar -- a game/practice a managed
+    person would normally be invited to (via their team/group), but isn't,
+    because an open onboarding requirement blocks that event's kind (club.
+    services.onboarding.open_requirements_blocking). Without this the event
+    would just silently never appear anywhere (events.services.attendance.
+    effective_members already excludes it from Attendance sync) -- shown
+    instead, muted, with which requirement is in the way, same "explain, don't
+    just hide" reasoning as the referee row's own distinct treatment.
+
+    Expects ``row`` ({event, blocked_requirements, blocked_member}) in scope --
+    blocked_member is only set once there's more than one managed person to
+    tell apart, same rule mobile/_calendar_row.html's own ``member`` uses.
+    No action here at all, not even a link styled as one -- there's nothing
+    to tap into doing, just an explanation, so it links straight to the event
+    like every other row rather than growing its own inert button.
+{% endcomment %}
+<a class="flex items-center gap-3 bg-white px-4 py-3 opacity-70" href="{% url "mobile:event_detail" row.event.pk %}">
+    <div class="w-9.5 shrink-0 text-center">
+        <div class="font-mono text-[10px] tracking-wide text-muted uppercase">{{ row.event.start|date:"D" }}</div>
+        <div class="font-display text-2xl leading-none font-extrabold text-ink">{{ row.event.start|date:"d" }}</div>
+    </div>
+    <div class="w-[3px] shrink-0 self-stretch rounded-full bg-line"></div>
+    <div class="min-w-0 flex-1">
+        <div class="flex items-center gap-1 text-sm font-semibold text-ink">
+            {% lucide "lock" size=13 stroke_width=2.4 class="shrink-0 text-dim" %}
+            <span class="truncate">{{ row.event.title }}</span>
+        </div>
+        <div class="truncate text-xs text-muted">
+            {{ row.event.start|date:"H:i" }}
+            {% if row.blocked_member %}&middot; {{ row.blocked_member.first_name }}{% endif %}
+            {% for team in row.event.teams.all %}&middot; {{ team.name }}{% endfor %}
+        </div>
+        <div class="truncate text-xs text-club-dark">
+            {% blocktrans with name=row.blocked_requirements.0.name %}Complete “{{ name }}” to sign up{% endblocktrans %}
+        </div>
+    </div>
+    <span class="pill pill-neutral shrink-0">{% trans "Blocked" %}</span>
+</a>

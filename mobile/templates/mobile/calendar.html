@@ -8,14 +8,20 @@
     docstring -- later_months is a list of {month_start, rows}). No person
     switcher and no club-wide toggle here -- always every event
     self.managed_people is invited to, plus (merged into the same
-    chronological list, own accent colour) any home game self.me is
-    eligible to referee -- see mobile/_calendar_referee_row.html. A real,
-    working ?kind=
-    filter (All/Games/Practices) stands in for the design mock's "Games only"
-    pill; its List/Month toggle isn't reproduced -- that's a second view
-    mode, not a filter. -mx-4 (on the row groups only, not this filter row)
-    breaks the rows out of base.html's shared page padding so they run
-    edge-to-edge, matching the design canvas's own M3 markup.
+    chronological list, each its own accent colour/look):
+      - any home game a managed person is eligible to referee -- see
+        mobile/_calendar_referee_row.html;
+      - any event a managed person would normally be invited to but can't sign
+        up for yet, because an open onboarding requirement blocks it -- see
+        mobile/_calendar_blocked_row.html. Without this row it would just
+        silently never appear (events.services.attendance.effective_members
+        already excludes it), with no explanation at all.
+    A real, working ?kind= filter (All/Games/Practices) stands in for the
+    design mock's "Games only" pill; its List/Month toggle isn't reproduced --
+    that's a second view mode, not a filter. -mx-4 (on the row groups only,
+    not this filter row) breaks the rows out of base.html's shared page
+    padding so they run edge-to-edge, matching the design canvas's own M3
+    markup.
 {% endcomment %}
 
 {% block header_extra %}
@@ -63,7 +69,7 @@
                     <div class="bg-paper px-4 py-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "This week" %}</div>
                     <div class="flex flex-col gap-px bg-line">
                         {% for row in this_week %}
-                            {% if row.referee_signup %}{% include "mobile/_calendar_referee_row.html" %}{% else %}{% include "mobile/_calendar_row.html" %}{% endif %}
+                            {% if row.blocked_requirements %}{% include "mobile/_calendar_blocked_row.html" %}{% elif row.referee_signup %}{% include "mobile/_calendar_referee_row.html" %}{% else %}{% include "mobile/_calendar_row.html" %}{% endif %}
                         {% endfor %}
                     </div>
                 </div>
@@ -74,7 +80,7 @@
                     <div class="bg-paper px-4 py-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Next week" %}</div>
                     <div class="flex flex-col gap-px bg-line">
                         {% for row in next_week %}
-                            {% if row.referee_signup %}{% include "mobile/_calendar_referee_row.html" %}{% else %}{% include "mobile/_calendar_row.html" %}{% endif %}
+                            {% if row.blocked_requirements %}{% include "mobile/_calendar_blocked_row.html" %}{% elif row.referee_signup %}{% include "mobile/_calendar_referee_row.html" %}{% else %}{% include "mobile/_calendar_row.html" %}{% endif %}
                         {% endfor %}
                     </div>
                 </div>
@@ -85,7 +91,7 @@
                     <div class="bg-paper px-4 py-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{{ month.month_start|date:"F Y" }}</div>
                     <div class="flex flex-col gap-px bg-line">
                         {% for row in month.rows %}
-                            {% if row.referee_signup %}{% include "mobile/_calendar_referee_row.html" %}{% else %}{% include "mobile/_calendar_row.html" %}{% endif %}
+                            {% if row.blocked_requirements %}{% include "mobile/_calendar_blocked_row.html" %}{% elif row.referee_signup %}{% include "mobile/_calendar_referee_row.html" %}{% else %}{% include "mobile/_calendar_row.html" %}{% endif %}
                         {% endfor %}
                     </div>
                 </div>

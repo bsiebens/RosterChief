@@ -51,6 +51,7 @@ from .services.onboarding import (
     mark_bypassed,
     mark_complete,
     mark_incomplete,
+    open_requirements_blocking,
 )
 from .services.seasons import _initial_season_start, _season_end, generate_seasons, resync_seasons
 from .tenancy import (
@@ -2267,6 +2268,34 @@ class OnboardingRequirementTests(TestCase):
         mark_bypassed(self.membership, self.medical, user=self.staff, note="waived")
 
         self.assertEqual(blocked_member_ids_for_event(self.club, self.season, "game"), set())
+
+    # --- open_requirements_blocking (per-member "why can't I sign up" mirror) ---
+    def test_open_requirements_blocking_is_empty_when_nothing_is_configured_to_block(self):
+        self.assertEqual(open_requirements_blocking(self.member, self.club, self.season, "game"), [])
+
+    def test_open_requirements_blocking_returns_the_open_requirement(self):
+        self.medical.blocked_event_kinds = ["game"]
+        self.medical.save()
+
+        self.assertEqual(open_requirements_blocking(self.member, self.club, self.season, "game"), [self.medical])
+
+    def test_open_requirements_blocking_is_kind_specific(self):
+        self.medical.blocked_event_kinds = ["game"]
+        self.medical.save()
+
+        self.assertEqual(open_requirements_blocking(self.member, self.club, self.season, "training"), [])
+
+    def test_open_requirements_blocking_excludes_a_resolved_requirement(self):
+        self.medical.blocked_event_kinds = ["game"]
+        self.medical.save()
+        mark_complete(self.membership, self.medical, user=self.staff)
+
+        self.assertEqual(open_requirements_blocking(self.member, self.club, self.season, "game"), [])
+
+    def test_open_requirements_blocking_is_empty_with_no_club_membership(self):
+        stranger = Member.objects.create(first_name="No", last_name="Membership")
+
+        self.assertEqual(open_requirements_blocking(stranger, self.club, self.season, "game"), [])
 
     # --- approve_all_clean ---
     def test_approve_all_clean_activates_a_pending_paid_up_fully_checked_member(self):

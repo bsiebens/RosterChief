@@ -172,6 +172,28 @@ def blocked_member_ids_for_event(club, season, event_kind) -> set:
     return blocked_member_ids
 
 
+def open_requirements_blocking(member, club, season, event_kind) -> list:
+    """The specific, still-open `OnboardingRequirement`s blocking `member` from
+    `event_kind` events this season -- the per-member, explain-*why* mirror of
+    `blocked_member_ids_for_event`'s bulk set. Built for the member-facing "you
+    can't sign up for this yet" card (mobile app): unlike that function, this
+    one is meant to be called once for a person looking at one event, not once
+    per event for a whole club, so the per-member cost here is fine.
+
+    Empty (never blocked) for a member with no current-season ClubMembership.MEMBER
+    row -- same "nothing to check" reasoning as blocked_member_ids_for_event's own."""
+    membership = ClubMembership.objects.filter(club=club, season=season, member=member, kind=ClubMembership.Kind.MEMBER).first()
+    if membership is None:
+        return []
+
+    blocking = [requirement for requirement in OnboardingRequirement.objects.filter(club=club, is_active=True) if event_kind in requirement.blocked_event_kinds]
+    if not blocking:
+        return []
+
+    resolved_ids = set(MemberRequirementStatus.objects.filter(membership=membership, requirement__in=blocking).filter(_RESOLVED).values_list("requirement_id", flat=True))
+    return [requirement for requirement in blocking if requirement.pk not in resolved_ids]
+
+
 #: Fee states "clean" enough to activate on -- PARTIALLY_PAID/UNPAID never are.
 _CLEAN_FEE_STATUSES = (ClubMembership.FeeStatus.PAID, ClubMembership.FeeStatus.WAIVED)
 

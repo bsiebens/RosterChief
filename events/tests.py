@@ -21,6 +21,7 @@ from teams.models import Position, RefereeLevel, RefereeProfile, StaffAssignment
 from .admin import EventAdminForm
 from .models import Attendance, Competition, Event, EventReferee, EventSeries, Lineup, LineupSelection, Location, Opponent, RefereeSignup
 from .services import (
+    blocked_upcoming_events_for_member,
     cancel_occurrence,
     detach_occurrence,
     effective_members,
@@ -336,6 +337,68 @@ class EffectiveMembersTests(EventsTestBase):
         event.teams.set([self.team])
 
         self.assertEqual(self.attendee_ids(event), {self.alice.id, self.bob.id})
+
+    # --- blocked_upcoming_events_for_member (the read-side "why can't I sign up" mirror) ---
+
+    def test_blocked_event_is_reported_with_its_blocking_requirement(self):
+        self.make_membership(self.alice)
+        requirement = OnboardingRequirement.objects.create(club=self.club, name="Medical certificate", blocked_event_kinds=["game"])
+        event = self.make_event(kind=Event.EventKind.GAME)
+        event.teams.set([self.team])
+
+        results = blocked_upcoming_events_for_member(self.alice, self.club)
+
+        self.assertEqual(len(results), 1)
+        blocked_event, requirements = results[0]
+        self.assertEqual(blocked_event, event)
+        self.assertEqual(requirements, [requirement])
+
+    def test_an_unblocked_member_reports_nothing(self):
+        # Bob has no ClubMembership row at all in the base fixture -- nothing
+        # for open_requirements_blocking to find, same as blocked_member_ids_
+        # for_event's own "no club membership" case above.
+        OnboardingRequirement.objects.create(club=self.club, name="Medical certificate", blocked_event_kinds=["game"])
+        event = self.make_event(kind=Event.EventKind.GAME)
+        event.teams.set([self.team])
+
+        self.assertEqual(blocked_upcoming_events_for_member(self.bob, self.club), [])
+
+    def test_a_kind_the_requirement_does_not_block_reports_nothing(self):
+        self.make_membership(self.alice)
+        OnboardingRequirement.objects.create(club=self.club, name="Medical certificate", blocked_event_kinds=["game"])
+        event = self.make_event(kind=Event.EventKind.TRAINING)
+        event.teams.set([self.team])
+
+        self.assertEqual(blocked_upcoming_events_for_member(self.alice, self.club), [])
+
+    def test_a_resolved_requirement_reports_nothing(self):
+        membership = self.make_membership(self.alice)
+        staff = get_user_model().objects.create_user(email="staff2@example.com", password="pw-secret-123")
+        requirement = OnboardingRequirement.objects.create(club=self.club, name="Medical certificate", blocked_event_kinds=["game"])
+        mark_complete(membership, requirement, user=staff)
+        event = self.make_event(kind=Event.EventKind.GAME)
+        event.teams.set([self.team])
+
+        self.assertEqual(blocked_upcoming_events_for_member(self.alice, self.club), [])
+
+    def test_an_explicit_invite_is_not_reported_as_blocked(self):
+        # invited_members bypasses the block entirely -- Alice already has a
+        # normal Attendance row for this event, so there's nothing to explain.
+        self.make_membership(self.alice)
+        OnboardingRequirement.objects.create(club=self.club, name="Medical certificate", blocked_event_kinds=["game"])
+        event = self.make_event(kind=Event.EventKind.GAME)
+        event.teams.set([self.team])
+        event.invited_members.set([self.alice])
+
+        self.assertEqual(blocked_upcoming_events_for_member(self.alice, self.club), [])
+
+    def test_a_past_blocked_event_is_not_reported(self):
+        self.make_membership(self.alice)
+        OnboardingRequirement.objects.create(club=self.club, name="Medical certificate", blocked_event_kinds=["game"])
+        event = self.make_event(kind=Event.EventKind.GAME, start=timezone.now() - timedelta(days=1))
+        event.teams.set([self.team])
+
+        self.assertEqual(blocked_upcoming_events_for_member(self.alice, self.club), [])
 
 
 class AttendanceSyncTests(EventsTestBase):

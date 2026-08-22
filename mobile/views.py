@@ -24,10 +24,11 @@ from django.views.generic import TemplateView
 from club.models import ClubMembership
 from club.services.access import current_season, has_management_access, teams_managed_by
 from club.services.fees import open_dues_rows
-from club.services.onboarding import checklist_for
+from club.services.onboarding import checklist_for, open_requirements_blocking
 from club.services.sponsors import active_sponsors
 from controlpanel.messages import notify
 from events.models import Attendance, Event, Lineup, RefereeSignup
+from events.services.attendance import blocked_upcoming_events_for_member
 from events.services.calendar import week_bounds
 from events.services.lineup import notify_dropout, selected_members_by_position
 from events.services.referees import RefereeAssignmentError, accept_referee_signup, decline_referee_signup
@@ -373,6 +374,16 @@ class CalendarView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
             )
             rows += [{"event": signup.event, "referee_signup": signup, "referee_member": signup.member if show_member else None} for signup in signups]
 
+        # A blocked event would otherwise just silently never appear (effective_
+        # members() already excludes it from Attendance sync) -- shown here
+        # instead, with which onboarding requirement is in the way, rather than
+        # a managed person's game quietly vanishing with no explanation at all.
+        for person in self.managed_people:
+            for event, requirements in blocked_upcoming_events_for_member(person, self.request.club):
+                if kind_filter in self.KIND_FILTERS and event.kind != self.KIND_FILTERS[kind_filter]:
+                    continue
+                rows.append({"event": event, "blocked_requirements": requirements, "blocked_member": person if show_member else None})
+
         rows.sort(key=lambda row: row["event"].start)
 
         this_week, next_week, later_rows = [], [], []
@@ -477,6 +488,7 @@ class EventDetailView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
             referee_signups = list(RefereeSignup.objects.filter(event=event, member__in=self.managed_people, status__in=[RefereeSignup.Status.INVITED, RefereeSignup.Status.ACCEPTED]).select_related("member"))
 
         your_answers = []
+        blocked_signups = []
         if self.managed_people:
             managed_ids = [person.pk for person in self.managed_people]
             attendances_by_member = {attendance.member_id: attendance for attendance in Attendance.objects.filter(event=event, member_id__in=managed_ids).select_related("member")}
@@ -491,6 +503,14 @@ class EventDetailView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
             for person in self.managed_people:
                 attendance = attendances_by_member.get(person.pk)
                 if attendance is None:
+                    # No Attendance row at all -- either genuinely not invited, or
+                    # excluded by an open onboarding requirement (events.services.
+                    # attendance.effective_members). The latter still deserves an
+                    # explanation here rather than just silently not showing up.
+                    if season is not None:
+                        requirements = open_requirements_blocking(person, self.request.club, season, event.kind)
+                        if requirements:
+                            blocked_signups.append({"member": person, "requirements": requirements})
                     continue
                 your_answers.append({"member": person, "attendance": attendance, "membership": memberships_by_member.get(person.pk)})
 
@@ -522,6 +542,7 @@ class EventDetailView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
             lineup_categories=lineup_categories,
             referee_signups=referee_signups,
             your_answers=your_answers,
+            blocked_signups=blocked_signups,
             squad_summary=squad_summary,
             **kwargs,
         )

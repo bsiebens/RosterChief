@@ -1007,6 +1007,39 @@ class CalendarViewTests(TestCase):
 
         self.assertIn(event, self._events_in_context(response))
 
+    def test_a_blocked_event_shows_up_with_an_explanation_instead_of_disappearing(self):
+        team = Team.objects.create(club=self.club, name="U16", short_name="U16")
+        position = Position.objects.create(club=self.club, name="Forward", short_name="F")
+        TeamMembership.objects.create(team=team, member=self.member, season=self.season, position=position)
+        OnboardingRequirement.objects.create(club=self.club, name="Medical certificate", blocked_event_kinds=["game"])
+        event = self.make_event(title="Cup game", kind=Event.EventKind.GAME)
+        event.teams.add(team)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, "Cup game")
+        self.assertContains(response, "Blocked")
+        self.assertContains(response, "Medical certificate")
+        self.assertFalse(Attendance.objects.filter(event=event, member=self.member).exists())
+
+    def test_a_resolved_requirement_shows_the_event_normally_not_blocked(self):
+        team = Team.objects.create(club=self.club, name="U16", short_name="U16")
+        position = Position.objects.create(club=self.club, name="Forward", short_name="F")
+        TeamMembership.objects.create(team=team, member=self.member, season=self.season, position=position)
+        requirement = OnboardingRequirement.objects.create(club=self.club, name="Medical certificate", blocked_event_kinds=["game"])
+        club_membership = ClubMembership.objects.get(club=self.club, member=self.member, season=self.season)
+        MemberRequirementStatus.objects.create(membership=club_membership, requirement=requirement, is_complete=True)
+        event = self.make_event(title="Cup game", kind=Event.EventKind.GAME)
+        event.teams.add(team)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, "Cup game")
+        self.assertNotContains(response, "Blocked")
+        self.assertTrue(Attendance.objects.filter(event=event, member=self.member).exists())
+
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
 class CalendarRefereeSignupTests(TestCase):
@@ -1337,6 +1370,32 @@ class EventDetailScreenTests(TestCase):
         response = self._get()
 
         self.assertNotContains(response, 'name="status" value="dropout"')
+
+    def test_blocked_signup_shows_why_instead_of_disappearing(self):
+        OnboardingRequirement.objects.create(club=self.club, name="Medical certificate", blocked_event_kinds=["game"])
+        game = Event.objects.create(club=self.club, title="Cup game", kind=Event.EventKind.GAME, start=timezone.now() + datetime.timedelta(days=7))
+        game.teams.add(self.team)
+        self.client.force_login(self.user)
+
+        response = self._get(game)
+
+        self.assertEqual(len(response.context["blocked_signups"]), 1)
+        self.assertContains(response, "Can't sign up yet")
+        self.assertContains(response, "Medical certificate")
+        self.assertFalse(Attendance.objects.filter(event=game, member=self.member).exists())
+
+    def test_no_blocked_card_once_the_requirement_is_resolved(self):
+        requirement = OnboardingRequirement.objects.create(club=self.club, name="Medical certificate", blocked_event_kinds=["game"])
+        club_membership = ClubMembership.objects.get(club=self.club, member=self.member, season=self.season)
+        MemberRequirementStatus.objects.create(membership=club_membership, requirement=requirement, is_complete=True)
+        game = Event.objects.create(club=self.club, title="Cup game", kind=Event.EventKind.GAME, start=timezone.now() + datetime.timedelta(days=7))
+        game.teams.add(self.team)
+        self.client.force_login(self.user)
+
+        response = self._get(game)
+
+        self.assertEqual(response.context["blocked_signups"], [])
+        self.assertNotContains(response, "Can't sign up yet")
 
     def test_no_referee_card_when_not_invited(self):
         self.client.force_login(self.user)
