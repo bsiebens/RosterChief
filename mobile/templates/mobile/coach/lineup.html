@@ -72,7 +72,7 @@
             <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-on-dark-dim uppercase">{% trans "Unavailable" %}</div>
             <div class="flex flex-wrap gap-2">
                 {% for attendance in unavailable %}
-                    <span class="rounded-full bg-steel px-3 py-1.5 text-xs text-on-dark-faint opacity-50">{{ attendance.member.get_full_name }} &middot; {{ attendance.get_status_display }}</span>
+                    <span class="rounded-full bg-steel px-3 py-1.5 text-xs text-on-dark">{{ attendance.member.get_full_name }} &middot; {{ attendance.get_status_display }}</span>
                 {% endfor %}
             </div>
         </div>
