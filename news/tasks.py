@@ -15,7 +15,7 @@ from django.utils.html import strip_tags
 from club.models import ClubMembership
 from club.services.access import current_season
 from members.models import Member
-from notifications.services import notify_members
+from notifications.services import notify_members, recipient_emails
 
 from .models import News
 from .services import render_body_html
@@ -43,6 +43,28 @@ def _notify_audience(news_item):
     return members.distinct()
 
 
+def _dedupe_by_recipients(members):
+    """Collapses siblings (or anyone else sharing a guardian) down to one
+    notification each, keyed on where the email would actually land -- not
+    family membership itself, since a blended family's kids don't
+    necessarily share the exact same guardian set, only some overlap. A
+    parent of three kids all on the news audience gets one email, not three;
+    each kid still gets their own row (and read state) via events.tasks.
+    notify_new_event, which is deliberately untouched by this -- an event
+    needs a reply per child, a news post doesn't. Members nobody's reachable
+    for (no login, no guardian) are never deduped against anything -- there's
+    no shared inbox to spare."""
+    seen_emails = set()
+    representatives = []
+    for member in members:
+        emails = recipient_emails(member)
+        if emails and any(email in seen_emails for email in emails):
+            continue
+        representatives.append(member)
+        seen_emails.update(emails)
+    return representatives
+
+
 def _plain_text_body(news_item) -> str:
     """The notification's own plain-text body: rendered from the same
     Markdown source the public site would use, then stripped back to plain
@@ -61,7 +83,7 @@ def notify_news_published(news_id):
         # (this task isn't registered for that anyway -- see the module docstring).
         return "Skipped: not published."
 
-    members = list(_notify_audience(news_item))
+    members = _dedupe_by_recipients(_notify_audience(news_item))
     if not members:
         return "Skipped: no current-season active members to notify."
 

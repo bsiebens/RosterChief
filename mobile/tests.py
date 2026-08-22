@@ -381,6 +381,28 @@ class HomeViewTests(TestCase):
 
         self.assertEqual(list(response.context["news_items"]), [])
 
+    def test_news_teaser_includes_a_managed_childs_team_news_even_when_scoped_to_me(self):
+        # A parent with no team of their own, scoped to their own "Me" chip
+        # (no team membership -> empty team_ids for `people`) should still see
+        # news about a child's team -- news isn't a per-person action like
+        # RSVP/dues, so it's keyed off every managed person, not just scope.
+        family = Family.objects.create(name="Bakker")
+        FamilyMembership.objects.create(family=family, member=self.member, role=FamilyMembership.FamilyRole.PARENT)
+        child = Member.objects.create(first_name="Noor", last_name="Bakker")
+        FamilyMembership.objects.create(family=family, member=child, role=FamilyMembership.FamilyRole.CHILD)
+        ClubMembership.objects.create(club=self.club, member=child, season=self.season)
+        team = Team.objects.create(club=self.club, name="U12", short_name="U12")
+        position = Position.objects.create(club=self.club, name="Forward", short_name="F")
+        TeamMembership.objects.create(team=team, member=child, season=self.season, position=position)
+        team_news = News.objects.create(club=self.club, title="U12 news", body="Body.", status=News.Status.PUBLISHED, published_at=timezone.now())
+        team_news.teams.add(team)
+        self.client.force_login(self.user)
+
+        response = self._get(url=reverse("mobile:home") + f"?as={self.member.pk}")
+
+        self.assertEqual(response.context["scope_person"], self.member)
+        self.assertIn(team_news, response.context["news_items"])
+
     def test_news_card_shows_an_empty_state_with_a_link_to_all_news_when_there_is_none(self):
         self.client.force_login(self.user)
 

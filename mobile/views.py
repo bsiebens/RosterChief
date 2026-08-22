@@ -240,9 +240,14 @@ class HomeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
             season = current_season(self.request.club)
             if season is not None:
                 dues_rows = open_dues_rows(self.request.club, people, season)
-                team_ids = list(TeamMembership.objects.filter(member__in=people, season=season).values_list("team_id", flat=True))
+                # Deliberately self.managed_people, not the scoped `people` above --
+                # news isn't a per-person action like RSVP/dues, it's "things this
+                # account should know about", so a parent picking their own "Me"
+                # chip (no team of their own) still sees their kids' team news
+                # rather than only club-wide items.
+                news_team_ids = list(TeamMembership.objects.filter(member__in=self.managed_people, season=season).values_list("team_id", flat=True))
             else:
-                team_ids = []
+                news_team_ids = []
 
             news_items = list(
                 News.objects.filter(
@@ -251,7 +256,7 @@ class HomeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
                     published_at__lte=now,
                     visibility__in=[News.Visibility.INTERNAL, News.Visibility.BOTH],
                 )
-                .filter(Q(teams__isnull=True) | Q(teams__id__in=team_ids))
+                .filter(Q(teams__isnull=True) | Q(teams__id__in=news_team_ids))
                 .prefetch_related("teams")
                 .order_by("-published_at")
                 .distinct()[: self.NEWS_LIMIT]

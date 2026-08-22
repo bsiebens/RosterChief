@@ -8,7 +8,7 @@ from django.test import TestCase
 from django.utils import timezone
 
 from club.models import Club, ClubMembership, ClubRole, Season
-from members.models import Member
+from members.models import Family, FamilyMembership, Member
 from notifications.models import Notification
 from teams.models import Position, Team, TeamMembership
 
@@ -209,6 +209,45 @@ class NotifyNewsPublishedTests(TestCase):
 
         self.assertEqual(result, "Skipped: not published.")
         self.assertFalse(Notification.objects.exists())
+
+    def test_siblings_sharing_a_guardian_are_notified_once(self):
+        # Two children, no login of their own, both reachable only through the
+        # same parent -- one Notification/one email for the family, not two.
+        parent_user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
+        parent = Member.objects.create(first_name="Pat", last_name="Parent", email="parent@example.com", user=parent_user)
+        family = Family.objects.create(name="Parent family")
+        FamilyMembership.objects.create(family=family, member=parent, role=FamilyMembership.FamilyRole.PARENT)
+        child_a = Member.objects.create(first_name="Ana", last_name="Parent")
+        child_b = Member.objects.create(first_name="Ben", last_name="Parent")
+        for child in (child_a, child_b):
+            FamilyMembership.objects.create(family=family, member=child, role=FamilyMembership.FamilyRole.CHILD)
+            ClubMembership.objects.create(club=self.club, member=child, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        news_item = News.objects.create(club=self.club, title="Club news", body="Body.", status=News.Status.PUBLISHED, published_at=timezone.now())
+
+        result = notify_news_published(news_item.pk)
+
+        self.assertEqual(Notification.objects.filter(club=self.club, title="Club news").count(), 1)
+        self.assertIn("Notified 1", result)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ["parent@example.com"])
+
+    def test_children_with_different_guardians_are_each_notified(self):
+        family_one = Family.objects.create(name="First family")
+        family_two = Family.objects.create(name="Second family")
+        for family_name, family in (("one", family_one), ("two", family_two)):
+            parent_user = User.objects.create_user(email=f"parent-{family_name}@example.com", password="pw-secret-123")
+            parent = Member.objects.create(first_name=f"Parent{family_name}", last_name="Adult", email=f"parent-{family_name}@example.com", user=parent_user)
+            FamilyMembership.objects.create(family=family, member=parent, role=FamilyMembership.FamilyRole.PARENT)
+            child = Member.objects.create(first_name=f"Child{family_name}", last_name="Kid")
+            FamilyMembership.objects.create(family=family, member=child, role=FamilyMembership.FamilyRole.CHILD)
+            ClubMembership.objects.create(club=self.club, member=child, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        news_item = News.objects.create(club=self.club, title="Club news", body="Body.", status=News.Status.PUBLISHED, published_at=timezone.now())
+
+        result = notify_news_published(news_item.pk)
+
+        self.assertEqual(Notification.objects.filter(club=self.club, title="Club news").count(), 2)
+        self.assertIn("Notified 2", result)
+        self.assertEqual(len(mail.outbox), 2)
 
     def test_the_body_is_plain_text_not_markdown(self):
         member = self.make_member("Jamie", email="jamie@example.com")
