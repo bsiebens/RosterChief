@@ -18,7 +18,7 @@
         {% if club.event_background %}
             <img class="absolute inset-0 h-full w-full object-cover grayscale" src="{{ club.event_background.url }}" alt="">
         {% endif %}
-        <div class="absolute inset-0" style="background: linear-gradient(180deg, rgba(11,18,32,.35) 0%, rgba(11,18,32,.55) 60%, rgba(11,18,32,.92) 100%)"></div>
+        <div class="absolute inset-0" style="background: linear-gradient(180deg, rgba(11,18,32,.5) 0%, rgba(11,18,32,.75) 60%, rgba(11,18,32,.96) 100%)"></div>
         <div class="relative z-10 flex flex-1 flex-col justify-end p-4 text-white">
             <a class="mb-auto flex h-11 w-11 items-center justify-center rounded-full bg-white/15" href="{% url "mobile:home" %}" aria-label="{% trans "Back" %}">
                 {% lucide "chevron-left" size=20 stroke_width=2.4 class="text-white" %}

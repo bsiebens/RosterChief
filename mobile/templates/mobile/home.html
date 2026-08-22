@@ -39,7 +39,7 @@
                 {% if club.event_background %}
                     <img class="absolute inset-0 h-full w-full object-cover grayscale" src="{{ club.event_background.url }}" alt="">
                 {% endif %}
-                <div class="absolute inset-0" style="background: linear-gradient(180deg, rgba(11,18,32,.15) 0%, rgba(11,18,32,.75) 55%, rgba(11,18,32,.95) 100%)"></div>
+                <div class="absolute inset-0" style="background: linear-gradient(180deg, rgba(11,18,32,.45) 0%, rgba(11,18,32,.82) 55%, rgba(11,18,32,.97) 100%)"></div>
                 <div class="relative z-10">
                     <div class="p-4 pb-0">
                         <p class="font-display text-xs font-extrabold text-info uppercase tracking-wide">{% blocktrans with date=hero_attendance.event.start|date:"D d M" %}Next up &middot; {{ date }}{% endblocktrans %}</p>
