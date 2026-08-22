@@ -58,7 +58,7 @@
                             <p class="mt-3 font-display text-xs font-extrabold text-on-dark-dim uppercase tracking-wide">{% trans "Replies are closed for this event" %}</p>
                             <span class="pill pill-neutral mt-2">{{ hero_attendance.get_status_display }}</span>
                         {% else %}
-                            <p class="mt-3 font-display text-xs font-extrabold text-on-dark-dim uppercase tracking-wide">{% blocktrans with name=hero_attendance.member.first_name %}{{ name }} &mdash; are you in?{% endblocktrans %}</p>
+                            <p class="mt-3 font-display text-xs font-extrabold text-white uppercase tracking-wide">{% blocktrans with name=hero_attendance.member.first_name %}{{ name }} &mdash; are you in?{% endblocktrans %}</p>
                             {% include "mobile/_hero_rsvp.html" %}
                         {% endif %}
                     </div>
