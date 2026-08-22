@@ -10,7 +10,7 @@
     treatment as management/templates/management/home.html's own
     notifications card.
 {% endcomment %}
-<form method="post" action="{% url "mobile:notifications" %}">
+<form method="post" action="{% url "mobile:notifications" %}" hx-boost="false">
     {% csrf_token %}
     <input type="hidden" name="action" value="mark_read">
     <input type="hidden" name="notification_id" value="{{ row.notification.pk }}">

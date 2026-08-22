@@ -289,6 +289,24 @@ class HomeViewTests(TestCase):
         needs_answer_events = {attendance.event for attendance in response.context["needs_answer"]}
         self.assertEqual(needs_answer_events, {awaiting, maybe})
 
+    def test_needs_your_answer_excludes_events_with_a_closed_registration_deadline(self):
+        # A distinct, already-answered earlier event so it becomes the hero --
+        # otherwise the closed-deadline event below would become the hero
+        # itself (still shown there, just read-only) rather than reaching
+        # needs_answer's own exclusion at all.
+        hero_event = self.make_event(title="Soonest", start=self.future)
+        Attendance.objects.create(event=hero_event, member=self.member, status=Attendance.AttendanceStatus.PRESENT)
+        closed = self.make_event(title="Deadline passed", start=self.future + datetime.timedelta(days=2), deadline=timezone.now() - datetime.timedelta(hours=1))
+        open_deadline = self.make_event(title="Deadline still open", start=self.future + datetime.timedelta(days=3), deadline=timezone.now() + datetime.timedelta(hours=1))
+        Attendance.objects.create(event=closed, member=self.member, status=Attendance.AttendanceStatus.NO_RESPONSE)
+        Attendance.objects.create(event=open_deadline, member=self.member, status=Attendance.AttendanceStatus.NO_RESPONSE)
+        self.client.force_login(self.user)
+
+        response = self._get("home")
+
+        needs_answer_events = {attendance.event for attendance in response.context["needs_answer"]}
+        self.assertEqual(needs_answer_events, {open_deadline})
+
     def test_needs_your_answer_is_capped_at_five_with_a_remaining_count(self):
         # A distinct, already-answered earlier event so it becomes the hero and
         # none of the seven "Practice N" events below get excluded as the hero.
@@ -524,7 +542,7 @@ class EventDetailRsvpTests(TestCase):
         other_event = Event.objects.create(club=self.club, title="Away game", start=timezone.now() + datetime.timedelta(days=8))
         self.client.force_login(self.user)
 
-        self._post(other_event, {"status": "absent"})
+        self._post(other_event, {"status": "absent", "note": "Sick"})
 
         self.assertEqual(Attendance.objects.get(event=other_event, member=self.member).status, Attendance.AttendanceStatus.ABSENT)
 
@@ -565,6 +583,25 @@ class EventDetailRsvpTests(TestCase):
         self.attendance.refresh_from_db()
         self.assertEqual(self.attendance.status, Attendance.AttendanceStatus.MAYBE)
 
+    def test_posting_maybe_without_a_reason_is_allowed(self):
+        # Unlike Out, a reason is optional for Maybe -- no 400 without one.
+        self.client.force_login(self.user)
+
+        response = self._post(self.event, {"status": "maybe"})
+
+        self.assertRedirects(response, reverse("mobile:home"), fetch_redirect_response=False)
+        self.attendance.refresh_from_db()
+        self.assertEqual(self.attendance.note, "")
+
+    def test_posting_maybe_with_a_reason_stores_the_note(self):
+        self.client.force_login(self.user)
+
+        self._post(self.event, {"status": "maybe", "note": "Might have to leave early"})
+
+        self.attendance.refresh_from_db()
+        self.assertEqual(self.attendance.status, Attendance.AttendanceStatus.MAYBE)
+        self.assertEqual(self.attendance.note, "Might have to leave early")
+
     def test_posting_absent_with_a_reason_stores_the_note(self):
         self.client.force_login(self.user)
 
@@ -601,6 +638,31 @@ class EventDetailRsvpTests(TestCase):
 
         self.attendance.refresh_from_db()
         self.assertEqual(self.attendance.note, "")
+
+    def test_absent_without_a_reason_is_rejected(self):
+        self.client.force_login(self.user)
+
+        response = self._post(self.event, {"status": "absent"})
+
+        self.assertEqual(response.status_code, 400)
+        self.attendance.refresh_from_db()
+        self.assertEqual(self.attendance.status, Attendance.AttendanceStatus.NO_RESPONSE)
+
+    def test_absent_with_a_whitespace_only_reason_is_rejected(self):
+        self.client.force_login(self.user)
+
+        response = self._post(self.event, {"status": "absent", "note": "   \n  "})
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_absent_with_a_punctuation_only_reason_is_rejected(self):
+        self.client.force_login(self.user)
+
+        response = self._post(self.event, {"status": "absent", "note": "..."})
+
+        self.assertEqual(response.status_code, 400)
+        self.attendance.refresh_from_db()
+        self.assertEqual(self.attendance.status, Attendance.AttendanceStatus.NO_RESPONSE)
 
     def test_rejects_an_unknown_status_value(self):
         self.client.force_login(self.user)
@@ -2157,6 +2219,16 @@ class CoachAttendanceViewTests(TestCase):
 
         self.assertContains(response, "Anna Player")
         self.assertContains(response, "9")
+
+    def test_shows_a_maybe_reason_alongside_an_absent_one(self):
+        self.attendance.status = Attendance.AttendanceStatus.MAYBE
+        self.attendance.note = "Might be a few minutes late"
+        self.attendance.save()
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, "Might be a few minutes late")
 
     def test_save_records_check_ins_via_record_check_in(self):
         self.client.force_login(self.user)

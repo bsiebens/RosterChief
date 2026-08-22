@@ -11,6 +11,12 @@
     under a dark gradient -- individual events have no photo of their own, so
     this is the one club-wide stand-in -- falling back to a plain dark
     background when the club hasn't uploaded one.
+
+    The per-person In/Maybe/Out forms below are hx-boost="false" -- Alpine
+    owns the toggle between this row's two sibling forms (buttons vs. the
+    Out reason prompt), and having htmx *also* intercept the submit broke
+    both. A real navigation for a write action is a fine trade; hx-boost's
+    value is in link-to-link browsing, not every POST on the page.
 {% endcomment %}
 
 {% block content %}
@@ -82,40 +88,44 @@
                             {% trans "Maybe" as label_maybe %}
                             {% trans "Out" as label_out %}
                             {% with status=answer.attendance.status %}
-                                <div x-data="{ asking: false, reason: '{{ answer.attendance.note|default:""|escapejs }}' }">
+                                <div x-data="{ asking: null, reason: '{{ answer.attendance.note|default:""|escapejs }}' }">
                                     <div class="flex gap-1.5" x-show="!asking">
-                                        <form class="flex-1" method="post" action="{% url "mobile:event_detail" event.pk %}">
+                                        <form class="min-w-0 flex-1" method="post" action="{% url "mobile:event_detail" event.pk %}" hx-boost="false">
                                             {% csrf_token %}
                                             <input type="hidden" name="member_id" value="{{ answer.member.pk }}">
                                             <input type="hidden" name="status" value="present">
                                             <input type="hidden" name="next" value="event_detail">
                                             <button type="submit" class="btn h-11 w-full text-[15px] {% if status == "present" %}btn-positive{% else %}bg-paper border border-stroke text-muted{% endif %}">{{ label_in }}</button>
                                         </form>
-                                        <form class="flex-1" method="post" action="{% url "mobile:event_detail" event.pk %}">
-                                            {% csrf_token %}
-                                            <input type="hidden" name="member_id" value="{{ answer.member.pk }}">
-                                            <input type="hidden" name="status" value="maybe">
-                                            <input type="hidden" name="next" value="event_detail">
-                                            <button type="submit" class="btn h-11 w-full text-[15px] {% if status == "maybe" %}bg-steel text-white{% else %}bg-paper border border-stroke text-muted{% endif %}">{{ label_maybe }}</button>
-                                        </form>
-                                        <button type="button" class="btn h-11 w-full flex-1 text-[15px] {% if status == "absent" %}bg-club text-white{% else %}bg-paper border border-stroke text-muted{% endif %}" @click="asking = true">{{ label_out }}</button>
+                                        <button type="button" class="btn h-11 w-full min-w-0 flex-1 text-[15px] {% if status == "maybe" %}bg-steel text-white{% else %}bg-paper border border-stroke text-muted{% endif %}" @click="asking = 'maybe'">{{ label_maybe }}</button>
+                                        <button type="button" class="btn h-11 w-full min-w-0 flex-1 text-[15px] {% if status == "absent" %}bg-club text-white{% else %}bg-paper border border-stroke text-muted{% endif %}" @click="asking = 'absent'">{{ label_out }}</button>
                                     </div>
 
-                                    <form x-show="asking" x-cloak method="post" action="{% url "mobile:event_detail" event.pk %}">
+                                    {% comment %}
+                                        One shared reason form for both Maybe (optional) and Out
+                                        (mandatory -- enforced server-side, EventDetailView.post) --
+                                        :value on the hidden status input follows whichever button
+                                        was tapped. No required/minlength attrs here: mixing that
+                                        with a dynamic per-status requirement got fiddly for what
+                                        the backend already enforces authoritatively regardless.
+                                    {% endcomment %}
+                                    <form x-show="asking" x-cloak method="post" action="{% url "mobile:event_detail" event.pk %}" hx-boost="false">
                                         {% csrf_token %}
                                         <input type="hidden" name="member_id" value="{{ answer.member.pk }}">
-                                        <input type="hidden" name="status" value="absent">
+                                        <input type="hidden" name="status" :value="asking">
                                         <input type="hidden" name="next" value="event_detail">
-                                        <label class="mb-1 block text-xs font-semibold text-muted">{% trans "Reason (optional -- only you and the coach can see this)" %}</label>
+                                        <label class="mb-1 block text-xs font-semibold text-muted" x-show="asking === 'absent'">{% trans "Reason -- only you and the coach can see this" %}</label>
+                                        <label class="mb-1 block text-xs font-semibold text-muted" x-show="asking === 'maybe'">{% trans "Add a reason (optional) -- only you and the coach can see this" %}</label>
                                         <textarea class="h-16 w-full rounded-lg border border-stroke bg-paper p-2 text-sm text-ink" name="note" x-model="reason" placeholder="{% trans "e.g. sick, family event..." %}"></textarea>
                                         <div class="mt-2 flex gap-2">
-                                            <button type="button" class="btn btn-secondary h-9 flex-1 text-xs" @click="asking = false">{% trans "Cancel" %}</button>
+                                            <button type="button" class="btn btn-secondary h-9 flex-1 text-xs" @click="asking = null">{% trans "Cancel" %}</button>
                                             <button type="submit" class="btn btn-dark h-9 flex-1 text-xs">{% trans "Confirm" %}</button>
                                         </div>
                                     </form>
                                 </div>
 
-                                {% if status == "absent" and answer.attendance.note %}
+                                {% if answer.attendance.note %}
+                                    {# Only ever set alongside absent/maybe -- EventDetailView.post clears it for present. #}
                                     <p class="mt-1.5 text-xs text-muted italic">&ldquo;{{ answer.attendance.note }}&rdquo;</p>
                                 {% endif %}
                             {% endwith %}

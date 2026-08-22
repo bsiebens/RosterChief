@@ -28,7 +28,7 @@
         {% if today or earlier_this_week or older %}
             <div class="flex items-center justify-between">
                 {% if unread_notification_count %}
-                    <form method="post" action="{% url "mobile:notifications" %}">
+                    <form method="post" action="{% url "mobile:notifications" %}" hx-boost="false">
                         {% csrf_token %}
                         <input type="hidden" name="action" value="mark_all_read">
                         <button class="font-display text-xs font-extrabold tracking-wide text-club uppercase" type="submit">{% trans "Mark all read" %}</button>
@@ -36,7 +36,7 @@
                 {% else %}
                     <span></span>
                 {% endif %}
-                <form method="post" action="{% url "mobile:notifications" %}">
+                <form method="post" action="{% url "mobile:notifications" %}" hx-boost="false">
                     {% csrf_token %}
                     <input type="hidden" name="action" value="clear_all">
                     <button class="font-display text-xs font-extrabold tracking-wide text-muted uppercase" type="submit">{% trans "Clear all" %}</button>

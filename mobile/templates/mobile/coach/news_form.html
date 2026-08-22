@@ -24,7 +24,7 @@
         </div>
     {% endif %}
 
-    <form id="coach-news-form" method="post" action="{% url "mobile:coach_create_news" %}">
+    <form id="coach-news-form" method="post" action="{% url "mobile:coach_create_news" %}" hx-boost="false">
         {% csrf_token %}
 
         <div class="m-card flex flex-col p-4">

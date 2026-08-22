@@ -28,7 +28,7 @@
         </a>
     </div>
 
-    <form method="post" action="{% url "mobile:coach_add_player" %}" x-data="{ count: 0 }">
+    <form method="post" action="{% url "mobile:coach_add_player" %}" x-data="{ count: 0 }" hx-boost="false">
         {% csrf_token %}
         <div class="m-card flex flex-col overflow-hidden">
             {% for candidate in candidates %}

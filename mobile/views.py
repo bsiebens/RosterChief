@@ -221,7 +221,16 @@ class HomeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
                 deadline = hero_attendance.event.deadline
                 rsvp_closed = deadline is not None and deadline < now
 
-            needs_answer_qs = upcoming.filter(status__in=[Attendance.AttendanceStatus.NO_RESPONSE, Attendance.AttendanceStatus.MAYBE]).order_by("event__start")
+            # Deadline already passed -> replying is no longer possible (see
+            # EventDetailView.post's own deadline check), so it doesn't belong
+            # in a "still needs a reply" list -- unlike hero_attendance above,
+            # which always shows the true next event regardless of RSVP state
+            # and falls back to a read-only pill once its own deadline closes.
+            needs_answer_qs = (
+                upcoming.filter(status__in=[Attendance.AttendanceStatus.NO_RESPONSE, Attendance.AttendanceStatus.MAYBE])
+                .filter(Q(event__deadline__isnull=True) | Q(event__deadline__gte=now))
+                .order_by("event__start")
+            )
             if hero_attendance is not None:
                 needs_answer_qs = needs_answer_qs.exclude(pk=hero_attendance.pk)
             needs_answer_total = needs_answer_qs.count()
@@ -444,14 +453,30 @@ class EventDetailView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         if event.deadline is not None and event.deadline < timezone.now():
             return HttpResponseBadRequest(_("Replies are closed for this event."))
 
-        # A reason is only ever meaningful attached to "Out" -- clearing it the
-        # moment someone flips back to In/Maybe avoids a stale "sick" note
-        # hanging around under an answer it no longer explains. Private by
+        # A reason is only ever meaningful attached to Out/Maybe -- clearing it
+        # the moment someone flips to In avoids a stale "sick" note hanging
+        # around under an answer it no longer explains. Private by
         # construction, not by a visibility flag: nothing renders another
         # member's own note anywhere -- only this member/family's own screens
         # (event_detail's "Your answers") and Coach mode's bench attendance
         # (mobile/templates/mobile/coach/attendance.html) ever read it.
-        note = request.POST.get("note", "").strip() if status == Attendance.AttendanceStatus.ABSENT else ""
+        note = ""
+        if status == Attendance.AttendanceStatus.ABSENT:
+            note = request.POST.get("note", "").strip()
+            # Rejects blank and punctuation-only "answers" (a bare ".", "-",
+            # "??") -- mandatory for Out specifically, unlike Maybe below.
+            # Backend-scoped, not the pretty inline-error UX this codebase
+            # gives ModelForm submissions elsewhere -- matches this view's
+            # own existing style (see "Unknown RSVP status"/"Replies are
+            # closed" above, both plain 400s a normal user should never
+            # actually see, since the template only ever offers Out through
+            # the reason form to begin with).
+            if not any(char.isalnum() for char in note):
+                return HttpResponseBadRequest(_("Please enter a reason."))
+        elif status == Attendance.AttendanceStatus.MAYBE:
+            # Optional here -- Maybe doesn't owe anyone an explanation the way
+            # a firm no does, but the same field carries it if given one.
+            note = request.POST.get("note", "").strip()
         Attendance.objects.update_or_create(event=event, member=member, defaults={"status": status, "note": note})
 
         if request.POST.get("next") == "event_detail":

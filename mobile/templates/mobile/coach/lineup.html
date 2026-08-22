@@ -11,6 +11,12 @@
     throughout rather than overriding the shared .coach-sheet's own light
     background -- a real per-screen shell hook is more infrastructure than
     one screen justifies.
+
+    Both forms are hx-boost="false" -- the first has three submit buttons
+    sharing one <form> via formaction overrides (Save/​+Add slot/​+Add line),
+    and htmx's boost reads the form's own action rather than the actual
+    submitter's formaction override, so a boosted click would always post
+    to the wrong endpoint. A plain navigation sidesteps that entirely.
 {% endcomment %}
 
 {% block header_extra %}
@@ -22,7 +28,7 @@
 {% endblock header_extra %}
 
 {% block content %}
-    <form method="post" action="{% url "mobile:coach_lineup" event.pk %}">
+    <form method="post" action="{% url "mobile:coach_lineup" event.pk %}" hx-boost="false">
         {% csrf_token %}
         <div class="flex flex-col gap-3">
             {% for unit in units %}
@@ -67,7 +73,7 @@
     {% endif %}
 
     {% if can_manage_active_team and not lineup.published_at %}
-        <form class="mt-2" method="post" action="{% url "mobile:coach_lineup_publish" event.pk %}">
+        <form class="mt-2" method="post" action="{% url "mobile:coach_lineup_publish" event.pk %}" hx-boost="false">
             {% csrf_token %}
             <button class="btn w-full bg-ice text-ice-ink" type="submit">{% trans "Publish" %}</button>
         </form>

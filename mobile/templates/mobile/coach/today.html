@@ -80,14 +80,7 @@
                     {% if rsvp_closed %}
                         <span class="pill pill-neutral mt-3">{{ hero_attendance.get_status_display }}</span>
                     {% else %}
-                        {% comment %}
-                            hx-boost="false" (passed as cross_shell below) -- mobile:event_detail
-                            is a Member-shell view (bg-paper, not this page's bg-ink); boosting
-                            would swap its response into this page's <body> without updating the
-                            <body> tag's own class, leaving the wrong background. See base.html's
-                            own comment for the full reasoning.
-                        {% endcomment %}
-                        {% include "mobile/_hero_rsvp.html" with cross_shell=True %}
+                        {% include "mobile/_hero_rsvp.html" %}
                     {% endif %}
                 </div>
             </div>

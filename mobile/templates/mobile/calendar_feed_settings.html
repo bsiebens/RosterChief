@@ -39,7 +39,7 @@
     <div class="m-card p-4">
         <div class="text-sm font-semibold text-ink">{% trans "Reset link" %}</div>
         <p class="mt-1 text-xs text-muted">{% trans "If you've shared this link and want to take it back, reset it -- the old one stops working immediately and you'll need to re-subscribe with the new one." %}</p>
-        <form class="mt-3" method="post" action="{% url "mobile:calendar_feed_settings" %}">
+        <form class="mt-3" method="post" action="{% url "mobile:calendar_feed_settings" %}" hx-boost="false">
             {% csrf_token %}
             <button type="submit" class="btn btn-secondary w-full">{% trans "Reset my calendar link" %}</button>
         </form>

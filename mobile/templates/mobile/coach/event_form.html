@@ -24,7 +24,7 @@
         </div>
     {% endif %}
 
-    <form id="coach-event-form" method="post" action="{% url "mobile:coach_create_event" %}">
+    <form id="coach-event-form" method="post" action="{% url "mobile:coach_create_event" %}" hx-boost="false">
         {% csrf_token %}
 
         <div class="grid grid-cols-3 gap-2">
