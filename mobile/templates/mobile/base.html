@@ -70,7 +70,7 @@
         {% block extra_head %}{% endblock extra_head %}
     </head>
 
-    <body class="flex min-h-screen flex-col bg-paper font-sans text-slate" hx-boost="true" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' data-vapid-public-key="{{ vapid_public_key }}" data-csrftoken="{{ csrf_token }}">
+    <body class="scrollbar-hide flex min-h-screen flex-col bg-paper font-sans text-slate" hx-boost="true" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' data-vapid-public-key="{{ vapid_public_key }}" data-csrftoken="{{ csrf_token }}">
         <header class="app-header sticky top-0 z-20">
             <div class="flex min-h-11 items-center gap-2.5">
                 <a class="flex items-center gap-2.5" href="{% url "mobile:home" %}">

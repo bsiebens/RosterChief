@@ -349,28 +349,29 @@ class CalendarView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
                 for attendance in attendances
             ]
 
-        # Referee sign-ups are scoped to self.me only, never managed_people --
-        # a referee is an adult with their own account, not something a
-        # parent does on a child's behalf, unlike every RSVP row above.
-        # Merged into the same chronological list (own dict shape, no
-        # pill_class/member) rather than a separate section, so it reads on
-        # the actual day it falls on -- distinct styling is what sets it
-        # apart (mobile/_calendar_referee_row.html), not a different place
-        # on the screen. Declined invites are dropped; accepted ones stay
-        # visible as a confirmed commitment.
-        if self.me is not None and kind_filter != "training":
+        # Referee sign-ups are scoped to every managed person, same as the
+        # RSVP rows above -- a referee-eligible child is exactly as real as
+        # a referee-eligible parent, and a parent signing a kid up to
+        # referee is no different from answering an RSVP on their behalf.
+        # Merged into the same chronological list (own dict shape) rather
+        # than a separate section, so it reads on the actual day it falls
+        # on -- distinct styling is what sets it apart (mobile/
+        # _calendar_referee_row.html), not a different place on the screen.
+        # Declined invites are dropped; accepted ones stay visible as a
+        # confirmed commitment.
+        if self.managed_people and kind_filter != "training":
             signups = (
                 RefereeSignup.objects.filter(
-                    member=self.me,
+                    member__in=self.managed_people,
                     event__club=self.request.club,
                     event__cancelled=False,
                     event__start__gte=now,
                     status__in=[RefereeSignup.Status.INVITED, RefereeSignup.Status.ACCEPTED],
                 )
-                .select_related("event", "event__location", "event__opponent")
+                .select_related("event", "event__location", "event__opponent", "member")
                 .prefetch_related("event__teams")
             )
-            rows += [{"event": signup.event, "referee_signup": signup} for signup in signups]
+            rows += [{"event": signup.event, "referee_signup": signup, "referee_member": signup.member if show_member else None} for signup in signups]
 
         rows.sort(key=lambda row: row["event"].start)
 
@@ -395,29 +396,33 @@ class CalendarView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
 
 
 class RefereeSignupRespondView(PersonScopeMixin, LoginRequiredMixin, View):
-    """Accept/decline a referee invite -- from a Calendar row
-    (mobile/_calendar_referee_row.html) or the same event's own detail page
-    (event_detail.html's own "Refereeing" card, for the same signup). Routes
-    through events.services.referees.accept_referee_signup/
-    decline_referee_signup, so capacity is enforced in the one place the
-    desktop admin flow already enforces it, and the referee-management
-    screen sees the result with no separate sync step. Boosted (no explicit
-    hx-boost="false") -- unlike event_detail's own RSVP forms, nothing here
-    is Alpine-owned/toggled, so there's no htmx/Alpine conflict to dodge."""
+    """Accept/decline a referee invite, for self.me or any managed person
+    (a referee-eligible child is exactly as real as a referee-eligible
+    parent) -- from a Calendar row (mobile/_calendar_referee_row.html) or
+    the same event's own detail page (event_detail.html's own "Refereeing"
+    card, for the same signup). Routes through events.services.referees.
+    accept_referee_signup/decline_referee_signup, so capacity is enforced
+    in the one place the desktop admin flow already enforces it, and the
+    referee-management screen sees the result with no separate sync step.
+    Boosted (no explicit hx-boost="false") -- unlike event_detail's own
+    RSVP forms, nothing here is Alpine-owned/toggled, so there's no
+    htmx/Alpine conflict to dodge."""
 
     def post(self, request, *args, **kwargs):
-        signup = get_object_or_404(RefereeSignup, pk=kwargs["signup_id"], member=self.me, event__club=request.club)
+        signup = get_object_or_404(RefereeSignup, pk=kwargs["signup_id"], member__in=self.managed_people, event__club=request.club)
         response = request.POST.get("response")
 
         if response == "accept":
             try:
                 accept_referee_signup(signup)
-                notify(request, f"s|{_('Referee sign-up confirmed')}|{_('Thanks for signing up -- see you there.')}")
+                body = _("%(name)s is confirmed to referee -- see you there.") % {"name": signup.member.get_full_name()}
+                notify(request, f"s|{_('Referee sign-up confirmed')}|{body}")
             except RefereeAssignmentError as exc:
-                notify(request, f"e|{_('Could not sign you up')}|{exc}")
+                notify(request, f"e|{_('Could not sign up')}|{exc}")
         elif response == "decline":
             decline_referee_signup(signup)
-            notify(request, f"s|{_('Declined')}|{_('No problem -- thanks for letting us know.')}")
+            body = _("%(name)s won't be refereeing this one -- thanks for letting us know.") % {"name": signup.member.get_full_name()}
+            notify(request, f"s|{_('Declined')}|{body}")
         else:
             return HttpResponseBadRequest(_("Unknown response."))
 
@@ -461,13 +466,15 @@ class EventDetailView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         lineup = Lineup.objects.filter(event=event, published_at__isnull=False).first()
         lineup_categories = selected_members_by_position(lineup) if lineup is not None else []
 
-        # Same self.me-only scope as the Calendar row this mirrors
-        # (mobile/_calendar_referee_row.html) -- a referee is an adult
-        # acting on their own behalf, never something a parent does for a
-        # managed child. Declined signups are excluded -- nothing left to do.
-        referee_signup = None
-        if self.me is not None:
-            referee_signup = RefereeSignup.objects.filter(event=event, member=self.me, status__in=[RefereeSignup.Status.INVITED, RefereeSignup.Status.ACCEPTED]).first()
+        # Same managed_people scope as the Calendar row this mirrors (mobile/
+        # _calendar_referee_row.html) -- a referee-eligible child is exactly
+        # as real as a referee-eligible parent. Declined signups are
+        # excluded -- nothing left to do. Rare in practice (a game usually
+        # has one eligible referee per family, if any), so this is a plain
+        # list rather than the "Your answers" card's counts-only aggregate.
+        referee_signups = []
+        if self.managed_people:
+            referee_signups = list(RefereeSignup.objects.filter(event=event, member__in=self.managed_people, status__in=[RefereeSignup.Status.INVITED, RefereeSignup.Status.ACCEPTED]).select_related("member"))
 
         your_answers = []
         if self.managed_people:
@@ -513,7 +520,7 @@ class EventDetailView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
             rsvp_closed=rsvp_closed,
             lineup=lineup,
             lineup_categories=lineup_categories,
-            referee_signup=referee_signup,
+            referee_signups=referee_signups,
             your_answers=your_answers,
             squad_summary=squad_summary,
             **kwargs,

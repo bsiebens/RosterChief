@@ -1,20 +1,22 @@
 {% load i18n lucide %}
 {% comment %}
     One referee sign-up row on M3's Calendar -- a home game the signed-in
-    account is eligible (and, once responded, confirmed) to referee for.
-    Merged into the same chronological list as the account's own RSVP rows
-    (mobile/_calendar_row.html), but in the referee accent (assets/mobile.
-    css's --color-referee/.pill-referee) so it reads as a different kind of
-    commitment at a glance -- and scoped to self.me only (mobile/views.py's
-    CalendarView), never managed_people, since a referee is an adult acting
-    on their own behalf, not something a parent does for a child.
+    account (or a managed person -- a referee-eligible child is exactly as
+    real as a referee-eligible parent, mobile/views.py's CalendarView) is
+    eligible (and, once responded, confirmed) to referee for. Merged into
+    the same chronological list as the account's own RSVP rows (mobile/
+    _calendar_row.html), but in the referee accent (assets/mobile.css's
+    --color-referee/.pill-referee) so it reads as a different kind of
+    commitment at a glance.
 
-    Expects ``row`` ({event, referee_signup}) in scope. Accept/Decline are
-    two small forms, not a single multi-button one -- and, unlike this
-    app's RSVP forms, boosted (no hx-boost="false"): nothing here is
-    Alpine-owned/toggled, so there's no htmx/Alpine conflict to dodge, and a
-    boosted POST avoids the jarring full-page reload a plain form submit
-    would cause on a page the user is mid-scroll on.
+    Expects ``row`` ({event, referee_signup, referee_member}) in scope --
+    referee_member is only set once there's more than one managed person to
+    tell apart, same rule mobile/_calendar_row.html's own ``member`` uses.
+    Accept/Decline are two small forms, not a single multi-button one --
+    and, unlike this app's RSVP forms, boosted (no hx-boost="false"):
+    nothing here is Alpine-owned/toggled, so there's no htmx/Alpine conflict
+    to dodge, and a boosted POST avoids the jarring full-page reload a plain
+    form submit would cause on a page the user is mid-scroll on.
 {% endcomment %}
 <div class="flex items-center gap-3 bg-white px-4 py-3">
     <div class="w-9.5 shrink-0 text-center">
@@ -29,6 +31,7 @@
         </div>
         <div class="truncate text-xs text-muted">
             {{ row.event.start|date:"H:i" }}
+            {% if row.referee_member %}&middot; {{ row.referee_member.first_name }}{% endif %}
             {% for team in row.event.teams.all %}&middot; {{ team.name }}{% endfor %}
             {% if row.event.location %}&middot; {{ row.event.location.name }}{% endif %}
         </div>

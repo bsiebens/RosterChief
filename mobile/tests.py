@@ -1010,9 +1010,9 @@ class CalendarViewTests(TestCase):
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
 class CalendarRefereeSignupTests(TestCase):
-    """M3's Calendar merges in the signed-in account's own referee sign-ups
-    (self.me only, never managed_people) -- see mobile/_calendar_referee_row.
-    html and CalendarView's own docstring."""
+    """M3's Calendar merges in every managed person's referee sign-ups, not
+    just self.me -- see mobile/_calendar_referee_row.html and CalendarView's
+    own docstring."""
 
     @classmethod
     def setUpTestData(cls):
@@ -1073,6 +1073,22 @@ class CalendarRefereeSignupTests(TestCase):
         response = self._get(kind="training")
 
         self.assertNotContains(response, "I'll ref")
+
+    def test_a_managed_childs_invite_shows_up_and_names_them(self):
+        family = Family.objects.create(name="Eree")
+        FamilyMembership.objects.create(family=family, member=self.member, role=FamilyMembership.FamilyRole.PARENT)
+        child = Member.objects.create(first_name="Kid", last_name="Eree")
+        FamilyMembership.objects.create(family=family, member=child, role=FamilyMembership.FamilyRole.CHILD)
+        ClubMembership.objects.create(club=self.club, member=child, season=self.season)
+        RefereeProfile.objects.create(member=child, level=self.level, valid_until=timezone.localdate() + datetime.timedelta(days=30))
+        other_game = Event.objects.create(club=self.club, title="Second game", kind=Event.EventKind.GAME, location=self.home_ground, start=timezone.now() + datetime.timedelta(days=2))
+        other_game.teams.add(self.team)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertTrue(RefereeSignup.objects.filter(event=other_game, member=child).exists())
+        self.assertContains(response, "Kid")
 
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
@@ -1152,6 +1168,21 @@ class RefereeSignupRespondViewTests(TestCase):
         response = self._post("accept")
 
         self.assertEqual(response.status_code, 404)
+
+    def test_a_parent_can_respond_on_behalf_of_a_managed_child(self):
+        family = Family.objects.create(name="Eree")
+        FamilyMembership.objects.create(family=family, member=self.member, role=FamilyMembership.FamilyRole.PARENT)
+        child = Member.objects.create(first_name="Kid", last_name="Eree")
+        FamilyMembership.objects.create(family=family, member=child, role=FamilyMembership.FamilyRole.CHILD)
+        ClubMembership.objects.create(club=self.club, member=child, season=self.season)
+        RefereeProfile.objects.create(member=child, level=self.level, valid_until=timezone.localdate() + datetime.timedelta(days=30))
+        child_signup = RefereeSignup.objects.create(event=self.game, member=child, status=RefereeSignup.Status.INVITED)
+        self.client.force_login(self.user)
+
+        response = self.client.post(reverse("mobile:referee_signup_respond", kwargs={"signup_id": child_signup.pk}), {"response": "accept"}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertRedirects(response, reverse("mobile:calendar"), fetch_redirect_response=False)
+        self.assertTrue(EventReferee.objects.filter(event=self.game, member=child).exists())
 
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
@@ -1311,7 +1342,7 @@ class EventDetailScreenTests(TestCase):
 
         response = self._get()
 
-        self.assertIsNone(response.context["referee_signup"])
+        self.assertEqual(list(response.context["referee_signups"]), [])
         self.assertNotContains(response, "Refereeing")
 
     def test_pending_referee_invite_shows_accept_decline(self):
@@ -1339,8 +1370,23 @@ class EventDetailScreenTests(TestCase):
 
         response = self._get()
 
-        self.assertIsNone(response.context["referee_signup"])
+        self.assertEqual(list(response.context["referee_signups"]), [])
         self.assertNotContains(response, "Refereeing")
+
+    def test_a_managed_childs_referee_invite_shows_up_too(self):
+        family = Family.objects.create(name="Bakker")
+        FamilyMembership.objects.create(family=family, member=self.member, role=FamilyMembership.FamilyRole.PARENT)
+        child = Member.objects.create(first_name="Noor", last_name="Bakker")
+        FamilyMembership.objects.create(family=family, member=child, role=FamilyMembership.FamilyRole.CHILD)
+        ClubMembership.objects.create(club=self.club, member=child, season=self.season)
+        RefereeSignup.objects.create(event=self.event, member=child, status=RefereeSignup.Status.INVITED)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, "Refereeing")
+        self.assertContains(response, "Noor Bakker")
+        self.assertContains(response, "I'll ref")
 
     def test_squad_response_counts_are_correct(self):
         in_member = Member.objects.create(first_name="A", last_name="In")
