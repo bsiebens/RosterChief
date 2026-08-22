@@ -1,4 +1,4 @@
-{% load i18n lucide %}
+{% load i18n %}
 {% comment %}
     One referee sign-up row on M3's Calendar -- a home game the signed-in
     account (or a managed person -- a referee-eligible child is exactly as
@@ -7,7 +7,9 @@
     the same chronological list as the account's own RSVP rows (mobile/
     _calendar_row.html), but in the referee accent (assets/mobile.css's
     --color-referee/.pill-referee) so it reads as a different kind of
-    commitment at a glance.
+    commitment at a glance -- text/layout otherwise matches that row exactly
+    (no icon, same truncate-on-one-line title), so the accent colour is the
+    only thing setting it apart, not a different shape.
 
     Expects ``row`` ({event, referee_signup, referee_member}) in scope --
     referee_member is only set once there's more than one managed person to
@@ -24,10 +26,7 @@
     </div>
     <div class="w-[3px] shrink-0 self-stretch rounded-full" style="background: var(--color-referee)"></div>
     <div class="min-w-0 flex-1">
-        <div class="flex items-center gap-1 text-sm font-semibold text-ink">
-            {% lucide "flag" size=13 stroke_width=2.4 class="shrink-0 text-referee" %}
-            <span class="truncate">{% trans "Referee" %} &middot; {{ row.event.title }}</span>
-        </div>
+        <div class="truncate text-sm font-semibold text-ink">{% trans "Referee" %} &middot; {{ row.event.title }}</div>
         <div class="truncate text-xs text-muted">
             {{ row.event.start|date:"H:i" }}
             {% if row.referee_member %}&middot; {{ row.referee_member.first_name }}{% endif %}
