@@ -46,7 +46,7 @@
                         <p class="mt-1 font-display text-2xl leading-none font-extrabold uppercase">{{ hero_attendance.event.title }}</p>
                     </div>
                     <div class="p-4">
-                        <div class="flex flex-wrap gap-4 font-mono text-xs text-on-dark">
+                        <div class="flex flex-wrap gap-4 font-mono text-xs text-white">
                             <span>{% blocktrans with time=hero_attendance.event.start|date:"H:i" %}{{ time }} face-off{% endblocktrans %}</span>
                             {% if hero_attendance.event.gathering %}
                                 <span>{% blocktrans with time=hero_attendance.event.gathering|date:"H:i" %}Meet {{ time }}{% endblocktrans %}</span>

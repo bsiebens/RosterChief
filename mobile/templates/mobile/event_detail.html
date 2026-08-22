@@ -89,16 +89,17 @@
                             {% trans "Out" as label_out %}
                             {% with status=answer.attendance.status %}
                                 <div x-data="{ asking: null, reason: '{{ answer.attendance.note|default:""|escapejs }}' }">
-                                    <div class="flex gap-1.5" x-show="!asking">
-                                        <form class="min-w-0 flex-1" method="post" action="{% url "mobile:event_detail" event.pk %}" hx-boost="false">
+                                    {# grid, not flex -- see _hero_rsvp.html's own comment: flex-1/min-w-0 kept letting a longer label win a wider share; grid-cols-3's tracks are content-independent. #}
+                                    <div class="grid grid-cols-3 gap-1.5" x-show="!asking">
+                                        <form method="post" action="{% url "mobile:event_detail" event.pk %}" hx-boost="false">
                                             {% csrf_token %}
                                             <input type="hidden" name="member_id" value="{{ answer.member.pk }}">
                                             <input type="hidden" name="status" value="present">
                                             <input type="hidden" name="next" value="event_detail">
                                             <button type="submit" class="btn h-11 w-full text-[15px] {% if status == "present" %}btn-positive{% else %}bg-paper border border-stroke text-muted{% endif %}">{{ label_in }}</button>
                                         </form>
-                                        <button type="button" class="btn h-11 w-full min-w-0 flex-1 text-[15px] {% if status == "maybe" %}bg-steel text-white{% else %}bg-paper border border-stroke text-muted{% endif %}" @click="asking = 'maybe'">{{ label_maybe }}</button>
-                                        <button type="button" class="btn h-11 w-full min-w-0 flex-1 text-[15px] {% if status == "absent" %}bg-club text-white{% else %}bg-paper border border-stroke text-muted{% endif %}" @click="asking = 'absent'">{{ label_out }}</button>
+                                        <button type="button" class="btn h-11 w-full text-[15px] {% if status == "maybe" %}bg-steel text-white{% else %}bg-paper border border-stroke text-muted{% endif %}" @click="asking = 'maybe'">{{ label_maybe }}</button>
+                                        <button type="button" class="btn h-11 w-full text-[15px] {% if status == "absent" %}bg-club text-white{% else %}bg-paper border border-stroke text-muted{% endif %}" @click="asking = 'absent'">{{ label_out }}</button>
                                     </div>
 
                                     {% comment %}
@@ -117,9 +118,9 @@
                                         <label class="mb-1 block text-xs font-semibold text-muted" x-show="asking === 'absent'">{% trans "Reason -- only you and the coach can see this" %}</label>
                                         <label class="mb-1 block text-xs font-semibold text-muted" x-show="asking === 'maybe'">{% trans "Add a reason (optional) -- only you and the coach can see this" %}</label>
                                         <textarea class="h-16 w-full rounded-lg border border-stroke bg-paper p-2 text-sm text-ink" name="note" x-model="reason" placeholder="{% trans "e.g. sick, family event..." %}"></textarea>
-                                        <div class="mt-2 flex gap-2">
-                                            <button type="button" class="btn btn-secondary h-9 flex-1 text-xs" @click="asking = null">{% trans "Cancel" %}</button>
-                                            <button type="submit" class="btn btn-dark h-9 flex-1 text-xs">{% trans "Confirm" %}</button>
+                                        <div class="mt-2 grid grid-cols-2 gap-2">
+                                            <button type="button" class="btn btn-secondary h-9 text-xs" @click="asking = null">{% trans "Cancel" %}</button>
+                                            <button type="submit" class="btn btn-dark h-9 text-xs">{% trans "Confirm" %}</button>
                                         </div>
                                     </form>
                                 </div>
