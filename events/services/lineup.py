@@ -7,9 +7,11 @@ through rather than touching the models directly.
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
+from club.services.access import event_season
 from events.models import Attendance, LineupSlot
 from members.models import Member
 from notifications.services import notify_members
+from teams.models import StaffAssignment
 
 #: Attendance statuses that mean "not actually available" -- these members
 #: stay exactly as they are on publish, never flipped to NOT_SELECTED, and
@@ -56,3 +58,17 @@ def publish_lineup(lineup):
         notify_members(selected_members, club=lineup.event.club, title=_("Line-up published"), body=body, source=lineup.event)
 
     return lineup
+
+
+def notify_dropout(event, member, note):
+    """A player who was SELECTED in a published line-up reporting, after the
+    fact, that they can no longer make it (mobile.views.EventDetailView.post's
+    "dropout" status) -- unlike an ordinary pre-deadline Out, the roster is
+    already locked in, so this goes straight to whoever can still act on it:
+    every current-season manager of the event's own teams (management
+    position, not every staffer -- a physio can't swap a line-up slot)."""
+    manager_ids = StaffAssignment.objects.filter(team__in=event.teams.all(), position__management_position=True, season=event_season(event)).values_list("member_id", flat=True).distinct()
+    managers = Member.objects.filter(pk__in=manager_ids)
+    if managers:
+        body = _("%(member)s can no longer make it to %(event)s: “%(note)s”") % {"member": member.get_full_name(), "event": event.title, "note": note}
+        notify_members(managers, club=event.club, title=_("Line-up dropout"), body=body, source=event)

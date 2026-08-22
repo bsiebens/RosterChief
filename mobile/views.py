@@ -27,8 +27,9 @@ from club.services.fees import open_dues_rows
 from club.services.onboarding import checklist_for
 from club.services.sponsors import active_sponsors
 from controlpanel.messages import notify
-from events.models import Attendance, Event
+from events.models import Attendance, Event, Lineup
 from events.services.calendar import week_bounds
+from events.services.lineup import notify_dropout
 from members.models import FamilyMembership, Member
 from members.views import ClubScopedPublicMixin
 from news.models import News
@@ -391,6 +392,10 @@ class EventDetailView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         event = get_object_or_404(Event.objects.select_related("location", "opponent"), pk=self.kwargs["pk"], club=self.request.club)
         season = event.season or current_season(self.request.club)
         rsvp_closed = event.deadline is not None and event.deadline < timezone.now()
+        # A published line-up supersedes ordinary RSVP -- the roster's locked
+        # in, so "Your answers" below switches to read-only and the line-up
+        # itself gets its own card.
+        lineup = Lineup.objects.filter(event=event, published_at__isnull=False).prefetch_related("units__slots__member").first()
 
         your_answers = []
         if self.managed_people:
@@ -430,11 +435,19 @@ class EventDetailView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
                     "no_reply_pct": round(100 * counts["no_reply_count"] / total),
                 }
 
-        return super().get_context_data(screen_title=event.title, event=event, rsvp_closed=rsvp_closed, your_answers=your_answers, squad_summary=squad_summary, **kwargs)
+        return super().get_context_data(screen_title=event.title, event=event, rsvp_closed=rsvp_closed, lineup=lineup, your_answers=your_answers, squad_summary=squad_summary, **kwargs)
 
     def post(self, request, *args, **kwargs):
         status = request.POST.get("status")
-        if status not in (Attendance.AttendanceStatus.PRESENT, Attendance.AttendanceStatus.ABSENT, Attendance.AttendanceStatus.MAYBE):
+        # "dropout" isn't an AttendanceStatus -- it's this same form posting
+        # from the "Can't make it after all" button a SELECTED member sees
+        # once the line-up's published (event_detail.html). It resolves to
+        # ABSENT below, same as an ordinary Out, but skips the closed-deadline
+        # guard (the line-up is published well after most deadlines) and
+        # additionally pings the event's managers, since by this point only
+        # they can still act on it (swap the slot, warn the opponent, ...).
+        is_dropout = status == "dropout"
+        if not is_dropout and status not in (Attendance.AttendanceStatus.PRESENT, Attendance.AttendanceStatus.ABSENT, Attendance.AttendanceStatus.MAYBE):
             return HttpResponseBadRequest(_("Unknown RSVP status."))
 
         # Every current caller (Home's hero, M2's per-person rows) always sends an
@@ -446,11 +459,16 @@ class EventDetailView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
             return HttpResponseBadRequest(_("You can't RSVP for that person."))
 
         event = get_object_or_404(Event, pk=kwargs["pk"], club=request.club)
+        existing = Attendance.objects.filter(event=event, member=member).first()
+
+        if is_dropout:
+            if existing is None or existing.status != Attendance.AttendanceStatus.SELECTED:
+                return HttpResponseBadRequest(_("You're not in the published line-up for this event."))
         # Mirrors the read-only treatment Home's hero and this same screen's own
         # "Your answers" card already show once the deadline has passed (see
         # get_context_data's rsvp_closed) -- enforced here too, since a disabled
         # button in the UI is only a hint, not a guarantee against a direct POST.
-        if event.deadline is not None and event.deadline < timezone.now():
+        elif event.deadline is not None and event.deadline < timezone.now():
             return HttpResponseBadRequest(_("Replies are closed for this event."))
 
         # A reason is only ever meaningful attached to Out/Maybe -- clearing it
@@ -461,14 +479,14 @@ class EventDetailView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         # (event_detail's "Your answers") and Coach mode's bench attendance
         # (mobile/templates/mobile/coach/attendance.html) ever read it.
         note = ""
-        if status == Attendance.AttendanceStatus.ABSENT:
+        if is_dropout or status == Attendance.AttendanceStatus.ABSENT:
             note = request.POST.get("note", "").strip()
             # Rejects blank and punctuation-only "answers" (a bare ".", "-",
-            # "??") -- mandatory for Out specifically, unlike Maybe below.
-            # Backend-scoped, not the pretty inline-error UX this codebase
-            # gives ModelForm submissions elsewhere -- matches this view's
-            # own existing style (see "Unknown RSVP status"/"Replies are
-            # closed" above, both plain 400s a normal user should never
+            # "??") -- mandatory for Out/dropout specifically, unlike Maybe
+            # below. Backend-scoped, not the pretty inline-error UX this
+            # codebase gives ModelForm submissions elsewhere -- matches this
+            # view's own existing style (see "Unknown RSVP status"/"Replies
+            # are closed" above, both plain 400s a normal user should never
             # actually see, since the template only ever offers Out through
             # the reason form to begin with).
             if not any(char.isalnum() for char in note):
@@ -477,7 +495,11 @@ class EventDetailView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
             # Optional here -- Maybe doesn't owe anyone an explanation the way
             # a firm no does, but the same field carries it if given one.
             note = request.POST.get("note", "").strip()
-        Attendance.objects.update_or_create(event=event, member=member, defaults={"status": status, "note": note})
+
+        final_status = Attendance.AttendanceStatus.ABSENT if is_dropout else status
+        Attendance.objects.update_or_create(event=event, member=member, defaults={"status": final_status, "note": note})
+        if is_dropout:
+            notify_dropout(event, member, note)
 
         if request.POST.get("next") == "event_detail":
             return HttpResponseRedirect(reverse("mobile:event_detail", kwargs={"pk": event.pk}))

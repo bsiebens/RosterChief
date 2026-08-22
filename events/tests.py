@@ -16,7 +16,7 @@ from club.services.onboarding import mark_bypassed, mark_complete
 from features.models import Maintenance
 from members.models import Group, GroupMembership, Member
 from notifications.models import Notification
-from teams.models import Position, RefereeLevel, RefereeProfile, Team, TeamMembership
+from teams.models import Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership
 
 from .admin import EventAdminForm
 from .models import Attendance, Competition, Event, EventReferee, EventSeries, Lineup, LineupSlot, LineupUnit, Location, Opponent
@@ -34,7 +34,7 @@ from .services import (
     team_no_shows,
 )
 from .services.calendar import add_months, month_bounds, month_grid, season_grid, week_bounds, week_grid
-from .services.lineup import clear_slot, place_member, publish_lineup
+from .services.lineup import clear_slot, notify_dropout, place_member, publish_lineup
 from .services.rbihf_import import RBIHFImportError, apply_plan, build_plan, extract_team_id, parse_fixtures, suggested_location, suggested_opponent
 from .services.referees import RefereeAssignmentError, add_external_referee, assign_referee, conflicting_events, eligible_referees, needs_referee_management, remove_referee, set_referee_fee
 from .tasks import send_deadline_reminders
@@ -465,6 +465,28 @@ class LineupServiceTests(EventsTestBase):
 
         notified_member_ids = set(Notification.objects.filter(member__in=[self.alice, self.bob]).values_list("member_id", flat=True))
         self.assertEqual(notified_member_ids, {self.alice.pk})
+
+    def test_notify_dropout_notifies_the_teams_managers(self):
+        event, _lineup, _unit, _slot = self.make_game_with_lineup()
+        manager = Member.objects.create(first_name="Cara", last_name="Coach")
+        management_position = Position.objects.create(club=self.club, name="Head coach", short_name="HC", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=self.team, member=manager, season=self.season, position=management_position)
+
+        notify_dropout(event, self.alice, "Twisted an ankle")
+
+        notification = Notification.objects.get(member=manager)
+        self.assertIn(self.alice.get_full_name(), notification.body)
+        self.assertIn("Twisted an ankle", notification.body)
+
+    def test_notify_dropout_does_not_notify_non_management_staff(self):
+        event, _lineup, _unit, _slot = self.make_game_with_lineup()
+        physio = Member.objects.create(first_name="Pat", last_name="Physio")
+        physio_position = Position.objects.create(club=self.club, name="Physio", short_name="PH", staff_position=True, management_position=False)
+        StaffAssignment.objects.create(team=self.team, member=physio, season=self.season, position=physio_position)
+
+        notify_dropout(event, self.alice, "Twisted an ankle")
+
+        self.assertFalse(Notification.objects.filter(member=physio).exists())
 
 
 class RosterChangeSyncTests(EventsTestBase):

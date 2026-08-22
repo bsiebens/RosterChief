@@ -709,6 +709,92 @@ class EventDetailRsvpTests(TestCase):
 
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class EventDetailDropoutTests(TestCase):
+    """The "Can't make it after all" action a SELECTED member sees on a
+    published line-up (event_detail.html) -- posts status=dropout, which
+    EventDetailView.post resolves to an ordinary ABSENT plus a manager
+    notification, since the closed-deadline guard doesn't apply here."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        today = timezone.localdate()
+        cls.season = Season.objects.create(club=cls.club, start_date=today - datetime.timedelta(days=30), end_date=today + datetime.timedelta(days=300))
+        cls.user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", email="parent@example.com", user=cls.user)
+        ClubMembership.objects.create(club=cls.club, member=cls.member, season=cls.season)
+        cls.team = Team.objects.create(club=cls.club, name="U16", short_name="U16")
+        # Deadline in the past -- a published line-up is typically well after it,
+        # and the dropout path specifically has to work despite this.
+        cls.event = Event.objects.create(club=cls.club, title="Away game", start=timezone.now() + datetime.timedelta(days=1), deadline=timezone.now() - datetime.timedelta(hours=1))
+        cls.event.teams.add(cls.team)
+        cls.manager = Member.objects.create(first_name="Cara", last_name="Coach")
+        management_position = Position.objects.create(club=cls.club, name="Head coach", short_name="HC", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=cls.team, member=cls.manager, season=cls.season, position=management_position)
+
+    def _post(self, data):
+        return self.client.post(reverse("mobile:event_detail", kwargs={"pk": self.event.pk}), data=data, HTTP_HOST="ajax-united.rosterchief.app")
+
+    def test_dropout_flips_a_selected_member_to_absent_with_the_given_reason(self):
+        Attendance.objects.create(event=self.event, member=self.member, status=Attendance.AttendanceStatus.SELECTED)
+        self.client.force_login(self.user)
+
+        response = self._post({"status": "dropout", "note": "Twisted an ankle"})
+
+        self.assertEqual(response.status_code, 302)
+        attendance = Attendance.objects.get(event=self.event, member=self.member)
+        self.assertEqual(attendance.status, Attendance.AttendanceStatus.ABSENT)
+        self.assertEqual(attendance.note, "Twisted an ankle")
+
+    def test_dropout_bypasses_the_closed_deadline_guard(self):
+        # setUpTestData's event already has a deadline in the past -- an
+        # ordinary Out would 400 here (see EventDetailRsvpTests), dropout must not.
+        Attendance.objects.create(event=self.event, member=self.member, status=Attendance.AttendanceStatus.SELECTED)
+        self.client.force_login(self.user)
+
+        response = self._post({"status": "dropout", "note": "Twisted an ankle"})
+
+        self.assertEqual(response.status_code, 302)
+
+    def test_dropout_notifies_the_teams_managers(self):
+        Attendance.objects.create(event=self.event, member=self.member, status=Attendance.AttendanceStatus.SELECTED)
+        self.client.force_login(self.user)
+
+        self._post({"status": "dropout", "note": "Twisted an ankle"})
+
+        notification = Notification.objects.get(member=self.manager)
+        self.assertIn(self.member.get_full_name(), notification.body)
+        self.assertIn("Twisted an ankle", notification.body)
+
+    def test_dropout_without_a_reason_is_rejected(self):
+        Attendance.objects.create(event=self.event, member=self.member, status=Attendance.AttendanceStatus.SELECTED)
+        self.client.force_login(self.user)
+
+        response = self._post({"status": "dropout"})
+
+        self.assertEqual(response.status_code, 400)
+        attendance = Attendance.objects.get(event=self.event, member=self.member)
+        self.assertEqual(attendance.status, Attendance.AttendanceStatus.SELECTED)
+
+    def test_dropout_is_rejected_when_the_member_was_not_selected(self):
+        Attendance.objects.create(event=self.event, member=self.member, status=Attendance.AttendanceStatus.PRESENT)
+        self.client.force_login(self.user)
+
+        response = self._post({"status": "dropout", "note": "Twisted an ankle"})
+
+        self.assertEqual(response.status_code, 400)
+        attendance = Attendance.objects.get(event=self.event, member=self.member)
+        self.assertEqual(attendance.status, Attendance.AttendanceStatus.PRESENT)
+
+    def test_dropout_is_rejected_when_there_is_no_attendance_row_at_all(self):
+        self.client.force_login(self.user)
+
+        response = self._post({"status": "dropout", "note": "Twisted an ankle"})
+
+        self.assertEqual(response.status_code, 400)
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
 class CalendarViewTests(TestCase):
     """M3 -- design_handoff_rosterchief_platform/README.md's M3 section: a
     "This week"/"Next week" agenda. No person switcher and no club-wide
@@ -994,6 +1080,64 @@ class EventDetailScreenTests(TestCase):
 
         self.assertEqual(list(response.context["your_answers"]), [])
         self.assertContains(response, "No one you manage is invited")
+
+    def test_no_lineup_card_when_none_is_published(self):
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertIsNone(response.context["lineup"])
+        self.assertNotContains(response, "Line-up")
+
+    def test_unpublished_lineup_is_not_shown(self):
+        lineup = Lineup.objects.create(event=self.event, team=self.team)
+        unit = LineupUnit.objects.create(lineup=lineup, label="Line 1")
+        LineupSlot.objects.create(unit=unit, member=self.member)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertIsNone(response.context["lineup"])
+
+    def test_published_lineup_shows_its_units_and_slotted_members(self):
+        lineup = Lineup.objects.create(event=self.event, team=self.team, published_at=timezone.now())
+        unit = LineupUnit.objects.create(lineup=lineup, label="Line 1")
+        LineupSlot.objects.create(unit=unit, member=self.member)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertEqual(response.context["lineup"], lineup)
+        self.assertContains(response, "Line 1")
+        self.assertContains(response, self.member.get_full_name())
+
+    def test_rsvp_buttons_are_replaced_by_a_readonly_pill_once_the_lineup_is_published(self):
+        Lineup.objects.create(event=self.event, team=self.team, published_at=timezone.now())
+        Attendance.objects.create(event=self.event, member=self.member, status=Attendance.AttendanceStatus.SELECTED)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertNotContains(response, 'name="status" value="present"')
+
+    def test_selected_member_sees_the_cant_make_it_button(self):
+        Lineup.objects.create(event=self.event, team=self.team, published_at=timezone.now())
+        Attendance.objects.create(event=self.event, member=self.member, status=Attendance.AttendanceStatus.SELECTED)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, "Can't make it after all")
+        self.assertContains(response, 'name="status" value="dropout"')
+
+    def test_not_selected_member_does_not_see_the_cant_make_it_button(self):
+        Lineup.objects.create(event=self.event, team=self.team, published_at=timezone.now())
+        Attendance.objects.create(event=self.event, member=self.member, status=Attendance.AttendanceStatus.NOT_SELECTED)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertNotContains(response, 'name="status" value="dropout"')
 
     def test_squad_response_counts_are_correct(self):
         in_member = Member.objects.create(first_name="A", last_name="In")

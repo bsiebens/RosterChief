@@ -44,7 +44,7 @@
         {% if event.gathering %}
             <div class="flex items-center gap-3.5">
                 <span class="w-20 shrink-0 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Meet" %}</span>
-                <span class="text-[15px] font-semibold text-ink">{{ event.gathering|date:"H:i" }}</span>
+                <span class="text-[15px] font-semibold text-ink">{{ event.gathering|date:"D d M \a\t H:i" }}</span>
             </div>
         {% endif %}
         {% if event.location %}
@@ -57,6 +57,27 @@
             </div>
         {% endif %}
     </div>
+
+    {% if lineup %}
+        <div class="m-card p-4">
+            <div class="flex items-center justify-between">
+                <span class="font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Line-up" %}</span>
+                <span class="pill pill-info">{% trans "Published" %}</span>
+            </div>
+            <div class="mt-3 flex flex-col gap-3">
+                {% for unit in lineup.units.all %}
+                    <div>
+                        <div class="mb-1.5 font-display text-xs font-extrabold tracking-wide text-club uppercase">{{ unit.label }}</div>
+                        <div class="flex flex-wrap gap-1.5">
+                            {% for slot in unit.slots.all %}
+                                {% if slot.member %}<span class="pill pill-neutral">{{ slot.member.get_full_name }}</span>{% endif %}
+                            {% endfor %}
+                        </div>
+                    </div>
+                {% endfor %}
+            </div>
+        </div>
+    {% endif %}
 
     {% if your_answers %}
         <div class="m-card p-4">
@@ -81,8 +102,31 @@
                                 <span class="pill pill-warn shrink-0">{% trans "No reply" %}</span>
                             {% endif %}
                         </div>
-                        {% if rsvp_closed %}
+                        {% if rsvp_closed or lineup %}
                             <span class="pill pill-neutral">{{ answer.attendance.get_status_display }}</span>
+                            {% if lineup and answer.attendance.status == "selected" %}
+                                {% comment %}
+                                    Only a SELECTED player sees this -- once they report a
+                                    dropout, EventDetailView.post flips them to ABSENT, so a
+                                    reload naturally drops this button and falls through to
+                                    the shared note paragraph below instead.
+                                {% endcomment %}
+                                <div class="mt-2" x-data="{ asking: false, reason: '' }">
+                                    <button type="button" class="btn btn-secondary h-9 w-full text-xs" x-show="!asking" @click="asking = true">{% trans "Can't make it after all" %}</button>
+                                    <form x-show="asking" x-cloak method="post" action="{% url "mobile:event_detail" event.pk %}" hx-boost="false" class="rounded-lg border border-stroke bg-paper p-3">
+                                        {% csrf_token %}
+                                        <input type="hidden" name="member_id" value="{{ answer.member.pk }}">
+                                        <input type="hidden" name="status" value="dropout">
+                                        <input type="hidden" name="next" value="event_detail">
+                                        <label class="mb-1 block text-xs font-semibold text-muted">{% trans "Let the coach know why -- they'll be notified right away" %}</label>
+                                        <textarea class="h-16 w-full rounded-lg border border-stroke bg-white p-2 text-sm text-ink" name="note" x-model="reason" placeholder="{% trans "e.g. sick, injured, running late..." %}"></textarea>
+                                        <div class="mt-2 grid grid-cols-2 gap-2">
+                                            <button type="button" class="btn btn-secondary h-9 text-xs" @click="asking = false">{% trans "Cancel" %}</button>
+                                            <button type="submit" class="btn btn-dark h-9 text-xs">{% trans "Send" %}</button>
+                                        </div>
+                                    </form>
+                                </div>
+                            {% endif %}
                         {% else %}
                             {% trans "In" as label_in %}
                             {% trans "Maybe" as label_maybe %}
