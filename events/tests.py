@@ -1708,6 +1708,22 @@ class CalendarGridTests(EventsTestBase):
         self.assertEqual(grid["day_start_hour"], 0)
         self.assertEqual(grid["day_end_hour"], 24)
 
+    def test_week_grid_first_event_hour_is_the_earliest_events_start_hour(self):
+        monday = date(2026, 8, 17)
+        morning = self.make_event(title="Morning", start=self.at(monday, 9), end=self.at(monday, 10))
+        evening = self.make_event(title="Evening", start=self.at(monday + timedelta(days=2), 18), end=self.at(monday + timedelta(days=2), 19))
+
+        grid = week_grid([morning, evening], monday)
+
+        self.assertEqual(grid["first_event_hour"], 9)
+
+    def test_week_grid_first_event_hour_is_none_when_the_week_has_no_events(self):
+        monday = date(2026, 8, 17)
+
+        grid = week_grid([], monday)
+
+        self.assertIsNone(grid["first_event_hour"])
+
     def test_week_grid_excludes_events_outside_the_week(self):
         monday = date(2026, 8, 17)
         event = self.make_event(start=self.at(monday + timedelta(days=7), 10))

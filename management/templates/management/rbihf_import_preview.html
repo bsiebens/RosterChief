@@ -18,7 +18,7 @@
                     <h2 class="card-title text-base">{% lucide "plus" size=18 %} {% blocktrans count counter=plan.to_create|length %}{{ counter }} game to create{% plural %}{{ counter }} games to create{% endblocktrans %}</h2>
 
                     {% if plan.to_create %}
-                        <div class="overflow-x-auto">
+                        <div class="overflow-x-auto overflow-y-visible">
                             <table class="table">
                                 <thead>
                                     <tr>
@@ -69,7 +69,7 @@
                     <h2 class="card-title text-base">{% lucide "refresh-cw" size=18 %} {% blocktrans count counter=plan.to_update|length %}{{ counter }} game to update{% plural %}{{ counter }} games to update{% endblocktrans %}</h2>
 
                     {% if plan.to_update %}
-                        <div class="overflow-x-auto">
+                        <div class="overflow-x-auto overflow-y-visible">
                             <table class="table">
                                 <thead>
                                     <tr>

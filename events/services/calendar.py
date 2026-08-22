@@ -158,6 +158,12 @@ def week_grid(events, week_start: datetime.date) -> dict:
         "hours": list(range(day_start_hour, day_end_hour + 1)),
         "day_start_hour": day_start_hour,
         "day_end_hour": day_end_hour,
+        # The grid always spans the full day (see DEFAULT_DAY_START_HOUR/END_HOUR's
+        # own comment -- never clipped), so a plain "top of the grid" scroll position
+        # would default to an empty 00:00 view most weeks. The template scrolls its
+        # bounded viewport to just before this hour instead -- None when the week has
+        # no events at all, since there's nothing to reveal either way.
+        "first_event_hour": min((start.hour for _event, start, _end in spans), default=None),
     }
 
 

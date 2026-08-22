@@ -5434,6 +5434,24 @@ class EventManagementTests(ManagementTestBase):
 
         self.assertContains(response, 'aria-label="Part of a series"', count=1)
 
+    def test_the_week_calendar_carries_the_first_event_hour_for_the_initial_scroll(self):
+        local_today = timezone.localdate()
+        start = timezone.make_aware(datetime.datetime.combine(local_today, datetime.time(18, 0)))
+        event = Event.objects.create(club=self.club, title="Evening practice", start=start)
+        event.teams.add(self.own_team)
+        self.client.force_login(self.own_team_coach)
+
+        response = self.club_get("event_list")  # default view=calendar, range=week
+
+        self.assertContains(response, 'data-first-event-hour="18"')
+
+    def test_the_week_calendar_first_event_hour_is_blank_with_no_events(self):
+        self.client.force_login(self.own_team_coach)
+
+        response = self.club_get("event_list", params={"date": "2030-01-07"})  # a Monday with nothing scheduled
+
+        self.assertContains(response, 'data-first-event-hour=""')
+
     def test_the_month_calendar_marks_a_series_occurrence_with_the_repeat_icon(self):
         series = EventSeries.objects.create(club=self.club, title="Weekly Training", kind=Event.EventKind.TRAINING, dtstart=timezone.now(), rrule="FREQ=WEEKLY;COUNT=1")
         occurrence = Event.objects.create(club=self.club, title="Weekly Training", start=timezone.now(), series=series)

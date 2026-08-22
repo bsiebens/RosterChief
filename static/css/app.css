@@ -4028,6 +4028,9 @@
   .max-h-96 {
     max-height: calc(var(--spacing) * 96);
   }
+  .max-h-\[70vh\] {
+    max-height: 70vh;
+  }
   .max-h-full {
     max-height: 100%;
   }
@@ -4449,6 +4452,9 @@
   }
   .overflow-y-auto {
     overflow-y: auto;
+  }
+  .overflow-y-visible {
+    overflow-y: visible;
   }
   .rounded {
     border-radius: 0.25rem;

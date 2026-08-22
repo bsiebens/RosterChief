@@ -68,7 +68,7 @@
 {% block panel %}
     {% if view_mode == "list" %}
         <div class="card overflow-hidden">
-            <div class="overflow-x-auto">
+            <div class="overflow-x-auto overflow-y-visible">
                 <table class="table">
                     <thead>
                         <tr>
@@ -158,7 +158,17 @@
             <div class="border-b border-line px-4 py-2.5 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">
                 {% blocktrans with start=calendar.week_start|date:"j M" end=calendar.week_end|date:"j M Y" %}{{ start }} – {{ end }}{% endblocktrans %}
             </div>
-            <div class="overflow-x-auto">
+            {% comment %}
+                Deliberately its own bounded, contained scroll (max-h + overflow-y-auto)
+                rather than riding the page's own scroll like everywhere else in this app
+                (management/base.html's own comment) -- the grid always spans the full
+                24h day (never clipped, see DEFAULT_DAY_START_HOUR/END_HOUR's own
+                comment), so inlining all of it into the page would mean scrolling past
+                a screenful of empty small-hours before reaching any events most weeks.
+                extra_body's own script scrolls this container to just before the
+                week's first event on load, for the same reason.
+            {% endcomment %}
+            <div id="cal-week-scroll" class="max-h-[70vh] overflow-x-auto overflow-y-auto" data-first-event-hour="{{ calendar.first_event_hour|default_if_none:"" }}" data-day-start-hour="{{ calendar.day_start_hour }}" data-day-end-hour="{{ calendar.day_end_hour }}">
                 {% with hours_span=calendar.hours|length|add:"-1" %}
                     <div class="cal-week-inner">
                         <div class="cal-week-header">
@@ -277,3 +287,25 @@
         {% endif %}
     {% endif %}
 {% endblock panel %}
+
+{% block extra_body %}
+    {% if calendar_range == "week" %}
+        <script>
+            (() => {
+                // Scrolls #cal-week-scroll to just before the week's first event on
+                // load -- the grid always spans the full 24h day (see week_grid's own
+                // comment), so without this most weeks would open on an empty
+                // small-hours view. No-op when the week has no events at all
+                // (data-first-event-hour is blank then -- nothing to reveal either way).
+                const container = document.getElementById("cal-week-scroll");
+                const body = container?.querySelector(".cal-week-body");
+                if (!container || !body || container.dataset.firstEventHour === "") return;
+
+                const dayStart = Number(container.dataset.dayStartHour);
+                const dayEnd = Number(container.dataset.dayEndHour);
+                const targetHour = Math.max(Number(container.dataset.firstEventHour) - 1, dayStart);
+                container.scrollTop = ((targetHour - dayStart) / (dayEnd - dayStart)) * body.offsetHeight;
+            })();
+        </script>
+    {% endif %}
+{% endblock extra_body %}

@@ -29,6 +29,6 @@
         <iframe class="h-[560px] w-full rounded-lg border border-line bg-white" src="{{ render_url }}" loading="lazy" title="{{ preview.label }}"></iframe>
     </div>
     {% if show_text_toggle %}
-        <pre class="hidden overflow-x-auto p-4.5 font-mono text-sm whitespace-pre-wrap text-ink" data-view-panel="text">{{ preview.text }}</pre>
+        <pre class="hidden overflow-x-auto overflow-y-visible p-4.5 font-mono text-sm whitespace-pre-wrap text-ink" data-view-panel="text">{{ preview.text }}</pre>
     {% endif %}
 </div>
