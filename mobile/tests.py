@@ -2419,6 +2419,62 @@ class CoachTodayViewTests(TestCase):
         self.assertContains(response, "Next up")
         self.assertContains(response, "Next week")
 
+    def test_a_session_with_an_end_time_stays_current_until_30_minutes_past_it(self):
+        ongoing = Event.objects.create(
+            club=self.club,
+            title="Ongoing game",
+            kind=Event.EventKind.GAME,
+            start=timezone.now() - datetime.timedelta(hours=2),
+            end=timezone.now() - datetime.timedelta(minutes=20),
+        )
+        ongoing.teams.add(self.team)
+        later = Event.objects.create(club=self.club, title="Later practice", kind=Event.EventKind.TRAINING, start=timezone.now() + datetime.timedelta(days=1))
+        later.teams.add(self.team)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertEqual(response.context["session_event"], ongoing)
+
+    def test_a_session_with_an_end_time_switches_30_minutes_past_it(self):
+        finished = Event.objects.create(
+            club=self.club,
+            title="Finished game",
+            kind=Event.EventKind.GAME,
+            start=timezone.now() - datetime.timedelta(hours=2),
+            end=timezone.now() - datetime.timedelta(minutes=40),
+        )
+        finished.teams.add(self.team)
+        later = Event.objects.create(club=self.club, title="Later practice", kind=Event.EventKind.TRAINING, start=timezone.now() + datetime.timedelta(days=1))
+        later.teams.add(self.team)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertEqual(response.context["session_event"], later)
+
+    def test_a_session_with_no_end_time_stays_current_until_90_minutes_past_start(self):
+        ongoing = Event.objects.create(club=self.club, title="Ongoing practice", kind=Event.EventKind.TRAINING, start=timezone.now() - datetime.timedelta(minutes=80))
+        ongoing.teams.add(self.team)
+        later = Event.objects.create(club=self.club, title="Later practice", kind=Event.EventKind.TRAINING, start=timezone.now() + datetime.timedelta(days=1))
+        later.teams.add(self.team)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertEqual(response.context["session_event"], ongoing)
+
+    def test_a_session_with_no_end_time_switches_90_minutes_past_start(self):
+        finished = Event.objects.create(club=self.club, title="Finished practice", kind=Event.EventKind.TRAINING, start=timezone.now() - datetime.timedelta(minutes=100))
+        finished.teams.add(self.team)
+        later = Event.objects.create(club=self.club, title="Later practice", kind=Event.EventKind.TRAINING, start=timezone.now() + datetime.timedelta(days=1))
+        later.teams.add(self.team)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertEqual(response.context["session_event"], later)
+
     def test_silent_players_are_counted_and_listed_in_needs_you(self):
         other_member = Member.objects.create(first_name="Anna", last_name="Player")
         TeamMembership.objects.create(team=self.team, member=other_member, season=self.season)

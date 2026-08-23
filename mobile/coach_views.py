@@ -5,8 +5,11 @@ club/season plumbing already factored into club.services.access -- see
 mobile/coach_mixins.py's CoachScopeMixin for the shared scaffolding.
 """
 
+import datetime
+
 from django import forms
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.db.models import Case, F, When
 from django.http import Http404, HttpResponseForbidden, HttpResponseRedirect
 from django.shortcuts import get_object_or_404
 from django.urls import reverse
@@ -39,6 +42,25 @@ IN_STATUSES = [Attendance.AttendanceStatus.PRESENT, Attendance.AttendanceStatus.
 #: An explicit no -- declined or, for a published line-up, not selected.
 #: Distinct from NO_RESPONSE ("silent"), which is a non-answer rather than a no.
 OUT_STATUSES = [Attendance.AttendanceStatus.ABSENT, Attendance.AttendanceStatus.EXCUSED, Attendance.AttendanceStatus.NOT_SELECTED]
+
+#: How long an event stays "current" (CoachTodayView's session card, and the
+#: missing-line-up nudge) past the moment it starts -- events.start__gte=now
+#: alone would flip to the next session the instant this one begins, while
+#: the coach is still mid-practice/mid-game. Past end (when set) plus a grace
+#: window; past start plus an assumed length when it isn't (most training
+#: events carry no end time -- see Event.end's own help text).
+STILL_CURRENT_GRACE = datetime.timedelta(minutes=30)
+STILL_CURRENT_ASSUMED_DURATION = datetime.timedelta(minutes=90)
+
+
+def _still_current_events(team):
+    """Events for ``team`` that haven't yet reached their "still current"
+    cutoff -- see STILL_CURRENT_GRACE/STILL_CURRENT_ASSUMED_DURATION above."""
+    cutoff = Case(
+        When(end__isnull=False, then=F("end") + STILL_CURRENT_GRACE),
+        default=F("start") + STILL_CURRENT_ASSUMED_DURATION,
+    )
+    return Event.objects.filter(teams=team, cancelled=False).annotate(still_current_cutoff=cutoff).filter(still_current_cutoff__gte=timezone.now()).order_by("start")
 
 
 class CoachTodayView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
@@ -86,7 +108,7 @@ class CoachTodayView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
         if team is not None:
             squad_count = TeamMembership.objects.filter(team=team, season=season).count() if season is not None else 0
 
-            upcoming = Event.objects.filter(teams=team, cancelled=False, start__gte=now).order_by("start")
+            upcoming = _still_current_events(team)
             tonight_event = upcoming.filter(start__date=today).first()
             session_event = tonight_event or upcoming.first()
 
