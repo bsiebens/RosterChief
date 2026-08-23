@@ -15,11 +15,17 @@
 #
 # The server needs a one-time `docker login ghcr.io` if the image is private (see
 # DEPLOYMENT.md) — this script doesn't carry credentials for that itself.
+#
+# SSH_KEY_FILE (optional) authenticates with that specific private key instead of whatever
+# ssh-agent/default identity would otherwise be tried — see deploy/deploy-prod.sh's own
+# comment on why IdentitiesOnly=yes goes with it, and deploy/.env.deploy.example for where to
+# keep these set rather than typing them every deploy.
 set -Eeuo pipefail
 
 # --- config (override via env) ----------------------------------------------
 SSH_HOST="${SSH_HOST:-home.siebens.org}"
 SSH_USER="${SSH_USER:-bernard}"
+SSH_KEY_FILE="${SSH_KEY_FILE:-}"
 REMOTE_DIR="${REMOTE_DIR:-/home/bernard/RosterChief}"
 BRANCH="${BRANCH:-$(git rev-parse --abbrev-ref HEAD)}"
 COMPOSE_FILE="${COMPOSE_FILE:-compose.behind-proxy.yaml}"
@@ -29,6 +35,8 @@ COMPOSE_FILE="${COMPOSE_FILE:-compose.behind-proxy.yaml}"
 DEFAULT_WEB_PORT="${DEFAULT_WEB_PORT:-8001}"
 
 SSH_TARGET="${SSH_USER}@${SSH_HOST}"
+SSH_OPTS=(-o ConnectTimeout=10)
+[ -n "$SSH_KEY_FILE" ] && SSH_OPTS+=(-i "$SSH_KEY_FILE" -o IdentitiesOnly=yes)
 
 say() { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
@@ -51,7 +59,7 @@ say "Deploying ${BRANCH} to ${SSH_TARGET}:${REMOTE_DIR}"
 # --- the work, on the server ------------------------------------------------
 # One SSH session runs the whole remote script; args are passed positionally so nothing has to
 # be re-quoted inside the heredoc.
-ssh -o ConnectTimeout=10 "${SSH_TARGET}" bash -s -- "${REMOTE_DIR}" "${BRANCH}" "${COMPOSE_FILE}" "${DEFAULT_WEB_PORT}" <<'REMOTE'
+ssh "${SSH_OPTS[@]}" "${SSH_TARGET}" bash -s -- "${REMOTE_DIR}" "${BRANCH}" "${COMPOSE_FILE}" "${DEFAULT_WEB_PORT}" <<'REMOTE'
 set -Eeuo pipefail
 REMOTE_DIR="$1"; BRANCH="$2"; COMPOSE_FILE="$3"; DEFAULT_WEB_PORT="$4"
 

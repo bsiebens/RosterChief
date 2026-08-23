@@ -92,9 +92,21 @@ deploy/deploy-prod.sh --push        # push main first, then deploy
 Unlike the dev script, this one has no default host (guessing wrong here is a real mistake, not
 a rebuild), refuses anything but `main` unless you set `ALLOW_NON_MAIN=1`, runs
 `deploy/backup.sh` before migrating (skip with `SKIP_BACKUP=1`, not recommended), and restarts
-`worker`/`beat` alongside `web` — a stale scheduled task is a production bug. `SSH_HOST`/
-`SSH_USER`/`REMOTE_DIR` are easiest set once in your shell profile or a local `.env` you
-`source`, rather than typed on every deploy.
+`worker`/`beat` alongside `web` — a stale scheduled task is a production bug.
+
+`SSH_HOST`/`SSH_USER`/`REMOTE_DIR` (and the optional `SSH_KEY_FILE`, to authenticate with a
+specific private key instead of your default SSH identity) are easiest set once per target
+rather than typed on every deploy:
+
+```bash
+cp deploy/.env.deploy.example deploy/.env.prod.local   # gitignored, never committed
+# fill it in, then:
+source deploy/.env.prod.local && deploy/deploy-prod.sh
+```
+
+`deploy/deploy-dev.sh` reads the same four variables (`SSH_HOST`/`SSH_USER` there already
+default to the dev box, so only set what differs — e.g. a `deploy/.env.dev.local` with just
+`SSH_KEY_FILE` if the dev box needs a different key than your default).
 
 ### Keep DJANGO_DEBUG=False, even on the test server
 
@@ -360,8 +372,10 @@ is only for `compose.behind-proxy.yaml`/the script itself, not the app code, see
 the image, run migrations *explicitly*, restart only `web`, and wait for `/healthz`.
 
 It refuses to deploy a branch whose local commits are not pushed — the server pulls from git,
-so unpushed work would ship stale code silently. Override the host, user, directory or branch
-with the `SSH_HOST` / `SSH_USER` / `REMOTE_DIR` / `BRANCH` environment variables.
+so unpushed work would ship stale code silently. Override the host, user, directory, branch, or
+SSH identity with the `SSH_HOST` / `SSH_USER` / `REMOTE_DIR` / `BRANCH` / `SSH_KEY_FILE`
+environment variables — see "Deploying updates" above for where to keep these set per target
+rather than typing them every deploy.
 
 #### Where the image comes from
 

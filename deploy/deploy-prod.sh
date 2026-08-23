@@ -23,10 +23,16 @@
 # No default SSH_HOST/REMOTE_DIR, unlike deploy-dev.sh — guessing wrong here is a much worse
 # mistake than for a throwaway test instance, so this refuses to run until you say exactly
 # where "production" is.
+#
+# SSH_KEY_FILE (optional) authenticates with that specific private key instead of whatever
+# ssh-agent/default identity would otherwise be tried — IdentitiesOnly=yes goes with it so a
+# key deliberately named here is the only one offered, not just tried first. See this repo's
+# deploy/.env.deploy.example for where to keep these set rather than typing them every deploy.
 set -Eeuo pipefail
 
 SSH_HOST="${SSH_HOST:?set SSH_HOST — the production server, e.g. SSH_HOST=1.2.3.4}"
 SSH_USER="${SSH_USER:?set SSH_USER}"
+SSH_KEY_FILE="${SSH_KEY_FILE:-}"
 REMOTE_DIR="${REMOTE_DIR:?set REMOTE_DIR, e.g. /home/bernard/RosterChief}"
 BRANCH="${BRANCH:-main}"
 COMPOSE_FILE="${COMPOSE_FILE:-compose.yaml}"
@@ -34,6 +40,8 @@ BASE_DOMAIN="${BASE_DOMAIN:-rosterchief.app}"
 SKIP_BACKUP="${SKIP_BACKUP:-}"
 
 SSH_TARGET="${SSH_USER}@${SSH_HOST}"
+SSH_OPTS=(-o ConnectTimeout=10)
+[ -n "$SSH_KEY_FILE" ] && SSH_OPTS+=(-i "$SSH_KEY_FILE" -o IdentitiesOnly=yes)
 
 say() { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
@@ -58,7 +66,7 @@ fi
 say "Deploying ${BRANCH} to PRODUCTION (${SSH_TARGET}:${REMOTE_DIR})"
 
 # --- the work, on the server ------------------------------------------------
-ssh -o ConnectTimeout=10 "${SSH_TARGET}" bash -s -- "${REMOTE_DIR}" "${BRANCH}" "${COMPOSE_FILE}" "${SKIP_BACKUP}" <<'REMOTE'
+ssh "${SSH_OPTS[@]}" "${SSH_TARGET}" bash -s -- "${REMOTE_DIR}" "${BRANCH}" "${COMPOSE_FILE}" "${SKIP_BACKUP}" <<'REMOTE'
 set -Eeuo pipefail
 REMOTE_DIR="$1"; BRANCH="$2"; COMPOSE_FILE="$3"; SKIP_BACKUP="$4"
 
@@ -114,5 +122,5 @@ done
 
 echo "ERROR: health check never passed against https://${BASE_DOMAIN}/healthz" >&2
 echo "Recent web logs:" >&2
-ssh -o ConnectTimeout=10 "${SSH_TARGET}" "cd ${REMOTE_DIR} && docker compose -f ${COMPOSE_FILE} logs --tail 40 web" >&2
+ssh "${SSH_OPTS[@]}" "${SSH_TARGET}" "cd ${REMOTE_DIR} && docker compose -f ${COMPOSE_FILE} logs --tail 40 web" >&2
 exit 1
