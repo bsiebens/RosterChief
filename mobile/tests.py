@@ -3143,7 +3143,13 @@ class CoachScheduleViewTests(TestCase):
 
     def test_events_are_grouped_into_this_week_next_week_and_month_dividers(self):
         _this_week_start, this_week_end = week_bounds(timezone.localdate())
-        this_week_event = Event.objects.create(club=self.club, title="This week practice", kind=Event.EventKind.TRAINING, start=timezone.make_aware(datetime.datetime.combine(this_week_end, datetime.time(18, 0))))
+        this_week_event_start = timezone.make_aware(datetime.datetime.combine(this_week_end, datetime.time(18, 0)))
+        if this_week_event_start <= timezone.now():
+            # See management.tests's own identical fallback on the same fixture
+            # shape -- the fixed 18:00 anchor is only "this week" if it's still
+            # ahead of now.
+            this_week_event_start = timezone.now() + datetime.timedelta(minutes=5)
+        this_week_event = Event.objects.create(club=self.club, title="This week practice", kind=Event.EventKind.TRAINING, start=this_week_event_start)
         this_week_event.teams.add(self.team)
         far_future = Event.objects.create(club=self.club, title="Far future practice", kind=Event.EventKind.TRAINING, start=timezone.now() + datetime.timedelta(days=60))
         far_future.teams.add(self.team)

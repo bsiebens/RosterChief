@@ -5611,7 +5611,15 @@ class EventManagementTests(ManagementTestBase):
         # Mirrors mobile.views.CalendarView's own This week/Next week/by-month
         # agenda grouping -- see EventListView._list_groups.
         _this_week_start, this_week_end = week_bounds(timezone.localdate())
-        this_week_event = Event.objects.create(club=self.club, title="This week event", start=timezone.make_aware(datetime.datetime.combine(this_week_end, datetime.time(18, 0))))
+        this_week_event_start = timezone.make_aware(datetime.datetime.combine(this_week_end, datetime.time(18, 0)))
+        if this_week_event_start <= timezone.now():
+            # The fixed 18:00 anchor is only "this week" if it's still ahead of
+            # now -- when this_week_end is today and it's already past 18:00,
+            # fall back to a few minutes from now (still always this week)
+            # instead of a start the view's own start__gte=now filter would
+            # exclude as already past.
+            this_week_event_start = timezone.now() + datetime.timedelta(minutes=5)
+        this_week_event = Event.objects.create(club=self.club, title="This week event", start=this_week_event_start)
         this_week_event.teams.add(self.own_team)
         next_week_event = Event.objects.create(club=self.club, title="Next week event", start=timezone.make_aware(datetime.datetime.combine(this_week_end + datetime.timedelta(days=3), datetime.time(18, 0))))
         next_week_event.teams.add(self.own_team)
