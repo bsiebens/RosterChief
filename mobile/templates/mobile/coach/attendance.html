@@ -31,13 +31,16 @@
         <a class="flex h-9 flex-1 items-center justify-center rounded-full font-display text-xs font-extrabold tracking-wide uppercase {% if filter_param == "silent" %}bg-ink text-white{% else %}border border-line bg-white text-muted{% endif %}" href="?filter=silent">
             {% trans "Silent" %} {{ silent_count }}
         </a>
+        <a class="flex h-9 flex-1 items-center justify-center rounded-full font-display text-xs font-extrabold tracking-wide uppercase {% if filter_param == "declined" %}bg-ink text-white{% else %}border border-line bg-white text-muted{% endif %}" href="?filter=declined">
+            {% trans "Declined" %} {{ declined_count }}
+        </a>
     </div>
 
     <form method="post" action="{% url "mobile:coach_attendance" event.pk %}" hx-boost="false">
         {% csrf_token %}
         <div class="m-card flex flex-col overflow-hidden">
             {% for row in rows %}
-                <div class="flex items-center gap-3 px-4 py-2.5 {% if not forloop.last %}border-b border-rule{% endif %} {% if row.is_silent %}bg-warn-bg{% endif %}" {% if can_manage_active_team %}x-data="{ state: '{{ row.showed_up|yesno:'true,false,' }}' }"{% endif %}>
+                <div class="flex items-center gap-3 px-4 py-2.5 {% if not forloop.last %}border-b border-rule{% endif %}" {% if can_manage_active_team %}x-data="{ state: '{{ row.showed_up|yesno:'true,false,' }}' }"{% endif %}>
                     <div class="w-8 shrink-0 text-center font-display text-lg font-extrabold text-ink tabular-nums">{{ row.membership.jersey_number|default:"—" }}</div>
                     <div class="min-w-0 flex-1">
                         <div class="text-sm font-semibold text-ink">{{ row.member.get_full_name }}</div>

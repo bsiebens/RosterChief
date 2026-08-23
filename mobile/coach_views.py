@@ -169,8 +169,9 @@ class CoachAttendanceView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
     #: param) means "Responded" (IN_STATUSES: present/selected/maybe), the
     #: default view. A coach doesn't need to check in someone silent or
     #: declined -- neither is expected to show up -- so those are left out of
-    #: the default rather than needing to be filtered away each time.
-    FILTERS = {"silent"}
+    #: the default rather than needing to be filtered away each time; each
+    #: still gets its own chip to review who's in either bucket.
+    FILTERS = {"silent", "declined"}
 
     def get_event(self):
         if self.active_team is None:
@@ -195,6 +196,8 @@ class CoachAttendanceView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
             filter_param = ""
         if filter_param == "silent":
             rows = [row for row in attendances if row.is_silent]
+        elif filter_param == "declined":
+            rows = [row for row in attendances if row.status in OUT_STATUSES]
         else:
             rows = [row for row in attendances if row.status in IN_STATUSES]
 
@@ -204,6 +207,7 @@ class CoachAttendanceView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
             total_count=len(attendances),
             responded_count=sum(1 for row in attendances if row.status in IN_STATUSES),
             silent_count=sum(1 for row in attendances if row.is_silent),
+            declined_count=sum(1 for row in attendances if row.status in OUT_STATUSES),
             checked_in_count=sum(1 for row in attendances if row.showed_up is not None),
             filter_param=filter_param,
             **kwargs,

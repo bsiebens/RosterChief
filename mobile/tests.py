@@ -3113,6 +3113,18 @@ class CoachAttendanceViewTests(TestCase):
         self.assertEqual([row.member for row in rows], [self.player])
         self.assertEqual(response.context["responded_count"], 1)
 
+    def test_declined_filter_narrows_to_declined_rows(self):
+        declined_member = Member.objects.create(first_name="Cara", last_name="Declined")
+        TeamMembership.objects.create(team=self.team, member=declined_member, season=self.season)
+        Attendance.objects.update_or_create(event=self.event, member=declined_member, defaults={"status": Attendance.AttendanceStatus.ABSENT})
+        self.client.force_login(self.user)
+
+        response = self._get(filter="declined")
+
+        rows = response.context["rows"]
+        self.assertEqual([row.member for row in rows], [declined_member])
+        self.assertEqual(response.context["declined_count"], 1)
+
     def test_the_goalies_chip_is_gone(self):
         self.client.force_login(self.user)
 
@@ -3120,6 +3132,17 @@ class CoachAttendanceViewTests(TestCase):
 
         self.assertNotContains(response, "Goalies")
         self.assertContains(response, "Responded")
+        self.assertContains(response, "Declined")
+
+    def test_silent_rows_have_no_special_background(self):
+        silent_member = Member.objects.create(first_name="Ben", last_name="Silent")
+        TeamMembership.objects.create(team=self.team, member=silent_member, season=self.season)
+        Attendance.objects.update_or_create(event=self.event, member=silent_member, defaults={"status": Attendance.AttendanceStatus.NO_RESPONSE})
+        self.client.force_login(self.user)
+
+        response = self._get(filter="silent")
+
+        self.assertNotContains(response, "bg-warn-bg")
 
     def test_event_from_another_team_is_not_reachable(self):
         other_team = Team.objects.create(club=self.club, name="U14", short_name="U14")
