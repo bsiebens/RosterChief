@@ -34,6 +34,7 @@ from .services import (
     team_attendance_rate,
     team_no_shows,
 )
+from .services.attendance import member_attendance_counts
 from .services.calendar import add_months, month_bounds, month_grid, season_grid, week_bounds, week_grid
 from .services.lineup import cancel_scheduled_publish, notify_dropout, publish_lineup, schedule_lineup_publish, selected_members_by_position, toggle_selection
 from .services.rbihf_import import RBIHFImportError, apply_plan, build_plan, extract_team_id, parse_fixtures, suggested_location, suggested_opponent
@@ -1064,6 +1065,34 @@ class TeamAttendanceStatsTests(EventsTestBase):
         record_check_in(attendance, showed_up=True)
 
         self.assertEqual(list(team_no_shows(self.team, self.season)), [])
+
+    def test_member_attendance_counts_no_shows_matches_team_no_shows_definition(self):
+        event = self.make_past_training(1)
+        attendance = self.set_status(event, self.alice, Attendance.AttendanceStatus.PRESENT)
+        record_check_in(attendance, showed_up=False)
+
+        counts = member_attendance_counts(self.alice, self.season)
+
+        self.assertEqual(counts["no_shows"], 1)
+        # Still counted as present -- present/absent read the RSVP only, not showed_up.
+        self.assertEqual(counts["present"], 1)
+
+    def test_member_attendance_counts_no_shows_ignores_an_unchecked_present_rsvp(self):
+        event = self.make_past_training(1)
+        self.set_status(event, self.alice, Attendance.AttendanceStatus.PRESENT)
+
+        counts = member_attendance_counts(self.alice, self.season)
+
+        self.assertEqual(counts["no_shows"], 0)
+
+    def test_member_attendance_counts_no_shows_ignores_a_confirmed_check_in(self):
+        event = self.make_past_training(1)
+        attendance = self.set_status(event, self.alice, Attendance.AttendanceStatus.PRESENT)
+        record_check_in(attendance, showed_up=True)
+
+        counts = member_attendance_counts(self.alice, self.season)
+
+        self.assertEqual(counts["no_shows"], 0)
 
 
 RBIHF_TEAM_ID = "4460"

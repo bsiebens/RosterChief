@@ -10,6 +10,7 @@ from icalendar import Calendar as ICalCalendar
 
 from club.models import Club, ClubMembership, DuesInvoice, MemberRequirementStatus, OnboardingRequirement, Season, Sponsor
 from events.models import Attendance, Event, EventReferee, Lineup, LineupSelection, Location, RefereeSignup
+from events.services.attendance import record_check_in
 from members.models import Family, FamilyMembership, Member
 from news.models import News
 from notifications.models import Notification
@@ -2765,6 +2766,18 @@ class CoachRosterMemberViewTests(TestCase):
         response = self._get()
 
         self.assertEqual(response.context["attendance_counts"]["present"], 1)
+
+    def test_shows_no_shows(self):
+        past_event = Event.objects.create(club=self.club, title="Past practice", kind=Event.EventKind.TRAINING, start=timezone.now() - datetime.timedelta(days=2), season=self.season)
+        past_event.teams.add(self.team)
+        attendance, _created = Attendance.objects.update_or_create(event=past_event, member=self.player, defaults={"status": Attendance.AttendanceStatus.PRESENT})
+        record_check_in(attendance, showed_up=False)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertEqual(response.context["attendance_counts"]["no_shows"], 1)
+        self.assertContains(response, "No-shows")
 
     def test_managing_staff_sees_the_edit_form_and_remove_button(self):
         self.client.force_login(self.user)

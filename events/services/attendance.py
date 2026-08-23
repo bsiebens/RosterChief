@@ -197,11 +197,20 @@ def member_attendance_sparkline(member, season, *, limit=12):
 def member_attendance_counts(member, season):
     """Present/Absent/No-reply totals for the season, alongside the
     sparkline -- counts every past attendance row, not just the (possibly
-    truncated) ones the sparkline itself displays."""
+    truncated) ones the sparkline itself displays.
+
+    ``present``/``absent`` read the RSVP (``status``) only -- someone who
+    said they were coming but never actually turned up still counts as
+    "present" here, since nothing above touches ``showed_up`` (a separate
+    axis, only ever set by a coach's bench check-in -- events.services.
+    attendance.record_check_in). ``no_shows`` is that other axis, same
+    present/selected + showed_up=False definition as team_no_shows below,
+    just counted per member instead of listed per team."""
     return Attendance.objects.filter(member=member, event__season=season, event__start__lt=timezone.now()).aggregate(
         present=Count("id", filter=Q(status=Attendance.AttendanceStatus.PRESENT)),
         absent=Count("id", filter=Q(status=Attendance.AttendanceStatus.ABSENT)),
         no_reply=Count("id", filter=Q(status=Attendance.AttendanceStatus.NO_RESPONSE)),
+        no_shows=Count("id", filter=Q(status__in=[Attendance.AttendanceStatus.PRESENT, Attendance.AttendanceStatus.SELECTED], showed_up=False)),
     )
 
 
