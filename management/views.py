@@ -1,3 +1,4 @@
+import itertools
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -2471,22 +2472,55 @@ class EventListView(ClubStaffRequiredMixin, ListView):
             calendar_nav = {"prev": add_months(anchor, -1), "next": add_months(anchor, 1)}
         return grid, calendar_nav
 
+    def _list_groups(self, events, show_past):
+        """The same This week/Next week/by-month agenda grouping mobile.views.
+        CalendarView uses (see that view's own docstring for the algorithm) --
+        applied to whichever page of `events` is actually being shown, so
+        pagination and grouping don't fight each other. Past mode (show_past=1,
+        already descending) skips the this/next-week special-casing -- those
+        labels only make sense for what's ahead -- and just groups straight
+        into months, most recent first."""
+        if not events:
+            return [], [], []
+
+        if show_past:
+            months = [{"month_start": month_start, "events": list(month_events)} for month_start, month_events in itertools.groupby(events, key=lambda event: timezone.localtime(event.start).date().replace(day=1))]
+            return [], [], months
+
+        today = timezone.localdate()
+        _this_week_start, this_week_end = week_bounds(today)
+        next_week_end = this_week_end + timedelta(days=7)
+
+        this_week, next_week, later = [], [], []
+        for event in events:
+            event_date = timezone.localtime(event.start).date()
+            if event_date <= this_week_end:
+                this_week.append(event)
+            elif event_date <= next_week_end:
+                next_week.append(event)
+            else:
+                later.append(event)
+
+        later_months = [{"month_start": month_start, "events": list(month_events)} for month_start, month_events in itertools.groupby(later, key=lambda event: timezone.localtime(event.start).date().replace(day=1))]
+        return this_week, next_week, later_months
+
     def get_context_data(self, **kwargs):
         club, user = self.request.club, self.request.user
         view_mode = self.request.GET.get("view", "calendar")
         range_kind = self.request.GET.get("range", "week")
         anchor = self._anchor_date()
         selected_season = selected_season_from_request(self.request, club)
+        show_past = self.request.GET.get("show_past") == "1"
 
         calendar, calendar_nav = (None, None)
         if view_mode == "calendar":
             calendar, calendar_nav = self._calendar_context(range_kind, anchor, selected_season)
 
-        return super().get_context_data(
+        context = super().get_context_data(
             seasons=Season.objects.filter(club=club).order_by("-start_date"),
             selected_season=selected_season,
             selected_kind=self.request.GET.get("kind", ""),
-            show_past=self.request.GET.get("show_past") == "1",
+            show_past=show_past,
             event_kinds=Event.EventKind.choices,
             can_create=is_club_admin(user, club) or teams_managed_by(user, club).exists(),
             view_mode=view_mode,
@@ -2502,6 +2536,11 @@ class EventListView(ClubStaffRequiredMixin, ListView):
             calendar_nav=calendar_nav,
             **kwargs,
         )
+
+        if view_mode == "list":
+            context["list_this_week"], context["list_next_week"], context["list_months"] = self._list_groups(context["events"], show_past)
+
+        return context
 
 
 class EventDetailView(ClubStaffRequiredMixin, DetailView):

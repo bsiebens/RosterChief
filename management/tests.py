@@ -24,6 +24,7 @@ from club.models import Club, ClubMembership, ClubRole, DuesInvoice, FeePayment,
 from club.services.invoicing import DuesInvoicePDFError
 from club.services.onboarding import mark_complete
 from events.models import Attendance, Competition, Event, EventReferee, EventSeries, Location, Opponent, RefereeSignup
+from events.services.calendar import week_bounds
 from events.services.rbihf_import import RBIHFImportError
 from events.services.recurrence import detach_occurrence, generate_occurrences
 from events.services.referees import add_external_referee
@@ -5605,6 +5606,42 @@ class EventManagementTests(ManagementTestBase):
         response = self.club_get("event_detail", other_event.pk)
 
         self.assertEqual(response.status_code, 404)
+
+    def test_the_list_groups_into_this_week_next_week_and_month_dividers(self):
+        # Mirrors mobile.views.CalendarView's own This week/Next week/by-month
+        # agenda grouping -- see EventListView._list_groups.
+        _this_week_start, this_week_end = week_bounds(timezone.localdate())
+        this_week_event = Event.objects.create(club=self.club, title="This week event", start=timezone.make_aware(datetime.datetime.combine(this_week_end, datetime.time(18, 0))))
+        this_week_event.teams.add(self.own_team)
+        next_week_event = Event.objects.create(club=self.club, title="Next week event", start=timezone.make_aware(datetime.datetime.combine(this_week_end + datetime.timedelta(days=3), datetime.time(18, 0))))
+        next_week_event.teams.add(self.own_team)
+        later_event = Event.objects.create(club=self.club, title="Later event", start=timezone.make_aware(datetime.datetime.combine(this_week_end + datetime.timedelta(days=60), datetime.time(18, 0))))
+        later_event.teams.add(self.own_team)
+        self.client.force_login(self.own_team_coach)
+
+        response = self.club_get("event_list", params={"view": "list"})
+
+        self.assertEqual([event.title for event in response.context["list_this_week"]], ["This week event"])
+        self.assertEqual([event.title for event in response.context["list_next_week"]], ["Next week event"])
+        later_months = response.context["list_months"]
+        self.assertEqual(len(later_months), 1)
+        self.assertEqual([event.title for event in later_months[0]["events"]], ["Later event"])
+        self.assertContains(response, "This week")
+        self.assertContains(response, "Next week")
+        self.assertContains(response, later_event.start.strftime("%B %Y"))
+
+    def test_show_past_groups_by_month_without_this_next_week_labels(self):
+        past_event = Event.objects.create(club=self.club, title="Past event", start=timezone.now() - datetime.timedelta(days=10))
+        past_event.teams.add(self.own_team)
+        self.client.force_login(self.own_team_coach)
+
+        response = self.club_get("event_list", params={"view": "list", "show_past": "1"})
+
+        self.assertEqual(response.context["list_this_week"], [])
+        self.assertEqual(response.context["list_next_week"], [])
+        self.assertEqual(len(response.context["list_months"]), 1)
+        self.assertEqual([event.title for event in response.context["list_months"][0]["events"]], ["Past event"])
+        self.assertNotContains(response, "This week")
 
     def test_the_dashboard_only_shows_upcoming_events_for_managed_teams(self):
         own_event = Event.objects.create(club=self.club, title="My event", start=timezone.now() + datetime.timedelta(days=1))
