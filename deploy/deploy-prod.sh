@@ -37,7 +37,10 @@ REMOTE_DIR="${REMOTE_DIR:?set REMOTE_DIR, e.g. /home/bernard/RosterChief}"
 BRANCH="${BRANCH:-main}"
 COMPOSE_FILE="${COMPOSE_FILE:-compose.yaml}"
 BASE_DOMAIN="${BASE_DOMAIN:-rosterchief.app}"
-SKIP_BACKUP="${SKIP_BACKUP:-}"
+# "0", never empty -- an empty positional argument can vanish entirely when ssh reconstructs
+# the remote command line (word-splitting swallows it), leaving $4 unbound on the other end
+# under set -u instead of just empty. A non-empty sentinel survives the trip either way.
+SKIP_BACKUP="${SKIP_BACKUP:-0}"
 
 SSH_TARGET="${SSH_USER}@${SSH_HOST}"
 SSH_OPTS=(-o ConnectTimeout=10)
@@ -92,11 +95,11 @@ echo "     at $(git rev-parse --short HEAD) — $(git log -1 --pretty=%s)"
 step "Starting db + redis"
 dc up -d db redis
 
-if [ -z "$SKIP_BACKUP" ]; then
+if [ "$SKIP_BACKUP" = "1" ]; then
+    step "Skipping backup (SKIP_BACKUP=1) -- not recommended before a migration"
+else
     step "Backing up the database before migrating"
     COMPOSE="docker compose -f $COMPOSE_FILE" ./deploy/backup.sh /var/backups/rosterchief
-else
-    step "Skipping backup (SKIP_BACKUP set) -- not recommended before a migration"
 fi
 
 step "Pulling image for ${BRANCH}"
