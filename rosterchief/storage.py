@@ -37,3 +37,17 @@ class PrivateStorage(FileSystemStorage):
 
 
 private_storage = PrivateStorage(location=str(settings.PRIVATE_MEDIA_ROOT))
+
+
+def get_private_storage() -> PrivateStorage:
+    """Callable wrapper for FileField's own ``storage=`` kwarg -- a callable serializes
+    into a migration as just this dotted import path, evaluated fresh wherever the
+    migration runs. Passing the ``private_storage`` instance directly instead would bake
+    its constructed ``location`` (an absolute filesystem path) into the migration file
+    verbatim: correct on whichever machine ran makemigrations, wrong everywhere else --
+    a dev laptop's checkout path is not a production container's /app. This is exactly
+    what happened to club/migrations/0025 and 0026 before this fix, which is why they
+    still deconstruct the instance form -- only new/altered FileField declarations need
+    the callable; existing migrations don't need touching for their own past state to
+    stay valid, only the model (and a fresh migration) need to stop drifting from here."""
+    return private_storage

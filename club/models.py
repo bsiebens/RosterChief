@@ -11,7 +11,7 @@ from django.utils.translation import gettext_lazy as _
 
 from members.models import Member
 from rosterchief.base import ClubScopedModel, UUIDModel, unique_slugify, validate_club_scope
-from rosterchief.storage import private_storage
+from rosterchief.storage import get_private_storage
 
 
 class ClubManager(models.Manager):
@@ -553,7 +553,7 @@ class MemberRequirementStatus(UUIDModel):
     is_bypassed = models.BooleanField(_("bypassed"), default=False)
     completed_at = models.DateTimeField(_("completed at"), null=True, blank=True)
     completed_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("completed by"))
-    document = models.FileField(_("document"), storage=private_storage, upload_to=onboarding_document_path, blank=True, help_text=_("Stored privately -- readable only through this member's own page, never a direct link."))
+    document = models.FileField(_("document"), storage=get_private_storage, upload_to=onboarding_document_path, blank=True, help_text=_("Stored privately -- readable only through this member's own page, never a direct link."))
     note = models.TextField(_("note"), blank=True, help_text=_("Staff-only, e.g. how or when this was received."))
 
     class Meta:
