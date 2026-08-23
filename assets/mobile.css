@@ -472,11 +472,19 @@
        clashes with every other input on the page, which are all styled boxes -- same
        fix as management's own .file-input (assets/management.css), recolored for the
        mobile palette. ::file-selector-button needs `appearance: none` first or Safari
-       keeps drawing its own bezeled button regardless of the rest of this. */
+       keeps drawing its own bezeled button regardless of the rest of this.
+
+       Height comes from padding-block, not an explicit height -- the button is shadow
+       content Safari won't vertically center via align-items no matter what, so it
+       floats at the top of any extra box height instead of the middle. Sizing the box
+       around the button's own height (padding-block split evenly: 2.75rem target box -
+       2 * 1px border - 1.75rem button, halved) keeps the button flush with no leftover
+       space for Safari to mis-center it into (same fix, same reasoning, as management's
+       own .file-input's own comment). */
     .m-file-input {
         display: flex;
         align-items: center;
-        height: 2.75rem;
+        padding-block: 0.4375rem;
         width: 100%;
         border: 1px solid var(--color-stroke);
         border-radius: 0.5rem;
