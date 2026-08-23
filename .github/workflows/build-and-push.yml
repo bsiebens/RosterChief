@@ -9,7 +9,7 @@ name: Build and push image
 
 on:
   push:
-    branches: [main, development]
+    branches: [main]
   workflow_dispatch:
 
 env:
