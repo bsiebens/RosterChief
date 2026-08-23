@@ -128,10 +128,11 @@
 
             {% if can_manage_active_team %}
                 <div class="coach-tab-bar-add" x-data="{ open: false }">
-                    <button class="coach-tab-bar-add-button" type="button" @click="open = !open" aria-label="{% trans "Add" %}">
+                    <div class="fixed inset-0 z-10 bg-black/60" x-show="open" x-cloak @click="open = false"></div>
+                    <button class="coach-tab-bar-add-button relative z-20 transition-transform duration-200" :class="open ? 'rotate-45' : ''" type="button" @click="open = !open" aria-label="{% trans "Add" %}">
                         {% lucide "plus" size=24 %}
                     </button>
-                    <div class="absolute inset-x-3 bottom-full z-20 mb-3 flex flex-col gap-1 rounded-xl border border-line bg-white p-2 shadow-lg" x-show="open" x-cloak @click.outside="open = false">
+                    <div class="absolute inset-x-3 bottom-full z-20 mb-5 flex flex-col gap-1 rounded-xl border border-line bg-white p-2 shadow-lg" x-show="open" x-cloak @click.outside="open = false">
                         <a class="flex items-center gap-3 rounded-lg p-3 text-sm font-semibold text-ink" href="{% url "mobile:coach_create_event" %}">
                             {% lucide "calendar-plus" size=18 class="text-club" %} {% trans "New event" %}
                         </a>

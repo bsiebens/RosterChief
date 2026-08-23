@@ -418,6 +418,21 @@ class MemberAttendanceSparklineTests(ManagementTestBase):
 
         self.assertEqual(response.context["attendance_counts"]["no_reply"], 1)
 
+    def test_a_present_rsvp_checked_in_as_absent_counts_as_a_no_show(self):
+        self.make_attendance(status=Attendance.AttendanceStatus.PRESENT, start=timezone.now() - datetime.timedelta(days=2), showed_up=False)
+
+        response = self.club_get("member_detail", self.player.pk)
+
+        self.assertEqual(response.context["attendance_counts"]["no_shows"], 1)
+        self.assertContains(response, "No-shows")
+
+    def test_an_unchecked_present_rsvp_is_not_a_no_show(self):
+        self.make_attendance(status=Attendance.AttendanceStatus.PRESENT, start=timezone.now() - datetime.timedelta(days=2))
+
+        response = self.club_get("member_detail", self.player.pk)
+
+        self.assertEqual(response.context["attendance_counts"]["no_shows"], 0)
+
     def test_the_sparkline_is_capped_at_twelve_bars_oldest_first(self):
         for day in range(15, 0, -1):
             self.make_attendance(status=Attendance.AttendanceStatus.PRESENT, start=timezone.now() - datetime.timedelta(days=day))

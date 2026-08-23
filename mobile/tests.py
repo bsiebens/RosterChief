@@ -3179,6 +3179,13 @@ class CoachAttendanceViewTests(TestCase):
         self.assertContains(response, "Anna Player")
         self.assertContains(response, "9")
 
+    def test_the_schedule_tab_is_highlighted(self):
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertEqual(response.context["active_tab"], "coach_schedule")
+
     def test_shows_a_maybe_reason_alongside_an_absent_one(self):
         self.attendance.status = Attendance.AttendanceStatus.MAYBE
         self.attendance.note = "Might be a few minutes late"
@@ -3725,6 +3732,13 @@ class CoachLineupViewTests(TestCase):
         response = self.client.get(reverse("mobile:coach_lineup", kwargs={"event_id": self.event.pk}), HTTP_HOST="ajax-united.rosterchief.app")
 
         self.assertEqual(response.status_code, 302)
+
+    def test_the_schedule_tab_is_highlighted(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mobile:coach_lineup", kwargs={"event_id": self.event.pk}), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.context["active_tab"], "coach_schedule")
 
     def test_get_creates_a_lineup_lazily(self):
         self.client.force_login(self.user)

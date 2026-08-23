@@ -187,7 +187,7 @@ class CoachAttendanceView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
 
     template_name = "mobile/coach/attendance.html"
     screen_title = _("Attendance")
-    active_tab = "coach_today"
+    active_tab = "coach_schedule"
 
     #: ?filter= values this screen understands -- anything else (including no
     #: param) means "Responded" (IN_STATUSES: present/selected/maybe), the
@@ -606,7 +606,7 @@ class CoachLineupView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
 
     template_name = "mobile/coach/lineup.html"
     screen_title = _("Line-up")
-    active_tab = "coach_today"
+    active_tab = "coach_schedule"
 
     def get_event(self):
         if self.active_team is None:

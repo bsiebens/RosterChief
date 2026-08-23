@@ -176,24 +176,28 @@
                 {% if not attendance_sparkline %}
                     <p class="text-sm text-muted">{% trans "No events yet this season." %}</p>
                 {% else %}
-                    <div class="flex flex-wrap items-center gap-6">
+                    <div class="flex flex-1 flex-col justify-center gap-4">
                         <div class="attendance-sparkline">
                             {% for bar in attendance_sparkline %}
                                 <span class="attendance-bar attendance-bar-{{ bar.state }}" title="{{ bar.event.title }} — {{ bar.event.start|date:"j M" }}"></span>
                             {% endfor %}
                         </div>
-                        <div class="flex gap-4">
-                            <div>
+                        <div class="flex">
+                            <div class="flex-1">
                                 <div class="font-display text-2xl leading-none font-extrabold text-ok tabular-nums">{{ attendance_counts.present }}</div>
                                 <div class="mt-1 font-display text-[11px] font-bold tracking-[.1em] text-muted uppercase">{% trans "Present" %}</div>
                             </div>
-                            <div>
+                            <div class="flex-1">
                                 <div class="font-display text-2xl leading-none font-extrabold text-club tabular-nums">{{ attendance_counts.absent }}</div>
                                 <div class="mt-1 font-display text-[11px] font-bold tracking-[.1em] text-muted uppercase">{% trans "Absent" %}</div>
                             </div>
-                            <div>
+                            <div class="flex-1">
                                 <div class="font-display text-2xl leading-none font-extrabold text-dim tabular-nums">{{ attendance_counts.no_reply }}</div>
                                 <div class="mt-1 font-display text-[11px] font-bold tracking-[.1em] text-muted uppercase">{% trans "No reply" %}</div>
+                            </div>
+                            <div class="flex-1">
+                                <div class="font-display text-2xl leading-none font-extrabold text-warn-text tabular-nums">{{ attendance_counts.no_shows }}</div>
+                                <div class="mt-1 font-display text-[11px] font-bold tracking-[.1em] text-muted uppercase">{% trans "No-shows" %}</div>
                             </div>
                         </div>
                     </div>
