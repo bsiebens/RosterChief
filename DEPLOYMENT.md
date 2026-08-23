@@ -553,16 +553,24 @@ and Python's own reference counting touches nearly every object's refcount withi
 operations, defeating fork's copy-on-write sharing in practice — each child ends up paying
 close to the *full* Django-import cost again, not a fraction of it, and that base cost is a lot
 bigger than gunicorn's own 54 MB now that there are 46 installed apps. `compose.yaml`'s `worker`
-now runs `--pool=solo` instead (single process, no forking, tasks run sequentially) — this
-app's actual job volume never needed prefork's parallelism, so nothing is lost by removing it,
-and it's the single biggest lever available for `worker`'s own footprint. `beat` doesn't fork at
-all regardless of pool, so it was never the multiplied one; it still has essentially nothing to
-do between firing its five daily tasks, making it the cheapest process in the stack.
+runs `--pool=threads --concurrency=4` instead — threads share one process's memory the same way
+solo does (no fork, no multiplication), but still run several tasks at once, unlike solo's one
+thread. Solo was tried first and worked for memory, but a single slow task (the every-15-minutes
+line-up publish sweep, mainly) head-of-line-blocked everything queued behind it, including
+on-demand notifications a member was actively waiting on — this app's tasks are DB/notification-
+bound, not CPU-bound, so threads (not more processes) is the fix: real concurrency, GIL isn't a
+constraint for this workload, and no fork multiplication either. `beat` doesn't fork at all
+regardless of pool, so it was never the multiplied one; it still has essentially nothing to do
+between firing its five daily tasks, making it the cheapest process in the stack.
 
-**1 GB is not enough**, even after `--pool=solo` — `worker` alone at ~80% of a 1 GB box leaves
-nothing for `web`/`beat`/Postgres/Redis/Caddy, which is exactly what turns "starting one more
-service" into the whole host thrashing into swap. 2 GB would run it. 4 GB is the recommendation
-for three further reasons, all of which are the kind of thing that bites at the worst moment:
+**1 GB is not enough** — `worker` alone measured ~80% of a 1 GB box with the old prefork
+default, which leaves nothing for `web`/`beat`/Postgres/Redis/Caddy. That's exactly what turns
+"starting one more service" into the whole host swapping, and swapping shows up as *both* memory
+pressure and high sustained CPU (the kernel spends cycles on page faults and swap I/O instead of
+running the app) — the two are often the same underlying problem, not separate ones. `--pool=
+threads` closes most of that gap, but 2 GB is still the real floor for this stack; 4 GB is the
+recommendation for three further reasons, all of which are the kind of thing that bites at the
+worst moment:
 
 1. **`docker compose build` was the memory spike, not serving** — npm, uv and `collectstatic`
    together are enough to OOM a 2 GB box that's also running Postgres. This is why the image is

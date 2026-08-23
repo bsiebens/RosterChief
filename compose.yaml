@@ -75,15 +75,21 @@ services:
     # rosterchief/settings.py's "Task queue (Celery)" section. Several of these are safe to
     # scale; `beat` is not (see its own comment).
     #
-    # --pool=solo, not the prefork default: prefork forks --concurrency child processes, and
-    # Python's own reference counting touches nearly every object's refcount within the first
-    # few operations, defeating fork's copy-on-write sharing in practice -- each child ends up
-    # paying close to the *full* Django-import cost again, not a fraction of it. With 46
-    # installed apps that base import is substantial, and this app's actual job volume (daily/
-    # monthly schedules, occasional on-demand notifications) never needed the parallelism
-    # --concurrency bought anyway. solo runs everything in one process, sequentially -- see
-    # DEPLOYMENT.md's "Sizing the server" for the measurement that motivated this.
-    command: ["celery", "-A", "rosterchief", "worker", "--loglevel=info", "--pool=solo"]
+    # --pool=threads, not the prefork default: prefork forks --concurrency child processes,
+    # and Python's own reference counting touches nearly every object's refcount within the
+    # first few operations, defeating fork's copy-on-write sharing in practice -- each child
+    # ends up paying close to the *full* Django-import cost again, not a fraction of it. With
+    # 46 installed apps that base import is substantial -- see DEPLOYMENT.md's "Sizing the
+    # server" for the measurement that motivated moving off prefork.
+    #
+    # threads, not solo: solo runs everything in ONE thread, sequentially -- fine for memory
+    # (still just one process), but it means a single slow task head-of-line-blocks every task
+    # queued behind it (the every-15-minutes line-up publish sweep was seen delaying on-demand
+    # notification dispatch). Threads share one process's memory same as solo -- no fork, no
+    # multiplication -- while still running --concurrency tasks at once, same reasoning as
+    # gunicorn's own --workers 2 --threads 4 above. This app's tasks are DB/notification-bound,
+    # not CPU-bound, so the GIL isn't a real constraint on them.
+    command: ["celery", "-A", "rosterchief", "worker", "--loglevel=info", "--pool=threads", "--concurrency=4"]
     volumes:
       - media_data:/app/media
     depends_on:
