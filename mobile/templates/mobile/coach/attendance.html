@@ -26,13 +26,10 @@
 {% block content %}
     <div class="flex gap-2">
         <a class="flex h-9 flex-1 items-center justify-center rounded-full font-display text-xs font-extrabold tracking-wide uppercase {% if not filter_param %}bg-ink text-white{% else %}border border-line bg-white text-muted{% endif %}" href="?">
-            {% trans "All" %} {{ total_count }}
+            {% trans "Responded" %} {{ responded_count }}
         </a>
         <a class="flex h-9 flex-1 items-center justify-center rounded-full font-display text-xs font-extrabold tracking-wide uppercase {% if filter_param == "silent" %}bg-ink text-white{% else %}border border-line bg-white text-muted{% endif %}" href="?filter=silent">
             {% trans "Silent" %} {{ silent_count }}
-        </a>
-        <a class="flex h-9 flex-1 items-center justify-center rounded-full font-display text-xs font-extrabold tracking-wide uppercase {% if filter_param == "goalies" %}bg-ink text-white{% else %}border border-line bg-white text-muted{% endif %}" href="?filter=goalies">
-            {% trans "Goalies" %}
         </a>
     </div>
 

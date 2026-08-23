@@ -27,7 +27,7 @@
             </div>
         {% endif %}
 
-        <div class="grid grid-cols-3 gap-2.5">
+        <div class="grid grid-cols-4 gap-2">
             <div class="m-card p-3 text-center">
                 <div class="font-display text-2xl leading-none font-extrabold text-ink">{{ squad_count }}</div>
                 <div class="mt-1 font-display text-[10px] font-extrabold tracking-wide text-muted uppercase">{% trans "Squad" %}</div>
@@ -37,7 +37,11 @@
                 <div class="mt-1 font-display text-[10px] font-extrabold tracking-wide text-muted uppercase">{% trans "In" %}</div>
             </div>
             <div class="m-card p-3 text-center">
-                <div class="font-display text-2xl leading-none font-extrabold text-club">{{ silent_count }}</div>
+                <div class="font-display text-2xl leading-none font-extrabold text-club">{{ out_count }}</div>
+                <div class="mt-1 font-display text-[10px] font-extrabold tracking-wide text-muted uppercase">{% trans "Out" %}</div>
+            </div>
+            <div class="m-card p-3 text-center">
+                <div class="font-display text-2xl leading-none font-extrabold text-warn-text">{{ silent_count }}</div>
                 <div class="mt-1 font-display text-[10px] font-extrabold tracking-wide text-muted uppercase">{% trans "Silent" %}</div>
             </div>
         </div>

@@ -20,21 +20,25 @@ from club.models import Season
 from club.services.access import can_add_news, current_season
 from controlpanel.messages import notify
 from events.models import Attendance, Event, Lineup, LineupSelection
-from events.services.attendance import record_check_in
+from events.services.attendance import member_attendance_counts, record_check_in
 from events.services.lineup import UNAVAILABLE_STATUSES, cancel_scheduled_publish, publish_lineup, schedule_lineup_publish, toggle_selection
 from events.tasks import notify_new_event
 from management.forms import EventForm, NewsForm
 from news.models import News
 from news.services import notify_editors_of_pending_review
-from teams.models import StaffAssignment, Team, TeamMembership
+from teams.models import Position, StaffAssignment, Team, TeamMembership
 from teams.services import eligible_roster_members
 
 from .coach_mixins import CoachScopeMixin
-from .forms import _INPUT_CLASSES
+from .forms import _INPUT_CLASSES, CoachRosterEditForm
 
 #: RSVP states that count as "in" for the stat tile -- present/selected are an
 #: explicit yes, maybe is still a lean-in rather than silence.
 IN_STATUSES = [Attendance.AttendanceStatus.PRESENT, Attendance.AttendanceStatus.SELECTED, Attendance.AttendanceStatus.MAYBE]
+
+#: An explicit no -- declined or, for a published line-up, not selected.
+#: Distinct from NO_RESPONSE ("silent"), which is a non-answer rather than a no.
+OUT_STATUSES = [Attendance.AttendanceStatus.ABSENT, Attendance.AttendanceStatus.EXCUSED, Attendance.AttendanceStatus.NOT_SELECTED]
 
 
 class CoachTodayView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
@@ -75,6 +79,7 @@ class CoachTodayView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
         session_event = None
         tonight_event = None
         in_count = 0
+        out_count = 0
         silent_count = 0
         needs_you = []
 
@@ -88,6 +93,7 @@ class CoachTodayView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
             if session_event is not None:
                 attendances = Attendance.objects.filter(event=session_event)
                 in_count = attendances.filter(status__in=IN_STATUSES).count()
+                out_count = attendances.filter(status__in=OUT_STATUSES).count()
                 silent_count = attendances.filter(status=Attendance.AttendanceStatus.NO_RESPONSE).count()
                 if silent_count > 0:
                     needs_you.append(
@@ -134,6 +140,7 @@ class CoachTodayView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
             session_event=session_event,
             tonight_event=tonight_event,
             in_count=in_count,
+            out_count=out_count,
             silent_count=silent_count,
             needs_you=needs_you,
             hero_attendance=hero_attendance,
@@ -159,9 +166,11 @@ class CoachAttendanceView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
     active_tab = "coach_today"
 
     #: ?filter= values this screen understands -- anything else (including no
-    #: param) means "All". "Goalies" matches on position name rather than a
-    #: dedicated flag -- Position has no goalie-specific field to key off.
-    FILTERS = {"silent", "goalies"}
+    #: param) means "Responded" (IN_STATUSES: present/selected/maybe), the
+    #: default view. A coach doesn't need to check in someone silent or
+    #: declined -- neither is expected to show up -- so those are left out of
+    #: the default rather than needing to be filtered away each time.
+    FILTERS = {"silent"}
 
     def get_event(self):
         if self.active_team is None:
@@ -186,15 +195,14 @@ class CoachAttendanceView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
             filter_param = ""
         if filter_param == "silent":
             rows = [row for row in attendances if row.is_silent]
-        elif filter_param == "goalies":
-            rows = [row for row in attendances if row.membership and row.membership.position and "goal" in row.membership.position.name.lower()]
         else:
-            rows = attendances
+            rows = [row for row in attendances if row.status in IN_STATUSES]
 
         return super().get_context_data(
             event=event,
             rows=rows,
             total_count=len(attendances),
+            responded_count=sum(1 for row in attendances if row.status in IN_STATUSES),
             silent_count=sum(1 for row in attendances if row.is_silent),
             checked_in_count=sum(1 for row in attendances if row.showed_up is not None),
             filter_param=filter_param,
@@ -455,6 +463,68 @@ class CoachAddPlayerView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
         return HttpResponseRedirect(reverse("mobile:coach_today"))
 
 
+class CoachAddStaffView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
+    """Squad screen's staff "Add" entry point -- the same bulk-checkbox shape
+    as CoachAddPlayerView/C6, with one addition: StaffAssignment.position is
+    required (unlike a roster spot's optional one), so there's a single
+    position picker shared by however many candidates get checked, rather
+    than a per-row picker that wouldn't fit this screen. Good enough for the
+    common case (adding one or more assistants to the same role at once);
+    assigning several people to different positions in one visit still means
+    visiting this screen more than once.
+    """
+
+    template_name = "mobile/coach/add_staff.html"
+    screen_title = _("Add staff")
+    active_tab = "coach_today"
+
+    def get(self, request, *args, **kwargs):
+        if not self.can_manage_active_team:
+            return HttpResponseRedirect(reverse("mobile:coach_squad"))
+        return super().get(request, *args, **kwargs)
+
+    def _candidate_pool(self, season):
+        taken = StaffAssignment.objects.filter(team=self.active_team, season=season).values_list("member_id", flat=True)
+        return eligible_roster_members(self.request.club).exclude(pk__in=taken)
+
+    def get_context_data(self, **kwargs):
+        season = current_season(self.request.club)
+        candidates = []
+        positions = Position.objects.none()
+
+        if self.active_team is not None and season is not None:
+            candidates = list(self._candidate_pool(season).order_by("last_name", "first_name"))
+            positions = Position.objects.filter(club=self.request.club, staff_position=True)
+
+        return super().get_context_data(candidates=candidates, positions=positions, **kwargs)
+
+    def post(self, request, *args, **kwargs):
+        if not self.can_manage_active_team:
+            return HttpResponseForbidden()
+
+        season = current_season(request.club)
+        if self.active_team is None or season is None:
+            return HttpResponseForbidden()
+
+        position = Position.objects.filter(club=request.club, staff_position=True, pk=request.POST.get("position")).first()
+        if position is None:
+            notify(request, f"e|{_('Could not add staff')}|{_('Pick a position first.')}")
+            return HttpResponseRedirect(reverse("mobile:coach_add_staff"))
+
+        pool_ids = {str(pk) for pk in self._candidate_pool(season).values_list("pk", flat=True)}
+        added = 0
+        for member_id in request.POST.getlist("member"):
+            if member_id not in pool_ids:
+                continue
+            StaffAssignment.objects.get_or_create(team=self.active_team, season=season, member_id=member_id, defaults={"position": position})
+            added += 1
+
+        if added:
+            body = ngettext("%(count)d staff member added.", "%(count)d staff members added.", added) % {"count": added}
+            notify(request, f"s|{_('Staff updated')}|{body}")
+        return HttpResponseRedirect(reverse("mobile:coach_squad"))
+
+
 class CoachLineupView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
     """C3 -- a game's line-up, kept deliberately simple: a plain yes/no pick
     per available roster player, grouped by their roster position ("category")
@@ -576,11 +646,9 @@ class CoachLineupPublishView(CoachScopeMixin, LoginRequiredMixin, View):
 
 class CoachSquadView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
     """Bottom-tab "Squad" -- the active team's roster and staff for the
-    current season, view-only beyond the "Add player" entry point (which
-    reuses CoachAddPlayerView/C6). No per-row edit here (jersey number,
-    position, captaincy) -- that stays a desktop-only action for now via
-    management.forms.TeamMembershipForm; this screen is about seeing the
-    squad, not managing individual rows from a phone.
+    current season. Each roster row links through to CoachRosterMemberView
+    for stats/contact/edit/remove; staff rows stay plain (no per-row action
+    yet beyond the "Add" entry point below, which reuses CoachAddStaffView).
     """
 
     template_name = "mobile/coach/squad.html"
@@ -595,6 +663,71 @@ class CoachSquadView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
             staff = list(StaffAssignment.objects.filter(team=self.active_team, season=season).select_related("member", "position").order_by("position__ordering", "member__last_name"))
 
         return super().get_context_data(roster=roster, staff=staff, **kwargs)
+
+
+class CoachRosterMemberView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
+    """Squad screen's per-player detail sheet: attendance stats for the
+    season, tap-to-call buttons (the player's own phone/emergency phone, plus
+    each guardian's if they're a child -- Member.guardians is only ever
+    non-empty for one), and -- for whoever manages this team -- the same
+    position/jersey/captaincy edit TeamMembershipForm exposes on desktop,
+    plus a remove-from-roster action. Read-only (no edit form, no remove
+    button) for staff without a management position, same hide-don't-disable
+    rule as everywhere else in coach mode.
+    """
+
+    template_name = "mobile/coach/roster_member.html"
+    screen_title = _("Player")
+    active_tab = "coach_squad"
+
+    def get_membership(self):
+        if self.active_team is None:
+            raise Http404
+        return get_object_or_404(TeamMembership.objects.filter(team=self.active_team).select_related("member", "position"), pk=self.kwargs["membership_pk"])
+
+    def build_form(self, membership, data=None):
+        return CoachRosterEditForm(data, instance=membership, club=self.request.club, team=self.active_team, season=membership.season)
+
+    def get_context_data(self, **kwargs):
+        membership = self.get_membership()
+        member = membership.member
+
+        kwargs.setdefault("form", self.build_form(membership) if self.can_manage_active_team else None)
+        return super().get_context_data(
+            membership=membership,
+            member=member,
+            guardians=member.guardians,
+            attendance_counts=member_attendance_counts(member, membership.season),
+            **kwargs,
+        )
+
+    def post(self, request, *args, **kwargs):
+        membership = self.get_membership()
+        if not self.can_manage_active_team:
+            return HttpResponseForbidden()
+
+        form = self.build_form(membership, request.POST)
+        if not form.is_valid():
+            return self.render_to_response(self.get_context_data(form=form))
+
+        form.save()
+        notify(request, f"s|{_('Player updated')}|" + _("“%(member)s” has been updated.") % {"member": membership.member})
+        return HttpResponseRedirect(reverse("mobile:coach_roster_member", kwargs={"membership_pk": membership.pk}))
+
+
+class CoachRosterRemoveView(CoachScopeMixin, LoginRequiredMixin, View):
+    def post(self, request, *args, **kwargs):
+        if self.active_team is None:
+            raise Http404
+        if not self.can_manage_active_team:
+            return HttpResponseForbidden()
+
+        membership = get_object_or_404(TeamMembership.objects.filter(team=self.active_team), pk=kwargs["membership_pk"])
+        member = membership.member
+        membership.delete()
+
+        notify(request, f"w|{_('Player removed')}|" + _("“%(member)s” removed from the roster.") % {"member": member})
+        return HttpResponseRedirect(reverse("mobile:coach_squad"))
 
 
 class CoachScheduleView(CoachScopeMixin, LoginRequiredMixin, TemplateView):

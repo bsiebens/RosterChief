@@ -1,0 +1,97 @@
+{% extends "mobile/coach/base.html" %}
+{% load i18n lucide %}
+
+{% comment %}
+    Squad screen's per-player detail sheet -- see CoachRosterMemberView's own
+    docstring. Call buttons/guardian section mirror management/templates/
+    management/member_detail.html's "Personal information" card (same tel:
+    pattern, same guardians-only-if-non-empty gate), just laid out for a
+    phone instead of a desktop two-column grid.
+{% endcomment %}
+
+{% block header_extra %}
+    <div class="mt-3 flex items-center gap-3">
+        {% include "mobile/_avatar.html" with person=member size_class="h-12 w-12" text_class="text-base" %}
+        <div class="min-w-0 flex-1">
+            <div class="flex items-center gap-1.5">
+                <span class="truncate font-display text-lg leading-none font-extrabold text-white uppercase">{{ member.get_full_name }}</span>
+                {% if membership.is_captain %}<span class="font-display text-xs font-extrabold text-ice">C</span>{% endif %}
+                {% if membership.is_alternate_captain %}<span class="font-display text-xs font-extrabold text-ice">A</span>{% endif %}
+            </div>
+            <div class="mt-1 text-xs text-on-dark">{{ membership.position|default:_("No position set") }} {% if membership.jersey_number %}&middot; #{{ membership.jersey_number }}{% endif %}</div>
+        </div>
+    </div>
+{% endblock header_extra %}
+
+{% block content %}
+    <div class="m-card p-4">
+        <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Contact" %}</div>
+        <div class="flex flex-col gap-2">
+            {% if member.phone %}
+                <a class="btn w-full gap-2 border border-line bg-white text-ink" href="tel:{{ member.phone.as_international }}">{% lucide "phone" size=16 %} {% trans "Call" %}</a>
+            {% endif %}
+            {% if member.emergency_phone %}
+                <a class="btn w-full gap-2 border border-club-dark bg-white text-club-dark" href="tel:{{ member.emergency_phone.as_international }}">{% lucide "shield-alert" size=16 %} {% trans "Emergency call" %}</a>
+            {% endif %}
+            {% for guardian in guardians %}
+                {% if guardian.phone %}
+                    <a class="btn w-full gap-2 border border-line bg-white text-ink" href="tel:{{ guardian.phone.as_international }}">{% lucide "phone" size=16 %} {% blocktrans with name=guardian.get_full_name %}Call {{ name }}{% endblocktrans %}</a>
+                {% endif %}
+                {% if guardian.emergency_phone %}
+                    <a class="btn w-full gap-2 border border-club-dark bg-white text-club-dark" href="tel:{{ guardian.emergency_phone.as_international }}">{% lucide "shield-alert" size=16 %} {% blocktrans with name=guardian.get_full_name %}Emergency: {{ name }}{% endblocktrans %}</a>
+                {% endif %}
+            {% endfor %}
+            {% if not member.phone and not member.emergency_phone and not guardians %}
+                <p class="text-sm text-muted">{% trans "No phone numbers on file." %}</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="m-card mt-3 p-4">
+        <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Attendance this season" %}</div>
+        <div class="flex gap-4">
+            <div>
+                <div class="font-display text-2xl leading-none font-extrabold text-ok tabular-nums">{{ attendance_counts.present }}</div>
+                <div class="mt-1 font-display text-[10px] font-extrabold tracking-wide text-muted uppercase">{% trans "Present" %}</div>
+            </div>
+            <div>
+                <div class="font-display text-2xl leading-none font-extrabold text-club tabular-nums">{{ attendance_counts.absent }}</div>
+                <div class="mt-1 font-display text-[10px] font-extrabold tracking-wide text-muted uppercase">{% trans "Absent" %}</div>
+            </div>
+            <div>
+                <div class="font-display text-2xl leading-none font-extrabold text-dim tabular-nums">{{ attendance_counts.no_reply }}</div>
+                <div class="mt-1 font-display text-[10px] font-extrabold tracking-wide text-muted uppercase">{% trans "No reply" %}</div>
+            </div>
+        </div>
+    </div>
+
+    {% if form %}
+        <form class="m-card mt-3 flex flex-col gap-3 p-4" method="post" action="{% url "mobile:coach_roster_member" membership.pk %}" hx-boost="false">
+            {% csrf_token %}
+            <div class="mb-1 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Roster details" %}</div>
+            <div>
+                <label class="mb-1 block text-xs font-semibold text-muted uppercase tracking-wide">{% trans "Position" %}</label>
+                {{ form.position }}
+                {% if form.position.errors %}<p class="mt-1 text-xs text-club-dark">{{ form.position.errors.0 }}</p>{% endif %}
+            </div>
+            <div>
+                <label class="mb-1 block text-xs font-semibold text-muted uppercase tracking-wide">{% trans "Jersey number" %}</label>
+                {{ form.jersey_number }}
+                {% if form.jersey_number.errors %}<p class="mt-1 text-xs text-club-dark">{{ form.jersey_number.errors.0 }}</p>{% endif %}
+            </div>
+            <label class="flex items-center gap-2 text-sm text-ink">
+                {{ form.is_captain }} {% trans "Captain" %}
+            </label>
+            <label class="flex items-center gap-2 text-sm text-ink">
+                {{ form.is_alternate_captain }} {% trans "Alternate captain" %}
+            </label>
+            <button class="btn btn-dark mt-1 w-full" type="submit">{% trans "Save" %}</button>
+        </form>
+
+        {% trans "Remove this player from the roster? This cannot be undone." as remove_confirm_text %}
+        <form class="mt-3" method="post" action="{% url "mobile:coach_roster_remove" membership.pk %}" hx-boost="false" onsubmit="return confirm('{{ remove_confirm_text|escapejs }}')">
+            {% csrf_token %}
+            <button class="btn w-full gap-2 bg-club text-white" type="submit">{% lucide "trash-2" size=16 %} {% trans "Remove from roster" %}</button>
+        </form>
+    {% endif %}
+{% endblock content %}

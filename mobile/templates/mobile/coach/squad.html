@@ -3,8 +3,8 @@
 
 {% comment %}
     Bottom-tab "Squad" -- roster + staff for the active team, current season.
-    See CoachSquadView's own docstring for why there's no per-row edit here
-    (jersey number/position/captaincy stays a desktop-only action for now).
+    Each roster row links through to CoachRosterMemberView (stats, tap-to-
+    call, edit, remove) -- see that view's own docstring.
 {% endcomment %}
 
 {% block content %}
@@ -25,7 +25,7 @@
             <div class="m-card overflow-hidden">
                 {% for membership in roster %}
                     {% if not forloop.first %}<div class="h-px bg-rule"></div>{% endif %}
-                    <div class="flex items-center gap-3 p-3.5">
+                    <a class="flex items-center gap-3 p-3.5" href="{% url "mobile:coach_roster_member" membership.pk %}">
                         <div class="w-8 shrink-0 text-center font-display text-lg font-extrabold text-ink tabular-nums">{{ membership.jersey_number|default:"—" }}</div>
                         <div class="min-w-0 flex-1">
                             <div class="text-[15px] font-semibold text-ink">
@@ -35,7 +35,8 @@
                             </div>
                             <div class="text-xs text-muted">{{ membership.position|default:"—" }}</div>
                         </div>
-                    </div>
+                        {% lucide "chevron-right" size=18 class="shrink-0 text-dim" %}
+                    </a>
                 {% empty %}
                     <div class="p-6 text-center text-sm text-muted">{% trans "No one on the roster for this season yet." %}</div>
                 {% endfor %}
@@ -43,7 +44,14 @@
         </div>
 
         <div>
-            <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Staff" %}</div>
+            <div class="mb-2 flex items-center justify-between">
+                <span class="font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Staff" %}</span>
+                {% if can_manage_active_team %}
+                    <a class="flex items-center gap-1 font-display text-xs font-extrabold tracking-wide text-club uppercase" href="{% url "mobile:coach_add_staff" %}">
+                        {% lucide "user-plus" size=14 %} {% trans "Add" %}
+                    </a>
+                {% endif %}
+            </div>
             <div class="m-card overflow-hidden">
                 {% for assignment in staff %}
                     {% if not forloop.first %}<div class="h-px bg-rule"></div>{% endif %}

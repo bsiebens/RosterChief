@@ -26,11 +26,14 @@ urlpatterns = [
     # Coach mode (C1-C6).
     path("coach/", coach_views.CoachTodayView.as_view(), name="coach_today"),
     path("coach/squad/", coach_views.CoachSquadView.as_view(), name="coach_squad"),
+    path("coach/squad/<uuid:membership_pk>/", coach_views.CoachRosterMemberView.as_view(), name="coach_roster_member"),
+    path("coach/squad/<uuid:membership_pk>/remove/", coach_views.CoachRosterRemoveView.as_view(), name="coach_roster_remove"),
     path("coach/schedule/", coach_views.CoachScheduleView.as_view(), name="coach_schedule"),
     path("coach/attendance/<uuid:event_id>/", coach_views.CoachAttendanceView.as_view(), name="coach_attendance"),
     path("coach/events/new/", coach_views.CoachCreateEventView.as_view(), name="coach_create_event"),
     path("coach/news/new/", coach_views.CoachCreateNewsView.as_view(), name="coach_create_news"),
     path("coach/roster/add/", coach_views.CoachAddPlayerView.as_view(), name="coach_add_player"),
+    path("coach/staff/add/", coach_views.CoachAddStaffView.as_view(), name="coach_add_staff"),
     path("coach/lineup/<uuid:event_id>/", coach_views.CoachLineupView.as_view(), name="coach_lineup"),
     path("coach/lineup/<uuid:event_id>/publish/", coach_views.CoachLineupPublishView.as_view(), name="coach_lineup_publish"),
 ]
