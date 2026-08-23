@@ -52,13 +52,18 @@ development if you touch invoicing.
 ## First deploy
 
 ```bash
-# 1. Configure
+# 1. Clone and configure
+git clone git@github.com:bsiebens/RosterChief.git /home/bernard/RosterChief
+cd /home/bernard/RosterChief
 cp .env.compose.example .env                 # read by docker compose
 cp .env.production.example .env.production   # read by Django
 python -c "import secrets; print(secrets.token_urlsafe(64))"   # -> DJANGO_SECRET_KEY
 
-# 2. Build and start
-docker compose build
+# 2. Pull and start
+# The image is built on GitHub Actions (.github/workflows/build-and-push.yml), not here --
+# see "Sizing the server" for why. `docker compose build` still works instead if you ever
+# need to build locally.
+docker compose pull
 docker compose up -d db redis
 docker compose run --rm web python manage.py migrate
 docker compose run --rm web python manage.py createsuperuser
@@ -72,6 +77,24 @@ docker compose run --rm web python manage.py check --deploy
 `check --deploy` is what catches an env file that forgot the HTTPS flags: they default to
 **off** in code, because defaulting them to `not DEBUG` would redirect every test request to
 https and break the suite anywhere `DEBUG` is unset.
+
+### Deploying updates
+
+Once the first deploy above is done, `deploy/deploy-prod.sh` does the rest — same one-SSH-
+session design as `deploy/deploy-dev.sh` (see "Deploying with one command" below), tuned for a
+deploy target this permanent:
+
+```bash
+SSH_HOST=<server> SSH_USER=<user> REMOTE_DIR=/home/bernard/RosterChief deploy/deploy-prod.sh
+deploy/deploy-prod.sh --push        # push main first, then deploy
+```
+
+Unlike the dev script, this one has no default host (guessing wrong here is a real mistake, not
+a rebuild), refuses anything but `main` unless you set `ALLOW_NON_MAIN=1`, runs
+`deploy/backup.sh` before migrating (skip with `SKIP_BACKUP=1`, not recommended), and restarts
+`worker`/`beat` alongside `web` — a stale scheduled task is a production bug. `SSH_HOST`/
+`SSH_USER`/`REMOTE_DIR` are easiest set once in your shell profile or a local `.env` you
+`source`, rather than typed on every deploy.
 
 ### Keep DJANGO_DEBUG=False, even on the test server
 
@@ -110,10 +133,13 @@ would race, and a starting gunicorn worker is a bad place to discover a failed m
 Run them once, explicitly, as part of the deploy:
 
 ```bash
-docker compose build
+docker compose pull web
 docker compose run --rm web python manage.py migrate
 docker compose up -d --no-deps web
 ```
+
+(`deploy/deploy-prod.sh` does exactly this, plus a backup first and worker/beat restarts — see
+"Deploying updates".)
 
 ## Scheduled jobs
 
@@ -173,7 +199,7 @@ docker compose run --rm web python manage.py shell -c \
   "from features.models import Maintenance; Maintenance.start(message='Upgrading. Back by 21:00.')"
 
 # 2. Do the work — migrate is not blocked.
-docker compose build
+docker compose pull web
 docker compose run --rm web python manage.py migrate
 docker compose up -d --no-deps web
 
@@ -651,12 +677,21 @@ not healthy, and a load balancer must not keep feeding it traffic.
 
 ## Rollback
 
-Images are the unit of rollback. Tag on build, keep the last few, and:
+Images are the unit of rollback: `.github/workflows/build-and-push.yml` tags every build both
+`:main` (mutable, "latest") and `:main-<short-sha>` (immutable), so any prior build is one tag
+away — find the short SHA from the GitHub Actions run or `git log --oneline`:
 
 ```bash
-docker compose up -d --no-deps web   # with the previous image tag
+IMAGE_TAG=main-a1b2c3d docker compose pull web worker beat
+IMAGE_TAG=main-a1b2c3d docker compose up -d --no-deps web worker beat
 ```
+
+Setting `IMAGE_TAG` in the server's `.env` instead makes it the default for future plain
+`docker compose pull`s — remember to unset it (or set it back to `main`) once you're done, or
+the next `deploy-prod.sh` run will re-pull `:main` and quietly undo the pin anyway (`IMAGE_TAG`
+is exported for the duration of that script regardless of what `.env` says).
 
 Migrations are the exception: they don't roll back with the image. Prefer additive migrations
 (add a column, deploy, backfill, then stop writing the old one) so that yesterday's image
-still runs against today's schema.
+still runs against today's schema. If a migration genuinely needs undoing, restore from the
+backup `deploy-prod.sh` took immediately before it ran (see "Automated backups").
