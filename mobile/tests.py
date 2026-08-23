@@ -1,6 +1,7 @@
 import datetime
 from decimal import Decimal
 
+from django import forms
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
@@ -9,7 +10,7 @@ from django.utils import timezone, translation
 from icalendar import Calendar as ICalCalendar
 
 from club.models import Club, ClubMembership, DuesInvoice, MemberRequirementStatus, OnboardingRequirement, Season, Sponsor
-from events.models import Attendance, Event, EventReferee, Lineup, LineupSelection, Location, RefereeSignup
+from events.models import Attendance, Competition, Event, EventReferee, EventSeries, Lineup, LineupSelection, Location, Opponent, RefereeSignup
 from events.services.attendance import record_check_in
 from members.models import Family, FamilyMembership, Member
 from news.models import News
@@ -3393,6 +3394,147 @@ class CoachAttendanceRemindSilentViewTests(TestCase):
 
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class CoachLocationCreateViewTests(TestCase):
+    """New event's "+ New location" popup -- see CoachLocationCreateView's
+    own docstring for the primary-target/out-of-band-swap shape."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        today = timezone.localdate()
+        cls.season = Season.objects.create(club=cls.club, start_date=today - datetime.timedelta(days=30), end_date=today + datetime.timedelta(days=300))
+        cls.user = User.objects.create_user(email="coach@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Sam", last_name="Coach", email="coach@example.com", user=cls.user)
+        cls.team = Team.objects.create(club=cls.club, name="U16", short_name="U16")
+        cls.position = Position.objects.create(club=cls.club, name="Head coach", short_name="HC", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=cls.team, member=cls.member, season=cls.season, position=cls.position)
+
+    def _post(self, **overrides):
+        data = {"name": "Sportoase", "address": "1 Main St", "city": "Antwerp", "zip_code": "2000", "country": "BE"}
+        data.update(overrides)
+        return self.client.post(reverse("mobile:coach_location_create"), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+    def test_requires_login(self):
+        response = self._post()
+
+        self.assertEqual(response.status_code, 302)
+
+    def test_non_managing_staff_cannot_create_a_location(self):
+        physio_position = Position.objects.create(club=self.club, name="Physio", short_name="PHY", staff_position=True, management_position=False)
+        physio_user = User.objects.create_user(email="physio@example.com", password="pw-secret-123")
+        physio_member = Member.objects.create(first_name="Pat", last_name="Physio", user=physio_user)
+        StaffAssignment.objects.create(team=self.team, member=physio_member, season=self.season, position=physio_position)
+        self.client.force_login(physio_user)
+
+        response = self._post()
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(Location.objects.filter(name="Sportoase").exists())
+
+    def test_creates_a_location_scoped_to_the_club(self):
+        self.client.force_login(self.user)
+
+        response = self._post()
+
+        location = Location.objects.get(name="Sportoase")
+        self.assertEqual(location.club, self.club)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["HX-Trigger"], "location-created")
+
+    def test_success_response_carries_an_out_of_band_picker_with_it_selected(self):
+        self.client.force_login(self.user)
+
+        response = self._post()
+
+        location = Location.objects.get(name="Sportoase")
+        body = response.content.decode()
+        self.assertIn('id="location-picker"', body)
+        self.assertIn("hx-swap-oob", body)
+        self.assertIn(f'value="{location.pk}" selected', body)
+
+    def test_invalid_submission_reshows_the_modal_fields_with_errors(self):
+        self.client.force_login(self.user)
+
+        response = self._post(name="")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("HX-Trigger", response)
+        self.assertFalse(Location.objects.filter(city="Antwerp").exists())
+        self.assertContains(response, "This field is required")
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class CoachOpponentCreateViewTests(TestCase):
+    """New event's "+ New opponent" popup -- same shape as
+    CoachLocationCreateViewTests, for Opponent instead."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        today = timezone.localdate()
+        cls.season = Season.objects.create(club=cls.club, start_date=today - datetime.timedelta(days=30), end_date=today + datetime.timedelta(days=300))
+        cls.user = User.objects.create_user(email="coach@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Sam", last_name="Coach", email="coach@example.com", user=cls.user)
+        cls.team = Team.objects.create(club=cls.club, name="U16", short_name="U16")
+        cls.position = Position.objects.create(club=cls.club, name="Head coach", short_name="HC", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=cls.team, member=cls.member, season=cls.season, position=cls.position)
+
+    def _post(self, **overrides):
+        data = {"name": "Rival FC"}
+        data.update(overrides)
+        return self.client.post(reverse("mobile:coach_opponent_create"), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+    def test_requires_login(self):
+        response = self._post()
+
+        self.assertEqual(response.status_code, 302)
+
+    def test_non_managing_staff_cannot_create_an_opponent(self):
+        physio_position = Position.objects.create(club=self.club, name="Physio", short_name="PHY", staff_position=True, management_position=False)
+        physio_user = User.objects.create_user(email="physio@example.com", password="pw-secret-123")
+        physio_member = Member.objects.create(first_name="Pat", last_name="Physio", user=physio_user)
+        StaffAssignment.objects.create(team=self.team, member=physio_member, season=self.season, position=physio_position)
+        self.client.force_login(physio_user)
+
+        response = self._post()
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(Opponent.objects.filter(name="Rival FC").exists())
+
+    def test_creates_an_opponent_scoped_to_the_club_without_a_logo_field(self):
+        self.client.force_login(self.user)
+
+        response = self._post()
+
+        opponent = Opponent.objects.get(name="Rival FC")
+        self.assertEqual(opponent.club, self.club)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["HX-Trigger"], "opponent-created")
+        self.assertNotContains(response, 'name="logo"')
+
+    def test_success_response_carries_an_out_of_band_picker_with_it_selected(self):
+        self.client.force_login(self.user)
+
+        response = self._post()
+
+        opponent = Opponent.objects.get(name="Rival FC")
+        body = response.content.decode()
+        self.assertIn('id="opponent-picker"', body)
+        self.assertIn("hx-swap-oob", body)
+        self.assertIn(f'value="{opponent.pk}" selected', body)
+
+    def test_invalid_submission_reshows_the_modal_fields_with_errors(self):
+        self.client.force_login(self.user)
+
+        response = self._post(name="")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("HX-Trigger", response)
+        self.assertFalse(Opponent.objects.exists())
+        self.assertContains(response, "This field is required")
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
 class CoachCreateEventViewTests(TestCase):
     """C4 -- reuses management.forms.EventForm as-is; see CoachCreateEventView's
     own docstring for what's scoped down from the design mock."""
@@ -3498,6 +3640,192 @@ class CoachCreateEventViewTests(TestCase):
                 self.assertEqual(response.status_code, 200)
                 self.assertFalse(Event.objects.filter(title=f"Not a {kind} event").exists())
 
+    def test_teams_is_hidden_and_locked_to_the_active_team(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mobile:coach_create_event"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertIsInstance(response.context["form"].fields["teams"].widget, forms.MultipleHiddenInput)
+        self.assertEqual(response.context["form"].initial["teams"], [self.team.pk])
+        self.assertContains(response, f'<input type="hidden" name="teams" value="{self.team.pk}"')
+        self.assertNotContains(response, 'name="teams" type="checkbox"')
+
+    def test_kind_defaults_to_training_not_the_model_default(self):
+        # Event.kind's own model default is "other", which isn't even one of
+        # the four tiles this screen offers -- regression check for the same
+        # "unsaved instance already set form.initial" trap teams hits above.
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mobile:coach_create_event"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.context["form"].initial.get("kind"), "training")
+        self.assertContains(response, "kind: 'training'")
+
+    def test_groups_and_club_wide_are_not_offered(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mobile:coach_create_event"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertNotIn("groups", response.context["form"].fields)
+        self.assertNotIn("club_wide", response.context["form"].fields)
+
+    def test_can_set_opponent_and_competition_for_a_game(self):
+        opponent = Opponent.objects.create(club=self.club, name="Rival FC")
+        Competition.objects.create(name="Regional League", module="none")
+        self.client.force_login(self.user)
+
+        self._post(kind="game", title="Away game", opponent=str(opponent.pk), competition="Regional League")
+
+        event = Event.objects.get(title="Away game")
+        self.assertEqual(event.opponent, opponent)
+        self.assertEqual(event.competition, "Regional League")
+
+    def test_invited_members_pool_excludes_the_current_roster(self):
+        on_roster = Member.objects.create(first_name="On", last_name="Roster")
+        TeamMembership.objects.create(team=self.team, member=on_roster, season=self.season)
+        off_roster = Member.objects.create(first_name="Off", last_name="Roster")
+        ClubMembership.objects.create(club=self.club, member=off_roster, season=self.season, status=ClubMembership.StatusChoices.ACTIVE, kind=ClubMembership.Kind.MEMBER)
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mobile:coach_create_event"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        pool = response.context["form"].fields["invited_members"].queryset
+        self.assertIn(off_roster, pool)
+        self.assertNotIn(on_roster, pool)
+
+    def test_excluded_members_pool_is_the_current_roster(self):
+        on_roster = Member.objects.create(first_name="On", last_name="Roster")
+        TeamMembership.objects.create(team=self.team, member=on_roster, season=self.season)
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mobile:coach_create_event"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        pool = response.context["form"].fields["excluded_members"].queryset
+        self.assertIn(on_roster, pool)
+
+    def test_invited_and_excluded_members_actually_render_as_checkboxes(self):
+        # Regression: swapping a ModelMultipleChoiceField's widget *after*
+        # setting its queryset silently drops the choices the queryset-setter
+        # already pushed onto the old widget -- the checkbox list would
+        # render completely empty despite the queryset (and POST handling)
+        # being correct, so a plain queryset-only assertion (like the two
+        # tests above) can't catch this. See _scope_shared_fields' own
+        # comment for the mechanism.
+        on_roster = Member.objects.create(first_name="On", last_name="Roster")
+        TeamMembership.objects.create(team=self.team, member=on_roster, season=self.season)
+        off_roster = Member.objects.create(first_name="Off", last_name="Roster")
+        ClubMembership.objects.create(club=self.club, member=off_roster, season=self.season, status=ClubMembership.StatusChoices.ACTIVE, kind=ClubMembership.Kind.MEMBER)
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mobile:coach_create_event"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, "On Roster")
+        self.assertContains(response, "Off Roster")
+
+    def test_can_invite_an_extra_member_and_exclude_a_roster_member(self):
+        rostered = Member.objects.create(first_name="Rostered", last_name="Player")
+        TeamMembership.objects.create(team=self.team, member=rostered, season=self.season)
+        guest = Member.objects.create(first_name="Guest", last_name="Player")
+        ClubMembership.objects.create(club=self.club, member=guest, season=self.season, status=ClubMembership.StatusChoices.ACTIVE, kind=ClubMembership.Kind.MEMBER)
+        self.client.force_login(self.user)
+
+        self._post(title="Call-up practice", excluded_members=[str(rostered.pk)], invited_members=[str(guest.pk)])
+
+        event = Event.objects.get(title="Call-up practice")
+        self.assertFalse(Attendance.objects.filter(event=event, member=rostered).exists())
+        self.assertTrue(Attendance.objects.filter(event=event, member=guest).exists())
+
+    def test_valid_post_notifies_the_invited_roster(self):
+        rostered = Member.objects.create(first_name="Rostered", last_name="Player", email="rostered@example.com")
+        TeamMembership.objects.create(team=self.team, member=rostered, season=self.season)
+        self.client.force_login(self.user)
+
+        response = self._post(title="Notify practice")
+
+        self.assertRedirects(response, reverse("mobile:coach_today"), fetch_redirect_response=False)
+        event = Event.objects.get(title="Notify practice")
+        self.assertTrue(Notification.objects.filter(member=rostered, title=event.title).exists())
+
+    def test_weekday_checkboxes_actually_render(self):
+        # Same widget-swap-after-choices trap as invited/excluded_members
+        # above, for the plain MultipleChoiceField shape of it -- see
+        # build_series_form's own comment.
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mobile:coach_create_event"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, 'value="MO"')
+        self.assertContains(response, 'value="SU"')
+
+    def test_recurring_post_creates_a_series_with_occurrences(self):
+        self.client.force_login(self.user)
+        dtstart = timezone.localtime(timezone.now() + datetime.timedelta(days=1)).strftime("%Y-%m-%dT%H:%M")
+
+        response = self.client.post(
+            reverse("mobile:coach_create_event"),
+            {
+                "is_recurring": "on",
+                "kind": "training",
+                "title": "Weekly practice",
+                "teams": [str(self.team.pk)],
+                "dtstart": dtstart,
+                "frequency": "weekly",
+                "interval": "1",
+                "weekdays": ["MO", "WE"],
+            },
+            HTTP_HOST="ajax-united.rosterchief.app",
+        )
+
+        self.assertRedirects(response, reverse("mobile:coach_today"), fetch_redirect_response=False)
+        series = EventSeries.objects.get(title="Weekly practice")
+        self.assertEqual(series.club, self.club)
+        self.assertIn(self.team, series.teams.all())
+        self.assertTrue(series.occurrences.exists())
+
+    def test_recurring_series_does_not_send_a_new_event_notification(self):
+        rostered = Member.objects.create(first_name="Rostered", last_name="Player", email="rostered@example.com")
+        TeamMembership.objects.create(team=self.team, member=rostered, season=self.season)
+        self.client.force_login(self.user)
+        dtstart = timezone.localtime(timezone.now() + datetime.timedelta(days=1)).strftime("%Y-%m-%dT%H:%M")
+
+        self.client.post(
+            reverse("mobile:coach_create_event"),
+            {
+                "is_recurring": "on",
+                "kind": "training",
+                "title": "Silent series",
+                "teams": [str(self.team.pk)],
+                "dtstart": dtstart,
+                "frequency": "weekly",
+                "interval": "1",
+                "weekdays": ["MO"],
+            },
+            HTTP_HOST="ajax-united.rosterchief.app",
+        )
+
+        # Matches management.views.EventSeriesCreateView's own behaviour --
+        # not a mobile-specific gap. Occurrences still get their own
+        # attendance rows (so there's something to notify about later via
+        # send_deadline_reminders), just no immediate per-occurrence push.
+        self.assertFalse(Notification.objects.filter(member=rostered).exists())
+        series = EventSeries.objects.get(title="Silent series")
+        occurrence = series.occurrences.first()
+        self.assertIsNotNone(occurrence)
+        self.assertTrue(Attendance.objects.filter(event=occurrence, member=rostered).exists())
+
+    def test_recurring_weekly_requires_a_weekday(self):
+        self.client.force_login(self.user)
+        dtstart = timezone.localtime(timezone.now() + datetime.timedelta(days=1)).strftime("%Y-%m-%dT%H:%M")
+
+        response = self.client.post(
+            reverse("mobile:coach_create_event"),
+            {"is_recurring": "on", "kind": "training", "title": "No weekday", "teams": [str(self.team.pk)], "dtstart": dtstart, "frequency": "weekly", "interval": "1"},
+            HTTP_HOST="ajax-united.rosterchief.app",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(EventSeries.objects.filter(title="No weekday").exists())
+
     def test_missing_title_reshows_the_form_with_errors(self):
         self.client.force_login(self.user)
 
@@ -3555,6 +3883,14 @@ class CoachCreateNewsViewTests(TestCase):
         team_choices = list(response.context["form"].fields["teams"].queryset)
         self.assertEqual(team_choices, [self.team])
         self.assertNotIn(other_team, team_choices)
+
+    def test_teams_field_is_prechecked_with_the_active_team(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mobile:coach_create_news"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.context["form"].initial.get("teams"), [self.team.pk])
+        self.assertContains(response, f'value="{self.team.pk}" id="id_teams_0" checked')
 
     def test_valid_post_creates_a_pending_review_post_scoped_to_the_team(self):
         self.client.force_login(self.user)

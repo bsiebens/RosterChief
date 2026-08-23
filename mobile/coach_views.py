@@ -11,7 +11,7 @@ from django import forms
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.db.models import Case, F, Q, When
 from django.http import Http404, HttpResponseForbidden, HttpResponseRedirect
-from django.shortcuts import get_object_or_404
+from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
@@ -22,11 +22,12 @@ from django.views.generic import TemplateView, View
 from club.models import Season
 from club.services.access import can_add_news, current_season
 from controlpanel.messages import notify
-from events.models import Attendance, Event, Lineup, LineupSelection
+from events.models import Attendance, Event, EventSeries, Lineup, LineupSelection, Location, Opponent
+from events.services import generate_occurrences
 from events.services.attendance import member_attendance_counts, record_check_in
 from events.services.lineup import UNAVAILABLE_STATUSES, cancel_scheduled_publish, publish_lineup, schedule_lineup_publish, toggle_selection
 from events.tasks import notify_new_event
-from management.forms import EventForm, NewsForm
+from management.forms import EventForm, EventSeriesForm, LocationForm, NewsForm, OpponentForm
 from members.models import Member
 from news.models import News
 from news.services import notify_editors_of_pending_review
@@ -49,6 +50,52 @@ OUT_STATUSES = [Attendance.AttendanceStatus.ABSENT, Attendance.AttendanceStatus.
 #: stay desktop-only (management.forms.EventForm keeps the full list), since
 #: neither has a tile here.
 COACH_EVENT_KINDS = [Event.EventKind.TRAINING, Event.EventKind.GAME, Event.EventKind.TOURNAMENT, Event.EventKind.MEETING]
+
+
+class _LocationPickerForm(forms.Form):
+    """Just the ``location`` picker, standalone from EventForm/EventSeriesForm
+    -- CoachCreateEventView's own field (same name, so it POSTs into whichever
+    of those two forms actually validates the request) and CoachLocationCreateView's
+    "+ New location" popup both render this same one, so a freshly created
+    Location can be handed back pre-selected without reconstructing the much
+    bigger surrounding form just to redraw one <select>."""
+
+    location = forms.ModelChoiceField(queryset=Location.objects.none(), required=False, label=_("Location"), widget=forms.Select(attrs={"class": _INPUT_CLASSES}))
+
+
+class _OpponentPickerForm(forms.Form):
+    """Same idea as _LocationPickerForm, for ``opponent``."""
+
+    opponent = forms.ModelChoiceField(queryset=Opponent.objects.none(), required=False, label=_("Opponent"), widget=forms.Select(attrs={"class": _INPUT_CLASSES}))
+
+
+def _location_picker(club, selected=None):
+    picker = _LocationPickerForm(initial={"location": selected})
+    picker.fields["location"].queryset = Location.objects.filter(club=club).order_by("name")
+    return picker
+
+
+def _opponent_picker(club, selected=None):
+    picker = _OpponentPickerForm(initial={"opponent": selected})
+    picker.fields["opponent"].queryset = Opponent.objects.filter(club=club).order_by("name")
+    return picker
+
+
+def _styled_location_form(data=None):
+    form = LocationForm(data)
+    for field in form.fields.values():
+        field.widget.attrs["class"] = _INPUT_CLASSES
+    return form
+
+
+def _styled_opponent_form(data=None):
+    form = OpponentForm(data)
+    # A logo is a nice-to-have on the desktop Opponents page, not something worth a
+    # file-upload control on a "we just need this to exist" quick-add popup -- add
+    # one later from there if it matters.
+    del form.fields["logo"]
+    form.fields["name"].widget.attrs["class"] = _INPUT_CLASSES
+    return form
 
 #: How long an event stays "current" (CoachTodayView's session card, and the
 #: missing-line-up nudge) past the moment it starts -- events.start__gte=now
@@ -289,24 +336,40 @@ class CoachAttendanceRemindSilentView(CoachScopeMixin, LoginRequiredMixin, View)
 
 
 class CoachCreateEventView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
-    """C4 -- reuses management.forms.EventForm as-is: its own __init__ already
-    scopes ``teams`` to teams_managed_by(user, club) via EventAudienceFormMixin,
-    exactly the restriction a coach needs, so there's nothing to re-scope.
+    """C4 -- reuses management.forms.EventForm/EventSeriesForm as-is (their
+    own __init__ already scopes fields to the requester via
+    EventAudienceFormMixin), rather than a parallel hand-built form.
 
-    Only a subset of the mock's fields is rendered in the template (Title,
-    Kind, Teams, Location, Start, Answers close) -- everything else EventForm
-    carries (groups/club_wide/invited & excluded members/opponent/
-    competition/external id) stays unrendered and simply unset; all of it is
-    optional on the model, so an unrendered field validates cleanly empty.
-    "Repeat weekly" from the mock isn't built this stage -- the recurring-
-    series machinery (EventSeriesForm) is a separate form with its own
-    fields; wiring it in is later work, not something to fake with an inert
-    toggle here.
+    Audience is simplified from the desktop version: ``teams`` is hard-locked
+    to the active team (a hidden field, not a picker -- there's no "which
+    team" question on a screen that's already scoped to one), and ``groups``/
+    ``club_wide`` are dropped entirely, since both widen the audience past a
+    single team the same way multi-team selection would. ``invited_members``/
+    ``excluded_members`` stay, re-scoped to sensible pools (add someone not on
+    the roster; exclude someone who is) rather than "every club member" --
+    the template spells out that a genuinely multi-team event still needs the
+    desktop. Location/opponent are rendered via the standalone
+    _location_picker/_opponent_picker (see their own docstrings), each with a
+    "+ New" popup (CoachLocationCreateView/CoachOpponentCreateView) for when
+    the one needed doesn't exist yet.
 
-    After a successful save: the same notify_new_event.delay(...) call
-    management.views.EventCreateView.form_valid makes -- attendance sync is
-    automatic via events/signals.py, only the notification dispatch needs
-    replicating by hand for a view that isn't a CreateView.
+    One screen creates either a single Event or a recurring EventSeries --
+    ``is_recurring`` (a plain checkbox) picks which of the two forms below
+    actually validates the request; the two share every audience/location/
+    opponent field (identical names), so nothing needs duplicating in the
+    template, just shown/hidden. Competition has no EventSeries equivalent
+    (EventSeriesForm carries no such field), so it's one-off-only.
+
+    After a successful single-event save: the same notify_new_event.delay(...)
+    call management.views.EventCreateView.form_valid makes -- attendance sync
+    is automatic via events/signals.py, only the notification dispatch needs
+    replicating by hand for a view that isn't a CreateView. A new series
+    mirrors management.views.EventSeriesCreateView instead: generate_occurrences
+    materialises its occurrences immediately (each one syncing its own
+    attendance the same way), but -- matching that same desktop behaviour,
+    not a mobile-specific gap -- nothing pushes a "new event" notification per
+    occurrence; a bulk-created series relies on send_deadline_reminders' own
+    periodic sweep instead, exactly like a rolling-horizon extension does.
     """
 
     template_name = "mobile/coach/event_form.html"
@@ -318,42 +381,145 @@ class CoachCreateEventView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
             return HttpResponseRedirect(reverse("mobile:coach_today"))
         return super().get(request, *args, **kwargs)
 
-    def build_form(self, data=None):
-        instance = Event(club=self.request.club, created_by=self.me)
+    def _member_pools(self):
+        season = current_season(self.request.club)
+        roster_member_ids = list(TeamMembership.objects.filter(team=self.active_team, season=season).values_list("member_id", flat=True)) if season and self.active_team else []
+        excluded_pool = Member.objects.filter(pk__in=roster_member_ids).order_by("last_name", "first_name")
+        invited_pool = eligible_roster_members(self.request.club).exclude(pk__in=roster_member_ids).order_by("last_name", "first_name")
+        return invited_pool, excluded_pool
+
+    def _scope_shared_fields(self, form):
+        # Widget swapped in *before* .queryset is set on every ModelMultiple-
+        # ChoiceField below -- ModelChoiceField.queryset's setter pushes
+        # `self.widget.choices = self.choices` as a side effect at the moment
+        # it's assigned, so setting the queryset first and swapping the
+        # widget after just discards that push, leaving the new widget's own
+        # .choices empty (a real, previously-undetected bug this surfaced --
+        # see the regression tests, CoachCreateNewsView.build_form's own
+        # near-identical fix for ``teams`` there, and build_series_form's own
+        # comment on ``weekdays`` for the plain-ChoiceField variant of the
+        # same trap).
+        #
+        # teams: hard-locked to the active team, not a picker -- see this
+        # view's own docstring. A hidden MultipleHiddenInput renders its
+        # `initial` on GET without any template code, and the queryset
+        # restriction means a tampered request still can't set another team.
+        form.fields["teams"].widget = forms.MultipleHiddenInput()
+        form.fields["teams"].queryset = Team.objects.filter(pk=self.active_team.pk) if self.active_team is not None else Team.objects.none()
+        # form.initial (not just field.initial) -- ModelForm.__init__ already
+        # populated form.initial["teams"] = [] from the new, unsaved Event/
+        # EventSeries instance's own (necessarily empty) m2m, and
+        # get_initial_for_field's dict.get(name, field.initial) only ever
+        # falls back to field.initial when the key is *absent*, not when it's
+        # merely empty -- so field.initial alone renders nothing here.
+        form.initial["teams"] = [self.active_team.pk] if self.active_team is not None else []
+        del form.fields["groups"]
+        if "club_wide" in form.fields:
+            del form.fields["club_wide"]
+        invited_pool, excluded_pool = self._member_pools()
+        form.fields["invited_members"].widget = forms.CheckboxSelectMultiple()
+        form.fields["invited_members"].queryset = invited_pool
+        form.fields["excluded_members"].widget = forms.CheckboxSelectMultiple()
+        form.fields["excluded_members"].queryset = excluded_pool
+        # location/opponent stay on the form (scope_audience_fields already
+        # scoped both to this club) so a submitted value still validates and
+        # saves correctly -- just never rendered here via {{ form.location }}/
+        # {{ form.opponent }}. The template renders _location_picker.html/
+        # _opponent_picker.html instead (same "location"/"opponent" POST
+        # names, same club-scoped queryset, built standalone so a freshly
+        # created Location/Opponent can be handed back pre-selected without
+        # reconstructing this whole form -- see their own docstrings).
+        if "title" in form.fields:
+            form.fields["title"].widget.attrs["class"] = _INPUT_CLASSES
+
+    def build_event_form(self, data=None):
+        # kind=training, not Event.kind's own model default (OTHER) -- Practice
+        # is the tile picker's first/most common option, and OTHER isn't even
+        # one of the four tiles COACH_EVENT_KINDS offers below.
+        instance = Event(club=self.request.club, created_by=self.me, kind=Event.EventKind.TRAINING)
         form = EventForm(data, club=self.request.club, user=self.request.user, editing=False, instance=instance)
-        # max_referees has a model default (2) but no blank=True, so the form
-        # field is required despite it -- delete it rather than render a
-        # referee-count control this screen has no use for; construct_instance
-        # skips deleted fields entirely, leaving the instance's own default.
+        # max_referees/external_game_id have no use on a coach-created event --
+        # max_referees has a model default (2) but no blank=True, so the field
+        # is required despite it; construct_instance skips a deleted field
+        # entirely, leaving the instance's own default/blank.
         del form.fields["max_referees"]
+        del form.fields["external_game_id"]
         # Narrowed to the four kinds the tile picker actually offers -- social/
         # other don't get their own tile, and this keeps a tampered request from
         # setting one anyway (the desktop form still offers the full list).
         form.fields["kind"].choices = [choice for choice in form.fields["kind"].choices if choice[0] in COACH_EVENT_KINDS]
-        # The desktop searchable multi-select relies on management's own JS
-        # widget, not loaded here -- plain checkboxes work without it and
-        # read better on a phone regardless.
-        form.fields["teams"].widget = forms.CheckboxSelectMultiple()
-        if self.active_team is not None and data is None:
-            form.fields["teams"].initial = [self.active_team.pk]
-        # Same input styling as mobile.forms.MemberProfileForm (M6) -- one
-        # visual language for every text/date field across the app, not a
-        # diverging one for this screen.
-        for field_name in ("title", "start", "location", "deadline"):
+        self._scope_shared_fields(form)
+        for field_name in ("start", "deadline", "competition"):
+            form.fields[field_name].widget.attrs["class"] = _INPUT_CLASSES
+        return form
+
+    def build_series_form(self, data=None):
+        instance = EventSeries(club=self.request.club, kind=Event.EventKind.TRAINING)
+        form = EventSeriesForm(data, club=self.request.club, user=self.request.user, instance=instance)
+        # The raw-RRULE escape hatch is a desktop-only affordance -- the
+        # friendly frequency/interval/weekdays fields below cover the common
+        # weekly/monthly cases this screen is for.
+        del form.fields["advanced_rrule"]
+        # Not offered here: neither maps to a "how long since kickoff" a coach
+        # thinks in the way duration_hours/minutes below does.
+        del form.fields["gathering_minutes_before"]
+        form.fields["kind"].choices = [choice for choice in form.fields["kind"].choices if choice[0] in COACH_EVENT_KINDS]
+        self._scope_shared_fields(form)
+        # SelectMultiple relies on the desktop's searchable-select JS (not loaded
+        # here) to be usable at all -- checkboxes work without it, and there are
+        # only ever seven, so a tile-style has-checked toggle (see the template)
+        # reads better than a cramped multi-select on a phone regardless.
+        # choices passed straight to the widget's own constructor, not left to
+        # ChoiceField.choices' assignment-time push -- the field's own choices
+        # were already pushed onto the *original* SelectMultiple back when the
+        # field itself was declared, and swapping the widget here discards
+        # that (same trap _scope_shared_fields' own comment covers, just the
+        # plain-ChoiceField shape of it).
+        form.fields["weekdays"].widget = forms.CheckboxSelectMultiple(attrs={"class": "sr-only"}, choices=form.fields["weekdays"].choices)
+        for field_name in ("dtstart", "until", "frequency", "interval", "duration_hours", "duration_minutes", "deadline_minutes_before"):
             form.fields[field_name].widget.attrs["class"] = _INPUT_CLASSES
         return form
 
     def get_context_data(self, **kwargs):
-        kwargs.setdefault("form", self.build_form())
+        form = kwargs.setdefault("form", self.build_event_form())
+        series_form = kwargs.setdefault("series_form", self.build_series_form())
+        # Whichever of the two actually carries the failed submission's data
+        # (a validation failure always rebuilds the *other* one fresh/unbound,
+        # so at most one of these is ever bound) -- GET has neither bound.
+        bound = form if form.is_bound else series_form if series_form.is_bound else None
+        # title/teams/invited_members/excluded_members are identical fields on
+        # both forms (same name, same queryset) -- rendered once, from
+        # whichever form is actually bound, so a validation failure on the
+        # *series* form doesn't redisplay those as blank just because `form`
+        # itself is a fresh, never-submitted EventForm in that response.
+        kwargs.setdefault("shared_form", bound or form)
+        kwargs.setdefault("is_recurring", series_form.is_bound)
+        kwargs.setdefault("location_picker", _location_picker(self.request.club, selected=bound.data.get("location") if bound else None))
+        kwargs.setdefault("opponent_picker", _opponent_picker(self.request.club, selected=bound.data.get("opponent") if bound else None))
+        kwargs.setdefault("location_form", _styled_location_form())
+        kwargs.setdefault("opponent_form", _styled_opponent_form())
         return super().get_context_data(**kwargs)
 
     def post(self, request, *args, **kwargs):
         if not self.can_manage_active_team:
             return HttpResponseForbidden()
 
-        form = self.build_form(request.POST)
+        if request.POST.get("is_recurring") == "on":
+            series_form = self.build_series_form(request.POST)
+            if not series_form.is_valid():
+                return self.render_to_response(self.get_context_data(form=self.build_event_form(), series_form=series_form))
+
+            series = series_form.save()
+            # Not automatic on save -- without this the series would exist with
+            # zero occurrences until the extend_event_series cron next runs.
+            created = generate_occurrences(series)
+            body = ngettext("“%(series)s” created, with %(count)d occurrence scheduled.", "“%(series)s” created, with %(count)d occurrences scheduled.", len(created)) % {"series": series, "count": len(created)}
+            notify(request, f"s|{_('Series created')}|{body}")
+            return HttpResponseRedirect(reverse("mobile:coach_today"))
+
+        form = self.build_event_form(request.POST)
         if not form.is_valid():
-            return self.render_to_response(self.get_context_data(form=form))
+            return self.render_to_response(self.get_context_data(form=form, series_form=self.build_series_form()))
 
         event = form.save()
         body = _("“%(event)s” created.") % {"event": event}
@@ -363,6 +529,62 @@ class CoachCreateEventView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
         # series' occurrences aren't wired to this.
         notify_new_event.delay(str(event.pk))
         return HttpResponseRedirect(reverse("mobile:coach_today"))
+
+
+class CoachLocationCreateView(CoachScopeMixin, LoginRequiredMixin, View):
+    """New event's "+ New location" popup. The modal's own <form> targets
+    just #location-modal-body (hx-swap="innerHTML") -- on a validation
+    failure that's the whole response, re-showing the fields with errors. On
+    success the response also carries an out-of-band #location-picker swap
+    (the standard htmx way to update a second area from one request) so the
+    freshly created Location shows up pre-selected on the field the modal was
+    opened from, plus an HX-Trigger the modal listens for to close itself --
+    all without touching (or losing progress in) the rest of the in-progress
+    event/series form the modal is sitting on top of.
+    """
+
+    def post(self, request, *args, **kwargs):
+        if not self.can_manage_active_team:
+            return HttpResponseForbidden()
+
+        form = _styled_location_form(request.POST)
+        if not form.is_valid():
+            return render(request, "mobile/coach/_location_modal_fields.html", {"location_form": form})
+
+        location = form.save(commit=False)
+        location.club = request.club
+        location.save()
+        response = render(
+            request,
+            "mobile/coach/_location_created_response.html",
+            {"location_form": _styled_location_form(), "location_picker": _location_picker(request.club, selected=location.pk)},
+        )
+        response["HX-Trigger"] = "location-created"
+        return response
+
+
+class CoachOpponentCreateView(CoachScopeMixin, LoginRequiredMixin, View):
+    """New event's "+ New opponent" popup -- same shape as
+    CoachLocationCreateView, for Opponent instead."""
+
+    def post(self, request, *args, **kwargs):
+        if not self.can_manage_active_team:
+            return HttpResponseForbidden()
+
+        form = _styled_opponent_form(request.POST)
+        if not form.is_valid():
+            return render(request, "mobile/coach/_opponent_modal_fields.html", {"opponent_form": form})
+
+        opponent = form.save(commit=False)
+        opponent.club = request.club
+        opponent.save()
+        response = render(
+            request,
+            "mobile/coach/_opponent_created_response.html",
+            {"opponent_form": _styled_opponent_form(), "opponent_picker": _opponent_picker(request.club, selected=opponent.pk)},
+        )
+        response["HX-Trigger"] = "opponent-created"
+        return response
 
 
 class CoachCreateNewsView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
@@ -412,11 +634,26 @@ class CoachCreateNewsView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
         # A coach's post is always about their own team(s) -- never empty
         # (which News.teams's own help_text defines as "club-wide", an
         # editor/admin-only claim), and never any other team in the club.
+        #
+        # Widget swapped in *before* .queryset is set -- ModelChoiceField.
+        # queryset's setter pushes `self.widget.choices = self.choices` as a
+        # side effect at the moment it's assigned; setting the queryset first
+        # and swapping the widget after discards that push, leaving the new
+        # widget's own .choices empty and the checkbox list rendering nothing
+        # at all (a real, previously-undetected bug -- see the regression
+        # test, and mobile.coach_views.CoachCreateEventView._scope_shared_
+        # fields' own near-identical comment for the ModelMultipleChoiceField
+        # version of the same trap).
+        form.fields["teams"].widget = forms.CheckboxSelectMultiple()
         form.fields["teams"].queryset = Team.objects.filter(pk__in=[team.pk for team in self.managed_teams])
         form.fields["teams"].required = True
-        form.fields["teams"].widget = forms.CheckboxSelectMultiple()
         if self.active_team is not None and data is None:
-            form.fields["teams"].initial = [self.active_team.pk]
+            # form.initial, not field.initial -- ModelForm.__init__ already set
+            # form.initial["teams"] = [] from the new, unsaved News instance's
+            # own (necessarily empty) m2m, and dict.get(name, field.initial)
+            # only falls back to field.initial when the key is *absent*, not
+            # merely empty, so field.initial alone silently renders unchecked.
+            form.initial["teams"] = [self.active_team.pk]
         for field_name in ("title", "body"):
             form.fields[field_name].widget.attrs["class"] = _INPUT_CLASSES
         return form

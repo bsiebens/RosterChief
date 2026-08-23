@@ -1,0 +1,31 @@
+{% load i18n %}
+<div class="flex flex-col gap-3">
+    {% for error in location_form.non_field_errors %}<p class="text-xs text-club-dark">{{ error }}</p>{% endfor %}
+    <div>
+        <label class="mb-1 block text-xs font-semibold text-muted" for="{{ location_form.name.id_for_label }}">{% trans "Name" %}</label>
+        {{ location_form.name }}
+        {% for error in location_form.name.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
+    </div>
+    <div>
+        <label class="mb-1 block text-xs font-semibold text-muted" for="{{ location_form.address.id_for_label }}">{% trans "Address" %}</label>
+        {{ location_form.address }}
+        {% for error in location_form.address.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
+    </div>
+    <div class="grid grid-cols-2 gap-3">
+        <div>
+            <label class="mb-1 block text-xs font-semibold text-muted" for="{{ location_form.city.id_for_label }}">{% trans "City" %}</label>
+            {{ location_form.city }}
+            {% for error in location_form.city.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
+        </div>
+        <div>
+            <label class="mb-1 block text-xs font-semibold text-muted" for="{{ location_form.zip_code.id_for_label }}">{% trans "Zip code" %}</label>
+            {{ location_form.zip_code }}
+            {% for error in location_form.zip_code.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
+        </div>
+    </div>
+    <div>
+        <label class="mb-1 block text-xs font-semibold text-muted" for="{{ location_form.country.id_for_label }}">{% trans "Country" %}</label>
+        {{ location_form.country }}
+        {% for error in location_form.country.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
+    </div>
+</div>

@@ -1,0 +1,8 @@
+{% load i18n %}
+<div id="opponent-picker" {% if oob %}hx-swap-oob="true"{% endif %}>
+    <div class="mb-1 flex items-center justify-between">
+        <label class="text-xs font-semibold text-muted" for="{{ opponent_picker.opponent.id_for_label }}">{% trans "Opponent" %}</label>
+        <button type="button" class="font-display text-[11px] font-extrabold tracking-wide text-club uppercase" @click="showOpponentModal = true">{% trans "+ New" %}</button>
+    </div>
+    {{ opponent_picker.opponent }}
+</div>

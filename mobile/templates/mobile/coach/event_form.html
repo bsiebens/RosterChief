@@ -1,12 +1,14 @@
 {% extends "mobile/coach/base.html" %}
-{% load i18n %}
+{% load i18n lucide %}
 
 {% comment %}
-    C4 -- design_handoff_rosterchief_platform/README.md's C4 section: three
-    event-type tiles, title/date/location, "who" (teams), and an answers-
-    close row. See CoachCreateEventView's own docstring for what's scoped
-    down from the mock and why (no group/opponent/competition fields, no
-    "Repeat weekly" yet). The white sticky Cancel/title/Create bar breaks out
+    C4 -- design_handoff_rosterchief_platform/README.md's C4 section, grown
+    past the mock: a kind picker, title/location/date, opponent+competition
+    for a game, "who" (invited/excluded members on top of the auto-linked
+    active team), a "this repeats" toggle building an EventSeries instead of
+    a single Event, and "+ New" popups for location/opponent. See
+    CoachCreateEventView's own docstring for the shared-fields/two-forms
+    design this renders. The white sticky Cancel/title/Create bar breaks out
     of the sheet's own padding (-mx-4 -mt-5), same trick calendar_feed_
     settings.html/payments.html use for their own back-button bars.
 {% endcomment %}
@@ -18,71 +20,191 @@
         <button class="font-display text-sm font-extrabold tracking-wide text-club uppercase" type="submit" form="coach-event-form">{% trans "Create" %}</button>
     </div>
 
-    {% if form.non_field_errors %}
-        <div class="m-card border border-danger-border bg-danger-bg p-3 text-sm text-club-dark">
-            {% for error in form.non_field_errors %}<p>{{ error }}</p>{% endfor %}
-        </div>
-    {% endif %}
+    {% for error in form.non_field_errors %}
+        <div class="m-card border border-danger-border bg-danger-bg p-3 text-sm text-club-dark"><p>{{ error }}</p></div>
+    {% endfor %}
+    {% for error in series_form.non_field_errors %}
+        <div class="m-card border border-danger-border bg-danger-bg p-3 text-sm text-club-dark"><p>{{ error }}</p></div>
+    {% endfor %}
 
-    <form id="coach-event-form" class="flex flex-col gap-4" method="post" action="{% url "mobile:coach_create_event" %}" hx-boost="false">
-        {% csrf_token %}
+    <div x-data="{ kind: '{{ shared_form.kind.value|default:"training" }}', isRecurring: {% if is_recurring %}true{% else %}false{% endif %}, showLocationModal: false, showOpponentModal: false }">
+        <form id="coach-event-form" class="flex flex-col gap-4" method="post" action="{% url "mobile:coach_create_event" %}" hx-boost="false">
+            {% csrf_token %}
+            {{ shared_form.teams }}
 
-        <div class="grid grid-cols-2 gap-2">
-            <label class="flex h-12 items-center justify-center rounded-lg border border-line bg-white font-display text-xs font-extrabold tracking-wide text-muted uppercase has-checked:border-ink has-checked:bg-ink has-checked:text-white">
-                <input class="sr-only" type="radio" name="kind" value="training" checked>
-                {% trans "Practice" %}
-            </label>
-            <label class="flex h-12 items-center justify-center rounded-lg border border-line bg-white font-display text-xs font-extrabold tracking-wide text-muted uppercase has-checked:border-ink has-checked:bg-ink has-checked:text-white">
-                <input class="sr-only" type="radio" name="kind" value="game">
-                {% trans "Game" %}
-            </label>
-            <label class="flex h-12 items-center justify-center rounded-lg border border-line bg-white font-display text-xs font-extrabold tracking-wide text-muted uppercase has-checked:border-ink has-checked:bg-ink has-checked:text-white">
-                <input class="sr-only" type="radio" name="kind" value="tournament">
-                {% trans "Tournament" %}
-            </label>
-            <label class="flex h-12 items-center justify-center rounded-lg border border-line bg-white font-display text-xs font-extrabold tracking-wide text-muted uppercase has-checked:border-ink has-checked:bg-ink has-checked:text-white">
-                <input class="sr-only" type="radio" name="kind" value="meeting">
-                {% trans "Meeting" %}
-            </label>
-        </div>
-        {% for error in form.kind.errors %}<p class="text-xs text-club-dark">{{ error }}</p>{% endfor %}
-
-        <div class="m-card flex flex-col p-4">
-            <div>
-                <label class="mb-1 block text-xs font-semibold text-muted" for="{{ form.title.id_for_label }}">{% trans "Title" %}</label>
-                {{ form.title }}
-                {% for error in form.title.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
+            <div class="grid grid-cols-2 gap-2">
+                <label class="flex h-12 items-center justify-center rounded-lg border border-line bg-white font-display text-xs font-extrabold tracking-wide text-muted uppercase has-checked:border-ink has-checked:bg-ink has-checked:text-white">
+                    <input class="sr-only" type="radio" name="kind" value="training" x-model="kind">
+                    {% trans "Practice" %}
+                </label>
+                <label class="flex h-12 items-center justify-center rounded-lg border border-line bg-white font-display text-xs font-extrabold tracking-wide text-muted uppercase has-checked:border-ink has-checked:bg-ink has-checked:text-white">
+                    <input class="sr-only" type="radio" name="kind" value="game" x-model="kind">
+                    {% trans "Game" %}
+                </label>
+                <label class="flex h-12 items-center justify-center rounded-lg border border-line bg-white font-display text-xs font-extrabold tracking-wide text-muted uppercase has-checked:border-ink has-checked:bg-ink has-checked:text-white">
+                    <input class="sr-only" type="radio" name="kind" value="tournament" x-model="kind">
+                    {% trans "Tournament" %}
+                </label>
+                <label class="flex h-12 items-center justify-center rounded-lg border border-line bg-white font-display text-xs font-extrabold tracking-wide text-muted uppercase has-checked:border-ink has-checked:bg-ink has-checked:text-white">
+                    <input class="sr-only" type="radio" name="kind" value="meeting" x-model="kind">
+                    {% trans "Meeting" %}
+                </label>
             </div>
-            <div class="my-3 h-px bg-rule"></div>
-            <div>
-                <label class="mb-1 block text-xs font-semibold text-muted" for="{{ form.start.id_for_label }}">{% trans "Date &amp; time" %}</label>
-                {{ form.start }}
-                {% for error in form.start.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
+            {% for error in form.kind.errors %}<p class="text-xs text-club-dark">{{ error }}</p>{% endfor %}
+            {% for error in series_form.kind.errors %}<p class="text-xs text-club-dark">{{ error }}</p>{% endfor %}
+
+            <div class="m-card flex items-center justify-between p-4">
+                <span class="text-sm font-semibold text-ink">{% trans "This repeats" %}</span>
+                <input class="h-5 w-5 shrink-0 accent-ink" type="checkbox" name="is_recurring" x-model="isRecurring">
             </div>
-            <div class="my-3 h-px bg-rule"></div>
-            <div>
-                <label class="mb-1 block text-xs font-semibold text-muted" for="{{ form.location.id_for_label }}">{% trans "Location" %}</label>
-                {{ form.location }}
+
+            <div class="m-card flex flex-col p-4">
+                <div>
+                    <label class="mb-1 block text-xs font-semibold text-muted" for="{{ shared_form.title.id_for_label }}">{% trans "Title" %}</label>
+                    {{ shared_form.title }}
+                    {% for error in shared_form.title.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
+                </div>
+
+                <div x-show="!isRecurring">
+                    <div class="my-3 h-px bg-rule"></div>
+                    <label class="mb-1 block text-xs font-semibold text-muted" for="{{ form.start.id_for_label }}">{% trans "Date &amp; time" %}</label>
+                    {{ form.start }}
+                    {% for error in form.start.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
+                </div>
+
+                <div x-show="isRecurring" x-cloak>
+                    <div class="my-3 h-px bg-rule"></div>
+                    <label class="mb-1 block text-xs font-semibold text-muted" for="{{ series_form.dtstart.id_for_label }}">{% trans "First occurrence" %}</label>
+                    {{ series_form.dtstart }}
+                    {% for error in series_form.dtstart.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
+                </div>
+
+                <div class="my-3 h-px bg-rule"></div>
+                <div>
+                    {% include "mobile/coach/_location_picker.html" %}
+                </div>
+            </div>
+
+            <div x-show="kind === 'game'" x-cloak class="flex flex-col gap-4">
+                <div class="m-card p-4">
+                    {% include "mobile/coach/_opponent_picker.html" %}
+                </div>
+                <div x-show="!isRecurring" class="m-card p-4">
+                    <label class="mb-1 block text-xs font-semibold text-muted" for="{{ form.competition.id_for_label }}">{% trans "Competition" %}</label>
+                    {{ form.competition }}
+                </div>
+            </div>
+
+            <div x-show="isRecurring" x-cloak class="m-card flex flex-col p-4">
+                <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Repeats" %}</div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="mb-1 block text-xs font-semibold text-muted" for="{{ series_form.frequency.id_for_label }}">{% trans "Frequency" %}</label>
+                        {{ series_form.frequency }}
+                    </div>
+                    <div>
+                        <label class="mb-1 block text-xs font-semibold text-muted" for="{{ series_form.interval.id_for_label }}">{% trans "Every" %}</label>
+                        {{ series_form.interval }}
+                    </div>
+                </div>
+                <div class="mt-3">
+                    <label class="mb-1 block text-xs font-semibold text-muted">{% trans "On (weekly only)" %}</label>
+                    <div class="flex flex-wrap gap-2">
+                        {% for checkbox in series_form.weekdays %}
+                            <label class="flex h-9 items-center rounded-lg border border-line bg-white px-3 text-xs font-semibold text-ink has-checked:border-ink has-checked:bg-ink has-checked:text-white">
+                                {{ checkbox.tag }} {{ checkbox.choice_label }}
+                            </label>
+                        {% endfor %}
+                    </div>
+                    {% for error in series_form.weekdays.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
+                </div>
+                <div class="my-3 h-px bg-rule"></div>
+                <label class="mb-1 block text-xs font-semibold text-muted" for="{{ series_form.until.id_for_label }}">{% trans "Repeats until" %}</label>
+                {{ series_form.until }}
+                <p class="mt-1 text-xs text-dim">{% trans "Leave blank to keep repeating with no end date." %}</p>
+                <div class="my-3 h-px bg-rule"></div>
+                <label class="mb-1 block text-xs font-semibold text-muted">{% trans "Length of each occurrence" %}</label>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        {{ series_form.duration_hours }}
+                        <p class="mt-1 text-xs text-dim">{% trans "Hours" %}</p>
+                    </div>
+                    <div>
+                        {{ series_form.duration_minutes }}
+                        <p class="mt-1 text-xs text-dim">{% trans "Minutes" %}</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="m-card p-4">
+                <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Who" %}</div>
+                <p class="mb-3 text-xs text-dim">{% blocktrans with team=active_team.name %}Automatically for {{ team }}. Need more than one team? Create it from the management panel instead.{% endblocktrans %}</p>
+
+                {% if shared_form.excluded_members.field.queryset.exists %}
+                    <div class="mb-3">
+                        <div class="mb-1 text-xs font-semibold text-muted">{% trans "Exclude from the roster" %}</div>
+                        <div class="flex flex-col gap-2">
+                            {% for checkbox in shared_form.excluded_members %}
+                                <label class="flex items-center gap-2 text-sm text-ink">{{ checkbox.tag }} {{ checkbox.choice_label }}</label>
+                            {% endfor %}
+                        </div>
+                    </div>
+                {% endif %}
+
+                {% if shared_form.invited_members.field.queryset.exists %}
+                    <details>
+                        <summary class="cursor-pointer text-xs font-semibold text-muted">{% trans "Add someone not on the roster" %}</summary>
+                        <div class="mt-2 flex flex-col gap-2">
+                            {% for checkbox in shared_form.invited_members %}
+                                <label class="flex items-center gap-2 text-sm text-ink">{{ checkbox.tag }} {{ checkbox.choice_label }}</label>
+                            {% endfor %}
+                        </div>
+                    </details>
+                {% endif %}
+            </div>
+
+            <div x-show="!isRecurring" class="m-card p-4">
+                <label class="mb-1 block text-xs font-semibold text-muted" for="{{ form.deadline.id_for_label }}">{% trans "Answers close" %}</label>
+                {{ form.deadline }}
+                <p class="mt-1 text-xs text-dim">{% trans "Leave blank to keep answers open until the event starts." %}</p>
+            </div>
+            <div x-show="isRecurring" x-cloak class="m-card p-4">
+                <label class="mb-1 block text-xs font-semibold text-muted" for="{{ series_form.deadline_minutes_before.id_for_label }}">{% trans "Answers close (minutes before each occurrence)" %}</label>
+                {{ series_form.deadline_minutes_before }}
+                <p class="mt-1 text-xs text-dim">{% trans "Leave blank to keep answers open until each occurrence starts." %}</p>
+            </div>
+        </form>
+
+        <div class="fixed inset-0 z-30 flex items-end bg-black/60" x-show="showLocationModal" x-cloak @click.self="showLocationModal = false" @location-created.window="showLocationModal = false">
+            <div class="w-full rounded-t-2xl bg-white p-4" @click.stop>
+                <div class="mb-3 flex items-center justify-between">
+                    <span class="font-display text-sm font-extrabold tracking-wide text-ink uppercase">{% trans "New location" %}</span>
+                    <button type="button" class="text-dim" @click="showLocationModal = false" aria-label="{% trans "Close" %}">{% lucide "x" size=18 %}</button>
+                </div>
+                <form hx-post="{% url "mobile:coach_location_create" %}" hx-target="#location-modal-body" hx-swap="innerHTML" hx-boost="false">
+                    {% csrf_token %}
+                    <div id="location-modal-body">
+                        {% include "mobile/coach/_location_modal_fields.html" %}
+                    </div>
+                    <button class="btn btn-dark mt-3 w-full" type="submit">{% trans "Add location" %}</button>
+                </form>
             </div>
         </div>
 
-        <div class="m-card p-4">
-            <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Who" %}</div>
-            <div class="flex flex-col gap-2">
-                {% for checkbox in form.teams %}
-                    <label class="flex items-center gap-2 text-sm text-ink">
-                        {{ checkbox.tag }}
-                        {{ checkbox.choice_label }}
-                    </label>
-                {% endfor %}
+        <div class="fixed inset-0 z-30 flex items-end bg-black/60" x-show="showOpponentModal" x-cloak @click.self="showOpponentModal = false" @opponent-created.window="showOpponentModal = false">
+            <div class="w-full rounded-t-2xl bg-white p-4" @click.stop>
+                <div class="mb-3 flex items-center justify-between">
+                    <span class="font-display text-sm font-extrabold tracking-wide text-ink uppercase">{% trans "New opponent" %}</span>
+                    <button type="button" class="text-dim" @click="showOpponentModal = false" aria-label="{% trans "Close" %}">{% lucide "x" size=18 %}</button>
+                </div>
+                <form hx-post="{% url "mobile:coach_opponent_create" %}" hx-target="#opponent-modal-body" hx-swap="innerHTML" hx-boost="false">
+                    {% csrf_token %}
+                    <div id="opponent-modal-body">
+                        {% include "mobile/coach/_opponent_modal_fields.html" %}
+                    </div>
+                    <button class="btn btn-dark mt-3 w-full" type="submit">{% trans "Add opponent" %}</button>
+                </form>
             </div>
-            {% for error in form.teams.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
         </div>
-
-        <div class="m-card p-4">
-            <label class="mb-1 block text-xs font-semibold text-muted" for="{{ form.deadline.id_for_label }}">{% trans "Answers close" %}</label>
-            {{ form.deadline }}
-            <p class="mt-1 text-xs text-dim">{% trans "Leave blank to keep answers open until the event starts." %}</p>
-        </div>
-    </form>
+    </div>
 {% endblock content %}
