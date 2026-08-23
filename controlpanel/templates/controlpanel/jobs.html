@@ -12,7 +12,7 @@
 {% block panel %}
     <div class="rounded border border-info-border bg-info-bg px-4 py-3 text-sm text-info-text">
         {% lucide "info" size=16 class="inline -mt-0.5 mr-1" %}
-        These run on Celery Beat's own schedule (see <span class="font-mono">rosterchief/settings.py</span>) — there is no "run now" here, but each job can be paused individually below. A run that never appears at its scheduled time (and isn't paused) is the signal something's wrong with <span class="font-mono">worker</span>/<span class="font-mono">beat</span>, not with this page.
+        These run on host cron (see "Scheduled jobs" in <span class="font-mono">DEPLOYMENT.md</span>) — there is no "run now" here, but each job can be paused individually below. A run that never appears at its scheduled time (and isn't paused) is the signal something's wrong with the server's crontab, not with this page.
     </div>
 
     <div class="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">

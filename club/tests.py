@@ -1436,25 +1436,19 @@ class RootViewTests(TestCase):
     @classmethod
     def setUpTestData(cls):
         cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
-        cls.user = get_user_model().objects.create_user(email="member@example.com", password="pw-secret-123")
 
     def test_the_base_domain_hands_off_to_the_control_panel(self):
         response = self.client.get("/", HTTP_HOST="rosterchief.app")
 
         self.assertRedirects(response, reverse("controlpanel:dashboard"), fetch_redirect_response=False)
 
-    def test_a_club_subdomain_lands_on_the_club_home(self):
-        self.client.force_login(self.user)
-
+    def test_a_club_subdomain_redirects_to_the_member_app(self):
+        # Unconditional -- mobile:home is itself LoginRequiredMixin, so an anonymous
+        # visitor's round trip through it to the login screen is that view's own
+        # concern (see mobile/tests.py), not root()'s.
         response = self.client.get("/", HTTP_HOST="ajax-united.rosterchief.app")
 
-        self.assertTemplateUsed(response, "club/home.html")
-        self.assertContains(response, "Ajax United")
-
-    def test_the_club_home_requires_a_login(self):
-        response = self.client.get("/", HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertRedirects(response, f"{reverse('account_login')}?next=/", fetch_redirect_response=False)
+        self.assertRedirects(response, reverse("mobile:home"), fetch_redirect_response=False)
 
 
 class FeeServiceTests(TestCase):
