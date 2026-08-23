@@ -3464,6 +3464,40 @@ class CoachCreateEventViewTests(TestCase):
         self.assertEqual(response.status_code, 403)
         self.assertFalse(Event.objects.filter(title="Blocked practice").exists())
 
+    def test_kind_choices_are_limited_to_the_tile_picker(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mobile:coach_create_event"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        kind_choices = {value for value, _label in response.context["form"].fields["kind"].choices}
+        self.assertEqual(kind_choices, {"training", "game", "tournament", "meeting"})
+
+    def test_can_create_a_tournament(self):
+        self.client.force_login(self.user)
+
+        self._post(kind="tournament", title="Regional tournament")
+
+        event = Event.objects.get(title="Regional tournament")
+        self.assertEqual(event.kind, Event.EventKind.TOURNAMENT)
+
+    def test_can_create_a_meeting(self):
+        self.client.force_login(self.user)
+
+        self._post(kind="meeting", title="Team meeting")
+
+        event = Event.objects.get(title="Team meeting")
+        self.assertEqual(event.kind, Event.EventKind.MEETING)
+
+    def test_other_and_social_are_rejected(self):
+        self.client.force_login(self.user)
+
+        for kind in ("other", "social"):
+            with self.subTest(kind=kind):
+                response = self._post(kind=kind, title=f"Not a {kind} event")
+
+                self.assertEqual(response.status_code, 200)
+                self.assertFalse(Event.objects.filter(title=f"Not a {kind} event").exists())
+
     def test_missing_title_reshows_the_form_with_errors(self):
         self.client.force_login(self.user)
 

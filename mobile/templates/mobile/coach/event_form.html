@@ -24,10 +24,10 @@
         </div>
     {% endif %}
 
-    <form id="coach-event-form" method="post" action="{% url "mobile:coach_create_event" %}" hx-boost="false">
+    <form id="coach-event-form" class="flex flex-col gap-4" method="post" action="{% url "mobile:coach_create_event" %}" hx-boost="false">
         {% csrf_token %}
 
-        <div class="grid grid-cols-3 gap-2">
+        <div class="grid grid-cols-2 gap-2">
             <label class="flex h-12 items-center justify-center rounded-lg border border-line bg-white font-display text-xs font-extrabold tracking-wide text-muted uppercase has-checked:border-ink has-checked:bg-ink has-checked:text-white">
                 <input class="sr-only" type="radio" name="kind" value="training" checked>
                 {% trans "Practice" %}
@@ -37,10 +37,15 @@
                 {% trans "Game" %}
             </label>
             <label class="flex h-12 items-center justify-center rounded-lg border border-line bg-white font-display text-xs font-extrabold tracking-wide text-muted uppercase has-checked:border-ink has-checked:bg-ink has-checked:text-white">
-                <input class="sr-only" type="radio" name="kind" value="other">
-                {% trans "Other" %}
+                <input class="sr-only" type="radio" name="kind" value="tournament">
+                {% trans "Tournament" %}
+            </label>
+            <label class="flex h-12 items-center justify-center rounded-lg border border-line bg-white font-display text-xs font-extrabold tracking-wide text-muted uppercase has-checked:border-ink has-checked:bg-ink has-checked:text-white">
+                <input class="sr-only" type="radio" name="kind" value="meeting">
+                {% trans "Meeting" %}
             </label>
         </div>
+        {% for error in form.kind.errors %}<p class="text-xs text-club-dark">{{ error }}</p>{% endfor %}
 
         <div class="m-card flex flex-col p-4">
             <div>

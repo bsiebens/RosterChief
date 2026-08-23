@@ -45,6 +45,11 @@ IN_STATUSES = [Attendance.AttendanceStatus.PRESENT, Attendance.AttendanceStatus.
 #: Distinct from NO_RESPONSE ("silent"), which is a non-answer rather than a no.
 OUT_STATUSES = [Attendance.AttendanceStatus.ABSENT, Attendance.AttendanceStatus.EXCUSED, Attendance.AttendanceStatus.NOT_SELECTED]
 
+#: The event kinds CoachCreateEventView's tile picker offers -- social/other
+#: stay desktop-only (management.forms.EventForm keeps the full list), since
+#: neither has a tile here.
+COACH_EVENT_KINDS = [Event.EventKind.TRAINING, Event.EventKind.GAME, Event.EventKind.TOURNAMENT, Event.EventKind.MEETING]
+
 #: How long an event stays "current" (CoachTodayView's session card, and the
 #: missing-line-up nudge) past the moment it starts -- events.start__gte=now
 #: alone would flip to the next session the instant this one begins, while
@@ -321,6 +326,10 @@ class CoachCreateEventView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
         # referee-count control this screen has no use for; construct_instance
         # skips deleted fields entirely, leaving the instance's own default.
         del form.fields["max_referees"]
+        # Narrowed to the four kinds the tile picker actually offers -- social/
+        # other don't get their own tile, and this keeps a tampered request from
+        # setting one anyway (the desktop form still offers the full list).
+        form.fields["kind"].choices = [choice for choice in form.fields["kind"].choices if choice[0] in COACH_EVENT_KINDS]
         # The desktop searchable multi-select relies on management's own JS
         # widget, not loaded here -- plain checkboxes work without it and
         # read better on a phone regardless.
