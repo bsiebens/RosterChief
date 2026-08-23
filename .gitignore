@@ -134,7 +134,10 @@ celerybeat.pid
 
 # Environments
 .env
-deploy/.env.*.local
+# Any per-target deploy config (SSH_HOST/SSH_USER/SSH_KEY_FILE/... -- see deploy/.env.deploy.
+# example), whatever you name the copy -- only the example itself is meant to be committed.
+deploy/.env.*
+!deploy/.env.deploy.example
 .venv
 env/
 venv/

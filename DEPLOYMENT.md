@@ -108,6 +108,24 @@ source deploy/.env.prod.local && deploy/deploy-prod.sh
 default to the dev box, so only set what differs — e.g. a `deploy/.env.dev.local` with just
 `SSH_KEY_FILE` if the dev box needs a different key than your default).
 
+#### Deploying from inside the server itself
+
+`deploy/deploy-local.sh` is the same deploy, minus the SSH indirection — for when you're
+already logged into the server (or scripting the deploy some other way that isn't "from my
+Mac"). Run it from the repo root, **after** you've updated the checkout yourself
+(`git fetch origin && git checkout main && git reset --hard origin/main`) — this script only
+handles the docker/app side:
+
+```bash
+deploy/deploy-local.sh                          # pulls and deploys :main
+IMAGE_TAG=main-a1b2c3d deploy/deploy-local.sh    # pin/roll back to an exact build
+SKIP_BACKUP=1 deploy/deploy-local.sh             # not recommended
+```
+
+It brings `db`/`redis`/`caddy` up first if they aren't already — `caddy` doesn't need a code
+deploy to run, so nothing else in either deploy script would otherwise ever start it, which is
+exactly what left it down (and `/healthz` unreachable) after this server's first deploy.
+
 ### Keep DJANGO_DEBUG=False, even on the test server
 
 A test box is still a deployment: it is behind TLS, on a real domain, with real passkeys.

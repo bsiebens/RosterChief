@@ -9,7 +9,9 @@
 # pushed branch, pull the image .github/workflows/build-and-push.yml already built, migrate
 # explicitly, restart, wait for healthy) — with what production specifically needs on top:
 #
-#   - compose.yaml, not compose.behind-proxy.yaml: production runs its own Caddy/TLS.
+#   - compose.yaml, not compose.behind-proxy.yaml: production runs its own Caddy/TLS -- and
+#     makes sure `caddy` is actually up before relying on it for the healthz check, since
+#     nothing else here would otherwise ever start it (it doesn't need a code deploy).
 #   - Refuses anything but `main` by default (ALLOW_NON_MAIN=1 to override) — a deploy target
 #     this permanent shouldn't ship a feature branch by accident.
 #   - Backs the database up (deploy/backup.sh) before migrating — a migration is the one step
@@ -90,10 +92,13 @@ git checkout --quiet "$BRANCH"
 git reset --hard --quiet "origin/${BRANCH}"
 echo "     at $(git rev-parse --short HEAD) — $(git log -1 --pretty=%s)"
 
-# db/redis are restart:unless-stopped and should already be up from steady state — this is
-# just belt-and-suspenders (e.g. right after a host reboot) before backup.sh execs into them.
-step "Starting db + redis"
-dc up -d db redis
+# db/redis/caddy are all restart:unless-stopped and should already be up from steady state --
+# this is belt-and-suspenders (e.g. right after a host reboot, or a first deploy where caddy
+# was never started -- it doesn't need a code deploy to be brought up, so nothing else in this
+# script would otherwise ever start it) before backup.sh execs into db/web and before the
+# healthz check below relies on caddy actually being there to terminate TLS.
+step "Starting db + redis + caddy"
+dc up -d db redis caddy
 
 if [ "$SKIP_BACKUP" = "1" ]; then
     step "Skipping backup (SKIP_BACKUP=1) -- not recommended before a migration"
