@@ -50,6 +50,6 @@
             {% for error in photo_form.images.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
         </div>
 
-        <p class="px-1 text-xs text-dim">{% blocktrans with team=active_team.name %}Posted for {{ team }} and sent to an editor for review before it goes out to families -- they can widen who it reaches if needed.{% endblocktrans %}</p>
+        <p class="px-1 text-xs text-dim">{% blocktrans with team=active_team.name %}Linked to {{ team }} and sent to an editor for review before it goes out to families -- they can widen who it reaches if needed.{% endblocktrans %}</p>
     </form>
 {% endblock content %}

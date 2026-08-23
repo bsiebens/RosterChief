@@ -668,6 +668,7 @@ class CoachCreateNewsView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
     def build_photo_form(self, data=None, files=None):
         photo_form = NewsPhotoUploadForm(data, files)
         photo_form.fields["images"].required = False
+        photo_form.fields["images"].widget.attrs["class"] = "m-file-input"
         return photo_form
 
     def get_context_data(self, **kwargs):
