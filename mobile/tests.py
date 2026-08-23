@@ -2880,6 +2880,76 @@ class CoachRosterRemoveViewTests(TestCase):
 
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class CoachStaffRemoveViewTests(TestCase):
+    """Squad screen's per-staff-row remove action -- see
+    CoachStaffRemoveView's own docstring for why self-removal is refused."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        today = timezone.localdate()
+        cls.season = Season.objects.create(club=cls.club, start_date=today - datetime.timedelta(days=30), end_date=today + datetime.timedelta(days=300))
+        cls.user = User.objects.create_user(email="coach@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Sam", last_name="Coach", email="coach@example.com", user=cls.user)
+        cls.team = Team.objects.create(club=cls.club, name="U16", short_name="U16")
+        cls.coach_position = Position.objects.create(club=cls.club, name="Head coach", short_name="HC", staff_position=True, management_position=True)
+        cls.own_assignment = StaffAssignment.objects.create(team=cls.team, member=cls.member, season=cls.season, position=cls.coach_position)
+
+        cls.assistant_position = Position.objects.create(club=cls.club, name="Assistant coach", short_name="AC", staff_position=True, management_position=False)
+        cls.assistant = Member.objects.create(first_name="Ali", last_name="Assistant")
+        cls.assignment = StaffAssignment.objects.create(team=cls.team, member=cls.assistant, season=cls.season, position=cls.assistant_position)
+
+    def _post(self, assignment):
+        return self.client.post(reverse("mobile:coach_staff_remove", kwargs={"assignment_pk": assignment.pk}), HTTP_HOST="ajax-united.rosterchief.app")
+
+    def test_removes_another_staff_member(self):
+        self.client.force_login(self.user)
+
+        response = self._post(self.assignment)
+
+        self.assertRedirects(response, reverse("mobile:coach_squad"), fetch_redirect_response=False)
+        self.assertFalse(StaffAssignment.objects.filter(pk=self.assignment.pk).exists())
+
+    def test_cannot_remove_yourself(self):
+        self.client.force_login(self.user)
+
+        response = self._post(self.own_assignment)
+
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(StaffAssignment.objects.filter(pk=self.own_assignment.pk).exists())
+
+    def test_non_managing_staff_cannot_remove_anyone(self):
+        physio_position = Position.objects.create(club=self.club, name="Physio", short_name="PHY", staff_position=True, management_position=False)
+        physio_user = User.objects.create_user(email="physio@example.com", password="pw-secret-123")
+        physio_member = Member.objects.create(first_name="Pat", last_name="Physio", user=physio_user)
+        StaffAssignment.objects.create(team=self.team, member=physio_member, season=self.season, position=physio_position)
+        self.client.force_login(physio_user)
+
+        response = self._post(self.assignment)
+
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(StaffAssignment.objects.filter(pk=self.assignment.pk).exists())
+
+    def test_the_remove_button_is_hidden_on_your_own_row(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mobile:coach_squad"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertNotContains(response, reverse("mobile:coach_staff_remove", kwargs={"assignment_pk": self.own_assignment.pk}))
+        self.assertContains(response, reverse("mobile:coach_staff_remove", kwargs={"assignment_pk": self.assignment.pk}))
+
+    def test_an_assignment_from_another_team_is_not_reachable(self):
+        other_team = Team.objects.create(club=self.club, name="U14", short_name="U14")
+        other_position = Position.objects.create(club=self.club, name="Coach", short_name="C", staff_position=True, management_position=True)
+        other_assignment = StaffAssignment.objects.create(team=other_team, member=Member.objects.create(first_name="Other", last_name="Team"), season=self.season, position=other_position)
+        self.client.force_login(self.user)
+
+        response = self._post(other_assignment)
+
+        self.assertEqual(response.status_code, 404)
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
 class CoachAddStaffViewTests(TestCase):
     """Squad screen's staff "Add" entry point -- see CoachAddStaffView's own
     docstring for the shared-position-picker shape."""
@@ -2905,6 +2975,13 @@ class CoachAddStaffViewTests(TestCase):
         response = self.client.get(reverse("mobile:coach_add_staff"), HTTP_HOST="ajax-united.rosterchief.app")
 
         self.assertEqual(response.status_code, 302)
+
+    def test_the_squad_tab_is_highlighted(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mobile:coach_add_staff"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.context["active_tab"], "coach_squad")
 
     def test_get_redirects_a_non_managing_staffer(self):
         physio_position = Position.objects.create(club=self.club, name="Physio", short_name="PHY", staff_position=True, management_position=False)
@@ -3486,6 +3563,13 @@ class CoachAddPlayerViewTests(TestCase):
         response = self.client.get(reverse("mobile:coach_add_player"), HTTP_HOST="ajax-united.rosterchief.app")
 
         self.assertEqual(response.status_code, 302)
+
+    def test_the_squad_tab_is_highlighted(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mobile:coach_add_player"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.context["active_tab"], "coach_squad")
 
     def test_get_redirects_a_non_managing_staffer(self):
         physio_position = Position.objects.create(club=self.club, name="Physio", short_name="PHY", staff_position=True, management_position=False)

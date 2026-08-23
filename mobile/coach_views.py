@@ -457,7 +457,7 @@ class CoachAddPlayerView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
 
     template_name = "mobile/coach/add_player.html"
     screen_title = _("Add players")
-    active_tab = "coach_today"
+    active_tab = "coach_squad"
 
     #: ?filter= values this screen understands -- anything else (including no
     #: param at all) means "All".
@@ -540,7 +540,7 @@ class CoachAddStaffView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
 
     template_name = "mobile/coach/add_staff.html"
     screen_title = _("Add staff")
-    active_tab = "coach_today"
+    active_tab = "coach_squad"
 
     def get(self, request, *args, **kwargs):
         if not self.can_manage_active_team:
@@ -791,6 +791,30 @@ class CoachRosterRemoveView(CoachScopeMixin, LoginRequiredMixin, View):
         membership.delete()
 
         notify(request, f"w|{_('Player removed')}|" + _("“%(member)s” removed from the roster.") % {"member": member})
+        return HttpResponseRedirect(reverse("mobile:coach_squad"))
+
+
+class CoachStaffRemoveView(CoachScopeMixin, LoginRequiredMixin, View):
+    """Squad screen's per-staff-row remove action. A manager can't remove
+    their own StaffAssignment this way -- self-removal would strand them off
+    a team they're actively viewing, with no one obviously left to undo it;
+    that stays a desktop-only action (management.views.TeamStaffRemoveView),
+    which any *other* admin/manager can still reach."""
+
+    def post(self, request, *args, **kwargs):
+        if self.active_team is None:
+            raise Http404
+        if not self.can_manage_active_team:
+            return HttpResponseForbidden()
+
+        assignment = get_object_or_404(StaffAssignment.objects.filter(team=self.active_team), pk=kwargs["assignment_pk"])
+        if self.me is not None and assignment.member_id == self.me.pk:
+            return HttpResponseForbidden()
+
+        member = assignment.member
+        assignment.delete()
+
+        notify(request, f"w|{_('Staff removed')}|" + _("“%(member)s” removed from staff.") % {"member": member})
         return HttpResponseRedirect(reverse("mobile:coach_squad"))
 
 
