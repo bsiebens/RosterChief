@@ -33,14 +33,18 @@ RUN apt-get update && apt-get install --no-install-recommends -y git ca-certific
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
-# uv's own bytecode-compile step has a hardcoded 60s-per-file cap, and
-# phonenumbers' generated geodata/data*.py files (large literal dicts, not
-# slow code) are known to blow past it on a slower builder even though
-# nothing's actually hung -- widen the cap rather than dropping
-# UV_COMPILE_BYTECODE entirely, which would just move that same compile cost
-# to every cold container start instead of paying it once here.
-ENV UV_COMPILE_BYTECODE=1 \
-    UV_COMPILE_BYTECODE_TIMEOUT=300 \
+# Bytecode precompilation is off, not just given a longer leash: locally,
+# phonenumbers' largest generated geodata/data*.py files (~900KB of literal
+# dict data each) compile in ~0.1s, but the build host needed 300s+ for a
+# single one of the 29 such files uv tried to compile here -- a ~3000x gap
+# that a bigger UV_COMPILE_BYTECODE_TIMEOUT can't fix, since 29 files at that
+# rate could still blow past any reasonable build budget. That gap points to
+# something on the host itself (cross-arch QEMU emulation or memory pressure
+# during the build), worth root-causing separately. Leaving bytecode
+# compilation off means each container pays a first-import cost instead
+# (--preload/prefork make that once per boot, not per request) -- slower
+# startup until the host issue is fixed, but a build that reliably finishes.
+ENV UV_COMPILE_BYTECODE=0 \
     UV_LINK_MODE=copy \
     UV_PYTHON_DOWNLOADS=never
 
