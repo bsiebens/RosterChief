@@ -4010,6 +4010,62 @@ class CoachAddPlayerViewTests(TestCase):
         self.assertEqual(list(candidates), [returning])
         self.assertNotIn(new_signup, candidates)
 
+    def test_suggested_filter_includes_players_from_the_closest_younger_team(self):
+        # self.team is "U16" (see setUpTestData) -- a "U14" sibling is the
+        # closest smaller age-group number, so its *current*-season roster
+        # counts as "coming up" candidates.
+        u14 = Team.objects.create(club=self.club, name="U14", short_name="U14")
+        coming_up = self.make_eligible_member(first_name="Coming", last_name="Up")
+        TeamMembership.objects.create(team=u14, member=coming_up, season=self.season)
+        not_a_candidate = self.make_eligible_member(first_name="Not", last_name="Candidate")
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mobile:coach_add_player") + "?filter=suggested", HTTP_HOST="ajax-united.rosterchief.app")
+
+        candidates = response.context["candidates"]
+        self.assertIn(coming_up, candidates)
+        self.assertNotIn(not_a_candidate, candidates)
+
+    def test_suggested_filter_picks_the_closest_younger_team_not_any_smaller_one(self):
+        u14 = Team.objects.create(club=self.club, name="U14", short_name="U14")
+        u12 = Team.objects.create(club=self.club, name="U12", short_name="U12")
+        from_u14 = self.make_eligible_member(first_name="From", last_name="U14")
+        TeamMembership.objects.create(team=u14, member=from_u14, season=self.season)
+        from_u12 = self.make_eligible_member(first_name="From", last_name="U12")
+        TeamMembership.objects.create(team=u12, member=from_u12, season=self.season)
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mobile:coach_add_player") + "?filter=suggested", HTTP_HOST="ajax-united.rosterchief.app")
+
+        candidates = response.context["candidates"]
+        self.assertIn(from_u14, candidates)
+        self.assertNotIn(from_u12, candidates)
+
+    def test_suggested_filter_matches_nothing_extra_without_a_u_number(self):
+        self.team.name = "First Team"
+        self.team.short_name = "1st"
+        self.team.save()
+        sibling = Team.objects.create(club=self.club, name="Reserves", short_name="Res")
+        member = self.make_eligible_member(first_name="Reserve", last_name="Player")
+        TeamMembership.objects.create(team=sibling, member=member, season=self.season)
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mobile:coach_add_player") + "?filter=suggested", HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertNotIn(member, response.context["candidates"])
+
+    def test_suggested_filter_does_not_duplicate_a_player_matching_both_sources(self):
+        previous_season = Season.objects.create(club=self.club, start_date=self.season.start_date - datetime.timedelta(days=365), end_date=self.season.start_date - datetime.timedelta(days=1))
+        u14 = Team.objects.create(club=self.club, name="U14", short_name="U14")
+        both = self.make_eligible_member(first_name="Both", last_name="Sources")
+        TeamMembership.objects.create(team=self.team, member=both, season=previous_season)
+        TeamMembership.objects.create(team=u14, member=both, season=self.season)
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mobile:coach_add_player") + "?filter=suggested", HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(list(response.context["candidates"]).count(both), 1)
+
     def test_search_matches_first_or_last_name(self):
         match = self.make_eligible_member(first_name="Zara", last_name="Zenith")
         other = self.make_eligible_member(first_name="Not", last_name="Matching")

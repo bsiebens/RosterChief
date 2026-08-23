@@ -6,6 +6,7 @@ mobile/coach_mixins.py's CoachScopeMixin for the shared scaffolding.
 """
 
 import datetime
+import re
 
 from django import forms
 from django.contrib.auth.mixins import LoginRequiredMixin
@@ -692,13 +693,15 @@ class CoachAddPlayerView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
     The pool is teams.services.eligible_roster_members(club) minus whoever's
     already on this team+season -- the same two rules TeamMembershipForm
     applies internally, just reused directly rather than through the form.
-    "Suggested" (on this team last season) is real, computed data. "Age
-    eligible" from the mock isn't built -- neither Club nor Team carries an
-    age-group field to compare a birth date against, so faking that filter
-    would just mean it silently matched nothing. A plain first/last-name
-    search (?q=) narrows the pool further, ANDed with whichever filter chip
-    is active -- useful once a club's eligible-member pool outgrows a single
-    screenful.
+    "Suggested" is two real, computed sources unioned together: whoever was
+    on this team last season, plus whoever's on the closest younger team
+    *this* season (see _feeder_team -- a guess from team naming, since
+    neither Club nor Team carries a real age-group field to link them
+    properly). "Age eligible" from the mock still isn't built -- there's no
+    birth-date cutoff to compare against, and faking that filter would just
+    mean it silently matched nothing. A plain first/last-name search (?q=)
+    narrows the pool further, ANDed with whichever filter chip is active --
+    useful once a club's eligible-member pool outgrows a single screenful.
     """
 
     template_name = "mobile/coach/add_player.html"
@@ -709,10 +712,35 @@ class CoachAddPlayerView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
     #: param at all) means "All".
     FILTERS = {"suggested", "no_team"}
 
+    #: Matches a "U<number>" youth age-group marker in a team's name/short
+    #: name (e.g. "U14", "u16 boys") -- the only age-group signal available
+    #: anywhere on Team today.
+    AGE_GROUP_RE = re.compile(r"u(\d+)", re.IGNORECASE)
+
     def get(self, request, *args, **kwargs):
         if not self.can_manage_active_team:
             return HttpResponseRedirect(reverse("mobile:coach_today"))
         return super().get(request, *args, **kwargs)
+
+    def _age_group(self, team):
+        match = self.AGE_GROUP_RE.search(team.name) or self.AGE_GROUP_RE.search(team.short_name)
+        return int(match.group(1)) if match else None
+
+    def _feeder_team(self):
+        """The club's own team with the closest smaller age-group number
+        than the active team's, if either carries one -- a guess (see this
+        view's own docstring), so it silently returns None for a club that
+        doesn't name teams "U<N>"."""
+        active_age = self._age_group(self.active_team)
+        if active_age is None:
+            return None
+
+        feeder, feeder_age = None, None
+        for team in Team.objects.filter(club=self.request.club).exclude(pk=self.active_team.pk):
+            age = self._age_group(team)
+            if age is not None and age < active_age and (feeder_age is None or age > feeder_age):
+                feeder, feeder_age = team, age
+        return feeder
 
     def _candidate_pool(self, season):
         taken = TeamMembership.objects.filter(team=self.active_team, season=season).values_list("member_id", flat=True)
@@ -735,8 +763,14 @@ class CoachAddPlayerView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
             if filter_param == "no_team":
                 pool = pool.exclude(team_memberships__season=season)
             elif filter_param == "suggested":
+                suggested_ids = set()
                 previous_season = Season.before(self.request.club, season)
-                pool = pool.filter(team_memberships__team=self.active_team, team_memberships__season=previous_season) if previous_season is not None else pool.none()
+                if previous_season is not None:
+                    suggested_ids.update(pool.filter(team_memberships__team=self.active_team, team_memberships__season=previous_season).values_list("pk", flat=True))
+                feeder_team = self._feeder_team()
+                if feeder_team is not None:
+                    suggested_ids.update(pool.filter(team_memberships__team=feeder_team, team_memberships__season=season).values_list("pk", flat=True))
+                pool = pool.filter(pk__in=suggested_ids)
 
             if search_query:
                 pool = pool.filter(Q(first_name__icontains=search_query) | Q(last_name__icontains=search_query))
