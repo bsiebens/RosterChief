@@ -16,9 +16,6 @@
 #     this permanent shouldn't ship a feature branch by accident.
 #   - Backs the database up (deploy/backup.sh) before migrating — a migration is the one step
 #     here that isn't just "restart with new code," so it gets a fresh safety net first.
-#   - Restarts worker and beat alongside web. deploy-dev.sh only restarts web (that gap is
-#     noted there); in production, a worker or beat left running stale task code — a signature
-#     changed, a schedule changed — is a real bug, not just a dev inconvenience.
 #   - Verifies over the public URL (curl https://$BASE_DOMAIN/healthz through Caddy), since
 #     web has no host-published port here to hit directly the way the dev instance does.
 #
@@ -108,15 +105,18 @@ else
 fi
 
 step "Pulling image for ${BRANCH}"
-IMAGE_TAG="$BRANCH" dc pull web worker beat
+IMAGE_TAG="$BRANCH" dc pull web
 
 step "Running migrations"
 # -T and </dev/null: this whole script IS ssh's stdin (a heredoc) -- see deploy-dev.sh's own
 # comment on why `compose run` needs both or web never restarts.
 dc run --rm -T web python manage.py migrate --noinput </dev/null
 
-step "Restarting web, worker, beat"
-IMAGE_TAG="$BRANCH" dc up -d --no-deps web worker beat
+step "Restarting web"
+# No worker/beat to restart -- scheduled jobs run via host cron calling `manage.py <job>`
+# directly (see DEPLOYMENT.md's "Scheduled jobs"), not a persistent process this deploy
+# needs to cycle onto the new image.
+IMAGE_TAG="$BRANCH" dc up -d --no-deps web
 REMOTE
 
 say "Waiting for https://${BASE_DOMAIN}/healthz"

@@ -13,8 +13,10 @@
 #
 #   ensure db/redis/caddy are up (caddy doesn't need a code deploy, so nothing else here would
 #   otherwise ever start it -- this is exactly the gap that bit the first manual deploy) ->
-#   back up the database -> pull the image -> migrate -> restart web/worker/beat -> verify
-#   https://$BASE_DOMAIN/healthz.
+#   back up the database -> pull the image -> migrate -> restart web -> verify
+#   https://$BASE_DOMAIN/healthz. No worker/beat -- scheduled jobs run via host cron calling
+#   `manage.py <job>` directly (see DEPLOYMENT.md's "Scheduled jobs"), nothing persistent
+#   here for this script to cycle onto the new image.
 set -Eeuo pipefail
 
 COMPOSE_FILE="${COMPOSE_FILE:-compose.yaml}"
@@ -48,13 +50,13 @@ else
 fi
 
 say "Pulling image tag '${IMAGE_TAG}'"
-IMAGE_TAG="$IMAGE_TAG" dc pull web worker beat
+IMAGE_TAG="$IMAGE_TAG" dc pull web
 
 say "Running migrations"
 dc run --rm web python manage.py migrate --noinput
 
-say "Restarting web, worker, beat"
-IMAGE_TAG="$IMAGE_TAG" dc up -d --no-deps web worker beat
+say "Restarting web"
+IMAGE_TAG="$IMAGE_TAG" dc up -d --no-deps web
 
 say "Waiting for https://${BASE_DOMAIN}/healthz"
 for attempt in $(seq 1 20); do

@@ -11,11 +11,12 @@ from django.core.management.base import CommandError
 
 from billing.services import BillingError
 from billing.services.dues import renew, subscriptions_due_for_renewal
-from features.commands import MaintenanceAwareCommand
+from features.commands import ScheduledJobCommand
 
 
-class Command(MaintenanceAwareCommand):
+class Command(ScheduledJobCommand):
     help = "Open the next billing period for clubs whose current period ends soon."
+    job_name = "billing.tasks.renew_subscriptions"
 
     def add_arguments(self, parser):
         parser.add_argument("--dry-run", action="store_true", help="Report what would be issued, and issue nothing.")
@@ -26,9 +27,10 @@ class Command(MaintenanceAwareCommand):
 
         if not due_for_renewal:
             self.stdout.write(self.style.SUCCESS("Nothing to renew."))
-            return
+            return "Nothing to renew."
 
         failures = []
+        renewed = 0
         for subscription in due_for_renewal:
             club = subscription.club
 
@@ -44,13 +46,17 @@ class Command(MaintenanceAwareCommand):
                 self.stdout.write(self.style.ERROR(f"{club} — {error}"))
                 continue
 
+            renewed += 1
             self.stdout.write(self.style.SUCCESS(f"{club} — {due.period_start} to {due.period_end}, {due.amount} ({due.invoice.number})"))
 
         if options["dry_run"]:
-            self.stdout.write(self.style.WARNING(f"\nDry run: {len(due_for_renewal)} club(s) would be renewed."))
-            return
+            message = f"Dry run: {len(due_for_renewal)} club(s) would be renewed."
+            self.stdout.write(self.style.WARNING(f"\n{message}"))
+            return message
 
         if failures:
             # Non-zero, so cron mails you: a club that could not be billed is revenue quietly
             # not being collected.
             raise CommandError(f"{len(failures)} club(s) could not be renewed:\n  " + "\n  ".join(failures))
+
+        return f"Renewed {renewed} club(s)."

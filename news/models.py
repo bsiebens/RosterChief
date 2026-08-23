@@ -44,6 +44,12 @@ class News(ClubScopedModel):
     visibility = models.CharField(_("visibility"), max_length=10, choices=Visibility.choices, default=Visibility.INTERNAL)
     status = models.CharField(_("status"), max_length=20, choices=Status.choices, default=Status.DRAFT)
     published_at = models.DateTimeField(_("publish date"), null=True, blank=True, help_text=_("When this goes live. In the future to schedule it ahead of time."))
+    notified_at = models.DateTimeField(
+        _("notified at"),
+        null=True,
+        blank=True,
+        help_text=_("When the audience notification was sent -- or, if the publisher opted out of notifying, set immediately at publish time so the sweep never sends one."),
+    )
 
     created_by = models.ForeignKey(Member, on_delete=models.SET_NULL, null=True, blank=True, related_name="news_items", verbose_name=_("created by"))
 

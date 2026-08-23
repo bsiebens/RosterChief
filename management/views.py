@@ -39,10 +39,10 @@ from events.models import Attendance, Event, EventReferee, EventSeries, Location
 from events.services.attendance import member_attendance_counts, member_attendance_sparkline, player_attendance_rankings, players_who_missed_recent_practices, team_attendance_rate, team_no_shows
 from events.services.calendar import add_months, agenda_groups, month_bounds, month_grid, season_grid, week_bounds, week_grid
 from events.services.competitions import CompetitionFetchError, fetch_game_info
+from events.services.notifications import dispatch_notify_new_event
 from events.services.rbihf_import import RBIHFImportError, apply_plan, build_plan, extract_team_id, fetch_html
 from events.services.recurrence import cancel_occurrence, detach_occurrence, generate_occurrences, propagate_series
 from events.services.referees import RefereeAssignmentError, add_external_referee, assign_referee, conflicting_events, eligible_referees, needs_referee_management, remove_referee, set_referee_fee
-from events.tasks import notify_new_event
 from formbuilder.models import Form as FormBuilderForm
 from formbuilder.models import Submission
 from members.forms import ClaimRejectForm, ClaimReviewForm
@@ -50,8 +50,7 @@ from members.models import Family, FamilyMembership, Group, GroupMembership, Mem
 from members.services.claims import ClaimError, approve_claim, children_awaiting_a_parent, reject_claim, send_claim_approved_email, suggested_children
 from members.services.family import add_child_to_family, add_parent_to_family, attach_to_family, detach_from_family, get_or_create_login_user, grant_login, register_family
 from news.models import News, NewsPhoto
-from news.services import notify_editors_of_pending_review
-from news.tasks import notify_news_published
+from news.services import dispatch_send_publish_notification, notify_editors_of_pending_review
 from notifications.models import Notification
 from shop.models import Discount, Invoice, Order, Product
 from teams.models import Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
@@ -2273,11 +2272,24 @@ class NewsPublishView(NewsPublisherRequiredMixin, RedirectOnInvalidMixin, FormVi
         news_item = get_object_or_404(News.objects.filter(club=self.request.club), pk=self.kwargs["pk"])
         news_item.publish(at=form.cleaned_data["published_at"])
 
-        if form.cleaned_data["notify_members"]:
-            # eta in the past (the common, "publish now" case) just runs right
-            # away -- see news.tasks' own module docstring for why there's no
-            # separate immediate/scheduled branch here.
-            notify_news_published.apply_async(args=[str(news_item.pk)], eta=news_item.published_at)
+        if not form.cleaned_data["notify_members"]:
+            # Opted out entirely, not just delayed -- news.management.commands.
+            # notify_published_news's periodic sweep skips anything with notified_at
+            # already set, whatever the reason, so marking it now keeps it from ever
+            # picking this one up. publish() above already saved with its own
+            # update_fields=["status", "published_at"], so this needs its own save.
+            news_item.notified_at = timezone.now()
+            news_item.save(update_fields=["notified_at"])
+        elif not news_item.is_scheduled:
+            # Publish now, not ahead of time -- the common case. Dispatch right away
+            # rather than leaving it to notify_published_news's periodic sweep (every
+            # 15 minutes): the old Celery dispatch's own "eta in the past just runs
+            # right away" behavior meant this case was already effectively immediate,
+            # and waiting up to 15 minutes to notify anyone about a post that's live
+            # *right now* would read as broken, not just slower.
+            dispatch_send_publish_notification(str(news_item.pk))
+        # else: genuinely scheduled ahead (published_at in the future) -- leave
+        # notified_at null and let the sweep pick it up once published_at has passed.
 
         if news_item.is_scheduled:
             body = _("“%(news)s” is scheduled to go live on %(date)s.") % {"news": news_item, "date": news_item.published_at}
@@ -2901,7 +2913,7 @@ class EventCreateView(ClubStaffRequiredMixin, CreateView):
         # A deliberately-planned single event, not every Event row that ends up
         # created (see notify_new_event's own docstring for why a recurring
         # series' occurrences and bulk fixture imports aren't wired to this).
-        notify_new_event.delay(str(self.object.pk))
+        dispatch_notify_new_event(str(self.object.pk))
         return response
 
     def get_success_url(self):

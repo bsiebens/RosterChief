@@ -1,8 +1,6 @@
 from io import StringIO
-from unittest.mock import patch
 
 from allauth.mfa.models import Authenticator
-from celery import shared_task
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.core.management import call_command
@@ -12,7 +10,6 @@ from waffle import flag_is_active, get_waffle_flag_model
 
 from club.models import Club
 
-from .jobs import JOB_REGISTRY
 from .models import JobRun, JobToggle, Maintenance
 
 Flag = get_waffle_flag_model()
@@ -264,64 +261,41 @@ class MaintenanceCommandTests(TestCase):
         self.run_command("migrate", "--check")  # raises SystemExit only if migrations are pending
 
 
-@shared_task(name="features.tests.succeed")
-def _succeed_task():
-    return "did the thing"
-
-
-@shared_task(name="features.tests.fail")
-def _fail_task():
-    raise RuntimeError("boom")
-
-
-@shared_task(name="features.tests.untracked")
-def _untracked_task():
-    return "quiet"
-
-
 class JobRunTests(TestCase):
-    """The Celery signal wiring in features/signals.py, exercised against throwaway tasks
-    (module-level, like any real task -- Celery's registry gets confused if the same task
-    name is redefined per-test) rather than the real billing/club/events ones: what matters
-    here is that a JobRun row appears for anything in JOB_REGISTRY and only for that, not the
-    domain logic of any one scheduled job (each of those has its own tests alongside its
-    management command)."""
+    """features.commands.ScheduledJobCommand's own JobRun bookkeeping (replaces what used to
+    be Celery signal wiring in features/signals.py -- see that module's own docstring),
+    exercised against a real registered command (archive_overdue_clubs, same as
+    MaintenanceCommandTests above -- no complex setup, "nothing overdue" is a normal, cheap
+    result) rather than a throwaway one: what matters here is that ScheduledJobCommand.execute()
+    writes a JobRun row correctly, not the domain logic of any one scheduled job (each of
+    those has its own tests alongside its own management command)."""
 
     def setUp(self):
-        self.succeed_task, self.fail_task, self.untracked_task = _succeed_task, _fail_task, _untracked_task
-        patcher = patch.dict(JOB_REGISTRY, {"features.tests.succeed": {}, "features.tests.fail": {}})
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        cache.clear()
+        self.addCleanup(cache.clear)
 
     def test_a_successful_run_is_recorded(self):
-        # .apply() runs the task synchronously, in-process, regardless of
-        # CELERY_TASK_ALWAYS_EAGER -- exactly what the task_prerun/task_postrun signal
-        # handlers in features/signals.py are wired to react to either way.
-        self.succeed_task.apply()
+        call_command("archive_overdue_clubs", stdout=StringIO())
 
-        run = JobRun.objects.get(name="features.tests.succeed")
+        run = JobRun.objects.get(name="billing.tasks.archive_overdue_clubs")
         self.assertEqual(run.status, JobRun.Status.SUCCESS)
-        self.assertEqual(run.detail, "did the thing")
+        self.assertIn("Nothing overdue", run.detail)
         self.assertEqual(run.error, "")
         self.assertIsNotNone(run.started_at)
         self.assertIsNotNone(run.finished_at)
 
     def test_a_failed_run_is_recorded(self):
-        # A real worker never raises a task's exception back into whoever called .delay() --
-        # it's async, the caller is long gone by the time the task runs -- so eager mode
-        # doesn't either (CELERY_TASK_EAGER_PROPAGATES is left at its default False; see
-        # rosterchief/settings.py). The result carries FAILURE instead, same as production.
-        result = self.fail_task.apply()
+        # A disabled job is a failure ScheduledJobCommand.execute() itself raises (see
+        # features/commands.py) -- convenient, deterministic way to exercise the FAILURE
+        # branch of its own bookkeeping without contriving a real domain-logic failure.
+        JobToggle.set_enabled("billing.tasks.archive_overdue_clubs", False)
 
-        self.assertEqual(result.state, "FAILURE")
-        run = JobRun.objects.get(name="features.tests.fail")
+        with self.assertRaises(CommandError):
+            call_command("archive_overdue_clubs", stdout=StringIO())
+
+        run = JobRun.objects.get(name="billing.tasks.archive_overdue_clubs")
         self.assertEqual(run.status, JobRun.Status.FAILURE)
-        self.assertIn("boom", run.error)
-
-    def test_a_task_outside_the_registry_is_not_tracked(self):
-        self.untracked_task.apply()
-
-        self.assertFalse(JobRun.objects.filter(name="features.tests.untracked").exists())
+        self.assertIn("disabled", run.error)
 
 
 class JobToggleTests(TestCase):

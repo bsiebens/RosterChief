@@ -2,8 +2,9 @@
 Platform dashboard's job log / failed-jobs tile.
 
 ``features.jobs.JOB_REGISTRY`` is what a job *is* (label, description, schedule);
-``features.models.JobRun`` is what actually happened, written by the Celery signal handlers
-in features/signals.py. This module just joins the two for a template.
+``features.models.JobRun`` is what actually happened, written by features.commands.
+ScheduledJobCommand around each cron-invoked command's own execution. This module just
+joins the two for a template.
 """
 
 from datetime import timedelta

@@ -155,22 +155,22 @@ class Maintenance(UUIDModel):
 
 class JobToggle(UUIDModel):
     """Per-job on/off switch for the scheduled platform jobs in features/jobs.py's
-    JOB_REGISTRY, so the control panel can pause one specific job (a runaway task, one
-    under investigation, ...) without touching Celery Beat's schedule or reaching for
-    the platform-wide Maintenance lock, which stands down every job at once.
+    JOB_REGISTRY, so the control panel can pause one specific job (a runaway job, one
+    under investigation, ...) without touching cron's own schedule or reaching for the
+    platform-wide Maintenance lock, which stands down every job at once.
 
     One row per job that's ever been toggled off; a job with no row here is enabled --
     same "absence means default" shape as Maintenance's own singleton, but keyed instead
     of a single row, since there's one of these per registry entry rather than one for
     the whole platform. Cached the same write-through way for the same reason: a flip
-    made in the control panel has to reach every Celery worker, not just the process
-    that made it.
+    made in the control panel has to reach whichever cron-invoked process checks next,
+    not just the process that made it.
     """
 
     CACHE_KEY = "job_toggle:%s"
     CACHE_SECONDS = 10
 
-    name = models.CharField(_("job name"), max_length=255, unique=True, help_text=_("Dotted Celery task name, matching a features.jobs.JOB_REGISTRY key."))
+    name = models.CharField(_("job name"), max_length=255, unique=True, help_text=_("Matches a features.jobs.JOB_REGISTRY key."))
     enabled = models.BooleanField(_("enabled"), default=True)
 
     class Meta:
@@ -205,11 +205,14 @@ class JobToggle(UUIDModel):
 
 class JobRun(UUIDModel):
     """One execution of a scheduled platform job -- see features/jobs.py for the registry
-    of what each job is, and rosterchief/settings.CELERY_BEAT_SCHEDULE for when it runs.
+    of what each job is, and DEPLOYMENT.md's "Scheduled jobs" for the crontab that decides
+    when it runs.
 
-    Written entirely by the Celery signal handlers in features/signals.py: individual tasks
-    (billing/tasks.py, club/tasks.py, events/tasks.py) don't touch this model, so a task
-    that raises still gets a row -- the signal fires regardless of how the task ended.
+    Written entirely by features.commands.ScheduledJobCommand, wrapped around each cron-
+    invoked command's own execute(): individual commands (billing/club/events/news
+    management commands) don't touch this model themselves, so a command that raises --
+    including one stood down by Maintenance or JobToggle -- still gets a row regardless of
+    how it ended.
     """
 
     class Status(models.TextChoices):
@@ -218,12 +221,12 @@ class JobRun(UUIDModel):
         FAILURE = "failure", _("Failed")
 
     task_id = models.CharField(_("task id"), max_length=255, unique=True)
-    name = models.CharField(_("task name"), max_length=255, help_text=_("Dotted Celery task name, e.g. billing.tasks.renew_subscriptions."))
+    name = models.CharField(_("job name"), max_length=255, help_text=_("Matches a features.jobs.JOB_REGISTRY key, e.g. billing.tasks.renew_subscriptions."))
     status = models.CharField(_("status"), max_length=10, choices=Status.choices, default=Status.STARTED)
     started_at = models.DateTimeField(_("started at"))
     finished_at = models.DateTimeField(_("finished at"), null=True, blank=True)
-    detail = models.TextField(_("detail"), blank=True, help_text=_("What the task returned, on success."))
-    error = models.TextField(_("error"), blank=True, help_text=_("What the task raised, on failure."))
+    detail = models.TextField(_("detail"), blank=True, help_text=_("What the job returned, on success."))
+    error = models.TextField(_("error"), blank=True, help_text=_("What the job raised, on failure."))
 
     class Meta:
         verbose_name = _("job run")

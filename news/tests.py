@@ -2,19 +2,22 @@ import datetime
 
 from django.contrib.auth import get_user_model
 from django.core import mail
+from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.db import IntegrityError
 from django.test import TestCase
 from django.utils import timezone
 
 from club.models import Club, ClubMembership, ClubRole, Season
+from features.models import JobRun, JobToggle, Maintenance
 from members.models import Family, FamilyMembership, Member
 from notifications.models import Notification
 from teams.models import Position, Team, TeamMembership
 
 from .models import News, NewsPhoto
-from .services import notify_editors_of_pending_review
-from .tasks import notify_news_published
+from .services import notify_editors_of_pending_review, send_publish_notification
 
 User = get_user_model()
 
@@ -143,9 +146,12 @@ class NewsPhotoModelTests(TestCase):
         self.assertEqual(NewsPhoto.objects.filter(is_main=True).count(), 2)
 
 
-class NotifyNewsPublishedTests(TestCase):
-    """news.tasks.notify_news_published -- the audience is this item's teams'
-    current rosters, or every active member if it's club-wide."""
+class SendPublishNotificationTests(TestCase):
+    """news.services.send_publish_notification -- the audience is this item's
+    teams' current rosters, or every active member if it's club-wide. Called
+    directly here (not through the sweep command) to test audience
+    resolution in isolation; NotifyPublishedNewsCommandTests below covers
+    the sweep's own due/already-notified/toggle behavior."""
 
     @classmethod
     def setUpTestData(cls):
@@ -166,10 +172,10 @@ class NotifyNewsPublishedTests(TestCase):
         member = self.make_member("Jamie", email="jamie@example.com")
         news_item = News.objects.create(club=self.club, title="Big news", body="Something happened.", status=News.Status.PUBLISHED, published_at=timezone.now())
 
-        result = notify_news_published(news_item.pk)
+        notifications = send_publish_notification(news_item)
 
         self.assertTrue(Notification.objects.filter(club=self.club, member=member, title="Big news").exists())
-        self.assertIn("Notified 1", result)
+        self.assertEqual(len(notifications), 1)
 
     def test_team_scoped_news_only_notifies_that_teams_roster(self):
         team = Team.objects.create(club=self.club, name="U16", short_name="U16")
@@ -181,7 +187,7 @@ class NotifyNewsPublishedTests(TestCase):
         news_item = News.objects.create(club=self.club, title="Team news", body="Training moved.", status=News.Status.PUBLISHED, published_at=timezone.now())
         news_item.teams.add(team)
 
-        notify_news_published(news_item.pk)
+        send_publish_notification(news_item)
 
         self.assertTrue(Notification.objects.filter(member=on_team).exists())
         self.assertFalse(Notification.objects.filter(member=off_team).exists())
@@ -190,7 +196,7 @@ class NotifyNewsPublishedTests(TestCase):
         self.make_member("Jamie", status=ClubMembership.StatusChoices.PENDING, email="jamie@example.com")
         news_item = News.objects.create(club=self.club, title="News", body="Body.", status=News.Status.PUBLISHED, published_at=timezone.now())
 
-        notify_news_published(news_item.pk)
+        send_publish_notification(news_item)
 
         self.assertFalse(Notification.objects.exists())
 
@@ -198,16 +204,8 @@ class NotifyNewsPublishedTests(TestCase):
         self.make_member("Alex", kind=ClubMembership.Kind.GUARDIAN, email="alex@example.com")
         news_item = News.objects.create(club=self.club, title="News", body="Body.", status=News.Status.PUBLISHED, published_at=timezone.now())
 
-        notify_news_published(news_item.pk)
+        send_publish_notification(news_item)
 
-        self.assertFalse(Notification.objects.exists())
-
-    def test_skips_a_news_item_that_is_no_longer_published(self):
-        news_item = News.objects.create(club=self.club, title="News", body="Body.", status=News.Status.DRAFT)
-
-        result = notify_news_published(news_item.pk)
-
-        self.assertEqual(result, "Skipped: not published.")
         self.assertFalse(Notification.objects.exists())
 
     def test_siblings_sharing_a_guardian_are_notified_once(self):
@@ -224,10 +222,10 @@ class NotifyNewsPublishedTests(TestCase):
             ClubMembership.objects.create(club=self.club, member=child, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
         news_item = News.objects.create(club=self.club, title="Club news", body="Body.", status=News.Status.PUBLISHED, published_at=timezone.now())
 
-        result = notify_news_published(news_item.pk)
+        notifications = send_publish_notification(news_item)
 
         self.assertEqual(Notification.objects.filter(club=self.club, title="Club news").count(), 1)
-        self.assertIn("Notified 1", result)
+        self.assertEqual(len(notifications), 1)
         self.assertEqual(len(mail.outbox), 1)
         self.assertEqual(mail.outbox[0].to, ["parent@example.com"])
 
@@ -243,21 +241,119 @@ class NotifyNewsPublishedTests(TestCase):
             ClubMembership.objects.create(club=self.club, member=child, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
         news_item = News.objects.create(club=self.club, title="Club news", body="Body.", status=News.Status.PUBLISHED, published_at=timezone.now())
 
-        result = notify_news_published(news_item.pk)
+        notifications = send_publish_notification(news_item)
 
         self.assertEqual(Notification.objects.filter(club=self.club, title="Club news").count(), 2)
-        self.assertIn("Notified 2", result)
+        self.assertEqual(len(notifications), 2)
         self.assertEqual(len(mail.outbox), 2)
 
     def test_the_body_is_plain_text_not_markdown(self):
         member = self.make_member("Jamie", email="jamie@example.com")
         news_item = News.objects.create(club=self.club, title="News", body="**Bold** text.", status=News.Status.PUBLISHED, published_at=timezone.now())
 
-        notify_news_published(news_item.pk)
+        send_publish_notification(news_item)
 
         notification = Notification.objects.get(member=member)
         self.assertEqual(notification.body, "Bold text.")
         self.assertEqual(len(mail.outbox), 1)
+
+
+class NotifyPublishedNewsCommandTests(TestCase):
+    """The notify_published_news management command -- the periodic sweep that
+    replaced the old Celery ETA-scheduled dispatch. See that command's own
+    docstring for the News.notified_at idempotency design."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        cls.season = make_season(cls.club)
+        cls.member = Member.objects.create(first_name="Jamie", last_name="Member", email="jamie@example.com")
+        User.objects.create_user(email="jamie@example.com", password="pw-secret-123")
+        cls.member.user = User.objects.get(email="jamie@example.com")
+        cls.member.save(update_fields=["user"])
+        ClubMembership.objects.create(club=cls.club, member=cls.member, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
+
+    def setUp(self):
+        # JobToggle/Maintenance are cache-backed (see their own models -- a flip has to
+        # reach every process, not just the one that made it), so a toggle left disabled
+        # by one test would otherwise leak into the next via the shared LocMemCache.
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def test_notifies_a_published_item_past_its_publish_time(self):
+        news_item = News.objects.create(club=self.club, title="News", body="Body.", status=News.Status.PUBLISHED, published_at=timezone.now() - datetime.timedelta(minutes=1))
+
+        result = call_command("notify_published_news")
+
+        self.assertTrue(Notification.objects.filter(member=self.member, title="News").exists())
+        news_item.refresh_from_db()
+        self.assertIsNotNone(news_item.notified_at)
+        self.assertIn("Notified 1 member(s) across 1 news item(s)", result)
+
+    def test_skips_a_news_item_already_notified(self):
+        already = timezone.now() - datetime.timedelta(hours=1)
+        News.objects.create(club=self.club, title="News", body="Body.", status=News.Status.PUBLISHED, published_at=timezone.now() - datetime.timedelta(minutes=1), notified_at=already)
+
+        call_command("notify_published_news")
+
+        self.assertFalse(Notification.objects.exists())
+
+    def test_skips_a_news_item_not_yet_due(self):
+        News.objects.create(club=self.club, title="News", body="Body.", status=News.Status.PUBLISHED, published_at=timezone.now() + datetime.timedelta(hours=1))
+
+        call_command("notify_published_news")
+
+        self.assertFalse(Notification.objects.exists())
+
+    def test_skips_a_news_item_that_is_not_published(self):
+        News.objects.create(club=self.club, title="News", body="Body.", status=News.Status.DRAFT)
+
+        call_command("notify_published_news")
+
+        self.assertFalse(Notification.objects.exists())
+
+    def test_skips_a_news_item_opted_out_of_notification(self):
+        # notified_at set immediately at publish time (management.views.NewsPublishView.
+        # form_valid, when notify_members is unchecked) -- opted out entirely, not just
+        # delayed, so the sweep must never send one regardless of why notified_at is set.
+        News.objects.create(club=self.club, title="News", body="Body.", status=News.Status.PUBLISHED, published_at=timezone.now() - datetime.timedelta(minutes=1), notified_at=timezone.now())
+
+        call_command("notify_published_news")
+
+        self.assertFalse(Notification.objects.exists())
+
+    def test_a_quiet_sweep_is_not_an_error(self):
+        result = call_command("notify_published_news")
+
+        self.assertIn("Notified 0 member(s) across 0 news item(s)", result)
+
+    def test_writes_a_job_run_row(self):
+        News.objects.create(club=self.club, title="News", body="Body.", status=News.Status.PUBLISHED, published_at=timezone.now() - datetime.timedelta(minutes=1))
+
+        call_command("notify_published_news")
+
+        job_run = JobRun.objects.get(name="news.tasks.notify_news_published")
+        self.assertEqual(job_run.status, JobRun.Status.SUCCESS)
+
+    def test_stands_down_when_disabled_via_job_toggle(self):
+        JobToggle.set_enabled("news.tasks.notify_news_published", False)
+        News.objects.create(club=self.club, title="News", body="Body.", status=News.Status.PUBLISHED, published_at=timezone.now() - datetime.timedelta(minutes=1))
+
+        with self.assertRaises(CommandError):
+            call_command("notify_published_news")
+
+        self.assertFalse(Notification.objects.exists())
+        job_run = JobRun.objects.get(name="news.tasks.notify_news_published")
+        self.assertEqual(job_run.status, JobRun.Status.FAILURE)
+
+    def test_stands_down_during_maintenance(self):
+        Maintenance.start(message="Upgrading.")
+        News.objects.create(club=self.club, title="News", body="Body.", status=News.Status.PUBLISHED, published_at=timezone.now() - datetime.timedelta(minutes=1))
+
+        with self.assertRaises(CommandError):
+            call_command("notify_published_news")
+
+        self.assertFalse(Notification.objects.exists())
 
 
 class NotifyEditorsOfPendingReviewTests(TestCase):

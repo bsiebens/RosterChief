@@ -13,11 +13,12 @@ from django.core.management.base import CommandError
 
 from billing.services.reminders import reminders_to_send, send_reminder
 from club.models import Club
-from features.commands import MaintenanceAwareCommand
+from features.commands import ScheduledJobCommand
 
 
-class Command(MaintenanceAwareCommand):
+class Command(ScheduledJobCommand):
     help = "Email club admins about outstanding platform fees (dry run unless --commit)."
+    job_name = "billing.tasks.send_billing_reminders"
 
     def add_arguments(self, parser):
         parser.add_argument("--commit", action="store_true", help="Actually send. Without this the command only reports.")
@@ -32,7 +33,7 @@ class Command(MaintenanceAwareCommand):
 
         if not results:
             self.stdout.write(self.style.SUCCESS("Nothing owing. No reminders to send."))
-            return
+            return "Nothing owing. No reminders to send."
 
         for result in skipped:
             style = self.style.WARNING if result.recipients else self.style.ERROR
@@ -42,8 +43,9 @@ class Command(MaintenanceAwareCommand):
             self.stdout.write(f"{result.notice.level:>7} · {result.club} — €{result.notice.amount_outstanding} owed, {result.notice.days_until_archive}d to archive → {', '.join(result.recipients)}")
 
         if not options["commit"]:
-            self.stdout.write(self.style.WARNING(f"\nDry run: {len(sendable)} reminder(s) would be sent. Re-run with --commit to send them."))
-            return
+            message = f"Dry run: {len(sendable)} reminder(s) would be sent. Re-run with --commit to send them."
+            self.stdout.write(self.style.WARNING(f"\n{message}"))
+            return message
 
         failures = []
         for result in sendable:
@@ -62,3 +64,5 @@ class Command(MaintenanceAwareCommand):
             # Non-zero so cron mails you: a club that could not be warned is a club that gets
             # archived without notice.
             raise CommandError(f"{len(failures)} reminder(s) could not be sent:\n  " + "\n  ".join(failures))
+
+        return f"Sent {sent} reminder(s)."

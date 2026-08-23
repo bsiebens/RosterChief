@@ -90,9 +90,8 @@ deploy/deploy-prod.sh --push        # push main first, then deploy
 ```
 
 Unlike the dev script, this one has no default host (guessing wrong here is a real mistake, not
-a rebuild), refuses anything but `main` unless you set `ALLOW_NON_MAIN=1`, runs
-`deploy/backup.sh` before migrating (skip with `SKIP_BACKUP=1`, not recommended), and restarts
-`worker`/`beat` alongside `web` — a stale scheduled task is a production bug.
+a rebuild), refuses anything but `main` unless you set `ALLOW_NON_MAIN=1`, and runs
+`deploy/backup.sh` before migrating (skip with `SKIP_BACKUP=1`, not recommended).
 
 `SSH_HOST`/`SSH_USER`/`REMOTE_DIR` (and the optional `SSH_KEY_FILE`, to authenticate with a
 specific private key instead of your default SSH identity) are easiest set once per target
@@ -168,35 +167,57 @@ docker compose run --rm web python manage.py migrate
 docker compose up -d --no-deps web
 ```
 
-(`deploy/deploy-prod.sh` does exactly this, plus a backup first and worker/beat restarts — see
-"Deploying updates".)
+(`deploy/deploy-prod.sh` does exactly this, plus a backup first — see "Deploying updates".)
 
 ## Scheduled jobs
 
-Five jobs run on a schedule via **Celery Beat**, not host cron — see `rosterchief/settings.py`
-(`CELERY_BEAT_SCHEDULE`) for the exact times and `features/jobs.py` for what each one does.
-`worker` and `beat` are just the `web` image running a different command (see `compose.yaml`);
-`worker` can scale to several containers, but run **exactly one `beat`** across the whole
-deployment — it decides *when* a task fires, so two of them means every job runs twice (two
-`archive_overdue_clubs` runs is two emails to the same club, the same "exactly one node"
-reasoning the old crontab needed).
+Eight jobs run on a schedule via **host cron** calling `manage.py <job>` directly — there is no
+`worker`/`beat` process (see "Sizing the server" for why: on a small box, two more persistent
+Django processes was real, measured memory pressure for a job volume light enough that a plain
+`docker compose run` one-off pays that cost for a few seconds instead of 24/7). Each job is a
+`features.commands.ScheduledJobCommand` subclass — see `features/jobs.py` for what each one is
+and `features/commands.py` for the shared Maintenance/JobToggle-aware, JobRun-recording base
+class every one of them runs through.
 
-| Job | Cadence | What it does |
+| Job (management command) | Cadence | What it does |
 |---|---|---|
 | `extend_event_series` | daily 03:00 | materialises recurring event occurrences so the calendar never runs dry |
+| `send_deadline_reminders` | daily 07:00 | nudges whoever hasn't answered an event, a week before its deadline (or start) |
+| `publish_scheduled_lineups` | every 15 min | publishes any coach-scheduled line-up whose publish time has arrived |
 | `renew_subscriptions` | daily 04:00 | opens the next billing period for clubs whose current one is running out |
-| `send_billing_reminders` | daily 05:00 | emails club admins about outstanding platform fees, once per escalation level |
-| `archive_overdue_clubs` | daily 06:00 | archives clubs unpaid past their grace period |
+| `send_billing_reminders --commit` | daily 05:00 | emails club admins about outstanding platform fees, once per escalation level |
+| `archive_overdue_clubs --commit` | daily 06:00 | archives clubs unpaid past their grace period |
 | `generate_seasons` | monthly, 1st 05:00 | generates the next 2 years of seasons for every active club |
+| `notify_published_news` | every 15 min | notifies the audience of any published news item whose publish time has arrived and hasn't been notified yet |
 
-Each task always acts (no `--dry-run`/`--commit` gate) — the same as the old crontab always
-passing `--commit`. Run status (started, finished, success/failure, what it returned or
-raised) is recorded in `features.models.JobRun` and shown on the control panel's **Jobs**
-tab, which a crontab line mailing stderr on failure never gave us.
+**`--commit` is not optional for the two billing jobs it's shown on** — `send_billing_reminders`
+and `archive_overdue_clubs` default to a dry-run/report-only preview (per their own `--help`);
+without `--commit` cron would run them forever and nothing would actually happen. The other six
+act by default. `renew_subscriptions` also has a `--dry-run` to preview instead, for manual use.
 
-The `manage.py <command>` versions of these still exist unchanged, for manual/dry-run use
-from a shell — see each command's own `--help` (`generate_seasons --resync`, for one, is
-still CLI-only: it can delete rows, so it isn't something a beat schedule runs unattended).
+```cron
+# /etc/cron.d/rosterchief, or crontab -e as whichever user owns the checkout -- adjust
+# REMOTE_DIR and COMPOSE_FILE to match your deploy (see "Deploying with one command" above).
+REMOTE_DIR=/home/bernard/RosterChief
+COMPOSE_FILE=compose.yaml
+
+0  3 * * *  cd $REMOTE_DIR && docker compose -f $COMPOSE_FILE run --rm web python manage.py extend_event_series
+0  7 * * *  cd $REMOTE_DIR && docker compose -f $COMPOSE_FILE run --rm web python manage.py send_deadline_reminders
+0  4 * * *  cd $REMOTE_DIR && docker compose -f $COMPOSE_FILE run --rm web python manage.py renew_subscriptions
+0  5 * * *  cd $REMOTE_DIR && docker compose -f $COMPOSE_FILE run --rm web python manage.py send_billing_reminders --commit
+0  6 * * *  cd $REMOTE_DIR && docker compose -f $COMPOSE_FILE run --rm web python manage.py archive_overdue_clubs --commit
+0  5 1 * *  cd $REMOTE_DIR && docker compose -f $COMPOSE_FILE run --rm web python manage.py generate_seasons
+
+*/15 * * * * cd $REMOTE_DIR && docker compose -f $COMPOSE_FILE run --rm web python manage.py publish_scheduled_lineups
+*/15 * * * * cd $REMOTE_DIR && docker compose -f $COMPOSE_FILE run --rm web python manage.py notify_published_news
+```
+
+Run status (started, finished, success/failure, what it returned or raised) is recorded in
+`features.models.JobRun` and shown on the control panel's **Jobs** tab regardless of cron's own
+stderr-mailing (which needs a configured MTA this box may not have) — check there first, not
+your inbox, if a job seems to have gone quiet. Each command still has its own `--help` for
+manual/dry-run use from a shell (`generate_seasons --resync`, for one, is still CLI-only: it
+can delete rows, so it isn't something a schedule should ever run unattended).
 
 ## Maintenance mode
 
@@ -207,19 +228,19 @@ Control panel → **Features → Maintenance mode**. While it is on:
   you with no way to turn it back off;
 - `/healthz` keeps answering on every host, or the load balancer would take the node out of
   rotation and the control panel with it;
-- the **scheduled jobs stand down** — the five Celery tasks in the table above, plus
+- the **scheduled jobs stand down** — the eight jobs in the table above, plus
   `import_members_csv` when run by hand.
 
 `migrate` and `collectstatic` are deliberately **not** blocked. Maintenance is usually
 declared *in order* to run them, and a guard that stopped them would mean turning the mode
 off to do the work you turned it on for.
 
-A Celery task raises loudly rather than skipping quietly while the platform is closed — that
-is intended, a job that silently no-ops is how a month of billing goes missing — which
-`worker` logs and, via `features/signals.py`, records as a `Failed` JobRun on the control
-panel's **Jobs** tab. The `manage.py` version of each command still exits non-zero the same
-way and accepts `--ignore-maintenance` for the rare case you genuinely mean to run one by
-hand during a window.
+A scheduled job raises loudly rather than skipping quietly while the platform is closed —
+that is intended, a job that silently no-ops is how a month of billing goes missing —
+which `features.commands.ScheduledJobCommand` records as a `Failed` JobRun on the control
+panel's **Jobs** tab (see that class's own docstring). Every command accepts
+`--ignore-maintenance` for the rare case you genuinely mean to run one by hand during a
+window.
 
 So a migration-heavy deploy looks like:
 
@@ -408,7 +429,7 @@ that branch). To pin an exact build instead — for a rollback, or to test one c
 moving the branch — set `IMAGE_TAG` before pulling by hand on the server:
 
 ```bash
-IMAGE_TAG=main-a1b2c3d docker compose -f compose.behind-proxy.yaml pull web worker beat
+IMAGE_TAG=main-a1b2c3d docker compose -f compose.behind-proxy.yaml pull web
 IMAGE_TAG=main-a1b2c3d docker compose -f compose.behind-proxy.yaml up -d --no-deps web
 ```
 
@@ -546,29 +567,37 @@ via copy-on-write instead of each worker importing Django independently), plus t
 Postgres rows to come in lower than above — not yet re-measured, so treat the table as the
 shape of where memory goes rather than exact numbers on the current config.
 
-The table also predates `worker` and `beat` (see "Scheduled jobs") — and the ~50–60 MB guessed
-below for them was wrong, not just unmeasured: on a real 1 GB box, `worker` alone measured
-**~740 MB** with the prefork pool's default `--concurrency=2`. Prefork forks child processes,
-and Python's own reference counting touches nearly every object's refcount within the first few
-operations, defeating fork's copy-on-write sharing in practice — each child ends up paying
-close to the *full* Django-import cost again, not a fraction of it, and that base cost is a lot
-bigger than gunicorn's own 54 MB now that there are 46 installed apps. `compose.yaml`'s `worker`
-runs `--pool=threads --concurrency=4` instead — threads share one process's memory the same way
-solo does (no fork, no multiplication), but still run several tasks at once, unlike solo's one
-thread. Solo was tried first and worked for memory, but a single slow task (the every-15-minutes
-line-up publish sweep, mainly) head-of-line-blocked everything queued behind it, including
-on-demand notifications a member was actively waiting on — this app's tasks are DB/notification-
-bound, not CPU-bound, so threads (not more processes) is the fix: real concurrency, GIL isn't a
-constraint for this workload, and no fork multiplication either. `beat` doesn't fork at all
-regardless of pool, so it was never the multiplied one; it still has essentially nothing to do
-between firing its five daily tasks, making it the cheapest process in the stack.
+**There is no `worker`/`beat` row, and there used to be one** — worth the history, because it's
+exactly the kind of thing that bites again if re-added carelessly. Scheduled jobs first ran as
+Celery tasks on `worker`/`beat`, two more persistent Django processes. On a real 1 GB box,
+`worker` alone measured **~740 MB** with the prefork pool's default `--concurrency=2`: prefork
+forks child processes, and Python's own reference counting touches nearly every object's
+refcount within the first few operations, defeating fork's copy-on-write sharing in practice —
+each child pays close to the *full* Django-import cost again, not a fraction of it, and that
+base cost is a lot bigger than gunicorn's own 54 MB now that there are 46 installed apps.
+Switching `worker` to `--pool=threads` (no forking, so no multiplication, while still running
+several tasks concurrently) closed most of that gap without losing the concurrency `--pool=solo`
+gave up (a single slow task head-of-line-blocking everything queued behind it, including an
+on-demand notification a member was actively waiting on). But the actual fix was realizing
+neither process needed to be *persistent* at all: this app's job volume is a handful of daily/
+monthly schedules plus occasional on-demand notifications, light enough that a plain
+`docker compose run` one-off (host cron calling `manage.py <job>` directly — see "Scheduled
+jobs") pays the Django-import cost for the few seconds a job actually runs instead of 24/7. Two
+fewer persistent processes beats a smaller persistent process every time memory is the
+constraint. `--pool=threads`/`--concurrency` never shipped; if a future change reintroduces a
+real background-task queue, revisit this section's own math before assuming the old tuning still
+applies — it was calibrated for a specific pool/concurrency combination, not the workload itself.
 
-**1 GB is not enough** — `worker` alone measured ~80% of a 1 GB box with the old prefork
-default, which leaves nothing for `web`/`beat`/Postgres/Redis/Caddy. That's exactly what turns
-"starting one more service" into the whole host swapping, and swapping shows up as *both* memory
-pressure and high sustained CPU (the kernel spends cycles on page faults and swap I/O instead of
-running the app) — the two are often the same underlying problem, not separate ones. `--pool=
-threads` closes most of that gap, but 2 GB is still the real floor for this stack; 4 GB is the
+**Swapping shows up as both memory pressure and high sustained CPU** — the kernel spends cycles
+on page faults and swap I/O instead of running the app, so the two symptoms are often the same
+underlying problem, not separate ones. This is the practical reason the worker/beat measurement
+above mattered: it wasn't just "less headroom," a process that size on a 1 GB box was enough to
+push the whole host into swap, and everything else running there felt the CPU cost of that, not
+just `worker` itself.
+
+Even without `worker`/`beat`, **1 GB is tight** — the original table above (before either process
+existed) already put steady state at ~1.0–1.2 GB for `web`/Postgres/Redis/Caddy/OS alone, before
+a single cron job's brief spike lands on top. 2 GB is the real floor for this stack; 4 GB is the
 recommendation for three further reasons, all of which are the kind of thing that bites at the
 worst moment:
 
@@ -714,7 +743,7 @@ Nothing in the code changes. What changes is where the services live:
 | Cache / flags | `redis` container | managed Redis (or your existing one) |
 | Uploads | local disk | **S3 bucket** (`AWS_STORAGE_BUCKET_NAME`) |
 | Static files | WhiteNoise, in the image | unchanged — that is why WhiteNoise is there |
-| Scheduled jobs | `worker` + `beat` containers | `worker` on any/every node; **`beat` on exactly one** |
+| Scheduled jobs | host cron, one node | EventBridge Scheduler + a one-off ECS task (see below) — or cron on **exactly one** node, same "one scheduler" rule either way |
 | TLS | Caddy on the box | load balancer, or Caddy on each node |
 
 Drop `db` and `redis` from `compose.yaml`, point the URLs at the central services, and run
@@ -731,8 +760,8 @@ Images are the unit of rollback: `.github/workflows/build-and-push.yml` tags eve
 away — find the short SHA from the GitHub Actions run or `git log --oneline`:
 
 ```bash
-IMAGE_TAG=main-a1b2c3d docker compose pull web worker beat
-IMAGE_TAG=main-a1b2c3d docker compose up -d --no-deps web worker beat
+IMAGE_TAG=main-a1b2c3d docker compose pull web
+IMAGE_TAG=main-a1b2c3d docker compose up -d --no-deps web
 ```
 
 Setting `IMAGE_TAG` in the server's `.env` instead makes it the default for future plain

@@ -77,10 +77,11 @@ class DashboardView(PlatformStaffRequiredMixin, TemplateView):
 
 class JobsView(PlatformStaffRequiredMixin, TemplateView):
     """Status and recent history of the scheduled platform jobs -- see features/jobs.py for
-    the registry and features/models.JobRun for what a Celery task run writes. These still
-    run on Celery Beat's own schedule (rosterchief/settings.py) -- there is no "run now"
-    here -- but each one can be paused/resumed individually via JobToggleView below, without
-    reaching for the platform-wide Maintenance lock."""
+    the registry and features/models.JobRun for what a run writes (features.commands.
+    ScheduledJobCommand, around each command's own execution). These run on cron's own
+    schedule (see DEPLOYMENT.md's "Scheduled jobs") -- there is no "run now" here -- but
+    each one can be paused/resumed individually via JobToggleView below, without reaching
+    for the platform-wide Maintenance lock."""
 
     template_name = "controlpanel/jobs.html"
 
@@ -90,8 +91,10 @@ class JobsView(PlatformStaffRequiredMixin, TemplateView):
 
 class JobToggleView(PlatformStaffRequiredMixin, View):
     """Pause or resume one scheduled job -- see features.models.JobToggle. `name` is the
-    job's dotted Celery task name (a features.jobs.JOB_REGISTRY key), not a database id: a
-    toggle row only exists once a job has actually been flipped off at least once."""
+    job's registry key (a features.jobs.JOB_REGISTRY key, still dotted-Celery-path-shaped
+    for historical continuity even though nothing here runs on Celery anymore -- see that
+    module's own docstring), not a database id: a toggle row only exists once a job has
+    actually been flipped off at least once."""
 
     def post(self, request, name):
         if name not in JOB_REGISTRY:

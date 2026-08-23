@@ -13,7 +13,6 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 from importlib.util import find_spec
 from pathlib import Path
 
-from celery.schedules import crontab
 from decouple import Csv, config
 from dj_database_url import parse as db_url
 
@@ -275,49 +274,6 @@ USE_TZ = True
 REDIS_URL = config("DJANGO_REDIS_URL", default="")
 
 CACHES = {"default": {"BACKEND": "django_redis.cache.RedisCache", "LOCATION": REDIS_URL, "OPTIONS": {"CLIENT_CLASS": "django_redis.client.DefaultClient"}} if REDIS_URL else {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}}
-
-
-# Task queue (Celery)
-#
-# The scheduled platform jobs (see billing/tasks.py, club/tasks.py, events/tasks.py) used to
-# be host crontab entries calling `manage.py <command>` -- see DEPLOYMENT.md. They now run as
-# Celery tasks on a beat schedule below, tracked in features.models.JobRun and visible on the
-# control panel's Jobs tab, which a bare crontab line mailing stderr on failure never gave us.
-#
-# Same Redis as CACHES above -- one already-deployed instance, not a second broker to run.
-# Without DJANGO_REDIS_URL there is nothing to connect to, so tasks run eagerly (inline, in
-# the calling process) instead of being queued -- the same "just works with nothing
-# configured" fallback CACHES uses, so `manage.py shell` on a laptop with no Redis can still
-# exercise a task directly.
-#
-# CELERY_TASK_EAGER_PROPAGATES is deliberately left at its default (False): a real worker
-# never raises a task's exception back into the caller of .delay() either (it's async --
-# the caller has moved on long before the task runs), it catches it, marks the result
-# FAILURE and fires task_failure so error-tracking (features/signals.py -> JobRun) can react.
-# Propagating in eager mode only would make local/test behaviour diverge from production
-# *and* skip that signal, silently losing JobRun.error on every eager failure.
-CELERY_BROKER_URL = REDIS_URL
-CELERY_RESULT_BACKEND = REDIS_URL or None
-CELERY_TASK_ALWAYS_EAGER = not REDIS_URL
-CELERY_TASK_TRACK_STARTED = True
-CELERY_TIMEZONE = TIME_ZONE
-
-#: Mirrors the old crontab times exactly (see DEPLOYMENT.md), with one fix: renew_subscriptions
-#: was never actually wired to cron there, despite its own docstring saying it's meant to run
-#: on a schedule -- controlpanel.services.statistics.platform_attention()'s `renewals_pending`
-#: figure exists specifically to catch that class of gap. Placed before the reminder/archive
-#: jobs so a club that renews today isn't chased or archived for a period that just closed.
-CELERY_BEAT_SCHEDULE = {
-    "extend-event-series": {"task": "events.tasks.extend_event_series", "schedule": crontab(hour=3, minute=0)},
-    "send-deadline-reminders": {"task": "events.tasks.send_deadline_reminders", "schedule": crontab(hour=7, minute=0)},
-    # Every 15 minutes, not daily like the jobs above -- a coach's scheduled
-    # publish time should take effect close to it, not up to a day late.
-    "publish-scheduled-lineups": {"task": "events.tasks.publish_scheduled_lineups", "schedule": crontab(minute="*/15")},
-    "renew-subscriptions": {"task": "billing.tasks.renew_subscriptions", "schedule": crontab(hour=4, minute=0)},
-    "send-billing-reminders": {"task": "billing.tasks.send_billing_reminders", "schedule": crontab(hour=5, minute=0)},
-    "archive-overdue-clubs": {"task": "billing.tasks.archive_overdue_clubs", "schedule": crontab(hour=6, minute=0)},
-    "generate-seasons": {"task": "club.tasks.generate_seasons", "schedule": crontab(hour=5, minute=0, day_of_month=1)},
-}
 
 
 # Static files and uploads

@@ -1,5 +1,6 @@
 import datetime
 from decimal import Decimal
+from unittest.mock import patch
 
 from django import forms
 from django.contrib.auth import get_user_model
@@ -13,6 +14,7 @@ from club.models import Club, ClubMembership, DuesInvoice, MemberRequirementStat
 from events.models import Attendance, Competition, Event, EventReferee, EventSeries, Lineup, LineupSelection, Location, Opponent, RefereeSignup
 from events.services.attendance import record_check_in
 from events.services.calendar import week_bounds
+from events.services.notifications import notify_new_event
 from members.models import Family, FamilyMembership, Member
 from news.models import News
 from notifications.models import Notification
@@ -3825,7 +3827,12 @@ class CoachCreateEventViewTests(TestCase):
         TeamMembership.objects.create(team=self.team, member=rostered, season=self.season)
         self.client.force_login(self.user)
 
-        response = self._post(title="Notify practice")
+        # dispatch_notify_new_event fires on a real background thread now (see
+        # events/services/notifications.py) -- run it inline here instead, via
+        # side_effect, so the notification is guaranteed to exist by the time this
+        # assertion runs rather than racing a thread that may not have finished yet.
+        with patch("mobile.coach_views.dispatch_notify_new_event", side_effect=notify_new_event):
+            response = self._post(title="Notify practice")
 
         self.assertRedirects(response, reverse("mobile:coach_today"), fetch_redirect_response=False)
         event = Event.objects.get(title="Notify practice")

@@ -28,7 +28,7 @@ from events.services import generate_occurrences
 from events.services.attendance import member_attendance_counts, player_attendance_rankings, record_check_in
 from events.services.calendar import agenda_groups
 from events.services.lineup import UNAVAILABLE_STATUSES, cancel_scheduled_publish, publish_lineup, schedule_lineup_publish, toggle_selection
-from events.tasks import notify_new_event
+from events.services.notifications import dispatch_notify_new_event
 from management.forms import EventForm, EventSeriesForm, LocationForm, NewsForm, NewsPhotoUploadForm, OpponentForm
 from members.models import Member
 from news.models import News, NewsPhoto
@@ -362,7 +362,7 @@ class CoachCreateEventView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
     template, just shown/hidden. Competition has no EventSeries equivalent
     (EventSeriesForm carries no such field), so it's one-off-only.
 
-    After a successful single-event save: the same notify_new_event.delay(...)
+    After a successful single-event save: the same dispatch_notify_new_event(...)
     call management.views.EventCreateView.form_valid makes -- attendance sync
     is automatic via events/signals.py, only the notification dispatch needs
     replicating by hand for a view that isn't a CreateView. A new series
@@ -530,7 +530,7 @@ class CoachCreateEventView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
         # A deliberately-planned single event, same as the desktop create
         # flow -- see notify_new_event's own docstring for why a recurring
         # series' occurrences aren't wired to this.
-        notify_new_event.delay(str(event.pk))
+        dispatch_notify_new_event(str(event.pk))
         return HttpResponseRedirect(reverse("mobile:coach_today"))
 
 

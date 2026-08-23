@@ -25,6 +25,7 @@ from club.services.invoicing import DuesInvoicePDFError
 from club.services.onboarding import mark_complete
 from events.models import Attendance, Competition, Event, EventReferee, EventSeries, Location, Opponent, RefereeSignup
 from events.services.calendar import week_bounds
+from events.services.notifications import notify_new_event
 from events.services.rbihf_import import RBIHFImportError
 from events.services.recurrence import detach_occurrence, generate_occurrences
 from events.services.referees import add_external_referee
@@ -36,6 +37,7 @@ from management.recurrence_ui import build_rrule, describe_rrule, parse_rrule
 from members.models import Family, FamilyMembership, Group, GroupMembership, Member, ParentClaim
 from members.services.claims import children_awaiting_a_parent
 from news.models import News, NewsPhoto
+from news.services import _send_and_mark_notified
 from notifications.models import Notification
 from shop.models import Order
 from teams.models import Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
@@ -4246,7 +4248,12 @@ class NewsManagementTests(ManagementTestBase):
         item = News.objects.create(club=self.club, title="Draft item", body="Body.")
         self.client.force_login(self.editor)
 
-        self.club_post("news_publish", {"published_at": timezone.now().strftime("%Y-%m-%dT%H:%M"), "notify_members": "on"}, item.pk)
+        # dispatch_send_publish_notification fires on a real background thread now
+        # (see news/services.py) -- run it inline here instead, via side_effect, so
+        # the email is guaranteed sent by the time this assertion runs rather than
+        # racing a thread that may not have finished yet.
+        with mock.patch("management.views.dispatch_send_publish_notification", side_effect=_send_and_mark_notified):
+            self.club_post("news_publish", {"published_at": timezone.now().strftime("%Y-%m-%dT%H:%M"), "notify_members": "on"}, item.pk)
 
         # Not asserting an exact outbox size: the base fixture's own staff
         # members (self.editor etc.) may also be active MEMBER-kind club
@@ -4277,9 +4284,12 @@ class NewsManagementTests(ManagementTestBase):
         item = News.objects.create(club=self.club, title="Signed: New Player", body="Body.")
         self.client.force_login(self.editor)
 
+        # See test_notify_members_checkbox_emails_the_audience above for why this patches
+        # dispatch_send_publish_notification with a synchronous side_effect.
         with (
             override_settings(VAPID_PRIVATE_KEY="test-private-key", VAPID_ADMIN_EMAIL="admin@example.com"),
             mock.patch("mobile.services.push.webpush") as webpush_mock,
+            mock.patch("management.views.dispatch_send_publish_notification", side_effect=_send_and_mark_notified),
         ):
             self.club_post("news_publish", {"published_at": timezone.now().strftime("%Y-%m-%dT%H:%M"), "notify_members": "on"}, item.pk)
 
@@ -5331,7 +5341,12 @@ class EventManagementTests(ManagementTestBase):
         TeamMembership.objects.create(team=self.own_team, member=player, season=self.season, position=position)
         self.client.force_login(self.own_team_coach)
 
-        self.club_post("event_create", self.event_data())
+        # dispatch_notify_new_event fires on a real background thread now (see
+        # events/services/notifications.py) -- run it inline here instead, via
+        # side_effect, so the notification is guaranteed to exist by the time this
+        # assertion runs rather than racing a thread that may not have finished yet.
+        with mock.patch("management.views.dispatch_notify_new_event", side_effect=notify_new_event):
+            self.club_post("event_create", self.event_data())
 
         event = Event.objects.get(title="Training")
         notification = Notification.objects.get(member=player, content_type__model="event", object_id=str(event.pk))

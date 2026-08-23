@@ -93,7 +93,7 @@ echo "     at $(git rev-parse --short HEAD) — $(git log -1 --pretty=%s)"
 step "Pulling image for ${BRANCH}"
 # IMAGE_TAG, not a server-side .env edit -- this deploy is *for* $BRANCH, so pull exactly that
 # branch's latest build regardless of what a previous manual `docker compose pull` left set.
-IMAGE_TAG="$BRANCH" dc pull web worker beat
+IMAGE_TAG="$BRANCH" dc pull web
 
 # Bring the data services up first and wait for Postgres, so the migration below has something
 # to connect to on a cold start.

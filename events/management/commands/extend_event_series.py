@@ -1,10 +1,11 @@
 from events.models import EventSeries
 from events.services import generate_occurrences, horizon
-from features.commands import MaintenanceAwareCommand
+from features.commands import ScheduledJobCommand
 
 
-class Command(MaintenanceAwareCommand):
+class Command(ScheduledJobCommand):
     help = "Materialise recurring event occurrences up to the rolling horizon."
+    job_name = "events.tasks.extend_event_series"
 
     def handle(self, *args, **options):
         until = horizon()
@@ -16,4 +17,4 @@ class Command(MaintenanceAwareCommand):
             if created:
                 self.stdout.write(f"{series}: generated {len(created)} occurrence(s).")
 
-        self.stdout.write(self.style.SUCCESS(f"Done. Generated {total} occurrence(s) across {EventSeries.objects.count()} series."))
+        return f"Generated {total} occurrence(s) across {EventSeries.objects.count()} series."

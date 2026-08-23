@@ -7,6 +7,7 @@ from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.db import IntegrityError
 from django.test import TestCase
 from django.utils import timezone
@@ -14,7 +15,7 @@ from waffle import get_waffle_flag_model
 
 from club.models import Club, ClubMembership, OnboardingRequirement, Season
 from club.services.onboarding import mark_bypassed, mark_complete
-from features.models import JobToggle, Maintenance
+from features.models import JobRun, JobToggle, Maintenance
 from members.models import Group, GroupMembership, Member
 from notifications.models import Notification
 from teams.models import Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership
@@ -52,7 +53,6 @@ from .services.referees import (
     set_referee_fee,
     sync_referee_invites,
 )
-from .tasks import publish_scheduled_lineups, send_deadline_reminders
 
 
 class EventsTestBase(TestCase):
@@ -943,7 +943,7 @@ class ExtendSeriesCommandTests(RecurrenceTestBase):
         call_command("extend_event_series", stdout=out)
 
         self.assertEqual(series.occurrences.count(), 4)
-        self.assertIn("Done.", out.getvalue())
+        self.assertIn("Generated 4 occurrence(s)", out.getvalue())
 
 
 class EventClubScopeTests(EventsTestBase):
@@ -2026,7 +2026,7 @@ class SendDeadlineRemindersTests(EventsTestBase):
     def test_reminds_within_the_window_before_the_deadline(self):
         event = self.make_event_with_roster(start=timezone.now() + timedelta(days=10), deadline=timezone.now() + timedelta(days=6))
 
-        result = send_deadline_reminders()
+        result = call_command("send_deadline_reminders")
 
         self.assertTrue(Notification.objects.filter(member=self.alice, title=event.title).exists())
         self.assertTrue(Notification.objects.filter(member=self.bob, title=event.title).exists())
@@ -2035,14 +2035,14 @@ class SendDeadlineRemindersTests(EventsTestBase):
     def test_falls_back_to_the_event_start_when_no_deadline_is_set(self):
         event = self.make_event_with_roster(start=timezone.now() + timedelta(days=6), deadline=None)
 
-        send_deadline_reminders()
+        call_command("send_deadline_reminders")
 
         self.assertTrue(Notification.objects.filter(member=self.alice, title=event.title).exists())
 
     def test_does_not_remind_before_the_window_opens(self):
         self.make_event_with_roster(start=timezone.now() + timedelta(days=30), deadline=timezone.now() + timedelta(days=20))
 
-        send_deadline_reminders()
+        call_command("send_deadline_reminders")
 
         self.assertFalse(Notification.objects.exists())
 
@@ -2051,7 +2051,7 @@ class SendDeadlineRemindersTests(EventsTestBase):
         # window is closed, not "still open and overdue".
         self.make_event_with_roster(start=timezone.now() + timedelta(days=2), deadline=timezone.now() - timedelta(hours=1))
 
-        send_deadline_reminders()
+        call_command("send_deadline_reminders")
 
         self.assertFalse(Notification.objects.exists())
 
@@ -2059,7 +2059,7 @@ class SendDeadlineRemindersTests(EventsTestBase):
         event = self.make_event_with_roster(start=timezone.now() + timedelta(days=10), deadline=timezone.now() + timedelta(days=6))
         Attendance.objects.filter(event=event, member=self.alice).update(status=Attendance.AttendanceStatus.PRESENT)
 
-        send_deadline_reminders()
+        call_command("send_deadline_reminders")
 
         self.assertFalse(Notification.objects.filter(member=self.alice).exists())
         self.assertTrue(Notification.objects.filter(member=self.bob).exists())
@@ -2067,9 +2067,9 @@ class SendDeadlineRemindersTests(EventsTestBase):
     def test_does_not_notify_the_same_event_twice(self):
         self.make_event_with_roster(start=timezone.now() + timedelta(days=10), deadline=timezone.now() + timedelta(days=6))
 
-        send_deadline_reminders()
+        call_command("send_deadline_reminders")
         Notification.objects.all().delete()
-        send_deadline_reminders()
+        call_command("send_deadline_reminders")
 
         self.assertFalse(Notification.objects.exists())
 
@@ -2077,7 +2077,7 @@ class SendDeadlineRemindersTests(EventsTestBase):
         event = self.make_event_with_roster(start=timezone.now() + timedelta(days=10), deadline=timezone.now() + timedelta(days=6))
         Attendance.objects.filter(event=event).update(status=Attendance.AttendanceStatus.PRESENT)
 
-        send_deadline_reminders()
+        call_command("send_deadline_reminders")
 
         event.refresh_from_db()
         self.assertIsNotNone(event.deadline_reminder_sent_at)
@@ -2085,21 +2085,37 @@ class SendDeadlineRemindersTests(EventsTestBase):
     def test_skips_a_cancelled_event(self):
         self.make_event_with_roster(start=timezone.now() + timedelta(days=10), deadline=timezone.now() + timedelta(days=6), cancelled=True)
 
-        send_deadline_reminders()
+        call_command("send_deadline_reminders")
 
         self.assertFalse(Notification.objects.exists())
 
     def test_raises_during_maintenance_instead_of_silently_skipping(self):
         Maintenance.start(user=None)
 
-        with self.assertRaises(RuntimeError):
-            send_deadline_reminders()
+        with self.assertRaises(CommandError):
+            call_command("send_deadline_reminders")
 
     def test_raises_when_paused_from_the_control_panel(self):
         JobToggle.set_enabled("events.tasks.send_deadline_reminders", False)
 
-        with self.assertRaises(RuntimeError):
-            send_deadline_reminders()
+        with self.assertRaises(CommandError):
+            call_command("send_deadline_reminders")
+
+    def test_writes_a_successful_job_run(self):
+        call_command("send_deadline_reminders")
+
+        run = JobRun.objects.get(name="events.tasks.send_deadline_reminders")
+        self.assertEqual(run.status, JobRun.Status.SUCCESS)
+        self.assertIn("Reminded", run.detail)
+
+    def test_writes_a_failed_job_run_during_maintenance(self):
+        Maintenance.start(user=None)
+
+        with self.assertRaises(CommandError):
+            call_command("send_deadline_reminders")
+
+        run = JobRun.objects.get(name="events.tasks.send_deadline_reminders")
+        self.assertEqual(run.status, JobRun.Status.FAILURE)
 
 
 class PublishScheduledLineupsTests(EventsTestBase):
@@ -2123,7 +2139,7 @@ class PublishScheduledLineupsTests(EventsTestBase):
         lineup.scheduled_publish_at = timezone.now() - timedelta(minutes=1)
         lineup.save()
 
-        result = publish_scheduled_lineups()
+        result = call_command("publish_scheduled_lineups")
 
         lineup.refresh_from_db()
         self.assertIsNotNone(lineup.published_at)
@@ -2135,7 +2151,7 @@ class PublishScheduledLineupsTests(EventsTestBase):
         lineup.scheduled_publish_at = timezone.now() + timedelta(days=1)
         lineup.save()
 
-        publish_scheduled_lineups()
+        call_command("publish_scheduled_lineups")
 
         lineup.refresh_from_db()
         self.assertIsNone(lineup.published_at)
@@ -2144,7 +2160,7 @@ class PublishScheduledLineupsTests(EventsTestBase):
     def test_ignores_a_lineup_with_no_schedule_at_all(self):
         _event, lineup = self.make_game_with_lineup()
 
-        result = publish_scheduled_lineups()
+        result = call_command("publish_scheduled_lineups")
 
         lineup.refresh_from_db()
         self.assertIsNone(lineup.published_at)
@@ -2157,7 +2173,7 @@ class PublishScheduledLineupsTests(EventsTestBase):
         lineup.scheduled_publish_at = timezone.now() - timedelta(minutes=1)
         lineup.save()
 
-        publish_scheduled_lineups()
+        call_command("publish_scheduled_lineups")
 
         lineup.refresh_from_db()
         self.assertEqual(lineup.published_at, published_at)
@@ -2165,11 +2181,18 @@ class PublishScheduledLineupsTests(EventsTestBase):
     def test_raises_during_maintenance_instead_of_silently_skipping(self):
         Maintenance.start(user=None)
 
-        with self.assertRaises(RuntimeError):
-            publish_scheduled_lineups()
+        with self.assertRaises(CommandError):
+            call_command("publish_scheduled_lineups")
 
     def test_raises_when_paused_from_the_control_panel(self):
         JobToggle.set_enabled("events.tasks.publish_scheduled_lineups", False)
 
-        with self.assertRaises(RuntimeError):
-            publish_scheduled_lineups()
+        with self.assertRaises(CommandError):
+            call_command("publish_scheduled_lineups")
+
+    def test_writes_a_successful_job_run(self):
+        call_command("publish_scheduled_lineups")
+
+        run = JobRun.objects.get(name="events.tasks.publish_scheduled_lineups")
+        self.assertEqual(run.status, JobRun.Status.SUCCESS)
+        self.assertIn("Published", run.detail)

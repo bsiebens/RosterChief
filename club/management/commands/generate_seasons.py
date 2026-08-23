@@ -16,11 +16,15 @@ from django.utils import timezone
 
 from club.models import Club
 from club.services.seasons import generate_seasons, resync_seasons
-from features.commands import MaintenanceAwareCommand
+from features.commands import ScheduledJobCommand
 
 
-class Command(MaintenanceAwareCommand):
+class Command(ScheduledJobCommand):
     help = "Generate seasons up to N years ahead for every active club (default 2)."
+    #: Matches features/jobs.py's JOB_REGISTRY key -- the string is inherited from this
+    #: command's former life as a Celery task (club.tasks.generate_seasons); kept as-is so
+    #: existing JobRun history and the control panel's Jobs tab stay joined to the same name.
+    job_name = "club.tasks.generate_seasons"
 
     def add_arguments(self, parser):
         parser.add_argument("--years", type=int, default=2, help="How many years ahead to generate seasons for (default 2).")
@@ -31,6 +35,7 @@ class Command(MaintenanceAwareCommand):
         until = timezone.localdate() + relativedelta(years=options["years"])
         clubs = Club.objects.active()
 
+        resync_summary = ""
         if options["resync"]:
             total_removed, total_kept = 0, 0
             for club in clubs:
@@ -45,7 +50,8 @@ class Command(MaintenanceAwareCommand):
 
             if not options["commit"] and total_removed:
                 self.stdout.write(self.style.WARNING("Dry run -- pass --commit to actually delete these."))
-            self.stdout.write(self.style.SUCCESS(f"Resync: {total_removed} season(s) {'removed' if options['commit'] else 'to remove'}, {total_kept} kept (in use)."))
+            resync_summary = f"Resync: {total_removed} season(s) {'removed' if options['commit'] else 'to remove'}, {total_kept} kept (in use). "
+            self.stdout.write(self.style.SUCCESS(resync_summary))
 
         total = 0
         for club in clubs:
@@ -54,4 +60,6 @@ class Command(MaintenanceAwareCommand):
             if created:
                 self.stdout.write(f"{club}: generated {len(created)} season(s).")
 
-        self.stdout.write(self.style.SUCCESS(f"Done. Generated {total} season(s) across {clubs.count()} club(s)."))
+        generate_summary = f"Generated {total} season(s) across {clubs.count()} club(s)."
+        self.stdout.write(self.style.SUCCESS(f"Done. {generate_summary}"))
+        return f"{resync_summary}{generate_summary}"

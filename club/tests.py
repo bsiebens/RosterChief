@@ -19,6 +19,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from events.models import Event, Location
+from features.models import JobRun
 from members.models import Family, FamilyMembership, Member
 from teams.models import Position, StaffAssignment, Team, TeamMembership
 from teams.services import eligible_roster_members
@@ -2065,6 +2066,15 @@ class GenerateSeasonsCommandTests(TestCase):
         call_command("generate_seasons", "--resync", "--commit", stdout=StringIO())
 
         self.assertFalse(Season.objects.filter(pk=wrong.pk).exists())
+
+    def test_run_writes_a_job_run_row(self):
+        # ScheduledJobCommand's own bookkeeping (features/commands.py) -- Maintenance/JobToggle
+        # blocking behavior is tested generically there, not per-command here.
+        call_command("generate_seasons", stdout=StringIO())
+
+        job_run = JobRun.objects.get(name="club.tasks.generate_seasons")
+        self.assertEqual(job_run.status, JobRun.Status.SUCCESS)
+        self.assertIn("Generated", job_run.detail)
 
 
 
