@@ -440,18 +440,17 @@ class CoachCreateEventView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
         # one of the four tiles COACH_EVENT_KINDS offers below.
         instance = Event(club=self.request.club, created_by=self.me, kind=Event.EventKind.TRAINING)
         form = EventForm(data, club=self.request.club, user=self.request.user, editing=False, instance=instance)
-        # max_referees/external_game_id have no use on a coach-created event --
         # max_referees has a model default (2) but no blank=True, so the field
-        # is required despite it; construct_instance skips a deleted field
-        # entirely, leaving the instance's own default/blank.
+        # is required despite it -- delete it rather than render a referee-
+        # count control this screen has no use for; construct_instance skips
+        # a deleted field entirely, leaving the instance's own default.
         del form.fields["max_referees"]
-        del form.fields["external_game_id"]
         # Narrowed to the four kinds the tile picker actually offers -- social/
         # other don't get their own tile, and this keeps a tampered request from
         # setting one anyway (the desktop form still offers the full list).
         form.fields["kind"].choices = [choice for choice in form.fields["kind"].choices if choice[0] in COACH_EVENT_KINDS]
         self._scope_shared_fields(form)
-        for field_name in ("start", "deadline", "competition"):
+        for field_name in ("start", "gathering", "deadline", "competition", "external_game_id"):
             form.fields[field_name].widget.attrs["class"] = _INPUT_CLASSES
         return form
 
@@ -462,9 +461,6 @@ class CoachCreateEventView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
         # friendly frequency/interval/weekdays fields below cover the common
         # weekly/monthly cases this screen is for.
         del form.fields["advanced_rrule"]
-        # Not offered here: neither maps to a "how long since kickoff" a coach
-        # thinks in the way duration_hours/minutes below does.
-        del form.fields["gathering_minutes_before"]
         form.fields["kind"].choices = [choice for choice in form.fields["kind"].choices if choice[0] in COACH_EVENT_KINDS]
         self._scope_shared_fields(form)
         # SelectMultiple relies on the desktop's searchable-select JS (not loaded
@@ -478,7 +474,7 @@ class CoachCreateEventView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
         # that (same trap _scope_shared_fields' own comment covers, just the
         # plain-ChoiceField shape of it).
         form.fields["weekdays"].widget = forms.CheckboxSelectMultiple(attrs={"class": "sr-only"}, choices=form.fields["weekdays"].choices)
-        for field_name in ("dtstart", "until", "frequency", "interval", "duration_hours", "duration_minutes", "deadline_minutes_before"):
+        for field_name in ("dtstart", "until", "frequency", "interval", "duration_hours", "duration_minutes", "gathering_minutes_before", "deadline_minutes_before"):
             form.fields[field_name].widget.attrs["class"] = _INPUT_CLASSES
         return form
 

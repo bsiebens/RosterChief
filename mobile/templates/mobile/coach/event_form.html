@@ -70,6 +70,11 @@
                     <label class="mb-1 block text-xs font-semibold text-muted" for="{{ form.start.id_for_label }}">{% trans "Date &amp; time" %}</label>
                     {{ form.start }}
                     {% for error in form.start.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
+                    <div class="my-3 h-px bg-rule"></div>
+                    <label class="mb-1 block text-xs font-semibold text-muted" for="{{ form.gathering.id_for_label }}">{% trans "Gathering time" %}</label>
+                    {{ form.gathering }}
+                    <p class="mt-1 text-xs text-dim">{% trans "Leave blank if there's no separate meet-up time." %}</p>
+                    {% for error in form.gathering.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
                 </div>
 
                 <div x-show="isRecurring" x-cloak>
@@ -77,6 +82,11 @@
                     <label class="mb-1 block text-xs font-semibold text-muted" for="{{ series_form.dtstart.id_for_label }}">{% trans "First occurrence" %}</label>
                     {{ series_form.dtstart }}
                     {% for error in series_form.dtstart.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
+                    <div class="my-3 h-px bg-rule"></div>
+                    <label class="mb-1 block text-xs font-semibold text-muted" for="{{ series_form.gathering_minutes_before.id_for_label }}">{% trans "Gathering (minutes before each occurrence)" %}</label>
+                    {{ series_form.gathering_minutes_before }}
+                    <p class="mt-1 text-xs text-dim">{% trans "Leave blank if there's no separate meet-up time." %}</p>
+                    {% for error in series_form.gathering_minutes_before.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
                 </div>
 
                 <div class="my-3 h-px bg-rule"></div>
@@ -89,9 +99,18 @@
                 <div class="m-card p-4">
                     {% include "mobile/coach/_opponent_picker.html" %}
                 </div>
-                <div x-show="!isRecurring" class="m-card p-4">
-                    <label class="mb-1 block text-xs font-semibold text-muted" for="{{ form.competition.id_for_label }}">{% trans "Competition" %}</label>
-                    {{ form.competition }}
+                <div x-show="!isRecurring" class="m-card flex flex-col p-4">
+                    <div>
+                        <label class="mb-1 block text-xs font-semibold text-muted" for="{{ form.competition.id_for_label }}">{% trans "Competition" %}</label>
+                        {{ form.competition }}
+                    </div>
+                    <div class="my-3 h-px bg-rule"></div>
+                    <div>
+                        <label class="mb-1 block text-xs font-semibold text-muted" for="{{ form.external_game_id.id_for_label }}">{% trans "Competition ID" %}</label>
+                        {{ form.external_game_id }}
+                        <p class="mt-1 text-xs text-dim">{% trans "This game's id in the competition's own data source, if it has one." %}</p>
+                        {% for error in form.external_game_id.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
+                    </div>
                 </div>
             </div>
 

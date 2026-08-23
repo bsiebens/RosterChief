@@ -3700,6 +3700,65 @@ class CoachCreateEventViewTests(TestCase):
         self.assertEqual(event.opponent, opponent)
         self.assertEqual(event.competition, "Regional League")
 
+    def test_can_set_a_competition_id_for_a_game(self):
+        self.client.force_login(self.user)
+
+        self._post(kind="game", title="Away game", external_game_id="4460")
+
+        event = Event.objects.get(title="Away game")
+        self.assertEqual(event.external_game_id, "4460")
+
+    def test_competition_id_is_optional(self):
+        self.client.force_login(self.user)
+
+        self._post(title="Plain practice")
+
+        event = Event.objects.get(title="Plain practice")
+        self.assertEqual(event.external_game_id, "")
+
+    def test_can_set_a_gathering_time(self):
+        self.client.force_login(self.user)
+        gathering = timezone.localtime(timezone.now() + datetime.timedelta(days=5, hours=-1)).strftime("%Y-%m-%dT%H:%M")
+
+        self._post(title="Early gather practice", gathering=gathering)
+
+        event = Event.objects.get(title="Early gather practice")
+        self.assertIsNotNone(event.gathering)
+
+    def test_gathering_time_is_optional(self):
+        self.client.force_login(self.user)
+
+        self._post(title="No gather practice")
+
+        event = Event.objects.get(title="No gather practice")
+        self.assertIsNone(event.gathering)
+
+    def test_recurring_can_set_a_gathering_offset(self):
+        self.client.force_login(self.user)
+        dtstart = timezone.localtime(timezone.now() + datetime.timedelta(days=1)).strftime("%Y-%m-%dT%H:%M")
+
+        self.client.post(
+            reverse("mobile:coach_create_event"),
+            {
+                "is_recurring": "on",
+                "kind": "training",
+                "title": "Gathering series",
+                "teams": [str(self.team.pk)],
+                "dtstart": dtstart,
+                "frequency": "weekly",
+                "interval": "1",
+                "weekdays": ["MO"],
+                "gathering_minutes_before": "30",
+            },
+            HTTP_HOST="ajax-united.rosterchief.app",
+        )
+
+        series = EventSeries.objects.get(title="Gathering series")
+        self.assertEqual(series.gathering_offset, datetime.timedelta(minutes=30))
+        occurrence = series.occurrences.first()
+        self.assertIsNotNone(occurrence)
+        self.assertEqual(occurrence.gathering, occurrence.start - datetime.timedelta(minutes=30))
+
     def test_invited_members_pool_excludes_the_current_roster(self):
         on_roster = Member.objects.create(first_name="On", last_name="Roster")
         TeamMembership.objects.create(team=self.team, member=on_roster, season=self.season)
