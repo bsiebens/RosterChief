@@ -36,12 +36,21 @@ def publish_lineup(lineup):
     previously unused anywhere. Every selected member becomes SELECTED; every
     other member with an Attendance row for this event who was actually
     available (not out/silent, see UNAVAILABLE_STATUSES) becomes
-    NOT_SELECTED. Notifies only the selected players.
+    NOT_SELECTED.
 
+    Also doubles as "publish changes" for an already-published lineup a
+    coach keeps editing (CoachLineupView's own "Save line-up" only writes
+    LineupSelection -- Attendance.status, and any notification, only ever
+    updates here). Notifies by comparing against who was SELECTED *before*
+    this run, not by re-notifying everyone currently selected -- a player
+    unaffected by the edit shouldn't get a second "you're in" ping, and one
+    dropped since the last publish should hear about that specifically.
     Clears scheduled_publish_at regardless of whether this run came from a
     coach tapping Publish directly or from the scheduled sweep (events.tasks.
     publish_scheduled_lineups) catching a due one -- once published, there's
     nothing left pending either way."""
+    previously_selected_ids = set(Attendance.objects.filter(event=lineup.event, status=Attendance.AttendanceStatus.SELECTED).values_list("member_id", flat=True))
+
     lineup.published_at = timezone.now()
     lineup.scheduled_publish_at = None
     lineup.save(update_fields=["published_at", "scheduled_publish_at"])
@@ -51,10 +60,15 @@ def publish_lineup(lineup):
     Attendance.objects.filter(event=lineup.event, member_id__in=selected_member_ids).update(status=Attendance.AttendanceStatus.SELECTED)
     Attendance.objects.filter(event=lineup.event).exclude(member_id__in=selected_member_ids).exclude(status__in=UNAVAILABLE_STATUSES).update(status=Attendance.AttendanceStatus.NOT_SELECTED)
 
-    selected_members = Member.objects.filter(pk__in=selected_member_ids)
-    if selected_members:
+    newly_selected = Member.objects.filter(pk__in=selected_member_ids - previously_selected_ids)
+    if newly_selected:
         body = _("You're in the line-up for %(event)s.") % {"event": lineup.event.title}
-        notify_members(selected_members, club=lineup.event.club, title=_("Line-up published"), body=body, source=lineup.event)
+        notify_members(newly_selected, club=lineup.event.club, title=_("Line-up published"), body=body, source=lineup.event)
+
+    newly_dropped = Member.objects.filter(pk__in=previously_selected_ids - selected_member_ids)
+    if newly_dropped:
+        body = _("The line-up for %(event)s has changed -- you're not in it this time.") % {"event": lineup.event.title}
+        notify_members(newly_dropped, club=lineup.event.club, title=_("Line-up updated"), body=body, source=lineup.event)
 
     return lineup
 

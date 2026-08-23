@@ -573,6 +573,43 @@ class LineupServiceTests(EventsTestBase):
         notified_member_ids = set(Notification.objects.filter(member__in=[self.alice, self.bob]).values_list("member_id", flat=True))
         self.assertEqual(notified_member_ids, {self.alice.pk})
 
+    def test_republish_does_not_renotify_a_player_still_selected(self):
+        event, lineup = self.make_game_with_lineup()
+        LineupSelection.objects.create(lineup=lineup, member=self.alice)
+        Attendance.objects.update_or_create(event=event, member=self.alice, defaults={"status": Attendance.AttendanceStatus.PRESENT})
+        publish_lineup(lineup)
+        Notification.objects.filter(member=self.alice).delete()
+
+        publish_lineup(lineup)
+
+        self.assertFalse(Notification.objects.filter(member=self.alice).exists())
+
+    def test_republish_notifies_a_newly_added_player(self):
+        event, lineup = self.make_game_with_lineup()
+        Attendance.objects.update_or_create(event=event, member=self.alice, defaults={"status": Attendance.AttendanceStatus.PRESENT})
+        publish_lineup(lineup)
+        Notification.objects.filter(member=self.alice).delete()
+
+        LineupSelection.objects.create(lineup=lineup, member=self.alice)
+        publish_lineup(lineup)
+
+        notification = Notification.objects.get(member=self.alice)
+        self.assertIn("in the line-up", notification.body)
+
+    def test_republish_notifies_a_dropped_player_with_a_different_message(self):
+        event, lineup = self.make_game_with_lineup()
+        LineupSelection.objects.create(lineup=lineup, member=self.alice)
+        Attendance.objects.update_or_create(event=event, member=self.alice, defaults={"status": Attendance.AttendanceStatus.PRESENT})
+        publish_lineup(lineup)
+        Notification.objects.filter(member=self.alice).delete()
+
+        LineupSelection.objects.filter(lineup=lineup, member=self.alice).delete()
+        publish_lineup(lineup)
+
+        notification = Notification.objects.get(member=self.alice)
+        self.assertIn("not in it this time", notification.body)
+        self.assertEqual(Attendance.objects.get(event=event, member=self.alice).status, Attendance.AttendanceStatus.NOT_SELECTED)
+
     def test_notify_dropout_notifies_the_teams_managers(self):
         event, _lineup = self.make_game_with_lineup()
         manager = Member.objects.create(first_name="Cara", last_name="Coach")

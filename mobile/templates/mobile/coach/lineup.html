@@ -16,6 +16,12 @@
     html's own top-of-file comment) -- each row's Yes/No pair is
     Alpine-owned (x-data toggling a hidden input), and this codebase hasn't
     established an htmx interaction pattern to layer on top of that safely.
+
+    The Publish section below stays visible after the first publish too (not
+    just while draft) -- editing selections and hitting "Save line-up" never
+    notifies anyone by itself (see CoachLineupView's own docstring), so a
+    coach who changes an already-published lineup needs an explicit
+    "Publish changes" step to sync it and notify whoever's status changed.
 {% endcomment %}
 
 {% block header_extra %}
@@ -43,6 +49,9 @@
                                 <div class="min-w-0 flex-1 text-sm text-white">
                                     {{ row.member.get_full_name }}
                                     {% if row.membership.jersey_number %}<span class="text-on-dark-dim">&middot; #{{ row.membership.jersey_number }}</span>{% endif %}
+                                    {% if row.attendance_rate is not None %}
+                                        <span class="{% if row.attendance_rate >= 80 %}text-ok{% elif row.attendance_rate >= 50 %}text-warn{% else %}text-club{% endif %}">&middot; {% blocktrans with rate=row.attendance_rate %}{{ rate }}% turnout{% endblocktrans %}</span>
+                                    {% endif %}
                                 </div>
                                 {% if can_manage_active_team %}
                                     <input type="hidden" name="selected_{{ row.member.pk }}" :value="state">
@@ -78,7 +87,7 @@
         </div>
     {% endif %}
 
-    {% if can_manage_active_team and not lineup.published_at %}
+    {% if can_manage_active_team %}
         {% if lineup.scheduled_publish_at %}
             <div class="m-card-dark mt-2 p-4">
                 <p class="text-sm text-white">{% blocktrans with time=lineup.scheduled_publish_at|date:"D d M H:i" %}Scheduled to publish {{ time }}{% endblocktrans %}</p>
@@ -99,7 +108,7 @@
             <form class="mt-2" method="post" action="{% url "mobile:coach_lineup_publish" event.pk %}" hx-boost="false">
                 {% csrf_token %}
                 <input type="hidden" name="action" value="publish_now">
-                <button class="btn w-full bg-ice text-ice-ink" type="submit">{% trans "Publish" %}</button>
+                <button class="btn w-full bg-ice text-ice-ink" type="submit">{% if lineup.published_at %}{% trans "Publish changes" %}{% else %}{% trans "Publish" %}{% endif %}</button>
             </form>
             <details class="mt-2">
                 <summary class="cursor-pointer font-display text-xs font-extrabold tracking-wide text-on-dark-dim uppercase">{% trans "Or schedule for later" %}</summary>

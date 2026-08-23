@@ -4300,6 +4300,29 @@ class CoachLineupViewTests(TestCase):
         self.assertEqual([row["member"] for row in categories[0]["rows"]], [self.player])
         self.assertFalse(categories[0]["rows"][0]["selected"])
 
+    def test_a_player_with_too_little_history_shows_no_turnout_rate(self):
+        # self.player has exactly one Attendance row (for the upcoming game
+        # itself, not even a past one) -- well under player_attendance_rankings'
+        # own minimum_responses floor, so no rate should be attached.
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mobile:coach_lineup", kwargs={"event_id": self.event.pk}), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertIsNone(response.context["categories"][0]["rows"][0]["attendance_rate"])
+        self.assertNotContains(response, "turnout")
+
+    def test_a_player_with_enough_history_shows_a_turnout_rate(self):
+        for index, status in enumerate([Attendance.AttendanceStatus.PRESENT, Attendance.AttendanceStatus.PRESENT, Attendance.AttendanceStatus.ABSENT]):
+            past_practice = Event.objects.create(club=self.club, title=f"Practice {index}", kind=Event.EventKind.TRAINING, season=self.season, start=timezone.now() - datetime.timedelta(days=index + 1))
+            past_practice.teams.add(self.team)
+            Attendance.objects.update_or_create(event=past_practice, member=self.player, defaults={"status": status})
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mobile:coach_lineup", kwargs={"event_id": self.event.pk}), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.context["categories"][0]["rows"][0]["attendance_rate"], 67)
+        self.assertContains(response, "67% turnout")
+
     def test_save_selects_the_submitted_players(self):
         self.client.force_login(self.user)
         lineup = Lineup.objects.create(event=self.event, team=self.team)
@@ -4345,6 +4368,33 @@ class CoachLineupViewTests(TestCase):
         self.assertRedirects(response, reverse("mobile:coach_lineup", kwargs={"event_id": self.event.pk}), fetch_redirect_response=False)
         lineup.refresh_from_db()
         self.assertIsNotNone(lineup.published_at)
+
+    def test_publish_button_still_offered_after_the_lineup_is_published(self):
+        # A coach can keep editing a published lineup (test_save_selects_the_
+        # submitted_players above), and Save alone never notifies anyone -- so
+        # "Publish changes" has to stay reachable to actually push an edit out.
+        self.client.force_login(self.user)
+        Lineup.objects.create(event=self.event, team=self.team, published_at=timezone.now())
+
+        response = self.client.get(reverse("mobile:coach_lineup", kwargs={"event_id": self.event.pk}), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, "Publish changes")
+
+    def test_republishing_only_notifies_players_whose_status_changed(self):
+        self.client.force_login(self.user)
+        lineup = Lineup.objects.create(event=self.event, team=self.team)
+        LineupSelection.objects.create(lineup=lineup, member=self.player)
+        self.client.post(reverse("mobile:coach_lineup_publish", kwargs={"event_id": self.event.pk}), HTTP_HOST="ajax-united.rosterchief.app")
+        Notification.objects.filter(member=self.player).delete()
+
+        # Editing selections (Save) alone must not notify -- only a fresh Publish does.
+        self.client.post(reverse("mobile:coach_lineup", kwargs={"event_id": self.event.pk}), {}, HTTP_HOST="ajax-united.rosterchief.app")
+        self.assertFalse(Notification.objects.filter(member=self.player).exists())
+
+        self.client.post(reverse("mobile:coach_lineup_publish", kwargs={"event_id": self.event.pk}), HTTP_HOST="ajax-united.rosterchief.app")
+
+        notification = Notification.objects.get(member=self.player)
+        self.assertIn("not in it this time", notification.body)
 
     def test_schedule_sets_scheduled_publish_at_without_publishing(self):
         self.client.force_login(self.user)

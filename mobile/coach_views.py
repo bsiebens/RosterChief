@@ -25,7 +25,7 @@ from club.services.access import can_add_news, current_season
 from controlpanel.messages import notify
 from events.models import Attendance, Event, EventSeries, Lineup, LineupSelection, Location, Opponent
 from events.services import generate_occurrences
-from events.services.attendance import member_attendance_counts, record_check_in
+from events.services.attendance import member_attendance_counts, player_attendance_rankings, record_check_in
 from events.services.calendar import agenda_groups
 from events.services.lineup import UNAVAILABLE_STATUSES, cancel_scheduled_publish, publish_lineup, schedule_lineup_publish, toggle_selection
 from events.tasks import notify_new_event
@@ -898,6 +898,15 @@ class CoachLineupView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
     separate "start a line-up" step. Viewing is open to anyone staffing the
     team; saving/publishing is gated on can_manage_active_team, hidden in the
     template and 403'd here regardless.
+
+    Saving here only ever writes LineupSelection -- it never touches
+    Attendance.status or sends a notification, before or after the first
+    publish. A coach can keep editing a published lineup freely without
+    pinging anyone; CoachLineupPublishView's "Publish"/"Publish changes"
+    button (see the template) is the only thing that syncs Attendance and
+    notifies -- and events.services.lineup.publish_lineup only notifies
+    whoever's status actually changed since the last publish, not everyone
+    currently selected.
     """
 
     template_name = "mobile/coach/lineup.html"
@@ -914,11 +923,21 @@ class CoachLineupView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
         the member-side published view groups by (mobile/views.py's
         EventDetailView). A player with no TeamMembership for this team/
         season (a guest call-up) lands in a catch-all "No position set"
-        bucket rather than being dropped."""
+        bucket rather than being dropped.
+
+        Each row also carries this season's turnout rate (``events.services.
+        attendance.player_attendance_rankings``, one query for the whole
+        team rather than one per row) -- a player saying "yes" to this game
+        doesn't tell a coach how reliably they actually show up, and that's
+        exactly the judgment call a line-up screen exists for. Riders with
+        too little history (rankings' own ``minimum_responses`` floor) get
+        no rate rather than a misleading 0%/100% from one data point."""
         season = current_season(self.request.club)
         memberships_by_member = {}
+        rates_by_member = {}
         if season is not None:
             memberships_by_member = {tm.member_id: tm for tm in TeamMembership.objects.filter(team=self.active_team, season=season).select_related("position")}
+            rates_by_member = {row["member"].pk: row["rate"] for row in player_attendance_rankings(self.active_team, season)}
 
         selected_ids = set(LineupSelection.objects.filter(lineup=lineup).values_list("member_id", flat=True))
         available = Attendance.objects.filter(event=event).exclude(status__in=UNAVAILABLE_STATUSES).select_related("member").order_by("member__last_name", "member__first_name")
@@ -929,7 +948,7 @@ class CoachLineupView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
             position = membership.position if membership else None
             key = position.pk if position else None
             bucket = buckets.setdefault(key, {"label": position.name if position else _("No position set"), "ordering": position.ordering if position else 9999, "rows": []})
-            bucket["rows"].append({"member": attendance.member, "membership": membership, "selected": attendance.member_id in selected_ids})
+            bucket["rows"].append({"member": attendance.member, "membership": membership, "selected": attendance.member_id in selected_ids, "attendance_rate": rates_by_member.get(attendance.member_id)})
 
         return sorted(buckets.values(), key=lambda bucket: (bucket["ordering"], bucket["label"]))
 
@@ -975,7 +994,12 @@ class CoachLineupPublishView(CoachScopeMixin, LoginRequiredMixin, View):
     cancel_scheduled_publish do the actual work; events.tasks.
     publish_scheduled_lineups is the periodic sweep that catches a schedule
     once its time arrives. ``action`` picks which (default "publish_now",
-    so the plain "Publish" button posts with no extra fields)."""
+    so the plain "Publish"/"Publish changes" button posts with no extra
+    fields). Reachable, and does the right thing, whether this is the first
+    publish or a republish of an already-published lineup a coach kept
+    editing -- publish_lineup itself is what limits the notification to
+    whoever's status actually changed.
+    """
 
     def post(self, request, *args, **kwargs):
         if not self.can_manage_active_team:
@@ -998,8 +1022,12 @@ class CoachLineupPublishView(CoachScopeMixin, LoginRequiredMixin, View):
             cancel_scheduled_publish(lineup)
             notify(request, f"s|{_('Schedule cancelled')}|{_('Publish it manually whenever you are ready.')}")
         else:
+            was_already_published = lineup.published_at is not None
             publish_lineup(lineup)
-            notify(request, f"s|{_('Line-up published')}|{_('Selected players have been notified.')}")
+            if was_already_published:
+                notify(request, f"s|{_('Line-up updated')}|{_('Anyone whose status changed has been notified.')}")
+            else:
+                notify(request, f"s|{_('Line-up published')}|{_('Selected players have been notified.')}")
 
         return HttpResponseRedirect(reverse("mobile:coach_lineup", kwargs={"event_id": event.pk}))
 
