@@ -30,6 +30,7 @@ urlpatterns = [
     path("coach/squad/<uuid:membership_pk>/remove/", coach_views.CoachRosterRemoveView.as_view(), name="coach_roster_remove"),
     path("coach/schedule/", coach_views.CoachScheduleView.as_view(), name="coach_schedule"),
     path("coach/attendance/<uuid:event_id>/", coach_views.CoachAttendanceView.as_view(), name="coach_attendance"),
+    path("coach/attendance/<uuid:event_id>/remind-silent/", coach_views.CoachAttendanceRemindSilentView.as_view(), name="coach_attendance_remind_silent"),
     path("coach/events/new/", coach_views.CoachCreateEventView.as_view(), name="coach_create_event"),
     path("coach/news/new/", coach_views.CoachCreateNewsView.as_view(), name="coach_create_news"),
     path("coach/roster/add/", coach_views.CoachAddPlayerView.as_view(), name="coach_add_player"),

@@ -3212,6 +3212,90 @@ class CoachAttendanceViewTests(TestCase):
 
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class CoachAttendanceRemindSilentViewTests(TestCase):
+    """Attendance sheet's "Remind silent" button -- see
+    CoachAttendanceRemindSilentView's own docstring."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        today = timezone.localdate()
+        cls.season = Season.objects.create(club=cls.club, start_date=today - datetime.timedelta(days=30), end_date=today + datetime.timedelta(days=300))
+        cls.user = User.objects.create_user(email="coach@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Sam", last_name="Coach", email="coach@example.com", user=cls.user)
+        cls.team = Team.objects.create(club=cls.club, name="U16", short_name="U16")
+        cls.position = Position.objects.create(club=cls.club, name="Head coach", short_name="HC", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=cls.team, member=cls.member, season=cls.season, position=cls.position)
+
+        cls.silent_member = Member.objects.create(first_name="Ben", last_name="Silent")
+        TeamMembership.objects.create(team=cls.team, member=cls.silent_member, season=cls.season)
+        cls.event = Event.objects.create(club=cls.club, title="Practice", kind=Event.EventKind.TRAINING, start=timezone.now() + datetime.timedelta(hours=2))
+        cls.event.teams.add(cls.team)
+        Attendance.objects.update_or_create(event=cls.event, member=cls.silent_member, defaults={"status": Attendance.AttendanceStatus.NO_RESPONSE})
+
+    def _post(self, event=None):
+        event = event or self.event
+        return self.client.post(reverse("mobile:coach_attendance_remind_silent", kwargs={"event_id": event.pk}), HTTP_HOST="ajax-united.rosterchief.app")
+
+    def test_requires_login(self):
+        response = self._post()
+
+        self.assertEqual(response.status_code, 302)
+
+    def test_notifies_every_silent_member(self):
+        self.client.force_login(self.user)
+
+        response = self._post()
+
+        self.assertRedirects(response, reverse("mobile:coach_attendance", kwargs={"event_id": self.event.pk}), fetch_redirect_response=False)
+        self.assertTrue(Notification.objects.filter(club=self.club, member=self.silent_member, title=self.event.title).exists())
+
+    def test_does_not_notify_someone_who_already_responded(self):
+        responded_member = Member.objects.create(first_name="Anna", last_name="Player")
+        TeamMembership.objects.create(team=self.team, member=responded_member, season=self.season)
+        Attendance.objects.update_or_create(event=self.event, member=responded_member, defaults={"status": Attendance.AttendanceStatus.PRESENT})
+        self.client.force_login(self.user)
+
+        self._post()
+
+        # Filtered by title (the reminder's own, matching self.event.title) rather
+        # than just member= -- creating the TeamMembership above also fires
+        # notify_newly_invited's own, differently-titled "new events" push, which
+        # a plain member= filter would otherwise conflate with this one.
+        self.assertFalse(Notification.objects.filter(member=responded_member, title=self.event.title).exists())
+
+    def test_no_silent_members_is_a_no_op(self):
+        Attendance.objects.filter(event=self.event).update(status=Attendance.AttendanceStatus.PRESENT)
+        self.client.force_login(self.user)
+
+        self._post()
+
+        self.assertFalse(Notification.objects.filter(club=self.club).exists())
+
+    def test_non_managing_staff_cannot_send_a_reminder(self):
+        physio_position = Position.objects.create(club=self.club, name="Physio", short_name="PHY", staff_position=True, management_position=False)
+        physio_user = User.objects.create_user(email="physio@example.com", password="pw-secret-123")
+        physio_member = Member.objects.create(first_name="Pat", last_name="Physio", user=physio_user)
+        StaffAssignment.objects.create(team=self.team, member=physio_member, season=self.season, position=physio_position)
+        self.client.force_login(physio_user)
+
+        response = self._post()
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(Notification.objects.filter(member=self.silent_member).exists())
+
+    def test_event_from_another_team_is_not_reachable(self):
+        other_team = Team.objects.create(club=self.club, name="U14", short_name="U14")
+        other_event = Event.objects.create(club=self.club, title="Other practice", kind=Event.EventKind.TRAINING, start=timezone.now() + datetime.timedelta(hours=2))
+        other_event.teams.add(other_team)
+        self.client.force_login(self.user)
+
+        response = self._post(other_event)
+
+        self.assertEqual(response.status_code, 404)
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
 class CoachCreateEventViewTests(TestCase):
     """C4 -- reuses management.forms.EventForm as-is; see CoachCreateEventView's
     own docstring for what's scoped down from the design mock."""

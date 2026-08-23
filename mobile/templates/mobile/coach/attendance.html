@@ -36,6 +36,15 @@
         </a>
     </div>
 
+    {% if can_manage_active_team and silent_count > 0 %}
+        <form class="mt-2" method="post" action="{% url "mobile:coach_attendance_remind_silent" event.pk %}" hx-boost="false">
+            {% csrf_token %}
+            <button class="btn btn-secondary w-full gap-2" type="submit">
+                {% lucide "bell" size=16 %} {% blocktrans count counter=silent_count %}Remind {{ counter }} silent player{% plural %}Remind {{ counter }} silent players{% endblocktrans %}
+            </button>
+        </form>
+    {% endif %}
+
     <form method="post" action="{% url "mobile:coach_attendance" event.pk %}" hx-boost="false">
         {% csrf_token %}
         <div class="m-card flex flex-col overflow-hidden">

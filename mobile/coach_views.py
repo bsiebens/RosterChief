@@ -27,8 +27,10 @@ from events.services.attendance import member_attendance_counts, record_check_in
 from events.services.lineup import UNAVAILABLE_STATUSES, cancel_scheduled_publish, publish_lineup, schedule_lineup_publish, toggle_selection
 from events.tasks import notify_new_event
 from management.forms import EventForm, NewsForm
+from members.models import Member
 from news.models import News
 from news.services import notify_editors_of_pending_review
+from notifications.services import notify_members
 from teams.models import Position, StaffAssignment, Team, TeamMembership
 from teams.services import eligible_roster_members
 
@@ -251,6 +253,34 @@ class CoachAttendanceView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
         body = _("%(count)d players checked in.") % {"count": checked_in}
         notify(request, f"s|{title}|{body}")
         return HttpResponseRedirect(reverse("mobile:coach_today"))
+
+
+class CoachAttendanceRemindSilentView(CoachScopeMixin, LoginRequiredMixin, View):
+    """Attendance sheet's "Remind silent" button -- an on-demand version of
+    events.tasks.send_deadline_reminders' own NO_RESPONSE nudge, for a coach
+    who doesn't want to wait for that once-a-day sweep. Same title/body shape
+    as that task, so a player who gets both isn't looking at two differently
+    worded pushes for the same event."""
+
+    def post(self, request, *args, **kwargs):
+        if self.active_team is None:
+            raise Http404
+        if not self.can_manage_active_team:
+            return HttpResponseForbidden()
+
+        event = get_object_or_404(Event, pk=kwargs["event_id"], club=request.club, teams=self.active_team)
+        member_ids = Attendance.objects.filter(event=event, status=Attendance.AttendanceStatus.NO_RESPONSE).values_list("member_id", flat=True)
+        members = list(Member.objects.filter(id__in=member_ids))
+
+        if members:
+            when = timezone.localtime(event.start).strftime("%a %d %b, %H:%M")
+            body = _("Reminder: %(kind)s on %(when)s still needs your answer.") % {"kind": event.get_kind_display(), "when": when}
+            notify_members(members, club=event.club, title=event.title, body=body, source=event)
+            notify(request, f"s|{_('Reminder sent')}|" + ngettext("%(count)d player nudged.", "%(count)d players nudged.", len(members)) % {"count": len(members)})
+        else:
+            notify(request, f"w|{_('Nobody to remind')}|{_('Everyone has already responded.')}")
+
+        return HttpResponseRedirect(reverse("mobile:coach_attendance", kwargs={"event_id": event.pk}))
 
 
 class CoachCreateEventView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
