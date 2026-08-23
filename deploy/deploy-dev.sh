@@ -6,9 +6,15 @@
 #   deploy/deploy-dev.sh --push     # push the branch first, then deploy
 #
 # Runs FROM your machine, works ON the server over one SSH session: it fetches the pushed
-# branch, builds the image, runs migrations explicitly (never from the entrypoint — a
-# starting gunicorn worker is a bad place to discover a failed migration), restarts web, and
-# waits for /healthz. Any step failing aborts the whole thing with a non-zero exit.
+# branch (for compose.yaml/this script itself — the app code comes from the image below, not
+# this checkout), pulls the image GitHub Actions already built for that branch
+# (.github/workflows/build-and-push.yml pushed it to ghcr.io on the same push this script's
+# own preflight requires), runs migrations explicitly (never from the entrypoint — a starting
+# gunicorn worker is a bad place to discover a failed migration), restarts web, and waits for
+# /healthz. Any step failing aborts the whole thing with a non-zero exit.
+#
+# The server needs a one-time `docker login ghcr.io` if the image is private (see
+# DEPLOYMENT.md) — this script doesn't carry credentials for that itself.
 set -Eeuo pipefail
 
 # --- config (override via env) ----------------------------------------------
@@ -76,8 +82,10 @@ git checkout --quiet "$BRANCH"
 git reset --hard --quiet "origin/${BRANCH}"
 echo "     at $(git rev-parse --short HEAD) — $(git log -1 --pretty=%s)"
 
-step "Building image"
-dc build
+step "Pulling image for ${BRANCH}"
+# IMAGE_TAG, not a server-side .env edit -- this deploy is *for* $BRANCH, so pull exactly that
+# branch's latest build regardless of what a previous manual `docker compose pull` left set.
+IMAGE_TAG="$BRANCH" dc pull web worker beat
 
 # Bring the data services up first and wait for Postgres, so the migration below has something
 # to connect to on a cold start.

@@ -329,22 +329,55 @@ deploy/deploy-dev.sh --push     # push the branch first, then deploy
 ```
 
 It runs from your machine and does the work on the server in one SSH session: fetch the pushed
-branch (a hard reset to `origin/<branch>`, since a deploy target only receives deploys), build
+branch (a hard reset to `origin/<branch>`, since a deploy target only receives deploys — this
+is only for `compose.behind-proxy.yaml`/the script itself, not the app code, see below), pull
 the image, run migrations *explicitly*, restart only `web`, and wait for `/healthz`.
 
 It refuses to deploy a branch whose local commits are not pushed — the server pulls from git,
 so unpushed work would ship stale code silently. Override the host, user, directory or branch
 with the `SSH_HOST` / `SSH_USER` / `REMOTE_DIR` / `BRANCH` environment variables.
 
+#### Where the image comes from
+
+The app image is **not** built on the server. `.github/workflows/build-and-push.yml` builds it
+on GitHub's own runners on every push to `main`/`development` and pushes it to
+`ghcr.io/bsiebens/rosterchief`, tagged `:<branch>` and `:<branch>-<short-sha>`. The server only
+ever `docker compose pull`s — see "Sizing the server" below for why building on a small box is
+what you're avoiding by doing this.
+
+**Deploying a specific version**: `deploy/deploy-dev.sh` always pulls `:$BRANCH` (latest for
+that branch). To pin an exact build instead — for a rollback, or to test one commit without
+moving the branch — set `IMAGE_TAG` before pulling by hand on the server:
+
+```bash
+IMAGE_TAG=main-a1b2c3d docker compose -f compose.behind-proxy.yaml pull web worker beat
+IMAGE_TAG=main-a1b2c3d docker compose -f compose.behind-proxy.yaml up -d --no-deps web
+```
+
+(short SHAs come from the GitHub Actions run, or `git log --oneline`). Setting `IMAGE_TAG` in
+the server's `.env` instead makes it the new default for future plain `docker compose pull`s.
+
 First-time setup on the server, once:
 
 ```bash
-git clone git@git.siebens.org:bernard/RosterChief.git /home/bernard/RosterChief
+git clone git@github.com:bsiebens/RosterChief.git /home/bernard/RosterChief
 cd /home/bernard/RosterChief
 cp .env.compose.example .env             # fill in POSTGRES_PASSWORD etc.
 cp .env.production.example .env.production
 # then add the reverse_proxy site block to the host's Caddy (see above)
 ```
+
+If the `ghcr.io/bsiebens/rosterchief` package is private (GitHub Packages defaults to matching
+the repo's own visibility), the server also needs a one-time login before its first pull — a
+GitHub personal access token with `read:packages` is enough, no push access needed:
+
+```bash
+echo "<token>" | docker login ghcr.io -u <your-github-username> --password-stdin
+```
+
+Making the package public instead (its own visibility setting under the repo's Packages tab
+on GitHub) skips this entirely — reasonable here since the image contains no secrets, only
+application code and dependencies (all secrets are `.env`/`.env.production`, never baked in).
 
 ## Automated backups
 
@@ -464,9 +497,11 @@ tasks, so it's the cheapest process in the stack to run.
 2 GB would run it. 4 GB is the recommendation for three reasons, all of which are the kind of
 thing that bites at the worst moment:
 
-1. **`docker compose build` is the memory spike, not serving.** npm, uv and `collectstatic`
-   together will OOM a 2 GB box that is also running Postgres. Either take the 4 GB, or build
-   the image elsewhere and pull it.
+1. **`docker compose build` was the memory spike, not serving** — npm, uv and `collectstatic`
+   together are enough to OOM a 2 GB box that's also running Postgres. This is why the image is
+   built on GitHub Actions and the server only ever pulls it (see "Deploying with one command"
+   above) rather than building in place; 4 GB is still the recommendation, since the other two
+   reasons below don't go away.
 2. **Rendering an invoice loads WeasyPrint.** It is imported lazily (which is why the workers
    measure 54 MB and not 150), so pango and its fonts land in whichever worker renders a PDF —
    expect that worker to grow by ~50–100 MB the first time someone downloads an invoice.
@@ -478,7 +513,7 @@ thing that bites at the worst moment:
 | | |
 |---|---|
 | Docker images (app ~1 GB with pango, postgres, redis, caddy) | ~1.5 GB |
-| Build cache | 2–4 GB |
+| Build cache (only if you ever `docker compose build` locally on the box) | 2–4 GB |
 | Database, 5 years | < 0.5 GB |
 | Backups: 14 daily compressed dumps | < 0.5 GB |
 | Logs | ~1 GB |

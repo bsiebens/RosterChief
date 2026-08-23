@@ -9,11 +9,15 @@
 # Publishing on 127.0.0.1 and not 0.0.0.0 is the point: bound to all interfaces, a test
 # instance is reachable on http://<server-ip>:8001 with no TLS, bypassing the proxy and every
 # security header with it.
+#
+# web/worker/beat: see compose.yaml's own top-of-file comment on `image:` + `build: .` and
+# IMAGE_TAG -- same reasoning here.
 
 name: rosterchief-test
 
 services:
   web:
+    image: ghcr.io/bsiebens/rosterchief:${IMAGE_TAG:-main}
     build: .
     restart: unless-stopped
     env_file: .env.production
@@ -40,6 +44,7 @@ services:
       start_period: 20s
 
   worker:
+    image: ghcr.io/bsiebens/rosterchief:${IMAGE_TAG:-main}
     build: .
     restart: unless-stopped
     env_file: .env.production
@@ -54,6 +59,7 @@ services:
         condition: service_started
 
   beat:
+    image: ghcr.io/bsiebens/rosterchief:${IMAGE_TAG:-main}
     build: .
     restart: unless-stopped
     env_file: .env.production

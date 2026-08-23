@@ -2,6 +2,14 @@
 # deployment: point DJANGO_DATABASE_URL / DJANGO_REDIS_URL at your central services, set a
 # bucket, drop the `db` and `redis` services, and run several `web` containers behind a load
 # balancer. Nothing in the code changes.
+#
+# web/worker/beat carry both `image:` and `build: .`: normal deploys pull the prebuilt image
+# GitHub Actions already pushed (.github/workflows/build-and-push.yml) rather than building
+# here -- see DEPLOYMENT.md's "Sizing the server" for why building on a small box is the thing
+# that OOMs it. `build: .` stays so `docker compose build` still works if you ever need to
+# build locally. IMAGE_TAG picks the version: `:<branch>` (the default, "latest for this
+# branch") or `:<branch>-<short-sha>` to pin/roll back to an exact build -- see DEPLOYMENT.md's
+# "Deploying a specific version".
 
 name: rosterchief
 
@@ -32,6 +40,7 @@ services:
       - web
 
   web:
+    image: ghcr.io/bsiebens/rosterchief:${IMAGE_TAG:-main}
     build: .
     restart: unless-stopped
     env_file: .env.production
@@ -57,6 +66,7 @@ services:
       start_period: 20s
 
   worker:
+    image: ghcr.io/bsiebens/rosterchief:${IMAGE_TAG:-main}
     build: .
     restart: unless-stopped
     env_file: .env.production
@@ -74,6 +84,7 @@ services:
         condition: service_started
 
   beat:
+    image: ghcr.io/bsiebens/rosterchief:${IMAGE_TAG:-main}
     build: .
     restart: unless-stopped
     env_file: .env.production
