@@ -9,7 +9,7 @@ import datetime
 
 from django import forms
 from django.contrib.auth.mixins import LoginRequiredMixin
-from django.db.models import Case, F, When
+from django.db.models import Case, F, Q, When
 from django.http import Http404, HttpResponseForbidden, HttpResponseRedirect
 from django.shortcuts import get_object_or_404
 from django.urls import reverse
@@ -438,10 +438,10 @@ class CoachAddPlayerView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
     candidate rather than management.forms.TeamMembershipForm's one-member-
     at-a-time shape, which doesn't fit a "tap a few names, add them" flow
     anyway (the mock itself shows plain checkboxes, no inline position
-    picker). A coach sets jersey number/position afterward on the desktop --
-    same as any roster spot added blank via the Sign-up page today
-    (TeamMembership.position's own help_text already documents this as a
-    normal, expected state, not a shortcut this screen invents).
+    picker). A player added here starts with no jersey number/position set --
+    the coach picks those afterward from the player's own row on the Squad
+    screen (CoachRosterMemberView), same "blank is a normal, expected state"
+    TeamMembership.position's own help_text already documents.
 
     The pool is teams.services.eligible_roster_members(club) minus whoever's
     already on this team+season -- the same two rules TeamMembershipForm
@@ -449,7 +449,10 @@ class CoachAddPlayerView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
     "Suggested" (on this team last season) is real, computed data. "Age
     eligible" from the mock isn't built -- neither Club nor Team carries an
     age-group field to compare a birth date against, so faking that filter
-    would just mean it silently matched nothing.
+    would just mean it silently matched nothing. A plain first/last-name
+    search (?q=) narrows the pool further, ANDed with whichever filter chip
+    is active -- useful once a club's eligible-member pool outgrows a single
+    screenful.
     """
 
     template_name = "mobile/coach/add_player.html"
@@ -477,6 +480,7 @@ class CoachAddPlayerView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
         filter_param = self.request.GET.get("filter")
         if filter_param not in self.FILTERS:
             filter_param = ""
+        search_query = self.request.GET.get("q", "").strip()
 
         if self.active_team is not None and season is not None:
             squad_count = TeamMembership.objects.filter(team=self.active_team, season=season).count()
@@ -488,12 +492,16 @@ class CoachAddPlayerView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
                 previous_season = Season.before(self.request.club, season)
                 pool = pool.filter(team_memberships__team=self.active_team, team_memberships__season=previous_season) if previous_season is not None else pool.none()
 
+            if search_query:
+                pool = pool.filter(Q(first_name__icontains=search_query) | Q(last_name__icontains=search_query))
+
             candidates = list(pool.distinct().order_by("last_name", "first_name"))
 
         return super().get_context_data(
             candidates=candidates,
             squad_count=squad_count,
             filter_param=filter_param,
+            search_query=search_query,
             **kwargs,
         )
 

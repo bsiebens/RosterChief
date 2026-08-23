@@ -3536,6 +3536,30 @@ class CoachAddPlayerViewTests(TestCase):
         self.assertEqual(list(candidates), [returning])
         self.assertNotIn(new_signup, candidates)
 
+    def test_search_matches_first_or_last_name(self):
+        match = self.make_eligible_member(first_name="Zara", last_name="Zenith")
+        other = self.make_eligible_member(first_name="Not", last_name="Matching")
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mobile:coach_add_player") + "?q=zar", HTTP_HOST="ajax-united.rosterchief.app")
+
+        candidates = response.context["candidates"]
+        self.assertIn(match, candidates)
+        self.assertNotIn(other, candidates)
+
+    def test_search_combines_with_the_active_filter(self):
+        previous_season = Season.objects.create(club=self.club, start_date=self.season.start_date - datetime.timedelta(days=365), end_date=self.season.start_date - datetime.timedelta(days=1))
+        returning_match = self.make_eligible_member(first_name="Zara", last_name="Returning")
+        TeamMembership.objects.create(team=self.team, member=returning_match, season=previous_season)
+        returning_no_match = self.make_eligible_member(first_name="Other", last_name="Returning")
+        TeamMembership.objects.create(team=self.team, member=returning_no_match, season=previous_season)
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mobile:coach_add_player") + "?filter=suggested&q=zar", HTTP_HOST="ajax-united.rosterchief.app")
+
+        candidates = response.context["candidates"]
+        self.assertEqual(list(candidates), [returning_match])
+
     def test_post_adds_selected_members_to_the_roster(self):
         first = self.make_eligible_member(first_name="First", last_name="Pick")
         second = self.make_eligible_member(first_name="Second", last_name="Pick")

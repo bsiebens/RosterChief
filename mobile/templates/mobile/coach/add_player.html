@@ -1,5 +1,5 @@
 {% extends "mobile/coach/base.html" %}
-{% load i18n %}
+{% load i18n lucide %}
 
 {% comment %}
     C6 -- design_handoff_rosterchief_platform/README.md's C6 section: a
@@ -16,17 +16,29 @@
 {% endblock header_extra %}
 
 {% block content %}
+    <form method="get" class="relative">
+        {% if filter_param %}<input type="hidden" name="filter" value="{{ filter_param }}">{% endif %}
+        <span class="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-dim">{% lucide "search" size=16 %}</span>
+        <input type="search" name="q" value="{{ search_query }}" placeholder="{% trans "Search by name" %}" class="h-11 w-full rounded-lg border border-stroke bg-paper pr-3 pl-9 text-[15px] text-ink placeholder:text-dim focus:border-ink focus:outline-none">
+    </form>
+
     <div class="flex gap-2">
-        <a class="flex h-9 flex-1 items-center justify-center rounded-full font-display text-xs font-extrabold tracking-wide uppercase {% if not filter_param %}bg-ink text-white{% else %}border border-line bg-white text-muted{% endif %}" href="?">
+        <a class="flex h-9 flex-1 items-center justify-center rounded-full font-display text-xs font-extrabold tracking-wide uppercase {% if not filter_param %}bg-ink text-white{% else %}border border-line bg-white text-muted{% endif %}" href="?{% if search_query %}q={{ search_query|urlencode }}{% endif %}">
             {% trans "All" %}
         </a>
-        <a class="flex h-9 flex-1 items-center justify-center rounded-full font-display text-xs font-extrabold tracking-wide uppercase {% if filter_param == "suggested" %}bg-ink text-white{% else %}border border-line bg-white text-muted{% endif %}" href="?filter=suggested">
+        <a class="flex h-9 flex-1 items-center justify-center rounded-full font-display text-xs font-extrabold tracking-wide uppercase {% if filter_param == "suggested" %}bg-ink text-white{% else %}border border-line bg-white text-muted{% endif %}" href="?filter=suggested{% if search_query %}&q={{ search_query|urlencode }}{% endif %}">
             {% trans "Suggested" %}
         </a>
-        <a class="flex h-9 flex-1 items-center justify-center rounded-full font-display text-xs font-extrabold tracking-wide uppercase {% if filter_param == "no_team" %}bg-ink text-white{% else %}border border-line bg-white text-muted{% endif %}" href="?filter=no_team">
+        <a class="flex h-9 flex-1 items-center justify-center rounded-full font-display text-xs font-extrabold tracking-wide uppercase {% if filter_param == "no_team" %}bg-ink text-white{% else %}border border-line bg-white text-muted{% endif %}" href="?filter=no_team{% if search_query %}&q={{ search_query|urlencode }}{% endif %}">
             {% trans "No team" %}
         </a>
     </div>
+
+    {% if filter_param == "suggested" %}
+        <p class="text-xs text-muted">{% trans "Was on this team's roster last season." %}</p>
+    {% elif filter_param == "no_team" %}
+        <p class="text-xs text-muted">{% trans "Not on any team's roster yet this season." %}</p>
+    {% endif %}
 
     <form method="post" action="{% url "mobile:coach_add_player" %}" x-data="{ count: 0 }" hx-boost="false">
         {% csrf_token %}
@@ -38,7 +50,7 @@
                     <input class="h-5 w-5 shrink-0 accent-ink" type="checkbox" name="member" value="{{ candidate.pk }}" @change="count = $el.form.querySelectorAll('input[name=member]:checked').length">
                 </label>
             {% empty %}
-                <div class="px-4 py-6 text-center text-sm text-muted">{% trans "No one matches this filter." %}</div>
+                <div class="px-4 py-6 text-center text-sm text-muted">{% trans "No one matches." %}</div>
             {% endfor %}
         </div>
 
