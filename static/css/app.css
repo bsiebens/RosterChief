@@ -3948,6 +3948,9 @@
   .h-24 {
     height: calc(var(--spacing) * 24);
   }
+  .h-40 {
+    height: calc(var(--spacing) * 40);
+  }
   .h-44 {
     height: calc(var(--spacing) * 44);
   }
@@ -4310,6 +4313,9 @@
   }
   .resize {
     resize: both;
+  }
+  .resize-y {
+    resize: vertical;
   }
   .scrollbar-gutter-stable {
     scrollbar-gutter: stable;

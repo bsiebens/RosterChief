@@ -3963,13 +3963,15 @@ class CoachCreateNewsViewTests(TestCase):
         self.assertEqual(team_choices, [self.team])
         self.assertNotIn(other_team, team_choices)
 
-    def test_teams_field_is_prechecked_with_the_active_team(self):
+    def test_teams_is_hidden_and_locked_to_the_active_team(self):
         self.client.force_login(self.user)
 
         response = self.client.get(reverse("mobile:coach_create_news"), HTTP_HOST="ajax-united.rosterchief.app")
 
+        self.assertIsInstance(response.context["form"].fields["teams"].widget, forms.MultipleHiddenInput)
         self.assertEqual(response.context["form"].initial.get("teams"), [self.team.pk])
-        self.assertContains(response, f'value="{self.team.pk}" id="id_teams_0" checked')
+        self.assertContains(response, f'<input type="hidden" name="teams" value="{self.team.pk}"')
+        self.assertNotContains(response, 'name="teams" type="checkbox"')
 
     def test_valid_post_creates_a_pending_review_post_scoped_to_the_team(self):
         self.client.force_login(self.user)
@@ -3992,6 +3994,31 @@ class CoachCreateNewsViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertFalse(News.objects.filter(title="No team picked").exists())
         self.assertTrue(response.context["form"].errors)
+
+    def test_photos_are_optional(self):
+        self.client.force_login(self.user)
+
+        response = self._post(title="No photos here")
+
+        self.assertRedirects(response, reverse("mobile:coach_today"), fetch_redirect_response=False)
+        news_item = News.objects.get(title="No photos here")
+        self.assertEqual(news_item.photos.count(), 0)
+
+    def test_uploaded_photos_are_attached_first_one_is_main(self):
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse("mobile:coach_create_news"),
+            {"title": "Photo finish", "body": "Great game everyone.", "teams": [str(self.team.pk)], "images": [make_image_file("one.png"), make_image_file("two.png")]},
+            HTTP_HOST="ajax-united.rosterchief.app",
+        )
+
+        self.assertRedirects(response, reverse("mobile:coach_today"), fetch_redirect_response=False)
+        news_item = News.objects.get(title="Photo finish")
+        photos = list(news_item.photos.order_by("ordering"))
+        self.assertEqual(len(photos), 2)
+        self.assertTrue(photos[0].is_main)
+        self.assertFalse(photos[1].is_main)
 
     def test_non_managing_staff_cannot_post(self):
         physio_position = Position.objects.create(club=self.club, name="Physio", short_name="PHY", staff_position=True, management_position=False)

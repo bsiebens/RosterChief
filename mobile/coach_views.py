@@ -29,16 +29,16 @@ from events.services.attendance import member_attendance_counts, record_check_in
 from events.services.calendar import agenda_groups
 from events.services.lineup import UNAVAILABLE_STATUSES, cancel_scheduled_publish, publish_lineup, schedule_lineup_publish, toggle_selection
 from events.tasks import notify_new_event
-from management.forms import EventForm, EventSeriesForm, LocationForm, NewsForm, OpponentForm
+from management.forms import EventForm, EventSeriesForm, LocationForm, NewsForm, NewsPhotoUploadForm, OpponentForm
 from members.models import Member
-from news.models import News
+from news.models import News, NewsPhoto
 from news.services import notify_editors_of_pending_review
 from notifications.services import notify_members
 from teams.models import Position, StaffAssignment, Team, TeamMembership
 from teams.services import eligible_roster_members
 
 from .coach_mixins import CoachScopeMixin
-from .forms import _INPUT_CLASSES, CoachRosterEditForm
+from .forms import _INPUT_CLASSES, _TEXTAREA_CLASSES, CoachRosterEditForm
 
 #: RSVP states that count as "in" for the stat tile -- present/selected are an
 #: explicit yes, maybe is still a lean-in rather than silence.
@@ -404,10 +404,15 @@ class CoachCreateEventView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
         #
         # teams: hard-locked to the active team, not a picker -- see this
         # view's own docstring. A hidden MultipleHiddenInput renders its
-        # `initial` on GET without any template code, and the queryset
-        # restriction means a tampered request still can't set another team.
+        # `initial` on GET without any template code; the queryset
+        # restriction means a tampered request can't set a *different* team,
+        # and required=True (Event.teams itself is blank=True, so the form
+        # field defaults to optional) means a tampered request can't submit
+        # an empty selection either -- both would otherwise still produce a
+        # real, saveable event, just not one scoped to a single team anymore.
         form.fields["teams"].widget = forms.MultipleHiddenInput()
         form.fields["teams"].queryset = Team.objects.filter(pk=self.active_team.pk) if self.active_team is not None else Team.objects.none()
+        form.fields["teams"].required = True
         # form.initial (not just field.initial) -- ModelForm.__init__ already
         # populated form.initial["teams"] = [] from the new, unsaved Event/
         # EventSeries instance's own (necessarily empty) m2m, and
@@ -587,10 +592,12 @@ class CoachOpponentCreateView(CoachScopeMixin, LoginRequiredMixin, View):
 
 class CoachCreateNewsView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
     """C5 -- reuses management.forms.NewsForm, re-scoped to the coach's own
-    managed team(s). NewsForm.__init__ defaults ``teams`` to every club team
-    -- fine for an editor/admin, but a real gap for a coach, who should only
-    ever be able to post as their own team, never "on behalf of" one they
-    don't run.
+    active team. ``teams`` isn't a picker at all here (same reasoning as
+    CoachCreateEventView's own ``teams`` -- there's no "which team" question
+    on a screen already scoped to one): hard-locked to the active team, a
+    hidden field an editor can still widen from the desktop when reviewing
+    the submission, which is the honest place for that judgment call to live
+    -- not a checkbox list a coach has to get right on a phone.
 
     Gated with club.services.access.can_add_news, which already includes
     is_coach_manager -- no new authorization logic needed. On submit, the
@@ -599,19 +606,20 @@ class CoachCreateNewsView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
     NewsSubmitForReviewView makes) rather than left a silent draft, so it
     actually reaches an editor's queue -- can_publish_news stays editor/
     admin-only, so "Send for review" is the honest label here, not "Publish"
-    the way the design mock has it.
+    the way the design mock has it. Any uploaded photos are attached via
+    management.forms.NewsPhotoUploadForm's own "images" field and
+    NewsPhotoUploadView's own first-upload-becomes-main logic, reused
+    directly rather than a second copy of either.
 
-    title_en/body_en (the optional English fallback) and a cover photo
-    aren't part of this screen -- both text fields are blank=True on the
-    model (a coach posting from their phone isn't expected to also draft an
-    English translation), and News has no image field for a cover at all to
-    begin with. ``visibility`` is left at the model's own default
-    (INTERNAL -- team families, in-app only) rather than building the mock's
-    "also on club website" toggle: a coach's post always lands as
-    PENDING_REVIEW first, and an editor reviewing it can widen visibility
-    before publishing if a public-site placement is actually warranted --
-    that's a real gate, not a decorative row, so it isn't reproduced here as
-    one.
+    title_en/body_en (the optional English fallback) aren't part of this
+    screen -- both are blank=True on the model (a coach posting from their
+    phone isn't expected to also draft an English translation).
+    ``visibility`` is left at the model's own default (INTERNAL -- team
+    families, in-app only) rather than building the mock's "also on club
+    website" toggle: a coach's post always lands as PENDING_REVIEW first,
+    and an editor reviewing it can widen visibility before publishing if a
+    public-site placement is actually warranted -- that's a real gate, not a
+    decorative row, so it isn't reproduced here as one.
     """
 
     template_name = "mobile/coach/news_form.html"
@@ -629,35 +637,42 @@ class CoachCreateNewsView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
         del form.fields["title_en"]
         del form.fields["body_en"]
         del form.fields["visibility"]
-        # A coach's post is always about their own team(s) -- never empty
-        # (which News.teams's own help_text defines as "club-wide", an
-        # editor/admin-only claim), and never any other team in the club.
-        #
-        # Widget swapped in *before* .queryset is set -- ModelChoiceField.
-        # queryset's setter pushes `self.widget.choices = self.choices` as a
-        # side effect at the moment it's assigned; setting the queryset first
-        # and swapping the widget after discards that push, leaving the new
-        # widget's own .choices empty and the checkbox list rendering nothing
-        # at all (a real, previously-undetected bug -- see the regression
-        # test, and mobile.coach_views.CoachCreateEventView._scope_shared_
-        # fields' own near-identical comment for the ModelMultipleChoiceField
-        # version of the same trap).
-        form.fields["teams"].widget = forms.CheckboxSelectMultiple()
-        form.fields["teams"].queryset = Team.objects.filter(pk__in=[team.pk for team in self.managed_teams])
+        # teams: hard-locked to the active team, not a picker -- see this
+        # view's own docstring. Widget swapped in *before* .queryset is set --
+        # ModelChoiceField.queryset's setter pushes `self.widget.choices =
+        # self.choices` as a side effect at the moment it's assigned, and
+        # setting the queryset first (then swapping the widget after) would
+        # discard that push -- harmless for MultipleHiddenInput specifically
+        # (it renders from `value`/`initial`, not `choices`), but kept in
+        # this order anyway for consistency with the ModelMultipleChoiceField
+        # fields that *do* need it (CoachCreateEventView._scope_shared_fields'
+        # own comment has the full mechanism).
+        form.fields["teams"].widget = forms.MultipleHiddenInput()
+        form.fields["teams"].queryset = Team.objects.filter(pk=self.active_team.pk) if self.active_team is not None else Team.objects.none()
+        # News.teams is blank=True, so the auto-generated field defaults to
+        # required=False -- without this, a tampered empty submission would
+        # still save, silently becoming a club-wide post (see the analogous
+        # fix and full comment on CoachCreateEventView._scope_shared_fields'
+        # own "teams" field).
         form.fields["teams"].required = True
-        if self.active_team is not None and data is None:
-            # form.initial, not field.initial -- ModelForm.__init__ already set
-            # form.initial["teams"] = [] from the new, unsaved News instance's
-            # own (necessarily empty) m2m, and dict.get(name, field.initial)
-            # only falls back to field.initial when the key is *absent*, not
-            # merely empty, so field.initial alone silently renders unchecked.
-            form.initial["teams"] = [self.active_team.pk]
-        for field_name in ("title", "body"):
-            form.fields[field_name].widget.attrs["class"] = _INPUT_CLASSES
+        # form.initial, not field.initial -- ModelForm.__init__ already set
+        # form.initial["teams"] = [] from the new, unsaved News instance's
+        # own (necessarily empty) m2m, and dict.get(name, field.initial)
+        # only falls back to field.initial when the key is *absent*, not
+        # merely empty, so field.initial alone silently renders unchecked.
+        form.initial["teams"] = [self.active_team.pk] if self.active_team is not None else []
+        form.fields["title"].widget.attrs["class"] = _INPUT_CLASSES
+        form.fields["body"].widget.attrs["class"] = _TEXTAREA_CLASSES
         return form
+
+    def build_photo_form(self, data=None, files=None):
+        photo_form = NewsPhotoUploadForm(data, files)
+        photo_form.fields["images"].required = False
+        return photo_form
 
     def get_context_data(self, **kwargs):
         kwargs.setdefault("form", self.build_form())
+        kwargs.setdefault("photo_form", self.build_photo_form())
         return super().get_context_data(**kwargs)
 
     def post(self, request, *args, **kwargs):
@@ -665,10 +680,13 @@ class CoachCreateNewsView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
             return HttpResponseForbidden()
 
         form = self.build_form(request.POST)
-        if not form.is_valid():
-            return self.render_to_response(self.get_context_data(form=form))
+        photo_form = self.build_photo_form(request.POST, request.FILES)
+        if not form.is_valid() or not photo_form.is_valid():
+            return self.render_to_response(self.get_context_data(form=form, photo_form=photo_form))
 
         news_item = form.save()
+        for index, image in enumerate(photo_form.cleaned_data["images"]):
+            NewsPhoto.objects.create(news_item=news_item, image=image, is_main=index == 0)
         news_item.submit_for_review()
         notify_editors_of_pending_review(news_item)
 

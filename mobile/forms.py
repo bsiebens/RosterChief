@@ -10,6 +10,12 @@ from teams.models import Position, TeamMembership
 #: form so far just bakes its own classes straight into the widget.
 _INPUT_CLASSES = "h-11 w-full rounded-lg border border-stroke bg-paper px-3 text-[15px] text-ink placeholder:text-dim focus:border-ink focus:outline-none"
 
+#: Same look as _INPUT_CLASSES, sized for a multi-line body instead of a
+#: single-line value -- a fixed height (not h-11) plus vertical padding a
+#: fixed-height input doesn't need, and resize-y so a longer post isn't
+#: stuck scrolling inside a short box.
+_TEXTAREA_CLASSES = "h-40 w-full resize-y rounded-lg border border-stroke bg-paper px-3 py-2.5 text-[15px] text-ink placeholder:text-dim focus:border-ink focus:outline-none"
+
 
 class MemberProfileForm(forms.ModelForm):
     """M6 -- "Edit personal info" (design_handoff_rosterchief_platform/README.md).
