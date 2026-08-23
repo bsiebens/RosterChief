@@ -33,7 +33,14 @@ RUN apt-get update && apt-get install --no-install-recommends -y git ca-certific
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
+# uv's own bytecode-compile step has a hardcoded 60s-per-file cap, and
+# phonenumbers' generated geodata/data*.py files (large literal dicts, not
+# slow code) are known to blow past it on a slower builder even though
+# nothing's actually hung -- widen the cap rather than dropping
+# UV_COMPILE_BYTECODE entirely, which would just move that same compile cost
+# to every cold container start instead of paying it once here.
 ENV UV_COMPILE_BYTECODE=1 \
+    UV_COMPILE_BYTECODE_TIMEOUT=300 \
     UV_LINK_MODE=copy \
     UV_PYTHON_DOWNLOADS=never
 
