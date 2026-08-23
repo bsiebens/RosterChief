@@ -49,16 +49,16 @@
 
     <div class="m-card mt-3 p-4">
         <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Attendance this season" %}</div>
-        <div class="flex gap-4">
-            <div>
+        <div class="flex">
+            <div class="flex-1">
                 <div class="font-display text-2xl leading-none font-extrabold text-ok tabular-nums">{{ attendance_counts.present }}</div>
                 <div class="mt-1 font-display text-[10px] font-extrabold tracking-wide text-muted uppercase">{% trans "Present" %}</div>
             </div>
-            <div>
+            <div class="flex-1">
                 <div class="font-display text-2xl leading-none font-extrabold text-club tabular-nums">{{ attendance_counts.absent }}</div>
                 <div class="mt-1 font-display text-[10px] font-extrabold tracking-wide text-muted uppercase">{% trans "Absent" %}</div>
             </div>
-            <div>
+            <div class="flex-1">
                 <div class="font-display text-2xl leading-none font-extrabold text-dim tabular-nums">{{ attendance_counts.no_reply }}</div>
                 <div class="mt-1 font-display text-[10px] font-extrabold tracking-wide text-muted uppercase">{% trans "No reply" %}</div>
             </div>
