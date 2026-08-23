@@ -1,6 +1,7 @@
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from io import StringIO
+from types import SimpleNamespace
 
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
@@ -35,7 +36,7 @@ from .services import (
     team_no_shows,
 )
 from .services.attendance import member_attendance_counts
-from .services.calendar import add_months, month_bounds, month_grid, season_grid, week_bounds, week_grid
+from .services.calendar import add_months, agenda_groups, month_bounds, month_grid, season_grid, week_bounds, week_grid
 from .services.lineup import cancel_scheduled_publish, notify_dropout, publish_lineup, schedule_lineup_publish, selected_members_by_position, toggle_selection
 from .services.rbihf_import import RBIHFImportError, apply_plan, build_plan, extract_team_id, parse_fixtures, suggested_location, suggested_opponent
 from .services.referees import (
@@ -1806,6 +1807,53 @@ class CalendarGridTests(EventsTestBase):
 
     def test_add_months_rolls_over_the_year(self):
         self.assertEqual(add_months(date(2026, 11, 15), 2), date(2027, 1, 1))
+
+    def _item(self, day):
+        return SimpleNamespace(start=self.at(day, 12))
+
+    def test_agenda_groups_splits_into_this_week_next_week_and_later(self):
+        # 2026-08-19 is a Wednesday -- this week runs Mon 17..Sun 23, next
+        # week Mon 24..Sun 30, matching test_week_bounds_returns_monday_to_
+        # sunday above.
+        this_week_item = self._item(date(2026, 8, 21))
+        next_week_item = self._item(date(2026, 8, 27))
+        later_item = self._item(date(2026, 9, 15))
+        items = [this_week_item, next_week_item, later_item]
+
+        this_week, next_week, later_months = agenda_groups(items, today=date(2026, 8, 19))
+
+        self.assertEqual(this_week, [this_week_item])
+        self.assertEqual(next_week, [next_week_item])
+        self.assertEqual(len(later_months), 1)
+        self.assertEqual(later_months[0]["month_start"], date(2026, 9, 1))
+        self.assertEqual(later_months[0]["items"], [later_item])
+
+    def test_agenda_groups_later_items_split_across_separate_months(self):
+        september_item = self._item(date(2026, 9, 15))
+        october_item = self._item(date(2026, 10, 15))
+
+        _this_week, _next_week, later_months = agenda_groups([september_item, october_item], today=date(2026, 8, 19))
+
+        self.assertEqual([month["month_start"] for month in later_months], [date(2026, 9, 1), date(2026, 10, 1)])
+
+    def test_agenda_groups_show_past_skips_week_labels(self):
+        past_item = self._item(date(2026, 8, 1))
+
+        this_week, next_week, months = agenda_groups([past_item], show_past=True)
+
+        self.assertEqual(this_week, [])
+        self.assertEqual(next_week, [])
+        self.assertEqual(months, [{"month_start": date(2026, 8, 1), "items": [past_item]}])
+
+    def test_agenda_groups_empty_list(self):
+        self.assertEqual(agenda_groups([]), ([], [], []))
+
+    def test_agenda_groups_start_of_accessor_for_non_event_items(self):
+        row = {"event": self._item(date(2026, 8, 21))}
+
+        this_week, _next_week, _later = agenda_groups([row], start_of=lambda row: row["event"].start, today=date(2026, 8, 19))
+
+        self.assertEqual(this_week, [row])
 
     def test_week_grid_always_covers_the_full_day(self):
         monday = date(2026, 8, 17)

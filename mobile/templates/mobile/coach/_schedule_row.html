@@ -1,0 +1,13 @@
+{% load i18n %}
+<a class="flex items-center gap-3 p-3.5" href="{% if event.kind == "game" %}{% url "mobile:coach_lineup" event.pk %}{% else %}{% url "mobile:coach_attendance" event.pk %}{% endif %}">
+    <div class="w-9.5 shrink-0 text-center">
+        <div class="font-mono text-[10px] tracking-wide text-muted uppercase">{{ event.start|date:"D" }}</div>
+        <div class="font-display text-2xl leading-none font-extrabold text-ink">{{ event.start|date:"d" }}</div>
+    </div>
+    <div class="w-[3px] shrink-0 self-stretch rounded-full {% if event.kind == "game" %}bg-club{% elif event.kind == "training" %}bg-info{% else %}bg-warn{% endif %}"></div>
+    <div class="min-w-0 flex-1">
+        <div class="text-sm font-semibold text-ink">{{ event.title }}</div>
+        <div class="truncate text-xs text-muted">{{ event.start|date:"H:i" }}{% if event.location %} &middot; {{ event.location.name }}{% endif %}</div>
+    </div>
+    <span class="pill {% if event.kind == "game" %}pill-danger{% elif event.kind == "training" %}pill-info{% else %}pill-neutral{% endif %} shrink-0">{{ event.get_kind_display }}</span>
+</a>

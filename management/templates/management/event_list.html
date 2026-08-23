@@ -86,7 +86,7 @@
                 {% for month in list_months %}
                     <div class="card overflow-hidden">
                         <div class="border-b border-line bg-subhead px-4 py-2 font-display text-xs font-extrabold tracking-[.08em] text-ink uppercase">{{ month.month_start|date:"F Y" }}</div>
-                        {% for event in month.events %}{% include "management/_event_list_row.html" %}{% endfor %}
+                        {% for event in month.items %}{% include "management/_event_list_row.html" %}{% endfor %}
                     </div>
                 {% endfor %}
             </div>

@@ -5625,7 +5625,7 @@ class EventManagementTests(ManagementTestBase):
         self.assertEqual([event.title for event in response.context["list_next_week"]], ["Next week event"])
         later_months = response.context["list_months"]
         self.assertEqual(len(later_months), 1)
-        self.assertEqual([event.title for event in later_months[0]["events"]], ["Later event"])
+        self.assertEqual([event.title for event in later_months[0]["items"]], ["Later event"])
         self.assertContains(response, "This week")
         self.assertContains(response, "Next week")
         self.assertContains(response, later_event.start.strftime("%B %Y"))
@@ -5640,7 +5640,7 @@ class EventManagementTests(ManagementTestBase):
         self.assertEqual(response.context["list_this_week"], [])
         self.assertEqual(response.context["list_next_week"], [])
         self.assertEqual(len(response.context["list_months"]), 1)
-        self.assertEqual([event.title for event in response.context["list_months"][0]["events"]], ["Past event"])
+        self.assertEqual([event.title for event in response.context["list_months"][0]["items"]], ["Past event"])
         self.assertNotContains(response, "This week")
 
     def test_the_dashboard_only_shows_upcoming_events_for_managed_teams(self):

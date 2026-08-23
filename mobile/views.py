@@ -4,8 +4,6 @@ phase -- see design_handoff_rosterchief_platform/README.md -- and has no
 routes here yet.
 """
 
-import datetime
-import itertools
 import json
 
 from django.contrib.auth.mixins import LoginRequiredMixin
@@ -29,7 +27,7 @@ from club.services.sponsors import active_sponsors
 from controlpanel.messages import notify
 from events.models import Attendance, Event, Lineup, RefereeSignup
 from events.services.attendance import blocked_upcoming_events_for_member
-from events.services.calendar import week_bounds
+from events.services.calendar import agenda_groups, week_bounds
 from events.services.lineup import notify_dropout, selected_members_by_position
 from events.services.referees import RefereeAssignmentError, accept_referee_signup, decline_referee_signup
 from members.models import FamilyMembership, Member
@@ -284,10 +282,12 @@ class CalendarView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
     """M3 -- README's M3 section: a chronological agenda list (not the desktop
     week/month grid events.services.calendar was built for) grouped under
     "This week"/"Next week", then everything further out grouped by calendar
-    month (a "later_months" list of {month_start, rows}, each its own sticky
-    header) -- an unbounded agenda rather than a fixed lookahead window, since
-    a hard cutoff just hid events a member would reasonably expect to still
-    find here. No ?month= paging beyond that grouping -- there's no season
+    month via events.services.calendar.agenda_groups (also behind management.
+    views.EventListView's own "List" mode and mobile.coach_views.
+    CoachScheduleView, so all three stay behaviourally identical) -- an
+    unbounded agenda rather than a fixed lookahead window, since a hard
+    cutoff just hid events a member would reasonably expect to still find
+    here. No ?month= paging beyond that grouping -- there's no season
     browser here, just "everything upcoming, readably grouped".
 
     Always scoped to every one of ``self.managed_people`` -- unlike Home,
@@ -322,8 +322,6 @@ class CalendarView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
     def get_context_data(self, **kwargs):
         now = timezone.now()
         today = timezone.localdate()
-        _this_week_start, this_week_end = week_bounds(today)
-        next_week_end = this_week_end + datetime.timedelta(days=7)
         kind_filter = self.request.GET.get("kind")
 
         rows = []
@@ -386,22 +384,7 @@ class CalendarView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
 
         rows.sort(key=lambda row: row["event"].start)
 
-        this_week, next_week, later_rows = [], [], []
-        for row in rows:
-            event_date = timezone.localtime(row["event"].start).date()
-            if event_date <= this_week_end:
-                this_week.append(row)
-            elif event_date <= next_week_end:
-                next_week.append(row)
-            else:
-                later_rows.append(row)
-
-        # ``rows`` is already start-ordered, so a plain groupby (no sorting) is
-        # enough to split later_rows into one chronological run per month.
-        later_months = [
-            {"month_start": month_start, "rows": list(month_rows)}
-            for month_start, month_rows in itertools.groupby(later_rows, key=lambda row: timezone.localtime(row["event"].start).date().replace(day=1))
-        ]
+        this_week, next_week, later_months = agenda_groups(rows, start_of=lambda row: row["event"].start, today=today)
 
         return super().get_context_data(this_week=this_week, next_week=next_week, later_months=later_months, kind_filter=kind_filter if kind_filter in self.KIND_FILTERS else "", **kwargs)
 

@@ -16,6 +16,7 @@ Three grids, one per granularity:
 
 import calendar as _calendar
 import datetime
+import itertools
 
 from django.utils import timezone
 
@@ -53,6 +54,58 @@ def add_months(anchor: datetime.date, months: int) -> datetime.date:
     year = anchor.year + month_index // 12
     month = month_index % 12 + 1
     return datetime.date(year, month, 1)
+
+
+def agenda_groups(items, *, start_of=lambda item: item.start, show_past=False, today=None):
+    """Group already start-sorted ``items`` the way every agenda-style
+    schedule in this app presents itself: "This week"/"Next week", then
+    everything further out under its own month divider -- shared by
+    mobile.views.CalendarView (the member app's own Calendar), management.
+    views.EventListView (the desktop's "List" view), and mobile.coach_views.
+    CoachScheduleView (the coach app's "Schedule"), so the three stay
+    behaviourally identical rather than three hand-rolled copies of the same
+    grouping drifting apart over time.
+
+    ``start_of`` extracts an item's start datetime -- the default assumes a
+    bare ``Event``-like object; pass a lambda for anything else (e.g.
+    CalendarView's own rows, each a dict wrapping one).
+
+    ``show_past`` is for a caller already querying in descending order (most
+    recent first) -- "This week"/"Next week" only make sense for what's
+    ahead, so past mode skips that split and groups straight into months
+    instead, newest month first, oldest last.
+
+    Returns ``(this_week, next_week, later_months)`` -- ``later_months`` is
+    ``[{"month_start": date, "items": [...]}, ...]``; ``this_week``/
+    ``next_week`` are always ``[]`` in show_past mode, with everything
+    carried in ``later_months`` instead.
+    """
+    if not items:
+        return [], [], []
+
+    def _month_start(item):
+        return timezone.localtime(start_of(item)).date().replace(day=1)
+
+    if show_past:
+        months = [{"month_start": month_start, "items": list(month_items)} for month_start, month_items in itertools.groupby(items, key=_month_start)]
+        return [], [], months
+
+    today = today or timezone.localdate()
+    _this_week_start, this_week_end = week_bounds(today)
+    next_week_end = this_week_end + datetime.timedelta(days=7)
+
+    this_week, next_week, later = [], [], []
+    for item in items:
+        item_date = timezone.localtime(start_of(item)).date()
+        if item_date <= this_week_end:
+            this_week.append(item)
+        elif item_date <= next_week_end:
+            next_week.append(item)
+        else:
+            later.append(item)
+
+    later_months = [{"month_start": month_start, "items": list(month_items)} for month_start, month_items in itertools.groupby(later, key=_month_start)]
+    return this_week, next_week, later_months
 
 
 def _local_span(event) -> tuple[datetime.datetime, datetime.datetime]:

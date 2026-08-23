@@ -12,6 +12,7 @@ from icalendar import Calendar as ICalCalendar
 from club.models import Club, ClubMembership, DuesInvoice, MemberRequirementStatus, OnboardingRequirement, Season, Sponsor
 from events.models import Attendance, Competition, Event, EventReferee, EventSeries, Lineup, LineupSelection, Location, Opponent, RefereeSignup
 from events.services.attendance import record_check_in
+from events.services.calendar import week_bounds
 from members.models import Family, FamilyMembership, Member
 from news.models import News
 from notifications.models import Notification
@@ -850,7 +851,7 @@ class CalendarViewTests(TestCase):
     def _events_in_context(self, response):
         rows = response.context["this_week"] + response.context["next_week"]
         for month in response.context["later_months"]:
-            rows += month["rows"]
+            rows += month["items"]
         return {row["event"] for row in rows}
 
     def add_child(self, first_name="Noor"):
@@ -977,7 +978,7 @@ class CalendarViewTests(TestCase):
         self.assertEqual(len(later_months), 1)
         month_start = timezone.localtime(far_future.start).date().replace(day=1)
         self.assertEqual(later_months[0]["month_start"], month_start)
-        self.assertEqual([row["event"] for row in later_months[0]["rows"]], [far_future])
+        self.assertEqual([row["event"] for row in later_months[0]["items"]], [far_future])
         self.assertContains(response, month_start.strftime("%B %Y"))
 
     def test_further_out_events_are_split_across_separate_month_groups(self):
@@ -3127,7 +3128,9 @@ class CoachScheduleViewTests(TestCase):
 
         response = self._get()
 
-        self.assertEqual(response.context["events"], [])
+        self.assertEqual(response.context["this_week"], [])
+        self.assertEqual(response.context["next_week"], [])
+        self.assertEqual(response.context["later_months"], [])
 
     def test_no_staff_assignment_shows_a_graceful_empty_state(self):
         bare_user = User.objects.create_user(email="new@example.com", password="pw-secret-123")
@@ -3137,6 +3140,23 @@ class CoachScheduleViewTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Not staffing a team yet")
+
+    def test_events_are_grouped_into_this_week_next_week_and_month_dividers(self):
+        _this_week_start, this_week_end = week_bounds(timezone.localdate())
+        this_week_event = Event.objects.create(club=self.club, title="This week practice", kind=Event.EventKind.TRAINING, start=timezone.make_aware(datetime.datetime.combine(this_week_end, datetime.time(18, 0))))
+        this_week_event.teams.add(self.team)
+        far_future = Event.objects.create(club=self.club, title="Far future practice", kind=Event.EventKind.TRAINING, start=timezone.now() + datetime.timedelta(days=60))
+        far_future.teams.add(self.team)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertEqual([event.title for event in response.context["this_week"]], ["This week practice"])
+        later_months = response.context["later_months"]
+        self.assertEqual(len(later_months), 1)
+        self.assertEqual([event.title for event in later_months[0]["items"]], ["Far future practice"])
+        self.assertContains(response, "This week")
+        self.assertContains(response, far_future.start.strftime("%B %Y"))
 
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])

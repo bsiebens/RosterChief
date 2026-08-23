@@ -5,7 +5,7 @@
     M3 -- design_handoff_rosterchief_platform/README.md's M3 section: a full-
     width chronological agenda, grouped under "This week"/"Next week", then
     everything further out grouped by calendar month (see CalendarView's own
-    docstring -- later_months is a list of {month_start, rows}). No person
+    docstring -- later_months is a list of {month_start, items}). No person
     switcher and no club-wide toggle here -- always every event
     self.managed_people is invited to, plus (merged into the same
     chronological list, each its own accent colour/look):
@@ -90,7 +90,7 @@
                 <div>
                     <div class="bg-paper px-4 py-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{{ month.month_start|date:"F Y" }}</div>
                     <div class="flex flex-col gap-px bg-line">
-                        {% for row in month.rows %}
+                        {% for row in month.items %}
                             {% if row.blocked_requirements %}{% include "mobile/_calendar_blocked_row.html" %}{% elif row.referee_signup %}{% include "mobile/_calendar_referee_row.html" %}{% else %}{% include "mobile/_calendar_row.html" %}{% endif %}
                         {% endfor %}
                     </div>

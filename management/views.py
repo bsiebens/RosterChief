@@ -1,4 +1,3 @@
-import itertools
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -38,7 +37,7 @@ from controlpanel.mixins import RedirectOnInvalidMixin
 from controlpanel.services.statistics import club_attention, club_charts, club_statistics, unrostered_members
 from events.models import Attendance, Event, EventReferee, EventSeries, Location, Opponent, RefereeSignup
 from events.services.attendance import member_attendance_counts, member_attendance_sparkline, player_attendance_rankings, players_who_missed_recent_practices, team_attendance_rate, team_no_shows
-from events.services.calendar import add_months, month_bounds, month_grid, season_grid, week_bounds, week_grid
+from events.services.calendar import add_months, agenda_groups, month_bounds, month_grid, season_grid, week_bounds, week_grid
 from events.services.competitions import CompetitionFetchError, fetch_game_info
 from events.services.rbihf_import import RBIHFImportError, apply_plan, build_plan, extract_team_id, fetch_html
 from events.services.recurrence import cancel_occurrence, detach_occurrence, generate_occurrences, propagate_series
@@ -2473,36 +2472,15 @@ class EventListView(ClubStaffRequiredMixin, ListView):
         return grid, calendar_nav
 
     def _list_groups(self, events, show_past):
-        """The same This week/Next week/by-month agenda grouping mobile.views.
-        CalendarView uses (see that view's own docstring for the algorithm) --
-        applied to whichever page of `events` is actually being shown, so
-        pagination and grouping don't fight each other. Past mode (show_past=1,
-        already descending) skips the this/next-week special-casing -- those
-        labels only make sense for what's ahead -- and just groups straight
-        into months, most recent first."""
-        if not events:
-            return [], [], []
-
-        if show_past:
-            months = [{"month_start": month_start, "events": list(month_events)} for month_start, month_events in itertools.groupby(events, key=lambda event: timezone.localtime(event.start).date().replace(day=1))]
-            return [], [], months
-
-        today = timezone.localdate()
-        _this_week_start, this_week_end = week_bounds(today)
-        next_week_end = this_week_end + timedelta(days=7)
-
-        this_week, next_week, later = [], [], []
-        for event in events:
-            event_date = timezone.localtime(event.start).date()
-            if event_date <= this_week_end:
-                this_week.append(event)
-            elif event_date <= next_week_end:
-                next_week.append(event)
-            else:
-                later.append(event)
-
-        later_months = [{"month_start": month_start, "events": list(month_events)} for month_start, month_events in itertools.groupby(later, key=lambda event: timezone.localtime(event.start).date().replace(day=1))]
-        return this_week, next_week, later_months
+        """The shared This week/Next week/by-month agenda grouping (events.
+        services.calendar.agenda_groups, also behind mobile.views.CalendarView
+        and mobile.coach_views.CoachScheduleView) -- applied to whichever page
+        of `events` is actually being shown, so pagination and grouping don't
+        fight each other. Past mode (show_past=1, already descending) skips
+        the this/next-week special-casing -- those labels only make sense for
+        what's ahead -- and just groups straight into months, most recent
+        first."""
+        return agenda_groups(events, show_past=show_past)
 
     def get_context_data(self, **kwargs):
         club, user = self.request.club, self.request.user

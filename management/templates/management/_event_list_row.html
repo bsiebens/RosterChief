@@ -1,6 +1,6 @@
 {% load i18n lucide ui %}
 <div class="flex items-center gap-3 px-4 py-3 {% if not forloop.last %}border-b border-line{% endif %}">
-    <span class="badge badge-sm shrink-0 {% if event.kind == "game" %}badge-error{% elif event.kind == "training" %}badge-info{% elif event.kind == "tournament" %}badge-warning{% elif event.kind == "meeting" %}badge-neutral{% elif event.kind == "social" %}border-violet/30 bg-violet/10 text-violet{% else %}badge-outline{% endif %}">
+    <span class="badge badge-sm w-24 shrink-0 justify-center {% if event.kind == "game" %}badge-error{% elif event.kind == "training" %}badge-info{% elif event.kind == "tournament" %}badge-warning{% elif event.kind == "meeting" %}badge-neutral{% elif event.kind == "social" %}border-violet/30 bg-violet/10 text-violet{% else %}badge-outline{% endif %}">
         {{ event.get_kind_display }}
     </span>
     <div class="min-w-0 flex-1">

@@ -26,6 +26,7 @@ from controlpanel.messages import notify
 from events.models import Attendance, Event, EventSeries, Lineup, LineupSelection, Location, Opponent
 from events.services import generate_occurrences
 from events.services.attendance import member_attendance_counts, record_check_in
+from events.services.calendar import agenda_groups
 from events.services.lineup import UNAVAILABLE_STATUSES, cancel_scheduled_publish, publish_lineup, schedule_lineup_publish, toggle_selection
 from events.tasks import notify_new_event
 from management.forms import EventForm, EventSeriesForm, LocationForm, NewsForm, OpponentForm
@@ -1104,15 +1105,19 @@ class CoachScheduleView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
     straight into the coach-relevant action -- Bench attendance for a
     practice, the Line-up for a game -- rather than mobile:event_detail (the
     Member-shell RSVP page a coach browsing their own team's schedule has no
-    use for)."""
+    use for). Grouped into This week/Next week/by-month dividers via events.
+    services.calendar.agenda_groups -- the same shared grouping mobile.views.
+    CalendarView (the member app's own Calendar) and management.views.
+    EventListView's "List" mode use, so all three read the same way."""
 
     template_name = "mobile/coach/schedule.html"
     screen_title = _("Schedule")
     active_tab = "coach_schedule"
 
     def get_context_data(self, **kwargs):
-        events = []
+        this_week, next_week, later_months = [], [], []
         if self.active_team is not None:
             events = list(Event.objects.filter(teams=self.active_team, cancelled=False, start__gte=timezone.now()).order_by("start"))
+            this_week, next_week, later_months = agenda_groups(events)
 
-        return super().get_context_data(events=events, **kwargs)
+        return super().get_context_data(this_week=this_week, next_week=next_week, later_months=later_months, **kwargs)
