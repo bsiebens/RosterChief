@@ -74,7 +74,16 @@ services:
     # here, dispatched by `beat` below over the same Redis `web` uses as a cache — see
     # rosterchief/settings.py's "Task queue (Celery)" section. Several of these are safe to
     # scale; `beat` is not (see its own comment).
-    command: ["celery", "-A", "rosterchief", "worker", "--loglevel=info", "--concurrency=2"]
+    #
+    # --pool=solo, not the prefork default: prefork forks --concurrency child processes, and
+    # Python's own reference counting touches nearly every object's refcount within the first
+    # few operations, defeating fork's copy-on-write sharing in practice -- each child ends up
+    # paying close to the *full* Django-import cost again, not a fraction of it. With 46
+    # installed apps that base import is substantial, and this app's actual job volume (daily/
+    # monthly schedules, occasional on-demand notifications) never needed the parallelism
+    # --concurrency bought anyway. solo runs everything in one process, sequentially -- see
+    # DEPLOYMENT.md's "Sizing the server" for the measurement that motivated this.
+    command: ["celery", "-A", "rosterchief", "worker", "--loglevel=info", "--pool=solo"]
     volumes:
       - media_data:/app/media
     depends_on:

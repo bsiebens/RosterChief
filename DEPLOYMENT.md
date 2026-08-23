@@ -546,14 +546,23 @@ via copy-on-write instead of each worker importing Django independently), plus t
 Postgres rows to come in lower than above — not yet re-measured, so treat the table as the
 shape of where memory goes rather than exact numbers on the current config.
 
-The table also predates `worker` and `beat` (see "Scheduled jobs"): each is one more full
-Django process, not re-measured yet either, but expect each to land in the same range as one
-gunicorn worker above (~50–60 MB) since it's the same app import cost with none of gunicorn's
-own overhead. `beat` additionally has essentially nothing to do between firing its five daily
-tasks, so it's the cheapest process in the stack to run.
+The table also predates `worker` and `beat` (see "Scheduled jobs") — and the ~50–60 MB guessed
+below for them was wrong, not just unmeasured: on a real 1 GB box, `worker` alone measured
+**~740 MB** with the prefork pool's default `--concurrency=2`. Prefork forks child processes,
+and Python's own reference counting touches nearly every object's refcount within the first few
+operations, defeating fork's copy-on-write sharing in practice — each child ends up paying
+close to the *full* Django-import cost again, not a fraction of it, and that base cost is a lot
+bigger than gunicorn's own 54 MB now that there are 46 installed apps. `compose.yaml`'s `worker`
+now runs `--pool=solo` instead (single process, no forking, tasks run sequentially) — this
+app's actual job volume never needed prefork's parallelism, so nothing is lost by removing it,
+and it's the single biggest lever available for `worker`'s own footprint. `beat` doesn't fork at
+all regardless of pool, so it was never the multiplied one; it still has essentially nothing to
+do between firing its five daily tasks, making it the cheapest process in the stack.
 
-2 GB would run it. 4 GB is the recommendation for three reasons, all of which are the kind of
-thing that bites at the worst moment:
+**1 GB is not enough**, even after `--pool=solo` — `worker` alone at ~80% of a 1 GB box leaves
+nothing for `web`/`beat`/Postgres/Redis/Caddy, which is exactly what turns "starting one more
+service" into the whole host thrashing into swap. 2 GB would run it. 4 GB is the recommendation
+for three further reasons, all of which are the kind of thing that bites at the worst moment:
 
 1. **`docker compose build` was the memory spike, not serving** — npm, uv and `collectstatic`
    together are enough to OOM a 2 GB box that's also running Postgres. This is why the image is

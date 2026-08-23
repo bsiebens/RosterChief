@@ -48,8 +48,8 @@ services:
     build: .
     restart: unless-stopped
     env_file: .env.production
-    # See compose.yaml for what runs here and why.
-    command: ["celery", "-A", "rosterchief", "worker", "--loglevel=info", "--concurrency=2"]
+    # See compose.yaml for what runs here and why, including --pool=solo.
+    command: ["celery", "-A", "rosterchief", "worker", "--loglevel=info", "--pool=solo"]
     volumes:
       - media_data:/app/media
     depends_on:
