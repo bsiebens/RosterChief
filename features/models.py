@@ -153,6 +153,56 @@ class Maintenance(UUIDModel):
         return maintenance
 
 
+class JobToggle(UUIDModel):
+    """Per-job on/off switch for the scheduled platform jobs in features/jobs.py's
+    JOB_REGISTRY, so the control panel can pause one specific job (a runaway task, one
+    under investigation, ...) without touching Celery Beat's schedule or reaching for
+    the platform-wide Maintenance lock, which stands down every job at once.
+
+    One row per job that's ever been toggled off; a job with no row here is enabled --
+    same "absence means default" shape as Maintenance's own singleton, but keyed instead
+    of a single row, since there's one of these per registry entry rather than one for
+    the whole platform. Cached the same write-through way for the same reason: a flip
+    made in the control panel has to reach every Celery worker, not just the process
+    that made it.
+    """
+
+    CACHE_KEY = "job_toggle:%s"
+    CACHE_SECONDS = 10
+
+    name = models.CharField(_("job name"), max_length=255, unique=True, help_text=_("Dotted Celery task name, matching a features.jobs.JOB_REGISTRY key."))
+    enabled = models.BooleanField(_("enabled"), default=True)
+
+    class Meta:
+        verbose_name = _("job toggle")
+        verbose_name_plural = _("job toggles")
+
+    def __str__(self):
+        return f"{self.name} ({'on' if self.enabled else 'off'})"
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        get_cache().set(self.CACHE_KEY % self.name, self.enabled, self.CACHE_SECONDS)
+
+    @classmethod
+    def is_enabled(cls, name: str) -> bool:
+        cache_key = cls.CACHE_KEY % name
+        cached = get_cache().get(cache_key)
+        if cached is not None:
+            return cached
+
+        toggle = cls.objects.filter(name=name).first()
+        enabled = toggle is None or toggle.enabled
+        get_cache().set(cache_key, enabled, cls.CACHE_SECONDS)
+
+        return enabled
+
+    @classmethod
+    def set_enabled(cls, name: str, enabled: bool) -> JobToggle:
+        toggle, _created = cls.objects.update_or_create(name=name, defaults={"enabled": enabled})
+        return toggle
+
+
 class JobRun(UUIDModel):
     """One execution of a scheduled platform job -- see features/jobs.py for the registry
     of what each job is, and rosterchief/settings.CELERY_BEAT_SCHEDULE for when it runs.

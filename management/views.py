@@ -1861,6 +1861,23 @@ class PositionUpdateView(ClubAdminRequiredMixin, UpdateView):
         return super().get_context_data(update_view=True, **kwargs)
 
 
+class PositionDeleteView(ClubAdminRequiredMixin, View):
+    def post(self, request, pk):
+        position = get_object_or_404(Position.objects.filter(club=request.club), pk=pk)
+        name = str(position)
+        try:
+            position.delete()
+        except ProtectedError:
+            title = _("Can't delete")
+            body = _("“%(position)s” is still assigned on a team roster, and can't be deleted.") % {"position": name}
+            notify(request, f"e|{title}|{body}")
+            return redirect("management:position_list")
+
+        body = _("“%(position)s” has been deleted.") % {"position": name}
+        notify(request, f"w|{_('Position deleted')}|{body}")
+        return redirect("management:position_list")
+
+
 class RefereeLevelListView(ClubStaffRequiredMixin, ListView):
     """Visible to any staff, same reasoning as PositionListView; creating/
     editing a level is admin-only."""
@@ -1913,6 +1930,23 @@ class RefereeLevelUpdateView(MemberAdminRequiredMixin, UpdateView):
 
     def get_context_data(self, **kwargs):
         return super().get_context_data(update_view=True, **kwargs)
+
+
+class RefereeLevelDeleteView(MemberAdminRequiredMixin, View):
+    def post(self, request, pk):
+        level = get_object_or_404(RefereeLevel.objects.filter(club=request.club), pk=pk)
+        name = str(level)
+        try:
+            level.delete()
+        except ProtectedError:
+            title = _("Can't delete")
+            body = _("“%(level)s” is still held by a referee or inherited by another level, and can't be deleted.") % {"level": name}
+            notify(request, f"e|{title}|{body}")
+            return redirect("management:referee_level_list")
+
+        body = _("“%(level)s” has been deleted.") % {"level": name}
+        notify(request, f"w|{_('Referee level deleted')}|{body}")
+        return redirect("management:referee_level_list")
 
 
 class RefereeListView(ClubStaffRequiredMixin, ListView):

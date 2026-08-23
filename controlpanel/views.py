@@ -2,7 +2,7 @@ from contextlib import contextmanager
 
 from django.contrib.auth import get_user_model
 from django.db.models import Count
-from django.http import HttpResponse
+from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse
 from django.utils import timezone
@@ -19,7 +19,8 @@ from billing.services.invoices import invoice_pdf, issue_invoice
 from billing.services.plans import delete_plan, plan_deletion_impact
 from club.models import Club, ClubRole
 from events.models import Competition, Location
-from features.models import Maintenance
+from features.jobs import JOB_REGISTRY
+from features.models import JobToggle, Maintenance
 
 from .forms import ClubAdminForm, ClubForm, CompetitionForm, DuePaymentForm, FlagForm, HomeLocationForm, MaintenanceForm, OpenPeriodForm, PlanForm, PlanPriceForm, PlatformAdminForm, SubscriptionForm, TrialForm
 from .messages import notify
@@ -76,14 +77,36 @@ class DashboardView(PlatformStaffRequiredMixin, TemplateView):
 
 class JobsView(PlatformStaffRequiredMixin, TemplateView):
     """Status and recent history of the scheduled platform jobs -- see features/jobs.py for
-    the registry and features/models.JobRun for what a Celery task run writes. Monitoring
-    only, deliberately: these run on Celery Beat's own schedule (rosterchief/settings.py),
-    not on demand from here."""
+    the registry and features/models.JobRun for what a Celery task run writes. These still
+    run on Celery Beat's own schedule (rosterchief/settings.py) -- there is no "run now"
+    here -- but each one can be paused/resumed individually via JobToggleView below, without
+    reaching for the platform-wide Maintenance lock."""
 
     template_name = "controlpanel/jobs.html"
 
     def get_context_data(self, **kwargs):
         return super().get_context_data(nav="jobs", jobs=job_overview(), **kwargs)
+
+
+class JobToggleView(PlatformStaffRequiredMixin, View):
+    """Pause or resume one scheduled job -- see features.models.JobToggle. `name` is the
+    job's dotted Celery task name (a features.jobs.JOB_REGISTRY key), not a database id: a
+    toggle row only exists once a job has actually been flipped off at least once."""
+
+    def post(self, request, name):
+        if name not in JOB_REGISTRY:
+            raise Http404
+
+        enabled = not JobToggle.is_enabled(name)
+        JobToggle.set_enabled(name, enabled)
+
+        label = JOB_REGISTRY[name]["label"]
+        if enabled:
+            notify(request, f"s|Job resumed|“{label}” will run on its schedule again.")
+        else:
+            notify(request, f"w|Job paused|“{label}” will stand down until resumed.")
+
+        return redirect("controlpanel:jobs")
 
 
 class ClubListView(PlatformStaffRequiredMixin, ListView):

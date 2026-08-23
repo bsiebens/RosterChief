@@ -34,12 +34,13 @@
                 <a class="nav-subitem {% if nav == 'group_list' %}active{% endif %}" href="{% url 'management:group_list' %}">{% trans "Groups" %}</a>
                 {% comment %}
                     Placeholder -- nothing else is built yet (see ARCHITECTURE.md §5.8 and
-                    management.views.EvaluationsComingSoonView). Deliberately not behind a
-                    waffle flag like Forms below -- this is a standing "not built yet"
-                    reminder, so it stays visible rather than disappearing until someone
-                    remembers to flip a flag on.
+                    management.views.EvaluationsComingSoonView). Gated on forms_enabled,
+                    same as Forms below: the design (ARCHITECTURE.md §5.8) reuses formbuilder
+                    underneath, so a club without that flag shouldn't see it either.
                 {% endcomment %}
-                <a class="nav-subitem flex items-center gap-1.5 {% if nav == 'evaluations' %}active{% endif %}" href="{% url 'management:evaluations' %}">{% trans "Evaluations" %} <span class="badge badge-neutral badge-xs">{% trans "Soon" %}</span></a>
+                {% if forms_enabled %}
+                    <a class="nav-subitem flex items-center gap-1.5 {% if nav == 'evaluations' %}active{% endif %}" href="{% url 'management:evaluations' %}">{% trans "Evaluations" %} <span class="badge badge-neutral badge-xs">{% trans "Soon" %}</span></a>
+                {% endif %}
             {% endif %}
         </div>
     {% endif %}

@@ -475,7 +475,7 @@
        rounded overlap. */
 
     .coach-header {
-        padding: max(env(safe-area-inset-top), 14px) 16px 14px;
+        padding: max(env(safe-area-inset-top), 14px) 16px 22px;
         background: var(--color-ink);
         color: #fff;
         flex-shrink: 0;

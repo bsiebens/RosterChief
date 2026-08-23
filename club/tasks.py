@@ -13,7 +13,7 @@ from django.utils import timezone
 
 from club.models import Club
 from club.services.seasons import generate_seasons as generate_seasons_for_club
-from features.models import Maintenance
+from features.models import JobToggle, Maintenance
 
 #: How far ahead to generate, matching the management command's own default.
 YEARS_AHEAD = 2
@@ -23,6 +23,8 @@ YEARS_AHEAD = 2
 def generate_seasons():
     if Maintenance.is_on():
         raise RuntimeError("Platform is in maintenance mode; this job stood down.")
+    if not JobToggle.is_enabled("club.tasks.generate_seasons"):
+        raise RuntimeError("This job is disabled in the control panel.")
 
     until = timezone.localdate() + relativedelta(years=YEARS_AHEAD)
     clubs = Club.objects.active()

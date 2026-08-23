@@ -13,7 +13,7 @@ from waffle import flag_is_active, get_waffle_flag_model
 from club.models import Club
 
 from .jobs import JOB_REGISTRY
-from .models import JobRun, Maintenance
+from .models import JobRun, JobToggle, Maintenance
 
 Flag = get_waffle_flag_model()
 User = get_user_model()
@@ -322,3 +322,34 @@ class JobRunTests(TestCase):
         self.untracked_task.apply()
 
         self.assertFalse(JobRun.objects.filter(name="features.tests.untracked").exists())
+
+
+class JobToggleTests(TestCase):
+    """Per-job pause/resume switch -- see features.models.JobToggle and its use in
+    events/billing/club's scheduled tasks (each checks JobToggle.is_enabled(name)
+    right alongside the existing Maintenance.is_on() gate)."""
+
+    def setUp(self):
+        # Same reasoning as MaintenanceModeTests -- the toggle's cache isn't
+        # rolled back with the test transaction.
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def test_a_job_with_no_row_is_enabled_by_default(self):
+        self.assertTrue(JobToggle.is_enabled("events.tasks.extend_event_series"))
+
+    def test_disabling_a_job(self):
+        JobToggle.set_enabled("events.tasks.extend_event_series", False)
+
+        self.assertFalse(JobToggle.is_enabled("events.tasks.extend_event_series"))
+
+    def test_re_enabling_a_job(self):
+        JobToggle.set_enabled("events.tasks.extend_event_series", False)
+        JobToggle.set_enabled("events.tasks.extend_event_series", True)
+
+        self.assertTrue(JobToggle.is_enabled("events.tasks.extend_event_series"))
+
+    def test_toggling_one_job_does_not_affect_another(self):
+        JobToggle.set_enabled("events.tasks.extend_event_series", False)
+
+        self.assertTrue(JobToggle.is_enabled("events.tasks.send_deadline_reminders"))

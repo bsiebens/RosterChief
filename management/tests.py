@@ -1262,6 +1262,39 @@ class PositionManagementTests(ManagementTestBase):
         self.assertFalse(Position.objects.filter(club=self.club, name="Bad").exists())
         self.assertFormError(response.context["form"], "management_position", "A management position must also be a staff position.")
 
+    def test_deleting_an_unused_position(self):
+        position = Position.objects.create(club=self.club, name="Physio", short_name="PH")
+
+        response = self.club_post("position_delete", {}, position.pk)
+
+        self.assertRedirects(response, reverse("management:position_list"))
+        self.assertFalse(Position.objects.filter(pk=position.pk).exists())
+
+    def test_deleting_a_position_still_on_a_roster_is_refused(self):
+        team = Team.objects.create(club=self.club, name="First Team", short_name="1st")
+        member = Member.objects.create(first_name="Roster", last_name="Player")
+        position = Position.objects.create(club=self.club, name="Goalkeeper", short_name="GK")
+        TeamMembership.objects.create(team=team, member=member, season=self.season, position=position)
+
+        response = self.club_post("position_delete", {}, position.pk)
+
+        self.assertRedirects(response, reverse("management:position_list"))
+        self.assertTrue(Position.objects.filter(pk=position.pk).exists())
+
+    def test_deleting_a_position_is_admin_only(self):
+        position = Position.objects.create(club=self.club, name="Physio", short_name="PH")
+        coach_user = User.objects.create_user(email="coach-position-delete@example.com", password="pw-secret-123")
+        coach_member = Member.objects.create(user=coach_user, first_name="Cara", last_name="Coach")
+        team = Team.objects.create(club=self.club, name="Delete Test Team", short_name="DTT")
+        coach_position = Position.objects.create(club=self.club, name="Coach", short_name="C", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=team, member=coach_member, season=self.season, position=coach_position)
+        self.client.force_login(coach_user)
+
+        response = self.club_post("position_delete", {}, position.pk)
+
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(Position.objects.filter(pk=position.pk).exists())
+
 
 class RefereeLevelManagementTests(ManagementTestBase):
     """Admin-managed referee qualification tiers -- see
@@ -1362,6 +1395,46 @@ class RefereeLevelManagementTests(ManagementTestBase):
 
         self.assertContains(response, "Regional")
         self.assertContains(response, "everything")
+
+    def test_deleting_an_unused_level(self):
+        level = RefereeLevel.objects.create(club=self.club, name="Regional")
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("referee_level_delete", {}, level.pk)
+
+        self.assertRedirects(response, reverse("management:referee_level_list"))
+        self.assertFalse(RefereeLevel.objects.filter(pk=level.pk).exists())
+
+    def test_deleting_a_level_held_by_a_referee_is_refused(self):
+        level = RefereeLevel.objects.create(club=self.club, name="Regional")
+        member = Member.objects.create(first_name="Ref", last_name="Eree")
+        ClubMembership.objects.create(club=self.club, member=member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        RefereeProfile.objects.create(member=member, level=level, valid_until=timezone.localdate() + datetime.timedelta(days=30))
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("referee_level_delete", {}, level.pk)
+
+        self.assertRedirects(response, reverse("management:referee_level_list"))
+        self.assertTrue(RefereeLevel.objects.filter(pk=level.pk).exists())
+
+    def test_deleting_a_level_inherited_by_another_is_refused(self):
+        regional = RefereeLevel.objects.create(club=self.club, name="Regional")
+        RefereeLevel.objects.create(club=self.club, name="National", inherits_from=regional)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("referee_level_delete", {}, regional.pk)
+
+        self.assertRedirects(response, reverse("management:referee_level_list"))
+        self.assertTrue(RefereeLevel.objects.filter(pk=regional.pk).exists())
+
+    def test_deleting_a_level_is_admin_only(self):
+        level = RefereeLevel.objects.create(club=self.club, name="Regional")
+        self.client.force_login(self.make_non_admin_coach())
+
+        response = self.club_post("referee_level_delete", {}, level.pk)
+
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(RefereeLevel.objects.filter(pk=level.pk).exists())
 
 
 class RefereeListViewTests(ManagementTestBase):
@@ -6762,7 +6835,20 @@ class EvaluationsComingSoonViewTests(ManagementTestBase):
 
         self.assertEqual(response.status_code, 403)
 
-    def test_nav_shows_the_placeholder_unconditionally_no_flag_needed(self):
+    def test_nav_hides_the_placeholder_when_the_forms_flag_is_off(self):
+        # Evaluations is designed to reuse formbuilder underneath (ARCHITECTURE.md
+        # §5.8), so its nav entry is gated on that same flag, like Forms itself.
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("member_list")
+
+        self.assertNotContains(response, "Evaluations")
+
+    def test_nav_shows_the_placeholder_once_the_forms_flag_is_active(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
+        flag = get_waffle_flag_model().objects.create(name="formbuilder")
+        flag.clubs.add(self.club)
         self.client.force_login(self.admin_user)
 
         response = self.club_get("member_list")

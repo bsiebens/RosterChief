@@ -1,5 +1,5 @@
 {% extends "management/base.html" %}
-{% load i18n lucide %}
+{% load i18n lucide ui %}
 
 {% block heading %}{% trans "Positions" %}{% endblock heading %}
 
@@ -40,7 +40,10 @@
                         </td>
                         <td class="text-right">
                             {% if is_club_admin %}
-                                <a class="btn btn-outline btn-sm gap-2" href="{% url 'management:position_update' position.pk %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</a>
+                                <div class="flex justify-end gap-1">
+                                    <a class="btn btn-outline btn-sm gap-2" href="{% url 'management:position_update' position.pk %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</a>
+                                    <button class="btn btn-sm btn-outline btn-error" type="button" onclick="document.getElementById('{{ position.pk|dom_id:"position_delete_modal" }}').showModal()" aria-label="{% trans 'Delete' %}">{% lucide "trash-2" size=14 %}</button>
+                                </div>
                             {% endif %}
                         </td>
                     </tr>
@@ -52,4 +55,14 @@
             </tbody>
         </table>
     </div>
+
+    {% if is_club_admin %}
+        {% trans "Delete position" as delete_position_title %}
+        {% trans "Delete" as delete_label %}
+        {% for position in positions %}
+            {% url 'management:position_delete' position.pk as position_delete_url %}
+            {% blocktrans with name=position.name asvar delete_position_body %}Delete “{{ name }}”? Positions still assigned on a team roster can't be deleted. This cannot be undone.{% endblocktrans %}
+            {% include "controlpanel/_confirm_modal.html" with modal_id=position.pk|dom_id:"position_delete_modal" title=delete_position_title body=delete_position_body action_url=position_delete_url submit_label=delete_label %}
+        {% endfor %}
+    {% endif %}
 {% endblock panel %}

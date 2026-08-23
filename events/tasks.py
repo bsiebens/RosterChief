@@ -12,7 +12,7 @@ from django.utils.translation import gettext as _
 from events.models import Attendance, Event, EventSeries, Lineup
 from events.services import generate_occurrences, horizon
 from events.services.lineup import publish_lineup
-from features.models import Maintenance
+from features.models import JobToggle, Maintenance
 from members.models import Member
 from notifications.services import notify_members
 
@@ -28,6 +28,8 @@ def extend_event_series():
         # how a rolling horizon quietly runs dry. Raising here is what turns it into a
         # Failure on the control panel's Jobs tab instead of nothing happening at all.
         raise RuntimeError("Platform is in maintenance mode; this job stood down.")
+    if not JobToggle.is_enabled("events.tasks.extend_event_series"):
+        raise RuntimeError("This job is disabled in the control panel.")
 
     until = horizon()
     total = 0
@@ -85,6 +87,8 @@ def send_deadline_reminders():
     """
     if Maintenance.is_on():
         raise RuntimeError("Platform is in maintenance mode; this job stood down.")
+    if not JobToggle.is_enabled("events.tasks.send_deadline_reminders"):
+        raise RuntimeError("This job is disabled in the control panel.")
 
     now = timezone.now()
     events_reminded = 0
@@ -127,6 +131,8 @@ def publish_scheduled_lineups():
     to it, not up to a day late."""
     if Maintenance.is_on():
         raise RuntimeError("Platform is in maintenance mode; this job stood down.")
+    if not JobToggle.is_enabled("events.tasks.publish_scheduled_lineups"):
+        raise RuntimeError("This job is disabled in the control panel.")
 
     due = Lineup.objects.filter(published_at__isnull=True, scheduled_publish_at__isnull=False, scheduled_publish_at__lte=timezone.now())
     count = 0

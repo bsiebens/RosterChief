@@ -22,7 +22,7 @@ from billing.services import BillingError
 from billing.services.dues import record_payment, start_trial, subscribe, waive
 from club.models import Club, ClubMembership, ClubRole, Season
 from events.models import Attendance, Competition, Event, Location
-from features.models import Maintenance
+from features.models import JobToggle, Maintenance
 from members.models import Member
 from shop.models import Order
 from teams.models import Position, StaffAssignment, Team, TeamMembership
@@ -329,6 +329,61 @@ class ClubHomeLocationTests(ControlPanelTestBase):
 
         self.assertRedirects(response, reverse("controlpanel:club_detail", args=[self.club.pk]))
         self.assertFalse(Location.objects.filter(club=self.club, is_home=True).exists())
+
+
+class JobToggleViewTests(ControlPanelTestBase):
+    """Pausing/resuming one scheduled platform job -- see controlpanel.views.
+    JobToggleView and features.models.JobToggle."""
+
+    JOB_NAME = "events.tasks.extend_event_series"
+
+    def setUp(self):
+        super().setUp()
+        # JobToggle's cache isn't rolled back with the test transaction.
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def toggle(self, name=JOB_NAME):
+        return self.client.post(reverse("controlpanel:job_toggle", args=[name]))
+
+    def test_a_job_starts_enabled(self):
+        response = self.client.get(reverse("controlpanel:jobs"))
+
+        self.assertContains(response, "Pause job")
+
+    def test_pausing_a_job(self):
+        response = self.toggle()
+
+        self.assertRedirects(response, reverse("controlpanel:jobs"))
+        self.assertFalse(JobToggle.is_enabled(self.JOB_NAME))
+
+    def test_resuming_a_paused_job(self):
+        self.toggle()
+
+        self.toggle()
+
+        self.assertTrue(JobToggle.is_enabled(self.JOB_NAME))
+
+    def test_the_jobs_page_reflects_the_paused_state(self):
+        self.toggle()
+
+        response = self.client.get(reverse("controlpanel:jobs"))
+
+        self.assertContains(response, "paused")
+        self.assertContains(response, "Resume job")
+
+    def test_an_unknown_job_name_is_a_404(self):
+        response = self.toggle(name="not.a.real.job")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_a_non_staff_user_cannot_toggle_a_job(self):
+        self.client.force_login(User.objects.create_user(email="plain-jobs@example.com", password="pw-secret-123"))
+
+        response = self.toggle()
+
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(JobToggle.is_enabled(self.JOB_NAME))
 
 
 class StatisticsTests(TestCase):

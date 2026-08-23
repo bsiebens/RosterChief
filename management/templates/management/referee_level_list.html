@@ -1,5 +1,5 @@
 {% extends "management/base.html" %}
-{% load i18n lucide %}
+{% load i18n lucide ui %}
 
 {% block heading %}{% trans "Referee levels" %}{% endblock heading %}
 {% block topbar_context %}<span class="text-sm text-muted">{% trans "Which teams' home games each level qualifies a referee for." %}</span>{% endblock topbar_context %}
@@ -44,7 +44,10 @@
                         </td>
                         <td class="text-right">
                             {% if is_club_admin %}
-                                <a class="btn btn-outline btn-sm gap-2" href="{% url 'management:referee_level_update' level.pk %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</a>
+                                <div class="flex justify-end gap-1">
+                                    <a class="btn btn-outline btn-sm gap-2" href="{% url 'management:referee_level_update' level.pk %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</a>
+                                    <button class="btn btn-sm btn-outline btn-error" type="button" onclick="document.getElementById('{{ level.pk|dom_id:"referee_level_delete_modal" }}').showModal()" aria-label="{% trans 'Delete' %}">{% lucide "trash-2" size=14 %}</button>
+                                </div>
                             {% endif %}
                         </td>
                     </tr>
@@ -56,4 +59,14 @@
             </tbody>
         </table>
     </div>
+
+    {% if is_club_admin %}
+        {% trans "Delete referee level" as delete_level_title %}
+        {% trans "Delete" as delete_label %}
+        {% for level in levels %}
+            {% url 'management:referee_level_delete' level.pk as level_delete_url %}
+            {% blocktrans with name=level.name asvar delete_level_body %}Delete “{{ name }}”? Levels still held by a referee or inherited by another level can't be deleted. This cannot be undone.{% endblocktrans %}
+            {% include "controlpanel/_confirm_modal.html" with modal_id=level.pk|dom_id:"referee_level_delete_modal" title=delete_level_title body=delete_level_body action_url=level_delete_url submit_label=delete_label %}
+        {% endfor %}
+    {% endif %}
 {% endblock panel %}

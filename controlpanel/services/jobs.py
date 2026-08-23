@@ -11,7 +11,7 @@ from datetime import timedelta
 from django.utils import timezone
 
 from features.jobs import JOB_REGISTRY
-from features.models import JobRun
+from features.models import JobRun, JobToggle
 
 #: Runs shown per job on the Jobs tab -- enough to see a pattern (a job that fails every
 #: third day, say) without the page turning into a full audit log.
@@ -32,6 +32,7 @@ def job_overview():
             "label": meta["label"],
             "description": meta["description"],
             "schedule": meta["schedule"],
+            "enabled": JobToggle.is_enabled(name),
             "runs": (runs := list(JobRun.objects.filter(name=name)[:RECENT_RUNS])),
             "latest": runs[0] if runs else None,
         }

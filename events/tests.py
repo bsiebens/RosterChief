@@ -13,7 +13,7 @@ from waffle import get_waffle_flag_model
 
 from club.models import Club, ClubMembership, OnboardingRequirement, Season
 from club.services.onboarding import mark_bypassed, mark_complete
-from features.models import Maintenance
+from features.models import JobToggle, Maintenance
 from members.models import Group, GroupMembership, Member
 from notifications.models import Notification
 from teams.models import Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership
@@ -1981,6 +1981,12 @@ class SendDeadlineRemindersTests(EventsTestBase):
         with self.assertRaises(RuntimeError):
             send_deadline_reminders()
 
+    def test_raises_when_paused_from_the_control_panel(self):
+        JobToggle.set_enabled("events.tasks.send_deadline_reminders", False)
+
+        with self.assertRaises(RuntimeError):
+            send_deadline_reminders()
+
 
 class PublishScheduledLineupsTests(EventsTestBase):
     """events.tasks.publish_scheduled_lineups -- the periodic sweep behind a
@@ -2044,6 +2050,12 @@ class PublishScheduledLineupsTests(EventsTestBase):
 
     def test_raises_during_maintenance_instead_of_silently_skipping(self):
         Maintenance.start(user=None)
+
+        with self.assertRaises(RuntimeError):
+            publish_scheduled_lineups()
+
+    def test_raises_when_paused_from_the_control_panel(self):
+        JobToggle.set_enabled("events.tasks.publish_scheduled_lineups", False)
 
         with self.assertRaises(RuntimeError):
             publish_scheduled_lineups()

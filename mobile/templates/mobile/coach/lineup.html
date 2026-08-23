@@ -27,7 +27,7 @@
             <span class="pill pill-warn">{% trans "Scheduled" %}</span>
         {% endif %}
     </div>
-    <div class="mt-1 text-xs text-on-dark-dim">{{ event.title }} &middot; {{ event.start|date:"D d M H:i" }}</div>
+    <div class="mt-1 text-xs text-on-dark">{{ event.title }} &middot; {{ event.start|date:"D d M H:i" }}</div>
 {% endblock header_extra %}
 
 {% block content %}
@@ -107,7 +107,7 @@
                     {% csrf_token %}
                     <input type="hidden" name="action" value="schedule">
                     <input type="datetime-local" name="publish_at" class="h-10 min-w-0 flex-1 rounded-lg border border-steel bg-steel px-2 text-sm text-white" required>
-                    <button class="btn shrink-0 bg-steel text-on-dark" type="submit">{% trans "Schedule" %}</button>
+                    <button class="btn h-10 shrink-0 bg-steel text-on-dark" type="submit">{% trans "Schedule" %}</button>
                 </form>
             </details>
         {% endif %}

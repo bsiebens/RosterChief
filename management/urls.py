@@ -48,6 +48,7 @@ urlpatterns = [
     path("positions/", views.PositionListView.as_view(), name="position_list"),
     path("positions/new/", views.PositionCreateView.as_view(), name="position_create"),
     path("positions/<uuid:pk>/edit/", views.PositionUpdateView.as_view(), name="position_update"),
+    path("positions/<uuid:pk>/delete/", views.PositionDeleteView.as_view(), name="position_delete"),
     path("roles/", views.ClubRoleListView.as_view(), name="role_list"),
     path("roles/new/", views.ClubRoleCreateView.as_view(), name="role_create"),
     path("roles/<uuid:pk>/revoke/", views.ClubRoleRevokeView.as_view(), name="role_revoke"),
@@ -81,6 +82,7 @@ urlpatterns = [
     path("referee-levels/", views.RefereeLevelListView.as_view(), name="referee_level_list"),
     path("referee-levels/new/", views.RefereeLevelCreateView.as_view(), name="referee_level_create"),
     path("referee-levels/<uuid:pk>/edit/", views.RefereeLevelUpdateView.as_view(), name="referee_level_update"),
+    path("referee-levels/<uuid:pk>/delete/", views.RefereeLevelDeleteView.as_view(), name="referee_level_delete"),
     # News
     path("news/", views.NewsListView.as_view(), name="news_list"),
     path("news/new/", views.NewsCreateView.as_view(), name="news_create"),
