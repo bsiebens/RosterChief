@@ -201,23 +201,47 @@ act by default. `renew_subscriptions` also has a `--dry-run` to preview instead,
 REMOTE_DIR=/home/bernard/RosterChief
 COMPOSE_FILE=compose.yaml
 
-0  3 * * *  cd $REMOTE_DIR && docker compose -f $COMPOSE_FILE run --rm web python manage.py extend_event_series
-0  7 * * *  cd $REMOTE_DIR && docker compose -f $COMPOSE_FILE run --rm web python manage.py send_deadline_reminders
-0  4 * * *  cd $REMOTE_DIR && docker compose -f $COMPOSE_FILE run --rm web python manage.py renew_subscriptions
-0  5 * * *  cd $REMOTE_DIR && docker compose -f $COMPOSE_FILE run --rm web python manage.py send_billing_reminders --commit
-0  6 * * *  cd $REMOTE_DIR && docker compose -f $COMPOSE_FILE run --rm web python manage.py archive_overdue_clubs --commit
-0  5 1 * *  cd $REMOTE_DIR && docker compose -f $COMPOSE_FILE run --rm web python manage.py generate_seasons
+0  3 * * *  flock -n /tmp/rosterchief-extend_event_series.lock -c "cd $REMOTE_DIR && docker compose -f $COMPOSE_FILE run --rm web python manage.py extend_event_series"
+0  7 * * *  flock -n /tmp/rosterchief-send_deadline_reminders.lock -c "cd $REMOTE_DIR && docker compose -f $COMPOSE_FILE run --rm web python manage.py send_deadline_reminders"
+0  4 * * *  flock -n /tmp/rosterchief-renew_subscriptions.lock -c "cd $REMOTE_DIR && docker compose -f $COMPOSE_FILE run --rm web python manage.py renew_subscriptions"
+0  5 * * *  flock -n /tmp/rosterchief-send_billing_reminders.lock -c "cd $REMOTE_DIR && docker compose -f $COMPOSE_FILE run --rm web python manage.py send_billing_reminders --commit"
+0  6 * * *  flock -n /tmp/rosterchief-archive_overdue_clubs.lock -c "cd $REMOTE_DIR && docker compose -f $COMPOSE_FILE run --rm web python manage.py archive_overdue_clubs --commit"
+0  5 1 * *  flock -n /tmp/rosterchief-generate_seasons.lock -c "cd $REMOTE_DIR && docker compose -f $COMPOSE_FILE run --rm web python manage.py generate_seasons"
 
-*/15 * * * * cd $REMOTE_DIR && docker compose -f $COMPOSE_FILE run --rm web python manage.py publish_scheduled_lineups
-*/15 * * * * cd $REMOTE_DIR && docker compose -f $COMPOSE_FILE run --rm web python manage.py notify_published_news
+*/15 * * * * flock -n /tmp/rosterchief-publish_scheduled_lineups.lock -c "cd $REMOTE_DIR && docker compose -f $COMPOSE_FILE run --rm web python manage.py publish_scheduled_lineups"
+*/15 * * * * flock -n /tmp/rosterchief-notify_published_news.lock -c "cd $REMOTE_DIR && docker compose -f $COMPOSE_FILE run --rm web python manage.py notify_published_news"
 ```
+
+**`flock -n` is load-bearing, not decoration** — plain cron has no idea whether the *previous*
+invocation of a job is still running, and fires the next one anyway regardless. For the two
+every-15-minute jobs especially, a single run that hangs (a stuck DB connection, a lock, the
+host itself under memory pressure) would otherwise let cron pile up a new overlapping instance
+every 15 minutes on top of it, each holding its own DB connection — turning one slow run into a
+connection-pool exhaustion problem for every other job on the box, scheduled or manual. `-n`
+(non-blocking) makes a job whose previous run hasn't finished skip this tick entirely rather than
+queue up behind it; the next scheduled tick tries again. One lockfile per job (not one shared
+lockfile) so a stuck `notify_published_news` doesn't also block `publish_scheduled_lineups` from
+running.
 
 Run status (started, finished, success/failure, what it returned or raised) is recorded in
 `features.models.JobRun` and shown on the control panel's **Jobs** tab regardless of cron's own
 stderr-mailing (which needs a configured MTA this box may not have) — check there first, not
-your inbox, if a job seems to have gone quiet. Each command still has its own `--help` for
-manual/dry-run use from a shell (`generate_seasons --resync`, for one, is still CLI-only: it
-can delete rows, so it isn't something a schedule should ever run unattended).
+your inbox, if a job seems to have gone quiet. The Jobs tab also has a **Run now** button per
+job, for testing one off-schedule — it runs on a background thread (no request/gunicorn worker
+tied up waiting on it, same reasoning as `flock` above: a hung job shouldn't cost you anything
+beyond itself) and goes through the exact same command, args, and JobRun bookkeeping the crontab
+entry does, `--commit` included where the crontab has it.
+
+Every job run also logs `job.start`/`job.finished`/`job.failed` lines (with elapsed time, and for
+`job.start`, the OS pid) through Django's own `logging`, flushed immediately rather than sitting
+in a stdio buffer — `docker compose -f compose.yaml logs` (the one-off `run` containers log the
+same way `web` does) is where to look first if a run seems stuck: the last line reached tells you
+whether it got past creating its own `JobRun` row (a DB-connectivity problem from the very first
+write) or hung somewhere inside the command's own work.
+
+Each command still has its own `--help` for manual/dry-run use from a shell (`generate_seasons
+--resync`, for one, is still CLI-only: it can delete rows, so it isn't something a schedule
+should ever run unattended, Run now button included).
 
 ## Maintenance mode
 

@@ -22,7 +22,7 @@ from billing.services import BillingError
 from billing.services.dues import record_payment, start_trial, subscribe, waive
 from club.models import Club, ClubMembership, ClubRole, Season
 from events.models import Attendance, Competition, Event, Location
-from features.models import JobToggle, Maintenance
+from features.models import JobRun, JobToggle, Maintenance
 from members.models import Member
 from shop.models import Order
 from teams.models import Position, StaffAssignment, Team, TeamMembership
@@ -384,6 +384,73 @@ class JobToggleViewTests(ControlPanelTestBase):
 
         self.assertEqual(response.status_code, 403)
         self.assertTrue(JobToggle.is_enabled(self.JOB_NAME))
+
+
+class _SyncThread:
+    """Stands in for threading.Thread in tests -- .start() runs the target immediately,
+    in-process, instead of on a real background thread, so a job dispatched by
+    JobRunNowView is guaranteed to have finished (JobRun row and all) by the time an
+    assertion runs, rather than racing a thread that may not be done yet."""
+
+    def __init__(self, target=None, **kwargs):
+        self._target = target
+
+    def start(self):
+        self._target()
+
+
+class JobRunNowViewTests(ControlPanelTestBase):
+    """Manually triggering one scheduled job off-schedule -- see controlpanel.views.
+    JobRunNowView."""
+
+    JOB_NAME = "events.tasks.extend_event_series"
+
+    def setUp(self):
+        super().setUp()
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def run_now(self, name=JOB_NAME):
+        with mock.patch("controlpanel.views.threading.Thread", _SyncThread):
+            return self.client.post(reverse("controlpanel:job_run_now", args=[name]))
+
+    def test_running_a_job_now_writes_a_job_run(self):
+        response = self.run_now()
+
+        self.assertRedirects(response, reverse("controlpanel:jobs"))
+        run = JobRun.objects.get(name=self.JOB_NAME)
+        self.assertEqual(run.status, JobRun.Status.SUCCESS)
+
+    def test_a_paused_job_still_refuses(self):
+        JobToggle.set_enabled(self.JOB_NAME, False)
+
+        self.run_now()
+
+        run = JobRun.objects.get(name=self.JOB_NAME)
+        self.assertEqual(run.status, JobRun.Status.FAILURE)
+        self.assertIn("disabled", run.error)
+
+    def test_runs_with_the_registrys_own_args(self):
+        # send_billing_reminders defaults to a dry run -- features.jobs.JOB_REGISTRY's
+        # own ["--commit"] is what a manual run needs too, same as the crontab entry,
+        # or "Run now" would look like it worked while actually doing nothing.
+        with mock.patch("controlpanel.views.call_command") as call_command:
+            self.run_now(name="billing.tasks.send_billing_reminders")
+
+        call_command.assert_called_once_with("send_billing_reminders", "--commit")
+
+    def test_an_unknown_job_name_is_a_404(self):
+        response = self.run_now(name="not.a.real.job")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_a_non_staff_user_cannot_run_a_job(self):
+        self.client.force_login(User.objects.create_user(email="plain-run@example.com", password="pw-secret-123"))
+
+        response = self.run_now()
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(JobRun.objects.filter(name=self.JOB_NAME).exists())
 
 
 class StatisticsTests(TestCase):

@@ -12,7 +12,7 @@
 {% block panel %}
     <div class="rounded border border-info-border bg-info-bg px-4 py-3 text-sm text-info-text">
         {% lucide "info" size=16 class="inline -mt-0.5 mr-1" %}
-        These run on host cron (see "Scheduled jobs" in <span class="font-mono">DEPLOYMENT.md</span>) — there is no "run now" here, but each job can be paused individually below. A run that never appears at its scheduled time (and isn't paused) is the signal something's wrong with the server's crontab, not with this page.
+        These run on host cron (see "Scheduled jobs" in <span class="font-mono">DEPLOYMENT.md</span>) — "Run now" below triggers one off-schedule (in the background — the page doesn't wait for it), and each job can be paused individually too. A run that never appears at its scheduled time (and isn't paused) is the signal something's wrong with the server's crontab, not with this page.
     </div>
 
     <div class="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
@@ -40,11 +40,8 @@
                     </div>
                 </div>
                 <div class="flex flex-1 flex-col gap-2 px-4 py-3 text-sm">
-                    {# flex-1 here so the paragraph absorbs whatever space a shorter description leaves, keeping the schedule pill pinned to the bottom of the content block across every card in the row instead of drifting with description length. #}
+                    {# flex-1 on the paragraph so it absorbs whatever space a shorter description leaves -- the schedule pill isn't pinned by this anymore (it always sits in the footer, just above the button, regardless of description/log length), but the log below still benefits from a consistent starting point across every card in the row. #}
                     <p class="flex-1 text-slate">{{ job.description }}</p>
-                    <div class="badge flex items-center gap-1.5 font-mono text-[11px] text-muted">
-                        {% lucide "clock" size=12 %} {{ job.schedule }}
-                    </div>
                     {% if job.latest %}
                         <div class="mt-1 font-mono text-[11px] text-muted">
                             last run {{ job.latest.started_at|date:"j M Y, H:i" }}
@@ -76,15 +73,29 @@
                     </div>
                 {% endif %}
 
-                <div class="mt-auto border-t border-rule px-4 py-3">
-                    <form method="post" action="{% url 'controlpanel:job_toggle' job.name %}">
-                        {% csrf_token %}
-                        {% if job.enabled %}
-                            <button type="submit" class="btn btn-outline btn-sm btn-error w-full gap-2">{% lucide "pause" size=14 %} Pause job</button>
+                {# Schedule pill lives here now, not in the content block above -- always the row directly above the action buttons, regardless of description/log length. #}
+                <div class="mt-auto flex flex-col gap-2 border-t border-rule px-4 py-3">
+                    <div class="badge flex items-center gap-1.5 self-start font-mono text-[11px] text-muted">
+                        {% lucide "clock" size=12 %} {{ job.schedule }}
+                    </div>
+                    <div class="flex gap-2">
+                        {% if job.latest.status == "started" %}
+                            <span class="btn btn-outline btn-sm flex-1 gap-2 opacity-50">Running…</span>
                         {% else %}
-                            <button type="submit" class="btn btn-outline btn-sm btn-success w-full gap-2">{% lucide "play" size=14 %} Resume job</button>
+                            <form method="post" action="{% url 'controlpanel:job_run_now' job.name %}" class="flex-1">
+                                {% csrf_token %}
+                                <button type="submit" class="btn btn-outline btn-sm w-full gap-2">{% lucide "refresh-cw" size=14 %} Run now</button>
+                            </form>
                         {% endif %}
-                    </form>
+                        <form method="post" action="{% url 'controlpanel:job_toggle' job.name %}" class="flex-1">
+                            {% csrf_token %}
+                            {% if job.enabled %}
+                                <button type="submit" class="btn btn-outline btn-sm btn-error w-full gap-2">{% lucide "pause" size=14 %} Pause job</button>
+                            {% else %}
+                                <button type="submit" class="btn btn-outline btn-sm btn-success w-full gap-2">{% lucide "play" size=14 %} Resume job</button>
+                            {% endif %}
+                        </form>
+                    </div>
                 </div>
             </div>
         {% endfor %}

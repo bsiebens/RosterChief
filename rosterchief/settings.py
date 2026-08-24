@@ -340,9 +340,20 @@ SECURE_HSTS_PRELOAD = config("DJANGO_SECURE_HSTS_PRELOAD", default=False, cast=b
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
-    "handlers": {
-        "console": {"class": "logging.StreamHandler"},
+    "formatters": {
+        # A timestamp is the whole point: diagnosing "this job hung somewhere" means
+        # knowing exactly when the last log line landed, not just that it did.
+        "timestamped": {"format": "%(asctime)s %(levelname)s %(name)s: %(message)s"},
     },
+    "handlers": {
+        "console": {"class": "logging.StreamHandler", "formatter": "timestamped"},
+    },
+    # Root, not just named loggers below: features.commands.ScheduledJobCommand's own
+    # job.start/job.finished lines (and anything else that reaches for logging.getLogger(
+    # __name__) without its own explicit config) need somewhere to go. A StreamHandler
+    # flushes every record immediately, unlike stdout's own buffering, which is exactly
+    # what mattered when a job hung for hours with nothing else to show for it.
+    "root": {"handlers": ["console"], "level": "INFO"},
     "loggers": {
         "django.request": {"handlers": ["console"], "level": "ERROR", "propagate": False},
     },

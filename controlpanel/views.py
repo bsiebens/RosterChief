@@ -1,6 +1,10 @@
+import logging
+import threading
 from contextlib import contextmanager
 
 from django.contrib.auth import get_user_model
+from django.core.management import call_command
+from django.db import connections
 from django.db.models import Count
 from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect
@@ -109,6 +113,41 @@ class JobToggleView(PlatformStaffRequiredMixin, View):
         else:
             notify(request, f"w|Job paused|“{label}” will stand down until resumed.")
 
+        return redirect("controlpanel:jobs")
+
+
+class JobRunNowView(PlatformStaffRequiredMixin, View):
+    """Manually trigger one scheduled job outside its normal cron schedule. Dispatched on a
+    daemon background thread, same pattern as events.services.notifications.
+    dispatch_notify_new_event -- there is no Celery broker left to hand this off to, and a
+    job that hangs (the reason this button exists: see the JobRun history that motivated it)
+    would otherwise tie up this very request/gunicorn worker for as long as it hangs, not
+    just however long it's supposed to take.
+
+    Runs through call_command, i.e. the exact same features.commands.ScheduledJobCommand.
+    execute() path cron does -- same Maintenance/JobToggle checks (a paused job still
+    refuses here, on purpose: force it by resuming first, not by routing around the pause),
+    same JobRun row, same args as the crontab entry (features.jobs.JOB_REGISTRY's own
+    ``args`` -- the two billing jobs that need --commit to actually act get it here too, so
+    a manual run isn't a silent no-op dry run someone mistakes for having worked)."""
+
+    def post(self, request, name):
+        if name not in JOB_REGISTRY:
+            raise Http404
+
+        meta = JOB_REGISTRY[name]
+
+        def _run():
+            try:
+                call_command(meta["command"], *meta["args"])
+            except Exception:
+                logging.getLogger(__name__).exception("Manual run of %s failed", name)
+            finally:
+                connections.close_all()
+
+        threading.Thread(target=_run, daemon=True).start()
+
+        notify(request, f"s|Job started|“{meta['label']}” is running now — refresh in a moment to see the result.")
         return redirect("controlpanel:jobs")
 
 

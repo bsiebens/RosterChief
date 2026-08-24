@@ -7,12 +7,17 @@ for. Only the domain jobs (which write club data, archive clubs, or import membe
 down.
 """
 
+import logging
+import os
+import time
 import uuid
 
 from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
 
 from features.models import JobRun, JobToggle, Maintenance
+
+logger = logging.getLogger(__name__)
 
 
 class MaintenanceAwareCommand(BaseCommand):
@@ -58,18 +63,35 @@ class ScheduledJobCommand(MaintenanceAwareCommand):
     job_name: str = ""
 
     def execute(self, *args, **options):
+        # Logged *before* anything else, including the JobRun insert two lines down --
+        # a StreamHandler flushes every record immediately (unlike self.stdout.write,
+        # which can sit in a stdio buffer indefinitely if the process later hangs and
+        # never reaches a flush), so this line reaching `docker compose logs`/journald
+        # is proof the process itself started, even if everything after it stalls.
+        # Added after a job that should return instantly (an empty queryset) instead
+        # ran for hours with nothing to show for where the time went -- the fix for
+        # *that* is knowing whether it even got past this line next time.
+        logger.info("job.start name=%s pid=%s", self.job_name, os.getpid())
+        clock = time.monotonic()
+
         job_run = JobRun.objects.create(task_id=str(uuid.uuid4()), name=self.job_name, status=JobRun.Status.STARTED, started_at=timezone.now())
+        logger.info("job.run_created name=%s task_id=%s elapsed=%.3fs", self.job_name, job_run.task_id, time.monotonic() - clock)
+
         try:
             if not JobToggle.is_enabled(self.job_name):
                 raise CommandError("This job is disabled in the control panel.")
             result = super().execute(*args, **options)
         except Exception as exc:
+            elapsed = time.monotonic() - clock
+            logger.exception("job.failed name=%s elapsed=%.3fs", self.job_name, elapsed)
             job_run.status = JobRun.Status.FAILURE
             job_run.finished_at = timezone.now()
             job_run.error = str(exc)[:4000]
             job_run.save(update_fields=["status", "finished_at", "error"])
             raise
         else:
+            elapsed = time.monotonic() - clock
+            logger.info("job.finished name=%s elapsed=%.3fs detail=%r", self.job_name, elapsed, str(result or "")[:200])
             job_run.status = JobRun.Status.SUCCESS
             job_run.finished_at = timezone.now()
             job_run.detail = str(result or "")[:4000]
