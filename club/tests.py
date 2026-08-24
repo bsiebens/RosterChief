@@ -1359,6 +1359,43 @@ class ManagementBrandingTests(TestCase):
     ROSTERCHIEF_BASE_DOMAIN="rosterchief.app",
     ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"],
 )
+class MobileBrandingTests(TestCase):
+    """Mirrors ManagementBrandingTests above, for the member app: a /app/ path gets
+    mobile/_auth_base.html directly, and the mobile_context session flag
+    (PersonScopeMixin.dispatch, mobile/mixins.py) carries that skin onto
+    /accounts/logout/ too, since logout lives outside /app/."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        cls.season = Season.objects.create(club=cls.club, start_date=timezone.localdate() - datetime.timedelta(days=30), end_date=timezone.localdate() + datetime.timedelta(days=300))
+
+        cls.member_user = get_user_model().objects.create_user(email="member@example.com", password="pw-secret-123")
+        member = Member.objects.create(user=cls.member_user, first_name="Mo", last_name="Member")
+        ClubMembership.objects.create(club=cls.club, member=member, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
+
+    def test_the_logout_screen_stays_on_the_public_skin_without_a_visit_to_the_app(self):
+        self.client.force_login(self.member_user)
+
+        response = self.client.get(reverse("account_logout"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertTemplateUsed(response, "_club_base.html")
+        self.assertTemplateNotUsed(response, "mobile/_auth_base.html")
+
+    def test_the_logout_screen_gets_the_mobile_skin_after_visiting_the_app(self):
+        self.client.force_login(self.member_user)
+        self.client.get(reverse("mobile:home"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        response = self.client.get(reverse("account_logout"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertTemplateUsed(response, "mobile/_auth_base.html")
+        self.assertContains(response, "Ajax United")
+
+
+@override_settings(
+    ROSTERCHIEF_BASE_DOMAIN="rosterchief.app",
+    ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"],
+)
 class Custom403PageTests(TestCase):
     """Django's default 403 handler picks up templates/403.html automatically --
     branded per tenant (base_template, same as maintenance.html) so a permission

@@ -35,6 +35,12 @@ class PersonScopeMixin(ClubScopedPublicMixin):
     """
 
     def dispatch(self, request, *args, **kwargs):
+        # Read by club/context_processors.py's branding() -- allauth's login/logout/
+        # password-reset/MFA screens live under /accounts/, not /app/, so a path check
+        # alone can't tell they were reached from the member app rather than the old
+        # public site. Same pattern and same "sticks for the rest of the session"
+        # reasoning as club/mixins.py's ClubStaffRequiredMixin sets management_context.
+        request.session["mobile_context"] = True
         self.me = Member.objects.filter(user=request.user).first() if request.user.is_authenticated else None
         self.managed_people = self._managed_people(request)
         self.scope_everyone, self.scope_person = self._resolve_scope(request)

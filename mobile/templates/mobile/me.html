@@ -114,6 +114,10 @@
             </a>
         </div>
 
+        <a class="m-card flex items-center justify-center gap-2 p-3.5 text-[15px] font-semibold text-club" href="{% url "account_logout" %}" hx-boost="false">
+            {% lucide "log-out" size=18 %} {% trans "Log out" %}
+        </a>
+
         <p class="pb-2 text-center text-xs text-dim">{% blocktrans with club_name=club.name %}RosterChief &middot; {{ club_name }} &middot; v1.0{% endblocktrans %}</p>
     {% endif %}
 {% endblock content %}

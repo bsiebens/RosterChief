@@ -1,0 +1,116 @@
+{% load static lucide ui i18n %}
+
+{% comment %}
+    Standalone shell for allauth screens (login, logout, password reset, MFA, passkeys,
+    recovery codes) rendered whenever the request path is under /app/ (see
+    club/context_processors.py: MOBILE_BASE_TEMPLATE). Without this, a member hitting
+    /accounts/login/ on a club subdomain fell back to _club_base.html's old daisyUI
+    chain -- the club's *public* skin, nothing like the app they were about to land in.
+    Same reasoning and structure as management/_auth_base.html and
+    controlpanel/_auth_base.html (its own forks of this same problem), themed with
+    assets/mobile.css and this club's own colours, matching mobile/base.html.
+
+    Block names match what templates/allauth/layouts/base.html and templates/403.html/
+    maintenance.html target (head_title, extra_head, main, extra_body) -- same contract
+    as the other two _auth_base.html forks, so none of those shared templates need to
+    know this one exists.
+{% endcomment %}
+<!DOCTYPE html>
+<html lang="{{ LANGUAGE_CODE|default:"en" }}">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+        <meta name="theme-color" content="{{ club.primary_color|default:"#101e36" }}">
+
+        <title>
+            {% block head_title %}{% endblock head_title %} &middot; {{ club.name }}
+        </title>
+
+        <link rel="stylesheet" href="{% static 'css/mobile.css' %}">
+        {% if club.secondary_color %}
+            <style>
+                :root {
+                    --tenant-club: {{ club.secondary_color }};
+                    --tenant-club-dark: color-mix(in srgb, {{ club.secondary_color }} 80%, black);
+                    --tenant-club-content: {{ club.secondary_content_color }};
+                }
+            </style>
+        {% endif %}
+        {% if club.primary_color %}
+            <style>
+                :root { --tenant-navy: {{ club.primary_color }}; }
+            </style>
+        {% endif %}
+        {% block extra_head %}{% endblock extra_head %}
+    </head>
+
+    <body class="scrollbar-hide flex min-h-screen flex-col items-center gap-10 bg-navy px-4 py-14 font-sans text-slate">
+        <div class="flex w-full max-w-md items-center justify-between gap-4">
+            <a class="flex min-w-0 items-center gap-2.5" href="{% url 'mobile:home' %}">
+                {% if club.logo %}
+                    <img class="app-crest" src="{{ club.logo.url }}" alt="">
+                {% else %}
+                    <span class="app-crest app-crest-fallback">{{ club.initials }}</span>
+                {% endif %}
+                <span class="min-w-0 truncate font-display text-lg font-extrabold tracking-[.08em] text-white uppercase">{{ club.name }}</span>
+            </a>
+            <a class="flex shrink-0 items-center gap-1.5 font-mono text-xs text-on-dark-dim hover:text-white" href="{% url 'mobile:home' %}">
+                {% lucide "arrow-left" size=14 %} {% trans "Back to the app" %}
+            </a>
+        </div>
+
+        <main class="flex w-full max-w-md flex-1 flex-col justify-center gap-4">
+            {% if messages %}
+                <div class="flex flex-col gap-2">
+                    {% for message in messages %}
+                        {% with alert=message|as_alert %}
+                            <div class="alert {{ alert.css }}" role="alert">
+                                {% lucide alert.icon size=18 %}
+                                <div>
+                                    <div class="font-display text-sm font-bold tracking-wide uppercase">{{ alert.title }}</div>
+                                    <div class="text-sm">{{ alert.body }}</div>
+                                </div>
+                            </div>
+                        {% endwith %}
+                    {% endfor %}
+                </div>
+            {% endif %}
+
+            {% block main %}{% endblock main %}
+        </main>
+
+        <p class="font-mono text-[11px] text-on-dark-faint">&copy; {% now "Y" %} RosterChief</p>
+
+        {% comment %}
+            Same data-otp enhancement as management/_auth_base.html and
+            controlpanel/_auth_base.html -- see either's own comment for why the real
+            <input> stays invisible-but-focusable and each typed character is mirrored
+            into its own <span> instead of trying to align the real glyphs with the box
+            pitch via CSS alone.
+        {% endcomment %}
+        <script>
+            document.querySelectorAll("[data-otp]").forEach((otp) => {
+                const input = otp.querySelector("input");
+                const boxes = otp.querySelectorAll("span");
+                if (!input) return;
+
+                const fit = () => {
+                    const boxed = input.value.length <= boxes.length;
+                    otp.classList.toggle("otp", boxed);
+                    otp.classList.toggle("otp-lg", boxed);
+                    boxes.forEach((box, index) => {
+                        box.classList.toggle("hidden", !boxed);
+                        box.textContent = boxed ? input.value[index] || "" : "";
+                    });
+                    input.classList.toggle("input", !boxed);
+                    input.classList.toggle("input-lg", !boxed);
+                };
+
+                input.addEventListener("input", fit);
+                fit();
+            });
+        </script>
+
+        {% block extra_body %}{% endblock extra_body %}
+    </body>
+</html>

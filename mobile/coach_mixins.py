@@ -42,6 +42,11 @@ class CoachScopeMixin(ClubScopedPublicMixin):
     """
 
     def dispatch(self, request, *args, **kwargs):
+        # Same mobile_context session flag as mobile/mixins.py's PersonScopeMixin --
+        # see that mixin's own comment for why it's needed. Coach mode sets it too so
+        # a coach reaching /accounts/logout/ from the Coach shell also gets the app's
+        # chrome, not the old public site's.
+        request.session["mobile_context"] = True
         self.me = Member.objects.filter(user=request.user).first() if request.user.is_authenticated else None
         self.staffed_teams = list(teams_staffed_by(request.user, request.club)) if request.user.is_authenticated else []
         self.managed_teams = list(teams_managed_by(request.user, request.club)) if request.user.is_authenticated else []
