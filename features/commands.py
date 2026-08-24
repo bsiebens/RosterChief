@@ -13,11 +13,13 @@ import time
 import uuid
 
 from django.core.management.base import BaseCommand, CommandError
+from django.db import connection
 from django.utils import timezone
 
 from features.models import JobRun, JobToggle, Maintenance
 
 logger = logging.getLogger(__name__)
+db_logger = logging.getLogger("django.db.backends")
 
 
 class MaintenanceAwareCommand(BaseCommand):
@@ -62,6 +64,18 @@ class ScheduledJobCommand(MaintenanceAwareCommand):
 
     job_name: str = ""
 
+    def create_parser(self, prog_name, subcommand, **kwargs):
+        parser = super().create_parser(prog_name, subcommand, **kwargs)
+        parser.add_argument(
+            "--detailed-logging",
+            action="store_true",
+            help="Log every SQL query this run makes, with timing -- for a one-off manual run "
+            "you're actively watching, not something cron should ever pass (every query, on "
+            "every scheduled run, would drown the log). The control panel's own \"Run now\" "
+            "button always passes this.",
+        )
+        return parser
+
     def execute(self, *args, **options):
         # Logged *before* anything else, including the JobRun insert two lines down --
         # a StreamHandler flushes every record immediately (unlike self.stdout.write,
@@ -76,6 +90,23 @@ class ScheduledJobCommand(MaintenanceAwareCommand):
 
         job_run = JobRun.objects.create(task_id=str(uuid.uuid4()), name=self.job_name, status=JobRun.Status.STARTED, started_at=timezone.now())
         logger.info("job.run_created name=%s task_id=%s elapsed=%.3fs", self.job_name, job_run.task_id, time.monotonic() - clock)
+
+        # force_debug_cursor makes this connection log every query (SQL + timing) via
+        # the django.db.backends logger regardless of settings.DEBUG -- the same
+        # mechanism django.test.utils.CaptureQueriesContext uses. connection is a
+        # thread-local proxy, so this only affects the thread actually running this
+        # job (relevant for "Run now", which dispatches on a background thread inside
+        # the live web process -- other requests being served concurrently on other
+        # threads are untouched); the logger's own level is process-wide, not thread-
+        # local, so a concurrent request logging its own queries during this window
+        # would also get logged at DEBUG -- acceptable for how briefly this runs and
+        # how rarely someone reaches for it.
+        detailed = bool(options.get("detailed_logging"))
+        if detailed:
+            connection.force_debug_cursor = True
+            previous_db_level = db_logger.level
+            db_logger.setLevel(logging.DEBUG)
+            logger.info("job.detailed_logging_on name=%s", self.job_name)
 
         try:
             if not JobToggle.is_enabled(self.job_name):
@@ -97,3 +128,7 @@ class ScheduledJobCommand(MaintenanceAwareCommand):
             job_run.detail = str(result or "")[:4000]
             job_run.save(update_fields=["status", "finished_at", "detail"])
             return result
+        finally:
+            if detailed:
+                connection.force_debug_cursor = False
+                db_logger.setLevel(previous_db_level)

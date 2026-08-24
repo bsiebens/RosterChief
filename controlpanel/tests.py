@@ -437,7 +437,7 @@ class JobRunNowViewTests(ControlPanelTestBase):
         with mock.patch("controlpanel.views.call_command") as call_command:
             self.run_now(name="billing.tasks.send_billing_reminders")
 
-        call_command.assert_called_once_with("send_billing_reminders", "--commit")
+        call_command.assert_called_once_with("send_billing_reminders", "--commit", detailed_logging=True)
 
     def test_an_unknown_job_name_is_a_404(self):
         response = self.run_now(name="not.a.real.job")

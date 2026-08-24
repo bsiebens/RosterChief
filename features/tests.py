@@ -5,6 +5,7 @@ from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.core.management import call_command
 from django.core.management.base import CommandError
+from django.db import connection
 from django.test import RequestFactory, TestCase, override_settings
 from waffle import flag_is_active, get_waffle_flag_model
 
@@ -296,6 +297,22 @@ class JobRunTests(TestCase):
         run = JobRun.objects.get(name="billing.tasks.archive_overdue_clubs")
         self.assertEqual(run.status, JobRun.Status.FAILURE)
         self.assertIn("disabled", run.error)
+
+    def test_detailed_logging_logs_every_query(self):
+        # --detailed-logging is what the control panel's "Run now" button always passes
+        # (see controlpanel.views.JobRunNowView) -- cron never does, on purpose, since
+        # every query on every scheduled run would drown the log.
+        with self.assertLogs("django.db.backends", level="DEBUG") as captured:
+            call_command("archive_overdue_clubs", "--detailed-logging", stdout=StringIO())
+
+        self.assertTrue(any("SELECT" in message for message in captured.output))
+        # Restored afterwards, not left on for whatever else shares this connection/process.
+        self.assertFalse(connection.force_debug_cursor)
+
+    def test_detailed_logging_is_off_by_default(self):
+        call_command("archive_overdue_clubs", stdout=StringIO())
+
+        self.assertFalse(connection.force_debug_cursor)
 
 
 class JobToggleTests(TestCase):

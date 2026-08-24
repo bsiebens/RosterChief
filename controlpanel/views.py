@@ -129,7 +129,12 @@ class JobRunNowView(PlatformStaffRequiredMixin, View):
     refuses here, on purpose: force it by resuming first, not by routing around the pause),
     same JobRun row, same args as the crontab entry (features.jobs.JOB_REGISTRY's own
     ``args`` -- the two billing jobs that need --commit to actually act get it here too, so
-    a manual run isn't a silent no-op dry run someone mistakes for having worked)."""
+    a manual run isn't a silent no-op dry run someone mistakes for having worked) -- plus
+    detailed_logging=True, always: every SQL query this run makes gets logged with timing
+    (see ScheduledJobCommand.execute()'s own comment). cron never passes this -- every
+    query, on every scheduled run, would drown the log -- but a manual run is exactly the
+    "someone's actively watching, about to go dig through docker compose logs" case it's
+    for."""
 
     def post(self, request, name):
         if name not in JOB_REGISTRY:
@@ -139,7 +144,7 @@ class JobRunNowView(PlatformStaffRequiredMixin, View):
 
         def _run():
             try:
-                call_command(meta["command"], *meta["args"])
+                call_command(meta["command"], *meta["args"], detailed_logging=True)
             except Exception:
                 logging.getLogger(__name__).exception("Manual run of %s failed", name)
             finally:
