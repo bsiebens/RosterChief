@@ -14,7 +14,7 @@
 
 {% block content %}
     <div class="-mx-4 -mt-4 flex h-[330px] flex-col justify-end p-4 text-white"
-         style="background: linear-gradient(180deg, rgba(11,18,32,.6) 0%, rgba(11,18,32,0) 40%, rgba(11,18,32,.88) 100%){% if news_item.main_photo %}, url('{{ news_item.main_photo.image.url }}') center/cover no-repeat{% else %}, var(--color-navy){% endif %}">
+         style="background: linear-gradient(180deg, rgba(11,18,32,.6) 0%, rgba(11,18,32,0) 40%, rgba(11,18,32,.88) 100%){% if news_item.main_photo %}, url('{{ news_item.main_photo.image.url }}') top/cover no-repeat{% else %}, var(--color-navy){% endif %}">
         <a class="mb-auto flex h-11 w-11 items-center justify-center rounded-full bg-white/15" href="{% url "mobile:home" %}#news" aria-label="{% trans "Back" %}">
             {% lucide "chevron-left" size=20 stroke_width=2.4 class="text-white" %}
         </a>

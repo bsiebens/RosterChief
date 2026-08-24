@@ -113,7 +113,7 @@
                 {% with lead=news_items.0 %}
                     <a class="m-card block overflow-hidden" href="{% url "mobile:news_detail" lead.slug %}">
                         {% if lead.main_photo %}
-                            <img class="h-[104px] w-full object-cover" src="{{ lead.main_photo.image.url }}" alt="">
+                            <img class="h-[104px] w-full object-cover object-top" src="{{ lead.main_photo.image.url }}" alt="">
                         {% else %}
                             <div class="flex h-[104px] items-center justify-center bg-line text-xs text-dim">{% trans "News photo" %}</div>
                         {% endif %}
