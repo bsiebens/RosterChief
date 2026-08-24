@@ -18,11 +18,16 @@
     write action is a fine, standard trade -- hx-boost's value is in link-to-
     link browsing, not swallowing every POST on the page.
 
-    Neither button is colour-coded (no green "In") -- nobody has answered yet
-    at this point (that's the whole reason for the "are you in?" prompt), so
-    a green default would misleadingly read as an already-recorded answer.
-    Both are the same neutral steel tone with a shared border/white-text
-    treatment for readability against the photo backdrop.
+    Neither button is colour-coded by default -- when hero_attendance is
+    genuinely unanswered (the common case: HomeView prioritises the soonest
+    NO_RESPONSE event for this card), a green default would misleadingly read
+    as an already-recorded answer. Both are the same neutral steel tone with
+    a shared border/white-text treatment for readability against the photo
+    backdrop. Once every upcoming event already has an answer, HomeView falls
+    back to showing the true next one instead -- already answered, so here
+    the matching button (In=present -> green, Out=absent -> red) picks up
+    the same solid .btn-success/.btn-error fill the allauth shim uses, so the
+    already-recorded choice reads as selected rather than as a fresh prompt.
 
     The row is CSS grid (grid-cols-2), not flex -- flex-1 alone kept giving
     "Out" a wider share than "In" in practice (a longer label's own
@@ -43,9 +48,9 @@
             {% csrf_token %}
             <input type="hidden" name="member_id" value="{{ hero_attendance.member.pk }}">
             <input type="hidden" name="status" value="present">
-            <button class="btn w-full border border-white/30 bg-steel text-white" type="submit">{% trans "In" %}</button>
+            <button class="btn w-full border {% if hero_attendance.status == "present" %}btn-success border-transparent{% else %}border-white/30 bg-steel text-white{% endif %}" type="submit">{% trans "In" %}</button>
         </form>
-        <button class="btn w-full border border-white/30 bg-steel text-white" type="button" @click="asking = true">{% trans "Out" %}</button>
+        <button class="btn w-full border {% if hero_attendance.status == "absent" %}btn-error border-transparent{% else %}border-white/30 bg-steel text-white{% endif %}" type="button" @click="asking = true">{% trans "Out" %}</button>
     </div>
 
     <form x-show="asking" x-cloak class="rounded-lg border border-white/30 bg-steel/60 p-3" method="post" action="{% url "mobile:event_detail" hero_attendance.event.pk %}" hx-boost="false">

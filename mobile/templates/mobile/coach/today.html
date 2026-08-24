@@ -59,7 +59,7 @@
                     {% if can_manage_active_team %}
                         <div class="mt-3 flex gap-2">
                             <a class="btn flex-1 bg-ice text-ice-ink" href="{% url "mobile:coach_attendance" session_event.pk %}">{% trans "Check attendance" %}</a>
-                            {% if session_event.kind == "game" %}
+                            {% if session_event.kind == "game" or session_event.kind == "tournament" %}
                                 <a class="btn flex-1 bg-steel text-on-dark" href="{% url "mobile:coach_lineup" session_event.pk %}">{% trans "Line-up" %}</a>
                             {% endif %}
                         </div>

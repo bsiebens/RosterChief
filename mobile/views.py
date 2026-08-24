@@ -33,6 +33,7 @@ from events.services.referees import RefereeAssignmentError, accept_referee_sign
 from members.models import FamilyMembership, Member
 from members.views import ClubScopedPublicMixin
 from news.models import News
+from news.services import render_body_html
 from notifications.models import Notification
 from teams.models import StaffAssignment, TeamMembership
 
@@ -217,7 +218,15 @@ class HomeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
                 event__start__gte=now,
             ).select_related("event", "event__location", "member")
 
-            hero_attendance = upcoming.order_by("event__start").first()
+            # The soonest event nobody's answered yet takes priority over the
+            # true chronological next event -- a reply still owed is the more
+            # useful thing to surface. Once everything upcoming has an answer,
+            # fall back to the true next event so there's still something to
+            # show; _hero_rsvp.html colour-codes whichever button matches that
+            # already-recorded answer instead of presenting it as unanswered.
+            hero_attendance = upcoming.filter(status=Attendance.AttendanceStatus.NO_RESPONSE).order_by("event__start").first()
+            if hero_attendance is None:
+                hero_attendance = upcoming.order_by("event__start").first()
             if hero_attendance is not None:
                 deadline = hero_attendance.event.deadline
                 rsvp_closed = deadline is not None and deadline < now
@@ -240,15 +249,10 @@ class HomeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
             season = current_season(self.request.club)
             if season is not None:
                 dues_rows = open_dues_rows(self.request.club, people, season)
-                # Deliberately self.managed_people, not the scoped `people` above --
-                # news isn't a per-person action like RSVP/dues, it's "things this
-                # account should know about", so a parent picking their own "Me"
-                # chip (no team of their own) still sees their kids' team news
-                # rather than only club-wide items.
-                news_team_ids = list(TeamMembership.objects.filter(member__in=self.managed_people, season=season).values_list("team_id", flat=True))
-            else:
-                news_team_ids = []
 
+            # Every published item, club-wide or team-tagged -- not narrowed to
+            # this account's own teams. News is "things this club wants members
+            # to know about", not a per-person feed the way RSVP/dues are.
             news_items = list(
                 News.objects.filter(
                     club=self.request.club,
@@ -256,10 +260,8 @@ class HomeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
                     published_at__lte=now,
                     visibility__in=[News.Visibility.INTERNAL, News.Visibility.BOTH],
                 )
-                .filter(Q(teams__isnull=True) | Q(teams__id__in=news_team_ids))
-                .prefetch_related("teams")
-                .order_by("-published_at")
-                .distinct()[: self.NEWS_LIMIT]
+                .prefetch_related("teams", "photos")
+                .order_by("-published_at")[: self.NEWS_LIMIT]
             )
 
         return super().get_context_data(
@@ -664,7 +666,7 @@ class NewsDetailView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
             screen_title=title,
             news_item=news_item,
             article_title=title,
-            article_body=body,
+            article_body=render_body_html(body),
             **kwargs,
         )
 

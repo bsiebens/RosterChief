@@ -16,7 +16,7 @@ from events.services.attendance import record_check_in
 from events.services.calendar import week_bounds
 from events.services.notifications import notify_new_event
 from members.models import Family, FamilyMembership, Member
-from news.models import News
+from news.models import News, NewsPhoto
 from notifications.models import Notification
 from teams.models import Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership
 
@@ -282,9 +282,14 @@ class HomeViewTests(TestCase):
         self.assertIsNone(response.context["hero_attendance"])
 
     def test_needs_your_answer_only_lists_no_response_and_maybe(self):
-        answered = self.make_event(title="Already answered", start=self.future)
+        # A distinct, soonest, still-unanswered event becomes the hero (and is
+        # excluded from this list the same way an already-answered hero would
+        # be) -- the events below it demonstrate the status filter itself.
+        hero_event = self.make_event(title="Soonest, unanswered", start=self.future)
+        answered = self.make_event(title="Already answered", start=self.future + datetime.timedelta(days=1))
         awaiting = self.make_event(title="Awaiting reply", start=self.future + datetime.timedelta(days=2))
         maybe = self.make_event(title="Maybe reply", start=self.future + datetime.timedelta(days=4))
+        Attendance.objects.create(event=hero_event, member=self.member, status=Attendance.AttendanceStatus.NO_RESPONSE)
         Attendance.objects.create(event=answered, member=self.member, status=Attendance.AttendanceStatus.PRESENT)
         Attendance.objects.create(event=awaiting, member=self.member, status=Attendance.AttendanceStatus.NO_RESPONSE)
         Attendance.objects.create(event=maybe, member=self.member, status=Attendance.AttendanceStatus.MAYBE)
@@ -292,14 +297,15 @@ class HomeViewTests(TestCase):
 
         response = self._get("home")
 
+        self.assertEqual(response.context["hero_attendance"].event, hero_event)
         needs_answer_events = {attendance.event for attendance in response.context["needs_answer"]}
         self.assertEqual(needs_answer_events, {awaiting, maybe})
 
     def test_needs_your_answer_excludes_events_with_a_closed_registration_deadline(self):
-        # A distinct, already-answered earlier event so it becomes the hero --
-        # otherwise the closed-deadline event below would become the hero
-        # itself (still shown there, just read-only) rather than reaching
-        # needs_answer's own exclusion at all.
+        # Whichever of these becomes the hero (the soonest unanswered one,
+        # currently `closed` -- see HomeView.get_context_data) doesn't matter
+        # to this assertion: `closed` is excluded from needs_answer by its own
+        # deadline regardless, and open_deadline is the only one left either way.
         hero_event = self.make_event(title="Soonest", start=self.future)
         Attendance.objects.create(event=hero_event, member=self.member, status=Attendance.AttendanceStatus.PRESENT)
         closed = self.make_event(title="Deadline passed", start=self.future + datetime.timedelta(days=2), deadline=timezone.now() - datetime.timedelta(hours=1))
@@ -314,11 +320,10 @@ class HomeViewTests(TestCase):
         self.assertEqual(needs_answer_events, {open_deadline})
 
     def test_needs_your_answer_is_capped_at_five_with_a_remaining_count(self):
-        # A distinct, already-answered earlier event so it becomes the hero and
-        # none of the seven "Practice N" events below get excluded as the hero.
-        hero_event = self.make_event(title="Soonest", start=self.future)
-        Attendance.objects.create(event=hero_event, member=self.member, status=Attendance.AttendanceStatus.PRESENT)
-        for day in range(1, 8):
+        # 8 unanswered events -- the soonest becomes the hero (excluded from
+        # this list the same as an already-answered hero would be), leaving 7
+        # for needs_answer: capped at 5, with 2 remaining.
+        for day in range(1, 9):
             event = self.make_event(title=f"Practice {day}", start=self.future + datetime.timedelta(days=day))
             Attendance.objects.create(event=event, member=self.member, status=Attendance.AttendanceStatus.NO_RESPONSE)
         self.client.force_login(self.user)
@@ -338,6 +343,47 @@ class HomeViewTests(TestCase):
 
         self.assertEqual(response.context["hero_attendance"].event, soon)
         self.assertEqual(list(response.context["needs_answer"]), [])
+
+    def test_hero_falls_back_to_the_true_next_event_once_everything_is_answered(self):
+        soon = self.make_event(title="Soonest", start=self.future)
+        later = self.make_event(title="Later", start=self.future + datetime.timedelta(days=5))
+        Attendance.objects.create(event=soon, member=self.member, status=Attendance.AttendanceStatus.PRESENT)
+        Attendance.objects.create(event=later, member=self.member, status=Attendance.AttendanceStatus.ABSENT)
+        self.client.force_login(self.user)
+
+        response = self._get("home")
+
+        self.assertEqual(response.context["hero_attendance"].event, soon)
+
+    def test_hero_in_button_is_highlighted_when_already_present(self):
+        soon = self.make_event(title="Soonest", start=self.future)
+        Attendance.objects.create(event=soon, member=self.member, status=Attendance.AttendanceStatus.PRESENT)
+        self.client.force_login(self.user)
+
+        response = self._get("home")
+
+        self.assertContains(response, "btn-success")
+        self.assertNotContains(response, "btn-error")
+
+    def test_hero_out_button_is_highlighted_when_already_absent(self):
+        soon = self.make_event(title="Soonest", start=self.future)
+        Attendance.objects.create(event=soon, member=self.member, status=Attendance.AttendanceStatus.ABSENT)
+        self.client.force_login(self.user)
+
+        response = self._get("home")
+
+        self.assertContains(response, "btn-error")
+        self.assertNotContains(response, "btn-success")
+
+    def test_hero_buttons_are_neutral_when_genuinely_unanswered(self):
+        soon = self.make_event(title="Soonest", start=self.future)
+        Attendance.objects.create(event=soon, member=self.member, status=Attendance.AttendanceStatus.NO_RESPONSE)
+        self.client.force_login(self.user)
+
+        response = self._get("home")
+
+        self.assertNotContains(response, "btn-success")
+        self.assertNotContains(response, "btn-error")
 
     def test_dues_card_shows_the_outstanding_balance(self):
         membership = ClubMembership.objects.get(club=self.club, member=self.member, season=self.season)
@@ -408,6 +454,37 @@ class HomeViewTests(TestCase):
 
         self.assertEqual(response.context["scope_person"], self.member)
         self.assertIn(team_news, response.context["news_items"])
+
+    def test_news_teaser_shows_every_teams_news_not_just_this_accounts_own(self):
+        # Home's teaser is "everything the club published", not a per-team
+        # feed -- an item tagged to a team this account has nothing to do
+        # with still shows up here.
+        other_team = Team.objects.create(club=self.club, name="U10", short_name="U10")
+        other_team_news = News.objects.create(club=self.club, title="U10 news", body="Body.", status=News.Status.PUBLISHED, published_at=timezone.now())
+        other_team_news.teams.add(other_team)
+        self.client.force_login(self.user)
+
+        response = self._get("home")
+
+        self.assertIn(other_team_news, response.context["news_items"])
+
+    def test_news_teaser_shows_the_main_photo_when_set(self):
+        news_item = News.objects.create(club=self.club, title="With a photo", body="Body.", status=News.Status.PUBLISHED, published_at=timezone.now())
+        NewsPhoto.objects.create(news_item=news_item, image=make_image_file(), is_main=True)
+        self.client.force_login(self.user)
+
+        response = self._get("home")
+
+        self.assertContains(response, news_item.main_photo.image.url)
+        self.assertNotContains(response, "News photo")
+
+    def test_news_teaser_shows_the_placeholder_when_there_is_no_photo(self):
+        News.objects.create(club=self.club, title="No photo", body="Body.", status=News.Status.PUBLISHED, published_at=timezone.now())
+        self.client.force_login(self.user)
+
+        response = self._get("home")
+
+        self.assertContains(response, "News photo")
 
     def test_news_card_shows_an_empty_state_with_a_link_to_all_news_when_there_is_none(self):
         self.client.force_login(self.user)
@@ -1754,6 +1831,16 @@ class NewsDetailScreenTests(TestCase):
         self.assertContains(response, "Season Kickoff")
         self.assertContains(response, "We start training next week.")
 
+    def test_markdown_body_renders_as_html_not_literal_source(self):
+        news_item = News.objects.create(club=self.club, title="Formatted", body="**Bold** and a list:\n\n- one\n- two", status=News.Status.PUBLISHED, published_at=timezone.now())
+        self.client.force_login(self.user)
+
+        response = self._get(news_item)
+
+        self.assertContains(response, "<strong>Bold</strong>", html=False)
+        self.assertContains(response, "<li>one</li>", html=False)
+        self.assertNotContains(response, "**Bold**")
+
     def test_a_draft_item_404s(self):
         news_item = News.objects.create(club=self.club, title="Draft item", body="Not live yet.", status=News.Status.DRAFT)
         self.client.force_login(self.user)
@@ -2586,6 +2673,16 @@ class CoachTodayViewTests(TestCase):
 
         self.assertContains(response, reverse("mobile:coach_lineup", kwargs={"event_id": game.pk}))
 
+    def test_a_tournament_also_gets_a_missing_lineup_nudge(self):
+        tournament = Event.objects.create(club=self.club, title="Regional Cup", kind=Event.EventKind.TOURNAMENT, start=timezone.now() + datetime.timedelta(days=1))
+        tournament.teams.add(self.team)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, "Line-up not published")
+        self.assertContains(response, reverse("mobile:coach_lineup", kwargs={"event_id": tournament.pk}))
+
     def test_missing_lineup_check_is_capped(self):
         cap = CoachTodayView.UPCOMING_GAMES_CHECKED
         for day in range(cap + 1):
@@ -3111,6 +3208,15 @@ class CoachScheduleViewTests(TestCase):
         response = self._get()
 
         self.assertContains(response, reverse("mobile:coach_lineup", kwargs={"event_id": game.pk}))
+
+    def test_tournament_row_links_to_lineup(self):
+        tournament = Event.objects.create(club=self.club, title="Regional Cup", kind=Event.EventKind.TOURNAMENT, start=timezone.now() + datetime.timedelta(days=2))
+        tournament.teams.add(self.team)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, reverse("mobile:coach_lineup", kwargs={"event_id": tournament.pk}))
 
     def test_training_row_links_to_attendance(self):
         practice = Event.objects.create(club=self.club, title="Practice", kind=Event.EventKind.TRAINING, start=timezone.now() + datetime.timedelta(days=2))
@@ -4302,6 +4408,15 @@ class CoachLineupViewTests(TestCase):
 
         self.assertEqual(response.status_code, 404)
 
+    def test_a_tournament_event_is_reachable(self):
+        tournament = Event.objects.create(club=self.club, title="Regional Cup", kind=Event.EventKind.TOURNAMENT, start=timezone.now() + datetime.timedelta(days=2))
+        tournament.teams.add(self.team)
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mobile:coach_lineup", kwargs={"event_id": tournament.pk}), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+
     def test_get_groups_available_players_by_position(self):
         self.client.force_login(self.user)
 
@@ -4379,6 +4494,18 @@ class CoachLineupViewTests(TestCase):
         response = self.client.post(reverse("mobile:coach_lineup_publish", kwargs={"event_id": self.event.pk}), HTTP_HOST="ajax-united.rosterchief.app")
 
         self.assertRedirects(response, reverse("mobile:coach_lineup", kwargs={"event_id": self.event.pk}), fetch_redirect_response=False)
+        lineup.refresh_from_db()
+        self.assertIsNotNone(lineup.published_at)
+
+    def test_a_tournament_lineup_can_be_published(self):
+        tournament = Event.objects.create(club=self.club, title="Regional Cup", kind=Event.EventKind.TOURNAMENT, start=timezone.now() + datetime.timedelta(days=2))
+        tournament.teams.add(self.team)
+        self.client.force_login(self.user)
+        lineup = Lineup.objects.create(event=tournament, team=self.team)
+
+        response = self.client.post(reverse("mobile:coach_lineup_publish", kwargs={"event_id": tournament.pk}), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertRedirects(response, reverse("mobile:coach_lineup", kwargs={"event_id": tournament.pk}), fetch_redirect_response=False)
         lineup.refresh_from_db()
         self.assertIsNotNone(lineup.published_at)
 

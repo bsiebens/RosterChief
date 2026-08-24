@@ -6,8 +6,10 @@
     article". See NewsDetailView's own docstring (mobile/views.py) for the
     judgment calls: visibility mirrors news.tasks.notify_news_published's
     gate, language is Django's active-language detection (not a member-facing
-    toggle), and the body is plain user content -- rendered as-is, not
-    wrapped in {% trans %}.
+    toggle). article_body is Markdown source rendered to sanitised HTML by
+    news.services.render_body_html (same renderer the public API uses) --
+    ``|safe`` here is fine because that sanitisation already happened, not
+    because the source is trusted on its own.
 {% endcomment %}
 
 {% block content %}
@@ -26,7 +28,7 @@
     </div>
 
     <div class="flex flex-col gap-3.5">
-        <div class="whitespace-pre-line text-[15px] leading-relaxed text-ink">{{ article_body }}</div>
+        <div class="article-body">{{ article_body|safe }}</div>
 
         {% with teams=news_item.teams.all %}
             {% if teams %}

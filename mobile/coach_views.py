@@ -53,6 +53,11 @@ OUT_STATUSES = [Attendance.AttendanceStatus.ABSENT, Attendance.AttendanceStatus.
 #: neither has a tile here.
 COACH_EVENT_KINDS = [Event.EventKind.TRAINING, Event.EventKind.GAME, Event.EventKind.TOURNAMENT, Event.EventKind.MEETING]
 
+#: Event kinds a line-up applies to -- a Tournament is a squad-selection event
+#: exactly like a Game (who's travelling/dressed), unlike Training/Meeting.
+#: Everywhere C3 (line-up) gating checks "is this a game", it means this set.
+LINEUP_EVENT_KINDS = [Event.EventKind.GAME, Event.EventKind.TOURNAMENT]
+
 
 class _LocationPickerForm(forms.Form):
     """Just the ``location`` picker, standalone from EventForm/EventSeriesForm
@@ -184,7 +189,7 @@ class CoachTodayView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
                         }
                     )
 
-            upcoming_games = list(upcoming.filter(kind=Event.EventKind.GAME)[: self.UPCOMING_GAMES_CHECKED])
+            upcoming_games = list(upcoming.filter(kind__in=LINEUP_EVENT_KINDS)[: self.UPCOMING_GAMES_CHECKED])
             published_event_ids = set(Lineup.objects.filter(event__in=upcoming_games, published_at__isnull=False).values_list("event_id", flat=True))
             for game in upcoming_games:
                 if game.pk in published_event_ids:
@@ -916,7 +921,7 @@ class CoachLineupView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
     def get_event(self):
         if self.active_team is None:
             raise Http404
-        return get_object_or_404(Event, pk=self.kwargs["event_id"], club=self.request.club, teams=self.active_team, kind=Event.EventKind.GAME)
+        return get_object_or_404(Event, pk=self.kwargs["event_id"], club=self.request.club, teams=self.active_team, kind__in=LINEUP_EVENT_KINDS)
 
     def _categories(self, event, lineup):
         """Available roster players, grouped by position -- same "category"
@@ -1005,7 +1010,7 @@ class CoachLineupPublishView(CoachScopeMixin, LoginRequiredMixin, View):
         if not self.can_manage_active_team:
             return HttpResponseForbidden()
 
-        event = get_object_or_404(Event, pk=kwargs["event_id"], club=request.club, teams=self.active_team, kind=Event.EventKind.GAME)
+        event = get_object_or_404(Event, pk=kwargs["event_id"], club=request.club, teams=self.active_team, kind__in=LINEUP_EVENT_KINDS)
         lineup = get_object_or_404(Lineup, event=event)
         action = request.POST.get("action", "publish_now")
 

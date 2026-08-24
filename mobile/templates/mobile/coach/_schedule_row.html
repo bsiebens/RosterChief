@@ -1,5 +1,5 @@
 {% load i18n %}
-<a class="flex items-center gap-3 p-3.5" href="{% if event.kind == "game" %}{% url "mobile:coach_lineup" event.pk %}{% else %}{% url "mobile:coach_attendance" event.pk %}{% endif %}">
+<a class="flex items-center gap-3 p-3.5" href="{% if event.kind == "game" or event.kind == "tournament" %}{% url "mobile:coach_lineup" event.pk %}{% else %}{% url "mobile:coach_attendance" event.pk %}{% endif %}">
     <div class="w-9.5 shrink-0 text-center">
         <div class="font-mono text-[10px] tracking-wide text-muted uppercase">{{ event.start|date:"D" }}</div>
         <div class="font-display text-2xl leading-none font-extrabold text-ink">{{ event.start|date:"d" }}</div>
