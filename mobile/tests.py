@@ -470,12 +470,13 @@ class HomeViewTests(TestCase):
 
     def test_news_teaser_shows_the_main_photo_when_set(self):
         news_item = News.objects.create(club=self.club, title="With a photo", body="Body.", status=News.Status.PUBLISHED, published_at=timezone.now())
-        NewsPhoto.objects.create(news_item=news_item, image=make_image_file(), is_main=True)
+        NewsPhoto.objects.create(news_item=news_item, image=make_image_file(), is_main=True, focal_x=20, focal_y=80)
         self.client.force_login(self.user)
 
         response = self._get("home")
 
         self.assertContains(response, news_item.main_photo.image.url)
+        self.assertContains(response, "object-position: 20% 80%")
         self.assertNotContains(response, "News photo")
 
     def test_news_teaser_shows_the_placeholder_when_there_is_no_photo(self):
@@ -1830,6 +1831,15 @@ class NewsDetailScreenTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Season Kickoff")
         self.assertContains(response, "We start training next week.")
+
+    def test_the_hero_photo_uses_its_stored_focal_point(self):
+        news_item = News.objects.create(club=self.club, title="With a photo", body="Body.", status=News.Status.PUBLISHED, published_at=timezone.now())
+        NewsPhoto.objects.create(news_item=news_item, image=make_image_file(), is_main=True, focal_x=15, focal_y=90)
+        self.client.force_login(self.user)
+
+        response = self._get(news_item)
+
+        self.assertContains(response, "15% 90%/cover")
 
     def test_markdown_body_renders_as_html_not_literal_source(self):
         news_item = News.objects.create(club=self.club, title="Formatted", body="**Bold** and a list:\n\n- one\n- two", status=News.Status.PUBLISHED, published_at=timezone.now())

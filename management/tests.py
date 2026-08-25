@@ -4410,6 +4410,38 @@ class NewsManagementTests(ManagementTestBase):
         self.assertFalse(first.is_main)
         self.assertTrue(second.is_main)
 
+    def test_setting_the_focal_point_stores_it(self):
+        item = News.objects.create(club=self.club, title="Match report", body="Body.")
+        photo = NewsPhoto.objects.create(news_item=item, image=SimpleUploadedFile("one.jpg", b"one", content_type="image/jpeg"))
+        self.client.force_login(self.coach_manager)
+
+        self.club_post("news_photo_set_focal_point", {"focal_x": "20", "focal_y": "80"}, item.pk, photo.pk)
+
+        photo.refresh_from_db()
+        self.assertEqual(photo.focal_x, 20)
+        self.assertEqual(photo.focal_y, 80)
+
+    def test_the_focal_point_is_clamped_to_0_100(self):
+        item = News.objects.create(club=self.club, title="Match report", body="Body.")
+        photo = NewsPhoto.objects.create(news_item=item, image=SimpleUploadedFile("one.jpg", b"one", content_type="image/jpeg"))
+        self.client.force_login(self.coach_manager)
+
+        self.club_post("news_photo_set_focal_point", {"focal_x": "-5", "focal_y": "500"}, item.pk, photo.pk)
+
+        photo.refresh_from_db()
+        self.assertEqual(photo.focal_x, 0)
+        self.assertEqual(photo.focal_y, 100)
+
+    def test_a_non_numeric_focal_point_is_rejected(self):
+        item = News.objects.create(club=self.club, title="Match report", body="Body.")
+        photo = NewsPhoto.objects.create(news_item=item, image=SimpleUploadedFile("one.jpg", b"one", content_type="image/jpeg"))
+        self.client.force_login(self.coach_manager)
+
+        self.club_post("news_photo_set_focal_point", {"focal_x": "nope", "focal_y": "50"}, item.pk, photo.pk)
+
+        photo.refresh_from_db()
+        self.assertEqual(photo.focal_x, 50)  # default, untouched
+
     def test_deleting_a_photo_removes_it(self):
         item = News.objects.create(club=self.club, title="Match report", body="Body.")
         photo = NewsPhoto.objects.create(news_item=item, image=SimpleUploadedFile("one.jpg", b"one", content_type="image/jpeg"))

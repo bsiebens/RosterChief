@@ -94,6 +94,7 @@ urlpatterns = [
     path("news/<uuid:pk>/unpublish/", views.NewsUnpublishView.as_view(), name="news_unpublish"),
     path("news/<uuid:pk>/photos/", views.NewsPhotoUploadView.as_view(), name="news_photo_upload"),
     path("news/<uuid:pk>/photos/<uuid:photo_pk>/set-main/", views.NewsPhotoSetMainView.as_view(), name="news_photo_set_main"),
+    path("news/<uuid:pk>/photos/<uuid:photo_pk>/focal-point/", views.NewsPhotoSetFocalPointView.as_view(), name="news_photo_set_focal_point"),
     path("news/<uuid:pk>/photos/<uuid:photo_pk>/delete/", views.NewsPhotoDeleteView.as_view(), name="news_photo_delete"),
     # Calendar
     path("events/", views.EventListView.as_view(), name="event_list"),

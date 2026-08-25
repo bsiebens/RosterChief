@@ -2353,6 +2353,34 @@ class NewsPhotoSetMainView(NewsEditRequiredMixin, View):
         return redirect("management:news_detail", pk=news_item.pk)
 
 
+class NewsPhotoSetFocalPointView(NewsEditRequiredMixin, View):
+    """Where object-fit: cover centres the crop for this photo -- see NewsPhoto.
+    focal_x/focal_y's own docstring. ``_news_preview.html``'s own click-to-position
+    overlay posts the percentages here; validated and clamped server-side too,
+    since nothing stops a handcrafted request from sending nonsense."""
+
+    def get_news_item(self):
+        return get_object_or_404(News.objects.filter(club=self.request.club), pk=self.kwargs["pk"])
+
+    def post(self, request, pk, photo_pk):
+        news_item = self.get_news_item()
+        photo = get_object_or_404(NewsPhoto, pk=photo_pk, news_item=news_item)
+
+        try:
+            focal_x = int(request.POST["focal_x"])
+            focal_y = int(request.POST["focal_y"])
+        except (KeyError, ValueError):
+            notify(request, f"e|{_('Could not set focal point')}|{_('That was not a valid position.')}")
+            return redirect("management:news_detail", pk=news_item.pk)
+
+        photo.focal_x = max(0, min(100, focal_x))
+        photo.focal_y = max(0, min(100, focal_y))
+        photo.save(update_fields=["focal_x", "focal_y"])
+
+        notify(request, f"s|{_('Focal point set')}|{_('The photo will crop around that point wherever it shows up cropped.')}")
+        return redirect("management:news_detail", pk=news_item.pk)
+
+
 class NewsPhotoDeleteView(NewsEditRequiredMixin, View):
     def get_news_item(self):
         return get_object_or_404(News.objects.filter(club=self.request.club), pk=self.kwargs["pk"])

@@ -49,7 +49,7 @@
 
     <div class="card overflow-hidden">
         {% if news_item.main_photo %}
-            <img class="h-[190px] w-full object-cover" src="{{ news_item.main_photo.image.url }}" alt="">
+            <img class="h-[190px] w-full object-cover" style="object-position: {{ news_item.main_photo.object_position }}" src="{{ news_item.main_photo.image.url }}" alt="">
         {% endif %}
         <div class="card-body">
             <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
@@ -104,7 +104,7 @@
             <div class="mt-2 grid grid-cols-2 gap-4 md:grid-cols-4">
                 {% for photo in news_item.photos.all %}
                     <div class="relative">
-                        <img class="aspect-square w-full rounded-box border border-line object-cover" src="{{ photo.image.url }}" alt="">
+                        <img class="aspect-square w-full rounded-box border border-line object-cover" style="object-position: {{ photo.object_position }}" src="{{ photo.image.url }}" alt="">
                         {% if photo.is_main %}
                             <span class="badge badge-success badge-sm absolute top-1.5 left-1.5">{% trans "Main" %}</span>
                         {% endif %}
@@ -116,6 +116,17 @@
                                         <button class="btn btn-outline btn-xs gap-1" type="submit">{% lucide "star" size=12 %} {% trans "Set main" %}</button>
                                     </form>
                                 {% endif %}
+                                <button
+                                    class="btn btn-outline btn-xs gap-1"
+                                    type="button"
+                                    onclick="openFocalPointModal(this)"
+                                    data-image-url="{{ photo.image.url }}"
+                                    data-action-url="{% url 'management:news_photo_set_focal_point' news_item.pk photo.pk %}"
+                                    data-focal-x="{{ photo.focal_x }}"
+                                    data-focal-y="{{ photo.focal_y }}"
+                                >
+                                    {% lucide "crosshair" size=12 %} {% trans "Focal point" %}
+                                </button>
                                 <button class="btn btn-outline btn-error btn-xs gap-1" type="button" onclick="document.getElementById('{{ photo.pk|dom_id:"delete_photo_modal" }}').showModal()">{% lucide "trash-2" size=12 %} {% trans "Delete" %}</button>
                             </div>
                             {% url 'management:news_photo_delete' news_item.pk photo.pk as delete_photo_url %}
@@ -131,6 +142,81 @@
             </div>
         </div>
     </div>
+
+    {% if can_edit %}
+        {% comment %}
+            One shared modal for every photo's "Focal point" button, populated by
+            openFocalPointModal() below rather than one dialog per photo -- avoids
+            rendering N copies of the same markup for N photos. Click (or drag) on
+            the uncropped image to place the marker; the click position, as a
+            percentage of the rendered image, is exactly what NewsPhoto.focal_x/
+            focal_y stores and exactly what object-position/background-position
+            expect back out, so no conversion happens at either end.
+        {% endcomment %}
+        <dialog id="focal_point_modal" class="modal">
+            <div class="modal-box max-w-lg">
+                <h3 class="text-lg font-bold">{% trans "Set focal point" %}</h3>
+                <p class="py-2 text-sm opacity-70">{% trans "Click where the subject is. Wherever this photo is shown cropped, the crop will centre on that point." %}</p>
+                <div id="focal-point-picker" class="relative cursor-crosshair overflow-hidden rounded-box border border-line select-none">
+                    <img id="focal-point-image" class="block w-full" src="" alt="" draggable="false">
+                    <div id="focal-point-marker" class="pointer-events-none absolute h-6 w-6 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-club/80 shadow-md"></div>
+                </div>
+                <form method="post" id="focal-point-form" action="">
+                    {% csrf_token %}
+                    <input type="hidden" name="focal_x" id="focal-point-x" value="50">
+                    <input type="hidden" name="focal_y" id="focal-point-y" value="50">
+                </form>
+                <div class="modal-action">
+                    <form method="dialog">
+                        <button class="btn btn-outline gap-2">{% lucide "x" size=16 %} {% trans "Cancel" %}</button>
+                    </form>
+                    <button class="btn btn-primary gap-2" type="submit" form="focal-point-form">{% lucide "crosshair" size=16 %} {% trans "Save" %}</button>
+                </div>
+            </div>
+            <form method="dialog" class="modal-backdrop">
+                <button>close</button>
+            </form>
+        </dialog>
+
+        <script>
+            (() => {
+                const modal = document.getElementById("focal_point_modal");
+                const picker = document.getElementById("focal-point-picker");
+                const image = document.getElementById("focal-point-image");
+                const marker = document.getElementById("focal-point-marker");
+                const form = document.getElementById("focal-point-form");
+                const xInput = document.getElementById("focal-point-x");
+                const yInput = document.getElementById("focal-point-y");
+
+                function setFocalPoint(x, y) {
+                    xInput.value = x;
+                    yInput.value = y;
+                    marker.style.left = `${x}%`;
+                    marker.style.top = `${y}%`;
+                }
+
+                // One listener for the life of the page -- the picker element itself
+                // never changes, only which photo's URL/action is loaded into it, so
+                // there's no per-open rebinding (and no risk of stacking listeners)
+                // the way there would be if this lived inside openFocalPointModal.
+                picker.addEventListener("click", (event) => {
+                    const rect = picker.getBoundingClientRect();
+                    const x = Math.max(0, Math.min(100, Math.round(((event.clientX - rect.left) / rect.width) * 100)));
+                    const y = Math.max(0, Math.min(100, Math.round(((event.clientY - rect.top) / rect.height) * 100)));
+                    setFocalPoint(x, y);
+                });
+
+                // Called from each photo's "Focal point" button (onclick="openFocalPointModal(this)")
+                // -- global on purpose, since an inline handler attribute runs in global scope.
+                window.openFocalPointModal = (button) => {
+                    form.action = button.dataset.actionUrl;
+                    image.src = button.dataset.imageUrl;
+                    setFocalPoint(button.dataset.focalX, button.dataset.focalY);
+                    modal.showModal();
+                };
+            })();
+        </script>
+    {% endif %}
 </div>
 
 {% if can_edit %}

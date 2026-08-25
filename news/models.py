@@ -1,3 +1,4 @@
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.db.models import Q
 from django.utils import timezone
@@ -117,6 +118,17 @@ class NewsPhoto(UUIDModel):
     is_main = models.BooleanField(_("main picture"), default=False)
     ordering = models.PositiveSmallIntegerField(_("ordering"), default=0)
 
+    #: Where the crop centres when this photo is shown cropped (the Home teaser,
+    #: the article hero) -- percent from the left/top of the *original* image, not
+    #: the cropped result. Defaults to dead centre, CSS's own default object-position,
+    #: so an untouched photo behaves exactly as before this existed. object-fit:cover
+    #: (or a CSS background-position equivalent) always shows the same aspect-ratio
+    #: box regardless of the source photo's own shape; a subject that isn't centred
+    #: -- a crest occupying most of a portrait photo, a face lower in the frame --
+    #: needs this told explicitly rather than guessed by a single global default.
+    focal_x = models.PositiveSmallIntegerField(_("focal point (x)"), default=50, validators=[MinValueValidator(0), MaxValueValidator(100)])
+    focal_y = models.PositiveSmallIntegerField(_("focal point (y)"), default=50, validators=[MinValueValidator(0), MaxValueValidator(100)])
+
     class Meta:
         verbose_name = _("news photo")
         verbose_name_plural = _("news photos")
@@ -127,3 +139,11 @@ class NewsPhoto(UUIDModel):
 
     def __str__(self):
         return f"{self.news_item} — photo"
+
+    @property
+    def object_position(self) -> str:
+        """``object-position``/``background-position`` value for this photo's
+        stored focal point -- the one thing every render site (mobile's Home
+        teaser and article hero, management's own preview) needs, so none of
+        them re-derive the ``"{x}% {y}%"`` string themselves."""
+        return f"{self.focal_x}% {self.focal_y}%"

@@ -145,6 +145,19 @@ class NewsPhotoModelTests(TestCase):
 
         self.assertEqual(NewsPhoto.objects.filter(is_main=True).count(), 2)
 
+    def test_object_position_defaults_to_dead_centre(self):
+        photo = make_photo(self.item)
+
+        self.assertEqual(photo.object_position, "50% 50%")
+
+    def test_object_position_reflects_a_custom_focal_point(self):
+        photo = make_photo(self.item)
+        photo.focal_x = 20
+        photo.focal_y = 80
+        photo.save(update_fields=["focal_x", "focal_y"])
+
+        self.assertEqual(photo.object_position, "20% 80%")
+
 
 class SendPublishNotificationTests(TestCase):
     """news.services.send_publish_notification -- the audience is this item's
