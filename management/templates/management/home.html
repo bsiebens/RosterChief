@@ -100,56 +100,54 @@
         than pushing the column taller.
     {% endcomment %}
     <div class="grid grid-cols-1 gap-5 lg:h-[52rem] lg:grid-cols-3">
-        {# --- column 1: needs attention ------------------------------------ #}
-        <div class="flex min-h-0 flex-col lg:h-full">
-            <div class="card flex flex-1 flex-col overflow-hidden lg:min-h-0">
-                <div class="flex items-center border-b border-line px-4.5 py-3.5">
-                    <span class="font-display text-base font-extrabold tracking-[.08em] text-ink uppercase">{% trans "Needs attention" %}</span>
+        {# --- column 1: news, signups, club fee + renewal ------------------ #}
+        <div class="flex min-h-0 flex-col gap-5 lg:h-full">
+            <div class="card flex flex-1 flex-col overflow-hidden p-4.5 lg:min-h-0">
+                <div class="mb-3.5 flex shrink-0 items-center justify-between">
+                    <span class="font-display text-base font-extrabold tracking-[.08em] text-ink uppercase">{% trans "News" %}</span>
+                    <a class="btn btn-outline btn-sm" href="{% url 'management:news_list' %}">{% trans "View all" %}</a>
                 </div>
-                <div class="flex flex-1 flex-col overflow-y-auto lg:min-h-0">
-                    {% if attention.pending_approvals %}
-                        <div class="flex items-center gap-3.5 border-b border-rule px-4.5 py-3.5">
-                            <span class="h-8.5 w-1.5 shrink-0 rounded-sm bg-club"></span>
-                            <div class="flex-1">
-                                <div class="text-[15px] font-semibold text-ink">{% blocktrans count count=attention.pending_approvals %}{{ count }} membership awaiting approval{% plural %}{{ count }} memberships awaiting approval{% endblocktrans %}</div>
-                            </div>
-                            <a class="btn btn-outline btn-sm" href="{% url 'management:member_list' %}?status=pending">{% trans "Review" %}</a>
+                <div class="flex-1 overflow-y-auto lg:min-h-0">
+                    {% for news_item in published_news %}
+                        <div class="flex items-center justify-between gap-3 py-2.5{% if not forloop.last %} border-b border-rule{% endif %}">
+                            <a class="truncate text-sm font-semibold text-ink hover:underline" href="{% url 'management:news_detail' news_item.pk %}">{{ news_item.title }}</a>
+                            <span class="shrink-0 font-mono text-xs text-muted">{{ news_item.published_at|date:"j M" }}</span>
                         </div>
-                    {% endif %}
-                    {% if attention.teams_without_manager %}
-                        <div class="flex items-center gap-3.5 border-b border-rule px-4.5 py-3.5">
-                            <span class="h-8.5 w-1.5 shrink-0 rounded-sm bg-warn"></span>
-                            <div class="flex-1">
-                                <div class="text-[15px] font-semibold text-ink">{% blocktrans count count=attention.teams_without_manager %}{{ count }} team has no coach assigned{% plural %}{{ count }} teams have no coach assigned{% endblocktrans %}</div>
-                                <div class="text-[13px] text-muted">{% trans "Nobody can pick a squad for them" %}</div>
-                            </div>
-                            <a class="btn btn-outline btn-sm" href="{% url 'management:team_list' %}">{% trans "Assign" %}</a>
-                        </div>
-                    {% endif %}
-                    {% if attention.unrostered %}
-                        <div class="flex items-center gap-3.5 border-b border-rule px-4.5 py-3.5">
-                            <span class="h-8.5 w-1.5 shrink-0 rounded-sm bg-warn"></span>
-                            <div class="flex-1">
-                                <div class="text-[15px] font-semibold text-ink">{% blocktrans count count=attention.unrostered %}{{ count }} active member is on no team{% plural %}{{ count }} active members are on no team{% endblocktrans %}</div>
-                            </div>
-                            <a class="btn btn-outline btn-sm" href="{% url 'management:member_list' %}?unrostered=1">{% trans "Review" %}</a>
-                        </div>
-                    {% endif %}
-                    {% if missing_documentation_count %}
-                        <div class="flex items-center gap-3.5 border-b border-rule px-4.5 py-3.5">
-                            <span class="h-8.5 w-1.5 shrink-0 rounded-sm bg-warn"></span>
-                            <div class="flex-1">
-                                <div class="text-[15px] font-semibold text-ink">{% blocktrans count count=missing_documentation_count %}{{ count }} member has an open checklist item{% plural %}{{ count }} members have an open checklist item{% endblocktrans %}</div>
-                                <div class="text-[13px] text-muted">{% trans "Documents/medical certificates still outstanding" %}</div>
-                            </div>
-                            <a class="btn btn-outline btn-sm" href="{% url 'management:member_list' %}?docs=open">{% trans "Review" %}</a>
-                        </div>
-                    {% endif %}
-                    {% if not attention.pending_approvals and not attention.teams_without_manager and not attention.unrostered and not missing_documentation_count %}
-                        <div class="flex flex-1 items-center justify-center px-4.5 py-6 text-center text-sm text-muted">{% trans "Nothing needs attention." %}</div>
-                    {% endif %}
+                    {% empty %}
+                        <div class="py-4 text-center text-sm text-muted">{% trans "Nothing published yet." %}</div>
+                    {% endfor %}
                 </div>
             </div>
+
+            {% if is_club_admin %}
+                {# Financial/admin-only charts -- desktop-only canvases, same reasoning the old flat template gave: squeezed on a phone, and this surface is desktop-only anyway now. #}
+                <div class="card flex flex-1 flex-col overflow-hidden p-4.5 lg:min-h-0">
+                    <div class="mb-1.5 shrink-0 font-display text-base font-extrabold tracking-[.08em] text-ink uppercase">{% trans "Signups per month" %}</div>
+                    <p class="mb-2 shrink-0 text-sm text-muted">{% trans "New members against returning ones." %}</p>
+                    <div class="flex-1 lg:min-h-0">
+                        <canvas id="signups-chart"></canvas>
+                    </div>
+                </div>
+
+                <div class="flex flex-1 gap-5 lg:min-h-0">
+                    <div class="card flex flex-1 flex-col overflow-hidden p-4.5 lg:min-h-0">
+                        <div class="mb-3.5 shrink-0 font-display text-base font-extrabold tracking-[.08em] text-ink uppercase">{% trans "Club fee status" %}</div>
+                        <div class="flex-1 lg:min-h-0">
+                            <canvas id="fees-chart"></canvas>
+                        </div>
+                    </div>
+                    <div class="card flex flex-1 flex-col overflow-hidden p-4.5 lg:min-h-0">
+                        <div class="mb-3.5 shrink-0 font-display text-base font-extrabold tracking-[.08em] text-ink uppercase">{% trans "Renewal rate" %}</div>
+                        {% if attention.renewal_rate is None %}
+                            <p class="text-sm text-muted">{% trans "No previous season to compare." %}</p>
+                        {% else %}
+                            <div class="flex-1 lg:min-h-0">
+                                <canvas id="renewal-chart"></canvas>
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+            {% endif %}
         </div>
 
         {# --- column 2: notifications (25%) + upcoming (75%) --------------- #}
@@ -214,54 +212,56 @@
             </div>
         </div>
 
-        {# --- column 3: news, signups, club fee + renewal ------------------ #}
-        <div class="flex min-h-0 flex-col gap-5 lg:h-full">
-            <div class="card flex flex-1 flex-col overflow-hidden p-4.5 lg:min-h-0">
-                <div class="mb-3.5 flex shrink-0 items-center justify-between">
-                    <span class="font-display text-base font-extrabold tracking-[.08em] text-ink uppercase">{% trans "News" %}</span>
-                    <a class="btn btn-outline btn-sm" href="{% url 'management:news_list' %}">{% trans "View all" %}</a>
+        {# --- column 3: needs attention ------------------------------------ #}
+        <div class="flex min-h-0 flex-col lg:h-full">
+            <div class="card flex flex-1 flex-col overflow-hidden lg:min-h-0">
+                <div class="flex items-center border-b border-line px-4.5 py-3.5">
+                    <span class="font-display text-base font-extrabold tracking-[.08em] text-ink uppercase">{% trans "Needs attention" %}</span>
                 </div>
-                <div class="flex-1 overflow-y-auto lg:min-h-0">
-                    {% for news_item in published_news %}
-                        <div class="flex items-center justify-between gap-3 py-2.5{% if not forloop.last %} border-b border-rule{% endif %}">
-                            <a class="truncate text-sm font-semibold text-ink hover:underline" href="{% url 'management:news_detail' news_item.pk %}">{{ news_item.title }}</a>
-                            <span class="shrink-0 font-mono text-xs text-muted">{{ news_item.published_at|date:"j M" }}</span>
+                <div class="flex flex-1 flex-col overflow-y-auto lg:min-h-0">
+                    {% if attention.pending_approvals %}
+                        <div class="flex items-center gap-3.5 border-b border-rule px-4.5 py-3.5">
+                            <span class="h-8.5 w-1.5 shrink-0 rounded-sm bg-club"></span>
+                            <div class="flex-1">
+                                <div class="text-[15px] font-semibold text-ink">{% blocktrans count count=attention.pending_approvals %}{{ count }} membership awaiting approval{% plural %}{{ count }} memberships awaiting approval{% endblocktrans %}</div>
+                            </div>
+                            <a class="btn btn-outline btn-sm" href="{% url 'management:member_list' %}?status=pending">{% trans "Review" %}</a>
                         </div>
-                    {% empty %}
-                        <div class="py-4 text-center text-sm text-muted">{% trans "Nothing published yet." %}</div>
-                    {% endfor %}
+                    {% endif %}
+                    {% if attention.teams_without_manager %}
+                        <div class="flex items-center gap-3.5 border-b border-rule px-4.5 py-3.5">
+                            <span class="h-8.5 w-1.5 shrink-0 rounded-sm bg-warn"></span>
+                            <div class="flex-1">
+                                <div class="text-[15px] font-semibold text-ink">{% blocktrans count count=attention.teams_without_manager %}{{ count }} team has no coach assigned{% plural %}{{ count }} teams have no coach assigned{% endblocktrans %}</div>
+                                <div class="text-[13px] text-muted">{% trans "Nobody can pick a squad for them" %}</div>
+                            </div>
+                            <a class="btn btn-outline btn-sm" href="{% url 'management:team_list' %}">{% trans "Assign" %}</a>
+                        </div>
+                    {% endif %}
+                    {% if attention.unrostered %}
+                        <div class="flex items-center gap-3.5 border-b border-rule px-4.5 py-3.5">
+                            <span class="h-8.5 w-1.5 shrink-0 rounded-sm bg-warn"></span>
+                            <div class="flex-1">
+                                <div class="text-[15px] font-semibold text-ink">{% blocktrans count count=attention.unrostered %}{{ count }} active member is on no team{% plural %}{{ count }} active members are on no team{% endblocktrans %}</div>
+                            </div>
+                            <a class="btn btn-outline btn-sm" href="{% url 'management:member_list' %}?unrostered=1">{% trans "Review" %}</a>
+                        </div>
+                    {% endif %}
+                    {% if missing_documentation_count %}
+                        <div class="flex items-center gap-3.5 border-b border-rule px-4.5 py-3.5">
+                            <span class="h-8.5 w-1.5 shrink-0 rounded-sm bg-warn"></span>
+                            <div class="flex-1">
+                                <div class="text-[15px] font-semibold text-ink">{% blocktrans count count=missing_documentation_count %}{{ count }} member has an open checklist item{% plural %}{{ count }} members have an open checklist item{% endblocktrans %}</div>
+                                <div class="text-[13px] text-muted">{% trans "Documents/medical certificates still outstanding" %}</div>
+                            </div>
+                            <a class="btn btn-outline btn-sm" href="{% url 'management:member_list' %}?docs=open">{% trans "Review" %}</a>
+                        </div>
+                    {% endif %}
+                    {% if not attention.pending_approvals and not attention.teams_without_manager and not attention.unrostered and not missing_documentation_count %}
+                        <div class="flex flex-1 items-center justify-center px-4.5 py-6 text-center text-sm text-muted">{% trans "Nothing needs attention." %}</div>
+                    {% endif %}
                 </div>
             </div>
-
-            {% if is_club_admin %}
-                {# Financial/admin-only charts -- desktop-only canvases, same reasoning the old flat template gave: squeezed on a phone, and this surface is desktop-only anyway now. #}
-                <div class="card flex flex-1 flex-col overflow-hidden p-4.5 lg:min-h-0">
-                    <div class="mb-1.5 shrink-0 font-display text-base font-extrabold tracking-[.08em] text-ink uppercase">{% trans "Signups per month" %}</div>
-                    <p class="mb-2 shrink-0 text-sm text-muted">{% trans "New members against returning ones." %}</p>
-                    <div class="flex-1 lg:min-h-0">
-                        <canvas id="signups-chart"></canvas>
-                    </div>
-                </div>
-
-                <div class="flex flex-1 gap-5 lg:min-h-0">
-                    <div class="card flex flex-1 flex-col overflow-hidden p-4.5 lg:min-h-0">
-                        <div class="mb-3.5 shrink-0 font-display text-base font-extrabold tracking-[.08em] text-ink uppercase">{% trans "Club fee status" %}</div>
-                        <div class="flex-1 lg:min-h-0">
-                            <canvas id="fees-chart"></canvas>
-                        </div>
-                    </div>
-                    <div class="card flex flex-1 flex-col overflow-hidden p-4.5 lg:min-h-0">
-                        <div class="mb-3.5 shrink-0 font-display text-base font-extrabold tracking-[.08em] text-ink uppercase">{% trans "Renewal rate" %}</div>
-                        {% if attention.renewal_rate is None %}
-                            <p class="text-sm text-muted">{% trans "No previous season to compare." %}</p>
-                        {% else %}
-                            <div class="flex-1 lg:min-h-0">
-                                <canvas id="renewal-chart"></canvas>
-                            </div>
-                        {% endif %}
-                    </div>
-                </div>
-            {% endif %}
         </div>
     </div>
 
