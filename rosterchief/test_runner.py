@@ -12,14 +12,16 @@ before any database or template engine is created.
 
 Running the suite
 -----------------
-``uv run python manage.py test`` is ~16s for the full suite, of which ~4s is fixed
-startup: applying all migrations against a fresh in-memory sqlite database.
+``uv run python manage.py test`` runs in parallel by default (one worker per core --
+see ``RosterChiefTestRunner.add_arguments`` below), because at the suite's current size
+that's a real wall-clock win: ~38s serial vs. ~25s parallel on a 10-core machine, even
+though every worker re-runs the whole migration set against its own database clone (the
+fixed cost Django's own ``--parallel`` docs warn about). That math flips as the suite
+keeps growing -- worth re-measuring (`time manage.py test` vs. `time manage.py test
+--parallel=1`) if it ever stops paying off, rather than trusting these numbers forever.
 
-``--parallel`` works correctly here but is deliberately not the default. Every worker
-re-runs the whole migration set against its own database clone, so the fixed cost is
-paid N times; on a 10-core machine that buys ~4s of wall clock for ~5x the CPU, and it
-interleaves the output of failing tests across processes. Reach for it only if the suite
-grows enough that the per-worker setup is small next to the tests themselves.
+Pass ``--parallel=1`` to force serial output -- e.g. reproducing a failure with a clean,
+non-interleaved traceback, or ``--pdb`` (incompatible with real parallelism).
 
 ``--keepdb`` does nothing for local runs: the sqlite test database is in-memory and
 cannot survive the process. It only pays off against a real PostgreSQL
@@ -73,6 +75,18 @@ def _cached_template_loaders(templates):
 
 class RosterChiefTestRunner(DiscoverRunner):
     """The project's test runner. See the module docstring for what it changes and why."""
+
+    @classmethod
+    def add_arguments(cls, parser):
+        super().add_arguments(parser)
+        # Django's own default is 0 (serial) -- reach into the parser to flip it to
+        # "auto" (one worker per core) instead, so a plain `manage.py test` with no
+        # flags gets the parallel win by default. `--parallel=1` on the command line
+        # still overrides this back to serial.
+        for action in parser._actions:
+            if action.dest == "parallel":
+                action.default = "auto"
+                break
 
     def setup_test_environment(self, **kwargs):
         settings.PASSWORD_HASHERS = TEST_PASSWORD_HASHERS
