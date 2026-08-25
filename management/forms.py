@@ -6,7 +6,7 @@ from django.contrib.auth import get_user_model
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
-from club.models import Club, ClubMembership, ClubRole, FeePayment, OnboardingRequirement, ShopManager, Sponsor
+from club.models import Club, ClubMembership, ClubRole, FeePayment, OnboardingRequirement, Sponsor
 from club.services.access import groups_manageable_by, is_club_admin, teams_managed_by
 from events.models import Competition, Event, EventReferee, EventSeries, Location, Opponent
 from events.services.rbihf_import import RBIHFImportError, extract_team_id
@@ -697,11 +697,27 @@ class EventSeriesForm(EventAudienceFormMixin, forms.ModelForm):
 
 
 class ClubRoleAssignForm(forms.ModelForm):
-    """Grant a club-wide role to a member already affiliated with this club."""
+    """Grant a club-wide role to a member already affiliated with this club --
+    "Shop admin" rides along in the same dropdown even though it isn't really
+    a ClubRole (see club.models.ShopManager's own docstring): one grant
+    button/one dropdown on the roles page, not a second, separately-triggered
+    mechanism just for shop admin. management.views.ClubRoleCreateView
+    branches on SHOP_ADMIN itself, since granting it is a different
+    operation (a ShopManager row, not a ClubRole one), not a different value
+    of the same one."""
+
+    SHOP_ADMIN = "shop_admin"
+
+    # Deliberately NOT in Meta.fields below -- a ModelForm's _post_clean() calls
+    # instance.full_clean() on whatever it constructs from Meta.fields, which would
+    # validate "shop_admin" against ClubRole.role's own model-level choices (which
+    # don't include it) and silently fail the whole form. Declaring it here instead
+    # keeps it a real, validated form field without ever touching the model instance.
+    role = forms.ChoiceField(label=_("Role"), choices=[*(choice for choice in ClubRole.Roles.choices if choice[0] != ClubRole.Roles.MEMBER), (SHOP_ADMIN, _("shop admin"))])
 
     class Meta:
         model = ClubRole
-        fields = ["member", "role"]
+        fields = ["member"]
         widgets = {"member": forms.Select(attrs={"data-searchable": "true", "data-search-placeholder": _("Type a name to search...")})}
 
     def __init__(self, *args, club=None, **kwargs):
@@ -997,21 +1013,6 @@ class OrderMarkPaidForm(forms.Form):
 
     method = forms.ChoiceField(label=_("Method"), choices=Payment.PaymentMethod.choices, initial=Payment.PaymentMethod.CASH)
     reference = forms.CharField(label=_("Reference"), required=False, help_text=_("Optional -- a receipt number, whatever lets you find this again."))
-
-
-class ShopManagerAssignForm(forms.ModelForm):
-    """Grant the shop-admin flag to a member already affiliated with this club --
-    same shape as ClubRoleAssignForm, minus the role field: this is a single
-    yes/no grant, not a choice."""
-
-    class Meta:
-        model = ShopManager
-        fields = ["member"]
-        widgets = {"member": forms.Select(attrs={"data-searchable": "true", "data-search-placeholder": _("Type a name to search...")})}
-
-    def __init__(self, *args, club=None, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.fields["member"].queryset = Member.objects.filter(member_of__club=club).distinct()
 
 
 class RequirementBypassForm(forms.Form):

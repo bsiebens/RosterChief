@@ -94,7 +94,6 @@ from .forms import (
     RequirementBypassForm,
     RequirementCompletionForm,
     SendDuesInvoicesForm,
-    ShopManagerAssignForm,
     SignupTeamPlacementForm,
     SponsorForm,
     StaffAssignmentForm,
@@ -1512,6 +1511,7 @@ class TeamPhotoDeleteView(TeamManagerRequiredMixin, View):
 ROLE_DESCRIPTIONS = {
     ClubRole.Roles.ADMIN: _("Full control over the club: memberships, positions, roles, teams, shop, every event, and news."),
     ClubRole.Roles.EDITOR: _("Can create and edit events, and publish news items, but not memberships, positions, roles, or shop settings."),
+    ClubRole.Roles.MEMBER_ADMIN: _("Full read/write on people: members, families, groups, parent claims, teams, referee setup, and onboarding requirements — without Finance/Shop, Club identity, Sponsors, or granting/revoking roles."),
 }
 
 
@@ -1535,13 +1535,18 @@ class ClubRoleListView(ClubAdminRequiredMixin, ListView):
             sections=sections,
             role_form=ClubRoleAssignForm(club=self.request.club),
             shop_admins=shop_admins,
-            shop_admin_form=ShopManagerAssignForm(club=self.request.club),
             **kwargs,
         )
 
 
 class ClubRoleCreateView(ClubAdminRequiredMixin, RedirectOnInvalidMixin, FormView):
-    """Reachable only via the "Grant role" modal on the roles overview."""
+    """Reachable only via the single "Grant role" modal on the roles overview --
+    its dropdown includes "Shop admin" alongside the real ClubRole values (see
+    ClubRoleAssignForm), so there's one grant button/one dropdown/one flow on
+    this page, not a second, separately-triggered mechanism just for shop
+    admin. Branches here rather than in the form: ShopManager isn't a
+    ClubRole row at all (see its own docstring), so "granting" it is a
+    different operation, not a different value of the same one."""
 
     form_class = ClubRoleAssignForm
     http_method_names = ["post"]
@@ -1551,11 +1556,20 @@ class ClubRoleCreateView(ClubAdminRequiredMixin, RedirectOnInvalidMixin, FormVie
         return super().get_form_kwargs() | {"club": self.request.club}
 
     def form_valid(self, form):
+        member, role = form.cleaned_data["member"], form.cleaned_data["role"]
+
+        if role == ClubRoleAssignForm.SHOP_ADMIN:
+            _grant, created = ShopManager.objects.get_or_create(club=self.request.club, member=member)
+            if created:
+                notify(self.request, f"s|{_('Shop admin granted')}|{_('“%(member)s” can now manage the shop.') % {'member': member}}")
+            else:
+                notify(self.request, f"s|{_('Already a shop admin')}|{_('“%(member)s” already manages the shop.') % {'member': member}}")
+            return redirect("management:role_list")
+
         # A member holds at most one ClubRole per club (the membership-status sync in
         # club/signals.py already gave any active member an implicit MEMBER role) --
         # so granting ADMIN/EDITOR promotes that existing row rather than inserting a
         # second one, exactly like controlpanel.services.admins.grant_club_admin.
-        member, role = form.cleaned_data["member"], form.cleaned_data["role"]
         role_obj, created = ClubRole.objects.get_or_create(club=self.request.club, member=member, defaults={"role": role})
         if not created and role_obj.role != role:
             role_obj.role = role
@@ -1576,30 +1590,12 @@ class ClubRoleRevokeView(ClubAdminRequiredMixin, View):
         return redirect("management:role_list")
 
 
-class ShopManagerCreateView(ClubAdminRequiredMixin, RedirectOnInvalidMixin, FormView):
-    """Reachable only via the "Grant" modal in the roles overview's Shop admins
-    section. Admin-only, unlike the shop views themselves (ShopManagerRequiredMixin)
-    -- granting the grant is genuinely admin-only ground, same reasoning as
-    ClubRoleCreateView: a shop admin must never be able to hand out more access."""
-
-    form_class = ShopManagerAssignForm
-    http_method_names = ["post"]
-    invalid_redirect_url_name = "management:role_list"
-
-    def get_form_kwargs(self):
-        return super().get_form_kwargs() | {"club": self.request.club}
-
-    def form_valid(self, form):
-        member = form.cleaned_data["member"]
-        _grant, created = ShopManager.objects.get_or_create(club=self.request.club, member=member)
-        if created:
-            notify(self.request, f"s|{_('Shop admin granted')}|{_('“%(member)s” can now manage the shop.') % {'member': member}}")
-        else:
-            notify(self.request, f"s|{_('Already a shop admin')}|{_('“%(member)s” already manages the shop.') % {'member': member}}")
-        return redirect("management:role_list")
-
-
 class ShopManagerRevokeView(ClubAdminRequiredMixin, View):
+    """Granting shop admin goes through ClubRoleCreateView (the roles page's
+    one "Grant role" flow, "Shop admin" is just one of its dropdown values) --
+    but revoking still needs its own view: ShopManager isn't a ClubRole row,
+    so ClubRoleRevokeView's delete-this-pk-from-ClubRole logic doesn't apply."""
+
     def post(self, request, pk):
         grant = get_object_or_404(ShopManager, pk=pk, club=request.club)
         member = grant.member

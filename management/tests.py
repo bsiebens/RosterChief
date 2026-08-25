@@ -8622,15 +8622,18 @@ class ShopToggleViewTests(ShopTestBase):
 
 class ShopManagerGrantRevokeTests(ShopTestBase):
     """Granting/revoking the ShopManager flag itself -- admin-only ground (see
-    ShopManagerCreateView/RevokeView's own docstring), unlike the shop views
-    it unlocks."""
+    ClubRoleCreateView/ShopManagerRevokeView's own docstrings), unlike the shop
+    views it unlocks. Granting goes through the roles page's single "Grant
+    role" flow ("Shop admin" is one of its dropdown values, not a separate
+    modal/endpoint) -- revoking still has its own view, since ShopManager
+    isn't a ClubRole row."""
 
     def test_an_admin_can_grant_shop_manager(self):
         target = Member.objects.create(first_name="Target", last_name="Person")
         ClubMembership.objects.create(club=self.club, member=target, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
         self.client.force_login(self.admin_user)
 
-        response = self.club_post("shop_admin_create", {"member": str(target.pk)})
+        response = self.club_post("role_create", {"member": str(target.pk), "role": "shop_admin"})
 
         self.assertRedirects(response, reverse("management:role_list"))
         self.assertTrue(ShopManager.objects.filter(club=self.club, member=target).exists())
@@ -8640,7 +8643,7 @@ class ShopManagerGrantRevokeTests(ShopTestBase):
         ClubMembership.objects.create(club=self.club, member=target, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
         self.client.force_login(self.make_shop_manager())
 
-        response = self.club_post("shop_admin_create", {"member": str(target.pk)})
+        response = self.club_post("role_create", {"member": str(target.pk), "role": "shop_admin"})
 
         self.assertEqual(response.status_code, 403)
         self.assertFalse(ShopManager.objects.filter(club=self.club, member=target).exists())
@@ -8673,7 +8676,7 @@ class ShopManagerGrantRevokeTests(ShopTestBase):
         enrol_mfa(target_user)  # ClubRole EDITOR requires a second factor.
         self.client.force_login(self.admin_user)
 
-        self.club_post("shop_admin_create", {"member": str(target.pk)})
+        self.club_post("role_create", {"member": str(target.pk), "role": "shop_admin"})
 
         self.assertTrue(ShopManager.objects.filter(club=self.club, member=target).exists())
         self.assertEqual(ClubRole.objects.get(club=self.club, member=target).role, ClubRole.Roles.EDITOR)
@@ -8690,11 +8693,14 @@ class ShopManagerGrantRevokeTests(ShopTestBase):
         self.assertContains(response, "Shop admins")
         self.assertContains(response, "Sam ShopAdmin")
 
-    def test_grant_shop_admin_is_a_modal_on_the_roles_page(self):
+    def test_shop_admin_is_an_option_in_the_single_grant_role_modal(self):
+        # Not a second modal/endpoint -- see this class's own docstring.
         self.client.force_login(self.admin_user)
 
         response = self.club_get("role_list")
 
-        self.assertContains(response, 'id="grant_shop_admin_modal"')
+        self.assertContains(response, 'id="grant_role_modal"')
+        self.assertNotContains(response, 'id="grant_shop_admin_modal"')
+        self.assertContains(response, "Shop admin")
 
 

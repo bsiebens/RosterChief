@@ -52,7 +52,6 @@ urlpatterns = [
     path("roles/", views.ClubRoleListView.as_view(), name="role_list"),
     path("roles/new/", views.ClubRoleCreateView.as_view(), name="role_create"),
     path("roles/<uuid:pk>/revoke/", views.ClubRoleRevokeView.as_view(), name="role_revoke"),
-    path("roles/shop-admins/new/", views.ShopManagerCreateView.as_view(), name="shop_admin_create"),
     path("roles/shop-admins/<uuid:pk>/revoke/", views.ShopManagerRevokeView.as_view(), name="shop_admin_revoke"),
     path("parent-claims/", views.ParentClaimListView.as_view(), name="parent_claim_list"),
     path("parent-claims/<uuid:pk>/approve/", views.ParentClaimApproveView.as_view(), name="parent_claim_approve"),
