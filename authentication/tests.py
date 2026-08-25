@@ -1,6 +1,7 @@
 import re
 import uuid
 from types import SimpleNamespace
+from unittest import mock
 from urllib.parse import parse_qs, urlparse
 
 from allauth.core import context
@@ -9,6 +10,7 @@ from allauth.mfa.recovery_codes.internal.auth import RecoveryCodes
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import AnonymousUser
 from django.core import mail
+from django.core.cache import cache
 from django.db import IntegrityError
 from django.http import HttpResponse
 from django.template.loader import render_to_string
@@ -16,9 +18,10 @@ from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse
 
 from club.models import Club, ClubRole
+from features.models import EmailSuppression
 from members.models import Member
 
-from .adapters import RosterChiefMFAAdapter, webauthn_rp_id
+from .adapters import RosterChiefAccountAdapter, RosterChiefMFAAdapter, webauthn_rp_id
 from .middleware import RequireMFAMiddleware, mfa_required_for
 
 User = get_user_model()
@@ -343,6 +346,51 @@ class PasswordResetEmailTests(TestCase):
         self.assertIn("Roster", without_club)
         self.assertIn("Chief", without_club)
         self.assertIn("https://rosterchief.app/accounts/password/reset/key/abc-def/", without_club)
+
+
+class RosterChiefAccountAdapterTests(TestCase):
+    """RosterChiefAccountAdapter.send_mail -- routes allauth's own mail through
+    rosterchief.mail.send_message, exempting only password reset. See
+    features.models.EmailSuppression's own docstring for the full "pause
+    automated email" picture, and PasswordResetEmailTests above for the same
+    exemption exercised through the real view/email pipeline instead of a
+    mocked render_mail."""
+
+    def setUp(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def send(self, template_prefix):
+        adapter = RosterChiefAccountAdapter()
+        request = RequestFactory().get("/")
+        message = mock.Mock()
+        with context.request_context(request), mock.patch.object(adapter, "render_mail", return_value=message):
+            adapter.send_mail(template_prefix, "someone@example.com", {})
+        return message
+
+    def test_password_reset_sends_normally_when_not_suppressed(self):
+        message = self.send(RosterChiefAccountAdapter.PASSWORD_RESET_TEMPLATE_PREFIX)
+
+        message.send.assert_called_once()
+
+    def test_password_reset_still_sends_while_suppressed(self):
+        EmailSuppression.start()
+
+        message = self.send(RosterChiefAccountAdapter.PASSWORD_RESET_TEMPLATE_PREFIX)
+
+        message.send.assert_called_once()
+
+    def test_other_allauth_mail_sends_normally_when_not_suppressed(self):
+        message = self.send("account/email/email_confirmation")
+
+        message.send.assert_called_once()
+
+    def test_other_allauth_mail_is_silenced_while_suppressed(self):
+        EmailSuppression.start()
+
+        message = self.send("account/email/email_confirmation")
+
+        message.send.assert_not_called()
 
 
 class TwoFactorPageTests(TestCase):

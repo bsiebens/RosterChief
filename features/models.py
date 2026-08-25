@@ -153,6 +153,78 @@ class Maintenance(UUIDModel):
         return maintenance
 
 
+class EmailSuppression(UUIDModel):
+    """Platform-wide "pause automated email" switch. One row, cached the same
+    write-through way as Maintenance above — see that model's own docstring for
+    why (a flip has to reach every worker/server at once, not just the process
+    that made it).
+
+    Every automated send in the app routes through rosterchief.mail.send_message
+    instead of calling ``message.send()`` directly — news/event notifications,
+    billing reminders, dues invoices and reminders, claim-approval mail — so
+    turning this on actually silences all of it at once, the same "one switch,
+    everything obeys it" shape as Maintenance. Password reset is the deliberate
+    exception (see authentication.adapters.RosterChiefAccountAdapter): it has to
+    keep working while this is on, or there'd be no way back in for someone who
+    forgot their password during the very window this switch is meant to cover
+    (a bulk import, a staging rehearsal, an incident) without a database flip.
+    """
+
+    CACHE_KEY = "email_suppression:current"
+    CACHE_SECONDS = 10
+
+    is_active = models.BooleanField(_("active"), default=False)
+    started_at = models.DateTimeField(_("started at"), null=True, blank=True)
+    started_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="email_suppression_windows", verbose_name=_("started by"))
+
+    class Meta:
+        verbose_name = _("email suppression")
+        verbose_name_plural = _("email suppression")
+
+    def __str__(self):
+        return "Automated email paused" if self.is_active else "Automated email on"
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        get_cache().set(self.CACHE_KEY, self, self.CACHE_SECONDS)
+
+    @classmethod
+    def current(cls) -> EmailSuppression:
+        """The one row, created on first read. Cached until it changes."""
+        cached = get_cache().get(cls.CACHE_KEY)
+        if cached is not None:
+            return cached
+
+        suppression = cls.objects.first() or cls.objects.create()
+        get_cache().set(cls.CACHE_KEY, suppression, cls.CACHE_SECONDS)
+
+        return suppression
+
+    @classmethod
+    def is_on(cls) -> bool:
+        return cls.current().is_active
+
+    @classmethod
+    def start(cls, *, user=None) -> EmailSuppression:
+        suppression = cls.current()
+        suppression.is_active = True
+        suppression.started_at = timezone.now()
+        suppression.started_by = user
+        suppression.save()
+
+        return suppression
+
+    @classmethod
+    def stop(cls) -> EmailSuppression:
+        suppression = cls.current()
+        suppression.is_active = False
+        suppression.started_at = None
+        suppression.started_by = None
+        suppression.save()
+
+        return suppression
+
+
 class JobToggle(UUIDModel):
     """Per-job on/off switch for the scheduled platform jobs in features/jobs.py's
     JOB_REGISTRY, so the control panel can pause one specific job (a runaway job, one

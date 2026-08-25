@@ -24,6 +24,27 @@ RESEND_API_URL = "https://api.resend.com/emails"
 REQUEST_TIMEOUT = 10
 
 
+def send_message(message, *, exempt: bool = False, fail_silently: bool = False) -> bool:
+    """The one choke point every automated send in the app goes through instead of
+    calling ``message.send()`` directly -- club/services/invoicing.py, members/
+    services/claims.py, billing/services/reminders.py, and notifications/services.py
+    all route through this, as does authentication.adapters.RosterChiefAccountAdapter
+    for allauth's own mail -- so the control panel's "pause automated email" switch
+    (features.models.EmailSuppression) actually silences everything at once instead
+    of each call site needing its own check.
+
+    ``exempt=True`` skips the check entirely -- used only for password reset (see
+    the adapter above), so the switch can never lock someone out of their own
+    account. Returns whether the message was actually handed to the backend, not
+    whether delivery succeeded -- that's still on message.send()'s own return value/
+    exception, unchanged from before this existed."""
+    from features.models import EmailSuppression
+
+    if not exempt and EmailSuppression.is_on():
+        return False
+    return bool(message.send(fail_silently=fail_silently))
+
+
 class ResendEmailBackend(BaseEmailBackend):
     def send_messages(self, email_messages) -> int:
         if not email_messages:

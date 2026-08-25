@@ -153,6 +153,10 @@ ACCOUNT_LOGIN_METHODS = {"email"}
 ACCOUNT_SIGNUP_FIELDS = ["email*", "password1*", "password2*"]
 ACCOUNT_EMAIL_VERIFICATION = "none"
 
+# Routes allauth's own mail through the control panel's "pause automated email"
+# switch (features.models.EmailSuppression), exempt only for password reset.
+ACCOUNT_ADAPTER = "authentication.adapters.RosterChiefAccountAdapter"
+
 
 # Two-factor authentication (allauth.mfa)
 

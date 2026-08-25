@@ -2,10 +2,12 @@ import datetime
 
 from django.contrib.auth import get_user_model
 from django.core import mail
+from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.test import TestCase
 
 from club.models import Club, ClubMembership, Season
+from features.models import EmailSuppression
 from members.models import Family, FamilyMembership, Member
 
 from .models import Notification
@@ -103,6 +105,18 @@ class NotifyMembersTests(TestCase):
         self.assertEqual(mail.outbox[0].to, ["jamie@example.com"])
         self.assertIn("Big win", mail.outbox[0].subject)
         self.assertIn("We won 3-0.", mail.outbox[0].body)
+
+    def test_email_is_silenced_while_automated_email_is_paused(self):
+        # notify_members -> _send_email routes through rosterchief.mail.send_message,
+        # the same choke point every automated send goes through -- see
+        # features.models.EmailSuppression's own docstring.
+        self.addCleanup(cache.clear)
+        EmailSuppression.start()
+        member = self.make_member(email="jamie@example.com")
+
+        notify_members([member], club=self.club, title="Big win", body="We won 3-0.")
+
+        self.assertEqual(len(mail.outbox), 0)
 
     def test_the_email_carries_an_html_alternative(self):
         member = self.make_member()

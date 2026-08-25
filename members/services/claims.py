@@ -26,6 +26,7 @@ from django.utils import timezone
 from club.models import ClubMembership
 from members.models import Family, FamilyMembership, Member, ParentClaim
 from members.services.family import add_parent_to_family
+from rosterchief.mail import send_message
 
 User = get_user_model()
 
@@ -218,9 +219,8 @@ def send_claim_approved_email(claim, *, child, request=None):
     message.attach_alternative(html_body, "text/html")
 
     try:
-        message.send(fail_silently=False)
+        return send_message(message, fail_silently=False)
     except OSError:
         # Anything the mail backend raises for an unreachable server or a refused
         # connection. The link stands; the club can resend from the queue.
         return False
-    return True

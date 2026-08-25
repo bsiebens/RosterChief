@@ -80,6 +80,52 @@
         </div>
     </div>
 
+    {% comment %}
+        A narrower kill-switch than Maintenance: clubs stay reachable, only outbound
+        mail stands down -- everything routed through rosterchief.mail.send_message
+        (news/event notifications, billing reminders, dues invoices) except password
+        reset, which authentication.adapters.RosterChiefAccountAdapter always exempts
+        so this can never lock someone out of their own account.
+    {% endcomment %}
+    <div class="card overflow-hidden {% if email_suppression.is_active %}border-2 border-club{% endif %}">
+        {% if email_suppression.is_active %}
+            <div class="flex flex-wrap items-center gap-2.5 border-b border-club bg-club px-4 py-3">
+                {% lucide "mail-x" size=18 class="shrink-0 text-white" %}
+                <span class="font-display text-sm font-extrabold tracking-[.1em] text-white uppercase">Automated email paused</span>
+                <span class="flex-1"></span>
+                <span class="font-mono text-[11px] text-white/80">since {{ email_suppression.started_at|date:"j M Y, H:i" }}{% if email_suppression.started_by %} · {{ email_suppression.started_by.email }}{% endif %}</span>
+            </div>
+        {% else %}
+            <div class="flex items-center gap-2.5 border-b border-line bg-subhead px-4 py-3">
+                {% lucide "mail" size=18 class="shrink-0 text-muted" %}
+                <span class="font-display text-sm font-extrabold tracking-[.1em] text-ink uppercase">Automated email</span>
+                <span class="flex-1"></span>
+                <span class="flex items-center gap-1.5 font-mono text-[11px] text-ok-text">
+                    <span class="h-[7px] w-[7px] rounded-full bg-ok"></span>
+                    sending normally
+                </span>
+            </div>
+        {% endif %}
+
+        <div class="card-body">
+            {% if email_suppression.is_active %}
+                <p class="text-sm text-muted">Notifications, reminders, dues invoices, and every other automated send stand down. Password reset keeps working — nobody gets locked out while this is on.</p>
+
+                <form class="mt-1" method="post" action="{% url 'controlpanel:email_suppression' %}">
+                    {% csrf_token %}
+                    <button class="btn btn-success gap-2" type="submit">{% lucide "mail-check" size=16 %} Resume automated email</button>
+                </form>
+            {% else %}
+                <p class="text-sm text-muted">Silences every automated send — news and event notifications, billing reminders, dues invoices and reminders, claim-approval mail — except password reset, which always keeps working.</p>
+
+                <form class="mt-1" method="post" action="{% url 'controlpanel:email_suppression' %}">
+                    {% csrf_token %}
+                    <button class="btn btn-error gap-2" type="submit">{% lucide "mail-x" size=16 %} Pause automated email</button>
+                </form>
+            {% endif %}
+        </div>
+    </div>
+
     <div class="card">
         <div class="flex items-center gap-2.5 border-b border-line px-4 py-3">
             {% lucide "flag" size=16 class="shrink-0 text-muted" %}

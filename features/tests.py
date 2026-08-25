@@ -11,7 +11,7 @@ from waffle import flag_is_active, get_waffle_flag_model
 
 from club.models import Club
 
-from .models import JobRun, JobToggle, Maintenance
+from .models import EmailSuppression, JobRun, JobToggle, Maintenance
 
 Flag = get_waffle_flag_model()
 User = get_user_model()
@@ -225,6 +225,57 @@ class MaintenanceModeTests(TestCase):
         Maintenance.stop()
 
         self.assertFalse(cache.get(Maintenance.CACHE_KEY).is_active)
+
+
+class EmailSuppressionTests(TestCase):
+    """features.models.EmailSuppression -- the platform-wide "pause automated
+    email" switch. Mirrors MaintenanceModeTests' own model-level coverage above;
+    see rosterchief.tests.SendMessageTests for the actual send-gating behaviour
+    and authentication.tests for the password-reset exemption."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = User.objects.create_user(email="root@example.com", password="pw-secret-123", is_staff=True)
+
+    def setUp(self):
+        # Same cache-not-rolled-back-by-the-transaction reasoning as
+        # MaintenanceModeTests.setUp -- see that method's own comment.
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def test_off_by_default(self):
+        self.assertFalse(EmailSuppression.is_on())
+
+    def test_it_says_which_state_it_is_in(self):
+        self.assertEqual(str(EmailSuppression.start()), "Automated email paused")
+        self.assertEqual(str(EmailSuppression.stop()), "Automated email on")
+
+    def test_it_records_who_paused_it_and_when(self):
+        suppression = EmailSuppression.start(user=self.user)
+
+        self.assertTrue(suppression.is_active)
+        self.assertEqual(suppression.started_by, self.user)
+        self.assertIsNotNone(suppression.started_at)
+
+    def test_stopping_clears_who_and_when(self):
+        EmailSuppression.start(user=self.user)
+
+        suppression = EmailSuppression.stop()
+
+        self.assertFalse(suppression.is_active)
+        self.assertIsNone(suppression.started_by)
+        self.assertIsNone(suppression.started_at)
+
+    def test_the_state_is_shared_rather_than_per_process(self):
+        # Same shared-cache reasoning as Maintenance's own equivalent test.
+        EmailSuppression.start()
+
+        self.assertTrue(cache.get(EmailSuppression.CACHE_KEY).is_active)
+        self.assertTrue(EmailSuppression.is_on())
+
+        EmailSuppression.stop()
+
+        self.assertFalse(cache.get(EmailSuppression.CACHE_KEY).is_active)
 
 
 class MaintenanceCommandTests(TestCase):

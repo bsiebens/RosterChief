@@ -2,13 +2,17 @@ import importlib
 from unittest import mock
 
 import requests
+from django.core import mail as django_mail
+from django.core.cache import cache
 from django.core.mail import EmailMessage, EmailMultiAlternatives
 from django.db.utils import OperationalError
-from django.test import SimpleTestCase, override_settings
+from django.test import SimpleTestCase, TestCase, override_settings
 from django.urls import Resolver404, clear_url_caches, resolve, reverse
 
+from features.models import EmailSuppression
+
 from . import urls
-from .mail import ResendEmailBackend
+from .mail import ResendEmailBackend, send_message
 
 
 class BrowserReloadUrlTests(SimpleTestCase):
@@ -89,6 +93,50 @@ class HealthCheckTests(SimpleTestCase):
         # container is unhealthy forever — which is exactly how the first deploy failed.
         for host in ("127.0.0.1", "localhost"):
             self.assertEqual(self.client.get(reverse("healthz"), HTTP_HOST=host).status_code, 200, host)
+
+
+class SendMessageTests(TestCase):
+    """rosterchief.mail.send_message -- the choke point every automated send in
+    the app routes through (see the function's own docstring for the full list
+    of call sites), gated on features.models.EmailSuppression."""
+
+    def setUp(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def message(self):
+        return EmailMessage("Subject", "Body.", "from@example.com", ["to@example.com"])
+
+    def test_sends_normally_when_not_suppressed(self):
+        sent = send_message(self.message())
+
+        self.assertTrue(sent)
+        self.assertEqual(len(django_mail.outbox), 1)
+
+    def test_is_silenced_while_suppressed(self):
+        EmailSuppression.start()
+
+        sent = send_message(self.message())
+
+        self.assertFalse(sent)
+        self.assertEqual(len(django_mail.outbox), 0)
+
+    def test_exempt_still_sends_while_suppressed(self):
+        EmailSuppression.start()
+
+        sent = send_message(self.message(), exempt=True)
+
+        self.assertTrue(sent)
+        self.assertEqual(len(django_mail.outbox), 1)
+
+    def test_resuming_lets_mail_through_again(self):
+        EmailSuppression.start()
+        EmailSuppression.stop()
+
+        sent = send_message(self.message())
+
+        self.assertTrue(sent)
+        self.assertEqual(len(django_mail.outbox), 1)
 
 
 @override_settings(RESEND_API_KEY="test-key")

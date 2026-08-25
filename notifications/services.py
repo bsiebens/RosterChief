@@ -12,6 +12,8 @@ from django.core.mail import EmailMultiAlternatives
 from django.template.loader import render_to_string
 from django.utils import timezone
 
+from rosterchief.mail import send_message
+
 from .models import Notification
 
 
@@ -42,7 +44,7 @@ def _send_email(notification: Notification, emails: list[str]) -> None:
         message = EmailMultiAlternatives(subject, text_body, settings.DEFAULT_FROM_EMAIL, [email])
         message.attach_alternative(html_body, "text/html")
         try:
-            message.send(fail_silently=False)
+            send_message(message, fail_silently=False)
         except OSError:
             # Never fatal -- the Notification row (and whichever other addresses
             # in this same batch do go out) stands either way, same reasoning as

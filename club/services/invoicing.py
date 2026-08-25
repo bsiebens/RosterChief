@@ -19,6 +19,7 @@ from django.utils.translation import gettext_lazy as _
 from club.models import ClubMembership, DuesInvoice
 from club.services.fees import remaining_balance
 from events.models import Location
+from rosterchief.mail import send_message
 
 
 class DuesInvoicePDFError(Exception):
@@ -92,10 +93,9 @@ def send_invoice_email(invoice: DuesInvoice, *, request=None) -> bool:
     _attach_pdf(message, invoice)
 
     try:
-        message.send(fail_silently=False)
+        return send_message(message, fail_silently=False)
     except OSError:
         return False
-    return True
 
 
 def invoices_due_for_reminder(club, today=None):
@@ -124,8 +124,10 @@ def send_reminder_email(invoice: DuesInvoice, *, request=None) -> bool:
     _attach_pdf(message, invoice)
 
     try:
-        message.send(fail_silently=False)
+        sent = send_message(message, fail_silently=False)
     except OSError:
+        return False
+    if not sent:
         return False
 
     invoice.last_reminder_sent_at = timezone.now()

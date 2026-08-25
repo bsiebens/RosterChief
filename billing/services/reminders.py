@@ -19,6 +19,7 @@ from django.utils.translation import gettext as _
 
 from billing.services.notices import BillingNotice, club_billing_notice
 from club.models import ClubRole
+from rosterchief.mail import send_message
 
 
 @dataclass(frozen=True)
@@ -65,7 +66,8 @@ def send_reminder(club, notice: BillingNotice, *, recipients: list[str]) -> None
     text_body = render_to_string("billing/email/reminder.txt", context)
 
     message = EmailMultiAlternatives(subject=subject, body=text_body, from_email=settings.DEFAULT_FROM_EMAIL, to=recipients)
-    message.send(fail_silently=False)
+    if not send_message(message, fail_silently=False):
+        return
 
     notice.due.last_reminder_level = notice.level
     notice.due.last_reminder_sent_at = timezone.now()

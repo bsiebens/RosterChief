@@ -22,7 +22,7 @@ from billing.services import BillingError
 from billing.services.dues import record_payment, start_trial, subscribe, waive
 from club.models import Club, ClubMembership, ClubRole, Season
 from events.models import Attendance, Competition, Event, Location
-from features.models import JobRun, JobToggle, Maintenance
+from features.models import EmailSuppression, JobRun, JobToggle, Maintenance
 from members.models import Member
 from shop.models import Order
 from teams.models import Position, StaffAssignment, Team, TeamMembership
@@ -2043,3 +2043,38 @@ class MaintenancePanelTests(ControlPanelTestBase):
 
         self.assertContains(response, "Maintenance mode")
         self.assertContains(response, "Close the platform")
+
+
+class EmailSuppressionPanelTests(ControlPanelTestBase):
+    def setUp(self):
+        super().setUp()
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def test_pausing_records_who_did_it(self):
+        self.client.post(reverse("controlpanel:email_suppression"), {})
+
+        suppression = EmailSuppression.current()
+        self.assertTrue(suppression.is_active)
+        self.assertEqual(suppression.started_by, self.staff)
+
+    def test_posting_again_resumes_it(self):
+        EmailSuppression.start(user=self.staff)
+
+        self.client.post(reverse("controlpanel:email_suppression"), {})
+
+        self.assertFalse(EmailSuppression.is_on())
+
+    def test_the_features_page_offers_the_switch(self):
+        response = self.client.get(reverse("controlpanel:features"))
+
+        self.assertContains(response, "Automated email")
+        self.assertContains(response, "Pause automated email")
+
+    def test_the_features_page_shows_the_paused_state(self):
+        EmailSuppression.start(user=self.staff)
+
+        response = self.client.get(reverse("controlpanel:features"))
+
+        self.assertContains(response, "Automated email paused")
+        self.assertContains(response, "Resume automated email")

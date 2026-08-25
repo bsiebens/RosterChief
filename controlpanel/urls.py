@@ -20,6 +20,7 @@ urlpatterns = [
     # Features
     path("features/", views.FeatureListView.as_view(), name="features"),
     path("features/maintenance/", views.MaintenanceView.as_view(), name="maintenance"),
+    path("features/email-suppression/", views.EmailSuppressionView.as_view(), name="email_suppression"),
     path("features/flags/new/", views.FlagCreateView.as_view(), name="flag_create"),
     path("features/flags/<int:pk>/edit/", views.FlagUpdateView.as_view(), name="flag_update"),
     path("features/switches/<int:pk>/toggle/", views.SwitchToggleView.as_view(), name="switch_toggle"),

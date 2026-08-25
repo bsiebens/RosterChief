@@ -24,7 +24,7 @@ from billing.services.plans import delete_plan, plan_deletion_impact
 from club.models import Club, ClubRole
 from events.models import Competition, Location
 from features.jobs import JOB_REGISTRY
-from features.models import JobToggle, Maintenance
+from features.models import EmailSuppression, JobToggle, Maintenance
 
 from .forms import ClubAdminForm, ClubForm, CompetitionForm, DuePaymentForm, FlagForm, HomeLocationForm, MaintenanceForm, OpenPeriodForm, PlanForm, PlanPriceForm, PlatformAdminForm, SubscriptionForm, TrialForm
 from .messages import notify
@@ -368,6 +368,7 @@ class FeatureListView(PlatformStaffRequiredMixin, TemplateView):
             switches=Switch.objects.order_by("name"),
             maintenance=Maintenance.current(),
             maintenance_form=MaintenanceForm(),
+            email_suppression=EmailSuppression.current(),
             **kwargs,
         )
 
@@ -384,6 +385,23 @@ class MaintenanceView(PlatformStaffRequiredMixin, View):
             message = form.cleaned_data["message"] if form.is_valid() else ""
             Maintenance.start(message=message, user=request.user)
             notify(request, "w|Platform closed|Every club subdomain now serves a maintenance page, and the scheduled jobs stand down.")
+
+        return redirect("controlpanel:features")
+
+
+class EmailSuppressionView(PlatformStaffRequiredMixin, View):
+    """Pause every automated send (see rosterchief.mail.send_message, the choke
+    point every one of them routes through), or let them resume. Password reset
+    stays exempt regardless -- see authentication.adapters.RosterChiefAccountAdapter --
+    so this can never lock someone out of their own account."""
+
+    def post(self, request):
+        if EmailSuppression.is_on():
+            EmailSuppression.stop()
+            notify(request, "s|Automated email resumed|Notifications, reminders, and invoices will send normally again.")
+        else:
+            EmailSuppression.start(user=request.user)
+            notify(request, "w|Automated email paused|Nothing but password reset will send until this is turned back on.")
 
         return redirect("controlpanel:features")
 
