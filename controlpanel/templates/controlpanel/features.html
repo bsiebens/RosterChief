@@ -25,104 +25,116 @@
     {% include "controlpanel/_modal_form.html" with modal_id="competition_create_modal" title="New competition" form=competition_form action_url=competition_create_url submit_label="Create" submit_icon="plus" %}
 
     {% comment %}
-        The lock-down. Clubs get a maintenance page, the scheduled jobs stand down, and the
-        control panel and the auth screens stay open — otherwise you could not sign in to
-        turn it back off. This is the single most safety-critical control in the panel, so
-        the active state gets the full club/club-dark treatment, not just a badge.
+        Maintenance and Automated email side by side, equal height, each card's own
+        action pinned to its bottom -- .card is flex-col + h-full so a CSS-grid row's
+        default stretch gives both cards the taller one's height, .card-body picks up
+        flex-1 to actually consume that extra height (its own CSS is already flex-col),
+        and each form gets mt-auto so the button lands at the bottom regardless of how
+        much message/description text sits above it -- same "let flex distribute the
+        leftover space" approach controlpanel/templates/controlpanel/jobs.html's own
+        card footer uses.
     {% endcomment %}
-    <div class="card overflow-hidden {% if maintenance.is_active %}border-2 border-club{% endif %}">
-        {% if maintenance.is_active %}
-            <div class="flex flex-wrap items-center gap-2.5 border-b border-club bg-club px-4 py-3">
-                {% lucide "lock" size=18 class="shrink-0 text-white" %}
-                <span class="font-display text-sm font-extrabold tracking-[.1em] text-white uppercase">Maintenance mode — platform closed</span>
-                <span class="flex-1"></span>
-                <span class="font-mono text-[11px] text-white/80">since {{ maintenance.started_at|date:"j M Y, H:i" }}{% if maintenance.started_by %} · {{ maintenance.started_by.email }}{% endif %}</span>
-            </div>
-        {% else %}
-            <div class="flex items-center gap-2.5 border-b border-line bg-subhead px-4 py-3">
-                {% lucide "wrench" size=18 class="shrink-0 text-muted" %}
-                <span class="font-display text-sm font-extrabold tracking-[.1em] text-ink uppercase">Maintenance mode</span>
-                <span class="flex-1"></span>
-                <span class="flex items-center gap-1.5 font-mono text-[11px] text-ok-text">
-                    <span class="h-[7px] w-[7px] rounded-full bg-ok"></span>
-                    platform open
-                </span>
-            </div>
-        {% endif %}
-
-        <div class="card-body">
+    <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        {% comment %}
+            The lock-down. Clubs get a maintenance page, the scheduled jobs stand down, and the
+            control panel and the auth screens stay open — otherwise you could not sign in to
+            turn it back off. This is the single most safety-critical control in the panel, so
+            the active state gets the full club/club-dark treatment, not just a badge.
+        {% endcomment %}
+        <div class="card flex h-full flex-col overflow-hidden {% if maintenance.is_active %}border-2 border-club{% endif %}">
             {% if maintenance.is_active %}
-                {% if maintenance.message %}
-                    <div>
-                        <div class="mb-1.5 font-mono text-[10px] tracking-[.08em] text-muted uppercase">Message shown to clubs</div>
-                        <div class="border border-line bg-subhead px-3 py-2.5 font-mono text-sm text-ink">{{ maintenance.message }}</div>
-                    </div>
+                <div class="flex flex-wrap items-center gap-2.5 border-b border-club bg-club px-4 py-3">
+                    {% lucide "lock" size=18 class="shrink-0 text-white" %}
+                    <span class="font-display text-sm font-extrabold tracking-[.1em] text-white uppercase">Maintenance mode — platform closed</span>
+                    <span class="flex-1"></span>
+                    <span class="font-mono text-[11px] text-white/80">since {{ maintenance.started_at|date:"j M Y, H:i" }}{% if maintenance.started_by %} · {{ maintenance.started_by.email }}{% endif %}</span>
+                </div>
+            {% else %}
+                <div class="flex items-center gap-2.5 border-b border-line bg-subhead px-4 py-3">
+                    {% lucide "wrench" size=18 class="shrink-0 text-muted" %}
+                    <span class="font-display text-sm font-extrabold tracking-[.1em] text-ink uppercase">Maintenance mode</span>
+                    <span class="flex-1"></span>
+                    <span class="flex items-center gap-1.5 font-mono text-[11px] text-ok-text">
+                        <span class="h-[7px] w-[7px] rounded-full bg-ok"></span>
+                        platform open
+                    </span>
+                </div>
+            {% endif %}
+
+            <div class="card-body flex-1">
+                {% if maintenance.is_active %}
+                    {% if maintenance.message %}
+                        <div>
+                            <div class="mb-1.5 font-mono text-[10px] tracking-[.08em] text-muted uppercase">Message shown to clubs</div>
+                            <div class="border border-line bg-subhead px-3 py-2.5 font-mono text-sm text-ink">{{ maintenance.message }}</div>
+                        </div>
+                    {% endif %}
+                    <p class="text-sm text-muted">Every club subdomain is serving a maintenance page and the scheduled jobs have stood down. The control panel and the sign-in screens stay open.</p>
+
+                    <form class="mt-auto" method="post" action="{% url 'controlpanel:maintenance' %}">
+                        {% csrf_token %}
+                        <button class="btn btn-success gap-2" type="submit">{% lucide "lock-open" size=16 %} Reopen the platform</button>
+                    </form>
+                {% else %}
+                    <p class="text-sm text-muted">Closes every club subdomain and stands the scheduled jobs down. The control panel and the sign-in screens stay open.</p>
+
+                    <form class="mt-auto flex flex-col gap-3" method="post" action="{% url 'controlpanel:maintenance' %}">
+                        {% csrf_token %}
+                        <div class="form-control w-full">
+                            <label class="label-text mb-1.5 block" for="{{ maintenance_form.message.id_for_label }}">{{ maintenance_form.message.label }}</label>
+                            {{ maintenance_form.message|daisy }}
+                            <span class="label-text-alt mt-1 block">{{ maintenance_form.message.help_text }}</span>
+                        </div>
+                        <button class="btn btn-error gap-2 self-start" type="submit">{% lucide "lock" size=16 %} Close the platform</button>
+                    </form>
                 {% endif %}
-                <p class="text-sm text-muted">Every club subdomain is serving a maintenance page and the scheduled jobs have stood down. The control panel and the sign-in screens stay open.</p>
-
-                <form class="mt-1" method="post" action="{% url 'controlpanel:maintenance' %}">
-                    {% csrf_token %}
-                    <button class="btn btn-success gap-2" type="submit">{% lucide "lock-open" size=16 %} Reopen the platform</button>
-                </form>
-            {% else %}
-                <p class="text-sm text-muted">Closes every club subdomain and stands the scheduled jobs down. The control panel and the sign-in screens stay open.</p>
-
-                <form class="flex flex-col gap-3" method="post" action="{% url 'controlpanel:maintenance' %}">
-                    {% csrf_token %}
-                    <div class="form-control w-full">
-                        <label class="label-text mb-1.5 block" for="{{ maintenance_form.message.id_for_label }}">{{ maintenance_form.message.label }}</label>
-                        {{ maintenance_form.message|daisy }}
-                        <span class="label-text-alt mt-1 block">{{ maintenance_form.message.help_text }}</span>
-                    </div>
-                    <button class="btn btn-error gap-2 self-start" type="submit">{% lucide "lock" size=16 %} Close the platform</button>
-                </form>
-            {% endif %}
+            </div>
         </div>
-    </div>
 
-    {% comment %}
-        A narrower kill-switch than Maintenance: clubs stay reachable, only outbound
-        mail stands down -- everything routed through rosterchief.mail.send_message
-        (news/event notifications, billing reminders, dues invoices) except password
-        reset, which authentication.adapters.RosterChiefAccountAdapter always exempts
-        so this can never lock someone out of their own account.
-    {% endcomment %}
-    <div class="card overflow-hidden {% if email_suppression.is_active %}border-2 border-club{% endif %}">
-        {% if email_suppression.is_active %}
-            <div class="flex flex-wrap items-center gap-2.5 border-b border-club bg-club px-4 py-3">
-                {% lucide "mail-x" size=18 class="shrink-0 text-white" %}
-                <span class="font-display text-sm font-extrabold tracking-[.1em] text-white uppercase">Automated email paused</span>
-                <span class="flex-1"></span>
-                <span class="font-mono text-[11px] text-white/80">since {{ email_suppression.started_at|date:"j M Y, H:i" }}{% if email_suppression.started_by %} · {{ email_suppression.started_by.email }}{% endif %}</span>
-            </div>
-        {% else %}
-            <div class="flex items-center gap-2.5 border-b border-line bg-subhead px-4 py-3">
-                {% lucide "mail" size=18 class="shrink-0 text-muted" %}
-                <span class="font-display text-sm font-extrabold tracking-[.1em] text-ink uppercase">Automated email</span>
-                <span class="flex-1"></span>
-                <span class="flex items-center gap-1.5 font-mono text-[11px] text-ok-text">
-                    <span class="h-[7px] w-[7px] rounded-full bg-ok"></span>
-                    sending normally
-                </span>
-            </div>
-        {% endif %}
-
-        <div class="card-body">
+        {% comment %}
+            A narrower kill-switch than Maintenance: clubs stay reachable, only outbound
+            mail stands down -- everything routed through rosterchief.mail.send_message
+            (news/event notifications, billing reminders, dues invoices) except password
+            reset, which authentication.adapters.RosterChiefAccountAdapter always exempts
+            so this can never lock someone out of their own account.
+        {% endcomment %}
+        <div class="card flex h-full flex-col overflow-hidden {% if email_suppression.is_active %}border-2 border-club{% endif %}">
             {% if email_suppression.is_active %}
-                <p class="text-sm text-muted">Notifications, reminders, dues invoices, and every other automated send stand down. Password reset keeps working — nobody gets locked out while this is on.</p>
-
-                <form class="mt-1" method="post" action="{% url 'controlpanel:email_suppression' %}">
-                    {% csrf_token %}
-                    <button class="btn btn-success gap-2" type="submit">{% lucide "mail-check" size=16 %} Resume automated email</button>
-                </form>
+                <div class="flex flex-wrap items-center gap-2.5 border-b border-club bg-club px-4 py-3">
+                    {% lucide "mail-x" size=18 class="shrink-0 text-white" %}
+                    <span class="font-display text-sm font-extrabold tracking-[.1em] text-white uppercase">Automated email paused</span>
+                    <span class="flex-1"></span>
+                    <span class="font-mono text-[11px] text-white/80">since {{ email_suppression.started_at|date:"j M Y, H:i" }}{% if email_suppression.started_by %} · {{ email_suppression.started_by.email }}{% endif %}</span>
+                </div>
             {% else %}
-                <p class="text-sm text-muted">Silences every automated send — news and event notifications, billing reminders, dues invoices and reminders, claim-approval mail — except password reset, which always keeps working.</p>
-
-                <form class="mt-1" method="post" action="{% url 'controlpanel:email_suppression' %}">
-                    {% csrf_token %}
-                    <button class="btn btn-error gap-2" type="submit">{% lucide "mail-x" size=16 %} Pause automated email</button>
-                </form>
+                <div class="flex items-center gap-2.5 border-b border-line bg-subhead px-4 py-3">
+                    {% lucide "mail" size=18 class="shrink-0 text-muted" %}
+                    <span class="font-display text-sm font-extrabold tracking-[.1em] text-ink uppercase">Automated email</span>
+                    <span class="flex-1"></span>
+                    <span class="flex items-center gap-1.5 font-mono text-[11px] text-ok-text">
+                        <span class="h-[7px] w-[7px] rounded-full bg-ok"></span>
+                        sending normally
+                    </span>
+                </div>
             {% endif %}
+
+            <div class="card-body flex-1">
+                {% if email_suppression.is_active %}
+                    <p class="text-sm text-muted">Notifications, reminders, dues invoices, and every other automated send stand down. Password reset keeps working — nobody gets locked out while this is on.</p>
+
+                    <form class="mt-auto" method="post" action="{% url 'controlpanel:email_suppression' %}">
+                        {% csrf_token %}
+                        <button class="btn btn-success gap-2" type="submit">{% lucide "mail-check" size=16 %} Resume automated email</button>
+                    </form>
+                {% else %}
+                    <p class="text-sm text-muted">Silences every automated send — news and event notifications, billing reminders, dues invoices and reminders, claim-approval mail — except password reset, which always keeps working.</p>
+
+                    <form class="mt-auto" method="post" action="{% url 'controlpanel:email_suppression' %}">
+                        {% csrf_token %}
+                        <button class="btn btn-error gap-2" type="submit">{% lucide "mail-x" size=16 %} Pause automated email</button>
+                    </form>
+                {% endif %}
+            </div>
         </div>
     </div>
 

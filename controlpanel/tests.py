@@ -2044,6 +2044,13 @@ class MaintenancePanelTests(ControlPanelTestBase):
         self.assertContains(response, "Maintenance mode")
         self.assertContains(response, "Close the platform")
 
+    def test_maintenance_and_email_suppression_sit_side_by_side(self):
+        # Both cards live in the same 2-up grid row -- see features.html's own comment
+        # for why (equal height, each card's action pinned to its own bottom).
+        response = self.client.get(reverse("controlpanel:features"))
+
+        self.assertContains(response, "lg:grid-cols-2")
+
 
 class EmailSuppressionPanelTests(ControlPanelTestBase):
     def setUp(self):
@@ -2078,3 +2085,16 @@ class EmailSuppressionPanelTests(ControlPanelTestBase):
 
         self.assertContains(response, "Automated email paused")
         self.assertContains(response, "Resume automated email")
+
+    def test_every_panel_page_warns_while_email_is_paused(self):
+        # Mirrors MaintenancePanelTests' own equivalent -- not a state to leave on by
+        # accident, same reasoning.
+        EmailSuppression.start(user=self.staff)
+
+        for url in (reverse("controlpanel:dashboard"), reverse("controlpanel:club_list"), reverse("controlpanel:features")):
+            self.assertContains(self.client.get(url), "Automated email paused", msg_prefix=url)
+
+    def test_the_banner_is_absent_while_email_is_sending_normally(self):
+        response = self.client.get(reverse("controlpanel:dashboard"))
+
+        self.assertNotContains(response, "Automated email paused")

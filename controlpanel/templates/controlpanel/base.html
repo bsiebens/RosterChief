@@ -106,6 +106,17 @@
                     </div>
                 {% endif %}
 
+                {% if email_suppression_on %}
+                    <div class="flex items-center gap-3 rounded border border-danger-border bg-danger-bg px-4 py-3 text-sm text-club-dark" role="alert">
+                        {% lucide "mail-x" size=18 class="shrink-0" %}
+                        <div>
+                            <span class="font-display font-extrabold tracking-[.04em] uppercase">Automated email paused.</span>
+                            Notifications, reminders, and invoices are not sending. Password reset still works.
+                            <a class="link link-hover font-semibold" href="{% url 'controlpanel:features' %}">Resume it</a>
+                        </div>
+                    </div>
+                {% endif %}
+
                 {% if messages %}
                     <div class="flex flex-col gap-2">
                         {% for message in messages %}
