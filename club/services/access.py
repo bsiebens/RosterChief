@@ -20,7 +20,7 @@ from django.db.models import Q, QuerySet
 from django.utils import timezone
 
 from authentication.models import User
-from club.models import Club, ClubMembership, ClubRole, Season
+from club.models import Club, ClubMembership, ClubRole, Season, ShopManager
 from events.models import Event
 from members.models import FamilyMembership, Group, Member
 from teams.models import StaffAssignment, Team
@@ -209,8 +209,16 @@ def can_edit_event(user: User, event: Event) -> bool:
     ).exists()
 
 
+def is_shop_admin(user: User, club: Club) -> bool:
+    """An additive grant (club.models.ShopManager), not a ClubRole value -- see
+    that model's own docstring for why. Layered on top of whatever ClubRole a
+    member already holds, the same way is_coach_manager layers on top via
+    StaffAssignment instead of competing for the single ClubRole slot."""
+    return ShopManager.objects.filter(member__user=user, club=club).exists()
+
+
 def can_manage_shop(user: User, club: Club) -> bool:
-    return is_club_admin(user, club)
+    return is_club_admin(user, club) or is_shop_admin(user, club)
 
 
 def can_add_news(user: User, club: Club) -> bool:

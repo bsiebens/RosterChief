@@ -13,6 +13,7 @@ from authentication.models import User
 from club.models import Club, ClubMembership, Season
 from club.tenancy import reset_current_club, set_current_club
 from members.models import Member
+from notifications.models import Notification
 from teams.models import Position, Team
 
 from .admin import ProductAdmin
@@ -28,6 +29,9 @@ from .models import (
     Payment,
     Product,
 )
+from .services.checkout import CheckoutError, find_discount, place_order
+from .services.invoices import create_invoice_for_order, render_invoice_pdf
+from .services.pricing import cart_totals
 
 
 class ProductSlugTests(TestCase):
@@ -232,23 +236,34 @@ class OrderLineTests(ShopEntitiesTestBase):
 
 class DiscountTests(ShopEntitiesTestBase):
     def test_slug_and_str(self):
-        discount = Discount.objects.create(club=self.club, name="Sibling discount")
+        discount = Discount.objects.create(club=self.club, name="Sibling discount", code="SIBLING")
 
         self.assertEqual(discount.slug, "sibling-discount")
         self.assertEqual(str(discount), "Sibling discount")
 
+    def test_code_is_stored_uppercased(self):
+        discount = Discount.objects.create(club=self.club, name="Sibling discount", code="sibling10")
+
+        self.assertEqual(discount.code, "SIBLING10")
+
     def test_slug_is_unique_per_club(self):
-        Discount.objects.create(club=self.club, name="Sibling")
-        second = Discount.objects.create(club=self.club, name="Sibling")
+        Discount.objects.create(club=self.club, name="Sibling", code="SIBLING1")
+        second = Discount.objects.create(club=self.club, name="Sibling", code="SIBLING2")
 
         self.assertEqual(second.slug, "sibling-2")
+
+    def test_code_is_unique_per_club(self):
+        Discount.objects.create(club=self.club, name="Sibling", code="SIBLING")
+
+        with self.assertRaises(IntegrityError):
+            Discount.objects.create(club=self.club, name="Other", code="sibling")
 
 
 class AppliedDiscountTests(ShopEntitiesTestBase):
     @classmethod
     def setUpTestData(cls):
         super().setUpTestData()
-        cls.discount = Discount.objects.create(club=cls.club, name="Sibling")
+        cls.discount = Discount.objects.create(club=cls.club, name="Sibling", code="SIBLING")
 
     def apply(self, **kwargs):
         kwargs.setdefault("order", self.order)
@@ -410,7 +425,7 @@ class ClubScopeValidationTests(TestCase):
     # --- AppliedDiscount ---
     def test_applieddiscount_rejects_cross_club_discount(self):
         order = self.make_order(self.club)
-        discount = Discount.objects.create(club=self.other, name="Sibling")
+        discount = Discount.objects.create(club=self.other, name="Sibling", code="SIBLING")
         applied = AppliedDiscount(order=order, discount=discount, discount_amount=Decimal("5"))
         with self.assertRaises(ValidationError) as ctx:
             applied.full_clean()
@@ -418,7 +433,7 @@ class ClubScopeValidationTests(TestCase):
 
     def test_applieddiscount_rejects_non_member_applied_by(self):
         order = self.make_order(self.club)
-        discount = Discount.objects.create(club=self.club, name="Sibling")
+        discount = Discount.objects.create(club=self.club, name="Sibling", code="SIBLING")
         applied = AppliedDiscount(order=order, discount=discount, discount_amount=Decimal("5"), applied_by=self.stranger)
         with self.assertRaises(ValidationError) as ctx:
             applied.full_clean()
@@ -426,7 +441,7 @@ class ClubScopeValidationTests(TestCase):
 
     def test_applieddiscount_is_unique_per_order(self):
         order = self.make_order(self.club)
-        discount = Discount.objects.create(club=self.club, name="Sibling")
+        discount = Discount.objects.create(club=self.club, name="Sibling", code="SIBLING")
         AppliedDiscount.objects.create(order=order, discount=discount, discount_amount=Decimal("5"))
         with self.assertRaises(IntegrityError):
             AppliedDiscount.objects.create(order=order, discount=discount, discount_amount=Decimal("5"))
@@ -466,3 +481,201 @@ class AdminScopingTests(TestCase):
 
         self.assertIn(self.season, field.queryset)
         self.assertNotIn(self.other_season, field.queryset)
+
+
+class CartTotalsTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        cls.user = User.objects.create_user(email="shopper@example.com", password="pw-secret-123")
+        cls.product = Product.objects.create(club=cls.club, name="Home Jersey", price=Decimal("25.00"))
+
+    def make_cart(self, *quantities):
+        cart = Cart.objects.create(club=self.club, user=self.user)
+        for quantity in quantities:
+            CartItem.objects.create(cart=cart, product=self.product, quantity=quantity, unit_price=self.product.price, beneficiary=Member.objects.create(first_name=f"Kid{quantity}", last_name="Doe"))
+        return cart
+
+    def test_subtotal_sums_every_line(self):
+        cart = self.make_cart(2)
+        CartItem.objects.create(cart=cart, product=Product.objects.create(club=self.club, name="Cap", price=Decimal("10.00")), quantity=1, unit_price=Decimal("10.00"))
+
+        totals = cart_totals(cart)
+
+        self.assertEqual(totals["subtotal"], Decimal("60.00"))
+        self.assertEqual(totals["total"], Decimal("60.00"))
+
+    def test_percentage_discount(self):
+        cart = self.make_cart(2)  # 50.00
+        discount = Discount.objects.create(club=self.club, name="10 off", code="TEN", discount_type=DiscountType.PERCENTAGE, discount_amount=Decimal("10"))
+
+        totals = cart_totals(cart, discount)
+
+        self.assertEqual(totals["discount_amount"], Decimal("5.00"))
+        self.assertEqual(totals["total"], Decimal("45.00"))
+
+    def test_fixed_amount_discount(self):
+        cart = self.make_cart(2)  # 50.00
+        discount = Discount.objects.create(club=self.club, name="Fiver off", code="FIVER", discount_type=DiscountType.FIXED_AMOUNT, discount_amount=Decimal("5.00"))
+
+        totals = cart_totals(cart, discount)
+
+        self.assertEqual(totals["total"], Decimal("45.00"))
+
+    def test_a_fixed_discount_never_pushes_the_total_negative(self):
+        cart = self.make_cart(1)  # 25.00
+        discount = Discount.objects.create(club=self.club, name="Huge", code="HUGE", discount_type=DiscountType.FIXED_AMOUNT, discount_amount=Decimal("100.00"))
+
+        totals = cart_totals(cart, discount)
+
+        self.assertEqual(totals["discount_amount"], Decimal("25.00"))
+        self.assertEqual(totals["total"], Decimal("0.00"))
+
+
+class FindDiscountTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        cls.discount = Discount.objects.create(club=cls.club, name="Summer", code="SUMMER10")
+
+    def test_blank_code_is_not_an_error(self):
+        self.assertIsNone(find_discount(self.club, ""))
+
+    def test_matches_case_insensitively(self):
+        self.assertEqual(find_discount(self.club, "summer10"), self.discount)
+
+    def test_unknown_code_raises(self):
+        with self.assertRaises(CheckoutError):
+            find_discount(self.club, "NOPE")
+
+    def test_an_inactive_discount_is_not_found(self):
+        self.discount.is_active = False
+        self.discount.save(update_fields=["is_active"])
+
+        with self.assertRaises(CheckoutError):
+            find_discount(self.club, "SUMMER10")
+
+
+class PlaceOrderTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united", shop_open=True)
+        cls.user = User.objects.create_user(email="shopper@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Jane", last_name="Doe", email="shopper@example.com", user=cls.user)
+        cls.product = Product.objects.create(club=cls.club, name="Home Jersey", price=Decimal("25.00"))
+
+    def make_cart(self, quantity=2):
+        cart = Cart.objects.create(club=self.club, user=self.user)
+        CartItem.objects.create(cart=cart, product=self.product, quantity=quantity, unit_price=self.product.price)
+        return cart
+
+    def test_a_closed_shop_refuses_checkout(self):
+        self.club.shop_open = False
+        self.club.save(update_fields=["shop_open"])
+        cart = self.make_cart()
+
+        with self.assertRaises(CheckoutError):
+            place_order(cart, purchaser=self.member)
+
+    def test_an_empty_cart_refuses_checkout(self):
+        cart = Cart.objects.create(club=self.club, user=self.user)
+
+        with self.assertRaises(CheckoutError):
+            place_order(cart, purchaser=self.member)
+
+    def test_creates_an_order_with_matching_lines_and_total(self):
+        cart = self.make_cart(quantity=3)
+
+        order = place_order(cart, purchaser=self.member)
+
+        self.assertEqual(order.total, Decimal("75.00"))
+        [line] = order.order_items.all()
+        self.assertEqual(line.product, self.product)
+        self.assertEqual(line.quantity, 3)
+        self.assertEqual(line.line_total, Decimal("75.00"))
+
+    def test_the_cart_is_marked_checked_out(self):
+        cart = self.make_cart()
+
+        place_order(cart, purchaser=self.member)
+
+        cart.refresh_from_db()
+        self.assertEqual(cart.status, Cart.CartStatus.CHECKED_OUT)
+
+    def test_an_applied_discount_reduces_the_total_and_is_recorded(self):
+        cart = self.make_cart(quantity=2)  # 50.00
+        Discount.objects.create(club=self.club, name="Ten off", code="TEN10", discount_type=DiscountType.PERCENTAGE, discount_amount=Decimal("10"))
+
+        order = place_order(cart, purchaser=self.member, discount_code="ten10")
+
+        self.assertEqual(order.total, Decimal("45.00"))
+        [applied] = order.applied_discounts.all()
+        self.assertEqual(applied.discount.code, "TEN10")
+        self.assertEqual(applied.applied_by, self.member)
+
+    def test_an_invalid_discount_code_refuses_checkout_without_creating_an_order(self):
+        cart = self.make_cart()
+
+        with self.assertRaises(CheckoutError):
+            place_order(cart, purchaser=self.member, discount_code="NOPE")
+
+        self.assertFalse(Order.objects.exists())
+
+    def test_an_invoice_is_created_for_the_order(self):
+        cart = self.make_cart()
+
+        order = place_order(cart, purchaser=self.member)
+
+        self.assertTrue(Invoice.objects.filter(order=order).exists())
+        self.assertTrue(order.invoice.number.startswith("INV-"))
+
+    def test_the_purchaser_is_notified(self):
+        cart = self.make_cart()
+
+        order = place_order(cart, purchaser=self.member)
+
+        notification = Notification.objects.get(member=self.member)
+        self.assertIn(order.number, notification.title)
+        self.assertEqual(notification.source, order)
+
+
+class InvoicePdfTests(TestCase):
+    """shop.services.invoices.render_invoice_pdf -- mocks render_pdf itself
+    (same technique as club.tests.InvoicePdfTests) so this exercises the
+    template/context, not WeasyPrint's own native library dependency."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united", legal_name="Ajax United VZW", shop_open=True)
+        cls.user = User.objects.create_user(email="shopper@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Jane", last_name="Doe", email="shopper@example.com", user=cls.user)
+        cls.product = Product.objects.create(club=cls.club, name="Home Jersey", price=Decimal("25.00"))
+        cart = Cart.objects.create(club=cls.club, user=cls.user)
+        CartItem.objects.create(cart=cart, product=cls.product, quantity=2, unit_price=cls.product.price)
+        cls.order = place_order(cart, purchaser=cls.member)
+
+    def render(self):
+        with patch("shop.services.invoices.render_pdf", side_effect=lambda html: html) as renderer:
+            render_invoice_pdf(self.order.invoice)
+        return renderer.call_args[0][0]
+
+    def test_the_header_uses_the_legal_name(self):
+        self.assertIn("Ajax United VZW", self.render())
+
+    def test_line_items_are_listed(self):
+        html = self.render()
+
+        self.assertIn("Home Jersey", html)
+        self.assertIn("50.00", html)
+        self.assertIn(self.order.number, html)
+
+    def test_no_logo_falls_back_to_initials(self):
+        html = self.render()
+
+        self.assertIn("AU", html)
+
+    def test_invoice_gets_its_own_number(self):
+        create_invoice_for_order(Order.objects.create(club=self.club, purchaser=self.member, total=Decimal("1")))
+        # The order created in setUpTestData already has its own invoice; a second
+        # order's invoice must not collide with it.
+        self.assertEqual(Invoice.objects.filter(club=self.club).count(), 2)

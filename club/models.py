@@ -108,6 +108,12 @@ class Club(UUIDModel):
 
     archived_at = models.DateTimeField(_("archived at"), null=True, blank=True, help_text=_("Archived clubs stop resolving on their subdomain, but their data is retained."))
 
+    shop_open = models.BooleanField(
+        _("shop open"),
+        default=False,
+        help_text=_("While off, the shop is hidden from the member app entirely and the management panel's shop screens are read-only for browsing but refuse new orders."),
+    )
+
     season_start = models.DateField(
         _("season start"),
         default=datetime.date(2000, 8, 1),
@@ -591,6 +597,30 @@ class ClubRole(ClubScopedModel):
         ordering = ["club", "member__last_name", "member__first_name"]
         constraints = [
             models.UniqueConstraint(fields=["club", "member"], name="unique_member_per_club"),
+        ]
+
+    def __str__(self):
+        return f"{self.club} - {self.member}"
+
+
+class ShopManager(ClubScopedModel):
+    """An additive grant, not a ClubRole value -- a member holds at most one
+    ClubRole per club (see its own unique constraint above), so "shop admin"
+    couldn't be a ClubRole option without forcing a choice between it and
+    whatever other role someone already holds. Same shape as StaffAssignment
+    granting coach access on top of a member's own ClubRole, just club-wide
+    and season-independent (shop administration isn't tied to a team or a
+    season the way coaching is) -- see club.services.access.can_manage_shop.
+    """
+
+    member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="shop_manager_grants", verbose_name=_("member"))
+
+    class Meta:
+        verbose_name = _("shop manager")
+        verbose_name_plural = _("shop managers")
+        ordering = ["club", "member__last_name", "member__first_name"]
+        constraints = [
+            models.UniqueConstraint(fields=["club", "member"], name="unique_shop_manager_per_club"),
         ]
 
     def __str__(self):

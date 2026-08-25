@@ -24,7 +24,7 @@ from members.models import Family, FamilyMembership, Member
 from teams.models import Position, StaffAssignment, Team, TeamMembership
 from teams.services import eligible_roster_members
 
-from .models import Club, ClubMembership, ClubRole, DuesInvoice, FeePayment, MemberRequirementStatus, OnboardingRequirement, Season, Sponsor, club_logo_path
+from .models import Club, ClubMembership, ClubRole, DuesInvoice, FeePayment, MemberRequirementStatus, OnboardingRequirement, Season, ShopManager, Sponsor, club_logo_path
 from .services.access import (
     COACH_MANAGER,
     can_edit_event,
@@ -35,6 +35,7 @@ from .services.access import (
     is_club_admin,
     is_member_admin,
     is_platform_superuser,
+    is_shop_admin,
     members_visible_to,
     roles_in_club,
     teams_managed_by,
@@ -1066,8 +1067,8 @@ class AccessServiceTests(TestCase):
 
         self.assertFalse(can_edit_event(physio_user, event))
 
-    # --- can_manage_shop ---
-    def test_only_admin_can_manage_shop(self):
+    # --- can_manage_shop / is_shop_admin ---
+    def test_admin_can_manage_shop_without_a_shop_manager_grant(self):
         admin_user, admin_member = self.make_user_member("admin@example.com")
         self.grant(admin_member, ClubRole.Roles.ADMIN)
         editor_user, editor_member = self.make_user_member("editor@example.com")
@@ -1075,6 +1076,30 @@ class AccessServiceTests(TestCase):
 
         self.assertTrue(can_manage_shop(admin_user, self.club))
         self.assertFalse(can_manage_shop(editor_user, self.club))
+
+    def test_a_shop_manager_grant_is_additive_on_top_of_another_role(self):
+        # The whole point of ShopManager being a separate grant, not a ClubRole
+        # value: someone can be EDITOR *and* shop admin at once.
+        user, member = self.make_user_member("editor-shop@example.com")
+        self.grant(member, ClubRole.Roles.EDITOR)
+        ShopManager.objects.create(club=self.club, member=member)
+
+        self.assertTrue(is_shop_admin(user, self.club))
+        self.assertTrue(can_manage_shop(user, self.club))
+        self.assertTrue(has_club_role(user, self.club, ClubRole.Roles.EDITOR))
+
+    def test_a_shop_manager_grant_alone_is_enough_with_no_clubrole_at_all(self):
+        user, member = self.make_user_member("shoponly@example.com")
+        ShopManager.objects.create(club=self.club, member=member)
+
+        self.assertTrue(can_manage_shop(user, self.club))
+        self.assertFalse(is_club_admin(user, self.club))
+
+    def test_a_shop_manager_grant_in_another_club_does_not_count_here(self):
+        user, member = self.make_user_member("othershop@example.com")
+        ShopManager.objects.create(club=self.other_club, member=member)
+
+        self.assertFalse(can_manage_shop(user, self.club))
 
     # --- platform superuser bypass ---
     def test_superuser_is_club_admin_everywhere_with_no_clubrole_at_all(self):

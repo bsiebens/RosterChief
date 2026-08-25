@@ -19,6 +19,10 @@ class DiscountType(models.TextChoices):
     FIXED_AMOUNT = "fixed_amount", _("Fixed amount")
 
 
+def product_image_path(instance, filename):
+    return f"clubs/{instance.club.slug}/shop/products/{filename}"
+
+
 def next_scoped_number(instance, code):
     """Next per-club sequential number for the current year: ``<code>-<year>-<seq>``."""
     prefix = f"{code}-{timezone.now().year}-"
@@ -56,6 +60,9 @@ class Product(ClubScopedModel):
 
     name = models.CharField(_("name"), max_length=255)
     slug = models.SlugField(_("slug"), max_length=255, blank=True)
+    description = models.TextField(_("description"), blank=True)
+    image = models.ImageField(_("photo"), upload_to=product_image_path, blank=True)
+    price = models.DecimalField(_("price"), max_digits=10, decimal_places=2, default=0)
 
     product_type = models.CharField(_("product type"), max_length=255, choices=ProductType.choices, default=ProductType.MEMBERSHIP)
     season = models.ForeignKey(Season, on_delete=models.PROTECT, related_name="products", verbose_name=_("season"), blank=True, null=True)
@@ -199,6 +206,11 @@ class Discount(ClubScopedModel):
     slug = models.SlugField(_("slug"), max_length=255, blank=True)
     description = models.TextField(_("description"), blank=True)
 
+    #: What a member types in at checkout -- always compared uppercased (see
+    #: save()) so "summer10"/"SUMMER10" match the same discount regardless of
+    #: how either side happened to type it.
+    code = models.CharField(_("code"), max_length=50, help_text=_("What members type in at checkout, e.g. SUMMER10. Not case-sensitive."))
+
     discount_type = models.CharField(_("discount type"), max_length=255, choices=DiscountType.choices, default=DiscountType.PERCENTAGE)
     discount_amount = models.DecimalField(_("discount amount"), max_digits=10, decimal_places=2, default=0)
 
@@ -212,10 +224,15 @@ class Discount(ClubScopedModel):
         ordering = ["name"]
         constraints = [
             UniqueConstraint(fields=["club", "slug"], name="unique_order_discount_type_slug_per_club"),
+            UniqueConstraint(fields=["club", "code"], name="unique_discount_code_per_club"),
         ]
 
     def __str__(self):
         return self.name
+
+    def save(self, *args, **kwargs):
+        self.code = self.code.upper().strip()
+        super().save(*args, **kwargs)
 
 
 class AppliedDiscount(UUIDModel):
@@ -279,7 +296,10 @@ class Invoice(ClubScopedModel):
     due_date = models.DateField(_("due date"), blank=True, null=True)
 
     billing_snapshot = models.JSONField(_("billing snapshot"), blank=True, null=True)  # Name/address information
-    pdf = models.FileField(_("PDF"), upload_to="invoices", blank=True, null=True)
+    # No stored PDF field -- rendered on demand instead (shop.services.invoices.
+    # render_invoice_pdf), same pattern as club/services/invoicing.py's dues
+    # invoices. Simpler, and sidesteps ever needing to get storage/regeneration
+    # right for a cached file.
 
     class Meta:
         verbose_name = _("invoice")

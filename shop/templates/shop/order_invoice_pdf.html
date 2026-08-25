@@ -1,0 +1,139 @@
+{% load i18n %}
+
+{% comment %}
+    Rendered by WeasyPrint, not a browser -- same convention as club/templates/
+    club/dues_invoice_pdf.html (standalone document, own print stylesheet, no
+    app.css), extended with the club's own logo: shop.services.invoices'
+    render_invoice_pdf passes it in pre-embedded as a base64 data: URI
+    (logo_data_uri) since WeasyPrint has no browser session to fetch a real
+    URL through and no guarantee MEDIA_URL is reachable from wherever this
+    renders. Falls back to the initials badge dues_invoice_pdf.html doesn't
+    need (that one has no logo treatment at all yet) -- same initials-on-a-
+    tinted-square fallback the rest of the app uses when a club has no logo.
+{% endcomment %}
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <title>{{ invoice.number }}</title>
+        <style>
+            @page {
+                size: A4;
+                margin: 20mm;
+                @bottom-center {
+                    content: "{{ club.name }} — {% trans "invoice" %} {{ invoice.number }} — " counter(page) " / " counter(pages);
+                    font-size: 8pt;
+                    color: #666;
+                }
+            }
+            body { font-family: sans-serif; font-size: 10pt; color: #111; }
+            h1 { font-size: 20pt; margin: 0 0 2mm; }
+            .muted { color: #666; }
+            .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12mm; }
+            .brand { display: flex; align-items: center; gap: 4mm; }
+            .logo { height: 16mm; width: 16mm; object-fit: contain; }
+            .logo-fallback {
+                height: 16mm;
+                width: 16mm;
+                border-radius: 2mm;
+                background: {{ club.secondary_color|default:"#4f46e5" }};
+                color: #fff;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 14pt;
+                font-weight: bold;
+            }
+            .accent { color: {{ club.primary_color|default:"#4f46e5" }}; }
+            .parties { display: flex; justify-content: space-between; margin-bottom: 10mm; }
+            .parties h2 { font-size: 9pt; text-transform: uppercase; letter-spacing: 0.5pt; color: #666; margin: 0 0 2mm; }
+            table { width: 100%; border-collapse: collapse; margin-bottom: 6mm; }
+            th { text-align: left; font-size: 9pt; text-transform: uppercase; letter-spacing: 0.5pt; color: #666; border-bottom: 1px solid #ccc; padding: 2mm 0; }
+            td { padding: 2mm 0; border-bottom: 1px solid #eee; }
+            .right { text-align: right; }
+            .total td { font-weight: bold; border-bottom: 2px solid #111; border-top: 1px solid #111; }
+            .discount td { color: #b91c1c; }
+            .balance { font-size: 12pt; font-weight: bold; }
+            .status-paid { color: #15803d; }
+            .status-owed { color: #b91c1c; }
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            <div class="brand">
+                {% if logo_data_uri %}
+                    <img class="logo" src="{{ logo_data_uri }}" alt="">
+                {% else %}
+                    <span class="logo-fallback">{{ club.initials }}</span>
+                {% endif %}
+                <div>
+                    <h1>{{ club.official_name }}</h1>
+                    {% with snapshot=invoice.billing_snapshot %}
+                        {% if snapshot.address %}<div class="muted">{{ snapshot.address }}</div>{% endif %}
+                        {% if snapshot.zip_code or snapshot.city %}<div class="muted">{{ snapshot.zip_code }} {{ snapshot.city }}</div>{% endif %}
+                        {% if snapshot.contact_email %}<div class="muted">{{ snapshot.contact_email }}</div>{% endif %}
+                    {% endwith %}
+                </div>
+            </div>
+            <div class="right">
+                <h1 class="accent">{% trans "Invoice" %}</h1>
+                <div><strong>{{ invoice.number }}</strong></div>
+                <div class="muted">{% blocktrans with date=invoice.issued_at|date:"j F Y" %}Issued {{ date }}{% endblocktrans %}</div>
+            </div>
+        </div>
+
+        <div class="parties">
+            <div>
+                <h2>{% trans "Billed to" %}</h2>
+                <div><strong>{{ order.purchaser }}</strong></div>
+            </div>
+            <div class="right">
+                <h2>{% trans "Order" %}</h2>
+                <div>{{ order.number }}</div>
+                <div class="muted">{% trans "Payable on pickup" %}</div>
+            </div>
+        </div>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>{% trans "Item" %}</th>
+                    <th class="right">{% trans "Qty" %}</th>
+                    <th class="right">{% trans "Unit price" %}</th>
+                    <th class="right">{% trans "Amount" %}</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for line in lines %}
+                    <tr>
+                        <td>
+                            <strong>{{ line.product.name }}</strong>
+                            {% if line.beneficiary %}<div class="muted">{% trans "For" %} {{ line.beneficiary }}</div>{% endif %}
+                        </td>
+                        <td class="right">{{ line.quantity }}</td>
+                        <td class="right">€{{ line.unit_price }}</td>
+                        <td class="right">€{{ line.line_total }}</td>
+                    </tr>
+                {% endfor %}
+                {% for applied in order.applied_discounts.all %}
+                    <tr class="discount">
+                        <td colspan="3">{% trans "Discount" %} — {{ applied.description }}</td>
+                        <td class="right">
+                            −{% if applied.discount_type == "percentage" %}{{ applied.discount_amount }}%{% else %}€{{ applied.discount_amount }}{% endif %}
+                        </td>
+                    </tr>
+                {% endfor %}
+                <tr class="total">
+                    <td colspan="3">{% trans "Balance due" %}</td>
+                    <td class="right balance {% if order.status == "paid" or order.status == "delivered" %}status-paid{% else %}status-owed{% endif %}">€{{ order.total }}</td>
+                </tr>
+            </tbody>
+        </table>
+
+        {% if order.status == "paid" or order.status == "delivered" %}
+            <p class="status-paid"><strong>{% trans "Paid in full." %}</strong> {% trans "Thank you." %}</p>
+        {% else %}
+            <p class="muted">{% trans "Payable in person when you pick up your order." %}</p>
+        {% endif %}
+    </body>
+</html>

@@ -4,7 +4,7 @@ from waffle import flag_is_active
 
 from members.models import Group
 
-from .services.access import can_add_news, can_edit_news, can_manage_members, can_publish_news, groups_manageable_by, has_management_access, is_club_admin, is_coach_manager, teams_managed_by
+from .services.access import can_add_news, can_edit_news, can_manage_members, can_manage_shop, can_publish_news, groups_manageable_by, has_management_access, is_club_admin, is_coach_manager, teams_managed_by
 
 
 class ClubStaffRequiredMixin(LoginRequiredMixin, UserPassesTestMixin):
@@ -79,6 +79,19 @@ class FeatureRequiredMixin(ClubAdminRequiredMixin):
         if club is not None and not flag_is_active(request, self.feature_flag):
             raise Http404(f"The “{self.feature_flag}” feature isn't enabled for this club.")
         return super().dispatch(request, *args, **kwargs)
+
+
+class ShopManagerRequiredMixin(FeatureRequiredMixin):
+    """The shop section's own gate -- same "shop" waffle-flag 404 as
+    FeatureRequiredMixin (the section doesn't exist at all for a club that
+    hasn't got it turned on), but ADMIN *or* a ShopManager grant, not
+    ADMIN-only like the plain FeatureRequiredMixin every other feature section
+    uses. See can_manage_shop / club.models.ShopManager."""
+
+    feature_flag = "shop"
+
+    def test_func(self):
+        return can_manage_shop(self.request.user, self.request.club)
 
 
 class TeamManagerRequiredMixin(ClubStaffRequiredMixin):
