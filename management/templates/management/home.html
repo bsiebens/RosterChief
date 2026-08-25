@@ -336,7 +336,7 @@
                         labels: data.fees.map((slice) => slice.label),
                         datasets: [{data: data.fees.map((slice) => slice.value), backgroundColor: ["#14A05A", "#F0A22E", "#E4002B", "#8B95A4"]}],
                     },
-                    options: {responsive: true, maintainAspectRatio: false, plugins: {legend: {position: "bottom", labels: {color: ink}}}},
+                    options: {responsive: true, maintainAspectRatio: false, plugins: {legend: {display: false}}},
                 });
             }
 
@@ -348,7 +348,7 @@
                         labels: ["{{ renewed_label|escapejs }}", "{{ not_renewed_label|escapejs }}"],
                         datasets: [{data: [renewalRate, 100 - renewalRate], backgroundColor: ["#14A05A", "#E4002B"]}],
                     },
-                    options: {responsive: true, maintainAspectRatio: false, plugins: {legend: {position: "bottom", labels: {color: ink}}}},
+                    options: {responsive: true, maintainAspectRatio: false, plugins: {legend: {display: false}}},
                 });
             }
         })();
