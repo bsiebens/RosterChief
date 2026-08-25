@@ -25,9 +25,10 @@ from club.mixins import (
     NewsAuthorRequiredMixin,
     NewsEditRequiredMixin,
     NewsPublisherRequiredMixin,
+    ShopManagerRequiredMixin,
     TeamManagerRequiredMixin,
 )
-from club.models import ClubMembership, ClubRole, DuesInvoice, MemberRequirementStatus, OnboardingRequirement, Season, Sponsor
+from club.models import ClubMembership, ClubRole, DuesInvoice, MemberRequirementStatus, OnboardingRequirement, Season, ShopManager, Sponsor
 from club.services.access import _guardians_only, can_edit_news, can_publish_news, current_season, groups_manageable_by, is_club_admin, members_visible_to, teams_managed_by, teams_staffed_by
 from club.services.fees import mark_as_paid, record_payment, remaining_balance
 from club.services.invoicing import DuesInvoicePDFError, create_or_resend_invoice, invoice_pdf, invoices_due_for_reminder, recipient_for, resolve_document_address, send_invoice_email, send_reminders
@@ -52,7 +53,8 @@ from members.services.family import add_child_to_family, add_parent_to_family, a
 from news.models import News, NewsPhoto
 from news.services import dispatch_send_publish_notification, notify_editors_of_pending_review
 from notifications.models import Notification
-from shop.models import Discount, Invoice, Order, Product
+from shop.models import Discount, Invoice, Order, Payment, Product
+from shop.services.invoices import ShopInvoicePDFError, render_invoice_pdf
 from teams.models import Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
 from teams.services import eligible_roster_members
 
@@ -65,6 +67,7 @@ from .forms import (
     ClubMembershipForm,
     ClubRoleAssignForm,
     ClubSettingsForm,
+    DiscountForm,
     EventForm,
     EventRefereeFeeForm,
     EventSeriesForm,
@@ -82,13 +85,16 @@ from .forms import (
     NewsPublishForm,
     OnboardingRequirementForm,
     OpponentForm,
+    OrderMarkPaidForm,
     PositionForm,
+    ProductForm,
     RBIHFImportForm,
     RecordFeePaymentForm,
     RefereeLevelForm,
     RequirementBypassForm,
     RequirementCompletionForm,
     SendDuesInvoicesForm,
+    ShopManagerAssignForm,
     SignupTeamPlacementForm,
     SponsorForm,
     StaffAssignmentForm,
@@ -1524,7 +1530,14 @@ class ClubRoleListView(ClubAdminRequiredMixin, ListView):
 
     def get_context_data(self, **kwargs):
         sections = [(value, label, ROLE_DESCRIPTIONS.get(value, ""), [role for role in self.object_list if role.role == value]) for value, label in ClubRole.Roles.choices if value != ClubRole.Roles.MEMBER]
-        return super().get_context_data(sections=sections, role_form=ClubRoleAssignForm(club=self.request.club), **kwargs)
+        shop_admins = ShopManager.objects.filter(club=self.request.club).select_related("member")
+        return super().get_context_data(
+            sections=sections,
+            role_form=ClubRoleAssignForm(club=self.request.club),
+            shop_admins=shop_admins,
+            shop_admin_form=ShopManagerAssignForm(club=self.request.club),
+            **kwargs,
+        )
 
 
 class ClubRoleCreateView(ClubAdminRequiredMixin, RedirectOnInvalidMixin, FormView):
@@ -1560,6 +1573,38 @@ class ClubRoleRevokeView(ClubAdminRequiredMixin, View):
         role.delete()
         body = _("“%(member)s” is no longer %(role)s.") % {"member": member, "role": role_label}
         notify(request, f"w|{_('Role revoked')}|{body}")
+        return redirect("management:role_list")
+
+
+class ShopManagerCreateView(ClubAdminRequiredMixin, RedirectOnInvalidMixin, FormView):
+    """Reachable only via the "Grant" modal in the roles overview's Shop admins
+    section. Admin-only, unlike the shop views themselves (ShopManagerRequiredMixin)
+    -- granting the grant is genuinely admin-only ground, same reasoning as
+    ClubRoleCreateView: a shop admin must never be able to hand out more access."""
+
+    form_class = ShopManagerAssignForm
+    http_method_names = ["post"]
+    invalid_redirect_url_name = "management:role_list"
+
+    def get_form_kwargs(self):
+        return super().get_form_kwargs() | {"club": self.request.club}
+
+    def form_valid(self, form):
+        member = form.cleaned_data["member"]
+        _grant, created = ShopManager.objects.get_or_create(club=self.request.club, member=member)
+        if created:
+            notify(self.request, f"s|{_('Shop admin granted')}|{_('“%(member)s” can now manage the shop.') % {'member': member}}")
+        else:
+            notify(self.request, f"s|{_('Already a shop admin')}|{_('“%(member)s” already manages the shop.') % {'member': member}}")
+        return redirect("management:role_list")
+
+
+class ShopManagerRevokeView(ClubAdminRequiredMixin, View):
+    def post(self, request, pk):
+        grant = get_object_or_404(ShopManager, pk=pk, club=request.club)
+        member = grant.member
+        grant.delete()
+        notify(request, f"w|{_('Shop admin revoked')}|{_('“%(member)s” no longer manages the shop.') % {'member': member}}")
         return redirect("management:role_list")
 
 
@@ -3448,36 +3493,258 @@ class SponsorDeleteView(ClubAdminRequiredMixin, View):
         return redirect("management:sponsor_list")
 
 
-class ProductListView(FeatureRequiredMixin, StubListMixin, ListView):
-    feature_flag = "shop"
-    page_title = _("Products")
+# --- Shop (ShopManagerRequiredMixin: a club ADMIN, or anyone holding a
+# ShopManager grant -- see club.mixins/club.services.access) -----------------
+
+
+class ShopToggleView(ShopManagerRequiredMixin, View):
+    """The shop open/closed switch on the Products page -- see Club.shop_open,
+    checked by shop.services.checkout.place_order before it lets anyone order."""
+
+    def post(self, request):
+        club = request.club
+        club.shop_open = not club.shop_open
+        club.save(update_fields=["shop_open"])
+        if club.shop_open:
+            notify(request, f"s|{_('Shop opened')}|{_('Members can now place orders.')}")
+        else:
+            notify(request, f"w|{_('Shop closed')}|{_('Members can no longer place orders.')}")
+        return redirect("management:product_list")
+
+
+class ProductListView(ShopManagerRequiredMixin, ListView):
+    template_name = "management/product_list.html"
+    context_object_name = "products"
 
     def get_queryset(self):
         return Product.objects.filter(club=self.request.club)
 
 
-class OrderListView(FeatureRequiredMixin, StubListMixin, ListView):
-    feature_flag = "shop"
-    page_title = _("Orders")
+class ProductCreateView(ShopManagerRequiredMixin, CreateView):
+    model = Product
+    form_class = ProductForm
+    template_name = "management/product_form.html"
+
+    def form_valid(self, form):
+        form.instance.club = self.request.club
+        response = super().form_valid(form)
+        body = _("“%(product)s” created.") % {"product": self.object}
+        notify(self.request, f"s|{_('Product created')}|{body}")
+        return response
+
+    def get_success_url(self):
+        return reverse("management:product_list")
+
+
+class ProductUpdateView(ShopManagerRequiredMixin, UpdateView):
+    model = Product
+    form_class = ProductForm
+    template_name = "management/product_form.html"
 
     def get_queryset(self):
-        return Order.objects.filter(club=self.request.club)
+        return Product.objects.filter(club=self.request.club)
+
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        body = _("“%(product)s” updated.") % {"product": self.object}
+        notify(self.request, f"s|{_('Product updated')}|{body}")
+        return response
+
+    def get_success_url(self):
+        return reverse("management:product_list")
+
+    def get_context_data(self, **kwargs):
+        return super().get_context_data(update_view=True, **kwargs)
 
 
-class DiscountListView(FeatureRequiredMixin, StubListMixin, ListView):
-    feature_flag = "shop"
-    page_title = _("Discounts")
+class ProductToggleActiveView(ShopManagerRequiredMixin, View):
+    """No delete view -- Product is PROTECTed by OrderLine, so a product that's
+    ever been ordered can't be hard-deleted. Deactivating hides it from members
+    instead."""
+
+    def post(self, request, pk):
+        product = get_object_or_404(Product.objects.filter(club=request.club), pk=pk)
+        product.is_active = not product.is_active
+        product.save(update_fields=["is_active"])
+        if product.is_active:
+            notify(request, f"s|{_('Product activated')}|{_('“%(product)s” is now active.') % {'product': product}}")
+        else:
+            notify(request, f"w|{_('Product deactivated')}|{_('“%(product)s” is no longer active.') % {'product': product}}")
+        return redirect("management:product_list")
+
+
+class DiscountListView(ShopManagerRequiredMixin, ListView):
+    template_name = "management/discount_list.html"
+    context_object_name = "discounts"
 
     def get_queryset(self):
         return Discount.objects.filter(club=self.request.club)
 
 
-class InvoiceListView(FeatureRequiredMixin, StubListMixin, ListView):
-    feature_flag = "shop"
-    page_title = _("Invoices")
+class DiscountCreateView(ShopManagerRequiredMixin, CreateView):
+    model = Discount
+    form_class = DiscountForm
+    template_name = "management/discount_form.html"
+
+    def form_valid(self, form):
+        form.instance.club = self.request.club
+        response = super().form_valid(form)
+        body = _("“%(discount)s” created.") % {"discount": self.object}
+        notify(self.request, f"s|{_('Discount created')}|{body}")
+        return response
+
+    def get_success_url(self):
+        return reverse("management:discount_list")
+
+
+class DiscountUpdateView(ShopManagerRequiredMixin, UpdateView):
+    model = Discount
+    form_class = DiscountForm
+    template_name = "management/discount_form.html"
 
     def get_queryset(self):
-        return Invoice.objects.filter(club=self.request.club)
+        return Discount.objects.filter(club=self.request.club)
+
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        body = _("“%(discount)s” updated.") % {"discount": self.object}
+        notify(self.request, f"s|{_('Discount updated')}|{body}")
+        return response
+
+    def get_success_url(self):
+        return reverse("management:discount_list")
+
+    def get_context_data(self, **kwargs):
+        return super().get_context_data(update_view=True, **kwargs)
+
+
+class DiscountToggleActiveView(ShopManagerRequiredMixin, View):
+    def post(self, request, pk):
+        discount = get_object_or_404(Discount.objects.filter(club=request.club), pk=pk)
+        discount.is_active = not discount.is_active
+        discount.save(update_fields=["is_active"])
+        if discount.is_active:
+            notify(request, f"s|{_('Discount activated')}|{_('“%(discount)s” is now active.') % {'discount': discount}}")
+        else:
+            notify(request, f"w|{_('Discount deactivated')}|{_('“%(discount)s” is no longer active.') % {'discount': discount}}")
+        return redirect("management:discount_list")
+
+
+class OrderListView(ShopManagerRequiredMixin, ListView):
+    """A simple ``?status=`` query-param filter -- not a full filter strip,
+    there's little else worth narrowing an order list by yet."""
+
+    template_name = "management/order_list.html"
+    context_object_name = "orders"
+
+    def get_queryset(self):
+        orders = Order.objects.filter(club=self.request.club).select_related("purchaser")
+        status = self.request.GET.get("status")
+        if status:
+            orders = orders.filter(status=status)
+        return orders
+
+    def get_context_data(self, **kwargs):
+        return super().get_context_data(status_choices=Order.OrderStatus.choices, selected_status=self.request.GET.get("status", ""), **kwargs)
+
+
+class OrderDetailView(ShopManagerRequiredMixin, DetailView):
+    template_name = "management/order_detail.html"
+    context_object_name = "order"
+
+    def get_queryset(self):
+        return Order.objects.filter(club=self.request.club).select_related("purchaser")
+
+    def get_context_data(self, **kwargs):
+        order = self.object
+        lines = order.order_items.select_related("product", "beneficiary", "team")
+        applied_discounts = order.applied_discounts.select_related("discount")
+        payments = order.payments.all()
+        return super().get_context_data(
+            lines=lines,
+            applied_discounts=applied_discounts,
+            payments=payments,
+            mark_paid_form=OrderMarkPaidForm(),
+            **kwargs,
+        )
+
+
+class OrderMarkPaidView(ShopManagerRequiredMixin, View):
+    """Reachable only via the "Mark paid" modal on the order detail page --
+    creates a Payment row and settles the order. There's no online payment for
+    this shop, so this is how every order actually gets marked paid: someone on
+    staff, on pickup."""
+
+    def post(self, request, pk):
+        order = get_object_or_404(Order.objects.filter(club=request.club), pk=pk)
+        form = OrderMarkPaidForm(request.POST)
+
+        if not form.is_valid():
+            for error in form.errors.values():
+                notify(request, f"e|{_('Could not record payment')}|{' '.join(error)}")
+            return redirect("management:order_detail", pk=pk)
+
+        Payment.objects.create(
+            order=order,
+            amount=order.total,
+            method=form.cleaned_data["method"],
+            status=Payment.PaymentStatus.CONFIRMED,
+            reference=form.cleaned_data["reference"],
+            paid_at=timezone.now(),
+        )
+        order.status = Order.OrderStatus.PAID
+        order.save(update_fields=["status"])
+
+        notify(request, f"s|{_('Order marked paid')}|{_('Order %(number)s is now paid.') % {'number': order.number}}")
+        return redirect("management:order_detail", pk=pk)
+
+
+class OrderMarkDeliveredView(ShopManagerRequiredMixin, View):
+    """Plain status set, no state machine -- picked up before formally marked
+    paid can happen in real life, so this doesn't require PAID first."""
+
+    def post(self, request, pk):
+        order = get_object_or_404(Order.objects.filter(club=request.club), pk=pk)
+        order.status = Order.OrderStatus.DELIVERED
+        order.save(update_fields=["status"])
+        notify(request, f"s|{_('Order marked delivered')}|{_('Order %(number)s is now delivered.') % {'number': order.number}}")
+        return redirect("management:order_detail", pk=pk)
+
+
+class OrderCancelView(ShopManagerRequiredMixin, View):
+    def post(self, request, pk):
+        order = get_object_or_404(Order.objects.filter(club=request.club), pk=pk)
+        order.status = Order.OrderStatus.CANCELLED
+        order.save(update_fields=["status"])
+        notify(request, f"w|{_('Order cancelled')}|{_('Order %(number)s has been cancelled.') % {'number': order.number}}")
+        return redirect("management:order_detail", pk=pk)
+
+
+class InvoicePdfView(ShopManagerRequiredMixin, View):
+    def get(self, request, pk):
+        order = get_object_or_404(Order.objects.filter(club=request.club), pk=pk)
+        invoice = get_object_or_404(Invoice, order=order, club=request.club)
+
+        try:
+            pdf = render_invoice_pdf(invoice)
+        except ShopInvoicePDFError as error:
+            notify(request, f"e|{_('PDF unavailable')}|{error}")
+            return redirect("management:order_detail", pk=pk)
+
+        response = HttpResponse(pdf, content_type="application/pdf")
+        response["Content-Disposition"] = f'attachment; filename="{invoice.number}.pdf"'
+        return response
+
+
+class InvoiceListView(ShopManagerRequiredMixin, ListView):
+    """Read-only -- there's nothing on an Invoice worth its own detail page
+    beyond what the order detail already shows, so every row links there."""
+
+    template_name = "management/invoice_list.html"
+    context_object_name = "invoices"
+
+    def get_queryset(self):
+        return Invoice.objects.filter(club=self.request.club).select_related("order")
 
 
 class FormListView(FeatureRequiredMixin, StubListMixin, ListView):

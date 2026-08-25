@@ -20,7 +20,7 @@ from waffle import get_waffle_flag_model
 
 from billing.models import Plan, PlanPrice
 from billing.services.dues import record_payment, subscribe
-from club.models import Club, ClubMembership, ClubRole, DuesInvoice, FeePayment, MemberRequirementStatus, OnboardingRequirement, Season, Sponsor
+from club.models import Club, ClubMembership, ClubRole, DuesInvoice, FeePayment, MemberRequirementStatus, OnboardingRequirement, Season, ShopManager, Sponsor
 from club.services.invoicing import DuesInvoicePDFError
 from club.services.onboarding import mark_complete
 from events.models import Attendance, Competition, Event, EventReferee, EventSeries, Location, Opponent, RefereeSignup
@@ -39,7 +39,8 @@ from members.services.claims import children_awaiting_a_parent
 from news.models import News, NewsPhoto
 from news.services import _send_and_mark_notified
 from notifications.models import Notification
-from shop.models import Order
+from shop.models import Discount, DiscountType, Invoice, Order, OrderLine, Payment, Product
+from shop.services.invoices import ShopInvoicePDFError, create_invoice_for_order
 from teams.models import Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
 from teams.services import eligible_roster_members
 
@@ -8191,5 +8192,509 @@ class MemberAdminAccessTests(ManagementTestBase):
 
     def test_cannot_reach_positions(self):
         self.assertEqual(self.club_get("position_create").status_code, 403)
+
+
+class ShopTestBase(ManagementTestBase):
+    """Shared fixture for shop management tests: the "shop" waffle flag active
+    for this club (see FeatureGatedSectionsTests's own comment on why cache.clear()
+    matters here), plus one product to hang orders/discounts off of."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.product = Product.objects.create(club=cls.club, name="Home Jersey", price=Decimal("25.00"))
+
+    def setUp(self):
+        super().setUp()
+        cache.clear()
+        self.addCleanup(cache.clear)
+        flag = get_waffle_flag_model().objects.create(name="shop")
+        flag.clubs.add(self.club)
+
+    def make_shop_manager(self, email="shopadmin@example.com"):
+        user = User.objects.create_user(email=email, password="pw-secret-123")
+        member = Member.objects.create(user=user, first_name="Sam", last_name="ShopAdmin")
+        ClubMembership.objects.create(club=self.club, member=member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        ShopManager.objects.create(club=self.club, member=member)
+        return user
+
+    def make_plain_staff(self, email="physio-shop@example.com"):
+        user = User.objects.create_user(email=email, password="pw-secret-123")
+        member = Member.objects.create(user=user, first_name="Pat", last_name="Physio")
+        team = Team.objects.create(club=self.club, name="Shop Physio Team", short_name="SPT")
+        position = Position.objects.create(club=self.club, name="Physio Shop", short_name="PHS", staff_position=True, management_position=False)
+        StaffAssignment.objects.create(team=team, member=member, season=self.season, position=position)
+        return user
+
+
+class ShopManagerRBACBoundaryTests(ShopTestBase):
+    """The three-way boundary ShopManagerRequiredMixin is built for -- see
+    club.mixins.ShopManagerRequiredMixin/club.services.access.can_manage_shop."""
+
+    def test_a_plain_editor_without_a_shop_grant_gets_403(self):
+        user = User.objects.create_user(email="editor-only@example.com", password="pw-secret-123")
+        member = Member.objects.create(user=user, first_name="Edie", last_name="Editor")
+        ClubMembership.objects.create(club=self.club, member=member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        ClubRole.objects.filter(club=self.club, member=member).update(role=ClubRole.Roles.EDITOR)
+        enrol_mfa(user)  # ClubRole EDITOR requires a second factor.
+        self.client.force_login(user)
+
+        self.assertEqual(self.club_get("product_list").status_code, 403)
+
+    def test_a_shop_manager_with_no_club_role_at_all_can_reach_shop(self):
+        # No ClubMembership, no ClubRole row of any kind -- the ShopManager grant
+        # alone is enough, same as StaffAssignment granting coach access on top of
+        # nothing at all.
+        user = User.objects.create_user(email="shop-only@example.com", password="pw-secret-123")
+        member = Member.objects.create(user=user, first_name="Sol", last_name="ShopOnly")
+        ShopManager.objects.create(club=self.club, member=member)
+        self.client.force_login(user)
+
+        self.assertEqual(self.club_get("product_list").status_code, 200)
+
+    def test_an_admin_reaches_shop_regardless_of_a_shop_manager_grant(self):
+        self.client.force_login(self.admin_user)
+
+        self.assertFalse(ShopManager.objects.filter(club=self.club, member=self.admin_member).exists())
+        self.assertEqual(self.club_get("product_list").status_code, 200)
+
+
+class ProductManagementTests(ShopTestBase):
+    def product_data(self, **overrides):
+        data = {"name": "Away Jersey", "description": "", "price": "30.00", "is_active": "on"}
+        data.update(overrides)
+        return data
+
+    def test_a_shop_manager_can_view_the_product_list(self):
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_get("product_list")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Home Jersey")
+
+    def test_plain_staff_cannot_view_the_product_list(self):
+        self.client.force_login(self.make_plain_staff())
+
+        self.assertEqual(self.club_get("product_list").status_code, 403)
+
+    def test_a_shop_manager_can_create_a_product(self):
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_post("product_create", self.product_data())
+
+        self.assertRedirects(response, reverse("management:product_list"))
+        self.assertTrue(Product.objects.filter(club=self.club, name="Away Jersey").exists())
+
+    def test_an_admin_can_create_a_product_with_a_photo(self):
+        self.client.force_login(self.admin_user)
+
+        self.club_post("product_create", self.product_data(image=make_image_file()))
+
+        product = Product.objects.get(club=self.club, name="Away Jersey")
+        self.assertTrue(product.image)
+
+    def test_plain_staff_cannot_create_a_product(self):
+        self.client.force_login(self.make_plain_staff())
+
+        response = self.club_post("product_create", self.product_data())
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(Product.objects.filter(club=self.club, name="Away Jersey").exists())
+
+    def test_a_shop_manager_can_edit_a_product(self):
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_post("product_update", self.product_data(name="Home Jersey (Renamed)"), self.product.pk)
+
+        self.assertRedirects(response, reverse("management:product_list"))
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.name, "Home Jersey (Renamed)")
+
+    def test_plain_staff_cannot_edit_a_product(self):
+        self.client.force_login(self.make_plain_staff())
+
+        response = self.club_post("product_update", self.product_data(), self.product.pk)
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_toggling_a_product_flips_is_active(self):
+        self.client.force_login(self.make_shop_manager())
+        self.assertTrue(self.product.is_active)
+
+        self.club_post("product_toggle_active", {}, self.product.pk)
+        self.product.refresh_from_db()
+        self.assertFalse(self.product.is_active)
+
+        self.club_post("product_toggle_active", {}, self.product.pk)
+        self.product.refresh_from_db()
+        self.assertTrue(self.product.is_active)
+
+    def test_plain_staff_cannot_toggle_a_product(self):
+        self.client.force_login(self.make_plain_staff())
+
+        response = self.club_post("product_toggle_active", {}, self.product.pk)
+
+        self.assertEqual(response.status_code, 403)
+        self.product.refresh_from_db()
+        self.assertTrue(self.product.is_active)
+
+    def test_there_is_no_product_delete_view(self):
+        # Product is PROTECTed by OrderLine -- deactivating is the only removal
+        # path, see ProductToggleActiveView's own docstring.
+        with self.assertRaises(NoReverseMatch):
+            reverse("management:product_delete")
+
+
+class DiscountManagementTests(ShopTestBase):
+    def discount_data(self, **overrides):
+        data = {"name": "Summer sale", "description": "", "code": "summer10", "discount_type": DiscountType.PERCENTAGE, "discount_amount": "10", "is_active": "on"}
+        data.update(overrides)
+        return data
+
+    def test_a_shop_manager_can_view_the_discount_list(self):
+        Discount.objects.create(club=self.club, name="Existing", code="EXIST", discount_amount=Decimal("5"))
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_get("discount_list")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Existing")
+
+    def test_a_shop_manager_can_create_a_discount_and_the_code_gets_uppercased(self):
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_post("discount_create", self.discount_data())
+
+        self.assertRedirects(response, reverse("management:discount_list"))
+        discount = Discount.objects.get(club=self.club, name="Summer sale")
+        self.assertEqual(discount.code, "SUMMER10")
+
+    def test_plain_staff_cannot_create_a_discount(self):
+        self.client.force_login(self.make_plain_staff())
+
+        response = self.club_post("discount_create", self.discount_data())
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(Discount.objects.filter(club=self.club, name="Summer sale").exists())
+
+    def test_a_shop_manager_can_edit_a_discount(self):
+        discount = Discount.objects.create(club=self.club, name="Existing", code="EXIST", discount_amount=Decimal("5"))
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_post("discount_update", self.discount_data(name="Renamed sale"), discount.pk)
+
+        self.assertRedirects(response, reverse("management:discount_list"))
+        discount.refresh_from_db()
+        self.assertEqual(discount.name, "Renamed sale")
+
+    def test_toggling_a_discount_flips_is_active(self):
+        discount = Discount.objects.create(club=self.club, name="Existing", code="EXIST", discount_amount=Decimal("5"))
+        self.client.force_login(self.make_shop_manager())
+        self.assertTrue(discount.is_active)
+
+        self.club_post("discount_toggle_active", {}, discount.pk)
+
+        discount.refresh_from_db()
+        self.assertFalse(discount.is_active)
+
+    def test_plain_staff_cannot_toggle_a_discount(self):
+        discount = Discount.objects.create(club=self.club, name="Existing", code="EXIST", discount_amount=Decimal("5"))
+        self.client.force_login(self.make_plain_staff())
+
+        response = self.club_post("discount_toggle_active", {}, discount.pk)
+
+        self.assertEqual(response.status_code, 403)
+
+
+class OrderManagementTests(ShopTestBase):
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.purchaser = Member.objects.create(first_name="Olly", last_name="Orderer", email="olly@example.com")
+
+    def make_order(self, status=Order.OrderStatus.PENDING, total=Decimal("50.00")):
+        order = Order.objects.create(club=self.club, purchaser=self.purchaser, status=status, total=total)
+        OrderLine.objects.create(order=order, product=self.product, quantity=2, unit_price=Decimal("25.00"), line_total=total)
+        create_invoice_for_order(order)
+        return order
+
+    def test_a_shop_manager_can_view_the_order_list(self):
+        order = self.make_order()
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_get("order_list")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, order.number)
+
+    def test_plain_staff_cannot_view_the_order_list(self):
+        self.client.force_login(self.make_plain_staff())
+
+        self.assertEqual(self.club_get("order_list").status_code, 403)
+
+    def test_the_status_filter_narrows_the_list(self):
+        pending = self.make_order()
+        paid = self.make_order(status=Order.OrderStatus.PAID)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("order_list", params={"status": Order.OrderStatus.PAID})
+
+        self.assertContains(response, paid.number)
+        self.assertNotContains(response, pending.number)
+
+    def test_a_shop_manager_can_view_order_detail(self):
+        order = self.make_order()
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_get("order_detail", order.pk)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Home Jersey")
+        self.assertContains(response, self.purchaser.first_name)
+
+    def test_plain_staff_cannot_view_order_detail(self):
+        order = self.make_order()
+        self.client.force_login(self.make_plain_staff())
+
+        self.assertEqual(self.club_get("order_detail", order.pk).status_code, 403)
+
+    def test_marking_an_order_paid_creates_a_confirmed_cash_payment_by_default(self):
+        order = self.make_order()
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_post("order_mark_paid", {"method": Payment.PaymentMethod.CASH, "reference": "receipt-1"}, order.pk)
+
+        self.assertRedirects(response, reverse("management:order_detail", args=[order.pk]))
+        order.refresh_from_db()
+        self.assertEqual(order.status, Order.OrderStatus.PAID)
+
+        payment = Payment.objects.get(order=order)
+        self.assertEqual(payment.amount, order.total)
+        self.assertEqual(payment.method, Payment.PaymentMethod.CASH)
+        self.assertEqual(payment.status, Payment.PaymentStatus.CONFIRMED)
+        self.assertEqual(payment.reference, "receipt-1")
+        self.assertIsNotNone(payment.paid_at)
+
+    def test_marking_an_order_paid_by_bank_transfer(self):
+        order = self.make_order()
+        self.client.force_login(self.admin_user)
+
+        self.club_post("order_mark_paid", {"method": Payment.PaymentMethod.BANK_TRANSFER, "reference": ""}, order.pk)
+
+        payment = Payment.objects.get(order=order)
+        self.assertEqual(payment.method, Payment.PaymentMethod.BANK_TRANSFER)
+
+    def test_plain_staff_cannot_mark_an_order_paid(self):
+        order = self.make_order()
+        self.client.force_login(self.make_plain_staff())
+
+        response = self.club_post("order_mark_paid", {"method": Payment.PaymentMethod.CASH, "reference": ""}, order.pk)
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(Payment.objects.filter(order=order).exists())
+
+    def test_marking_an_order_delivered_does_not_require_paid_first(self):
+        order = self.make_order()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("order_mark_delivered", {}, order.pk)
+
+        self.assertRedirects(response, reverse("management:order_detail", args=[order.pk]))
+        order.refresh_from_db()
+        self.assertEqual(order.status, Order.OrderStatus.DELIVERED)
+
+    def test_cancelling_an_order(self):
+        order = self.make_order()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("order_cancel", {}, order.pk)
+
+        self.assertRedirects(response, reverse("management:order_detail", args=[order.pk]))
+        order.refresh_from_db()
+        self.assertEqual(order.status, Order.OrderStatus.CANCELLED)
+
+    def test_plain_staff_cannot_cancel_an_order(self):
+        order = self.make_order()
+        self.client.force_login(self.make_plain_staff())
+
+        response = self.club_post("order_cancel", {}, order.pk)
+
+        self.assertEqual(response.status_code, 403)
+        order.refresh_from_db()
+        self.assertEqual(order.status, Order.OrderStatus.PENDING)
+
+
+class InvoicePdfViewTests(ShopTestBase):
+    """Mirrors club.tests.InvoicePdfTests/shop.tests.InvoicePdfTests's own mocking
+    technique -- patched where management.views imported it, not at its source."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.purchaser = Member.objects.create(first_name="Olly", last_name="Orderer", email="olly@example.com")
+        cls.order = Order.objects.create(club=cls.club, purchaser=cls.purchaser, total=Decimal("25.00"))
+        OrderLine.objects.create(order=cls.order, product=cls.product, quantity=1, unit_price=Decimal("25.00"), line_total=Decimal("25.00"))
+        cls.invoice = create_invoice_for_order(cls.order)
+
+    def test_a_shop_manager_can_download_the_pdf(self):
+        self.client.force_login(self.make_shop_manager())
+
+        with mock.patch("management.views.render_invoice_pdf", return_value=b"%PDF-1.4 fake") as renderer:
+            response = self.club_get("order_invoice_pdf", self.order.pk)
+
+        renderer.assert_called_once_with(self.invoice)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/pdf")
+        self.assertIn(self.invoice.number, response["Content-Disposition"])
+
+    def test_a_pdf_error_notifies_and_redirects_back_to_the_order(self):
+        self.client.force_login(self.admin_user)
+
+        with mock.patch("management.views.render_invoice_pdf", side_effect=ShopInvoicePDFError("boom")):
+            response = self.club_get("order_invoice_pdf", self.order.pk)
+
+        self.assertRedirects(response, reverse("management:order_detail", args=[self.order.pk]))
+
+    def test_plain_staff_cannot_download_the_pdf(self):
+        self.client.force_login(self.make_plain_staff())
+
+        self.assertEqual(self.club_get("order_invoice_pdf", self.order.pk).status_code, 403)
+
+
+class InvoiceListViewTests(ShopTestBase):
+    def test_a_shop_manager_can_view_the_invoice_list(self):
+        purchaser = Member.objects.create(first_name="Olly", last_name="Orderer")
+        order = Order.objects.create(club=self.club, purchaser=purchaser, total=Decimal("10.00"))
+        invoice = create_invoice_for_order(order)
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_get("invoice_list")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, invoice.number)
+        self.assertContains(response, reverse("management:order_detail", args=[order.pk]))
+
+    def test_plain_staff_cannot_view_the_invoice_list(self):
+        self.client.force_login(self.make_plain_staff())
+
+        self.assertEqual(self.club_get("invoice_list").status_code, 403)
+
+    def test_every_invoice_created_gets_its_own_number(self):
+        purchaser = Member.objects.create(first_name="Olly", last_name="Orderer")
+        first = create_invoice_for_order(Order.objects.create(club=self.club, purchaser=purchaser, total=Decimal("1")))
+        second = create_invoice_for_order(Order.objects.create(club=self.club, purchaser=purchaser, total=Decimal("2")))
+
+        self.assertNotEqual(first.number, second.number)
+        self.assertEqual(Invoice.objects.filter(club=self.club).count(), 2)
+
+
+class ShopToggleViewTests(ShopTestBase):
+    def test_an_admin_can_open_the_shop(self):
+        self.assertFalse(self.club.shop_open)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("shop_toggle", {})
+
+        self.assertRedirects(response, reverse("management:product_list"))
+        self.club.refresh_from_db()
+        self.assertTrue(self.club.shop_open)
+
+    def test_a_shop_manager_can_close_the_shop(self):
+        self.club.shop_open = True
+        self.club.save(update_fields=["shop_open"])
+        self.client.force_login(self.make_shop_manager())
+
+        self.club_post("shop_toggle", {})
+
+        self.club.refresh_from_db()
+        self.assertFalse(self.club.shop_open)
+
+    def test_plain_staff_cannot_toggle_the_shop(self):
+        self.client.force_login(self.make_plain_staff())
+
+        response = self.club_post("shop_toggle", {})
+
+        self.assertEqual(response.status_code, 403)
+        self.club.refresh_from_db()
+        self.assertFalse(self.club.shop_open)
+
+
+class ShopManagerGrantRevokeTests(ShopTestBase):
+    """Granting/revoking the ShopManager flag itself -- admin-only ground (see
+    ShopManagerCreateView/RevokeView's own docstring), unlike the shop views
+    it unlocks."""
+
+    def test_an_admin_can_grant_shop_manager(self):
+        target = Member.objects.create(first_name="Target", last_name="Person")
+        ClubMembership.objects.create(club=self.club, member=target, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("shop_admin_create", {"member": str(target.pk)})
+
+        self.assertRedirects(response, reverse("management:role_list"))
+        self.assertTrue(ShopManager.objects.filter(club=self.club, member=target).exists())
+
+    def test_a_shop_manager_cannot_grant_shop_manager_to_someone_else(self):
+        target = Member.objects.create(first_name="Target", last_name="Person")
+        ClubMembership.objects.create(club=self.club, member=target, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_post("shop_admin_create", {"member": str(target.pk)})
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(ShopManager.objects.filter(club=self.club, member=target).exists())
+
+    def test_an_admin_can_revoke_shop_manager(self):
+        shop_manager_user = self.make_shop_manager()
+        grant = ShopManager.objects.get(club=self.club, member__user=shop_manager_user)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("shop_admin_revoke", {}, grant.pk)
+
+        self.assertRedirects(response, reverse("management:role_list"))
+        self.assertFalse(ShopManager.objects.filter(pk=grant.pk).exists())
+
+    def test_a_shop_manager_cannot_revoke_their_own_grant(self):
+        shop_manager_user = self.make_shop_manager()
+        grant = ShopManager.objects.get(club=self.club, member__user=shop_manager_user)
+        self.client.force_login(shop_manager_user)
+
+        response = self.club_post("shop_admin_revoke", {}, grant.pk)
+
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(ShopManager.objects.filter(pk=grant.pk).exists())
+
+    def test_granting_shop_manager_is_additive_to_an_existing_editor_role(self):
+        target_user = User.objects.create_user(email="editor-shop@example.com", password="pw-secret-123")
+        target = Member.objects.create(user=target_user, first_name="Edie", last_name="Editor")
+        ClubMembership.objects.create(club=self.club, member=target, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        ClubRole.objects.filter(club=self.club, member=target).update(role=ClubRole.Roles.EDITOR)
+        enrol_mfa(target_user)  # ClubRole EDITOR requires a second factor.
+        self.client.force_login(self.admin_user)
+
+        self.club_post("shop_admin_create", {"member": str(target.pk)})
+
+        self.assertTrue(ShopManager.objects.filter(club=self.club, member=target).exists())
+        self.assertEqual(ClubRole.objects.get(club=self.club, member=target).role, ClubRole.Roles.EDITOR)
+
+        self.client.force_login(target_user)
+        self.assertEqual(self.club_get("product_list").status_code, 200)
+
+    def test_the_shop_admins_section_appears_on_the_roles_page(self):
+        self.make_shop_manager(email="listed-shop-admin@example.com")
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("role_list")
+
+        self.assertContains(response, "Shop admins")
+        self.assertContains(response, "Sam ShopAdmin")
+
+    def test_grant_shop_admin_is_a_modal_on_the_roles_page(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("role_list")
+
+        self.assertContains(response, 'id="grant_shop_admin_modal"')
 
 

@@ -1,0 +1,101 @@
+{% extends "management/base.html" %}
+{% load i18n lucide ui %}
+
+{% block panel_title %}{% trans "Products" %}{% endblock panel_title %}
+{% block heading %}{% trans "Products" %}{% endblock heading %}
+
+{% block topbar_context %}
+    <span class="badge badge-neutral">{% blocktrans count counter=products|length %}{{ counter }} product{% plural %}{{ counter }} products{% endblocktrans %}</span>
+{% endblock topbar_context %}
+
+{% block actions %}
+    <a class="btn btn-primary gap-2" href="{% url 'management:product_create' %}">{% lucide "plus" size=16 %} {% trans "New product" %}</a>
+{% endblock actions %}
+
+{% block panel %}
+    {% comment %}
+        The shop's own open/closed switch -- Club.shop_open, gating whether members
+        can order at all. This is the natural "shop home" page for an admin, so it
+        lives here rather than tucked away in club settings. Same banner-card
+        treatment as controlpanel's Maintenance mode card: the active state gets
+        the full club-colour treatment, not just a badge, since it's the one switch
+        on this page with real consequences for members.
+    {% endcomment %}
+    <div class="card mb-4 overflow-hidden {% if club.shop_open %}border-2 border-club{% endif %}">
+        <div class="flex flex-wrap items-center gap-2.5 border-b border-line px-4 py-3 {% if club.shop_open %}bg-club{% else %}bg-subhead{% endif %}">
+            {% if club.shop_open %}
+                {% lucide "lock-open" size=18 class="shrink-0 text-white" %}
+                <span class="font-display text-sm font-extrabold tracking-[.1em] text-white uppercase">{% trans "Shop is open" %}</span>
+            {% else %}
+                {% lucide "lock" size=18 class="shrink-0 text-muted" %}
+                <span class="font-display text-sm font-extrabold tracking-[.1em] text-ink uppercase">{% trans "Shop is closed" %}</span>
+            {% endif %}
+        </div>
+        <div class="card-body flex-row flex-wrap items-center justify-between gap-3">
+            <p class="text-sm text-muted">
+                {% if club.shop_open %}
+                    {% trans "Members can browse products and place orders. They pay in person on pickup." %}
+                {% else %}
+                    {% trans "Members can't place orders right now." %}
+                {% endif %}
+            </p>
+            <form method="post" action="{% url 'management:shop_toggle' %}">
+                {% csrf_token %}
+                {% if club.shop_open %}
+                    <button class="btn btn-outline btn-error gap-2" type="submit">{% lucide "lock" size=16 %} {% trans "Close shop" %}</button>
+                {% else %}
+                    <button class="btn btn-success gap-2" type="submit">{% lucide "lock-open" size=16 %} {% trans "Open shop" %}</button>
+                {% endif %}
+            </form>
+        </div>
+    </div>
+
+    <div class="card overflow-hidden">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th></th>
+                    <th>{% trans "Name" %}</th>
+                    <th>{% trans "Price" %}</th>
+                    <th>{% trans "Status" %}</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for product in products %}
+                    <tr>
+                        <td>
+                            {% if product.image %}
+                                <img class="size-8 rounded object-cover" src="{{ product.image.url }}" alt="">
+                            {% endif %}
+                        </td>
+                        <td class="font-semibold">{{ product.name }}</td>
+                        <td class="font-mono tabular-nums">&euro; {{ product.price }}</td>
+                        <td>
+                            <span class="badge badge-sm {% if product.is_active %}badge-success{% else %}badge-neutral{% endif %}">
+                                {% if product.is_active %}{% trans "Active" %}{% else %}{% trans "Inactive" %}{% endif %}
+                            </span>
+                        </td>
+                        <td class="text-right">
+                            <div class="flex justify-end gap-1">
+                                <a class="btn btn-outline btn-sm" href="{% url 'management:product_update' product.pk %}" aria-label="{% trans 'Edit' %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</a>
+                                <form method="post" action="{% url 'management:product_toggle_active' product.pk %}">
+                                    {% csrf_token %}
+                                    {% if product.is_active %}
+                                        <button class="btn btn-sm btn-outline" type="submit">{% lucide "eye-off" size=14 %} {% trans "Deactivate" %}</button>
+                                    {% else %}
+                                        <button class="btn btn-sm btn-outline btn-success" type="submit">{% lucide "eye" size=14 %} {% trans "Activate" %}</button>
+                                    {% endif %}
+                                </form>
+                            </div>
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="5" class="text-center text-dim">{% trans "No products yet." %}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+{% endblock panel %}

@@ -1,0 +1,66 @@
+{% extends "management/base.html" %}
+{% load i18n lucide ui %}
+
+{% block panel_title %}{% trans "Orders" %}{% endblock panel_title %}
+{% block heading %}{% trans "Orders" %}{% endblock heading %}
+
+{% block topbar_context %}
+    <span class="badge badge-neutral">{% blocktrans count counter=orders|length %}{{ counter }} order{% plural %}{{ counter }} orders{% endblocktrans %}</span>
+{% endblock topbar_context %}
+
+{% block filter_strip %}
+    <div class="border-b border-line bg-white px-7 py-3">
+        <form method="get" class="flex flex-row flex-wrap items-center gap-2">
+            <select name="status" class="select w-48">
+                <option value="" {% if not selected_status %}selected{% endif %}>{% trans "All statuses" %}</option>
+                {% for value, label in status_choices %}
+                    <option value="{{ value }}" {% if value == selected_status %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+            <button class="btn btn-outline gap-2" type="submit">{% lucide "filter" size=16 %} {% trans "Filter" %}</button>
+        </form>
+    </div>
+{% endblock filter_strip %}
+
+{% block panel %}
+    <div class="card overflow-hidden">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>{% trans "Order" %}</th>
+                    <th>{% trans "Purchaser" %}</th>
+                    <th>{% trans "Status" %}</th>
+                    <th>{% trans "Total" %}</th>
+                    <th>{% trans "Placed" %}</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for order in orders %}
+                    <tr>
+                        <td class="font-mono text-xs">{{ order.number }}</td>
+                        <td class="font-semibold">{{ order.purchaser }}</td>
+                        <td>
+                            <span class="badge badge-sm
+                                {% if order.status == "paid" or order.status == "delivered" %}badge-success
+                                {% elif order.status == "partially_paid" %}badge-warning
+                                {% elif order.status == "cancelled" or order.status == "refunded" %}badge-error
+                                {% else %}badge-neutral{% endif %}">
+                                {{ order.get_status_display }}
+                            </span>
+                        </td>
+                        <td class="font-mono tabular-nums">&euro; {{ order.total }}</td>
+                        <td class="font-mono text-xs">{{ order.created|date:"Y-m-d" }}</td>
+                        <td class="text-right">
+                            <a class="btn btn-outline btn-sm" href="{% url 'management:order_detail' order.pk %}">{% trans "View" %}</a>
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="6" class="text-center text-dim">{% trans "No orders yet." %}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+{% endblock panel %}

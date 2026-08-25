@@ -1,0 +1,48 @@
+{% extends "management/base.html" %}
+{% load i18n lucide ui %}
+
+{% block panel_title %}{% trans "Invoices" %}{% endblock panel_title %}
+{% block heading %}{% trans "Invoices" %}{% endblock heading %}
+
+{% block topbar_context %}
+    <span class="badge badge-neutral">{% blocktrans count counter=invoices|length %}{{ counter }} invoice{% plural %}{{ counter }} invoices{% endblocktrans %}</span>
+{% endblock topbar_context %}
+
+{% block panel %}
+    <div class="card overflow-hidden">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>{% trans "Invoice" %}</th>
+                    <th>{% trans "Order" %}</th>
+                    <th>{% trans "Issued" %}</th>
+                    <th>{% trans "Order status" %}</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for invoice in invoices %}
+                    <tr class="cursor-pointer" onclick="window.location='{% url 'management:order_detail' invoice.order.pk %}'">
+                        <td class="font-mono text-xs">{{ invoice.number }}</td>
+                        <td>
+                            <a class="link link-hover font-mono text-xs" href="{% url 'management:order_detail' invoice.order.pk %}">{{ invoice.order.number }}</a>
+                        </td>
+                        <td class="font-mono text-xs">{{ invoice.issued_at|date:"Y-m-d" }}</td>
+                        <td>
+                            <span class="badge badge-sm
+                                {% if invoice.order.status == "paid" or invoice.order.status == "delivered" %}badge-success
+                                {% elif invoice.order.status == "partially_paid" %}badge-warning
+                                {% elif invoice.order.status == "cancelled" or invoice.order.status == "refunded" %}badge-error
+                                {% else %}badge-neutral{% endif %}">
+                                {{ invoice.order.get_status_display }}
+                            </span>
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="4" class="text-center text-dim">{% trans "No invoices yet." %}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+{% endblock panel %}

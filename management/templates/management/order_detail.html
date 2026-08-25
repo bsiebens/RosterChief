@@ -1,0 +1,151 @@
+{% extends "management/base.html" %}
+{% load i18n lucide ui %}
+
+{% comment %}
+    Status actions are each a small POST -- "mark paid" via a modal form
+    (controlpanel/_modal_form.html, a tiny method/reference form), "mark delivered"
+    a plain one-click POST, "cancel" a confirm modal (controlpanel/_confirm_modal.html).
+    No state machine enforced server-side: a picked-up-before-paid order can happen
+    in real life, so every action stays available regardless of current status.
+{% endcomment %}
+
+{% block panel_title %}{% blocktrans with number=order.number %}Order {{ number }}{% endblocktrans %}{% endblock panel_title %}
+{% block heading %}{% blocktrans with number=order.number %}Order {{ number }}{% endblocktrans %}{% endblock heading %}
+{% block topbar_context %}<span class="text-sm text-muted">{{ order.purchaser }}</span>{% endblock topbar_context %}
+
+{% block actions %}
+    <a class="btn btn-outline gap-2" href="{% url 'management:order_list' %}">{% lucide "arrow-left" size=16 %} {% trans "Orders" %}</a>
+    <a class="btn btn-outline gap-2" href="{% url 'management:order_invoice_pdf' order.pk %}">{% lucide "file-down" size=16 %} {% trans "Print invoice" %}</a>
+{% endblock actions %}
+
+{% block panel %}
+    <div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <div class="card p-4">
+            <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Total" %}</div>
+            <div class="mt-1 font-display text-[34px] leading-none font-extrabold tabular-nums text-ink">&euro;{{ order.total }}</div>
+            <div class="mt-1 text-[13px] text-muted">
+                <span class="badge badge-sm
+                    {% if order.status == "paid" or order.status == "delivered" %}badge-success
+                    {% elif order.status == "partially_paid" %}badge-warning
+                    {% elif order.status == "cancelled" or order.status == "refunded" %}badge-error
+                    {% else %}badge-neutral{% endif %}">
+                    {{ order.get_status_display }}
+                </span>
+            </div>
+        </div>
+        <div class="card p-4">
+            <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Purchaser" %}</div>
+            <div class="mt-1 font-display text-[22px] leading-none font-extrabold text-ink">
+                <a class="link link-hover" href="{% url 'management:member_detail' order.purchaser.pk %}">{{ order.purchaser }}</a>
+            </div>
+            <div class="mt-1 text-[13px] text-muted">{{ order.purchaser.email|default:"—" }}{% if order.purchaser.phone %} &middot; {{ order.purchaser.phone }}{% endif %}</div>
+        </div>
+        <div class="card p-4">
+            <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Placed" %}</div>
+            <div class="mt-1 font-display text-[22px] leading-none font-extrabold text-ink">{{ order.created|date:"j M Y" }}</div>
+            <div class="mt-1 text-[13px] text-muted">{{ order.created|date:"H:i" }}</div>
+        </div>
+    </div>
+
+    <div class="card card-body gap-3">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+            <h2 class="card-title">{% lucide "package" size=18 %} {% trans "Line items" %}</h2>
+            <div class="flex gap-2">
+                {% if order.status != "cancelled" %}
+                    <button class="btn btn-success btn-sm gap-2" type="button" onclick="document.getElementById('mark_paid_modal').showModal()">{% lucide "circle-check" size=14 %} {% trans "Mark paid" %}</button>
+                    <form method="post" action="{% url 'management:order_mark_delivered' order.pk %}" class="inline-flex">
+                        {% csrf_token %}
+                        <button class="btn btn-outline btn-sm gap-2" type="submit">{% lucide "package-check" size=14 %} {% trans "Mark delivered" %}</button>
+                    </form>
+                    <button class="btn btn-outline btn-error btn-sm gap-2" type="button" onclick="document.getElementById('cancel_order_modal').showModal()">{% lucide "x" size=14 %} {% trans "Cancel" %}</button>
+                {% endif %}
+            </div>
+        </div>
+
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>{% trans "Product" %}</th>
+                    <th>{% trans "Beneficiary" %}</th>
+                    <th>{% trans "Quantity" %}</th>
+                    <th>{% trans "Unit price" %}</th>
+                    <th>{% trans "Line total" %}</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for line in lines %}
+                    <tr>
+                        <td class="font-semibold">{{ line.product }}</td>
+                        <td>{{ line.beneficiary|default:"—" }}</td>
+                        <td>{{ line.quantity }}</td>
+                        <td class="font-mono tabular-nums">&euro; {{ line.unit_price }}</td>
+                        <td class="font-mono tabular-nums">&euro; {{ line.line_total }}</td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="5" class="text-center text-dim">{% trans "No line items." %}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        {% if applied_discounts %}
+            <div class="mt-2">
+                <div class="text-xs text-muted">{% trans "Discount applied" %}</div>
+                {% for applied in applied_discounts %}
+                    <div class="text-sm text-ink">
+                        {{ applied.discount }}
+                        &mdash;
+                        {% if applied.discount_type == "percentage" %}{{ applied.discount_amount }}%{% else %}&euro; {{ applied.discount_amount }}{% endif %}
+                    </div>
+                {% endfor %}
+            </div>
+        {% endif %}
+    </div>
+
+    <div class="card card-body gap-3">
+        <h2 class="card-title">{% lucide "receipt" size=18 %} {% trans "Payments" %}</h2>
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>{% trans "Method" %}</th>
+                    <th>{% trans "Amount" %}</th>
+                    <th>{% trans "Status" %}</th>
+                    <th>{% trans "Reference" %}</th>
+                    <th>{% trans "Paid at" %}</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for payment in payments %}
+                    <tr>
+                        <td>{{ payment.get_method_display }}</td>
+                        <td class="font-mono tabular-nums">&euro; {{ payment.amount }}</td>
+                        <td>
+                            <span class="badge badge-sm {% if payment.status == "confirmed" %}badge-success{% elif payment.status == "failed" %}badge-error{% else %}badge-neutral{% endif %}">
+                                {{ payment.get_status_display }}
+                            </span>
+                        </td>
+                        <td>{{ payment.reference|default:"—" }}</td>
+                        <td class="font-mono text-xs">{{ payment.paid_at|date:"Y-m-d H:i"|default:"—" }}</td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="5" class="text-center text-dim">{% trans "No payments recorded yet." %}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    {% trans "Mark paid" as mark_paid_title %}
+    {% trans "Mark paid" as mark_paid_submit_label %}
+    {% blocktrans with number=order.number asvar mark_paid_blurb %}Records a payment of the full order total for {{ number }} and marks it paid.{% endblocktrans %}
+    {% url 'management:order_mark_paid' order.pk as mark_paid_url %}
+    {% include "controlpanel/_modal_form.html" with modal_id="mark_paid_modal" title=mark_paid_title form=mark_paid_form action_url=mark_paid_url submit_label=mark_paid_submit_label submit_icon="circle-check" blurb=mark_paid_blurb %}
+
+    {% trans "Cancel order" as cancel_order_title %}
+    {% trans "Cancel order" as cancel_order_submit_label %}
+    {% blocktrans with number=order.number asvar cancel_order_body %}Cancel order {{ number }}? This cannot be undone.{% endblocktrans %}
+    {% url 'management:order_cancel' order.pk as cancel_order_url %}
+    {% include "controlpanel/_confirm_modal.html" with modal_id="cancel_order_modal" title=cancel_order_title body=cancel_order_body action_url=cancel_order_url submit_label=cancel_order_submit_label %}
+{% endblock panel %}

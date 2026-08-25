@@ -1,0 +1,35 @@
+{% extends "management/base.html" %}
+{% load i18n lucide ui %}
+
+{% block panel_title %}{% if update_view %}{% trans "Edit product" %}{% else %}{% trans "New product" %}{% endif %}{% endblock panel_title %}
+{% block heading %}{% if update_view %}{% blocktrans %}Edit {{ object }}{% endblocktrans %}{% else %}{% trans "New product" %}{% endif %}{% endblock heading %}
+
+{% block panel %}
+    <div class="card">
+        <div class="card-body">
+            <form method="post" enctype="multipart/form-data">
+                {% csrf_token %}
+
+                {% for error in form.non_field_errors %}
+                    <div class="alert alert-error">
+                        {% lucide "circle-x" size=18 %}
+                        <span>{{ error }}</span>
+                    </div>
+                {% endfor %}
+
+                <div class="grid grid-cols-2 gap-4">
+                    {% for field in form %}
+                        <div class="{% if field.widget_type == "textarea" or field.widget_type == "clearablefile" %}col-span-2{% endif %}">
+                            {% form_field field %}
+                        </div>
+                    {% endfor %}
+                </div>
+
+                <div class="mt-4 flex justify-start gap-2">
+                    <a class="btn btn-outline gap-2" href="{% url "management:product_list" %}">{% lucide "arrow-left" size=16 %} {% trans "Cancel" %}</a>
+                    <button class="btn btn-primary gap-2" type="submit">{% lucide "save" size=16 %} {% trans "Save" %}</button>
+                </div>
+            </form>
+        </div>
+    </div>
+{% endblock panel %}

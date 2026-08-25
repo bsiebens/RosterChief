@@ -1,0 +1,62 @@
+{% extends "management/base.html" %}
+{% load i18n lucide ui %}
+
+{% block panel_title %}{% trans "Discounts" %}{% endblock panel_title %}
+{% block heading %}{% trans "Discounts" %}{% endblock heading %}
+
+{% block topbar_context %}
+    <span class="badge badge-neutral">{% blocktrans count counter=discounts|length %}{{ counter }} discount{% plural %}{{ counter }} discounts{% endblocktrans %}</span>
+{% endblock topbar_context %}
+
+{% block actions %}
+    <a class="btn btn-primary gap-2" href="{% url 'management:discount_create' %}">{% lucide "plus" size=16 %} {% trans "New discount" %}</a>
+{% endblock actions %}
+
+{% block panel %}
+    <div class="card overflow-hidden">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>{% trans "Name" %}</th>
+                    <th>{% trans "Code" %}</th>
+                    <th>{% trans "Amount" %}</th>
+                    <th>{% trans "Status" %}</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for discount in discounts %}
+                    <tr>
+                        <td class="font-semibold">{{ discount.name }}</td>
+                        <td class="font-mono text-xs">{{ discount.code }}</td>
+                        <td class="font-mono tabular-nums">
+                            {% if discount.discount_type == "percentage" %}{{ discount.discount_amount }}%{% else %}&euro; {{ discount.discount_amount }}{% endif %}
+                        </td>
+                        <td>
+                            <span class="badge badge-sm {% if discount.is_active %}badge-success{% else %}badge-neutral{% endif %}">
+                                {% if discount.is_active %}{% trans "Active" %}{% else %}{% trans "Inactive" %}{% endif %}
+                            </span>
+                        </td>
+                        <td class="text-right">
+                            <div class="flex justify-end gap-1">
+                                <a class="btn btn-outline btn-sm" href="{% url 'management:discount_update' discount.pk %}" aria-label="{% trans 'Edit' %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</a>
+                                <form method="post" action="{% url 'management:discount_toggle_active' discount.pk %}">
+                                    {% csrf_token %}
+                                    {% if discount.is_active %}
+                                        <button class="btn btn-sm btn-outline" type="submit">{% lucide "eye-off" size=14 %} {% trans "Deactivate" %}</button>
+                                    {% else %}
+                                        <button class="btn btn-sm btn-outline btn-success" type="submit">{% lucide "eye" size=14 %} {% trans "Activate" %}</button>
+                                    {% endif %}
+                                </form>
+                            </div>
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="5" class="text-center text-dim">{% trans "No discounts yet." %}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+{% endblock panel %}

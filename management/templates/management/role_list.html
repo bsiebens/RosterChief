@@ -50,11 +50,55 @@
                 </div>
             {% endwith %}
         {% endfor %}
+
+        {% comment %}
+            ShopManager isn't a ClubRole value (see that model's own docstring) --
+            an additive grant on top of whatever ClubRole a member already holds,
+            so it gets its own section rather than a slot in the loop above.
+        {% endcomment %}
+        <div class="card card-body">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                    <h2 class="card-title">{% trans "Shop admins" %}</h2>
+                    <p class="text-sm text-muted">{% trans "Can manage products, discounts and orders, without needing the Editor or Admin role." %}</p>
+                </div>
+                <button class="btn btn-outline btn-sm gap-2" type="button" onclick="document.getElementById('grant_shop_admin_modal').showModal()">{% lucide "plus" size=14 %} {% trans "Grant" %}</button>
+            </div>
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>{% trans "Member" %}</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for grant in shop_admins %}
+                        <tr>
+                            <td class="font-semibold text-ink">{{ grant.member }}</td>
+                            <td class="text-right">
+                                <form method="post" action="{% url 'management:shop_admin_revoke' grant.pk %}">
+                                    {% csrf_token %}
+                                    <button class="btn btn-outline btn-error btn-xs gap-1" type="submit">{% lucide "x" size=13 %} {% trans "Revoke" %}</button>
+                                </form>
+                            </td>
+                        </tr>
+                    {% empty %}
+                        <tr>
+                            <td colspan="2" class="py-4 text-center text-muted">{% trans "No one has been granted shop admin yet." %}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
     </div>
 
     {% trans "Grant role" as grant_role_label %}
     {% url 'management:role_create' as role_create_url %}
     {% include "controlpanel/_modal_form.html" with modal_id="grant_role_modal" title=grant_role_label form=role_form action_url=role_create_url submit_label=grant_role_label submit_icon="shield-check" %}
+
+    {% trans "Grant shop admin" as grant_shop_admin_label %}
+    {% url 'management:shop_admin_create' as shop_admin_create_url %}
+    {% include "controlpanel/_modal_form.html" with modal_id="grant_shop_admin_modal" title=grant_shop_admin_label form=shop_admin_form action_url=shop_admin_create_url submit_label=grant_shop_admin_label submit_icon="shield-check" %}
 {% endblock panel %}
 
 {% block extra_body %}

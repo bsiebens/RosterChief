@@ -6,13 +6,14 @@ from django.contrib.auth import get_user_model
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
-from club.models import Club, ClubMembership, ClubRole, FeePayment, OnboardingRequirement, Sponsor
+from club.models import Club, ClubMembership, ClubRole, FeePayment, OnboardingRequirement, ShopManager, Sponsor
 from club.services.access import groups_manageable_by, is_club_admin, teams_managed_by
 from events.models import Competition, Event, EventReferee, EventSeries, Location, Opponent
 from events.services.rbihf_import import RBIHFImportError, extract_team_id
 from members.models import Family, FamilyMembership, Group, Member
 from members.services.family import find_member_by_email
 from news.models import News
+from shop.models import Discount, Payment, Product
 from teams.models import Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
 from teams.services import eligible_roster_members
 
@@ -974,6 +975,43 @@ class SignupTeamPlacementForm(forms.ModelForm):
         kwargs.setdefault("instance", TeamMembership(season=season, member=member))
         super().__init__(*args, **kwargs)
         self.fields["team"].queryset = Team.objects.filter(club=club)
+
+
+class ProductForm(forms.ModelForm):
+    class Meta:
+        model = Product
+        fields = ["name", "description", "image", "price", "is_active"]
+        widgets = {"image": forms.ClearableFileInput(attrs={"accept": "image/png,image/jpeg,image/gif,image/webp"})}
+
+
+class DiscountForm(forms.ModelForm):
+    class Meta:
+        model = Discount
+        fields = ["name", "description", "code", "discount_type", "discount_amount", "is_active"]
+
+
+class OrderMarkPaidForm(forms.Form):
+    """The "mark paid" modal on an order's detail page -- creates a Payment row.
+    Defaults to CASH: pay-on-pickup is the realistic case, there's no online
+    payment for this shop."""
+
+    method = forms.ChoiceField(label=_("Method"), choices=Payment.PaymentMethod.choices, initial=Payment.PaymentMethod.CASH)
+    reference = forms.CharField(label=_("Reference"), required=False, help_text=_("Optional -- a receipt number, whatever lets you find this again."))
+
+
+class ShopManagerAssignForm(forms.ModelForm):
+    """Grant the shop-admin flag to a member already affiliated with this club --
+    same shape as ClubRoleAssignForm, minus the role field: this is a single
+    yes/no grant, not a choice."""
+
+    class Meta:
+        model = ShopManager
+        fields = ["member"]
+        widgets = {"member": forms.Select(attrs={"data-searchable": "true", "data-search-placeholder": _("Type a name to search...")})}
+
+    def __init__(self, *args, club=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["member"].queryset = Member.objects.filter(member_of__club=club).distinct()
 
 
 class RequirementBypassForm(forms.Form):
