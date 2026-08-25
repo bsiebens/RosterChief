@@ -130,6 +130,12 @@
                 {% lucide "newspaper" size=21 %}
                 <span class="tab-bar-label">{% trans "News" %}</span>
             </a>
+            {% if shop_open %}
+                <a class="tab-bar-item {% if active_tab == "shop" %}tab-bar-item-active{% endif %}" href="{% url "mobile:shop_home" %}">
+                    {% lucide "shopping-bag" size=21 %}
+                    <span class="tab-bar-label">{% trans "Shop" %}</span>
+                </a>
+            {% endif %}
             <a class="tab-bar-item {% if active_tab == "me" %}tab-bar-item-active{% endif %}" href="{% url "mobile:me" %}">
                 {% lucide "user" size=21 %}
                 <span class="tab-bar-label">{% trans "Me" %}</span>

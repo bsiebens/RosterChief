@@ -18,6 +18,8 @@ from events.services.notifications import notify_new_event
 from members.models import Family, FamilyMembership, Member
 from news.models import News, NewsPhoto
 from notifications.models import Notification
+from shop.models import Cart, CartItem, Discount, Order, OrderLine, Product
+from shop.services.checkout import place_order
 from teams.models import Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership
 
 from .coach_views import CoachTodayView
@@ -4617,3 +4619,437 @@ class CoachLineupViewTests(TestCase):
         self.assertEqual(response.status_code, 403)
         lineup.refresh_from_db()
         self.assertIsNone(lineup.published_at)
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class ShopTabVisibilityTests(TestCase):
+    """The Shop tab (base.html) is present only while Club.shop_open is on --
+    absent otherwise, same "just missing, not disabled" treatment as the
+    Coach/Member switcher (MobileShellTests.test_mode_switcher_hidden_without_a_staff_assignment).
+    Every shop URL also 404s while closed (mobile.mixins.ShopScopeMixin) --
+    Club.shop_open's own help text is explicit the shop is "hidden from the
+    member app entirely" while off, not just unlinked."""
+
+    def _login(self, **club_kwargs):
+        club = make_club(**club_kwargs)
+        user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
+        Member.objects.create(first_name="Lars", last_name="Bakker", email="parent@example.com", user=user)
+        self.client.force_login(user)
+        return club
+
+    def test_shop_tab_shown_when_open(self):
+        self._login(shop_open=True)
+
+        response = self.client.get(reverse("mobile:home"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, reverse("mobile:shop_home"))
+
+    def test_shop_tab_hidden_when_closed(self):
+        self._login(shop_open=False)
+
+        response = self.client.get(reverse("mobile:home"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertNotContains(response, reverse("mobile:shop_home"))
+
+    def test_shop_home_404s_when_closed(self):
+        self._login(shop_open=False)
+
+        response = self.client.get(reverse("mobile:shop_home"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 404)
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class ShopHomeViewTests(TestCase):
+    """Shop tab landing -- every active+public Product for this club."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club(shop_open=True)
+        cls.user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", email="parent@example.com", user=cls.user)
+
+    def _get(self):
+        return self.client.get(reverse("mobile:shop_home"), HTTP_HOST="ajax-united.rosterchief.app")
+
+    def test_requires_login(self):
+        response = self._get()
+
+        self.assertEqual(response.status_code, 302)
+
+    def test_only_active_and_public_products_are_shown(self):
+        visible = Product.objects.create(club=self.club, name="Home Jersey", price=Decimal("25.00"))
+        Product.objects.create(club=self.club, name="Inactive Item", price=Decimal("10.00"), is_active=False)
+        Product.objects.create(club=self.club, name="Staff-only Item", price=Decimal("10.00"), is_public=False)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertEqual(list(response.context["products"]), [visible])
+
+    def test_empty_catalogue_shows_an_empty_state(self):
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, "Nothing in the shop yet.")
+
+    def test_cart_item_count_badge_reflects_the_open_cart(self):
+        product = Product.objects.create(club=self.club, name="Home Jersey", price=Decimal("25.00"))
+        cart = Cart.objects.create(club=self.club, user=self.user)
+        CartItem.objects.create(cart=cart, product=product, quantity=1, unit_price=product.price)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertEqual(response.context["cart_item_count"], 1)
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class ShopProductDetailViewTests(TestCase):
+    """Product detail + add-to-cart -- see ShopProductDetailView's own
+    docstring for the beneficiary judgment call."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club(shop_open=True)
+        cls.user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", email="parent@example.com", user=cls.user)
+        cls.product = Product.objects.create(club=cls.club, name="Home Jersey", price=Decimal("25.00"))
+
+    def _url(self):
+        return reverse("mobile:shop_product_detail", kwargs={"slug": self.product.slug})
+
+    def test_get_renders_the_product(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, "Home Jersey")
+
+    def test_inactive_product_404s(self):
+        self.product.is_active = False
+        self.product.save()
+        self.client.force_login(self.user)
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_add_to_cart_without_a_beneficiary(self):
+        self.client.force_login(self.user)
+
+        response = self.client.post(self._url(), {"quantity": "2"}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertRedirects(response, reverse("mobile:shop_cart"), fetch_redirect_response=False)
+        [item] = CartItem.objects.all()
+        self.assertEqual(item.quantity, 2)
+        self.assertIsNone(item.beneficiary)
+        self.assertEqual(item.unit_price, self.product.price)
+
+    def test_add_to_cart_with_a_beneficiary(self):
+        family = Family.objects.create(name="Bakker")
+        FamilyMembership.objects.create(family=family, member=self.member, role=FamilyMembership.FamilyRole.PARENT)
+        child = Member.objects.create(first_name="Noor", last_name="Bakker")
+        FamilyMembership.objects.create(family=family, member=child, role=FamilyMembership.FamilyRole.CHILD)
+        season = Season.objects.create(club=self.club, start_date=timezone.localdate(), end_date=timezone.localdate() + datetime.timedelta(days=300))
+        ClubMembership.objects.create(club=self.club, member=child, season=season)
+        self.client.force_login(self.user)
+
+        response = self.client.post(self._url(), {"quantity": "1", "beneficiary": str(child.pk)}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertRedirects(response, reverse("mobile:shop_cart"), fetch_redirect_response=False)
+        [item] = CartItem.objects.all()
+        self.assertEqual(item.beneficiary, child)
+
+    def test_adding_the_same_product_again_bumps_quantity_instead_of_erroring(self):
+        self.client.force_login(self.user)
+        self.client.post(self._url(), {"quantity": "1"}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        response = self.client.post(self._url(), {"quantity": "2"}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 302)
+        [item] = CartItem.objects.all()
+        self.assertEqual(item.quantity, 3)
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class ShopCartViewTests(TestCase):
+    """Cart screen -- items, running totals, and the ?code= discount preview
+    (ShopCartView's own docstring)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club(shop_open=True)
+        cls.user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", email="parent@example.com", user=cls.user)
+        cls.product = Product.objects.create(club=cls.club, name="Home Jersey", price=Decimal("25.00"))
+
+    def _get(self, **params):
+        return self.client.get(reverse("mobile:shop_cart"), params, HTTP_HOST="ajax-united.rosterchief.app")
+
+    def test_empty_cart_shows_an_empty_state(self):
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, "Your cart is empty.")
+
+    def test_cart_items_and_totals_are_shown(self):
+        cart = Cart.objects.create(club=self.club, user=self.user)
+        CartItem.objects.create(cart=cart, product=self.product, quantity=2, unit_price=self.product.price)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertEqual(response.context["totals"]["subtotal"], Decimal("50.00"))
+        self.assertContains(response, "Home Jersey")
+
+    def test_a_valid_discount_code_is_previewed(self):
+        cart = Cart.objects.create(club=self.club, user=self.user)
+        CartItem.objects.create(cart=cart, product=self.product, quantity=2, unit_price=self.product.price)
+        Discount.objects.create(club=self.club, name="Ten off", code="TEN10", discount_amount=Decimal("10"))
+        self.client.force_login(self.user)
+
+        response = self._get(code="ten10")
+
+        self.assertEqual(response.context["totals"]["discount_amount"], Decimal("5.00"))
+
+    def test_an_invalid_discount_code_shows_an_error(self):
+        cart = Cart.objects.create(club=self.club, user=self.user)
+        CartItem.objects.create(cart=cart, product=self.product, quantity=1, unit_price=self.product.price)
+        self.client.force_login(self.user)
+
+        response = self._get(code="NOPE")
+
+        self.assertIsNotNone(response.context["discount_error"])
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class ShopCartItemUpdateViewTests(TestCase):
+    """+/- and remove on a single cart row."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club(shop_open=True)
+        cls.user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", email="parent@example.com", user=cls.user)
+        cls.product = Product.objects.create(club=cls.club, name="Home Jersey", price=Decimal("25.00"))
+
+    def setUp(self):
+        self.cart = Cart.objects.create(club=self.club, user=self.user)
+        self.item = CartItem.objects.create(cart=self.cart, product=self.product, quantity=2, unit_price=self.product.price)
+        self.client.force_login(self.user)
+
+    def _post(self, action):
+        return self.client.post(reverse("mobile:shop_cart_item_update", kwargs={"item_id": self.item.pk}), {"action": action}, HTTP_HOST="ajax-united.rosterchief.app")
+
+    def test_increment(self):
+        self._post("increment")
+
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.quantity, 3)
+
+    def test_decrement(self):
+        self._post("decrement")
+
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.quantity, 1)
+
+    def test_decrement_below_one_removes_the_item(self):
+        self.item.quantity = 1
+        self.item.save(update_fields=["quantity"])
+
+        self._post("decrement")
+
+        self.assertFalse(CartItem.objects.filter(pk=self.item.pk).exists())
+
+    def test_remove(self):
+        self._post("remove")
+
+        self.assertFalse(CartItem.objects.filter(pk=self.item.pk).exists())
+
+    def test_cannot_modify_another_users_cart_item(self):
+        self.client.logout()
+        other_user = User.objects.create_user(email="other@example.com", password="pw-secret-123")
+        self.client.force_login(other_user)
+
+        response = self._post("increment")
+
+        self.assertEqual(response.status_code, 404)
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class ShopCheckoutViewTests(TestCase):
+    """POST-only checkout -- shop.services.checkout.place_order does the
+    actual validation, this just relays success/failure (ShopCheckoutView's
+    own docstring)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club(shop_open=True)
+        cls.user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", email="parent@example.com", user=cls.user)
+        cls.product = Product.objects.create(club=cls.club, name="Home Jersey", price=Decimal("25.00"))
+
+    def _checkout(self, **data):
+        return self.client.post(reverse("mobile:shop_checkout"), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+    def test_placing_an_order_creates_it_and_checks_out_the_cart(self):
+        cart = Cart.objects.create(club=self.club, user=self.user)
+        CartItem.objects.create(cart=cart, product=self.product, quantity=2, unit_price=self.product.price)
+        self.client.force_login(self.user)
+
+        response = self._checkout()
+
+        order = Order.objects.get()
+        self.assertRedirects(response, reverse("mobile:shop_order_detail", kwargs={"pk": order.pk}), fetch_redirect_response=False)
+        self.assertEqual(order.purchaser, self.member)
+        cart.refresh_from_db()
+        self.assertEqual(cart.status, Cart.CartStatus.CHECKED_OUT)
+
+    def test_empty_cart_shows_an_error_and_creates_no_order(self):
+        self.client.force_login(self.user)
+
+        response = self._checkout()
+
+        self.assertRedirects(response, reverse("mobile:shop_cart"), fetch_redirect_response=False)
+        self.assertFalse(Order.objects.exists())
+
+    def test_an_invalid_discount_code_shows_an_error_and_creates_no_order(self):
+        cart = Cart.objects.create(club=self.club, user=self.user)
+        CartItem.objects.create(cart=cart, product=self.product, quantity=1, unit_price=self.product.price)
+        self.client.force_login(self.user)
+
+        response = self._checkout(discount_code="NOPE")
+
+        self.assertRedirects(response, reverse("mobile:shop_cart"), fetch_redirect_response=False)
+        self.assertFalse(Order.objects.exists())
+
+    def test_a_closed_shop_blocks_checkout_entirely(self):
+        cart = Cart.objects.create(club=self.club, user=self.user)
+        CartItem.objects.create(cart=cart, product=self.product, quantity=1, unit_price=self.product.price)
+        self.club.shop_open = False
+        self.club.save(update_fields=["shop_open"])
+        self.client.force_login(self.user)
+
+        response = self._checkout()
+
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(Order.objects.exists())
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class ShopOrdersViewTests(TestCase):
+    """"My orders" -- scoped to self.managed_people (ShopOrdersView's own
+    docstring for why that's broader than just self.me)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club(shop_open=True)
+        cls.user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", email="parent@example.com", user=cls.user)
+
+    def _get(self):
+        return self.client.get(reverse("mobile:shop_orders"), HTTP_HOST="ajax-united.rosterchief.app")
+
+    def test_shows_only_the_current_members_own_orders(self):
+        Order.objects.create(club=self.club, purchaser=self.member, total=Decimal("10.00"))
+        other_member = Member.objects.create(first_name="Tom", last_name="Roe")
+        Order.objects.create(club=self.club, purchaser=other_member, total=Decimal("20.00"))
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        orders = [row["order"] for row in response.context["rows"]]
+        self.assertEqual(len(orders), 1)
+        self.assertEqual(orders[0].purchaser, self.member)
+
+    def test_includes_orders_placed_for_managed_children(self):
+        family = Family.objects.create(name="Bakker")
+        FamilyMembership.objects.create(family=family, member=self.member, role=FamilyMembership.FamilyRole.PARENT)
+        child = Member.objects.create(first_name="Noor", last_name="Bakker")
+        FamilyMembership.objects.create(family=family, member=child, role=FamilyMembership.FamilyRole.CHILD)
+        season = Season.objects.create(club=self.club, start_date=timezone.localdate(), end_date=timezone.localdate() + datetime.timedelta(days=300))
+        ClubMembership.objects.create(club=self.club, member=child, season=season)
+        child_order = Order.objects.create(club=self.club, purchaser=child, total=Decimal("15.00"))
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        orders = [row["order"] for row in response.context["rows"]]
+        self.assertIn(child_order, orders)
+
+    def test_no_orders_shows_an_empty_state(self):
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, "No orders yet.")
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class ShopOrderDetailViewTests(TestCase):
+    """Order detail -- scoped the same way as ShopOrdersView; another
+    member's order 404s rather than leaking."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club(shop_open=True)
+        cls.user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", email="parent@example.com", user=cls.user)
+        cls.product = Product.objects.create(club=cls.club, name="Home Jersey", price=Decimal("25.00"))
+        cls.order = Order.objects.create(club=cls.club, purchaser=cls.member, total=Decimal("25.00"))
+        OrderLine.objects.create(order=cls.order, product=cls.product, quantity=1, unit_price=cls.product.price, line_total=cls.product.price)
+
+    def test_shows_the_order(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mobile:shop_order_detail", kwargs={"pk": self.order.pk}), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, self.order.number)
+        self.assertContains(response, "Home Jersey")
+
+    def test_another_members_order_404s(self):
+        other_user = User.objects.create_user(email="other@example.com", password="pw-secret-123")
+        Member.objects.create(first_name="Tom", last_name="Roe", email="other@example.com", user=other_user)
+        self.client.force_login(other_user)
+
+        response = self.client.get(reverse("mobile:shop_order_detail", kwargs={"pk": self.order.pk}), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 404)
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class ShopInvoiceViewTests(TestCase):
+    """Rendered on demand via shop.services.invoices.render_invoice_pdf --
+    render_pdf itself is mocked, same technique as shop.tests.InvoicePdfTests,
+    so this exercises the view's own scoping, not WeasyPrint."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club(shop_open=True)
+        cls.user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", email="parent@example.com", user=cls.user)
+        cls.product = Product.objects.create(club=cls.club, name="Home Jersey", price=Decimal("25.00"))
+        cart = Cart.objects.create(club=cls.club, user=cls.user)
+        CartItem.objects.create(cart=cart, product=cls.product, quantity=1, unit_price=cls.product.price)
+        cls.order = place_order(cart, purchaser=cls.member)
+
+    def test_downloads_the_pdf(self):
+        self.client.force_login(self.user)
+
+        with patch("shop.services.invoices.render_pdf", side_effect=lambda html: b"%PDF-fake"):
+            response = self.client.get(reverse("mobile:shop_invoice", kwargs={"pk": self.order.pk}), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/pdf")
+
+    def test_another_members_invoice_404s(self):
+        other_user = User.objects.create_user(email="other@example.com", password="pw-secret-123")
+        Member.objects.create(first_name="Tom", last_name="Roe", email="other@example.com", user=other_user)
+        self.client.force_login(other_user)
+
+        response = self.client.get(reverse("mobile:shop_invoice", kwargs={"pk": self.order.pk}), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 404)

@@ -6,6 +6,7 @@ them) don't each re-derive this.
 """
 
 from django.conf import settings
+from django.http import Http404
 
 from club.services.access import current_season, has_management_access, teams_staffed_by
 from members.models import FamilyMembership, Member
@@ -104,5 +105,20 @@ class PersonScopeMixin(ClubScopedPublicMixin):
             unread_notification_count=unread_notification_count,
             season=current_season(self.request.club),
             vapid_public_key=settings.VAPID_PUBLIC_KEY,
+            # Gates the Shop tab itself (base.html) -- same "just absent, not
+            # disabled" treatment as the Coach/Member switcher above.
+            shop_open=self.request.club.shop_open,
             **kwargs,
         )
+
+
+class ShopScopeMixin(PersonScopeMixin):
+    """Every shop screen 404s once ``shop_open`` is off -- there's no read-only
+    "browse while closed" mode, matching the tab's own absence from the tab
+    bar (base.html) and Product.is_public's own help text. Layered on top of
+    PersonScopeMixin rather than duplicated onto each shop view."""
+
+    def dispatch(self, request, *args, **kwargs):
+        if getattr(request, "club", None) is None or not request.club.shop_open:
+            raise Http404("The shop is closed.")
+        return super().dispatch(request, *args, **kwargs)

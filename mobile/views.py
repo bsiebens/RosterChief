@@ -5,6 +5,7 @@ routes here yet.
 """
 
 import json
+from decimal import Decimal
 
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.paginator import Paginator
@@ -35,10 +36,14 @@ from members.views import ClubScopedPublicMixin
 from news.models import News
 from news.services import render_body_html
 from notifications.models import Notification
+from shop.models import Cart, CartItem, Order, Product
+from shop.services.checkout import CheckoutError, find_discount, place_order
+from shop.services.invoices import ShopInvoicePDFError, render_invoice_pdf
+from shop.services.pricing import cart_totals
 from teams.models import StaffAssignment, TeamMembership
 
 from .forms import MemberProfileForm
-from .mixins import PersonScopeMixin
+from .mixins import PersonScopeMixin, ShopScopeMixin
 from .models import CalendarFeedToken, PushSubscription
 from .services.calendar_feed import build_feed
 from .services.icons import render_fallback_icon
@@ -960,3 +965,229 @@ class NotificationsView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
             return HttpResponseRedirect(url or reverse("mobile:notifications"))
 
         return HttpResponseBadRequest(_("Unknown action."))
+
+
+#: Pill styling for an Order's status (assets/mobile.css's .pill-*) -- shared
+#: by ShopOrdersView's list rows and ShopOrderDetailView's own header.
+ORDER_STATUS_PILL_CLASSES = {
+    Order.OrderStatus.PENDING: "pill-warn",
+    Order.OrderStatus.PARTIALLY_PAID: "pill-warn",
+    Order.OrderStatus.PAID: "pill-ok",
+    Order.OrderStatus.DELIVERED: "pill-ok",
+    Order.OrderStatus.CANCELLED: "pill-neutral",
+    Order.OrderStatus.REFUNDED: "pill-neutral",
+}
+
+
+class ShopHomeView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
+    """Shop tab landing -- every active+public Product for this club, grid
+    style. Only reachable while Club.shop_open is on (ShopScopeMixin 404s
+    otherwise); the tab itself is simply absent from the tab bar the rest of
+    the time (base.html), matching every other "not applicable to you" case
+    in this app."""
+
+    template_name = "mobile/shop_home.html"
+    screen_title = _("Shop")
+    active_tab = "shop"
+
+    def get_context_data(self, **kwargs):
+        products = Product.objects.filter(club=self.request.club, is_active=True, is_public=True)
+        cart = Cart.objects.filter(club=self.request.club, user=self.request.user, status=Cart.CartStatus.OPEN).first()
+        cart_item_count = cart.items.count() if cart is not None else 0
+        return super().get_context_data(products=products, cart_item_count=cart_item_count, **kwargs)
+
+
+class ShopProductDetailView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
+    """Photo/description/price, a quantity stepper and -- since CartItem.beneficiary
+    exists specifically for this -- a chip row to say who it's for, mirroring
+    Home's own person-chip pattern. Only rendered once self.managed_people has
+    more than one person: a member ordering just for themselves has nothing to
+    disambiguate, so the item's beneficiary is simply left unset in that case.
+
+    "Add to cart" get-or-creates the member's open Cart for this club and
+    bumps quantity on the (cart, product, beneficiary) row if it already
+    exists, rather than erroring on the model's own unique constraint.
+    """
+
+    template_name = "mobile/shop_product_detail.html"
+    screen_title = _("Shop")
+    active_tab = "shop"
+
+    def _product(self):
+        return get_object_or_404(Product, club=self.request.club, slug=self.kwargs["slug"], is_active=True, is_public=True)
+
+    def get(self, request, *args, **kwargs):
+        product = self._product()
+        return self.render_to_response(self.get_context_data(product=product))
+
+    def get_context_data(self, **kwargs):
+        return super().get_context_data(screen_title=kwargs["product"].name, **kwargs)
+
+    def post(self, request, *args, **kwargs):
+        product = self._product()
+        if self.me is None:
+            return HttpResponseBadRequest(_("No member record for this account."))
+
+        try:
+            quantity = max(1, int(request.POST.get("quantity", 1)))
+        except ValueError:
+            quantity = 1
+
+        beneficiary = None
+        beneficiary_id = request.POST.get("beneficiary")
+        if beneficiary_id:
+            beneficiary = next((person for person in self.managed_people if str(person.pk) == beneficiary_id), None)
+            if beneficiary is None:
+                return HttpResponseBadRequest(_("You can't order for that person."))
+
+        cart, _created = Cart.objects.get_or_create(club=request.club, user=request.user, status=Cart.CartStatus.OPEN)
+        item, item_created = CartItem.objects.get_or_create(cart=cart, product=product, beneficiary=beneficiary, defaults={"quantity": quantity, "unit_price": product.price})
+        if not item_created:
+            item.quantity += quantity
+            item.save(update_fields=["quantity"])
+
+        title = _("Added to cart")
+        body = _("%(product)s added to your cart.") % {"product": product.name}
+        notify(request, f"s|{title}|{body}")
+        return HttpResponseRedirect(reverse("mobile:shop_cart"))
+
+
+class ShopCartView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
+    """Cart + checkout screen. The discount code is applied via a plain GET
+    (``?code=``), recomputed on each render through shop.services.pricing.cart_totals
+    -- no htmx/live preview, matching this screen's otherwise-static-form
+    shape. "Place order" carries whatever code is currently in the box
+    through to ShopCheckoutView as a hidden field; place_order is the only
+    place a code is actually redeemed, so it re-validates it itself rather
+    than trusting this screen's own preview.
+    """
+
+    template_name = "mobile/shop_cart.html"
+    screen_title = _("Cart")
+    active_tab = "shop"
+
+    def get_context_data(self, **kwargs):
+        cart = Cart.objects.filter(club=self.request.club, user=self.request.user, status=Cart.CartStatus.OPEN).first()
+        items = list(cart.items.select_related("product", "beneficiary").order_by("created")) if cart is not None else []
+        for item in items:
+            item.line_total = item.unit_price * item.quantity
+
+        code = self.request.GET.get("code", "").strip()
+        discount = None
+        discount_error = None
+        if code and cart is not None:
+            try:
+                discount = find_discount(self.request.club, code)
+            except CheckoutError as error:
+                discount_error = str(error)
+
+        totals = cart_totals(cart, discount) if cart is not None else {"subtotal": Decimal("0"), "discount_amount": Decimal("0"), "total": Decimal("0")}
+
+        return super().get_context_data(cart=cart, items=items, code=code, discount=discount, discount_error=discount_error, totals=totals, **kwargs)
+
+
+class ShopCartItemUpdateView(ShopScopeMixin, LoginRequiredMixin, View):
+    """+/- and remove on a single cart row. Decrementing below 1 removes the
+    item outright -- a row stuck at a quantity nobody asked to keep isn't
+    useful, and there's no separate "0 means gone" state to represent."""
+
+    def post(self, request, *args, **kwargs):
+        item = get_object_or_404(CartItem, pk=kwargs["item_id"], cart__club=request.club, cart__user=request.user, cart__status=Cart.CartStatus.OPEN)
+        action = request.POST.get("action")
+
+        if action == "increment":
+            item.quantity += 1
+            item.save(update_fields=["quantity"])
+        elif action == "decrement":
+            if item.quantity > 1:
+                item.quantity -= 1
+                item.save(update_fields=["quantity"])
+            else:
+                item.delete()
+        elif action == "remove":
+            item.delete()
+        else:
+            return HttpResponseBadRequest(_("Unknown action."))
+
+        return HttpResponseRedirect(reverse("mobile:shop_cart"))
+
+
+class ShopCheckoutView(ShopScopeMixin, LoginRequiredMixin, View):
+    """POST-only target for the cart screen's "Place order" button. Every
+    checkout rule (shop open, cart non-empty, a real discount code) lives in
+    shop.services.checkout.place_order -- this view's only job is to call it
+    and translate CheckoutError into a flashed message instead of a 500."""
+
+    def post(self, request, *args, **kwargs):
+        cart = Cart.objects.filter(club=request.club, user=request.user, status=Cart.CartStatus.OPEN).first()
+        if cart is None or self.me is None:
+            notify(request, f"e|{_('Nothing to order')}|{_('Your cart is empty.')}")
+            return HttpResponseRedirect(reverse("mobile:shop_cart"))
+
+        try:
+            order = place_order(cart, purchaser=self.me, discount_code=request.POST.get("discount_code", ""))
+        except CheckoutError as error:
+            notify(request, f"e|{_('Could not place order')}|{error}")
+            return HttpResponseRedirect(reverse("mobile:shop_cart"))
+
+        title = _("Order placed")
+        body = _("Order %(number)s is in -- pay when you pick it up.") % {"number": order.number}
+        notify(request, f"s|{title}|{body}")
+        return HttpResponseRedirect(reverse("mobile:shop_order_detail", kwargs={"pk": order.pk}))
+
+
+class ShopOrdersView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
+    """"My orders" -- every past Order across self.managed_people, not just
+    self.me. Order.purchaser is always whoever's own login placed it (this
+    app gives one Cart per account, never per managed person), so this is the
+    same "aggregate across everyone I'm responsible for" scope PaymentsView/
+    club.services.fees.open_dues_rows already use, e.g. a parent checking on
+    an order a teenager placed under their own login."""
+
+    template_name = "mobile/shop_orders.html"
+    screen_title = _("My orders")
+    active_tab = "shop"
+
+    def get_context_data(self, **kwargs):
+        orders = Order.objects.filter(club=self.request.club, purchaser__in=self.managed_people).select_related("purchaser").order_by("-created") if self.managed_people else Order.objects.none()
+        rows = [{"order": order, "pill_class": ORDER_STATUS_PILL_CLASSES.get(order.status, "pill-neutral")} for order in orders]
+        return super().get_context_data(rows=rows, **kwargs)
+
+
+class ShopOrderDetailView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
+    """Line items, status, total and a link to the invoice PDF. Scoped to
+    self.managed_people, same reasoning as ShopOrdersView -- an order outside
+    that set 404s, same treatment EditProfileView gives an unmanaged member."""
+
+    template_name = "mobile/shop_order_detail.html"
+    screen_title = _("Order")
+    active_tab = "shop"
+
+    def get_context_data(self, **kwargs):
+        order = get_object_or_404(Order.objects.select_related("purchaser"), pk=self.kwargs["pk"], club=self.request.club, purchaser__in=self.managed_people)
+        lines = order.order_items.select_related("product", "beneficiary")
+        pill_class = ORDER_STATUS_PILL_CLASSES.get(order.status, "pill-neutral")
+        return super().get_context_data(screen_title=order.number, order=order, lines=lines, pill_class=pill_class, **kwargs)
+
+
+class ShopInvoiceView(ShopScopeMixin, LoginRequiredMixin, View):
+    """Rendered on demand via shop.services.invoices.render_invoice_pdf --
+    mirrors management.views.DuesInvoicePdfView's own try/except pattern.
+    Scoped the same way as ShopOrdersView/ShopOrderDetailView -- never
+    another member's invoice, including another managed family's."""
+
+    def get(self, request, *args, **kwargs):
+        order = get_object_or_404(Order, pk=kwargs["pk"], club=request.club, purchaser__in=self.managed_people)
+        invoice = getattr(order, "invoice", None)
+        if invoice is None:
+            raise Http404("No invoice for that order.")
+
+        try:
+            pdf = render_invoice_pdf(invoice)
+        except ShopInvoicePDFError as error:
+            notify(request, f"e|{_('PDF unavailable')}|{error}")
+            return HttpResponseRedirect(reverse("mobile:shop_order_detail", kwargs={"pk": order.pk}))
+
+        response = HttpResponse(pdf, content_type="application/pdf")
+        response["Content-Disposition"] = f'attachment; filename="{invoice.number}.pdf"'
+        return response

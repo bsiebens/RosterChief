@@ -1,0 +1,53 @@
+{% extends "mobile/base.html" %}
+{% load i18n lucide %}
+
+{% comment %}
+    Order detail -- line items, status, total, a link to the on-demand
+    invoice PDF (shop.services.invoices.render_invoice_pdf via
+    ShopInvoiceView). White sticky back-header to shop_orders, same pattern
+    as payments.html.
+{% endcomment %}
+
+{% block content %}
+    <div class="-mx-4 -mt-4 flex items-center gap-1 border-b border-line bg-white px-4 py-3">
+        <a class="-ml-2.5 flex h-11 w-11 shrink-0 items-center justify-center" href="{% url "mobile:shop_orders" %}" aria-label="{% trans "Back" %}">
+            {% lucide "chevron-left" size=20 stroke_width=2.4 class="text-ink" %}
+        </a>
+        <span class="min-w-0 flex-1 truncate font-display text-xl leading-none font-extrabold text-ink uppercase">{{ order.number }}</span>
+    </div>
+
+    <div class="m-card flex items-center justify-between p-4">
+        <div>
+            <div class="text-sm font-semibold text-ink">{{ order.purchaser.get_full_name }}</div>
+            <div class="text-xs text-muted">{{ order.created|date:"d M Y" }}</div>
+        </div>
+        <span class="pill {{ pill_class }}">{{ order.get_status_display }}</span>
+    </div>
+
+    <div class="m-card overflow-hidden">
+        {% for line in lines %}
+            {% if not forloop.first %}<div class="h-px bg-rule"></div>{% endif %}
+            <div class="flex items-center gap-3 p-3.5">
+                <div class="min-w-0 flex-1">
+                    <div class="text-[15px] font-semibold text-ink">{{ line.product.name }}</div>
+                    <div class="text-xs text-muted">
+                        {% if line.beneficiary %}{% blocktrans with name=line.beneficiary.first_name %}For {{ name }} &middot; {% endblocktrans %}{% endif %}{% blocktrans with qty=line.quantity %}{{ qty }}x{% endblocktrans %}
+                    </div>
+                </div>
+                <span class="font-display text-sm font-extrabold text-ink">{% blocktrans with amount=line.line_total|floatformat:2 %}&euro; {{ amount }}{% endblocktrans %}</span>
+            </div>
+        {% endfor %}
+    </div>
+
+    <div class="m-card flex items-center justify-between p-4 font-display text-lg font-extrabold text-ink">
+        <span>{% trans "Total" %}</span>
+        <span>{% blocktrans with amount=order.total|floatformat:2 %}&euro; {{ amount }}{% endblocktrans %}</span>
+    </div>
+
+    {% if order.invoice %}
+        <a class="btn btn-secondary w-full" href="{% url "mobile:shop_invoice" order.pk %}">
+            {% lucide "file-down" size=16 %} {% trans "Download invoice" %}
+        </a>
+    {% endif %}
+    <p class="pb-2 text-center text-xs text-dim">{% trans "Pay when you pick it up -- no online payment." %}</p>
+{% endblock content %}

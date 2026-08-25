@@ -1,0 +1,73 @@
+{% extends "mobile/base.html" %}
+{% load i18n lucide %}
+
+{% comment %}
+    Product detail + add-to-cart. White sticky back-header, same pattern as
+    payments.html/calendar_feed_settings.html -- not a tab of its own,
+    active_tab stays "shop" (ShopProductDetailView's own docstring).
+
+    The beneficiary chip row (mirrors Home's own person-chip pattern, see
+    mobile/templates/mobile/home.html) only renders once managed_people has
+    more than one person -- a member ordering just for themselves has
+    nothing to disambiguate, so the hidden "beneficiary" field simply isn't
+    submitted in that case (ShopProductDetailView.post then leaves the
+    CartItem's beneficiary unset).
+{% endcomment %}
+
+{% block content %}
+    <div class="-mx-4 -mt-4 flex items-center gap-1 border-b border-line bg-white px-4 py-3">
+        <a class="-ml-2.5 flex h-11 w-11 shrink-0 items-center justify-center" href="{% url "mobile:shop_home" %}" aria-label="{% trans "Back" %}">
+            {% lucide "chevron-left" size=20 stroke_width=2.4 class="text-ink" %}
+        </a>
+        <span class="min-w-0 flex-1 truncate font-display text-xl leading-none font-extrabold text-ink uppercase">{{ product.name }}</span>
+    </div>
+
+    <div class="m-card overflow-hidden">
+        {% if product.image %}
+            <img class="h-48 w-full object-cover" src="{{ product.image.url }}" alt="">
+        {% else %}
+            <div class="flex h-48 items-center justify-center bg-line text-xs text-dim">{% trans "No photo" %}</div>
+        {% endif %}
+        <div class="p-4">
+            <div class="font-display text-2xl font-extrabold text-club">{% blocktrans with amount=product.price|floatformat:2 %}&euro; {{ amount }}{% endblocktrans %}</div>
+            {% if product.description %}
+                <p class="mt-2 text-sm text-ink">{{ product.description|linebreaksbr }}</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <form method="post" class="m-card flex flex-col gap-4 p-4" x-data="{ qty: 1, beneficiary: '{{ me.pk }}' }">
+        {% csrf_token %}
+
+        {% if managed_people|length > 1 %}
+            <div>
+                <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "For" %}</div>
+                <div class="scrollbar-hide flex gap-2 overflow-x-auto pb-0.5">
+                    {% for person in managed_people %}
+                        <button type="button" class="person-chip" :class="beneficiary === '{{ person.pk }}' && 'person-chip-active'" @click="beneficiary = '{{ person.pk }}'">
+                            <span class="person-chip-avatar">{{ person.first_name|slice:":1" }}</span>
+                            <span class="person-chip-label">{% if person == me %}{% trans "Me" %}{% else %}{{ person.first_name }}{% endif %}</span>
+                        </button>
+                    {% endfor %}
+                </div>
+                <input type="hidden" name="beneficiary" :value="beneficiary">
+            </div>
+        {% endif %}
+
+        <div class="flex items-center justify-between">
+            <span class="font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Quantity" %}</span>
+            <div class="flex items-center gap-3">
+                <button type="button" class="flex h-10 w-10 items-center justify-center rounded-lg border border-stroke bg-white text-ink" @click="qty = Math.max(1, qty - 1)" aria-label="{% trans "Decrease quantity" %}">
+                    {% lucide "minus" size=16 %}
+                </button>
+                <span class="w-6 text-center font-display text-lg font-extrabold text-ink" x-text="qty"></span>
+                <button type="button" class="flex h-10 w-10 items-center justify-center rounded-lg border border-stroke bg-white text-ink" @click="qty += 1" aria-label="{% trans "Increase quantity" %}">
+                    {% lucide "plus" size=16 %}
+                </button>
+            </div>
+        </div>
+        <input type="hidden" name="quantity" :value="qty">
+
+        <button type="submit" class="btn btn-primary w-full">{% trans "Add to cart" %}</button>
+    </form>
+{% endblock content %}

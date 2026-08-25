@@ -1,0 +1,40 @@
+{% extends "mobile/base.html" %}
+{% load i18n lucide %}
+
+{% comment %}
+    "My orders" -- every past Order across self.managed_people, not just
+    self.me (see ShopOrdersView's own docstring for why). White sticky
+    back-header, same pattern as payments.html -- not a tab of its own,
+    active_tab stays "shop".
+{% endcomment %}
+
+{% block content %}
+    <div class="-mx-4 -mt-4 flex items-center gap-1 border-b border-line bg-white px-4 py-3">
+        <a class="-ml-2.5 flex h-11 w-11 shrink-0 items-center justify-center" href="{% url "mobile:shop_home" %}" aria-label="{% trans "Back" %}">
+            {% lucide "chevron-left" size=20 stroke_width=2.4 class="text-ink" %}
+        </a>
+        <span class="min-w-0 flex-1 truncate font-display text-xl leading-none font-extrabold text-ink uppercase">{% trans "My orders" %}</span>
+    </div>
+
+    {% if rows %}
+        <div class="m-card overflow-hidden">
+            {% for row in rows %}
+                {% if not forloop.first %}<div class="h-px bg-rule"></div>{% endif %}
+                <a class="flex items-center gap-3 p-3.5" href="{% url "mobile:shop_order_detail" row.order.pk %}">
+                    <div class="min-w-0 flex-1">
+                        <div class="text-[15px] font-semibold text-ink">{{ row.order.number }}</div>
+                        <div class="text-xs text-muted">
+                            {% blocktrans with name=row.order.purchaser.first_name date=row.order.created|date:"d M Y" %}{{ name }} &middot; {{ date }}{% endblocktrans %}
+                        </div>
+                    </div>
+                    <span class="pill {{ row.pill_class }} shrink-0">{{ row.order.get_status_display }}</span>
+                    {% lucide "chevron-right" size=18 class="shrink-0 text-dim" %}
+                </a>
+            {% endfor %}
+        </div>
+    {% else %}
+        <div class="m-card p-6 text-center">
+            <p class="text-sm text-muted">{% trans "No orders yet." %}</p>
+        </div>
+    {% endif %}
+{% endblock content %}

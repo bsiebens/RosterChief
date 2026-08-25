@@ -23,6 +23,15 @@ urlpatterns = [
     path("me/calendar-sync/", views.CalendarFeedSettingsView.as_view(), name="calendar_feed_settings"),
     path("me/<uuid:member_id>/edit/", views.EditProfileView.as_view(), name="edit_profile"),
     path("notifications/", views.NotificationsView.as_view(), name="notifications"),
+    # Shop.
+    path("shop/", views.ShopHomeView.as_view(), name="shop_home"),
+    path("shop/products/<slug:slug>/", views.ShopProductDetailView.as_view(), name="shop_product_detail"),
+    path("shop/cart/", views.ShopCartView.as_view(), name="shop_cart"),
+    path("shop/cart/items/<uuid:item_id>/", views.ShopCartItemUpdateView.as_view(), name="shop_cart_item_update"),
+    path("shop/checkout/", views.ShopCheckoutView.as_view(), name="shop_checkout"),
+    path("shop/orders/", views.ShopOrdersView.as_view(), name="shop_orders"),
+    path("shop/orders/<uuid:pk>/", views.ShopOrderDetailView.as_view(), name="shop_order_detail"),
+    path("shop/orders/<uuid:pk>/invoice.pdf", views.ShopInvoiceView.as_view(), name="shop_invoice"),
     # Coach mode (C1-C6).
     path("coach/", coach_views.CoachTodayView.as_view(), name="coach_today"),
     path("coach/squad/", coach_views.CoachSquadView.as_view(), name="coach_squad"),
