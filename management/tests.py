@@ -8318,6 +8318,18 @@ class ProductManagementTests(ShopTestBase):
 
         self.assertEqual(self.club_get("product_list").status_code, 403)
 
+    def test_the_sold_column_reflects_paid_orders_only(self):
+        purchaser = Member.objects.create(first_name="Olly", last_name="Orderer", email="olly-sold@example.com")
+        paid = Order.objects.create(club=self.club, purchaser=purchaser, status=Order.OrderStatus.PAID, total=Decimal("50.00"))
+        OrderLine.objects.create(order=paid, product=self.product, quantity=2, unit_price=Decimal("25.00"), line_total=Decimal("50.00"))
+        pending = Order.objects.create(club=self.club, purchaser=purchaser, status=Order.OrderStatus.PENDING, total=Decimal("999.00"))
+        OrderLine.objects.create(order=pending, product=self.product, quantity=99, unit_price=Decimal("999.00"), line_total=Decimal("999.00"))
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_get("product_list")
+
+        self.assertEqual(response.context["products"][0].sold_count, 2)
+
     def test_a_shop_manager_can_create_a_product(self):
         self.client.force_login(self.make_shop_manager())
 
@@ -8512,6 +8524,21 @@ class ProductVariantManagementTests(ShopTestBase):
     see ProductVariant's own docstring for why it's one free-text field, not
     separate size/colour axes."""
 
+    def test_the_edit_page_breaks_sold_count_down_per_variant(self):
+        small = ProductVariant.objects.create(product=self.product, name="Small")
+        ProductVariant.objects.create(product=self.product, name="Large")
+        purchaser = Member.objects.create(first_name="Olly", last_name="Orderer", email="olly-variant-sold@example.com")
+        order = Order.objects.create(club=self.club, purchaser=purchaser, status=Order.OrderStatus.DELIVERED, total=Decimal("50.00"))
+        OrderLine.objects.create(order=order, product=self.product, variant=small, quantity=3, unit_price=Decimal("25.00"), line_total=Decimal("75.00"))
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_get("product_update", self.product.pk)
+
+        variants_by_name = {variant.name: variant for variant in response.context["variants"]}
+        self.assertEqual(variants_by_name["Small"].sold_count, 3)
+        self.assertEqual(variants_by_name["Large"].sold_count, 0)
+        self.assertEqual(response.context["product_sold_count"], 3)
+
     def test_a_shop_manager_can_add_a_variant(self):
         self.client.force_login(self.make_shop_manager())
 
@@ -8674,6 +8701,17 @@ class OrderManagementTests(ShopTestBase):
         self.client.force_login(self.make_plain_staff())
 
         self.assertEqual(self.club_get("order_list").status_code, 403)
+
+    def test_the_kpi_strip_reflects_paid_orders_regardless_of_the_status_filter(self):
+        self.make_order(status=Order.OrderStatus.PAID, total=Decimal("30.00"))
+        self.make_order(status=Order.OrderStatus.PENDING, total=Decimal("999.00"))
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_get("order_list", params={"status": Order.OrderStatus.PAID})
+
+        self.assertEqual(response.context["kpis"]["total_orders"], 2)
+        self.assertEqual(response.context["kpis"]["open_orders"], 2)
+        self.assertEqual(response.context["kpis"]["total_sold"], Decimal("30.00"))
 
     def test_the_status_filter_narrows_the_list(self):
         pending = self.make_order()

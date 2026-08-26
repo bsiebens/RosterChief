@@ -23,6 +23,32 @@
 {% endblock filter_strip %}
 
 {% block panel %}
+    {% comment %}
+        Shop-wide numbers, not filtered by the ?status= strip below -- "how's
+        the shop doing overall" rather than "how many of the filtered rows".
+        shop.services.stats.order_kpis: total_sold/items_sold only count paid
+        (PAID_STATUSES) orders, same definition as the platform dashboard's
+        own Shop "Revenue" figure.
+    {% endcomment %}
+    <div class="mb-4 grid grid-cols-2 gap-3.5 md:grid-cols-4">
+        <div class="card p-4">
+            <div class="text-[13px] text-muted">{% trans "Open orders" %}</div>
+            <div class="font-mono text-2xl font-semibold text-ink">{{ kpis.open_orders }}</div>
+        </div>
+        <div class="card p-4">
+            <div class="text-[13px] text-muted">{% trans "Total orders" %}</div>
+            <div class="font-mono text-2xl font-semibold text-ink">{{ kpis.total_orders }}</div>
+        </div>
+        <div class="card p-4">
+            <div class="text-[13px] text-muted">{% trans "Total sold" %}</div>
+            <div class="font-mono text-2xl font-semibold text-ink">&euro; {{ kpis.total_sold }}</div>
+        </div>
+        <div class="card p-4">
+            <div class="text-[13px] text-muted">{% trans "Items sold" %}</div>
+            <div class="font-mono text-2xl font-semibold text-ink">{{ kpis.items_sold }}</div>
+        </div>
+    </div>
+
     <div class="card overflow-hidden">
         <table class="table">
             <thead>

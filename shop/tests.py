@@ -34,6 +34,7 @@ from .models import (
 from .services.checkout import CheckoutError, find_discount, place_order
 from .services.invoices import create_invoice_for_order, render_invoice_pdf
 from .services.pricing import cart_totals
+from .services.stats import order_kpis, quantity_sold_by_product, quantity_sold_by_variant
 
 
 class ProductSlugTests(TestCase):
@@ -803,3 +804,100 @@ class InvoicePdfTests(TestCase):
         # The order created in setUpTestData already has its own invoice; a second
         # order's invoice must not collide with it.
         self.assertEqual(Invoice.objects.filter(club=self.club).count(), 2)
+
+
+class OrderKPIsTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        cls.member = Member.objects.create(first_name="Jane", last_name="Doe")
+        cls.product = Product.objects.create(club=cls.club, name="Home Jersey", price=Decimal("25.00"))
+
+    def make_order(self, status, total=Decimal("50.00"), quantity=2):
+        order = Order.objects.create(club=self.club, purchaser=self.member, status=status, total=total)
+        OrderLine.objects.create(order=order, product=self.product, quantity=quantity, unit_price=Decimal("25.00"), line_total=total)
+        return order
+
+    def test_open_orders_excludes_delivered_cancelled_and_refunded(self):
+        self.make_order(Order.OrderStatus.PENDING)
+        self.make_order(Order.OrderStatus.PAID)
+        self.make_order(Order.OrderStatus.PARTIALLY_PAID)
+        self.make_order(Order.OrderStatus.DELIVERED)
+        self.make_order(Order.OrderStatus.CANCELLED)
+        self.make_order(Order.OrderStatus.REFUNDED)
+
+        self.assertEqual(order_kpis(self.club)["open_orders"], 3)
+
+    def test_total_orders_counts_every_status(self):
+        self.make_order(Order.OrderStatus.PENDING)
+        self.make_order(Order.OrderStatus.CANCELLED)
+
+        self.assertEqual(order_kpis(self.club)["total_orders"], 2)
+
+    def test_total_sold_only_counts_paid_and_delivered(self):
+        self.make_order(Order.OrderStatus.PAID, total=Decimal("30.00"))
+        self.make_order(Order.OrderStatus.DELIVERED, total=Decimal("20.00"))
+        self.make_order(Order.OrderStatus.PENDING, total=Decimal("999.00"))
+        self.make_order(Order.OrderStatus.CANCELLED, total=Decimal("999.00"))
+
+        self.assertEqual(order_kpis(self.club)["total_sold"], Decimal("50.00"))
+
+    def test_items_sold_matches_total_sold_scope(self):
+        self.make_order(Order.OrderStatus.PAID, quantity=3)
+        self.make_order(Order.OrderStatus.PENDING, quantity=99)
+
+        self.assertEqual(order_kpis(self.club)["items_sold"], 3)
+
+    def test_zero_orders_returns_zero_not_none(self):
+        kpis = order_kpis(self.club)
+
+        self.assertEqual(kpis, {"open_orders": 0, "total_orders": 0, "total_sold": Decimal("0"), "items_sold": 0})
+
+    def test_kpis_are_scoped_to_the_club(self):
+        other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
+        Order.objects.create(club=other_club, purchaser=self.member, status=Order.OrderStatus.PAID, total=Decimal("100.00"))
+
+        self.assertEqual(order_kpis(self.club)["total_orders"], 0)
+
+
+class QuantitySoldTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        cls.member = Member.objects.create(first_name="Jane", last_name="Doe")
+        cls.product = Product.objects.create(club=cls.club, name="Home Jersey", price=Decimal("25.00"))
+        cls.small = ProductVariant.objects.create(product=cls.product, name="Small")
+        cls.large = ProductVariant.objects.create(product=cls.product, name="Large")
+
+    def make_line(self, status, quantity, variant=None, product=None):
+        order = Order.objects.create(club=self.club, purchaser=self.member, status=status, total=Decimal("1.00"))
+        OrderLine.objects.create(order=order, product=product or self.product, variant=variant, quantity=quantity, unit_price=Decimal("25.00"), line_total=Decimal("1.00"))
+
+    def test_only_paid_and_delivered_lines_count(self):
+        self.make_line(Order.OrderStatus.PAID, 2)
+        self.make_line(Order.OrderStatus.DELIVERED, 1)
+        self.make_line(Order.OrderStatus.PENDING, 99)
+        self.make_line(Order.OrderStatus.CANCELLED, 99)
+
+        self.assertEqual(quantity_sold_by_product(self.club), {self.product.pk: 3})
+
+    def test_products_with_no_sales_are_absent_not_zero(self):
+        other_product = Product.objects.create(club=self.club, name="Away Jersey")
+
+        self.assertNotIn(other_product.pk, quantity_sold_by_product(self.club))
+
+    def test_variant_breakdown_is_per_variant(self):
+        self.make_line(Order.OrderStatus.PAID, 2, variant=self.small)
+        self.make_line(Order.OrderStatus.PAID, 5, variant=self.large)
+        self.make_line(Order.OrderStatus.PAID, 1)  # no variant -- base sale
+
+        breakdown = quantity_sold_by_variant(self.product)
+
+        self.assertEqual(breakdown, {self.small.pk: 2, self.large.pk: 5})
+
+    def test_another_products_sales_dont_leak_into_this_breakdown(self):
+        other_product = Product.objects.create(club=self.club, name="Away Jersey")
+        other_variant = ProductVariant.objects.create(product=other_product, name="Small")
+        self.make_line(Order.OrderStatus.PAID, 4, variant=other_variant, product=other_product)
+
+        self.assertEqual(quantity_sold_by_variant(self.product), {})

@@ -55,6 +55,7 @@ from news.services import dispatch_send_publish_notification, notify_editors_of_
 from notifications.models import Notification
 from shop.models import Discount, Invoice, Order, Payment, Product, ProductCategory, ProductVariant
 from shop.services.invoices import ShopInvoicePDFError, render_invoice_pdf
+from shop.services.stats import order_kpis, quantity_sold_by_product, quantity_sold_by_variant
 from teams.models import Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
 from teams.services import eligible_roster_members
 
@@ -3522,7 +3523,12 @@ class ProductListView(ShopManagerRequiredMixin, ListView):
         categories = list(ProductCategory.objects.filter(club=self.request.club))
         for category in categories:
             category.edit_form = ProductCategoryForm(instance=category)
-        return super().get_context_data(categories=categories, category_form=ProductCategoryForm(), **kwargs)
+
+        context = super().get_context_data(categories=categories, category_form=ProductCategoryForm(), **kwargs)
+        sold = quantity_sold_by_product(self.request.club)
+        for product in context["products"]:
+            product.sold_count = sold.get(product.pk, 0)
+        return context
 
 
 class ProductCreateView(ShopManagerRequiredMixin, View):
@@ -3596,12 +3602,15 @@ class ProductUpdateView(ShopManagerRequiredMixin, UpdateView):
         # Bound per-row so each variant's own "Edit" modal can render its own
         # form -- same reasoning as FeatureListView's flags/competitions.
         variants = list(self.object.variants.all())
+        sold_by_variant = quantity_sold_by_variant(self.object)
         for variant in variants:
             variant.edit_form = ProductVariantForm(instance=variant)
+            variant.sold_count = sold_by_variant.get(variant.pk, 0)
         return super().get_context_data(
             update_view=True,
             variants=variants,
             variant_form=ProductVariantForm(),
+            product_sold_count=quantity_sold_by_product(self.request.club).get(self.object.pk, 0),
             **kwargs,
         )
 
@@ -3812,7 +3821,10 @@ class OrderListView(ShopManagerRequiredMixin, ListView):
         return orders
 
     def get_context_data(self, **kwargs):
-        return super().get_context_data(status_choices=Order.OrderStatus.choices, selected_status=self.request.GET.get("status", ""), **kwargs)
+        # order_kpis reads every order for the club regardless of the ?status=
+        # filter above -- the KPI strip is "how's the shop doing overall", not
+        # "how many of the filtered rows below".
+        return super().get_context_data(status_choices=Order.OrderStatus.choices, selected_status=self.request.GET.get("status", ""), kpis=order_kpis(self.request.club), **kwargs)
 
 
 class OrderDetailView(ShopManagerRequiredMixin, DetailView):

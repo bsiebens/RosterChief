@@ -90,14 +90,17 @@
         <div class="card card-body">
             <div class="flex flex-wrap items-center justify-between gap-2">
                 <h2 class="card-title">{% lucide "shirt" size=18 %} {% trans "Variants" %}</h2>
-                <button class="btn btn-outline btn-sm gap-2" type="button" onclick="document.getElementById('add_variant_modal').showModal()">{% lucide "plus" size=14 %} {% trans "Add variant" %}</button>
+                <div class="flex items-center gap-3">
+                    <span class="text-sm text-muted">{% blocktrans count counter=product_sold_count %}{{ counter }} sold{% plural %}{{ counter }} sold{% endblocktrans %}</span>
+                    <button class="btn btn-outline btn-sm gap-2" type="button" onclick="document.getElementById('add_variant_modal').showModal()">{% lucide "plus" size=14 %} {% trans "Add variant" %}</button>
+                </div>
             </div>
             <table class="table">
                 <thead>
                     <tr>
                         <th>{% trans "Name" %}</th>
                         <th>{% trans "Price" %}</th>
-                        <th></th>
+                        <th>{% trans "Sold" %}</th>
                         <th></th>
                     </tr>
                 </thead>
@@ -106,18 +109,19 @@
                         <tr>
                             <td class="font-semibold text-ink">{{ variant.name }}{% if not variant.is_active %} <span class="badge badge-sm badge-neutral">{% trans "Inactive" %}</span>{% endif %}</td>
                             <td class="font-mono tabular-nums">{% if variant.price is not None %}&euro; {{ variant.price }}{% else %}<span class="text-dim">{% trans "Same as product" %}</span>{% endif %}</td>
+                            <td class="font-mono text-xs tabular-nums text-muted">{{ variant.sold_count }}</td>
                             <td class="text-right">
-                                <button class="btn btn-outline btn-xs gap-1" type="button" onclick="document.getElementById('{{ variant.pk|dom_id:"edit_variant_modal" }}').showModal()">{% lucide "pencil" size=12 %} {% trans "Edit" %}</button>
-                            </td>
-                            <td class="text-right">
-                                <form method="post" action="{% url 'management:product_variant_toggle_active' object.pk variant.pk %}">
-                                    {% csrf_token %}
-                                    {% if variant.is_active %}
-                                        <button class="btn btn-outline btn-xs gap-1" type="submit">{% lucide "eye-off" size=12 %} {% trans "Deactivate" %}</button>
-                                    {% else %}
-                                        <button class="btn btn-outline btn-xs gap-1" type="submit">{% lucide "eye" size=12 %} {% trans "Activate" %}</button>
-                                    {% endif %}
-                                </form>
+                                <div class="flex justify-end gap-1">
+                                    <button class="btn btn-outline btn-xs gap-1" type="button" onclick="document.getElementById('{{ variant.pk|dom_id:"edit_variant_modal" }}').showModal()">{% lucide "pencil" size=12 %} {% trans "Edit" %}</button>
+                                    <form method="post" action="{% url 'management:product_variant_toggle_active' object.pk variant.pk %}">
+                                        {% csrf_token %}
+                                        {% if variant.is_active %}
+                                            <button class="btn btn-outline btn-xs gap-1" type="submit">{% lucide "eye-off" size=12 %} {% trans "Deactivate" %}</button>
+                                        {% else %}
+                                            <button class="btn btn-outline btn-xs gap-1" type="submit">{% lucide "eye" size=12 %} {% trans "Activate" %}</button>
+                                        {% endif %}
+                                    </form>
+                                </div>
                             </td>
                         </tr>
                         {% trans "Edit variant" as edit_variant_label %}
