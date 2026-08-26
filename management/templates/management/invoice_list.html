@@ -61,7 +61,7 @@
             <tbody>
                 {% for invoice in invoices %}
                     <tr>
-                        <td class="font-mono text-xs">{{ invoice.number }}</td>
+                        <td><a class="link link-hover font-mono text-xs" href="{{ invoice.detail_url }}">{{ invoice.number }}</a></td>
                         <td>
                             <span class="inline-flex items-center gap-1.5 text-sm text-muted">
                                 {% if invoice.kind == "order" %}{% lucide "shopping-bag" size=13 %}{% else %}{% lucide "wallet" size=13 %}{% endif %}

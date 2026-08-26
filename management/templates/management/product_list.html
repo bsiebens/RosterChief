@@ -125,7 +125,7 @@
                                 <img class="size-8 rounded object-cover" src="{{ product.image.url }}" alt="">
                             {% endif %}
                         </td>
-                        <td class="font-semibold">{{ product.name }}</td>
+                        <td><a class="link link-hover font-semibold" href="{% url 'management:product_update' product.pk %}">{{ product.name }}</a></td>
                         <td class="text-muted">{{ product.category.name|default:"—" }}</td>
                         <td class="font-mono text-xs tabular-nums">&euro; {{ product.price }}</td>
                         <td class="font-mono text-xs tabular-nums text-muted">{{ product.sold_count }}</td>

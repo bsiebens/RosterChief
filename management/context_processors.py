@@ -146,6 +146,7 @@ _NAV_SECTIONS = {
     "discount_update": "discount_list",
     "discount_toggle_active": "discount_list",
     "invoice_list": "invoice_list",
+    "membership_invoice_detail": "invoice_list",
     "form_list": "form_list",
     "submission_list": "form_list",
     "evaluations": "evaluations",

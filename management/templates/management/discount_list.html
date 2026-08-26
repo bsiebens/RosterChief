@@ -27,7 +27,7 @@
             <tbody>
                 {% for discount in discounts %}
                     <tr>
-                        <td class="font-semibold">{{ discount.name }}</td>
+                        <td><a class="link link-hover font-semibold" href="{% url 'management:discount_update' discount.pk %}">{{ discount.name }}</a></td>
                         <td class="font-mono text-xs">{{ discount.code }}</td>
                         <td class="font-mono text-xs tabular-nums">
                             {% if discount.discount_type == "percentage" %}{{ discount.discount_amount }}%{% else %}&euro; {{ discount.discount_amount }}{% endif %}

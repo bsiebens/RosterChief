@@ -8723,6 +8723,66 @@ class OrderManagementTests(ShopTestBase):
         self.assertContains(response, paid.number)
         self.assertNotContains(response, pending.number)
 
+    def test_the_default_view_hides_delivered_orders(self):
+        pending = self.make_order()
+        delivered = self.make_order(status=Order.OrderStatus.DELIVERED)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("order_list")
+
+        self.assertContains(response, pending.number)
+        self.assertNotContains(response, delivered.number)
+
+    def test_status_all_shows_delivered_orders_too(self):
+        delivered = self.make_order(status=Order.OrderStatus.DELIVERED)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("order_list", params={"status": "all"})
+
+        self.assertContains(response, delivered.number)
+
+    def test_explicitly_filtering_on_delivered_still_shows_it(self):
+        delivered = self.make_order(status=Order.OrderStatus.DELIVERED)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("order_list", params={"status": Order.OrderStatus.DELIVERED})
+
+        self.assertContains(response, delivered.number)
+
+    def test_search_matches_the_purchasers_name(self):
+        match = Member.objects.create(first_name="Zelda", last_name="Zephyr")
+        order = Order.objects.create(club=self.club, purchaser=match, status=Order.OrderStatus.PENDING, total=Decimal("10.00"))
+        other = self.make_order()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("order_list", params={"q": "Zelda"})
+
+        self.assertContains(response, order.number)
+        self.assertNotContains(response, other.number)
+
+    def test_search_matches_by_family_name(self):
+        parent = Member.objects.create(first_name="Priya", last_name="Family")
+        child = Member.objects.create(first_name="Cy", last_name="Family")
+        family = Family.objects.create(name="Family")
+        FamilyMembership.objects.create(family=family, member=parent, role=FamilyMembership.FamilyRole.PARENT)
+        FamilyMembership.objects.create(family=family, member=child, role=FamilyMembership.FamilyRole.CHILD)
+        order = Order.objects.create(club=self.club, purchaser=child, status=Order.OrderStatus.PENDING, total=Decimal("10.00"))
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("order_list", params={"q": "Family"})
+
+        self.assertContains(response, order.number)
+
+    def test_search_matches_the_order_number(self):
+        order = self.make_order()
+        other = self.make_order()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("order_list", params={"q": order.number})
+
+        self.assertContains(response, order.number)
+        self.assertNotContains(response, other.number)
+
     def test_a_shop_manager_can_view_order_detail(self):
         order = self.make_order()
         self.client.force_login(self.make_shop_manager())

@@ -3813,26 +3813,47 @@ class DiscountToggleActiveView(ShopManagerRequiredMixin, View):
 
 
 class OrderListView(ShopManagerRequiredMixin, ListView):
-    """A simple ``?status=`` query-param filter -- not a full filter strip,
-    there's little else worth narrowing an order list by yet."""
+    """Default view hides DELIVERED orders -- "closed", paid and picked up --
+    so the list reads as "what still needs attention" rather than the club's
+    entire order history. ?status=all shows everything; ?status=<value>
+    narrows to exactly one status (including "delivered" itself, if that's
+    what's actually wanted). ?q= searches by purchaser first/last/family
+    name or the order's own number, same search shape as
+    MembershipListView/InvoiceListView's own ?q=."""
 
     template_name = "management/order_list.html"
     context_object_name = "orders"
 
     def get_queryset(self):
         orders = Order.objects.filter(club=self.request.club).select_related("purchaser")
+
         status = self.request.GET.get("status")
-        if status:
+        if not status:
+            orders = orders.exclude(status=Order.OrderStatus.DELIVERED)
+        elif status != "all":
             orders = orders.filter(status=status)
+
+        search = self.request.GET.get("q", "").strip()
+        if search:
+            orders = (
+                orders.filter(purchaser__first_name__icontains=search)
+                | orders.filter(purchaser__last_name__icontains=search)
+                | orders.filter(purchaser__family_memberships__family__name__icontains=search)
+                | orders.filter(purchaser__family_memberships__family__memberships__member__last_name__icontains=search)
+                | orders.filter(number__icontains=search)
+            )
+            orders = orders.distinct()
+
         return orders
 
     def get_context_data(self, **kwargs):
-        # order_kpis reads every order for the club regardless of the ?status=
-        # filter above -- the KPI strip is "how's the shop doing overall", not
-        # "how many of the filtered rows below".
+        # order_kpis reads every order for the club regardless of the ?status=/
+        # ?q= filters above -- the KPI strip is "how's the shop doing overall",
+        # not "how many of the filtered rows below".
         return super().get_context_data(
             status_choices=Order.OrderStatus.choices,
             selected_status=self.request.GET.get("status", ""),
+            search=self.request.GET.get("q", "").strip(),
             kpis=order_kpis(self.request.club),
             bulk_mark_paid_form=OrderBulkMarkPaidForm(),
             bulk_ready_for_pickup_form=OrderBulkMarkReadyForPickupForm(),

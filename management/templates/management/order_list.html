@@ -9,15 +9,24 @@
 {% endblock topbar_context %}
 
 {% block filter_strip %}
-    <div class="border-b border-line bg-white px-7 py-3">
-        <form method="get" class="flex flex-row flex-wrap items-center gap-2">
-            <select name="status" class="select w-48">
-                <option value="" {% if not selected_status %}selected{% endif %}>{% trans "All statuses" %}</option>
+    <div class="flex flex-wrap items-center gap-2 border-b border-line bg-white px-7 py-2.5">
+        <form method="get" id="order-filters" class="flex flex-wrap items-center gap-2">
+            <div class="relative">
+                <span class="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-dim">{% lucide "search" size=14 %}</span>
+                {# No submit button -- data-autosubmit (base.html-loaded script) submits the form itself, debounced, as soon as typing pauses. #}
+                <input type="search" name="q" value="{{ search }}" placeholder="{% trans 'Name, family, or order number ...' %}" class="input w-72 pl-9" data-autosubmit>
+            </div>
+            {# Empty value is the default view (closed/delivered orders hidden, see OrderListView's own docstring) -- "all" is an explicit opt-in to see everything, not the same as no filter at all. #}
+            <select name="status" class="select w-auto" onchange="this.form.submit()">
+                <option value="" {% if not selected_status %}selected{% endif %}>{% trans "Open (hides closed)" %}</option>
+                <option value="all" {% if selected_status == "all" %}selected{% endif %}>{% trans "All statuses" %}</option>
                 {% for value, label in status_choices %}
                     <option value="{{ value }}" {% if value == selected_status %}selected{% endif %}>{{ label }}</option>
                 {% endfor %}
             </select>
-            <button class="btn btn-outline gap-2" type="submit">{% lucide "filter" size=16 %} {% trans "Filter" %}</button>
+            {% if search %}
+                <a class="btn btn-outline gap-2" href="{% url "management:order_list" %}">{% lucide "x" size=14 %} {% trans "Clear" %}</a>
+            {% endif %}
         </form>
     </div>
 {% endblock filter_strip %}
@@ -88,7 +97,7 @@
                     {% for order in orders %}
                         <tr>
                             <td>{% if order.status != "cancelled" %}<input type="checkbox" class="checkbox order-row-checkbox" name="order_ids" value="{{ order.pk }}">{% endif %}</td>
-                            <td class="font-mono text-xs">{{ order.number }}</td>
+                            <td><a class="link link-hover font-mono text-xs" href="{% url 'management:order_detail' order.pk %}">{{ order.number }}</a></td>
                             <td class="font-semibold">{{ order.purchaser }}</td>
                             <td>
                                 <span class="badge badge-sm
