@@ -379,7 +379,7 @@
     .pill-sm {
         padding: 3px 8px;
         font-size: 0.625rem;
-        gap: 3px;
+        gap: 6px;
     }
 
     .pill-ok {
