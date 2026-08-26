@@ -123,7 +123,7 @@ from .forms import (
 from .pdf import PDFExportError, event_referee_form_pdf, membership_list_pdf, referee_form_colors
 from .pdf_previews import PDF_PREVIEWS, PDF_PREVIEWS_BY_KEY, render_pdf_preview
 from .recurrence_ui import describe_rrule
-from .shop_export import build_production_export
+from .shop_export import build_production_export, pop_production_export, stash_production_export
 
 
 class HomeView(ClubStaffRequiredMixin, TemplateView):
@@ -3990,7 +3990,15 @@ class OrderProductionExportView(ShopManagerRequiredMixin, View):
     failed export never marks lines sent that weren't. Manual correction
     lives on the line item's own edit modal (OrderLineEditForm); to get a
     fresh copy of what's already out without sending anything new, see
-    OrderProductionReprintView below."""
+    OrderProductionReprintView below.
+
+    Redirects to a reloaded order_list rather than returning the file
+    directly -- a browser doesn't navigate away from a page when a form
+    POST's response is a file download, so the Production column would
+    otherwise look stale even though the marking succeeded. The file itself
+    is stashed (management.shop_export.stash_production_export) and fetched
+    by OrderProductionDownloadView, which the reloaded page's own script
+    triggers automatically."""
 
     def post(self, request):
         products = _selected_merchandise_products(request)
@@ -4005,9 +4013,24 @@ class OrderProductionExportView(ShopManagerRequiredMixin, View):
         workbook = build_production_export(lines)
         mark_lines_in_production(lines)
 
-        response = HttpResponse(content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-        response["Content-Disposition"] = 'attachment; filename="order-production-list.xlsx"'
-        workbook.save(response)
+        token = stash_production_export(request.club, workbook, "order-production-list.xlsx")
+        notify(request, f"s|{_('Marked in production')}|{_('%(count)d item(s) marked in production. Your download should start automatically.') % {'count': len(lines)}}")
+        return redirect(f"{reverse('management:order_list')}?production_download={token}")
+
+
+class OrderProductionDownloadView(ShopManagerRequiredMixin, View):
+    """Serves the file OrderProductionExportView just stashed -- split into
+    its own GET step for the reason explained in that view's own docstring.
+    One-time use: the token is popped (not just read) so refreshing the
+    order_list page a second time doesn't re-trigger a stale download."""
+
+    def get(self, request, token):
+        stashed = pop_production_export(request.club, token)
+        if stashed is None:
+            raise Http404
+        filename, content = stashed
+        response = HttpResponse(content, content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
         return response
 
 

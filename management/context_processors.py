@@ -137,6 +137,7 @@ _NAV_SECTIONS = {
     "order_bulk_mark_paid": "order_list",
     "order_bulk_mark_ready_for_pickup": "order_list",
     "order_production_export": "order_list",
+    "order_production_download": "order_list",
     "order_production_reprint": "order_list",
     "payment_update": "order_list",
     "payment_delete": "order_list",

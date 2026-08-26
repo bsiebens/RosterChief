@@ -5,6 +5,7 @@ import sys
 from decimal import Decimal
 from io import BytesIO
 from unittest import mock
+from urllib.parse import parse_qs, urlparse
 
 import openpyxl
 from allauth.mfa.models import Authenticator
@@ -34,6 +35,7 @@ from management.email_previews import EMAIL_PREVIEWS
 from management.pdf import PDFExportError, _tint_with_white, referee_form_colors, render_pdf
 from management.pdf_previews import PDF_PREVIEWS
 from management.recurrence_ui import build_rrule, describe_rrule, parse_rrule
+from management.shop_export import build_production_export, stash_production_export
 from members.models import Family, FamilyMembership, Group, GroupMembership, Member, ParentClaim
 from members.services.claims import children_awaiting_a_parent
 from news.models import News, NewsPhoto
@@ -9578,7 +9580,13 @@ class OrderProductionExportTests(ShopTestBase):
     """OrderProductionExportView -- the Orders list's own "Download order
     list" modal. Exports pending (not-yet-in-production) lines for the
     selected merchandise products and marks them in production, so a repeat
-    download only ever includes what's new since."""
+    download only ever includes what's new since.
+
+    Redirects to order_list?production_download=<token> rather than
+    returning the file directly (see the view's own docstring for why); the
+    tests below follow that redirect and hit the download URL themselves,
+    the same two requests order_list.html's own auto-download script fires
+    for real in a browser."""
 
     def setUp(self):
         super().setUp()
@@ -9593,19 +9601,39 @@ class OrderProductionExportTests(ShopTestBase):
         kwargs.update(overrides)
         return OrderLine.objects.create(**kwargs)
 
+    def download(self, response):
+        """Follows an export POST's own redirect to the file it stashed."""
+        self.assertEqual(response.status_code, 302)
+        token = parse_qs(urlparse(response.url).query)["production_download"][0]
+        return self.club_get("order_production_download", token)
+
     def test_the_export_lists_beneficiary_and_personalization(self):
         beneficiary = Member.objects.create(first_name="Cy", last_name="Child")
         line = self.make_line(beneficiary=beneficiary, personalization_number="7", personalization_name="SMITH")
         self.client.force_login(self.make_shop_manager())
 
         response = self.club_post("order_production_export", {"product_ids": [str(self.product.pk)]})
+        download = self.download(response)
 
-        self.assertEqual(response.status_code, 200)
-        workbook = openpyxl.load_workbook(BytesIO(response.content))
+        self.assertEqual(download.status_code, 200)
+        workbook = openpyxl.load_workbook(BytesIO(download.content))
         rows = list(workbook.active.iter_rows(values_only=True))
         self.assertIn((line.order.number, "Child", "Cy", None, "7", "SMITH", 1), rows)
 
-    def test_exported_lines_are_marked_in_production(self):
+    def test_redirects_to_order_list_with_a_download_token(self):
+        self.make_line()
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_post("order_production_export", {"product_ids": [str(self.product.pk)]})
+
+        self.assertTrue(response.url.startswith(reverse("management:order_list")))
+        self.assertIn("production_download=", response.url)
+
+    def test_exported_lines_are_marked_in_production_before_the_file_is_even_downloaded(self):
+        # The marking is a side effect of the POST itself, not of following
+        # the redirect or downloading the file -- this is exactly the "does
+        # it actually mark, regardless of what the browser does with the
+        # download" regression check.
         line = self.make_line()
         self.client.force_login(self.make_shop_manager())
 
@@ -9616,14 +9644,26 @@ class OrderProductionExportTests(ShopTestBase):
         line.order.refresh_from_db()
         self.assertEqual(line.order.production_status, ProductionStatus.IN_PRODUCTION)
 
+    def test_the_download_token_is_one_time_use(self):
+        self.make_line()
+        self.client.force_login(self.make_shop_manager())
+        response = self.club_post("order_production_export", {"product_ids": [str(self.product.pk)]})
+        token = parse_qs(urlparse(response.url).query)["production_download"][0]
+
+        first = self.club_get("order_production_download", token)
+        second = self.club_get("order_production_download", token)
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 404)
+
     def test_a_repeat_download_has_nothing_pending_left_to_export(self):
         self.make_line()
         self.client.force_login(self.make_shop_manager())
-        self.club_post("order_production_export", {"product_ids": [str(self.product.pk)]})
+        self.download(self.club_post("order_production_export", {"product_ids": [str(self.product.pk)]}))
 
         response = self.club_post("order_production_export", {"product_ids": [str(self.product.pk)]})
 
-        # Nothing pending -> notify + redirect, not a second file.
+        # Nothing pending -> notify + redirect straight to order_list, no token.
         self.assertRedirects(response, reverse("management:order_list"))
 
     def test_cancelled_orders_are_excluded(self):
@@ -9642,8 +9682,9 @@ class OrderProductionExportTests(ShopTestBase):
         self.client.force_login(self.make_shop_manager())
 
         response = self.club_post("order_production_export", {"product_ids": [str(self.product.pk)]})
+        download = self.download(response)
 
-        workbook = openpyxl.load_workbook(BytesIO(response.content))
+        workbook = openpyxl.load_workbook(BytesIO(download.content))
         self.assertEqual(workbook.sheetnames, [self.product.name])
         other_line.refresh_from_db()
         self.assertEqual(other_line.production_status, ProductionStatus.PENDING)
@@ -9662,6 +9703,19 @@ class OrderProductionExportTests(ShopTestBase):
         response = self.club_post("order_production_export", {"product_ids": [str(self.product.pk)]})
 
         self.assertEqual(response.status_code, 403)
+
+    def test_a_download_token_from_another_club_404s(self):
+        other_club = Club.objects.create(name="Other Club", slug="other-club-production-dl")
+        other_purchaser = Member.objects.create(first_name="Otto", last_name="Other")
+        other_product = Product.objects.create(club=other_club, name="Other Jersey", price=Decimal("25.00"), product_type=Product.ProductType.MERCHANDISE)
+        other_order = Order.objects.create(club=other_club, purchaser=other_purchaser, total=Decimal("25.00"))
+        other_line = OrderLine.objects.create(order=other_order, product=other_product, quantity=1, unit_price=Decimal("25.00"), line_total=Decimal("25.00"))
+        token = stash_production_export(other_club, build_production_export([other_line]), "other-club.xlsx")
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_get("order_production_download", token)
+
+        self.assertEqual(response.status_code, 404)
 
 
 class OrderProductionReprintTests(ShopTestBase):

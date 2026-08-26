@@ -250,4 +250,17 @@
             });
         })();
     </script>
+    {% if request.GET.production_download %}
+        {% comment %}
+            OrderProductionExportView redirects here (a real page load, so
+            the Production column above already reflects the marking that
+            just happened) with ?production_download=<token> instead of
+            returning the file directly -- setting location.href to a
+            Content-Disposition:attachment URL triggers the download without
+            navigating away from this now-current page.
+        {% endcomment %}
+        <script>
+            window.location.href = "{% url 'management:order_production_download' request.GET.production_download %}";
+        </script>
+    {% endif %}
 {% endblock extra_body %}
