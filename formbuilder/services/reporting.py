@@ -1,4 +1,4 @@
-"""Build a tabular overview of all answers for a Form."""
+"""Build a tabular overview of all answers for one FormSend."""
 
 from dataclasses import dataclass
 
@@ -15,20 +15,27 @@ class ReportRow:
 
 @dataclass
 class FormReport:
-    form: object
+    send: object
     columns: list  # Field instances, in display order
     rows: list  # ReportRow, newest submission first
     summaries: dict  # field id -> {stringified value: count} for choice-like fields
     count: int
 
+    @property
+    def form(self):
+        return self.send.form
 
-def form_report(form):
-    """Return a FormReport: one column per field, one row per submission."""
-    columns = list(form.fields.order_by("order"))
+
+def form_report(send):
+    """Return a FormReport for one occasion of sending a form: one column per
+    field, one row per submission to THIS send -- not every send of the same
+    form ever, which would mix logically separate response sets together
+    (see FormSend's own docstring)."""
+    columns = list(send.form.fields.order_by("order"))
     summaries = {column.id: {} for column in columns if column.field_type in CHOICE_TYPES}
 
     rows = []
-    submissions = form.submissions.select_related("member").prefetch_related("answers")
+    submissions = send.submissions.select_related("member").prefetch_related("answers")
     for submission in submissions:
         values = {answer.field_id: answer.value for answer in submission.answers.all()}
         rows.append(ReportRow(submission=submission, values=values))
@@ -36,7 +43,7 @@ def form_report(form):
             if field_id in values:
                 _tally(bucket, values[field_id])
 
-    return FormReport(form=form, columns=columns, rows=rows, summaries=summaries, count=len(rows))
+    return FormReport(send=send, columns=columns, rows=rows, summaries=summaries, count=len(rows))
 
 
 def _tally(bucket, value):

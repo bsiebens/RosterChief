@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Answer, Field, Form, Submission
+from .models import Answer, Field, Form, FormSend, Submission
 
 
 class FieldInline(admin.TabularInline):
@@ -12,7 +12,7 @@ class FieldInline(admin.TabularInline):
 
 @admin.register(Form)
 class FormAdmin(admin.ModelAdmin):
-    list_display = ["title", "slug", "club", "is_active", "login_required", "opens_at", "closes_at"]
+    list_display = ["title", "slug", "club", "is_active", "login_required"]
     list_filter = ["club", "is_active", "login_required"]
     search_fields = ["title", "slug"]
     prepopulated_fields = {"slug": ["title"]}
@@ -27,6 +27,14 @@ class FieldAdmin(admin.ModelAdmin):
     raw_id_fields = ["form"]
 
 
+@admin.register(FormSend)
+class FormSendAdmin(admin.ModelAdmin):
+    list_display = ["form", "club", "club_wide", "opens_at", "closes_at", "is_active"]
+    list_filter = ["club", "club_wide", "is_active"]
+    search_fields = ["form__title"]
+    raw_id_fields = ["form", "created_by", "teams", "groups", "invited_members", "excluded_members"]
+
+
 class AnswerInline(admin.TabularInline):
     model = Answer
     extra = 0
@@ -35,10 +43,10 @@ class AnswerInline(admin.TabularInline):
 
 @admin.register(Submission)
 class SubmissionAdmin(admin.ModelAdmin):
-    list_display = ["form", "member", "submitted_at"]
-    list_filter = ["form"]
-    search_fields = ["form__title", "member__first_name", "member__last_name"]
-    raw_id_fields = ["form", "member"]
+    list_display = ["send", "member", "submitted_at"]
+    list_filter = ["send__form"]
+    search_fields = ["send__form__title", "member__first_name", "member__last_name"]
+    raw_id_fields = ["send", "member"]
     readonly_fields = ["submitted_at"]
     inlines = [AnswerInline]
 
