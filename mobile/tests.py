@@ -20,6 +20,7 @@ from news.models import News, NewsPhoto
 from notifications.models import Notification
 from shop.models import Cart, CartItem, Discount, Order, OrderLine, Product, ProductCategory, ProductVariant
 from shop.services.checkout import place_order
+from shop.services.invoices import create_invoice_for_order
 from teams.models import Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership
 
 from .coach_views import CoachTodayView
@@ -5134,6 +5135,18 @@ class ShopOrderDetailViewTests(TestCase):
         response = self.client.get(reverse("mobile:shop_order_detail", kwargs={"pk": self.order.pk}), HTTP_HOST="ajax-united.rosterchief.app")
 
         self.assertEqual(response.status_code, 404)
+
+    def test_the_download_invoice_link_is_not_htmx_boosted(self):
+        # hx-boost="true" is set globally on <body> (base.html) -- without an
+        # explicit override here, htmx would intercept the click and swap the
+        # raw PDF bytes into the page as if they were markup instead of
+        # letting the browser handle the download.
+        create_invoice_for_order(self.order)
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mobile:shop_order_detail", kwargs={"pk": self.order.pk}), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, f'href="{reverse("mobile:shop_invoice", kwargs={"pk": self.order.pk})}" hx-boost="false"')
 
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])

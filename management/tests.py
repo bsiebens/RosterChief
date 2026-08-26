@@ -21,7 +21,7 @@ from waffle import get_waffle_flag_model
 from billing.models import Plan, PlanPrice
 from billing.services.dues import record_payment, subscribe
 from club.models import Club, ClubMembership, ClubRole, DuesInvoice, FeePayment, MemberRequirementStatus, OnboardingRequirement, Season, ShopManager, Sponsor
-from club.services.invoicing import DuesInvoicePDFError
+from club.services.invoicing import DuesInvoicePDFError, create_or_resend_invoice
 from club.services.onboarding import mark_complete
 from events.models import Attendance, Competition, Event, EventReferee, EventSeries, Location, Opponent, RefereeSignup
 from events.services.calendar import week_bounds
@@ -9150,6 +9150,128 @@ class InvoiceListViewTests(ShopTestBase):
 
         self.assertNotEqual(first.number, second.number)
         self.assertEqual(Invoice.objects.filter(club=self.club).count(), 2)
+
+    def make_dues_invoice(self, member, **overrides):
+        membership = ClubMembership.objects.create(club=self.club, member=member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE, fee_amount=Decimal("100.00"))
+        kwargs = {"due_in_days": 14, "recipient_email": member.email or "parent@example.com", "sent_to_guardian": False}
+        kwargs.update(overrides)
+        return create_or_resend_invoice(membership, **kwargs)
+
+    def test_dues_invoices_appear_for_an_admin(self):
+        member = Member.objects.create(first_name="Dana", last_name="Duesworth", email="dana@example.com")
+        invoice = self.make_dues_invoice(member)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("invoice_list")
+
+        self.assertContains(response, invoice.number)
+        self.assertContains(response, "Dana")
+
+    def test_dues_invoices_are_hidden_from_a_non_admin_shop_manager(self):
+        member = Member.objects.create(first_name="Dana", last_name="Duesworth", email="dana@example.com")
+        invoice = self.make_dues_invoice(member)
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_get("invoice_list")
+
+        self.assertNotContains(response, invoice.number)
+        self.assertNotContains(response, '<option value="dues"')
+
+    def test_a_non_admin_requesting_type_dues_still_sees_no_dues_rows(self):
+        member = Member.objects.create(first_name="Dana", last_name="Duesworth", email="dana@example.com")
+        invoice = self.make_dues_invoice(member)
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_get("invoice_list", params={"type": "dues"})
+
+        self.assertNotContains(response, invoice.number)
+
+    def test_type_filter_order_excludes_dues(self):
+        purchaser = Member.objects.create(first_name="Olly", last_name="Orderer")
+        order_invoice = create_invoice_for_order(Order.objects.create(club=self.club, purchaser=purchaser, total=Decimal("10.00")))
+        dues_member = Member.objects.create(first_name="Dana", last_name="Duesworth", email="dana2@example.com")
+        dues_invoice = self.make_dues_invoice(dues_member)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("invoice_list", params={"type": "order"})
+
+        self.assertContains(response, order_invoice.number)
+        self.assertNotContains(response, dues_invoice.number)
+
+    def test_type_filter_dues_excludes_orders(self):
+        purchaser = Member.objects.create(first_name="Olly", last_name="Orderer")
+        order_invoice = create_invoice_for_order(Order.objects.create(club=self.club, purchaser=purchaser, total=Decimal("10.00")))
+        dues_member = Member.objects.create(first_name="Dana", last_name="Duesworth", email="dana3@example.com")
+        dues_invoice = self.make_dues_invoice(dues_member)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("invoice_list", params={"type": "dues"})
+
+        self.assertContains(response, dues_invoice.number)
+        self.assertNotContains(response, order_invoice.number)
+
+    def test_search_matches_the_purchasers_name(self):
+        match = Member.objects.create(first_name="Zelda", last_name="Zephyr")
+        other = Member.objects.create(first_name="Olly", last_name="Orderer")
+        matching_invoice = create_invoice_for_order(Order.objects.create(club=self.club, purchaser=match, total=Decimal("10.00")))
+        other_invoice = create_invoice_for_order(Order.objects.create(club=self.club, purchaser=other, total=Decimal("10.00")))
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("invoice_list", params={"q": "Zelda"})
+
+        self.assertContains(response, matching_invoice.number)
+        self.assertNotContains(response, other_invoice.number)
+
+    def test_search_matches_by_family_name(self):
+        parent = Member.objects.create(first_name="Priya", last_name="Family", email="priya@example.com")
+        child = Member.objects.create(first_name="Cy", last_name="Family")
+        family = Family.objects.create(name="Family")
+        FamilyMembership.objects.create(family=family, member=parent, role=FamilyMembership.FamilyRole.PARENT)
+        FamilyMembership.objects.create(family=family, member=child, role=FamilyMembership.FamilyRole.CHILD)
+        invoice = self.make_dues_invoice(child, recipient_email=parent.email, sent_to_guardian=True)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("invoice_list", params={"q": "Family"})
+
+        self.assertContains(response, invoice.number)
+
+    def test_download_links_point_at_the_right_pdf_view(self):
+        purchaser = Member.objects.create(first_name="Olly", last_name="Orderer")
+        order = Order.objects.create(club=self.club, purchaser=purchaser, total=Decimal("10.00"))
+        create_invoice_for_order(order)
+        dues_member = Member.objects.create(first_name="Dana", last_name="Duesworth", email="dana4@example.com")
+        dues_invoice = self.make_dues_invoice(dues_member)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("invoice_list")
+
+        self.assertContains(response, reverse("management:order_invoice_pdf", args=[order.pk]))
+        self.assertContains(response, reverse("management:membership_invoice_pdf", args=[dues_invoice.membership.pk]))
+
+    def test_rows_are_sorted_newest_first_across_both_kinds(self):
+        purchaser = Member.objects.create(first_name="Olly", last_name="Orderer")
+        older_order = create_invoice_for_order(Order.objects.create(club=self.club, purchaser=purchaser, total=Decimal("1")))
+        older_order.issued_at = timezone.now() - datetime.timedelta(days=5)
+        older_order.save(update_fields=["issued_at"])
+        dues_member = Member.objects.create(first_name="Dana", last_name="Duesworth", email="dana5@example.com")
+        newer_dues = self.make_dues_invoice(dues_member)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("invoice_list")
+
+        self.assertLess(response.content.find(newer_dues.number.encode()), response.content.find(older_order.number.encode()))
+
+    def test_pagination_splits_the_merged_list(self):
+        purchaser = Member.objects.create(first_name="Olly", last_name="Orderer")
+        for _i in range(26):
+            create_invoice_for_order(Order.objects.create(club=self.club, purchaser=purchaser, total=Decimal("1")))
+        self.client.force_login(self.admin_user)
+
+        first_page = self.club_get("invoice_list")
+        second_page = self.club_get("invoice_list", params={"page": 2})
+
+        self.assertEqual(len(first_page.context["invoices"]), 25)
+        self.assertEqual(len(second_page.context["invoices"]), 1)
 
 
 class ShopToggleViewTests(ShopTestBase):

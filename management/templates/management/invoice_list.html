@@ -1,12 +1,48 @@
 {% extends "management/base.html" %}
 {% load i18n lucide ui %}
 
+{% comment %}
+    Every invoice this club has sent -- shop order invoices and membership
+    dues invoices together (InvoiceListView merges/sorts/paginates the two
+    in Python, they're different tables). Dues rows are only ever present
+    for an admin (can_see_dues) -- a ShopManager who isn't also an admin
+    still gets this page for their own order invoices, the type filter just
+    never offers "Dues" for them, same financial-data boundary
+    MembershipListView already draws.
+
+    No detail page of its own -- "View" on either kind of row lands on the
+    order/membership page that already shows everything about it, same as
+    this page's own shop-only predecessor.
+{% endcomment %}
+
 {% block panel_title %}{% trans "Invoices" %}{% endblock panel_title %}
 {% block heading %}{% trans "Invoices" %}{% endblock heading %}
 
 {% block topbar_context %}
-    <span class="badge badge-neutral">{% blocktrans count counter=invoices|length %}{{ counter }} invoice{% plural %}{{ counter }} invoices{% endblocktrans %}</span>
+    <span class="badge badge-neutral">{% blocktrans count counter=total_count %}{{ counter }} invoice{% plural %}{{ counter }} invoices{% endblocktrans %}</span>
 {% endblock topbar_context %}
+
+{% block filter_strip %}
+    <div class="flex flex-wrap items-center gap-2 border-b border-line bg-white px-7 py-2.5">
+        <form method="get" id="invoice-filters" class="flex flex-wrap items-center gap-2">
+            <div class="relative">
+                <span class="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-dim">{% lucide "search" size=14 %}</span>
+                {# No submit button -- data-autosubmit (base.html-loaded script) submits the form itself, debounced, as soon as typing pauses. #}
+                <input type="search" name="q" value="{{ search }}" placeholder="{% trans 'Name or family ...' %}" class="input w-64 pl-9" data-autosubmit>
+            </div>
+            <select name="type" class="select w-auto" onchange="this.form.submit()">
+                <option value="all" {% if selected_type == "all" %}selected{% endif %}>{% trans "All invoices" %}</option>
+                <option value="order" {% if selected_type == "order" %}selected{% endif %}>{% trans "Orders" %}</option>
+                {% if can_see_dues %}
+                    <option value="dues" {% if selected_type == "dues" %}selected{% endif %}>{% trans "Dues" %}</option>
+                {% endif %}
+            </select>
+            {% if search %}
+                <a class="btn btn-outline gap-2" href="{% url "management:invoice_list" %}">{% lucide "x" size=14 %} {% trans "Clear" %}</a>
+            {% endif %}
+        </form>
+    </div>
+{% endblock filter_strip %}
 
 {% block panel %}
     <div class="card overflow-hidden">
@@ -14,35 +50,47 @@
             <thead>
                 <tr>
                     <th>{% trans "Invoice" %}</th>
-                    <th>{% trans "Order" %}</th>
-                    <th>{% trans "Issued" %}</th>
-                    <th>{% trans "Order status" %}</th>
+                    <th>{% trans "Type" %}</th>
+                    <th>{% trans "Billed to" %}</th>
+                    <th>{% trans "Amount" %}</th>
+                    <th>{% trans "Status" %}</th>
+                    <th>{% trans "Date" %}</th>
+                    <th></th>
                 </tr>
             </thead>
             <tbody>
                 {% for invoice in invoices %}
-                    <tr class="cursor-pointer" onclick="window.location='{% url 'management:order_detail' invoice.order.pk %}'">
+                    <tr>
                         <td class="font-mono text-xs">{{ invoice.number }}</td>
                         <td>
-                            <a class="link link-hover font-mono text-xs" href="{% url 'management:order_detail' invoice.order.pk %}">{{ invoice.order.number }}</a>
-                        </td>
-                        <td class="font-mono text-xs">{{ invoice.issued_at|date:"Y-m-d" }}</td>
-                        <td>
-                            <span class="badge badge-sm
-                                {% if invoice.order.status == "paid" or invoice.order.status == "delivered" %}badge-success
-                                {% elif invoice.order.status == "partially_paid" %}badge-warning
-                                {% elif invoice.order.status == "cancelled" or invoice.order.status == "refunded" %}badge-error
-                                {% else %}badge-neutral{% endif %}">
-                                {{ invoice.order.get_status_display }}
+                            <span class="inline-flex items-center gap-1.5 text-sm text-muted">
+                                {% if invoice.kind == "order" %}{% lucide "shopping-bag" size=13 %}{% else %}{% lucide "wallet" size=13 %}{% endif %}
+                                {{ invoice.kind_label }}
                             </span>
+                        </td>
+                        <td>
+                            <a class="link link-hover font-semibold" href="{% url 'management:member_detail' invoice.billed_to.pk %}">{{ invoice.billed_to }}</a>
+                        </td>
+                        <td class="font-mono text-xs tabular-nums">&euro; {{ invoice.amount }}</td>
+                        <td>
+                            <span class="badge badge-sm {{ invoice.status_css }}">{{ invoice.status_label }}</span>
+                        </td>
+                        <td class="font-mono text-xs">{{ invoice.date|date:"Y-m-d"|default:"—" }}</td>
+                        <td class="text-right">
+                            <div class="flex justify-end gap-1">
+                                <a class="btn btn-outline btn-xs gap-1" href="{{ invoice.detail_url }}">{% lucide "eye" size=12 %} {% trans "View" %}</a>
+                                <a class="btn btn-outline btn-xs gap-1" href="{{ invoice.download_url }}">{% lucide "file-down" size=12 %} {% trans "Download" %}</a>
+                            </div>
                         </td>
                     </tr>
                 {% empty %}
                     <tr>
-                        <td colspan="4" class="text-center text-dim">{% trans "No invoices yet." %}</td>
+                        <td colspan="7" class="text-center text-dim">{% trans "No invoices yet." %}</td>
                     </tr>
                 {% endfor %}
             </tbody>
         </table>
     </div>
+
+    {% include "management/_pagination.html" %}
 {% endblock panel %}

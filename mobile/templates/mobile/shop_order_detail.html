@@ -52,7 +52,13 @@
     </div>
 
     {% if order.invoice %}
-        <a class="btn btn-secondary w-full" href="{% url "mobile:shop_invoice" order.pk %}">
+        {% comment %}
+            hx-boost="false": this returns a PDF, not HTML -- boosted, htmx
+            fetches it via AJAX and swaps the raw bytes into the page as if
+            they were markup (same reasoning as calendar_feed_settings.html's
+            own webcal link).
+        {% endcomment %}
+        <a class="btn btn-secondary w-full" href="{% url "mobile:shop_invoice" order.pk %}" hx-boost="false">
             {% lucide "file-down" size=16 %} {% trans "Download invoice" %}
         </a>
     {% endif %}

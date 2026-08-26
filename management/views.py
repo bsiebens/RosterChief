@@ -1,6 +1,7 @@
 from datetime import date, timedelta
 from decimal import Decimal
 
+from django.core.paginator import Paginator
 from django.db import IntegrityError, transaction
 from django.db.models import Count, ProtectedError, Q, Sum
 from django.http import FileResponse, Http404, HttpResponse, JsonResponse
@@ -4086,15 +4087,136 @@ class InvoicePdfView(ShopManagerRequiredMixin, View):
         return response
 
 
-class InvoiceListView(ShopManagerRequiredMixin, ListView):
-    """Read-only -- there's nothing on an Invoice worth its own detail page
-    beyond what the order detail already shows, so every row links there."""
+def _order_invoice_status(order):
+    if order.status in (Order.OrderStatus.PAID, Order.OrderStatus.DELIVERED):
+        return _("Paid"), "badge-success"
+    if order.status == Order.OrderStatus.READY_FOR_PICKUP:
+        return order.get_status_display(), "badge-info"
+    if order.status == Order.OrderStatus.PARTIALLY_PAID:
+        return order.get_status_display(), "badge-warning"
+    if order.status in (Order.OrderStatus.CANCELLED, Order.OrderStatus.REFUNDED):
+        return order.get_status_display(), "badge-error"
+    return order.get_status_display(), "badge-neutral"
+
+
+def _dues_invoice_status(invoice):
+    if invoice.is_paid:
+        return _("Paid"), "badge-success"
+    if invoice.is_overdue:
+        return _("Overdue"), "badge-error"
+    return _("Sent"), "badge-neutral"
+
+
+class InvoiceListView(ShopManagerRequiredMixin, TemplateView):
+    """Every invoice this club has ever sent -- shop order invoices and
+    membership dues invoices together, newest first, with a type filter and
+    a name/family search. Different models with no shared table to query in
+    one go, so each is fetched (search/type-filtered at the DB level, one
+    query per kind) and normalised into the same row shape, then merged,
+    sorted, and paginated in Python -- fine at a single club's scale
+    (invoices in the dozens/hundreds), and far simpler than a raw SQL UNION
+    across two differently-shaped tables. There's nothing on either invoice
+    worth its own detail page beyond what the order/membership page already
+    shows, so every row's "View" link lands there, same reasoning the old
+    shop-only version of this page already had.
+
+    Dues invoices are financial member data -- ClubAdminRequiredMixin-only
+    everywhere else in the app (see MembershipListView's own docstring), so
+    a ShopManager who isn't also an admin gets this page (they already see
+    order invoices) but never sees a dues row, regardless of ?type=."""
 
     template_name = "management/invoice_list.html"
-    context_object_name = "invoices"
+    paginate_by = 25
 
-    def get_queryset(self):
-        return Invoice.objects.filter(club=self.request.club).select_related("order")
+    def get_context_data(self, **kwargs):
+        club = self.request.club
+        is_admin = is_club_admin(self.request.user, club)
+        selected_type = self.request.GET.get("type", "all")
+        if selected_type not in ("order", "dues"):
+            selected_type = "all"
+        search = self.request.GET.get("q", "").strip()
+
+        rows = []
+        if selected_type in ("all", "order"):
+            rows.extend(self._order_rows(club, search))
+        if is_admin and selected_type in ("all", "dues"):
+            rows.extend(self._dues_rows(club, search))
+        rows.sort(key=lambda row: row["date"] or date.min, reverse=True)
+
+        page_obj = Paginator(rows, self.paginate_by).get_page(self.request.GET.get("page"))
+
+        return super().get_context_data(
+            invoices=page_obj.object_list,
+            page_obj=page_obj,
+            paginator=page_obj.paginator,
+            is_paginated=page_obj.has_other_pages(),
+            total_count=len(rows),
+            selected_type=selected_type,
+            search=search,
+            can_see_dues=is_admin,
+            **kwargs,
+        )
+
+    @staticmethod
+    def _search_by_member_or_family(queryset, prefix, search):
+        # Also matches by family -- searching "Smith" finds every invoice for
+        # a family that has an explicit name of "Smith" or that includes
+        # anyone surnamed Smith, not just an invoice literally billed to a
+        # Smith -- same search shape as MembershipListView's own ?q=.
+        return (
+            queryset.filter(**{f"{prefix}__first_name__icontains": search})
+            | queryset.filter(**{f"{prefix}__last_name__icontains": search})
+            | queryset.filter(**{f"{prefix}__family_memberships__family__name__icontains": search})
+            | queryset.filter(**{f"{prefix}__family_memberships__family__memberships__member__last_name__icontains": search})
+        ).distinct()
+
+    def _order_rows(self, club, search):
+        invoices = Invoice.objects.filter(club=club).select_related("order__purchaser")
+        if search:
+            invoices = self._search_by_member_or_family(invoices, "order__purchaser", search)
+
+        rows = []
+        for invoice in invoices:
+            status_label, status_css = _order_invoice_status(invoice.order)
+            rows.append(
+                {
+                    "kind": "order",
+                    "kind_label": _("Order"),
+                    "number": invoice.number,
+                    "billed_to": invoice.order.purchaser,
+                    "amount": invoice.order.total,
+                    "date": invoice.issued_at.date() if invoice.issued_at else None,
+                    "status_label": status_label,
+                    "status_css": status_css,
+                    "detail_url": reverse("management:order_detail", kwargs={"pk": invoice.order.pk}),
+                    "download_url": reverse("management:order_invoice_pdf", kwargs={"pk": invoice.order.pk}),
+                }
+            )
+        return rows
+
+    def _dues_rows(self, club, search):
+        invoices = DuesInvoice.objects.filter(club=club, sent_at__isnull=False).select_related("membership__member")
+        if search:
+            invoices = self._search_by_member_or_family(invoices, "membership__member", search)
+
+        rows = []
+        for invoice in invoices:
+            status_label, status_css = _dues_invoice_status(invoice)
+            rows.append(
+                {
+                    "kind": "dues",
+                    "kind_label": _("Dues"),
+                    "number": invoice.number,
+                    "billed_to": invoice.membership.member,
+                    "amount": invoice.amount,
+                    "date": invoice.sent_at.date() if invoice.sent_at else None,
+                    "status_label": status_label,
+                    "status_css": status_css,
+                    "detail_url": reverse("management:membership_invoice_detail", kwargs={"pk": invoice.membership.pk}),
+                    "download_url": reverse("management:membership_invoice_pdf", kwargs={"pk": invoice.membership.pk}),
+                }
+            )
+        return rows
 
 
 class FormListView(FeatureRequiredMixin, StubListMixin, ListView):
