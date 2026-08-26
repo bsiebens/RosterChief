@@ -10,11 +10,17 @@ class Command(ScheduledJobCommand):
     def handle(self, *args, **options):
         until = horizon()
         total = 0
+        series_count = 0
 
-        for series in EventSeries.objects.all():
+        # .iterator(): this runs across every club's every series in one
+        # sweep -- without it, Django caches the whole queryset in memory
+        # before the loop even starts, which grows with the platform, not
+        # with any one run's actual work.
+        for series in EventSeries.objects.iterator(chunk_size=200):
+            series_count += 1
             created = generate_occurrences(series, until)
             total += len(created)
             if created:
                 self.stdout.write(f"{series}: generated {len(created)} occurrence(s).")
 
-        return f"Generated {total} occurrence(s) across {EventSeries.objects.count()} series."
+        return f"Generated {total} occurrence(s) across {series_count} series."

@@ -1,5 +1,6 @@
 import datetime
 
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 from django.utils.translation import gettext as _
 
@@ -26,18 +27,28 @@ class Command(ScheduledJobCommand):
         exactly the flood notify_new_event's own docstring says to avoid. Idempotent
         via Event.deadline_reminder_sent_at: safe to run as often as cron likes without
         double-notifying, and if a run is ever missed, the next one still catches
-        anything whose window hasn't fully closed yet."""
+        anything whose window hasn't fully closed yet.
+
+        The reminder window itself (cutoff - LEAD_TIME <= now < cutoff, where
+        cutoff is deadline-or-start) is pushed into the query via Coalesce
+        rather than fetched-then-filtered in Python: across a whole platform,
+        "not yet reminded, still upcoming" can be a large, slow-draining set
+        (every future event, everywhere), while "actually inside its 7-day
+        reminder window right now" is a small one -- there's no reason to
+        pull the former into memory just to throw most of it straight back
+        out again."""
         now = timezone.now()
         events_reminded = 0
         members_notified = 0
 
-        candidates = Event.objects.filter(cancelled=False, deadline_reminder_sent_at__isnull=True, start__gt=now).select_related("club")
+        candidates = (
+            Event.objects.filter(cancelled=False, deadline_reminder_sent_at__isnull=True, start__gt=now)
+            .annotate(cutoff=Coalesce("deadline", "start"))
+            .filter(cutoff__gt=now, cutoff__lte=now + DEADLINE_REMINDER_LEAD_TIME)
+            .select_related("club")
+            .iterator(chunk_size=200)
+        )
         for event in candidates:
-            cutoff = event.deadline or event.start
-            reminder_at = cutoff - DEADLINE_REMINDER_LEAD_TIME
-            if not (reminder_at <= now < cutoff):
-                continue
-
             member_ids = Attendance.objects.filter(event=event, status=Attendance.AttendanceStatus.NO_RESPONSE).values_list("member_id", flat=True)
             members = Member.objects.filter(id__in=member_ids)
             if members:

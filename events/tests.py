@@ -1,3 +1,4 @@
+import itertools
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from io import StringIO
@@ -8,8 +9,9 @@ from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
 from django.core.management.base import CommandError
-from django.db import IntegrityError
+from django.db import IntegrityError, connection
 from django.test import TestCase
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from waffle import get_waffle_flag_model
 
@@ -869,6 +871,59 @@ class GenerateOccurrencesTests(RecurrenceTestBase):
         first = series.occurrences.order_by("start").first()
         self.assertIsNone(first.gathering)
         self.assertIsNone(first.deadline)
+
+    def test_a_later_run_only_adds_whats_new_since_the_last_occurrence(self):
+        # No COUNT -- this is the open-ended shape the resume path exists for.
+        series = self.make_series(rrule="FREQ=WEEKLY")
+
+        first_batch = generate_occurrences(series, self.anchor + timedelta(days=20))
+        self.assertEqual(len(first_batch), 3)  # anchor, +1w, +2w
+
+        second_batch = generate_occurrences(series, self.anchor + timedelta(days=40))
+
+        self.assertEqual(len(second_batch), 3)  # +3w, +4w, +5w -- not the first 3 again
+        self.assertEqual(series.occurrences.count(), 6)
+        self.assertEqual(len(set(series.occurrences.values_list("start", flat=True))), 6)  # no duplicates
+
+    def test_resume_stays_cheap_regardless_of_how_much_history_already_exists(self):
+        series = self.make_series(rrule="FREQ=WEEKLY")
+        # 200 weeks of "existing" history, well past what a from-scratch walk
+        # to `until` below would ever touch -- created directly, bypassing
+        # generate_occurrences, purely to simulate an old series.
+        Event.objects.bulk_create(
+            [Event(club=self.club, series=series, start=self.anchor + timedelta(weeks=week), title="Weekly Training", kind=Event.EventKind.TRAINING) for week in range(200)]
+        )
+
+        # A generous ceiling, not an exact count -- apply_template's own m2m/
+        # attendance-sync bookkeeping costs a real handful of queries per
+        # *newly created* event regardless of this optimization. The point
+        # here is that cost tracks len(created) (3 -- weeks 199 already
+        # exists, 200/201/202 are new), not the 200 weeks of pre-existing
+        # history: a regression back to re-walking all of it and re-creating
+        # (or re-diffing against) every prior week would blow well past this.
+        with CaptureQueriesContext(connection) as queries:
+            created = generate_occurrences(series, self.anchor + timedelta(weeks=202))
+        self.assertLess(len(queries), 150)
+
+        self.assertEqual(len(created), 3)  # weeks 200, 201, 202 -- not a re-walk of 0-199
+
+    def test_a_count_bounded_rule_is_never_resumed_and_still_stops_at_count(self):
+        series = self.make_series(rrule="FREQ=WEEKLY;COUNT=4")
+
+        generate_occurrences(series, self.anchor + timedelta(days=10))  # partial window
+        generate_occurrences(series, self.anchor + timedelta(days=90))  # much further out
+
+        self.assertEqual(series.occurrences.count(), 4)
+
+    def test_resume_preserves_interval_spacing_for_a_biweekly_rule(self):
+        series = self.make_series(rrule="FREQ=WEEKLY;INTERVAL=2")
+
+        generate_occurrences(series, self.anchor + timedelta(days=20))
+        generate_occurrences(series, self.anchor + timedelta(days=60))
+
+        starts = list(series.occurrences.order_by("start").values_list("start", flat=True))
+        gaps = {b - a for a, b in itertools.pairwise(starts)}
+        self.assertEqual(gaps, {timedelta(weeks=2)})
 
 
 class SingleOccurrenceTests(RecurrenceTestBase):

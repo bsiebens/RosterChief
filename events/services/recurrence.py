@@ -21,8 +21,16 @@ def horizon():
     return timezone.now() + timedelta(days=HORIZON_DAYS)
 
 
-def occurrence_datetimes(series, until):
-    """Expand the series' RRULE from its anchor up to ``until``, minus EXDATEs.
+def occurrence_datetimes(series, until, after=None):
+    """Expand the series' RRULE from ``after`` (default: its own anchor) up
+    to ``until``, minus EXDATEs.
+
+    ``after``, when given, re-anchors the walk at a later point without
+    changing the rule's own cadence: dateutil finds the next valid
+    occurrence *from* that point on, following the same BYDAY/interval
+    pattern, so this safely resumes generation instead of re-walking a
+    series' entire history from its original start every time (see
+    generate_occurrences' own docstring).
 
     ``until`` is the generation horizon; the series' own ``until`` (its formal
     end) further caps it, whichever comes first.
@@ -30,7 +38,7 @@ def occurrence_datetimes(series, until):
     if series.until is not None and series.until < until:
         until = series.until
 
-    rule = rrulestr(series.rrule, dtstart=series.dtstart)
+    rule = rrulestr(series.rrule, dtstart=after or series.dtstart)
     excluded = set(series.excluded_dates)
 
     result = []
@@ -65,12 +73,41 @@ def apply_template(series, event):
 
 
 def generate_occurrences(series, until=None):
-    """Materialise any missing occurrences up to ``until`` (default: horizon)."""
+    """Materialise any missing occurrences up to ``until`` (default: horizon).
+
+    Resumes from the series' own last-generated occurrence rather than
+    re-walking the RRULE from ``series.dtstart`` every time -- for a
+    long-running series, that's the difference between expanding a handful
+    of new dates each run and re-expanding its entire history every single
+    time, forever. Deliberately *not* ``series.generated_until`` as the
+    resume point, tempting as that field looks for this: it's an arbitrary
+    horizon timestamp, not a genuine occurrence of the rule's own cadence,
+    and re-anchoring dateutil's dtstart there breaks phase alignment for
+    anything but a bare FREQ=...;INTERVAL=1 rule -- it'll happily hand back
+    that arbitrary point itself as a spurious "occurrence" purely because
+    it's now the dtstart. The last real occurrence is, by construction,
+    already phase-aligned.
+
+    Skipped for a COUNT=-bounded rule: COUNT is counted from the rule's own
+    dtstart, not from wherever iteration happens to resume, so re-anchoring
+    would silently grant it N *more* occurrences past its original limit.
+    Harmless to just walk those from scratch every time instead -- a
+    COUNT-bounded rule can never produce more than COUNT occurrences ever,
+    so it was never the unbounded, grows-with-the-series'-age case this
+    resume logic exists for in the first place.
+
+    ``existing`` re-checks the resume point itself (so re-anchoring there
+    doesn't recreate it) as a safety net -- scoped to the resume window, not
+    the whole series, so it stays cheap regardless of how old the series is.
+    """
     until = until or horizon()
-    existing = set(series.occurrences.values_list("start", flat=True))
+    last_start = series.occurrences.order_by("-start").values_list("start", flat=True).first()
+    can_resume = last_start is not None and "COUNT=" not in series.rrule.upper()
+    resume_from = last_start if can_resume else series.dtstart
+    existing = set(series.occurrences.filter(start__gte=resume_from).values_list("start", flat=True))
 
     created = []
-    for start in occurrence_datetimes(series, until):
+    for start in occurrence_datetimes(series, until, after=resume_from):
         if start in existing:
             continue
         event = Event(club=series.club, series=series, start=start)
