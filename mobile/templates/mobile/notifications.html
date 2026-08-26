@@ -17,12 +17,23 @@
             <p class="mt-1 text-sm text-muted">{% trans "Once you're linked to a member record, their notifications will show up here." %}</p>
         </div>
     {% else %}
-        <div class="m-card flex items-center gap-3 p-4" x-data="{ requested: false }" x-show="!requested">
+        {% comment %}
+            requested only flips true (hiding this card) once subscribe()'s
+            own promise actually resolves truthy -- it used to flip
+            immediately on click regardless of outcome, so a denied
+            permission or a deployment with no VAPID key configured looked
+            identical to success: the card vanished and nothing else ever
+            happened. failed swaps the description for an explanation
+            instead, and the button stays put so it can be retried (e.g.
+            after fixing the browser's own site permission).
+        {% endcomment %}
+        <div class="m-card flex items-center gap-3 p-4" x-data="{ requested: false, failed: false, pending: false }" x-show="!requested">
             <div class="min-w-0 flex-1">
                 <div class="text-sm font-semibold text-ink">{% trans "Enable push notifications" %}</div>
-                <div class="text-xs text-muted">{% trans "Get notified on this device as soon as something new comes in." %}</div>
+                <div class="text-xs text-muted" x-show="!failed">{% trans "Get notified on this device as soon as something new comes in." %}</div>
+                <div class="text-xs text-club" x-show="failed" x-cloak>{% trans "Couldn't turn on notifications -- check this browser's notification permission for the site, then try again." %}</div>
             </div>
-            <button type="button" class="btn btn-dark shrink-0" @click="window.rosterchiefPush.subscribe(); requested = true">{% trans "Enable" %}</button>
+            <button type="button" class="btn btn-dark shrink-0" :disabled="pending" @click="pending = true; failed = false; requested = await window.rosterchiefPush.subscribe(); failed = !requested; pending = false">{% trans "Enable" %}</button>
         </div>
 
         {% if today or earlier_this_week or older %}

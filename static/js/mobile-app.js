@@ -16,13 +16,29 @@ function urlBase64ToUint8Array(base64String) {
 }
 
 async function subscribe() {
-    if (!("serviceWorker" in navigator) || !("PushManager" in window)) return false;
+    // Every early return here used to fail silently -- the "Enable" button's
+    // own click handler flipped its card away regardless of the outcome, so
+    // a missing VAPID key (nothing to configure client-side, purely a server
+    // deployment gap) or a denied permission looked identical to success:
+    // nothing happened, and nothing said why. console.warn at least gets it
+    // into the browser console; notifications.html's own click handler is
+    // what surfaces the user-visible failure state now.
+    if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
+        console.warn("rosterchiefPush: push notifications aren't supported in this browser.");
+        return false;
+    }
 
     const permission = await Notification.requestPermission();
-    if (permission !== "granted") return false;
+    if (permission !== "granted") {
+        console.warn(`rosterchiefPush: notification permission was ${permission}, not granted.`);
+        return false;
+    }
 
     const publicKey = document.body.dataset.vapidPublicKey;
-    if (!publicKey) return false;
+    if (!publicKey) {
+        console.warn("rosterchiefPush: no VAPID public key configured on the server (DJANGO_VAPID_PUBLIC_KEY) -- push is not set up for this deployment.");
+        return false;
+    }
 
     const registration = await navigator.serviceWorker.ready;
     const subscription = await registration.pushManager.subscribe({
@@ -30,11 +46,15 @@ async function subscribe() {
         applicationServerKey: urlBase64ToUint8Array(publicKey),
     });
 
-    await fetch("/app/push/subscribe/", {
+    const response = await fetch("/app/push/subscribe/", {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-CSRFToken": document.body.dataset.csrftoken || "" },
         body: JSON.stringify(subscription.toJSON()),
     });
+    if (!response.ok) {
+        console.warn(`rosterchiefPush: the server rejected the subscription (${response.status}).`);
+        return false;
+    }
     return true;
 }
 

@@ -1,5 +1,7 @@
 import datetime
+import json
 from decimal import Decimal
+from unittest import mock
 from unittest.mock import patch
 
 from django import forms
@@ -8,7 +10,9 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone, translation
+from django.utils.translation import gettext_lazy as _
 from icalendar import Calendar as ICalCalendar
+from pywebpush import WebPushException
 
 from club.models import Club, ClubMembership, DuesInvoice, MemberRequirementStatus, OnboardingRequirement, Season, Sponsor
 from events.models import Attendance, Competition, Event, EventReferee, EventSeries, Lineup, LineupSelection, Location, Opponent, RefereeSignup
@@ -26,6 +30,7 @@ from teams.models import Position, RefereeLevel, RefereeProfile, StaffAssignment
 from .coach_views import CoachTodayView
 from .models import CalendarFeedToken, PushSubscription
 from .services.icons import render_fallback_icon
+from .services.push import send_push_to_member
 
 User = get_user_model()
 
@@ -219,6 +224,59 @@ class PushSubscribeViewTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 302)
+
+
+@override_settings(VAPID_PRIVATE_KEY="test-private-key", VAPID_ADMIN_EMAIL="admin@example.com")
+class SendPushToMemberTests(TestCase):
+    """mobile.services.push.send_push_to_member -- the regression coverage
+    that was missing when a lazy (gettext_lazy) title/body made it all the
+    way to json.dumps() and blew up, silently, since the only thing that
+    exercised this path in the whole suite before was the (VAPID-disabled,
+    so early-returning before ever reaching the json.dumps call at all)
+    signal wiring in push_new_notification."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        cls.member = Member.objects.create(first_name="Lars", last_name="Bakker")
+        cls.subscription = PushSubscription.objects.create(club=cls.club, member=cls.member, endpoint="https://push.example.com/abc", p256dh="key1", auth="key2")
+
+    @override_settings(VAPID_PRIVATE_KEY="")
+    def test_a_noop_without_a_configured_vapid_key(self):
+        with patch("mobile.services.push.webpush") as mock_webpush:
+            send_push_to_member(self.member, title="Hi", body="There")
+
+        mock_webpush.assert_not_called()
+
+    def test_sends_to_every_subscription(self):
+        with patch("mobile.services.push.webpush") as mock_webpush:
+            send_push_to_member(self.member, title="Hi", body="There")
+
+        mock_webpush.assert_called_once()
+        self.assertEqual(mock_webpush.call_args.kwargs["subscription_info"], self.subscription.as_subscription_info())
+
+    def test_a_lazily_translated_title_and_body_are_json_serialised_without_raising(self):
+        # The exact bug: gettext_lazy() (and the still-lazy result of `_(...) %
+        # {...}`) isn't a plain str, and json.dumps can't serialize it directly.
+        with patch("mobile.services.push.webpush") as mock_webpush:
+            send_push_to_member(self.member, title=_("Reminder"), body=_("Score is %(count)d") % {"count": 3})
+
+        payload = json.loads(mock_webpush.call_args.kwargs["data"])
+        self.assertEqual(payload, {"title": "Reminder", "body": "Score is 3", "url": "/app/"})
+
+    def test_a_gone_subscription_is_deleted_not_retried(self):
+        response = mock.Mock(status_code=410)
+        with patch("mobile.services.push.webpush", side_effect=WebPushException("gone", response=response)):
+            send_push_to_member(self.member, title="Hi", body="There")
+
+        self.assertFalse(PushSubscription.objects.filter(pk=self.subscription.pk).exists())
+
+    def test_a_transient_failure_is_logged_not_raised_and_keeps_the_subscription(self):
+        response = mock.Mock(status_code=500)
+        with patch("mobile.services.push.webpush", side_effect=WebPushException("server error", response=response)):
+            send_push_to_member(self.member, title="Hi", body="There")  # must not raise
+
+        self.assertTrue(PushSubscription.objects.filter(pk=self.subscription.pk).exists())
 
 
 class RenderFallbackIconTests(TestCase):

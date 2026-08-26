@@ -24,7 +24,13 @@ def send_push_to_member(member, *, title: str, body: str, url: str = "/app/") ->
         # Dev/no-config default -- see the settings.py comment next to VAPID_PRIVATE_KEY.
         return
 
-    payload = json.dumps({"title": title, "body": body, "url": url})
+    # str(): title/body often arrive as a gettext_lazy proxy (or the still-lazy
+    # result of formatting one, e.g. `_("...") % {...}` -- Django's lazy strings
+    # stay lazy through `%` too), not a plain str -- json.dumps can't serialize
+    # that object directly and raises TypeError. Forcing it here, once, at the
+    # one place this payload actually gets encoded, is simpler and safer than
+    # auditing every caller across the app that builds a title/body.
+    payload = json.dumps({"title": str(title), "body": str(body), "url": url})
     for subscription in models.PushSubscription.objects.filter(member=member):
         try:
             webpush(

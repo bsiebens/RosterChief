@@ -47,41 +47,57 @@ from django.test.signals import setting_changed
 TEST_PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
 
 
-def _use_isolated_media_root(*args):
-    """Point ``default_storage`` at a fresh, private tempdir instead of the
+def _apply_per_process_test_overrides(*args):
+    """Two settings that need to be forced back to a test-safe value inside
+    *every* process the suite runs in, not just the main one -- see
+    ``RosterChiefParallelTestSuite`` below for why that distinction matters.
+
+    ``default_storage`` is pointed at a fresh, private tempdir instead of the
     project's real ``media/`` -- shop.services.invoices.render_invoice_pdf /
     club.services.invoicing.invoice_pdf cache their rendered PDF there, keyed
     by the invoice's own pk. Without this, a test run writes real files into
     the project's actual media directory, and a cached file from one test
     would silently survive into the next (disk writes aren't rolled back the
-    way the per-test DB transaction is).
+    way the per-test DB transaction is). It's a lazy wrapper that only
+    re-reads MEDIA_ROOT when its cache is invalidated, which is what
+    actually honours a plain ``override_settings(MEDIA_ROOT=...)`` too --
+    setting the value alone is not enough, the signal is what forces the
+    rebuild.
+
+    ``VAPID_PRIVATE_KEY`` is forced empty regardless of whatever a
+    developer's own ``.env`` has configured for the real "Enable push
+    notifications" button -- mobile.services.push.send_push_to_member treats
+    an empty key as "push isn't set up, no-op" (see its own comment), which
+    is what practically every test that creates a Notification is silently
+    relying on. A real key turns that into a genuine outbound webpush() call
+    on every one of them -- at best pointless network I/O, at worst a hang
+    or a flood of failures against a real push service, and it was a real
+    key in a developer's own .env that surfaced exactly that the first time
+    this override didn't exist yet.
 
     ``*args`` because ``ParallelTestSuite.process_setup`` is invoked as a
     plain function (its own ``__func__``, unbound from any instance -- see
     ``_init_worker`` in django/test/runner.py) with whatever
     ``process_setup_args`` was set to; called with none here, but the
     signature still needs to accept them.
-
-    default_storage is a lazy wrapper that only re-reads MEDIA_ROOT when its
-    cache is invalidated, which is what actually honours a plain
-    ``override_settings(MEDIA_ROOT=...)`` too -- setting the value alone is
-    not enough, the signal is what forces the rebuild.
     """
     settings.MEDIA_ROOT = tempfile.mkdtemp(prefix="rosterchief-test-media-")
     setting_changed.send(sender=None, setting="STORAGES", value=settings.STORAGES, enter=True)
+    settings.VAPID_PRIVATE_KEY = ""
 
 
 class RosterChiefParallelTestSuite(ParallelTestSuite):
-    """Runs ``_use_isolated_media_root`` inside every spawned worker process
-    too -- ``RosterChiefTestRunner.setup_test_environment`` only ever runs
-    once, in the main process, before workers are spawned. On macOS/Windows
-    (multiprocessing's ``spawn`` start method), each worker is a fresh
-    interpreter that re-reads settings.py from scratch and never inherits
-    that one-time override, so without this, parallel runs quietly leaked
-    cached PDFs into the real media/ directory while a serial run looked
+    """Runs ``_apply_per_process_test_overrides`` inside every spawned worker
+    process too -- ``RosterChiefTestRunner.setup_test_environment`` only ever
+    runs once, in the main process, before workers are spawned. On macOS/
+    Windows (multiprocessing's ``spawn`` start method), each worker is a
+    fresh interpreter that re-reads settings.py from scratch and never
+    inherits that one-time override, so without this, parallel runs quietly
+    leaked cached PDFs into the real media/ directory (and, pre-VAPID-override,
+    would have sent real push notifications) while a serial run looked
     perfectly clean."""
 
-    process_setup = _use_isolated_media_root
+    process_setup = _apply_per_process_test_overrides
 
 
 def _cached_template_loaders(templates):
@@ -137,7 +153,7 @@ class RosterChiefTestRunner(DiscoverRunner):
         # Covers the serial/main-process case; RosterChiefParallelTestSuite
         # (above) covers each spawned worker under --parallel, which never
         # runs this method at all -- see its own docstring.
-        _use_isolated_media_root()
+        _apply_per_process_test_overrides()
 
         settings.TEMPLATES = _cached_template_loaders(settings.TEMPLATES)
         # The template engines are built lazily and cached; this is the same signal
