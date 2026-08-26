@@ -17,7 +17,7 @@ class Command(ScheduledJobCommand):
         (see DEPLOYMENT.md's "Scheduled jobs"), unlike this app's other daily jobs,
         since a schedule set for a specific time should take effect close to it, not
         up to a day late."""
-        due = Lineup.objects.filter(published_at__isnull=True, scheduled_publish_at__isnull=False, scheduled_publish_at__lte=timezone.now())
+        due = Lineup.objects.filter(published_at__isnull=True, scheduled_publish_at__isnull=False, scheduled_publish_at__lte=timezone.now()).iterator(chunk_size=200)
         count = 0
         for lineup in due:
             publish_lineup(lineup)

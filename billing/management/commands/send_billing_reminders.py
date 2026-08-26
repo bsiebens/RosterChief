@@ -25,7 +25,7 @@ class Command(ScheduledJobCommand):
         parser.add_argument("--force", action="store_true", help="Re-send even where a reminder already went out at this level.")
 
     def handle(self, *args, **options):
-        clubs = Club.objects.active().select_related("subscription", "subscription__plan").order_by("name")
+        clubs = Club.objects.active().select_related("subscription", "subscription__plan").order_by("name").iterator(chunk_size=200)
         results = reminders_to_send(clubs, force=options["force"])
 
         sendable = [result for result in results if result.sent]

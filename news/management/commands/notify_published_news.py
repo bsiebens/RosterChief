@@ -27,7 +27,7 @@ class Command(ScheduledJobCommand):
     job_name = "news.tasks.notify_news_published"
 
     def handle(self, *args, **options):
-        due = News.objects.filter(status=News.Status.PUBLISHED, published_at__lte=timezone.now(), notified_at__isnull=True).select_related("club").prefetch_related("teams")
+        due = News.objects.filter(status=News.Status.PUBLISHED, published_at__lte=timezone.now(), notified_at__isnull=True).select_related("club").prefetch_related("teams").iterator(chunk_size=200)
 
         items_notified = 0
         members_notified = 0
