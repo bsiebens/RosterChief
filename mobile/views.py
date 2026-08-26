@@ -9,7 +9,7 @@ from decimal import Decimal
 
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.paginator import Paginator
-from django.db.models import Count, Q
+from django.db.models import Count, F, Q
 from django.http import Http404, HttpResponse, HttpResponseBadRequest, HttpResponseRedirect, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.template.loader import render_to_string
@@ -36,7 +36,7 @@ from members.views import ClubScopedPublicMixin
 from news.models import News
 from news.services import render_body_html
 from notifications.models import Notification
-from shop.models import Cart, CartItem, Order, Product, ProductCategory
+from shop.models import Cart, CartItem, Order, Product, ProductCategory, Voucher
 from shop.services.checkout import CheckoutError, find_discount, place_order
 from shop.services.invoices import ShopInvoicePDFError, render_invoice_pdf
 from shop.services.pricing import cart_totals
@@ -752,12 +752,23 @@ class MeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         if self.me is not None and season is not None:
             staff_assignments = list(StaffAssignment.objects.filter(member=self.me, season=season).select_related("team", "position").order_by("team__name"))
 
+        # Same managed_people aggregation as people_rows/open_dues_count above --
+        # a voucher issued to a managed child is just as much "mine" here as
+        # one issued to self.me. Fully consumed ones are excluded outright
+        # (nothing left to show for), but an expired or deactivated one with
+        # money still nominally on it stays visible with its own status pill --
+        # that's information, not just a used-up husk.
+        vouchers = []
+        if self.managed_people:
+            vouchers = list(Voucher.objects.filter(club=club, issued_to__in=self.managed_people).exclude(consumed_amount__gte=F("amount")).select_related("issued_to").order_by("expiry_date"))
+
         return super().get_context_data(
             member_since=member_since,
             team_manager_label=team_manager_label,
             people_rows=people_rows,
             open_dues_count=open_dues_count,
             staff_assignments=staff_assignments,
+            vouchers=vouchers,
             **kwargs,
         )
 

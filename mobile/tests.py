@@ -18,7 +18,7 @@ from events.services.notifications import notify_new_event
 from members.models import Family, FamilyMembership, Member
 from news.models import News, NewsPhoto
 from notifications.models import Notification
-from shop.models import Cart, CartItem, Discount, Order, OrderLine, Product, ProductCategory, ProductVariant
+from shop.models import Cart, CartItem, Discount, Order, OrderLine, Product, ProductCategory, ProductVariant, Voucher
 from shop.services.checkout import place_order
 from shop.services.invoices import create_invoice_for_order
 from teams.models import Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership
@@ -2002,6 +2002,49 @@ class MeViewTests(TestCase):
 
         self.assertContains(response, reverse("mobile:edit_profile", kwargs={"member_id": self.member.pk}))
         self.assertContains(response, reverse("mobile:edit_profile", kwargs={"member_id": self.child.pk}))
+
+    def test_a_voucher_issued_to_self_shows_up(self):
+        voucher = Voucher.objects.create(club=self.club, issued_to=self.member, amount=Decimal("50.00"), expiry_date=timezone.localdate() + datetime.timedelta(days=30))
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, voucher.number)
+        self.assertContains(response, "50.00")
+
+    def test_a_voucher_issued_to_a_managed_child_shows_up(self):
+        Voucher.objects.create(club=self.club, issued_to=self.child, amount=Decimal("20.00"), expiry_date=timezone.localdate() + datetime.timedelta(days=30))
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, "Noor")
+
+    def test_a_fully_used_voucher_is_hidden(self):
+        voucher = Voucher.objects.create(club=self.club, issued_to=self.member, amount=Decimal("50.00"), consumed_amount=Decimal("50.00"), expiry_date=timezone.localdate() + datetime.timedelta(days=30))
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertNotContains(response, voucher.number)
+
+    def test_an_expired_voucher_still_shows_with_its_own_status(self):
+        voucher = Voucher.objects.create(club=self.club, issued_to=self.member, amount=Decimal("50.00"), expiry_date=timezone.localdate() - datetime.timedelta(days=1))
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, voucher.number)
+        self.assertContains(response, "Expired")
+
+    def test_a_voucher_from_another_club_is_not_shown(self):
+        other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
+        Voucher.objects.create(club=other_club, issued_to=self.member, amount=Decimal("50.00"), expiry_date=timezone.localdate() + datetime.timedelta(days=30))
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertNotContains(response, "€ 50.00")
 
     def test_a_managed_persons_current_season_team_and_number_show_as_the_meta_line(self):
         team = Team.objects.create(club=self.club, name="U16", short_name="U16")
