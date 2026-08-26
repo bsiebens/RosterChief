@@ -1,37 +1,79 @@
 {% extends "management/base.html" %}
-{% load i18n lucide ui %}
+{% load i18n lucide ui static %}
 
 {% block panel_title %}{% if update_view %}{% trans "Edit product" %}{% else %}{% trans "New product" %}{% endif %}{% endblock panel_title %}
 {% block heading %}{% if update_view %}{% blocktrans %}Edit {{ object }}{% endblocktrans %}{% else %}{% trans "New product" %}{% endif %}{% endblock heading %}
 
 {% block panel %}
-    <div class="card">
-        <div class="card-body">
-            <form method="post" enctype="multipart/form-data">
-                {% csrf_token %}
+    <form method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        {% if not update_view %}{{ variant_formset.management_form }}{% endif %}
 
-                {% for error in form.non_field_errors %}
+        {% for error in form.non_field_errors %}
+            <div class="alert alert-error mb-4">
+                {% lucide "circle-x" size=18 %}
+                <span>{{ error }}</span>
+            </div>
+        {% endfor %}
+
+        <div class="card mb-4 card-body">
+            <h2 class="card-title">{% trans "Basics" %}</h2>
+            {% form_field form.name %}
+            <div class="grid grid-cols-2 gap-4">
+                {% form_field form.category %}
+                {% form_field form.price %}
+            </div>
+        </div>
+
+        <div class="card mb-4 card-body">
+            <h2 class="card-title">{% trans "Photo & description" %}</h2>
+            {% form_field form.image %}
+            {% form_field form.description textarea_height="h-28" %}
+        </div>
+
+        <div class="card mb-4 card-body">
+            {% form_field form.is_active show_as_toggle=True %}
+        </div>
+
+        {% if not update_view %}
+            {% comment %}
+                Optional variant rows, filled in right here instead of forcing a
+                save-then-add-variants round trip -- ProductVariantFormSet
+                (management/forms.py), extra=3 blank rows, reusing the same
+                clone-from-<template> mechanism as the team/group bulk-add pages
+                (static/js/bulk-add-rows.js) via matching element ids/classes.
+            {% endcomment %}
+            <div class="card mb-4 card-body">
+                <h2 class="card-title">{% lucide "shirt" size=18 %} {% trans "Options (sizes, colours, ...)" %}</h2>
+                <p class="text-sm text-muted">{% trans "Optional -- leave every row blank to sell this product as-is. A price override only applies if this option costs something different from the product's own price." %}</p>
+
+                {% for error in variant_formset.non_form_errors %}
                     <div class="alert alert-error">
-                        {% lucide "circle-x" size=18 %}
                         <span>{{ error }}</span>
                     </div>
                 {% endfor %}
 
-                <div class="grid grid-cols-2 gap-4">
-                    {% for field in form %}
-                        <div class="{% if field.widget_type == "textarea" or field.widget_type == "clearablefile" %}col-span-2{% endif %}">
-                            {% form_field field %}
-                        </div>
+                <div id="bulk-add-rows" data-prefix="{{ variant_formset.prefix }}" class="flex flex-col gap-2">
+                    {% for vform in variant_formset %}
+                        {% include "management/_product_variant_formset_row.html" with form=vform %}
                     {% endfor %}
                 </div>
 
-                <div class="mt-4 flex justify-start gap-2">
-                    <a class="btn btn-outline gap-2" href="{% url "management:product_list" %}">{% lucide "arrow-left" size=16 %} {% trans "Cancel" %}</a>
-                    <button class="btn btn-primary gap-2" type="submit">{% lucide "save" size=16 %} {% trans "Save" %}</button>
+                <template id="bulk-add-row-template">
+                    {% include "management/_product_variant_formset_row.html" with form=variant_formset.empty_form %}
+                </template>
+
+                <div>
+                    <button class="btn btn-outline btn-sm gap-2" type="button" id="add-row">{% lucide "plus" size=14 %} {% trans "Add another option" %}</button>
                 </div>
-            </form>
+            </div>
+        {% endif %}
+
+        <div class="flex justify-start gap-2">
+            <a class="btn btn-outline gap-2" href="{% url "management:product_list" %}">{% lucide "arrow-left" size=16 %} {% trans "Cancel" %}</a>
+            <button class="btn btn-primary gap-2" type="submit">{% lucide "save" size=16 %} {% trans "Save" %}</button>
         </div>
-    </div>
+    </form>
 
     {% if update_view %}
         {% comment %}
@@ -91,3 +133,9 @@
         {% include "controlpanel/_modal_form.html" with modal_id="add_variant_modal" title=add_variant_label form=variant_form action_url=add_variant_url submit_label=add_variant_label submit_icon="plus" %}
     {% endif %}
 {% endblock panel %}
+
+{% block extra_body %}
+    {% if not update_view %}
+        <script src="{% static 'js/bulk-add-rows.js' %}"></script>
+    {% endif %}
+{% endblock extra_body %}

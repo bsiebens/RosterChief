@@ -2,14 +2,22 @@
 {% load i18n lucide %}
 
 {% comment %}
-    Shop tab landing -- every active+public Product for this club, grid style
-    (photo/name/price), tapping through to shop_product_detail.html. "My
-    orders" and the cart (with its item-count badge) both live in this same
-    header row rather than their own tab-bar slots -- reachable from the Shop
-    tab, same idiom Payments uses hanging off Me.
+    Shop tab landing -- every active+public Product for this club, grouped by
+    ProductCategory into its own labelled section (grid style, photo/name/
+    price), tapping through to shop_product_detail.html. "My orders" and the
+    cart (with its item-count badge) both live in this same header row rather
+    than their own tab-bar slots -- reachable from the Shop tab, same idiom
+    Payments uses hanging off Me.
+
+    The pill row (only shown once there's more than one group -- a single
+    category, or no categories at all, has nothing to jump between) is a
+    same-page #anchor jump, not a filter: every section is always in the DOM
+    and the page still scrolls straight through top to bottom, the pills are
+    just a shortcut past the ones you don't want to scroll past.
 {% endcomment %}
 
 {% block content %}
+    {% trans "Other" as other_label %}
     <div class="flex items-center justify-between">
         <span class="font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Shop" %}</span>
         <div class="flex items-center gap-3">
@@ -26,21 +34,38 @@
     </div>
 
     {% if products %}
-        <div class="grid grid-cols-2 gap-3">
-            {% for product in products %}
-                <a class="m-card block overflow-hidden" href="{% url "mobile:shop_product_detail" product.slug %}">
-                    {% if product.image %}
-                        <img class="h-28 w-full object-cover" src="{{ product.image.url }}" alt="">
-                    {% else %}
-                        <div class="flex h-28 items-center justify-center bg-line text-xs text-dim">{% trans "No photo" %}</div>
-                    {% endif %}
-                    <div class="p-3">
-                        <div class="truncate text-sm font-semibold text-ink">{{ product.name }}</div>
-                        <div class="mt-1 font-display text-base font-extrabold text-club">{% blocktrans with amount=product.price|floatformat:2 %}&euro; {{ amount }}{% endblocktrans %}</div>
-                    </div>
-                </a>
-            {% endfor %}
-        </div>
+        {% if groups|length > 1 %}
+            <div class="scrollbar-hide flex gap-2 overflow-x-auto pb-0.5">
+                {% for group in groups %}
+                    <a class="person-chip pl-2.5" href="#cat-{{ group.category.pk|default:"none" }}">
+                        <span class="person-chip-label">{{ group.category.name|default:other_label }}</span>
+                    </a>
+                {% endfor %}
+            </div>
+        {% endif %}
+
+        {% for group in groups %}
+            <div id="cat-{{ group.category.pk|default:"none" }}" class="shop-category-anchor flex flex-col gap-3">
+                {% if groups|length > 1 %}
+                    <div class="font-display text-xs font-extrabold tracking-wide text-muted uppercase">{{ group.category.name|default:other_label }}</div>
+                {% endif %}
+                <div class="grid grid-cols-2 gap-3">
+                    {% for product in group.products %}
+                        <a class="m-card block overflow-hidden" href="{% url "mobile:shop_product_detail" product.slug %}">
+                            {% if product.image %}
+                                <img class="h-28 w-full object-cover" src="{{ product.image.url }}" alt="">
+                            {% else %}
+                                <div class="flex h-28 items-center justify-center bg-line text-xs text-dim">{% trans "No photo" %}</div>
+                            {% endif %}
+                            <div class="p-3">
+                                <div class="truncate text-sm font-semibold text-ink">{{ product.name }}</div>
+                                <div class="mt-1 font-display text-base font-extrabold text-club">{% blocktrans with amount=product.price|floatformat:2 %}&euro; {{ amount }}{% endblocktrans %}</div>
+                            </div>
+                        </a>
+                    {% endfor %}
+                </div>
+            </div>
+        {% endfor %}
     {% else %}
         <div class="m-card p-6 text-center">
             <p class="text-sm text-muted">{% trans "Nothing in the shop yet." %}</p>

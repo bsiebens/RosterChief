@@ -36,7 +36,7 @@ from members.views import ClubScopedPublicMixin
 from news.models import News
 from news.services import render_body_html
 from notifications.models import Notification
-from shop.models import Cart, CartItem, Order, Product
+from shop.models import Cart, CartItem, Order, Product, ProductCategory
 from shop.services.checkout import CheckoutError, find_discount, place_order
 from shop.services.invoices import ShopInvoicePDFError, render_invoice_pdf
 from shop.services.pricing import cart_totals
@@ -991,10 +991,25 @@ class ShopHomeView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
     active_tab = "shop"
 
     def get_context_data(self, **kwargs):
-        products = Product.objects.filter(club=self.request.club, is_active=True, is_public=True)
+        products = list(Product.objects.filter(club=self.request.club, is_active=True, is_public=True).select_related("category"))
         cart = Cart.objects.filter(club=self.request.club, user=self.request.user, status=Cart.CartStatus.OPEN).first()
         cart_item_count = cart.items.count() if cart is not None else 0
-        return super().get_context_data(products=products, cart_item_count=cart_item_count, **kwargs)
+
+        # One products query total (not one per category) -- see ShopHomeView's
+        # own template for how "groups" feeds both the top pill row (a same-page
+        # anchor jump, not a filter -- the whole grid still scrolls straight
+        # through) and each category's own section.
+        categories = ProductCategory.objects.filter(club=self.request.club).order_by("ordering", "name")
+        groups = []
+        for category in categories:
+            items = [product for product in products if product.category_id == category.pk]
+            if items:
+                groups.append({"category": category, "products": items})
+        uncategorized = [product for product in products if product.category_id is None]
+        if uncategorized:
+            groups.append({"category": None, "products": uncategorized})
+
+        return super().get_context_data(products=products, groups=groups, cart_item_count=cart_item_count, **kwargs)
 
 
 class ShopProductDetailView(ShopScopeMixin, LoginRequiredMixin, TemplateView):

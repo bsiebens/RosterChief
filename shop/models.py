@@ -52,6 +52,25 @@ def save_with_number(instance, save):
                 raise
 
 
+class ProductCategory(ClubScopedModel):
+    """A club-defined grouping for the shop's product grid ("Merch", "Fees",
+    "Season tickets", ...) -- purely organisational, no behaviour of its own.
+    Deleting one un-categorises its products (SET_NULL on Product.category)
+    rather than blocking the delete or taking products down with it."""
+
+    name = models.CharField(_("name"), max_length=255)
+    ordering = models.PositiveSmallIntegerField(_("ordering"), default=0)
+
+    class Meta:
+        verbose_name = _("product category")
+        verbose_name_plural = _("product categories")
+        ordering = ["ordering", "name"]
+        constraints = [UniqueConstraint(fields=["club", "name"], name="unique_category_name_per_club")]
+
+    def __str__(self):
+        return self.name
+
+
 class Product(ClubScopedModel):
     class ProductType(models.TextChoices):
         MEMBERSHIP = "membership", _("Membership")
@@ -61,6 +80,7 @@ class Product(ClubScopedModel):
 
     name = models.CharField(_("name"), max_length=255)
     slug = models.SlugField(_("slug"), max_length=255, blank=True)
+    category = models.ForeignKey(ProductCategory, on_delete=models.SET_NULL, related_name="products", verbose_name=_("category"), blank=True, null=True)
     description = models.TextField(_("description"), blank=True)
     image = models.ImageField(_("photo"), upload_to=product_image_path, blank=True)
     price = models.DecimalField(_("price"), max_digits=10, decimal_places=2, default=0)
@@ -91,7 +111,7 @@ class Product(ClubScopedModel):
         return self.name
 
     def clean(self):
-        validate_club_scope(self, self.club_id, same_club_fields=("season", "staff_role"))
+        validate_club_scope(self, self.club_id, same_club_fields=("season", "staff_role", "category"))
 
 
 class ProductVariant(UUIDModel):

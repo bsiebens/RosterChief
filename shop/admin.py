@@ -10,6 +10,7 @@ from .models import (
     OrderLine,
     Payment,
     Product,
+    ProductCategory,
     ProductVariant,
 )
 
@@ -48,12 +49,19 @@ class ProductVariantInline(admin.TabularInline):
 
 @admin.register(Product)
 class ProductAdmin(ClubScopedFKMixin, admin.ModelAdmin):
-    scoped_fk_fields = ("season", "staff_role")
-    list_display = ["name", "product_type", "club", "is_active", "is_public"]
+    scoped_fk_fields = ("season", "staff_role", "category")
+    list_display = ["name", "product_type", "category", "club", "is_active", "is_public"]
     list_filter = ["club", "product_type", "is_active", "is_public"]
     search_fields = ["name", "slug"]
     prepopulated_fields = {"slug": ["name"]}
     inlines = [ProductVariantInline]
+
+
+@admin.register(ProductCategory)
+class ProductCategoryAdmin(admin.ModelAdmin):
+    list_display = ["name", "ordering", "club"]
+    list_filter = ["club"]
+    search_fields = ["name"]
 
 
 @admin.register(ProductVariant)

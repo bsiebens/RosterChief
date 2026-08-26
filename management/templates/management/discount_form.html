@@ -5,31 +5,44 @@
 {% block heading %}{% if update_view %}{% blocktrans %}Edit {{ object }}{% endblocktrans %}{% else %}{% trans "New discount" %}{% endif %}{% endblock heading %}
 
 {% block panel %}
-    <div class="card">
-        <div class="card-body">
-            <form method="post">
-                {% csrf_token %}
+    <form method="post">
+        {% csrf_token %}
 
-                {% for error in form.non_field_errors %}
-                    <div class="alert alert-error">
-                        {% lucide "circle-x" size=18 %}
-                        <span>{{ error }}</span>
-                    </div>
-                {% endfor %}
+        {% for error in form.non_field_errors %}
+            <div class="alert alert-error mb-4">
+                {% lucide "circle-x" size=18 %}
+                <span>{{ error }}</span>
+            </div>
+        {% endfor %}
 
-                <div class="grid grid-cols-2 gap-4">
-                    {% for field in form %}
-                        <div class="{% if field.widget_type == "textarea" %}col-span-2{% endif %}">
-                            {% form_field field %}
-                        </div>
-                    {% endfor %}
-                </div>
-
-                <div class="mt-4 flex justify-start gap-2">
-                    <a class="btn btn-outline gap-2" href="{% url "management:discount_list" %}">{% lucide "arrow-left" size=16 %} {% trans "Cancel" %}</a>
-                    <button class="btn btn-primary gap-2" type="submit">{% lucide "save" size=16 %} {% trans "Save" %}</button>
-                </div>
-            </form>
+        <div class="card mb-4 card-body">
+            <h2 class="card-title">{% trans "Basics" %}</h2>
+            <div class="grid grid-cols-2 gap-4">
+                {% form_field form.name %}
+                {% form_field form.code %}
+            </div>
         </div>
-    </div>
+
+        <div class="card mb-4 card-body">
+            <h2 class="card-title">{% trans "Amount" %}</h2>
+            <div class="grid grid-cols-2 gap-4">
+                {% form_field form.discount_type %}
+                {% form_field form.discount_amount %}
+            </div>
+        </div>
+
+        <div class="card mb-4 card-body">
+            <h2 class="card-title">{% trans "Description" %}</h2>
+            {% form_field form.description textarea_height="h-28" show_label=False %}
+        </div>
+
+        <div class="card mb-4 card-body">
+            {% form_field form.is_active show_as_toggle=True %}
+        </div>
+
+        <div class="flex justify-start gap-2">
+            <a class="btn btn-outline gap-2" href="{% url "management:discount_list" %}">{% lucide "arrow-left" size=16 %} {% trans "Cancel" %}</a>
+            <button class="btn btn-primary gap-2" type="submit">{% lucide "save" size=16 %} {% trans "Save" %}</button>
+        </div>
+    </form>
 {% endblock panel %}

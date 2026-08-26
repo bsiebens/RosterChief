@@ -143,6 +143,7 @@ def form_field(
     show_placeholder: bool = True,
     show_as_toggle: bool = False,
     size: str = "full",
+    textarea_height: str = "h-72",
 ) -> dict:
     if label is not None:
         field.label = label
@@ -189,4 +190,5 @@ def form_field(
         "show_as_toggle": show_as_toggle,
         "field_type": field_type,
         "size_modifier": size_modifier,
+        "textarea_height": textarea_height,
     }

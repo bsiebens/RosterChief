@@ -28,6 +28,7 @@ from .models import (
     OrderLine,
     Payment,
     Product,
+    ProductCategory,
     ProductVariant,
 )
 from .services.checkout import CheckoutError, find_discount, place_order
@@ -73,6 +74,39 @@ class ProductSlugTests(TestCase):
         product = Product.objects.create(club=self.club, name="Home Jersey")
 
         self.assertEqual(str(product), "Home Jersey")
+
+
+class ProductCategoryModelTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+
+    def test_str_returns_name(self):
+        category = ProductCategory.objects.create(club=self.club, name="Merchandise")
+
+        self.assertEqual(str(category), "Merchandise")
+
+    def test_name_is_unique_per_club(self):
+        ProductCategory.objects.create(club=self.club, name="Merchandise")
+
+        with self.assertRaises(IntegrityError):
+            ProductCategory.objects.create(club=self.club, name="Merchandise")
+
+    def test_the_same_name_is_fine_in_a_different_club(self):
+        other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
+        ProductCategory.objects.create(club=self.club, name="Merchandise")
+
+        ProductCategory.objects.create(club=other_club, name="Merchandise")  # must not raise
+
+    def test_deleting_a_category_uncategorises_its_products_instead_of_deleting_them(self):
+        category = ProductCategory.objects.create(club=self.club, name="Merchandise")
+        product = Product.objects.create(club=self.club, name="Home Jersey", category=category)
+
+        category.delete()
+
+        product.refresh_from_db()
+        self.assertIsNone(product.category)
+        self.assertTrue(Product.objects.filter(pk=product.pk).exists())
 
 
 class ProductVariantModelTests(TestCase):

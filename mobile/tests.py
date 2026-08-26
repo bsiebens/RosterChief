@@ -18,7 +18,7 @@ from events.services.notifications import notify_new_event
 from members.models import Family, FamilyMembership, Member
 from news.models import News, NewsPhoto
 from notifications.models import Notification
-from shop.models import Cart, CartItem, Discount, Order, OrderLine, Product, ProductVariant
+from shop.models import Cart, CartItem, Discount, Order, OrderLine, Product, ProductCategory, ProductVariant
 from shop.services.checkout import place_order
 from teams.models import Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership
 
@@ -4721,6 +4721,45 @@ class ShopHomeViewTests(TestCase):
         response = self._get()
 
         self.assertEqual(response.context["cart_item_count"], 1)
+
+    def test_products_are_grouped_by_category_with_uncategorised_last(self):
+        category = ProductCategory.objects.create(club=self.club, name="Merchandise")
+        categorized = Product.objects.create(club=self.club, name="Home Jersey", price=Decimal("25.00"), category=category)
+        uncategorized = Product.objects.create(club=self.club, name="Donation", price=Decimal("5.00"))
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        groups = response.context["groups"]
+        self.assertEqual(len(groups), 2)
+        self.assertEqual(groups[0]["category"], category)
+        self.assertEqual(groups[0]["products"], [categorized])
+        self.assertIsNone(groups[1]["category"])
+        self.assertEqual(groups[1]["products"], [uncategorized])
+
+    def test_a_single_group_shows_no_category_pills(self):
+        # The pill row is a same-page #jump between sections -- with nothing
+        # to jump between, it shouldn't render at all.
+        Product.objects.create(club=self.club, name="Home Jersey", price=Decimal("25.00"))
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertNotContains(response, 'href="#cat-')
+
+    def test_multiple_categories_show_a_jump_pill_each(self):
+        merch = ProductCategory.objects.create(club=self.club, name="Merchandise")
+        fees = ProductCategory.objects.create(club=self.club, name="Fees")
+        Product.objects.create(club=self.club, name="Home Jersey", price=Decimal("25.00"), category=merch)
+        Product.objects.create(club=self.club, name="Season Fee", price=Decimal("100.00"), category=fees)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, f'href="#cat-{merch.pk}"')
+        self.assertContains(response, f'href="#cat-{fees.pk}"')
+        self.assertContains(response, "Merchandise")
+        self.assertContains(response, "Fees")
 
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])

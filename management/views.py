@@ -53,7 +53,7 @@ from members.services.family import add_child_to_family, add_parent_to_family, a
 from news.models import News, NewsPhoto
 from news.services import dispatch_send_publish_notification, notify_editors_of_pending_review
 from notifications.models import Notification
-from shop.models import Discount, Invoice, Order, Payment, Product, ProductVariant
+from shop.models import Discount, Invoice, Order, Payment, Product, ProductCategory, ProductVariant
 from shop.services.invoices import ShopInvoicePDFError, render_invoice_pdf
 from teams.models import Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
 from teams.services import eligible_roster_members
@@ -87,8 +87,10 @@ from .forms import (
     OpponentForm,
     OrderMarkPaidForm,
     PositionForm,
+    ProductCategoryForm,
     ProductForm,
     ProductVariantForm,
+    ProductVariantFormSet,
     RBIHFImportForm,
     RecordFeePaymentForm,
     RefereeLevelForm,
@@ -3514,23 +3516,58 @@ class ProductListView(ShopManagerRequiredMixin, ListView):
     context_object_name = "products"
 
     def get_queryset(self):
-        return Product.objects.filter(club=self.request.club)
+        return Product.objects.filter(club=self.request.club).select_related("category")
+
+    def get_context_data(self, **kwargs):
+        categories = list(ProductCategory.objects.filter(club=self.request.club))
+        for category in categories:
+            category.edit_form = ProductCategoryForm(instance=category)
+        return super().get_context_data(categories=categories, category_form=ProductCategoryForm(), **kwargs)
 
 
-class ProductCreateView(ShopManagerRequiredMixin, CreateView):
-    model = Product
-    form_class = ProductForm
+class ProductCreateView(ShopManagerRequiredMixin, View):
+    """Product + its first batch of variants in one submit -- the standalone
+    "Add variant" modal (ProductVariantCreateView) still exists for adding
+    more later, but making someone save the product first just to give it
+    sizes was needless friction. A plain View, not CreateView: this needs a
+    second, independent form (the variant formset) alongside ProductForm,
+    which CreateView's single-form flow doesn't have room for."""
+
     template_name = "management/product_form.html"
 
-    def form_valid(self, form):
-        form.instance.club = self.request.club
-        response = super().form_valid(form)
-        body = _("“%(product)s” created.") % {"product": self.object}
-        notify(self.request, f"s|{_('Product created')}|{body}")
-        return response
+    def get_forms(self, data=None):
+        # Product.clean() rejects a category from another club by comparing
+        # against self.club_id -- on a brand-new instance that's still None
+        # until ClubScopedModel.save() auto-assigns it, which only happens
+        # *after* validation. Pre-set it here so full_clean() sees the real
+        # club, not None -- same fix as EventCreateView.get_form_kwargs.
+        return (
+            ProductForm(data, files=self.request.FILES or None, club=self.request.club, instance=Product(club=self.request.club)),
+            ProductVariantFormSet(data, prefix="variants"),
+        )
 
-    def get_success_url(self):
-        return reverse("management:product_list")
+    def render_form(self, form, formset):
+        return render(self.request, self.template_name, {"form": form, "variant_formset": formset})
+
+    def get(self, request, *args, **kwargs):
+        form, formset = self.get_forms()
+        return self.render_form(form, formset)
+
+    def post(self, request, *args, **kwargs):
+        form, formset = self.get_forms(request.POST)
+        if not form.is_valid() or not formset.is_valid():
+            return self.render_form(form, formset)
+
+        with transaction.atomic():
+            product = form.save(commit=False)
+            product.club = request.club
+            product.save()
+            ProductVariant.objects.bulk_create(
+                [ProductVariant(product=product, name=row["name"], price=row.get("price")) for row in formset.cleaned_data if row.get("name")]
+            )
+
+        notify(request, f"s|{_('Product created')}|{_('“%(product)s” created.') % {'product': product}}")
+        return redirect("management:product_list")
 
 
 class ProductUpdateView(ShopManagerRequiredMixin, UpdateView):
@@ -3540,6 +3577,11 @@ class ProductUpdateView(ShopManagerRequiredMixin, UpdateView):
 
     def get_queryset(self):
         return Product.objects.filter(club=self.request.club)
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs["club"] = self.request.club
+        return kwargs
 
     def form_valid(self, form):
         response = super().form_valid(form)
@@ -3562,6 +3604,59 @@ class ProductUpdateView(ShopManagerRequiredMixin, UpdateView):
             variant_form=ProductVariantForm(),
             **kwargs,
         )
+
+
+class ProductCategoryCreateView(ShopManagerRequiredMixin, RedirectOnInvalidMixin, FormView):
+    """Reachable only via the "Add category" modal on the products page --
+    no standalone template, same shape as ProductVariantCreateView."""
+
+    form_class = ProductCategoryForm
+    http_method_names = ["post"]
+    invalid_redirect_url_name = "management:product_list"
+
+    def form_valid(self, form):
+        form.instance.club = self.request.club
+        form.save()
+        response = super().form_valid(form)
+        notify(self.request, f"s|{_('Category added')}|{_('“%(category)s” added.') % {'category': form.instance.name}}")
+        return response
+
+    def get_success_url(self):
+        return reverse("management:product_list")
+
+
+class ProductCategoryUpdateView(ShopManagerRequiredMixin, RedirectOnInvalidMixin, UpdateView):
+    """Reachable only via a category's own "Edit" modal on the products page --
+    same reasoning as ProductCategoryCreateView."""
+
+    model = ProductCategory
+    form_class = ProductCategoryForm
+    http_method_names = ["post"]
+    invalid_redirect_url_name = "management:product_list"
+
+    def get_queryset(self):
+        return ProductCategory.objects.filter(club=self.request.club)
+
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        notify(self.request, f"s|{_('Category updated')}|{_('“%(category)s” updated.') % {'category': self.object.name}}")
+        return response
+
+    def get_success_url(self):
+        return reverse("management:product_list")
+
+
+class ProductCategoryDeleteView(ShopManagerRequiredMixin, View):
+    """No PROTECT to work around -- Product.category is SET_NULL, so deleting
+    a category just un-categorises whatever it held (unlike Product/Variant,
+    which only ever get deactivated)."""
+
+    def post(self, request, pk):
+        category = get_object_or_404(ProductCategory.objects.filter(club=request.club), pk=pk)
+        name = category.name
+        category.delete()
+        notify(request, f"s|{_('Category deleted')}|{_('“%(category)s” deleted.') % {'category': name}}")
+        return redirect("management:product_list")
 
 
 class ProductToggleActiveView(ShopManagerRequiredMixin, View):

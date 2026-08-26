@@ -59,7 +59,7 @@
             {% elif field_type == "textarea" %}
                 <textarea
                         name="{{ field.html_name }}"
-                        class="{% if type == "markdownx" %}markdownx{% endif %} textarea textarea-bordered h-72 w-full {% if field.errors %}textarea-error text-error{% endif %} {% if size_modifier %}textarea-{{ size_modifier }}{% endif %}"
+                        class="{% if type == "markdownx" %}markdownx{% endif %} textarea textarea-bordered {{ textarea_height|default:"h-72" }} w-full {% if field.errors %}textarea-error text-error{% endif %} {% if size_modifier %}textarea-{{ size_modifier }}{% endif %}"
                         {% if show_placeholder %}placeholder="{{ field.label }}"{% endif %}
                 >{{ field.value|default:"" }}</textarea>
 

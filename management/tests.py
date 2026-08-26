@@ -39,7 +39,7 @@ from members.services.claims import children_awaiting_a_parent
 from news.models import News, NewsPhoto
 from news.services import _send_and_mark_notified
 from notifications.models import Notification
-from shop.models import Discount, DiscountType, Invoice, Order, OrderLine, Payment, Product, ProductVariant
+from shop.models import Discount, DiscountType, Invoice, Order, OrderLine, Payment, Product, ProductCategory, ProductVariant
 from shop.services.invoices import ShopInvoicePDFError, create_invoice_for_order
 from teams.models import Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
 from teams.services import eligible_roster_members
@@ -250,6 +250,34 @@ class ActiveNavHighlightTests(ManagementTestBase):
         response = self.club_get("sponsor_list")
 
         self.assertContains(response, f'class="nav-item active" href="{reverse("management:membership_list")}"')
+
+    def test_adding_or_editing_a_product_still_highlights_finance(self):
+        # product_create/product_update had no entry in _NAV_SECTIONS at all,
+        # so the whole sidebar (and the Products sub-item) went dark the
+        # moment you left product_list -- confusing on a page reachable only
+        # via "New product"/"Edit" from that same list.
+        cache.clear()
+        self.addCleanup(cache.clear)
+        get_waffle_flag_model().objects.create(name="shop").clubs.add(self.club)
+        product = Product.objects.create(club=self.club, name="Nav Check Jersey", price=Decimal("10.00"))
+        for name, args in (("product_create", ()), ("product_update", (product.pk,))):
+            with self.subTest(name=name):
+                response = self.club_get(name, *args)
+
+                self.assertContains(response, f'class="nav-item active" href="{reverse("management:membership_list")}"')
+                self.assertContains(response, f'class="nav-subitem active" href="{reverse("management:product_list")}"')
+
+    def test_adding_or_editing_a_discount_still_highlights_finance(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
+        get_waffle_flag_model().objects.create(name="shop").clubs.add(self.club)
+        discount = Discount.objects.create(club=self.club, name="Nav Check Discount", code="NAVCHECK")
+        for name, args in (("discount_create", ()), ("discount_update", (discount.pk,))):
+            with self.subTest(name=name):
+                response = self.club_get(name, *args)
+
+                self.assertContains(response, f'class="nav-item active" href="{reverse("management:membership_list")}"')
+                self.assertContains(response, f'class="nav-subitem active" href="{reverse("management:discount_list")}"')
 
 
 class SidebarThemingTests(ManagementTestBase):
@@ -8261,7 +8289,19 @@ class ShopManagerRBACBoundaryTests(ShopTestBase):
 
 class ProductManagementTests(ShopTestBase):
     def product_data(self, **overrides):
-        data = {"name": "Away Jersey", "description": "", "price": "30.00", "is_active": "on"}
+        data = {
+            "name": "Away Jersey",
+            "description": "",
+            "price": "30.00",
+            "is_active": "on",
+            # ProductCreateView's own variant formset (management/forms.py's
+            # ProductVariantFormSet) -- zero submitted rows is a valid "no
+            # variants yet" formset, same as its extra=3 blank rows unfilled.
+            "variants-TOTAL_FORMS": "0",
+            "variants-INITIAL_FORMS": "0",
+            "variants-MIN_NUM_FORMS": "0",
+            "variants-MAX_NUM_FORMS": "1000",
+        }
         data.update(overrides)
         return data
 
@@ -8344,6 +8384,122 @@ class ProductManagementTests(ShopTestBase):
         # path, see ProductToggleActiveView's own docstring.
         with self.assertRaises(NoReverseMatch):
             reverse("management:product_delete")
+
+    def test_a_product_can_be_created_with_a_category(self):
+        category = ProductCategory.objects.create(club=self.club, name="Merchandise")
+        self.client.force_login(self.make_shop_manager())
+
+        self.club_post("product_create", self.product_data(category=category.pk))
+
+        product = Product.objects.get(club=self.club, name="Away Jersey")
+        self.assertEqual(product.category, category)
+
+    def test_a_category_from_another_club_is_rejected(self):
+        other_club = Club.objects.create(name="Other Club", slug="other-club-cat")
+        other_category = ProductCategory.objects.create(club=other_club, name="Foreign")
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_post("product_create", self.product_data(category=other_category.pk))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Product.objects.filter(club=self.club, name="Away Jersey").exists())
+
+
+class ProductCreateWithVariantsTests(ShopTestBase):
+    """The create-product page's own variant formset (ProductVariantFormSet) --
+    lets a club fill in "Small"/"Medium"/"Large" rows right on the create
+    form instead of saving the product first. See ProductManagementTests'
+    own product_data() for the formset's management-form fields."""
+
+    def formset_data(self, *rows):
+        data = {"variants-TOTAL_FORMS": str(len(rows)), "variants-INITIAL_FORMS": "0", "variants-MIN_NUM_FORMS": "0", "variants-MAX_NUM_FORMS": "1000"}
+        for index, row in enumerate(rows):
+            for field, value in row.items():
+                data[f"variants-{index}-{field}"] = value
+        return data
+
+    def test_variant_rows_are_created_alongside_the_product(self):
+        self.client.force_login(self.make_shop_manager())
+        data = {"name": "Away Jersey", "description": "", "price": "30.00", "is_active": "on"}
+        data.update(self.formset_data({"name": "Small"}, {"name": "Large", "price": "35.00"}))
+
+        response = self.club_post("product_create", data)
+
+        self.assertRedirects(response, reverse("management:product_list"))
+        product = Product.objects.get(club=self.club, name="Away Jersey")
+        self.assertEqual(product.variants.count(), 2)
+        self.assertEqual(product.variants.get(name="Large").price, Decimal("35.00"))
+
+    def test_a_blank_row_is_simply_skipped(self):
+        self.client.force_login(self.make_shop_manager())
+        data = {"name": "Away Jersey", "description": "", "price": "30.00", "is_active": "on"}
+        data.update(self.formset_data({"name": "Small"}, {"name": ""}))
+
+        self.club_post("product_create", data)
+
+        product = Product.objects.get(club=self.club, name="Away Jersey")
+        self.assertEqual(product.variants.count(), 1)
+
+    def test_two_rows_with_the_same_name_are_rejected(self):
+        self.client.force_login(self.make_shop_manager())
+        data = {"name": "Away Jersey", "description": "", "price": "30.00", "is_active": "on"}
+        data.update(self.formset_data({"name": "Small"}, {"name": "small"}))
+
+        response = self.club_post("product_create", data)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Product.objects.filter(club=self.club, name="Away Jersey").exists())
+
+
+class ProductCategoryManagementTests(ShopTestBase):
+    def test_a_shop_manager_can_add_a_category(self):
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_post("product_category_create", {"name": "Merchandise", "ordering": "0"})
+
+        self.assertRedirects(response, reverse("management:product_list"))
+        self.assertTrue(ProductCategory.objects.filter(club=self.club, name="Merchandise").exists())
+
+    def test_plain_staff_cannot_add_a_category(self):
+        self.client.force_login(self.make_plain_staff())
+
+        response = self.club_post("product_category_create", {"name": "Merchandise", "ordering": "0"})
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(ProductCategory.objects.filter(club=self.club, name="Merchandise").exists())
+
+    def test_a_shop_manager_can_edit_a_category(self):
+        category = ProductCategory.objects.create(club=self.club, name="Merch")
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_post("product_category_update", {"name": "Merchandise", "ordering": "1"}, category.pk)
+
+        self.assertRedirects(response, reverse("management:product_list"))
+        category.refresh_from_db()
+        self.assertEqual(category.name, "Merchandise")
+        self.assertEqual(category.ordering, 1)
+
+    def test_deleting_a_category_uncategorises_its_products(self):
+        category = ProductCategory.objects.create(club=self.club, name="Merch")
+        self.product.category = category
+        self.product.save(update_fields=["category"])
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_post("product_category_delete", {}, category.pk)
+
+        self.assertRedirects(response, reverse("management:product_list"))
+        self.assertFalse(ProductCategory.objects.filter(pk=category.pk).exists())
+        self.product.refresh_from_db()
+        self.assertIsNone(self.product.category)
+
+    def test_a_category_from_another_club_404s(self):
+        other_club = Club.objects.create(name="Other Club", slug="other-club-cat2")
+        other_category = ProductCategory.objects.create(club=other_club, name="Foreign")
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_post("product_category_update", {"name": "Hijacked", "ordering": "0"}, other_category.pk)
+
+        self.assertEqual(response.status_code, 404)
 
 
 class ProductVariantManagementTests(ShopTestBase):

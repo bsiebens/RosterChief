@@ -13,7 +13,7 @@ from events.services.rbihf_import import RBIHFImportError, extract_team_id
 from members.models import Family, FamilyMembership, Group, Member
 from members.services.family import find_member_by_email
 from news.models import News
-from shop.models import Discount, Payment, Product, ProductVariant
+from shop.models import Discount, Payment, Product, ProductCategory, ProductVariant
 from teams.models import Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
 from teams.services import eligible_roster_members
 
@@ -993,11 +993,22 @@ class SignupTeamPlacementForm(forms.ModelForm):
         self.fields["team"].queryset = Team.objects.filter(club=club)
 
 
+class ProductCategoryForm(forms.ModelForm):
+    class Meta:
+        model = ProductCategory
+        fields = ["name", "ordering"]
+
+
 class ProductForm(forms.ModelForm):
     class Meta:
         model = Product
-        fields = ["name", "description", "image", "price", "is_active"]
+        fields = ["name", "category", "description", "image", "price", "is_active"]
         widgets = {"image": forms.ClearableFileInput(attrs={"accept": "image/png,image/jpeg,image/gif,image/webp"})}
+
+    def __init__(self, *args, club=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["category"].queryset = ProductCategory.objects.filter(club=club)
+        self.fields["category"].empty_label = _("No category")
 
 
 class ProductVariantForm(forms.ModelForm):
@@ -1008,6 +1019,49 @@ class ProductVariantForm(forms.ModelForm):
     class Meta:
         model = ProductVariant
         fields = ["name", "price", "is_active"]
+
+
+class ProductVariantRowForm(forms.Form):
+    """One row of the create-product page's own variant formset -- entirely
+    optional, unlike ProductVariantForm's own required name: a row left blank
+    is simply skipped, same "extra" idiom as TeamBulkAddFormSet's rows. Kept
+    separate from ProductVariantForm (a ModelForm) since there's no Product
+    to attach these to until the product itself is actually saved -- the view
+    builds ProductVariant instances from the cleaned rows afterwards."""
+
+    name = forms.CharField(label=_("Name"), max_length=255, required=False, widget=forms.TextInput(attrs={"class": "input input-bordered w-full", "placeholder": _("e.g. Small")}))
+    price = forms.DecimalField(label=_("Price override"), max_digits=10, decimal_places=2, required=False, widget=forms.NumberInput(attrs={"class": "input input-bordered w-full", "step": "0.01", "placeholder": _("Same as product")}))
+
+    def clean(self):
+        cleaned = super().clean()
+        if cleaned.get("price") is not None and not cleaned.get("name"):
+            self.add_error("name", _("Give this option a name too."))
+        return cleaned
+
+
+class BaseProductVariantFormSet(forms.BaseFormSet):
+    """Catches two rows claiming the same name -- ProductVariant's own
+    unique-per-product constraint would reject the second at save time, but
+    that's a worse error to discover after the product itself has already
+    been created."""
+
+    def clean(self):
+        super().clean()
+        if any(self.errors):
+            return
+
+        seen = set()
+        for form in self.forms:
+            name = (form.cleaned_data or {}).get("name")
+            if not name:
+                continue
+            key = name.strip().lower()
+            if key in seen:
+                form.add_error("name", _("This option is listed twice."))
+            seen.add(key)
+
+
+ProductVariantFormSet = forms.formset_factory(ProductVariantRowForm, formset=BaseProductVariantFormSet, extra=3)
 
 
 class DiscountForm(forms.ModelForm):

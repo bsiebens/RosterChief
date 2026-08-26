@@ -52,12 +52,68 @@
         </div>
     </div>
 
+    {% comment %}
+        Categories -- purely organisational (ProductCategory's own docstring):
+        group the shop's product grid on the mobile app, and give the product
+        form's own category picker something to choose from. Managed here,
+        card-and-modals like Variants on the product edit page, rather than a
+        whole standalone list page -- there's rarely more than a handful.
+    {% endcomment %}
+    <div class="card mb-4 card-body">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+            <h2 class="card-title">{% lucide "tag" size=18 %} {% trans "Categories" %}</h2>
+            <button class="btn btn-outline btn-sm gap-2" type="button" onclick="document.getElementById('add_category_modal').showModal()">{% lucide "plus" size=14 %} {% trans "Add category" %}</button>
+        </div>
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>{% trans "Ordering" %}</th>
+                    <th>{% trans "Name" %}</th>
+                    <th>{% trans "Products" %}</th>
+                    <th></th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for category in categories %}
+                    <tr>
+                        <td class="font-mono text-muted">{{ category.ordering }}</td>
+                        <td class="font-semibold text-ink">{{ category.name }}</td>
+                        <td class="text-muted">{{ category.products.count }}</td>
+                        <td class="text-right">
+                            <button class="btn btn-outline btn-xs gap-1" type="button" onclick="document.getElementById('{{ category.pk|dom_id:"edit_category_modal" }}').showModal()">{% lucide "pencil" size=12 %} {% trans "Edit" %}</button>
+                        </td>
+                        <td class="text-right">
+                            <button class="btn btn-outline btn-xs btn-error gap-1" type="button" onclick="document.getElementById('{{ category.pk|dom_id:"delete_category_modal" }}').showModal()">{% lucide "trash-2" size=12 %} {% trans "Delete" %}</button>
+                        </td>
+                    </tr>
+                    {% trans "Edit category" as edit_category_label %}
+                    {% url 'management:product_category_update' category.pk as edit_category_url %}
+                    {% include "controlpanel/_modal_form.html" with modal_id=category.pk|dom_id:"edit_category_modal" title=edit_category_label form=category.edit_form action_url=edit_category_url submit_label=edit_category_label submit_icon="save" %}
+                    {% trans "Delete category" as delete_category_label %}
+                    {% trans "Delete" as delete_label %}
+                    {% url 'management:product_category_delete' category.pk as delete_category_url %}
+                    {% blocktrans with name=category.name asvar delete_category_body %}Delete “{{ name }}”? Its products stay, just un-categorised.{% endblocktrans %}
+                    {% include "controlpanel/_confirm_modal.html" with modal_id=category.pk|dom_id:"delete_category_modal" title=delete_category_label body=delete_category_body action_url=delete_category_url submit_label=delete_label %}
+                {% empty %}
+                    <tr>
+                        <td colspan="5" class="py-4 text-center text-muted">{% trans "No categories yet -- products show up ungrouped in the shop." %}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% trans "Add category" as add_category_label %}
+    {% url 'management:product_category_create' as add_category_url %}
+    {% include "controlpanel/_modal_form.html" with modal_id="add_category_modal" title=add_category_label form=category_form action_url=add_category_url submit_label=add_category_label submit_icon="plus" %}
+
     <div class="card overflow-hidden">
         <table class="table">
             <thead>
                 <tr>
                     <th></th>
                     <th>{% trans "Name" %}</th>
+                    <th>{% trans "Category" %}</th>
                     <th>{% trans "Price" %}</th>
                     <th>{% trans "Status" %}</th>
                     <th></th>
@@ -72,6 +128,7 @@
                             {% endif %}
                         </td>
                         <td class="font-semibold">{{ product.name }}</td>
+                        <td class="text-muted">{{ product.category.name|default:"—" }}</td>
                         <td class="font-mono tabular-nums">&euro; {{ product.price }}</td>
                         <td>
                             <span class="badge badge-sm {% if product.is_active %}badge-success{% else %}badge-neutral{% endif %}">
@@ -94,7 +151,7 @@
                     </tr>
                 {% empty %}
                     <tr>
-                        <td colspan="5" class="text-center text-dim">{% trans "No products yet." %}</td>
+                        <td colspan="6" class="text-center text-dim">{% trans "No products yet." %}</td>
                     </tr>
                 {% endfor %}
             </tbody>

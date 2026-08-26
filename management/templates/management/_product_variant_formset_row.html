@@ -1,0 +1,19 @@
+{% load i18n lucide %}
+{% comment %}
+    One row of the create-product page's own variant formset. Rendered both
+    for the rows already in the formset and (with __prefix__ placeholders)
+    into the <template> the "Add option" button clones from -- same shape as
+    management/_team_bulk_add_row.html, minus the <tr>: this formset lives
+    inside a plain card, not a table.
+{% endcomment %}
+<div class="bulk-add-row flex items-start gap-2">
+    <div class="flex-1">
+        {{ form.name }}
+        {% for error in form.name.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
+    </div>
+    <div class="w-32">
+        {{ form.price }}
+        {% for error in form.price.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
+    </div>
+    <button class="btn btn-ghost btn-sm btn-square remove-row" type="button" aria-label="{% trans 'Remove this row' %}" title="{% trans 'Remove this row' %}">{% lucide "x" size=16 %}</button>
+</div>

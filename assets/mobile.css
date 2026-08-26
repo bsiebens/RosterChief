@@ -453,6 +453,13 @@
         text-transform: uppercase;
     }
 
+    /* Shop category anchor jump (shop_home.html) -- the pill row above the
+       grid isn't a filter, it's a same-page #jump; this offsets each
+       category's heading so the sticky app-header doesn't land on top of it. */
+    .shop-category-anchor {
+        scroll-margin-top: 4.5rem;
+    }
+
     /* --- Cards ---------------------------------------------------------------------- */
 
     .m-card {
