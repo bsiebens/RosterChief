@@ -1,9 +1,18 @@
-"""Order invoices: rendered on demand, never stored -- same pattern as
-club/services/invoicing.py's dues invoices (see that module's own docstring
-for the reasoning). The ``Invoice`` row still exists and still gets a real
-``INV-<year>-<seq>`` number the moment an order is placed, it just never
-carries a ``pdf`` file; ``render_invoice_pdf`` regenerates the document fresh
-from the order's own current line items every time someone views/prints it.
+"""Order invoices: composed fresh from the order's own current line items,
+then cached to disk under a per-invoice path so the (comparatively slow)
+WeasyPrint render only happens once per invoice -- see ``render_invoice_pdf``.
+The ``Invoice`` row itself carries no ``pdf`` field; the cache lives purely
+in storage, keyed by ``invoice.pk``, and is never exposed as a public
+URL -- every read goes through ``default_storage.open()`` inside an
+authenticated view (InvoicePdfView/mobile ShopInvoiceView), the same way a
+club logo's *upload* uses this storage without the PDF ever getting a
+public-facing link the way a logo does.
+
+Cache invalidation is event-driven, not time-based: ``shop.signals`` deletes
+an order's cached PDF the moment ``Order.status`` actually changes (paid,
+delivered, refunded, ... all change what the PDF itself says), so the next
+request regenerates it. Nothing here decides *when* to invalidate; this
+module only knows how to render, cache, and drop a cached copy.
 
 Not shared with club.services.invoicing's own ``render_pdf``/PDF error type --
 same "an app depending on another app's PDF error type for a two-line
@@ -13,6 +22,8 @@ gives for not sharing with management.pdf/billing.services.invoices either.
 
 import base64
 
+from django.core.files.base import ContentFile
+from django.core.files.storage import default_storage
 from django.template.loader import render_to_string
 from django.utils.translation import gettext_lazy as _
 
@@ -63,7 +74,25 @@ def _logo_data_uri(club) -> str | None:
     return f"data:{mimetype};base64,{base64.b64encode(data).decode('ascii')}"
 
 
+def _cache_path(invoice) -> str:
+    return f"clubs/{invoice.club.slug}/shop/invoices/cache/{invoice.pk}.pdf"
+
+
+def invalidate_cached_invoice_pdf(invoice) -> None:
+    """Drop invoice's cached PDF, if any -- called from shop.signals the
+    moment its order's status changes. A no-op when nothing was cached yet
+    (a PDF nobody has ever downloaded), which is the common case."""
+    path = _cache_path(invoice)
+    if default_storage.exists(path):
+        default_storage.delete(path)
+
+
 def render_invoice_pdf(invoice) -> bytes:
+    cache_path = _cache_path(invoice)
+    if default_storage.exists(cache_path):
+        with default_storage.open(cache_path, "rb") as cached:
+            return cached.read()
+
     order = invoice.order
     lines = order.order_items.select_related("product", "variant", "beneficiary")
     html = render_to_string(
@@ -76,7 +105,9 @@ def render_invoice_pdf(invoice) -> bytes:
             "logo_data_uri": _logo_data_uri(invoice.club),
         },
     )
-    return render_pdf(html)
+    pdf_bytes = render_pdf(html)
+    default_storage.save(cache_path, ContentFile(pdf_bytes))
+    return pdf_bytes
 
 
 def render_pdf(html: str) -> bytes:

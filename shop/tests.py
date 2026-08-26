@@ -33,7 +33,7 @@ from .models import (
     ProductVariant,
 )
 from .services.checkout import CheckoutError, find_discount, place_order
-from .services.invoices import ShopInvoicePDFError, create_invoice_for_order, render_invoice_pdf
+from .services.invoices import ShopInvoicePDFError, create_invoice_for_order, invalidate_cached_invoice_pdf, render_invoice_pdf
 from .services.notifications import dispatch_order_ready_for_pickup_notification
 from .services.pricing import cart_totals
 from .services.stats import order_kpis, quantity_sold_by_product, quantity_sold_by_variant
@@ -844,6 +844,15 @@ class InvoicePdfTests(TestCase):
         CartItem.objects.create(cart=cart, product=cls.product, quantity=2, unit_price=cls.product.price)
         cls.order = place_order(cart, purchaser=cls.member)
 
+    def setUp(self):
+        # setUpTestData's order/invoice is shared (class-level) across every
+        # test method here, but render_invoice_pdf now caches its output to
+        # disk keyed by invoice.pk -- disk writes aren't rolled back the way
+        # the DB is between tests, so without this the first test method to
+        # call render() would cache a copy every later one silently reuses
+        # instead of exercising the mock.
+        invalidate_cached_invoice_pdf(self.order.invoice)
+
     def render(self):
         with patch("shop.services.invoices.render_pdf", side_effect=lambda html: html) as renderer:
             render_invoice_pdf(self.order.invoice)
@@ -966,3 +975,54 @@ class QuantitySoldTests(TestCase):
         self.make_line(Order.OrderStatus.PAID, 4, variant=other_variant, product=other_product)
 
         self.assertEqual(quantity_sold_by_variant(self.product), {})
+
+
+class InvoicePdfCachingTests(TestCase):
+    """render_invoice_pdf's own caching, and shop.signals' invalidation of it
+    on Order.status change -- see that module's own docstring."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        cls.member = Member.objects.create(first_name="Jane", last_name="Doe")
+        cls.order = Order.objects.create(club=cls.club, purchaser=cls.member, status=Order.OrderStatus.PENDING, total=Decimal("25.00"))
+        cls.invoice = create_invoice_for_order(cls.order)
+
+    def setUp(self):
+        invalidate_cached_invoice_pdf(self.invoice)
+
+    def test_a_second_render_reuses_the_cached_copy(self):
+        with patch("shop.services.invoices.render_pdf", side_effect=lambda html: b"%PDF-fake") as renderer:
+            first = render_invoice_pdf(self.invoice)
+            second = render_invoice_pdf(self.invoice)
+
+        renderer.assert_called_once()
+        self.assertEqual(first, second)
+
+    def test_changing_the_orders_status_busts_the_cache(self):
+        with patch("shop.services.invoices.render_pdf", side_effect=lambda html: b"%PDF-fake"):
+            render_invoice_pdf(self.invoice)
+
+        self.order.status = Order.OrderStatus.PAID
+        self.order.save(update_fields=["status"])
+
+        with patch("shop.services.invoices.render_pdf", side_effect=lambda html: b"%PDF-fake-2") as renderer:
+            second = render_invoice_pdf(self.invoice)
+
+        renderer.assert_called_once()
+        self.assertEqual(second, b"%PDF-fake-2")
+
+    def test_saving_an_order_without_a_status_change_keeps_the_cache(self):
+        with patch("shop.services.invoices.render_pdf", side_effect=lambda html: b"%PDF-fake"):
+            render_invoice_pdf(self.invoice)
+
+        self.order.save(update_fields=["status"])  # same status, re-saved
+
+        with patch("shop.services.invoices.render_pdf") as renderer:
+            render_invoice_pdf(self.invoice)
+
+        renderer.assert_not_called()
+
+    def test_a_freshly_created_order_has_nothing_cached_to_invalidate(self):
+        # pre_save's own pk-less branch -- must not raise on a brand-new Order.
+        Order.objects.create(club=self.club, purchaser=self.member, status=Order.OrderStatus.PENDING, total=Decimal("1"))  # must not raise

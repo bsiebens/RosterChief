@@ -42,7 +42,7 @@ from .services.access import (
     teams_staffed_by,
 )
 from .services.fees import mark_as_paid, open_dues_rows, record_payment, remaining_balance
-from .services.invoicing import create_or_resend_invoice, invoice_pdf, invoices_due_for_reminder, recipient_for, resolve_document_address
+from .services.invoicing import create_or_resend_invoice, invalidate_cached_invoice_pdf, invoice_pdf, invoices_due_for_reminder, recipient_for, resolve_document_address
 from .services.onboarding import (
     annotate_onboarding_status,
     approve_all_clean,
@@ -1778,6 +1778,15 @@ class InvoicePdfTests(TestCase):
         cls.membership = ClubMembership.objects.create(club=cls.club, member=cls.member, season=cls.season, status=ClubMembership.StatusChoices.PENDING, fee_amount=Decimal("150.00"))
         cls.invoice = create_or_resend_invoice(cls.membership, due_in_days=14, recipient_email="jane@example.com", sent_to_guardian=False)
 
+    def setUp(self):
+        # setUpTestData's invoice is shared (class-level) across every test
+        # method here, but invoice_pdf now caches its output to disk keyed by
+        # invoice.pk -- disk writes aren't rolled back the way the DB is
+        # between tests, so without this the first test method to call
+        # render() would cache a copy every later one silently reuses instead
+        # of exercising the mock.
+        invalidate_cached_invoice_pdf(self.invoice)
+
     def render(self):
         with mock.patch("club.services.invoicing.render_pdf", side_effect=lambda html: html) as renderer:
             invoice_pdf(self.invoice)
@@ -1815,6 +1824,66 @@ class InvoicePdfTests(TestCase):
 
         self.assertIn("Registered Office 5", html)
         self.assertNotIn("Sportlaan 1", html)
+
+
+class InvoicePdfCachingTests(TestCase):
+    """invoice_pdf's own caching, and club.signals' invalidation of it on
+    ClubMembership.fee_status change -- see that module's own docstring."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        cls.season = make_season(cls.club)
+        cls.member = Member.objects.create(first_name="Jane", last_name="Doe", email="jane@example.com")
+        cls.membership = ClubMembership.objects.create(club=cls.club, member=cls.member, season=cls.season, status=ClubMembership.StatusChoices.PENDING, fee_amount=Decimal("150.00"), fee_status=ClubMembership.FeeStatus.UNPAID)
+        cls.invoice = create_or_resend_invoice(cls.membership, due_in_days=14, recipient_email="jane@example.com", sent_to_guardian=False)
+
+    def setUp(self):
+        invalidate_cached_invoice_pdf(self.invoice)
+
+    def test_a_second_render_reuses_the_cached_copy(self):
+        with mock.patch("club.services.invoicing.render_pdf", side_effect=lambda html: b"%PDF-fake") as renderer:
+            first = invoice_pdf(self.invoice)
+            second = invoice_pdf(self.invoice)
+
+        renderer.assert_called_once()
+        self.assertEqual(first, second)
+
+    def test_changing_fee_status_busts_the_cache(self):
+        with mock.patch("club.services.invoicing.render_pdf", side_effect=lambda html: b"%PDF-fake"):
+            invoice_pdf(self.invoice)
+
+        self.membership.fee_status = ClubMembership.FeeStatus.PAID
+        self.membership.save(update_fields=["fee_status"])
+
+        with mock.patch("club.services.invoicing.render_pdf", side_effect=lambda html: b"%PDF-fake-2") as renderer:
+            second = invoice_pdf(self.invoice)
+
+        renderer.assert_called_once()
+        self.assertEqual(second, b"%PDF-fake-2")
+
+    def test_resending_an_invoice_busts_its_own_cache(self):
+        with mock.patch("club.services.invoicing.render_pdf", side_effect=lambda html: b"%PDF-fake"):
+            invoice_pdf(self.invoice)
+
+        create_or_resend_invoice(self.membership, due_in_days=30, recipient_email="jane@example.com", sent_to_guardian=False)
+
+        with mock.patch("club.services.invoicing.render_pdf", side_effect=lambda html: b"%PDF-fake-2") as renderer:
+            second = invoice_pdf(self.invoice)
+
+        renderer.assert_called_once()
+        self.assertEqual(second, b"%PDF-fake-2")
+
+    def test_saving_a_membership_without_a_fee_status_change_keeps_the_cache(self):
+        with mock.patch("club.services.invoicing.render_pdf", side_effect=lambda html: b"%PDF-fake"):
+            invoice_pdf(self.invoice)
+
+        self.membership.save(update_fields=["fee_status"])  # same status, re-saved
+
+        with mock.patch("club.services.invoicing.render_pdf") as renderer:
+            invoice_pdf(self.invoice)
+
+        renderer.assert_not_called()
 
 
 class ResolveDocumentAddressTests(TestCase):

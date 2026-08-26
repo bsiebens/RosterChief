@@ -11,6 +11,8 @@ from datetime import timedelta
 from types import SimpleNamespace
 
 from django.conf import settings
+from django.core.files.base import ContentFile
+from django.core.files.storage import default_storage
 from django.core.mail import EmailMultiAlternatives
 from django.template.loader import render_to_string
 from django.utils import timezone
@@ -58,6 +60,11 @@ def create_or_resend_invoice(membership: ClubMembership, *, due_in_days: int, re
     # get_or_create's own save (for a new row) already assigned invoice.number,
     # so it's always set by this point -- update_fields never needs to include it.
     invoice.save(update_fields=["amount", "due_date", "sent_at", "sent_to_email", "sent_to_guardian", "modified"])
+    # A resend changes amount/due_date directly on this row -- a cached PDF
+    # from before would serve stale figures forever otherwise. The
+    # fee_status-change signal (club.signals) doesn't cover this path since
+    # nothing on the membership itself changes.
+    invalidate_cached_invoice_pdf(invoice)
     return invoice
 
 
@@ -180,11 +187,37 @@ def resolve_document_address(club):
     return Location.objects.filter(club=club, is_home=True).first()
 
 
+def _cache_path(invoice: DuesInvoice) -> str:
+    return f"clubs/{invoice.club.slug}/dues/invoices/cache/{invoice.pk}.pdf"
+
+
+def invalidate_cached_invoice_pdf(invoice: DuesInvoice) -> None:
+    """Drop invoice's cached PDF, if any -- called both from club.signals
+    (the moment the membership's fee_status changes -- paid/owed is the one
+    thing the PDF itself renders differently) and from create_or_resend_invoice
+    directly (a resend changes amount/due_date on this same row). A no-op
+    when nothing was cached yet."""
+    path = _cache_path(invoice)
+    if default_storage.exists(path):
+        default_storage.delete(path)
+
+
 def invoice_pdf(invoice: DuesInvoice) -> bytes:
+    # Cached to disk, same reasoning/shape as shop.services.invoices.
+    # render_invoice_pdf -- see that module's own docstring. Never exposed
+    # as a public URL: every read goes through default_storage.open() inside
+    # an authenticated view (DuesInvoicePdfView).
+    cache_path = _cache_path(invoice)
+    if default_storage.exists(cache_path):
+        with default_storage.open(cache_path, "rb") as cached:
+            return cached.read()
+
     # Same header convention as management/event_referee_form_pdf.html: the club's
     # legal name (official_name falls back to the everyday name when unset) and its
     # document address -- never an event-specific location, since a dues invoice
     # isn't tied to any one event.
     document_address = resolve_document_address(invoice.club)
     html = render_to_string("club/dues_invoice_pdf.html", {"club": invoice.club, "invoice": invoice, "membership": invoice.membership, "member": invoice.membership.member, "document_address": document_address})
-    return render_pdf(html)
+    pdf_bytes = render_pdf(html)
+    default_storage.save(cache_path, ContentFile(pdf_bytes))
+    return pdf_bytes
