@@ -8842,7 +8842,7 @@ class OrderManagementTests(ShopTestBase):
         second = self.make_order()
         self.client.force_login(self.make_shop_manager())
 
-        response = self.club_post("order_bulk_mark_paid", {"order_ids": [str(first.pk), str(second.pk)]})
+        response = self.club_post("order_bulk_mark_paid", {"order_ids": [str(first.pk), str(second.pk)], "method": Payment.PaymentMethod.CASH})
 
         self.assertRedirects(response, reverse("management:order_list"))
         first.refresh_from_db()
@@ -8851,11 +8851,21 @@ class OrderManagementTests(ShopTestBase):
         self.assertEqual(second.status, Order.OrderStatus.PAID)
         self.assertEqual(Payment.objects.filter(order__in=[first, second], status=Payment.PaymentStatus.CONFIRMED).count(), 2)
 
+    def test_bulk_mark_paid_uses_the_chosen_method(self):
+        order = self.make_order()
+        self.client.force_login(self.make_shop_manager())
+
+        self.club_post("order_bulk_mark_paid", {"order_ids": [str(order.pk)], "method": Payment.PaymentMethod.BANK_TRANSFER})
+
+        payment = Payment.objects.get(order=order)
+        self.assertEqual(payment.method, Payment.PaymentMethod.BANK_TRANSFER)
+        self.assertEqual(payment.reference, "")
+
     def test_bulk_mark_paid_skips_cancelled_orders(self):
         cancelled = self.make_order(status=Order.OrderStatus.CANCELLED)
         self.client.force_login(self.make_shop_manager())
 
-        self.club_post("order_bulk_mark_paid", {"order_ids": [str(cancelled.pk)]})
+        self.club_post("order_bulk_mark_paid", {"order_ids": [str(cancelled.pk)], "method": Payment.PaymentMethod.CASH})
 
         cancelled.refresh_from_db()
         self.assertEqual(cancelled.status, Order.OrderStatus.CANCELLED)
@@ -8875,7 +8885,7 @@ class OrderManagementTests(ShopTestBase):
         foreign_order = Order.objects.create(club=other_club, purchaser=other_purchaser, status=Order.OrderStatus.PENDING, total=Decimal("10.00"))
         self.client.force_login(self.make_shop_manager())
 
-        self.club_post("order_bulk_mark_paid", {"order_ids": [str(foreign_order.pk)]})
+        self.club_post("order_bulk_mark_paid", {"order_ids": [str(foreign_order.pk)], "method": Payment.PaymentMethod.CASH})
 
         foreign_order.refresh_from_db()
         self.assertEqual(foreign_order.status, Order.OrderStatus.PENDING)
@@ -8884,7 +8894,7 @@ class OrderManagementTests(ShopTestBase):
         order = self.make_order()
         self.client.force_login(self.make_plain_staff())
 
-        response = self.club_post("order_bulk_mark_paid", {"order_ids": [str(order.pk)]})
+        response = self.club_post("order_bulk_mark_paid", {"order_ids": [str(order.pk)], "method": Payment.PaymentMethod.CASH})
 
         self.assertEqual(response.status_code, 403)
         order.refresh_from_db()
@@ -8960,6 +8970,120 @@ class OrderManagementTests(ShopTestBase):
         self.assertEqual(response.status_code, 403)
         order.refresh_from_db()
         self.assertEqual(order.status, Order.OrderStatus.PENDING)
+
+
+class PaymentManagementTests(ShopTestBase):
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.purchaser = Member.objects.create(first_name="Olly", last_name="Orderer", email="olly-payment@example.com")
+
+    def make_order(self, status=Order.OrderStatus.PAID, total=Decimal("50.00")):
+        return Order.objects.create(club=self.club, purchaser=self.purchaser, status=status, total=total)
+
+    def make_payment(self, order, **overrides):
+        kwargs = {"order": order, "amount": order.total, "method": Payment.PaymentMethod.CASH, "status": Payment.PaymentStatus.CONFIRMED, "paid_at": timezone.now()}
+        kwargs.update(overrides)
+        return Payment.objects.create(**kwargs)
+
+    def test_a_shop_manager_can_edit_a_payments_method_and_reference(self):
+        order = self.make_order()
+        payment = self.make_payment(order)
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_post("payment_update", {"method": Payment.PaymentMethod.BANK_TRANSFER, "reference": "TX-42"}, order.pk, payment.pk)
+
+        self.assertRedirects(response, reverse("management:order_detail", args=[order.pk]))
+        payment.refresh_from_db()
+        self.assertEqual(payment.method, Payment.PaymentMethod.BANK_TRANSFER)
+        self.assertEqual(payment.reference, "TX-42")
+
+    def test_editing_a_payment_never_touches_its_amount_or_status(self):
+        order = self.make_order()
+        payment = self.make_payment(order)
+        self.client.force_login(self.make_shop_manager())
+
+        self.club_post("payment_update", {"method": Payment.PaymentMethod.CREDIT_CARD, "reference": ""}, order.pk, payment.pk)
+
+        payment.refresh_from_db()
+        self.assertEqual(payment.amount, order.total)
+        self.assertEqual(payment.status, Payment.PaymentStatus.CONFIRMED)
+
+    def test_plain_staff_cannot_edit_a_payment(self):
+        order = self.make_order()
+        payment = self.make_payment(order)
+        self.client.force_login(self.make_plain_staff())
+
+        response = self.club_post("payment_update", {"method": Payment.PaymentMethod.CASH, "reference": "nope"}, order.pk, payment.pk)
+
+        self.assertEqual(response.status_code, 403)
+        payment.refresh_from_db()
+        self.assertNotEqual(payment.reference, "nope")
+
+    def test_a_payment_from_another_order_404s(self):
+        order = self.make_order()
+        other_order = self.make_order()
+        payment = self.make_payment(other_order)
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_post("payment_update", {"method": Payment.PaymentMethod.CASH, "reference": ""}, order.pk, payment.pk)
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_deleting_the_only_payment_drops_the_order_back_to_pending(self):
+        order = self.make_order()
+        payment = self.make_payment(order)
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_post("payment_delete", {}, order.pk, payment.pk)
+
+        self.assertRedirects(response, reverse("management:order_detail", args=[order.pk]))
+        self.assertFalse(Payment.objects.filter(pk=payment.pk).exists())
+        order.refresh_from_db()
+        self.assertEqual(order.status, Order.OrderStatus.PENDING)
+
+    def test_deleting_one_of_several_payments_leaves_status_alone(self):
+        order = self.make_order()
+        first = self.make_payment(order, amount=Decimal("20.00"))
+        self.make_payment(order, amount=Decimal("30.00"))
+        self.client.force_login(self.make_shop_manager())
+
+        self.club_post("payment_delete", {}, order.pk, first.pk)
+
+        order.refresh_from_db()
+        self.assertEqual(order.status, Order.OrderStatus.PAID)
+        self.assertEqual(order.payments.count(), 1)
+
+    def test_deleting_the_only_payment_on_a_cancelled_order_leaves_it_cancelled(self):
+        order = self.make_order(status=Order.OrderStatus.CANCELLED)
+        payment = self.make_payment(order)
+        self.client.force_login(self.make_shop_manager())
+
+        self.club_post("payment_delete", {}, order.pk, payment.pk)
+
+        order.refresh_from_db()
+        self.assertEqual(order.status, Order.OrderStatus.CANCELLED)
+
+    def test_plain_staff_cannot_delete_a_payment(self):
+        order = self.make_order()
+        payment = self.make_payment(order)
+        self.client.force_login(self.make_plain_staff())
+
+        response = self.club_post("payment_delete", {}, order.pk, payment.pk)
+
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(Payment.objects.filter(pk=payment.pk).exists())
+
+    def test_a_payment_from_another_club_404s(self):
+        other_club = Club.objects.create(name="Other Club", slug="other-club-payment")
+        other_purchaser = Member.objects.create(first_name="Otto", last_name="Other", email="otto-payment@example.com")
+        other_order = Order.objects.create(club=other_club, purchaser=other_purchaser, status=Order.OrderStatus.PAID, total=Decimal("10.00"))
+        payment = self.make_payment(other_order)
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_post("payment_delete", {}, other_order.pk, payment.pk)
+
+        self.assertEqual(response.status_code, 404)
 
 
 class InvoicePdfViewTests(ShopTestBase):

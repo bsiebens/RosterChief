@@ -1079,6 +1079,35 @@ class OrderMarkPaidForm(forms.Form):
     reference = forms.CharField(label=_("Reference"), required=False, help_text=_("Optional -- a receipt number, whatever lets you find this again."))
 
 
+class OrderBulkMarkPaidForm(forms.Form):
+    """The one shared payment method for a whole batch of orders marked paid
+    from the Orders list in one go -- order_list.html's own bulk_mark_paid_
+    modal. No reference field, unlike the single-order OrderMarkPaidForm:
+    one reference wouldn't meaningfully apply across a batch of distinct
+    orders, and there's no reasonable per-row entry point for 50 of them in
+    the same submit -- see OrderBulkMarkPaidView's own docstring. The
+    select's own form attr lets it live inside that modal while still
+    posting through the row-checkboxes' #orders_bulk_form -- the select
+    branch of templatetags/field.html passes arbitrary widget attrs
+    through, unlike its textarea branch (see OrderBulkMarkReadyForPickupForm
+    below for why that one is rendered by hand instead)."""
+
+    method = forms.ChoiceField(label=_("Method"), choices=Payment.PaymentMethod.choices, initial=Payment.PaymentMethod.CASH, widget=forms.Select(attrs={"form": "orders_bulk_form"}))
+
+
+class PaymentEditForm(forms.ModelForm):
+    """The "Edit" modal on a payment row (order detail page) -- method and
+    reference only, matching what OrderMarkPaidForm collects when the
+    payment was first created. Amount/status/paid_at stay out of reach here:
+    changing the amount would silently desync from the order total no
+    on-screen control re-checks, and status/paid_at are what "delete this
+    payment and mark paid again" is for, not an inline edit."""
+
+    class Meta:
+        model = Payment
+        fields = ["method", "reference"]
+
+
 class OrderMarkReadyForPickupForm(forms.Form):
     """The "mark ready for pickup" modal on an order's detail page. A plain
     Form, not a ModelForm bound to the order -- same reasoning as

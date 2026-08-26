@@ -67,7 +67,7 @@
                     {% blocktrans count counter=orders|length %}{{ counter }} order{% plural %}{{ counter }} orders{% endblocktrans %}
                 </span>
                 <div class="flex gap-2">
-                    <button class="btn btn-success btn-sm gap-2" type="submit" formaction="{% url 'management:order_bulk_mark_paid' %}">{% lucide "circle-check" size=14 %} {% trans "Mark selected paid" %}</button>
+                    <button class="btn btn-success btn-sm gap-2" type="button" onclick="document.getElementById('bulk_mark_paid_modal').showModal()">{% lucide "circle-check" size=14 %} {% trans "Mark selected paid" %}</button>
                     <button class="btn btn-info btn-sm gap-2" type="button" onclick="document.getElementById('bulk_ready_for_pickup_modal').showModal()">{% lucide "bell" size=14 %} {% trans "Mark selected ready for pickup" %}</button>
                 </div>
             </div>
@@ -115,6 +115,23 @@
             </table>
         </div>
     </form>
+
+    <dialog id="bulk_mark_paid_modal" class="modal">
+        <div class="modal-box">
+            <h3 class="text-lg font-bold">{% trans "Mark selected paid" %}</h3>
+            <p class="py-2 text-sm opacity-70">{% trans "Records a payment of the full total for every selected order. No reference -- there's no one that would meaningfully apply across a whole batch; use a single order's own \"Mark paid\" for that." %}</p>
+            <div class="form-control w-full">
+                {% form_field bulk_mark_paid_form.method size="small" %}
+            </div>
+            <div class="modal-action">
+                <form method="dialog">
+                    <button class="btn btn-outline gap-2">{% lucide "x" size=16 %} {% trans "Cancel" %}</button>
+                </form>
+                <button class="btn btn-success gap-2" type="submit" form="orders_bulk_form" formaction="{% url 'management:order_bulk_mark_paid' %}">{% lucide "circle-check" size=16 %} {% trans "Mark selected paid" %}</button>
+            </div>
+        </div>
+        <form method="dialog" class="modal-backdrop"><button>close</button></form>
+    </dialog>
 
     <dialog id="bulk_ready_for_pickup_modal" class="modal">
         <div class="modal-box">

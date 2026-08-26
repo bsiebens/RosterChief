@@ -30,8 +30,9 @@
             h1 { font-size: 20pt; margin: 0 0 2mm; }
             .brand-name { font-size: 13pt; margin: 0 0 2mm; }
             .muted { color: #666; }
-            .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12mm; }
-            .brand { display: flex; align-items: center; gap: 4mm; }
+            .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12mm; gap: 8mm; }
+            .brand { display: flex; align-items: center; gap: 4mm; flex: 1; min-width: 0; }
+            .header .right { flex-shrink: 0; }
             .logo { height: 16mm; width: 16mm; object-fit: contain; }
             .logo-fallback {
                 height: 16mm;

@@ -87,9 +87,11 @@ from .forms import (
     NewsPublishForm,
     OnboardingRequirementForm,
     OpponentForm,
+    OrderBulkMarkPaidForm,
     OrderBulkMarkReadyForPickupForm,
     OrderMarkPaidForm,
     OrderMarkReadyForPickupForm,
+    PaymentEditForm,
     PositionForm,
     ProductCategoryForm,
     ProductForm,
@@ -3831,18 +3833,21 @@ class OrderListView(ShopManagerRequiredMixin, ListView):
             status_choices=Order.OrderStatus.choices,
             selected_status=self.request.GET.get("status", ""),
             kpis=order_kpis(self.request.club),
+            bulk_mark_paid_form=OrderBulkMarkPaidForm(),
             bulk_ready_for_pickup_form=OrderBulkMarkReadyForPickupForm(),
             **kwargs,
         )
 
 
 class OrderBulkMarkPaidView(ShopManagerRequiredMixin, View):
-    """The Orders list's own "Mark selected paid" -- CASH, no reference: there's
-    no one reference that would meaningfully apply across a whole batch of
-    distinct orders, use the single-order modal (OrderMarkPaidView) for that.
-    Cancelled orders are excluded rather than erroring -- their own checkbox
-    isn't even rendered (order_list.html), so this only matters for a stale
-    selection left over from before a page reload."""
+    """The Orders list's own "Mark selected paid" -- one shared method
+    (OrderBulkMarkPaidForm), no reference: there's no one reference that
+    would meaningfully apply across a whole batch of distinct orders, and no
+    reasonable place to enter 50 different ones in the same submit -- use the
+    single-order modal (OrderMarkPaidView) for that. Cancelled orders are
+    excluded rather than erroring -- their own checkbox isn't even rendered
+    (order_list.html), so this only matters for a stale selection left over
+    from before a page reload."""
 
     def post(self, request):
         next_url = request.POST.get("next")
@@ -3853,11 +3858,17 @@ class OrderBulkMarkPaidView(ShopManagerRequiredMixin, View):
             notify(request, f"e|{_('No orders selected')}|{_('Select at least one order.')}")
             return redirect(redirect_url)
 
+        form = OrderBulkMarkPaidForm(request.POST)
+        if not form.is_valid():
+            notify(request, f"e|{_('Could not record payment')}|{_('Choose a valid payment method.')}")
+            return redirect(redirect_url)
+
+        method = form.cleaned_data["method"]
         orders = Order.objects.filter(pk__in=ids, club=request.club).exclude(status=Order.OrderStatus.CANCELLED)
         count = 0
         with transaction.atomic():
             for order in orders:
-                Payment.objects.create(order=order, amount=order.total, method=Payment.PaymentMethod.CASH, status=Payment.PaymentStatus.CONFIRMED, paid_at=timezone.now())
+                Payment.objects.create(order=order, amount=order.total, method=method, status=Payment.PaymentStatus.CONFIRMED, paid_at=timezone.now())
                 order.status = Order.OrderStatus.PAID
                 order.save(update_fields=["status"])
                 count += 1
@@ -3913,7 +3924,11 @@ class OrderDetailView(ShopManagerRequiredMixin, DetailView):
         order = self.object
         lines = order.order_items.select_related("product", "variant", "beneficiary", "team")
         applied_discounts = order.applied_discounts.select_related("discount")
-        payments = order.payments.all()
+        # Bound per-row so each payment's own "Edit" modal can render its own
+        # form -- same reasoning as ProductUpdateView's variants.
+        payments = list(order.payments.all())
+        for payment in payments:
+            payment.edit_form = PaymentEditForm(instance=payment)
         return super().get_context_data(
             lines=lines,
             applied_discounts=applied_discounts,
@@ -3922,6 +3937,55 @@ class OrderDetailView(ShopManagerRequiredMixin, DetailView):
             mark_ready_for_pickup_form=OrderMarkReadyForPickupForm(initial={"pickup_instructions": order.pickup_instructions}),
             **kwargs,
         )
+
+
+class PaymentUpdateView(ShopManagerRequiredMixin, RedirectOnInvalidMixin, UpdateView):
+    """Reachable only via a payment's own "Edit" modal on the order detail
+    page -- method and reference only, see PaymentEditForm's own docstring
+    for why amount/status/paid_at stay out of reach."""
+
+    model = Payment
+    form_class = PaymentEditForm
+    http_method_names = ["post"]
+    invalid_redirect_url_name = "management:order_detail"
+
+    def get_invalid_redirect_kwargs(self):
+        return {"pk": self.kwargs["order_pk"]}
+
+    def get_queryset(self):
+        return Payment.objects.filter(order__club=self.request.club, order__pk=self.kwargs["order_pk"])
+
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        notify(self.request, f"s|{_('Payment updated')}|{_('Payment updated.')}")
+        return response
+
+    def get_success_url(self):
+        return reverse("management:order_detail", kwargs={"pk": self.kwargs["order_pk"]})
+
+
+class PaymentDeleteView(ShopManagerRequiredMixin, View):
+    """No PROTECT to work around -- Payment is only ever referenced by its
+    own Order (CASCADE the other way), so deleting one is a plain delete.
+
+    Drops the order back to PENDING once it has no payments left at all --
+    covers "staff marked this paid by mistake" without leaving the order
+    reading as settled with nothing behind it. Left alone if payments remain
+    (a partial refund/correction on an order with several) or if the order
+    is CANCELLED/REFUNDED -- those are deliberate, terminal states a payment
+    row disappearing shouldn't resurrect."""
+
+    def post(self, request, order_pk, pk):
+        payment = get_object_or_404(Payment.objects.filter(order__club=request.club, order__pk=order_pk), pk=pk)
+        order = payment.order
+        payment.delete()
+
+        if not order.payments.exists() and order.status not in (Order.OrderStatus.CANCELLED, Order.OrderStatus.REFUNDED):
+            order.status = Order.OrderStatus.PENDING
+            order.save(update_fields=["status"])
+
+        notify(request, f"s|{_('Payment deleted')}|{_('Payment deleted.')}")
+        return redirect("management:order_detail", pk=order_pk)
 
 
 class OrderMarkPaidView(ShopManagerRequiredMixin, View):

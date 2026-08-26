@@ -121,6 +121,7 @@
                     <th>{% trans "Status" %}</th>
                     <th>{% trans "Reference" %}</th>
                     <th>{% trans "Paid at" %}</th>
+                    <th></th>
                 </tr>
             </thead>
             <tbody>
@@ -135,10 +136,24 @@
                         </td>
                         <td>{{ payment.reference|default:"—" }}</td>
                         <td class="font-mono text-xs">{{ payment.paid_at|date:"Y-m-d H:i"|default:"—" }}</td>
+                        <td class="text-right">
+                            <div class="flex justify-end gap-1">
+                                <button class="btn btn-outline btn-xs gap-1" type="button" onclick="document.getElementById('{{ payment.pk|dom_id:"edit_payment_modal" }}').showModal()">{% lucide "pencil" size=12 %} {% trans "Edit" %}</button>
+                                <button class="btn btn-outline btn-xs btn-error gap-1" type="button" onclick="document.getElementById('{{ payment.pk|dom_id:"delete_payment_modal" }}').showModal()">{% lucide "trash-2" size=12 %} {% trans "Delete" %}</button>
+                            </div>
+                        </td>
                     </tr>
+                    {% trans "Edit payment" as edit_payment_label %}
+                    {% url 'management:payment_update' order.pk payment.pk as edit_payment_url %}
+                    {% include "controlpanel/_modal_form.html" with modal_id=payment.pk|dom_id:"edit_payment_modal" title=edit_payment_label form=payment.edit_form action_url=edit_payment_url submit_label=edit_payment_label submit_icon="save" %}
+                    {% trans "Delete payment" as delete_payment_label %}
+                    {% trans "Delete" as delete_label %}
+                    {% url 'management:payment_delete' order.pk payment.pk as delete_payment_url %}
+                    {% blocktrans with amount=payment.amount asvar delete_payment_body %}Delete this €{{ amount }} payment? This does not change the order's own status. This cannot be undone.{% endblocktrans %}
+                    {% include "controlpanel/_confirm_modal.html" with modal_id=payment.pk|dom_id:"delete_payment_modal" title=delete_payment_label body=delete_payment_body action_url=delete_payment_url submit_label=delete_label %}
                 {% empty %}
                     <tr>
-                        <td colspan="5" class="text-center text-dim">{% trans "No payments recorded yet." %}</td>
+                        <td colspan="6" class="text-center text-dim">{% trans "No payments recorded yet." %}</td>
                     </tr>
                 {% endfor %}
             </tbody>
