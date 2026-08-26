@@ -31,6 +31,7 @@ from events.services.attendance import blocked_upcoming_events_for_member
 from events.services.calendar import agenda_groups, week_bounds
 from events.services.lineup import notify_dropout, selected_members_by_position
 from events.services.referees import RefereeAssignmentError, accept_referee_signup, decline_referee_signup
+from formbuilder.models import FormSend
 from members.models import FamilyMembership, Member
 from members.views import ClubScopedPublicMixin
 from news.models import News
@@ -897,6 +898,8 @@ def _notification_source_link(source):
         return _("Club news"), reverse("mobile:news_detail", kwargs={"slug": source.slug})
     if isinstance(source, Event):
         return _("Event"), reverse("mobile:event_detail", kwargs={"pk": source.pk})
+    if isinstance(source, FormSend):
+        return _("Form"), reverse("mobile:form_fill", kwargs={"pk": source.pk})
     return None, None
 
 

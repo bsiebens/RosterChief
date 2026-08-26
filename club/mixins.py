@@ -4,7 +4,7 @@ from waffle import flag_is_active
 
 from members.models import Group
 
-from .services.access import can_add_news, can_edit_news, can_manage_members, can_manage_shop, can_publish_news, groups_manageable_by, has_management_access, is_club_admin, is_coach_manager, teams_managed_by
+from .services.access import can_add_news, can_edit_news, can_manage_forms, can_manage_members, can_manage_shop, can_publish_news, groups_manageable_by, has_management_access, is_club_admin, is_coach_manager, teams_managed_by
 
 
 class ClubStaffRequiredMixin(LoginRequiredMixin, UserPassesTestMixin):
@@ -173,3 +173,13 @@ class NewsEditRequiredMixin(ClubStaffRequiredMixin):
 
     def test_func(self):
         return can_edit_news(self.request.user, self.get_news_item())
+
+
+class FormManagerRequiredMixin(ClubStaffRequiredMixin):
+    """ADMIN, EDITOR, or a current-season coach_manager -- gates every
+    management view for Form/Field/FormSend, including response viewing/
+    export (see can_manage_forms's own docstring for why this is one
+    function, not News's add/publish/edit split)."""
+
+    def test_func(self):
+        return can_manage_forms(self.request.user, self.request.club)

@@ -238,3 +238,14 @@ def can_edit_news(user: User, news_item) -> bool:
     if news_item.status == news_item.Status.PUBLISHED:
         return can_publish_news(user, news_item.club)
     return can_add_news(user, news_item.club)
+
+
+def can_manage_forms(user: User, club: Club) -> bool:
+    """ADMIN, EDITOR, or a current-season coach_manager -- same trusted-content
+    role set as can_add_news (ARCHITECTURE.md's RBAC table already assigns
+    EDITOR ownership of formbuilder content). One function gates creating a
+    form, sending it, and viewing its responses -- unlike News there's no
+    draft/review workflow here (creating a FormSend *is* publishing it, see
+    FormSend's own docstring), so there's nothing for a separate publish
+    check to gate, and no stricter tier for response visibility either."""
+    return is_club_admin(user, club) or has_club_role(user, club, ClubRole.Roles.EDITOR) or is_coach_manager(user, club)

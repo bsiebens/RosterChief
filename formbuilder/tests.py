@@ -10,6 +10,7 @@ from django.utils import timezone
 
 from club.models import Club, ClubMembership, Season
 from members.models import Group, GroupMembership, Member
+from notifications.models import Notification
 from teams.models import Team, TeamMembership
 
 from .models import Answer, Field, Form, FormSend, Submission
@@ -25,6 +26,7 @@ from .services import (
     resolve_season,
     submit_form,
 )
+from .services.notifications import notify_form_send
 
 
 class FormbuilderTestBase(TestCase):
@@ -550,3 +552,47 @@ class AnswerCleanTests(FormbuilderTestBase):
         submission = Submission.objects.create(send=self.send, member=self.member)
 
         Answer(submission=submission, field=self.name, value="v").full_clean()
+
+
+class NotifyFormSendTests(FormbuilderTestBase):
+    """formbuilder.services.notifications.notify_form_send -- one Notification
+    per resolved audience member, source pointing back at the send."""
+
+    def test_notifies_every_resolved_audience_member(self):
+        other = Member.objects.create(first_name="Joe", last_name="Roe")
+        self.send.invited_members.add(other)
+
+        result = notify_form_send(str(self.send.pk))
+
+        self.assertEqual(Notification.objects.filter(member=self.member).count(), 1)
+        self.assertEqual(Notification.objects.filter(member=other).count(), 1)
+        self.assertEqual(result, "Notified 2 member(s).")
+
+    def test_notification_source_points_at_the_send(self):
+        notify_form_send(str(self.send.pk))
+
+        notification = Notification.objects.get(member=self.member)
+        self.assertEqual(notification.source, self.send)
+        self.assertEqual(notification.title, self.form.title)
+
+    def test_deadline_is_mentioned_when_the_send_has_one(self):
+        self.send.closes_at = timezone.now() + timedelta(days=3)
+        self.send.save()
+
+        notify_form_send(str(self.fresh_send().pk))
+
+        notification = Notification.objects.get(member=self.member)
+        self.assertIn(str(timezone.localtime(self.send.closes_at).day), notification.body)
+
+    def test_a_send_with_no_audience_notifies_nobody(self):
+        empty_send = FormSend.objects.create(club=self.club, form=self.form)
+
+        result = notify_form_send(str(empty_send.pk))
+
+        self.assertFalse(Notification.objects.filter(object_id=str(empty_send.pk)).exists())
+        self.assertEqual(result, "Skipped: no one to notify.")
+
+    def test_a_deleted_send_is_skipped_not_errored(self):
+        result = notify_form_send("00000000-0000-0000-0000-000000000000")
+
+        self.assertEqual(result, "Skipped: send no longer exists.")
