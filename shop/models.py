@@ -59,12 +59,11 @@ class ProductCategory(ClubScopedModel):
     rather than blocking the delete or taking products down with it."""
 
     name = models.CharField(_("name"), max_length=255)
-    ordering = models.PositiveSmallIntegerField(_("ordering"), default=0)
 
     class Meta:
         verbose_name = _("product category")
         verbose_name_plural = _("product categories")
-        ordering = ["ordering", "name"]
+        ordering = ["name"]
         constraints = [UniqueConstraint(fields=["club", "name"], name="unique_category_name_per_club")]
 
     def __str__(self):

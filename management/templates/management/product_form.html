@@ -18,7 +18,10 @@
 
         <div class="card mb-4 card-body">
             <h2 class="card-title">{% trans "Basics" %}</h2>
-            {% form_field form.name %}
+            <div class="flex items-start gap-4">
+                <div class="max-w-md">{% form_field form.name %}</div>
+                <div class="w-fit shrink-0">{% form_field form.is_active show_as_toggle=True %}</div>
+            </div>
             <div class="grid grid-cols-2 gap-4">
                 {% form_field form.category %}
                 {% form_field form.price %}
@@ -29,10 +32,6 @@
             <h2 class="card-title">{% trans "Photo & description" %}</h2>
             {% form_field form.image %}
             {% form_field form.description textarea_height="h-28" %}
-        </div>
-
-        <div class="card mb-4 card-body">
-            {% form_field form.is_active show_as_toggle=True %}
         </div>
 
         {% if not update_view %}
@@ -53,6 +52,11 @@
                     </div>
                 {% endfor %}
 
+                <div class="flex items-center gap-2">
+                    <span class="flex-1 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Name" %}</span>
+                    <span class="w-32 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Price override" %}</span>
+                    <span class="w-8"></span>
+                </div>
                 <div id="bulk-add-rows" data-prefix="{{ variant_formset.prefix }}" class="flex flex-col gap-2">
                     {% for vform in variant_formset %}
                         {% include "management/_product_variant_formset_row.html" with form=vform %}

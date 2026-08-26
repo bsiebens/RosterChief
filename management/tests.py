@@ -8455,7 +8455,7 @@ class ProductCategoryManagementTests(ShopTestBase):
     def test_a_shop_manager_can_add_a_category(self):
         self.client.force_login(self.make_shop_manager())
 
-        response = self.club_post("product_category_create", {"name": "Merchandise", "ordering": "0"})
+        response = self.club_post("product_category_create", {"name": "Merchandise"})
 
         self.assertRedirects(response, reverse("management:product_list"))
         self.assertTrue(ProductCategory.objects.filter(club=self.club, name="Merchandise").exists())
@@ -8463,7 +8463,7 @@ class ProductCategoryManagementTests(ShopTestBase):
     def test_plain_staff_cannot_add_a_category(self):
         self.client.force_login(self.make_plain_staff())
 
-        response = self.club_post("product_category_create", {"name": "Merchandise", "ordering": "0"})
+        response = self.club_post("product_category_create", {"name": "Merchandise"})
 
         self.assertEqual(response.status_code, 403)
         self.assertFalse(ProductCategory.objects.filter(club=self.club, name="Merchandise").exists())
@@ -8472,12 +8472,17 @@ class ProductCategoryManagementTests(ShopTestBase):
         category = ProductCategory.objects.create(club=self.club, name="Merch")
         self.client.force_login(self.make_shop_manager())
 
-        response = self.club_post("product_category_update", {"name": "Merchandise", "ordering": "1"}, category.pk)
+        response = self.club_post("product_category_update", {"name": "Merchandise"}, category.pk)
 
         self.assertRedirects(response, reverse("management:product_list"))
         category.refresh_from_db()
         self.assertEqual(category.name, "Merchandise")
-        self.assertEqual(category.ordering, 1)
+
+    def test_categories_are_ordered_alphabetically(self):
+        ProductCategory.objects.create(club=self.club, name="Merchandise")
+        ProductCategory.objects.create(club=self.club, name="Fees")
+
+        self.assertEqual(list(ProductCategory.objects.filter(club=self.club).values_list("name", flat=True)), ["Fees", "Merchandise"])
 
     def test_deleting_a_category_uncategorises_its_products(self):
         category = ProductCategory.objects.create(club=self.club, name="Merch")
@@ -8497,7 +8502,7 @@ class ProductCategoryManagementTests(ShopTestBase):
         other_category = ProductCategory.objects.create(club=other_club, name="Foreign")
         self.client.force_login(self.make_shop_manager())
 
-        response = self.club_post("product_category_update", {"name": "Hijacked", "ordering": "0"}, other_category.pk)
+        response = self.club_post("product_category_update", {"name": "Hijacked"}, other_category.pk)
 
         self.assertEqual(response.status_code, 404)
 

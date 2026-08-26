@@ -996,7 +996,7 @@ class SignupTeamPlacementForm(forms.ModelForm):
 class ProductCategoryForm(forms.ModelForm):
     class Meta:
         model = ProductCategory
-        fields = ["name", "ordering"]
+        fields = ["name"]
 
 
 class ProductForm(forms.ModelForm):

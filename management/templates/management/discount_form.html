@@ -25,19 +25,16 @@
 
         <div class="card mb-4 card-body">
             <h2 class="card-title">{% trans "Amount" %}</h2>
-            <div class="grid grid-cols-2 gap-4">
+            <div class="grid grid-cols-3 gap-4">
                 {% form_field form.discount_type %}
                 {% form_field form.discount_amount %}
+                {% form_field form.is_active show_as_toggle=True %}
             </div>
         </div>
 
         <div class="card mb-4 card-body">
             <h2 class="card-title">{% trans "Description" %}</h2>
             {% form_field form.description textarea_height="h-28" show_label=False %}
-        </div>
-
-        <div class="card mb-4 card-body">
-            {% form_field form.is_active show_as_toggle=True %}
         </div>
 
         <div class="flex justify-start gap-2">

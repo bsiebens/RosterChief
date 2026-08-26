@@ -999,7 +999,7 @@ class ShopHomeView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
         # own template for how "groups" feeds both the top pill row (a same-page
         # anchor jump, not a filter -- the whole grid still scrolls straight
         # through) and each category's own section.
-        categories = ProductCategory.objects.filter(club=self.request.club).order_by("ordering", "name")
+        categories = ProductCategory.objects.filter(club=self.request.club).order_by("name")
         groups = []
         for category in categories:
             items = [product for product in products if product.category_id == category.pk]

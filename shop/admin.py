@@ -59,7 +59,7 @@ class ProductAdmin(ClubScopedFKMixin, admin.ModelAdmin):
 
 @admin.register(ProductCategory)
 class ProductCategoryAdmin(admin.ModelAdmin):
-    list_display = ["name", "ordering", "club"]
+    list_display = ["name", "club"]
     list_filter = ["club"]
     search_fields = ["name"]
 
