@@ -11,6 +11,9 @@ from club.models import Club, ClubMembership, ClubRole, FeePayment, OnboardingRe
 from club.services.access import groups_manageable_by, is_club_admin, teams_managed_by
 from events.models import Competition, Event, EventReferee, EventSeries, Location, Opponent
 from events.services.rbihf_import import RBIHFImportError, extract_team_id
+from formbuilder.models import Field as FormBuilderField
+from formbuilder.models import Form as FormBuilderForm
+from formbuilder.models import FormSend
 from members.models import Family, FamilyMembership, Group, Member
 from members.services.family import find_member_by_email
 from news.models import News
@@ -1277,3 +1280,162 @@ class RequirementBypassForm(forms.Form):
     bypass in a way it isn't for an ordinary completion."""
 
     note = forms.CharField(label=_("Why isn't this needed?"), widget=forms.Textarea(attrs={"rows": 2}))
+
+
+# --- formbuilder ------------------------------------------------------------
+
+
+class FormForm(forms.ModelForm):
+    class Meta:
+        model = FormBuilderForm
+        fields = ["title", "description", "login_required", "is_active"]
+
+
+def _options_from_text(text: str) -> list:
+    """One choice per line -> Field.options' plain-string list shape (see
+    formbuilder.services.options.field_choices). Blank lines are dropped so a
+    trailing newline from the textarea doesn't become an empty option."""
+    return [line.strip() for line in (text or "").splitlines() if line.strip()]
+
+
+def _text_from_options(options) -> str:
+    return "\n".join(str(option.get("value", option)) if isinstance(option, dict) else str(option) for option in options or [])
+
+
+_CHOICE_LIKE_FIELD_TYPES = {FormBuilderField.FieldType.CHOICE, FormBuilderField.FieldType.MULTICHOICE}
+
+
+class FieldRowForm(forms.Form):
+    """One row of the create-form page's own field formset -- entirely
+    optional, unlike FormBuilderFieldForm's own required label: a row left
+    blank is simply skipped, same "extra" idiom as ProductVariantRowForm's
+    own rows. Kept separate from FormBuilderFieldForm (a ModelForm) since
+    there's no Form to attach these to until the form itself is actually
+    saved -- the view builds Field instances from the cleaned rows
+    afterwards."""
+
+    label = forms.CharField(label=_("Question"), max_length=255, required=False, widget=forms.TextInput(attrs={"class": "input input-bordered w-full", "placeholder": _("e.g. Shirt size")}))
+    field_type = forms.ChoiceField(label=_("Type"), choices=FormBuilderField.FieldType.choices, required=False, initial=FormBuilderField.FieldType.TEXT, widget=forms.Select(attrs={"class": "select select-bordered w-full"}))
+    required = forms.BooleanField(label=_("Required"), required=False, initial=True)
+    options = forms.CharField(label=_("Options"), required=False, widget=forms.Textarea(attrs={"class": "textarea textarea-bordered w-full", "rows": 2, "placeholder": _("One per line -- only used for Choice/Multiple choice")}))
+
+    def clean_options(self):
+        return _options_from_text(self.cleaned_data.get("options", ""))
+
+    def clean(self):
+        cleaned = super().clean()
+        if cleaned.get("options") and not cleaned.get("label"):
+            self.add_error("label", _("Give this question text too."))
+        if cleaned.get("field_type") in _CHOICE_LIKE_FIELD_TYPES and cleaned.get("label") and not cleaned.get("options"):
+            self.add_error("options", _("Choice questions need at least one option, one per line."))
+        return cleaned
+
+
+class BaseFieldFormSet(forms.BaseFormSet):
+    """Catches two rows claiming the same question text -- Field's own
+    unique-per-form key constraint would reject the second (both slugify to
+    the same key) at save time, but that's a worse error to discover after
+    the form itself has already been created."""
+
+    def clean(self):
+        super().clean()
+        if any(self.errors):
+            return
+
+        seen = set()
+        for form in self.forms:
+            label = (form.cleaned_data or {}).get("label")
+            if not label:
+                continue
+            key = label.strip().lower()
+            if key in seen:
+                form.add_error("label", _("This question is listed twice."))
+            seen.add(key)
+
+
+FieldFormSet = forms.formset_factory(FieldRowForm, formset=BaseFieldFormSet, extra=5)
+
+
+class FormBuilderFieldForm(forms.ModelForm):
+    """The standalone add/edit modal for one Field, off FormDetailView --
+    same shape as ProductVariantForm's own per-variant modal. ``options`` is
+    exposed as newline-separated text here too (not the model's raw JSON
+    list), converted on the way in/out by the view."""
+
+    options = forms.CharField(label=_("Options"), required=False, widget=forms.Textarea(attrs={"rows": 3, "placeholder": _("One per line -- only used for Choice/Multiple choice")}))
+
+    class Meta:
+        model = FormBuilderField
+        fields = ["label", "field_type", "required", "help_text", "order", "options"]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.instance.pk:
+            self.fields["options"].initial = _text_from_options(self.instance.options)
+
+    def clean_options(self):
+        return _options_from_text(self.cleaned_data.get("options", ""))
+
+    def clean(self):
+        cleaned = super().clean()
+        if cleaned.get("field_type") in _CHOICE_LIKE_FIELD_TYPES and not cleaned.get("options"):
+            self.add_error("options", _("Choice questions need at least one option, one per line."))
+        return cleaned
+
+
+class FormSendAudienceFormMixin:
+    """FormSend's own copy of EventAudienceFormMixin's audience-scoping
+    logic -- teams restricted to the ones the requester manages (all of them
+    for an admin), groups restricted to the ones they belong to, and a
+    non-admin must pick at least one team or group. A small, deliberate
+    duplication rather than generalising EventAudienceFormMixin for two
+    unrelated apps to share -- see formbuilder.services.audience's own
+    module docstring for the same reasoning applied to effective_members."""
+
+    def scope_audience_fields(self, club, user):
+        self.club = club
+        self.user = user
+        self.fields["teams"].queryset = teams_managed_by(user, club)
+        self.fields["groups"].queryset = groups_manageable_by(user, club)
+        members = Member.objects.filter(member_of__club=club).distinct()
+        self.fields["invited_members"].queryset = members
+        self.fields["excluded_members"].queryset = members
+        if not is_club_admin(user, club):
+            del self.fields["club_wide"]
+
+    def clean_audience_requires_a_claim_for_non_admins(self, cleaned):
+        if is_club_admin(self.user, self.club):
+            return
+        teams = cleaned.get("teams")
+        groups = cleaned.get("groups")
+        if not (teams is not None and teams.exists()) and not (groups is not None and groups.exists()):
+            self.add_error(None, _("Select at least one of your teams or groups, or ask an admin to send it club-wide."))
+
+    def clean_club_wide_excludes_teams_and_groups(self, cleaned):
+        if not cleaned.get("club_wide"):
+            return
+        teams = cleaned.get("teams")
+        groups = cleaned.get("groups")
+        if (teams is not None and teams.exists()) or (groups is not None and groups.exists()):
+            self.add_error("club_wide", _("A whole-club send can't also list specific teams or groups -- clear them, or turn this off."))
+
+
+class FormSendForm(FormSendAudienceFormMixin, forms.ModelForm):
+    class Meta:
+        model = FormSend
+        fields = ["teams", "groups", "club_wide", "invited_members", "excluded_members", "opens_at", "closes_at", "max_submissions_per_user", "is_active"]
+        widgets = {
+            "opens_at": forms.DateTimeInput(attrs={"type": "datetime-local"}),
+            "closes_at": forms.DateTimeInput(attrs={"type": "datetime-local"}),
+            **_AUDIENCE_WIDGETS,
+        }
+
+    def __init__(self, *args, club=None, user=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.scope_audience_fields(club, user)
+
+    def clean(self):
+        cleaned = super().clean()
+        self.clean_audience_requires_a_claim_for_non_admins(cleaned)
+        self.clean_club_wide_excludes_teams_and_groups(cleaned)
+        return cleaned

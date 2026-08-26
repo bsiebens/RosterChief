@@ -1,0 +1,62 @@
+{% extends "management/base.html" %}
+{% load i18n lucide ui %}
+
+{% block panel_title %}{% trans "Responses" %}{% endblock panel_title %}
+{% block heading %}{% blocktrans with title=send.form.title %}Responses &middot; {{ title }}{% endblocktrans %}{% endblock heading %}
+
+{% block topbar_context %}
+    <span class="badge badge-neutral">{% blocktrans count counter=report.count %}{{ counter }} response{% plural %}{{ counter }} responses{% endblocktrans %}</span>
+{% endblock topbar_context %}
+
+{% block actions %}
+    <a class="btn btn-outline btn-sm gap-2" href="{% url 'management:formsend_responses_export' send.form.pk send.pk %}">{% lucide "download" size=14 %} {% trans "Export CSV" %}</a>
+{% endblock actions %}
+
+{% block panel %}
+    {% for col in columns %}
+        {% if col.summary %}
+            {% if forloop.first %}<div class="mb-4 grid grid-cols-1 gap-4 md:grid-cols-2">{% endif %}
+            <div class="card card-body">
+                <h3 class="card-title text-sm">{{ col.field.label }}</h3>
+                <div class="flex flex-col gap-1">
+                    {% for value, count in col.summary %}
+                        <div class="flex items-center justify-between text-sm">
+                            <span class="text-muted">{{ value }}</span>
+                            <span class="font-mono tabular-nums">{{ count }}</span>
+                        </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% if forloop.last %}</div>{% endif %}
+        {% endif %}
+    {% endfor %}
+
+    <div class="card overflow-hidden">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>{% trans "Submitted" %}</th>
+                    <th>{% trans "Member" %}</th>
+                    {% for col in columns %}
+                        <th>{{ col.field.label }}</th>
+                    {% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in rows %}
+                    <tr>
+                        <td class="font-mono text-xs">{{ row.submission.submitted_at|date:"d M Y H:i" }}</td>
+                        <td>{{ row.submission.member|default:"—" }}</td>
+                        {% for cell in row.cells %}
+                            <td class="text-sm">{{ cell|default:"—" }}</td>
+                        {% endfor %}
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="{{ columns|length|add:2 }}" class="text-center text-dim">{% trans "No responses yet." %}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+{% endblock panel %}

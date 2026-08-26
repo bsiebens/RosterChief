@@ -171,7 +171,17 @@ urlpatterns = [
     path("shop/invoices/", views.InvoiceListView.as_view(), name="invoice_list"),
     # Forms
     path("forms/", views.FormListView.as_view(), name="form_list"),
-    path("forms/<uuid:pk>/submissions/", views.SubmissionListView.as_view(), name="submission_list"),
+    path("forms/new/", views.FormCreateView.as_view(), name="form_create"),
+    path("forms/<uuid:pk>/", views.FormDetailView.as_view(), name="form_detail"),
+    path("forms/<uuid:pk>/edit/", views.FormUpdateView.as_view(), name="form_update"),
+    path("forms/<uuid:pk>/fields/new/", views.FormFieldCreateView.as_view(), name="form_field_create"),
+    path("forms/<uuid:form_pk>/fields/<uuid:pk>/edit/", views.FormFieldUpdateView.as_view(), name="form_field_update"),
+    path("forms/<uuid:form_pk>/fields/<uuid:pk>/toggle-active/", views.FormFieldToggleActiveView.as_view(), name="form_field_toggle_active"),
+    path("forms/<uuid:form_pk>/sends/new/", views.FormSendCreateView.as_view(), name="formsend_create"),
+    path("forms/<uuid:form_pk>/sends/<uuid:pk>/", views.FormSendDetailView.as_view(), name="formsend_detail"),
+    path("forms/<uuid:form_pk>/sends/<uuid:pk>/edit/", views.FormSendUpdateView.as_view(), name="formsend_update"),
+    path("forms/<uuid:form_pk>/sends/<uuid:pk>/responses/", views.FormSendResponsesView.as_view(), name="formsend_responses"),
+    path("forms/<uuid:form_pk>/sends/<uuid:pk>/responses/export/", views.FormSendResponsesExportView.as_view(), name="formsend_responses_export"),
     # Evaluations (placeholder -- see ARCHITECTURE.md §5.8, nothing built yet)
     path("evaluations/", views.EvaluationsComingSoonView.as_view(), name="evaluations"),
     # Settings (admin only)

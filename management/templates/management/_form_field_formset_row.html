@@ -1,0 +1,24 @@
+{% load i18n lucide %}
+{% comment %}
+    One row of the create-form page's own field formset -- same shape as
+    management/_product_variant_formset_row.html, minus the <tr> (this
+    formset lives inside a plain card too).
+{% endcomment %}
+<div class="bulk-add-row flex items-start gap-2">
+    <div class="flex-1">
+        {{ form.label }}
+        {% for error in form.label.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
+    </div>
+    <div class="w-40">
+        {{ form.field_type }}
+    </div>
+    <div class="flex h-11 w-16 shrink-0 items-center justify-center gap-1">
+        {{ form.required }}
+        <span class="text-xs text-muted">{% trans "Req." %}</span>
+    </div>
+    <div class="w-48">
+        {{ form.options }}
+        {% for error in form.options.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
+    </div>
+    <button class="btn btn-ghost btn-sm btn-square remove-row" type="button" aria-label="{% trans 'Remove this row' %}" title="{% trans 'Remove this row' %}">{% lucide "x" size=16 %}</button>
+</div>

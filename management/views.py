@@ -1,3 +1,4 @@
+import csv
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -21,6 +22,7 @@ from club.mixins import (
     ClubStaffRequiredMixin,
     EventManagerRequiredMixin,
     FeatureRequiredMixin,
+    FormManagerRequiredMixin,
     ManagementPositionRequiredMixin,
     MemberAdminRequiredMixin,
     NewsAuthorRequiredMixin,
@@ -45,8 +47,12 @@ from events.services.notifications import dispatch_notify_new_event
 from events.services.rbihf_import import RBIHFImportError, apply_plan, build_plan, extract_team_id, fetch_html
 from events.services.recurrence import cancel_occurrence, detach_occurrence, generate_occurrences, propagate_series
 from events.services.referees import RefereeAssignmentError, add_external_referee, assign_referee, conflicting_events, eligible_referees, needs_referee_management, remove_referee, set_referee_fee
+from formbuilder.models import Field as FormBuilderField
 from formbuilder.models import Form as FormBuilderForm
-from formbuilder.models import Submission
+from formbuilder.models import FormSend
+from formbuilder.services.audience import effective_members as form_effective_members
+from formbuilder.services.notifications import dispatch_notify_form_send
+from formbuilder.services.reporting import form_report
 from members.forms import ClaimRejectForm, ClaimReviewForm
 from members.models import Family, FamilyMembership, Group, GroupMembership, Member, ParentClaim
 from members.services.claims import ClaimError, approve_claim, children_awaiting_a_parent, reject_claim, send_claim_approved_email, suggested_children
@@ -81,6 +87,10 @@ from .forms import (
     EventSeriesForm,
     ExternalRefereeForm,
     FamilyCreateForm,
+    FieldFormSet,
+    FormBuilderFieldForm,
+    FormForm,
+    FormSendForm,
     GrantLoginForm,
     GroupBulkAddFormSet,
     GroupForm,
@@ -4565,20 +4575,306 @@ class InvoiceListView(ShopManagerRequiredMixin, TemplateView):
         return rows
 
 
-class FormListView(FeatureRequiredMixin, StubListMixin, ListView):
-    feature_flag = "formbuilder"
-    page_title = _("Forms")
+class FormListView(FormManagerRequiredMixin, ListView):
+    template_name = "management/form_list.html"
+    context_object_name = "forms"
+
+    def get_queryset(self):
+        return FormBuilderForm.objects.filter(club=self.request.club).annotate(send_count=Count("sends", distinct=True))
+
+
+class FormCreateView(FormManagerRequiredMixin, View):
+    """A form + its first batch of questions in one submit -- same shape as
+    ProductCreateView's product+variants: a plain View, not CreateView, since
+    this needs a second, independent form (the field formset) alongside
+    FormForm. The audience/send itself is a separate step (FormSendCreateView)
+    once the question set exists."""
+
+    template_name = "management/form_form.html"
+
+    def get_forms(self, data=None):
+        return (
+            FormForm(data, instance=FormBuilderForm(club=self.request.club)),
+            FieldFormSet(data, prefix="fields"),
+        )
+
+    def render_form(self, form, field_formset):
+        return render(self.request, self.template_name, {"form": form, "field_formset": field_formset})
+
+    def get(self, request, *args, **kwargs):
+        form, field_formset = self.get_forms()
+        return self.render_form(form, field_formset)
+
+    def post(self, request, *args, **kwargs):
+        form, field_formset = self.get_forms(request.POST)
+        if not form.is_valid() or not field_formset.is_valid():
+            return self.render_form(form, field_formset)
+
+        with transaction.atomic():
+            form_obj = form.save(commit=False)
+            form_obj.club = request.club
+            form_obj.save()
+            FormBuilderField.objects.bulk_create(
+                [
+                    FormBuilderField(form=form_obj, label=row["label"], field_type=row["field_type"], required=row["required"], options=row["options"], order=index)
+                    for index, row in enumerate(field_formset.cleaned_data)
+                    if row.get("label")
+                ]
+            )
+
+        notify(request, f"s|{_('Form created')}|{_('“%(form)s” created.') % {'form': form_obj}}")
+        return redirect("management:form_detail", pk=form_obj.pk)
+
+
+class FormDetailView(FormManagerRequiredMixin, DetailView):
+    """Questions + this form's sends (each a separate occasion it went out
+    to an audience -- see FormSend's own docstring). Reachable at the same
+    URL the original forms/<uuid:pk>/submissions/ stub used, since a single
+    "all submissions for this form" list stopped making sense once responses
+    became per-send (formbuilder.services.reporting.form_report's own
+    docstring) -- what replaces it is this page's own sends list, each
+    linking to its own responses."""
+
+    template_name = "management/form_detail.html"
+    context_object_name = "form"
 
     def get_queryset(self):
         return FormBuilderForm.objects.filter(club=self.request.club)
 
+    def get_context_data(self, **kwargs):
+        form_obj = self.object
+        fields = list(form_obj.fields.order_by("order"))
+        for field in fields:
+            field.edit_form = FormBuilderFieldForm(instance=field)
+        sends = list(form_obj.sends.annotate(submission_count=Count("submissions", distinct=True)).order_by("-created"))
+        return super().get_context_data(
+            fields=fields,
+            sends=sends,
+            add_field_form=FormBuilderFieldForm(),
+            **kwargs,
+        )
 
-class SubmissionListView(FeatureRequiredMixin, StubListMixin, ListView):
-    feature_flag = "formbuilder"
-    page_title = _("Submissions")
+
+class FormUpdateView(FormManagerRequiredMixin, UpdateView):
+    model = FormBuilderForm
+    form_class = FormForm
+    template_name = "management/form_form.html"
 
     def get_queryset(self):
-        return Submission.objects.filter(form__club=self.request.club, form_id=self.kwargs["pk"])
+        return FormBuilderForm.objects.filter(club=self.request.club)
+
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        notify(self.request, f"s|{_('Form updated')}|{_('“%(form)s” updated.') % {'form': self.object}}")
+        return response
+
+    def get_success_url(self):
+        return reverse("management:form_detail", args=[self.object.pk])
+
+    def get_context_data(self, **kwargs):
+        return super().get_context_data(update_view=True, **kwargs)
+
+
+class FormFieldCreateView(FormManagerRequiredMixin, RedirectOnInvalidMixin, FormView):
+    """Reachable only via the "Add question" modal on the form's own detail
+    page -- no standalone template, same shape as ProductVariantCreateView."""
+
+    form_class = FormBuilderFieldForm
+    http_method_names = ["post"]
+    invalid_redirect_url_name = "management:form_detail"
+
+    def get_invalid_redirect_kwargs(self):
+        return {"pk": self.kwargs["pk"]}
+
+    def get_form_obj(self):
+        return get_object_or_404(FormBuilderForm.objects.filter(club=self.request.club), pk=self.kwargs["pk"])
+
+    def form_valid(self, form):
+        form_obj = self.get_form_obj()
+        last_order = form_obj.fields.order_by("-order").values_list("order", flat=True).first()
+        form.instance.form = form_obj
+        form.instance.order = (last_order or 0) + 1
+        form.save()
+        response = super().form_valid(form)
+        notify(self.request, f"s|{_('Question added')}|{_('“%(field)s” added to %(form)s.') % {'field': form.instance.label, 'form': form_obj}}")
+        return response
+
+    def get_success_url(self):
+        return reverse("management:form_detail", args=[self.kwargs["pk"]])
+
+
+class FormFieldUpdateView(FormManagerRequiredMixin, RedirectOnInvalidMixin, UpdateView):
+    """Reachable only via a question's own "Edit" modal on the form's detail
+    page -- same reasoning as FormFieldCreateView. Editing an already-answered
+    question is still allowed (label/help_text/order/required all stay safe
+    to change after the fact); only its ``key`` -- never exposed here -- is
+    the part reporting actually joins on, and that's never touched once set."""
+
+    model = FormBuilderField
+    form_class = FormBuilderFieldForm
+    http_method_names = ["post"]
+    invalid_redirect_url_name = "management:form_detail"
+
+    def get_invalid_redirect_kwargs(self):
+        return {"pk": self.kwargs["form_pk"]}
+
+    def get_queryset(self):
+        return FormBuilderField.objects.filter(form__club=self.request.club, form__pk=self.kwargs["form_pk"])
+
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        notify(self.request, f"s|{_('Question updated')}|{_('“%(field)s” updated.') % {'field': self.object.label}}")
+        return response
+
+    def get_success_url(self):
+        return reverse("management:form_detail", args=[self.kwargs["form_pk"]])
+
+
+class FormFieldToggleActiveView(FormManagerRequiredMixin, View):
+    """No delete view -- Answer.field is PROTECT (formbuilder.models.Answer's
+    own docstring), same reasoning as ProductVariantToggleActiveView one
+    level down in shop. A field with no answers yet can still be removed
+    from the "Add question"/edit UI by simply deactivating it; nothing here
+    offers a hard delete at all, matching Field's own "retire via
+    is_active=False instead" design note (ARCHITECTURE.md §5.6)."""
+
+    def post(self, request, form_pk, pk):
+        field = get_object_or_404(FormBuilderField.objects.filter(form__club=request.club, form__pk=form_pk), pk=pk)
+        field.is_active = not field.is_active
+        field.save(update_fields=["is_active"])
+        if field.is_active:
+            notify(request, f"s|{_('Question activated')}|{_('“%(field)s” is now active.') % {'field': field.label}}")
+        else:
+            notify(request, f"w|{_('Question deactivated')}|{_('“%(field)s” is no longer active.') % {'field': field.label}}")
+        return redirect("management:form_detail", pk=form_pk)
+
+
+class FormSendCreateView(FormManagerRequiredMixin, CreateView):
+    model = FormSend
+    form_class = FormSendForm
+    template_name = "management/formsend_form.html"
+
+    def get_form_kwargs(self):
+        # FormSend.clean() rejects a form from another club by comparing against
+        # self.club_id -- on a brand-new instance that's still None until
+        # ClubScopedModel.save() auto-assigns it, which only happens *after*
+        # validation. Set it here so full_clean() sees the real club/form, not
+        # None -- same fix as EventCreateView.get_form_kwargs.
+        return super().get_form_kwargs() | {"club": self.request.club, "user": self.request.user, "instance": FormSend(club=self.request.club, form=self.get_form_object())}
+
+    def get_context_data(self, **kwargs):
+        return super().get_context_data(form_obj=self.get_form_object(), **kwargs)
+
+    def get_form_object(self):
+        return get_object_or_404(FormBuilderForm.objects.filter(club=self.request.club), pk=self.kwargs["form_pk"])
+
+    def form_valid(self, form):
+        form.instance.created_by = Member.objects.filter(user=self.request.user).first()
+        response = super().form_valid(form)
+        notify(self.request, f"s|{_('Form sent')}|{_('“%(form)s” sent.') % {'form': self.object.form}}")
+        dispatch_notify_form_send(str(self.object.pk))
+        return response
+
+    def get_success_url(self):
+        return reverse("management:formsend_detail", args=[self.kwargs["form_pk"], self.object.pk])
+
+
+class FormSendDetailView(FormManagerRequiredMixin, DetailView):
+    model = FormSend
+    template_name = "management/formsend_detail.html"
+    context_object_name = "send"
+
+    def get_queryset(self):
+        return FormSend.objects.filter(club=self.request.club, form__pk=self.kwargs["form_pk"]).select_related("form")
+
+    def get_context_data(self, **kwargs):
+        send = self.object
+        audience_count = form_effective_members(send).count()
+        submission_count = send.submissions.count()
+        return super().get_context_data(
+            audience_count=audience_count,
+            submission_count=submission_count,
+            not_yet_count=max(audience_count - submission_count, 0),
+            **kwargs,
+        )
+
+
+class FormSendUpdateView(FormManagerRequiredMixin, UpdateView):
+    model = FormSend
+    form_class = FormSendForm
+    template_name = "management/formsend_form.html"
+
+    def get_queryset(self):
+        return FormSend.objects.filter(club=self.request.club, form__pk=self.kwargs["form_pk"]).select_related("form")
+
+    def get_form_kwargs(self):
+        return super().get_form_kwargs() | {"club": self.request.club, "user": self.request.user}
+
+    def get_context_data(self, **kwargs):
+        return super().get_context_data(form_obj=self.object.form, update_view=True, **kwargs)
+
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        notify(self.request, f"s|{_('Send updated')}|{_('Updated.')}")
+        return response
+
+    def get_success_url(self):
+        return reverse("management:formsend_detail", args=[self.kwargs["form_pk"], self.object.pk])
+
+
+class FormSendResponsesView(FormManagerRequiredMixin, DetailView):
+    model = FormSend
+    template_name = "management/formsend_responses.html"
+    context_object_name = "send"
+
+    def get_queryset(self):
+        return FormSend.objects.filter(club=self.request.club, form__pk=self.kwargs["form_pk"]).select_related("form")
+
+    def get_context_data(self, **kwargs):
+        # Pre-shaped for the template rather than looked up there by a dynamic
+        # key (Field.id, a UUID) -- Django templates can't index a dict by a
+        # variable key without a custom filter this repo doesn't otherwise
+        # have, so each column carries its own summary (already sorted) and
+        # each row carries its cells in the same column order.
+        report = form_report(self.object)
+        columns = [{"field": column, "summary": sorted(report.summaries[column.id].items()) if column.id in report.summaries else None} for column in report.columns]
+        rows = [{"submission": row.submission, "cells": [row.values.get(column.id) for column in report.columns]} for row in report.rows]
+        return super().get_context_data(report=report, columns=columns, rows=rows, **kwargs)
+
+
+class FormSendResponsesExportView(FormManagerRequiredMixin, View):
+    """Plain streamed CSV -- an idempotent GET with nothing to stash/redirect
+    around (unlike OrderProductionExportView's stash-token pattern, built
+    for a POST-that-mutates-then-downloads flow this view doesn't have), and
+    no existing lighter CSV helper in this repo to reuse; shop's own export
+    (management.shop_export) is openpyxl/Excel-specific for a genuinely
+    different need (a manufacturer order list, one sheet per product)."""
+
+    def get(self, request, form_pk, pk):
+        send = get_object_or_404(FormSend.objects.filter(club=request.club, form__pk=form_pk).select_related("form"), pk=pk)
+        report = form_report(send)
+
+        response = HttpResponse(content_type="text/csv")
+        response["Content-Disposition"] = f'attachment; filename="{send.form.slug}-responses.csv"'
+        writer = csv.writer(response)
+        writer.writerow([_("Submitted"), _("Member"), *[column.label for column in report.columns]])
+        for row in report.rows:
+            writer.writerow(
+                [
+                    timezone.localtime(row.submission.submitted_at).strftime("%Y-%m-%d %H:%M"),
+                    str(row.submission.member) if row.submission.member else "",
+                    *[_format_answer_value(row.values.get(column.id)) for column in report.columns],
+                ]
+            )
+        return response
+
+
+def _format_answer_value(value):
+    if value is None:
+        return ""
+    if isinstance(value, list):
+        return ", ".join(str(item) for item in value)
+    return str(value)
 
 
 class EvaluationsComingSoonView(MemberAdminRequiredMixin, TemplateView):

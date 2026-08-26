@@ -1,0 +1,48 @@
+{% extends "management/base.html" %}
+{% load i18n lucide ui %}
+
+{% block panel_title %}{% trans "Forms" %}{% endblock panel_title %}
+{% block heading %}{% trans "Forms" %}{% endblock heading %}
+
+{% block topbar_context %}
+    <span class="badge badge-neutral">{% blocktrans count counter=forms|length %}{{ counter }} form{% plural %}{{ counter }} forms{% endblocktrans %}</span>
+{% endblock topbar_context %}
+
+{% block actions %}
+    <a class="btn btn-primary gap-2" href="{% url 'management:form_create' %}">{% lucide "plus" size=16 %} {% trans "New form" %}</a>
+{% endblock actions %}
+
+{% block panel %}
+    <div class="card overflow-hidden">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>{% trans "Title" %}</th>
+                    <th>{% trans "Sends" %}</th>
+                    <th>{% trans "Status" %}</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for form_item in forms %}
+                    <tr>
+                        <td><a class="link link-hover font-semibold" href="{% url 'management:form_detail' form_item.pk %}">{{ form_item.title }}</a></td>
+                        <td class="font-mono text-xs tabular-nums">{{ form_item.send_count }}</td>
+                        <td>
+                            <span class="badge badge-sm {% if form_item.is_active %}badge-success{% else %}badge-neutral{% endif %}">
+                                {% if form_item.is_active %}{% trans "Active" %}{% else %}{% trans "Inactive" %}{% endif %}
+                            </span>
+                        </td>
+                        <td class="text-right">
+                            <a class="btn btn-outline btn-sm" href="{% url 'management:form_detail' form_item.pk %}">{% trans "Open" %}</a>
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="4" class="text-center text-dim">{% trans "No forms yet." %}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+{% endblock panel %}

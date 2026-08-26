@@ -30,6 +30,10 @@ from events.services.notifications import notify_new_event
 from events.services.rbihf_import import RBIHFImportError
 from events.services.recurrence import detach_occurrence, generate_occurrences
 from events.services.referees import add_external_referee
+from formbuilder.models import Answer, FormSend, Submission
+from formbuilder.models import Field as FormBuilderField
+from formbuilder.models import Form as FormBuilderForm
+from formbuilder.services.notifications import notify_form_send
 from management.bulk_import import TEMPLATE_COLUMNS
 from management.email_previews import EMAIL_PREVIEWS
 from management.pdf import PDFExportError, _tint_with_white, referee_form_colors, render_pdf
@@ -10150,3 +10154,222 @@ class ShopManagerGrantRevokeTests(ShopTestBase):
         self.assertContains(response, "Shop admin")
 
 
+
+
+class FormManagementTests(ManagementTestBase):
+    """Form/Field/FormSend CRUD -- FormManagerRequiredMixin (ADMIN/EDITOR/
+    coach-manager, gated behind the "formbuilder" waffle flag, see
+    can_manage_forms/club.mixins.FormManagerRequiredMixin)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.team = Team.objects.create(club=cls.club, name="First Team", short_name="1st")
+
+        cls.coach_manager = User.objects.create_user(email="coach-forms@example.com", password="pw-secret-123")
+        coach_member = Member.objects.create(user=cls.coach_manager, first_name="Cara", last_name="Coach")
+        coach_position = Position.objects.create(club=cls.club, name="Head Coach", short_name="HC", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=cls.team, member=coach_member, season=cls.season, position=coach_position)
+
+        cls.plain_staff = User.objects.create_user(email="physio-forms@example.com", password="pw-secret-123")
+        staff_member = Member.objects.create(user=cls.plain_staff, first_name="Pat", last_name="Physio")
+        staff_position = Position.objects.create(club=cls.club, name="Physio", short_name="PH", staff_position=True, management_position=False)
+        StaffAssignment.objects.create(team=cls.team, member=staff_member, season=cls.season, position=staff_position)
+
+        cls.editor = User.objects.create_user(email="editor-forms@example.com", password="pw-secret-123")
+        editor_member = Member.objects.create(user=cls.editor, first_name="Eve", last_name="Editor")
+        ClubMembership.objects.create(club=cls.club, member=editor_member, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
+        ClubRole.objects.filter(club=cls.club, member=editor_member).update(role=ClubRole.Roles.EDITOR)
+        enrol_mfa(cls.editor)
+
+    def setUp(self):
+        super().setUp()
+        cache.clear()
+        self.addCleanup(cache.clear)
+        flag = get_waffle_flag_model().objects.create(name="formbuilder")
+        flag.clubs.add(self.club)
+
+    def make_form(self, **kwargs):
+        kwargs.setdefault("club", self.club)
+        kwargs.setdefault("title", "Sign-up")
+        return FormBuilderForm.objects.create(**kwargs)
+
+    # --- permissions -- broader than plain ClubAdminRequiredMixin, unlike
+    # the flag-gating itself (FeatureGatedSectionsTests) which only proves
+    # an admin can reach it. ---
+
+    def test_coach_manager_can_reach_form_list(self):
+        self.client.force_login(self.coach_manager)
+
+        self.assertEqual(self.club_get("form_list").status_code, 200)
+
+    def test_editor_can_reach_form_list(self):
+        self.client.force_login(self.editor)
+
+        self.assertEqual(self.club_get("form_list").status_code, 200)
+
+    def test_plain_staff_gets_403(self):
+        self.client.force_login(self.plain_staff)
+
+        self.assertEqual(self.club_get("form_list").status_code, 403)
+
+    # --- create ---
+
+    def test_creates_a_form_with_its_questions(self):
+        self.client.force_login(self.admin_user)
+        data = {
+            "title": "Sign-up",
+            "description": "",
+            "login_required": "",
+            "is_active": "on",
+            "fields-TOTAL_FORMS": "2",
+            "fields-INITIAL_FORMS": "0",
+            "fields-MIN_NUM_FORMS": "0",
+            "fields-MAX_NUM_FORMS": "1000",
+            "fields-0-label": "Shirt size",
+            "fields-0-field_type": "choice",
+            "fields-0-required": "on",
+            "fields-0-options": "S\nM\nL",
+            "fields-1-label": "",
+            "fields-1-field_type": "text",
+            "fields-1-required": "",
+            "fields-1-options": "",
+        }
+
+        response = self.club_post("form_create", data)
+
+        form_obj = FormBuilderForm.objects.get(club=self.club, title="Sign-up")
+        self.assertRedirects(response, reverse("management:form_detail", args=[form_obj.pk]))
+        field = form_obj.fields.get()
+        self.assertEqual(field.label, "Shirt size")
+        self.assertEqual(field.options, ["S", "M", "L"])
+
+    def test_a_blank_question_row_is_skipped(self):
+        self.client.force_login(self.admin_user)
+        data = {
+            "title": "Sign-up",
+            "description": "",
+            "login_required": "",
+            "is_active": "on",
+            "fields-TOTAL_FORMS": "1",
+            "fields-INITIAL_FORMS": "0",
+            "fields-MIN_NUM_FORMS": "0",
+            "fields-MAX_NUM_FORMS": "1000",
+            "fields-0-label": "",
+            "fields-0-field_type": "text",
+            "fields-0-required": "",
+            "fields-0-options": "",
+        }
+
+        self.club_post("form_create", data)
+
+        form_obj = FormBuilderForm.objects.get(club=self.club, title="Sign-up")
+        self.assertFalse(form_obj.fields.exists())
+
+    def test_duplicate_question_text_is_rejected(self):
+        self.client.force_login(self.admin_user)
+        data = {
+            "title": "Sign-up",
+            "description": "",
+            "login_required": "",
+            "is_active": "on",
+            "fields-TOTAL_FORMS": "2",
+            "fields-INITIAL_FORMS": "0",
+            "fields-MIN_NUM_FORMS": "0",
+            "fields-MAX_NUM_FORMS": "1000",
+            "fields-0-label": "Name",
+            "fields-0-field_type": "text",
+            "fields-0-required": "",
+            "fields-0-options": "",
+            "fields-1-label": "Name",
+            "fields-1-field_type": "text",
+            "fields-1-required": "",
+            "fields-1-options": "",
+        }
+
+        self.club_post("form_create", data)
+
+        self.assertFalse(FormBuilderForm.objects.filter(club=self.club, title="Sign-up").exists())
+
+    # --- fields ---
+
+    def test_can_add_a_question_from_the_detail_page(self):
+        form_obj = self.make_form()
+        self.client.force_login(self.admin_user)
+
+        self.club_post("form_field_create", {"label": "Age", "field_type": "number", "required": "on", "help_text": "", "order": "1", "options": ""}, form_obj.pk)
+
+        self.assertTrue(form_obj.fields.filter(label="Age").exists())
+
+    def test_toggling_a_question_flips_is_active(self):
+        form_obj = self.make_form()
+        field = FormBuilderField.objects.create(form=form_obj, label="Name", order=1)
+        self.client.force_login(self.admin_user)
+
+        self.club_post("form_field_toggle_active", {}, form_obj.pk, field.pk)
+
+        field.refresh_from_db()
+        self.assertFalse(field.is_active)
+
+    def test_a_question_from_another_club_404s(self):
+        other_club = Club.objects.create(name="Rival FC", slug="rival-fc-forms")
+        other_form = FormBuilderForm.objects.create(club=other_club, title="Other")
+        other_field = FormBuilderField.objects.create(form=other_form, label="X", order=1)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("form_field_toggle_active", {}, other_form.pk, other_field.pk)
+
+        self.assertEqual(response.status_code, 404)
+
+    # --- sends ---
+
+    def test_creating_a_send_notifies_the_resolved_audience(self):
+        form_obj = self.make_form()
+        member = Member.objects.create(first_name="Jane", last_name="Doe")
+        ClubMembership.objects.create(club=self.club, member=member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        self.client.force_login(self.admin_user)
+        data = {
+            "club_wide": "",
+            "teams": [str(self.team.pk)],
+            "groups": [],
+            "invited_members": [str(member.pk)],
+            "excluded_members": [],
+            "opens_at": "",
+            "closes_at": "",
+            "max_submissions_per_user": "",
+            "is_active": "on",
+        }
+
+        with mock.patch("management.views.dispatch_notify_form_send", side_effect=notify_form_send):
+            response = self.club_post("formsend_create", data, form_obj.pk)
+
+        send = FormSend.objects.get(form=form_obj)
+        self.assertRedirects(response, reverse("management:formsend_detail", args=[form_obj.pk, send.pk]))
+        self.assertTrue(Notification.objects.filter(member=member).exists())
+
+    def test_a_send_from_another_club_404s(self):
+        other_club = Club.objects.create(name="Rival FC", slug="rival-fc-forms-2")
+        other_form = FormBuilderForm.objects.create(club=other_club, title="Other")
+        other_send = FormSend.objects.create(club=other_club, form=other_form)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("formsend_detail", other_form.pk, other_send.pk)
+
+        self.assertEqual(response.status_code, 404)
+
+    # --- responses ---
+
+    def test_responses_export_is_a_csv_of_the_sends_own_submissions(self):
+        form_obj = self.make_form()
+        field = FormBuilderField.objects.create(form=form_obj, key="name", label="Name", order=1)
+        send = FormSend.objects.create(club=self.club, form=form_obj, club_wide=True)
+        member = Member.objects.create(first_name="Jane", last_name="Doe")
+        submission = Submission.objects.create(send=send, member=member)
+        Answer.objects.create(submission=submission, field=field, value="Jane")
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("formsend_responses_export", form_obj.pk, send.pk)
+
+        self.assertEqual(response["Content-Type"], "text/csv")
+        content = response.content.decode()
+        self.assertIn("Jane", content)

@@ -1,0 +1,124 @@
+{% extends "management/base.html" %}
+{% load i18n lucide ui %}
+
+{% block panel_title %}{{ form.title }}{% endblock panel_title %}
+{% block heading %}{{ form.title }}{% endblock heading %}
+
+{% block topbar_context %}
+    <span class="badge badge-sm {% if form.is_active %}badge-success{% else %}badge-neutral{% endif %}">
+        {% if form.is_active %}{% trans "Active" %}{% else %}{% trans "Inactive" %}{% endif %}
+    </span>
+{% endblock topbar_context %}
+
+{% block actions %}
+    <a class="btn btn-outline btn-sm gap-2" href="{% url 'management:form_update' form.pk %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</a>
+    <a class="btn btn-primary btn-sm gap-2" href="{% url 'management:formsend_create' form.pk %}">{% lucide "send" size=14 %} {% trans "Send" %}</a>
+{% endblock actions %}
+
+{% block panel %}
+    {% if form.description %}
+        <div class="card mb-4 card-body">
+            <p class="text-sm text-muted">{{ form.description|linebreaksbr }}</p>
+        </div>
+    {% endif %}
+
+    <div class="card mb-4 card-body">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+            <h2 class="card-title">{% lucide "list-checks" size=18 %} {% trans "Questions" %}</h2>
+            <button class="btn btn-outline btn-sm gap-2" type="button" onclick="document.getElementById('add_field_modal').showModal()">{% lucide "plus" size=14 %} {% trans "Add question" %}</button>
+        </div>
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>{% trans "Question" %}</th>
+                    <th>{% trans "Type" %}</th>
+                    <th>{% trans "Required" %}</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for field in fields %}
+                    <tr>
+                        <td class="font-semibold text-ink">
+                            <div class="flex items-center gap-3">
+                                <span>{{ field.label }}</span>
+                                {% if not field.is_active %}<span class="badge badge-sm badge-neutral">{% trans "Retired" %}</span>{% endif %}
+                            </div>
+                        </td>
+                        <td class="text-sm text-muted">{{ field.get_field_type_display }}</td>
+                        <td>{% if field.required %}{% lucide "check" size=14 %}{% else %}<span class="text-dim">&mdash;</span>{% endif %}</td>
+                        <td class="text-right">
+                            <div class="flex justify-end gap-1">
+                                <button class="btn btn-outline btn-xs gap-1" type="button" onclick="document.getElementById('{{ field.pk|dom_id:"edit_field_modal" }}').showModal()">{% lucide "pencil" size=12 %} {% trans "Edit" %}</button>
+                                <form method="post" action="{% url 'management:form_field_toggle_active' form.pk field.pk %}">
+                                    {% csrf_token %}
+                                    {% if field.is_active %}
+                                        <button class="btn btn-outline btn-xs gap-1" type="submit">{% lucide "eye-off" size=12 %} {% trans "Retire" %}</button>
+                                    {% else %}
+                                        <button class="btn btn-outline btn-xs gap-1" type="submit">{% lucide "eye" size=12 %} {% trans "Restore" %}</button>
+                                    {% endif %}
+                                </form>
+                            </div>
+                        </td>
+                    </tr>
+                    {% trans "Edit question" as edit_field_label %}
+                    {% url 'management:form_field_update' form.pk field.pk as edit_field_url %}
+                    {% include "controlpanel/_modal_form.html" with modal_id=field.pk|dom_id:"edit_field_modal" title=edit_field_label form=field.edit_form action_url=edit_field_url submit_label=edit_field_label submit_icon="save" %}
+                {% empty %}
+                    <tr>
+                        <td colspan="4" class="py-4 text-center text-muted">{% trans "No questions yet." %}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="card card-body">
+        <h2 class="card-title">{% lucide "send" size=18 %} {% trans "Sends" %}</h2>
+        <p class="text-sm text-muted">{% trans "Each time this form goes out to an audience is its own send, with its own responses." %}</p>
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>{% trans "Sent" %}</th>
+                    <th>{% trans "Window" %}</th>
+                    <th>{% trans "Responses" %}</th>
+                    <th>{% trans "Status" %}</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for send in sends %}
+                    <tr>
+                        <td class="font-mono text-xs">{{ send.created|date:"d M Y" }}</td>
+                        <td class="text-sm text-muted">
+                            {% if send.opens_at or send.closes_at %}
+                                {% if send.opens_at %}{{ send.opens_at|date:"d M" }}{% else %}&hellip;{% endif %}
+                                &ndash;
+                                {% if send.closes_at %}{{ send.closes_at|date:"d M Y" }}{% else %}&hellip;{% endif %}
+                            {% else %}
+                                <span class="text-dim">{% trans "No deadline" %}</span>
+                            {% endif %}
+                        </td>
+                        <td class="font-mono text-xs tabular-nums">{{ send.submission_count }}</td>
+                        <td>
+                            <span class="badge badge-sm {% if send.is_active %}badge-success{% else %}badge-neutral{% endif %}">
+                                {% if send.is_active %}{% trans "Open" %}{% else %}{% trans "Closed" %}{% endif %}
+                            </span>
+                        </td>
+                        <td class="text-right">
+                            <a class="btn btn-outline btn-sm" href="{% url 'management:formsend_responses' form.pk send.pk %}">{% trans "Responses" %}</a>
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="5" class="text-center text-dim">{% trans "This form hasn't been sent yet." %}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    {% trans "Add question" as add_field_label %}
+    {% url 'management:form_field_create' form.pk as add_field_url %}
+    {% include "controlpanel/_modal_form.html" with modal_id="add_field_modal" title=add_field_label form=add_field_form action_url=add_field_url submit_label=add_field_label submit_icon="plus" %}
+{% endblock panel %}

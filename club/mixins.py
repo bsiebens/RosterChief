@@ -94,6 +94,26 @@ class ShopManagerRequiredMixin(FeatureRequiredMixin):
         return can_manage_shop(self.request.user, self.request.club)
 
 
+class FormManagerRequiredMixin(FeatureRequiredMixin):
+    """The forms section's own gate -- same "formbuilder" waffle-flag 404 as
+    FeatureRequiredMixin, but ADMIN/EDITOR/coach-manager, not ADMIN-only --
+    same role set as can_add_news (ARCHITECTURE.md's RBAC table already
+    assigns EDITOR ownership of formbuilder content). Gates every management
+    view for Form/Field/FormSend, including response viewing/export -- see
+    can_manage_forms's own docstring for why this is one function, not
+    News's add/publish/edit split. A non-admin who can reach this (an
+    EDITOR or coach-manager) has no nav-sidebar entry for it, same
+    already-accepted gap ShopManager (a non-admin ShopManager grant) has for
+    Products -- the nav sidebar's Settings/Finance sections are wrapped in
+    an admin-only check regardless of the underlying view's own, broader
+    gate; not something this feature needs to be the one to fix."""
+
+    feature_flag = "formbuilder"
+
+    def test_func(self):
+        return can_manage_forms(self.request.user, self.request.club)
+
+
 class TeamManagerRequiredMixin(ClubStaffRequiredMixin):
     """A manager of *this* team, or a club ADMIN. ``self.get_team()`` must return the
     ``Team`` the view acts on (e.g. from the URL's ``pk``) before ``test_func`` runs.
@@ -173,13 +193,3 @@ class NewsEditRequiredMixin(ClubStaffRequiredMixin):
 
     def test_func(self):
         return can_edit_news(self.request.user, self.get_news_item())
-
-
-class FormManagerRequiredMixin(ClubStaffRequiredMixin):
-    """ADMIN, EDITOR, or a current-season coach_manager -- gates every
-    management view for Form/Field/FormSend, including response viewing/
-    export (see can_manage_forms's own docstring for why this is one
-    function, not News's add/publish/edit split)."""
-
-    def test_func(self):
-        return can_manage_forms(self.request.user, self.request.club)

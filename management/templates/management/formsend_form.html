@@ -1,0 +1,60 @@
+{% extends "management/base.html" %}
+{% load i18n lucide ui %}
+
+{% block panel_title %}{% if update_view %}{% trans "Edit send" %}{% else %}{% trans "Send form" %}{% endif %}{% endblock panel_title %}
+{% block heading %}{% if update_view %}{% blocktrans %}Edit send &middot; {{ form_obj }}{% endblocktrans %}{% else %}{% blocktrans %}Send &middot; {{ form_obj }}{% endblocktrans %}{% endif %}{% endblock heading %}
+
+{% block panel %}
+    <form method="post" class="flex flex-col gap-4">
+        {% csrf_token %}
+
+        {% for error in form.non_field_errors %}
+            <div class="alert alert-error">
+                <span>{{ error }}</span>
+            </div>
+        {% endfor %}
+
+        {% if not update_view %}
+            <div class="alert alert-info">
+                {% lucide "info" size=16 %}
+                <span>{% trans "Everyone in the audience below is notified as soon as you save this." %}</span>
+            </div>
+        {% endif %}
+
+        <div class="card">
+            <div class="card-body">
+                <h2 class="card-title">{% lucide "users" size=18 %} {% trans "Who's this for" %}</h2>
+                {% if "club_wide" in form.fields %}
+                    {% form_field form.club_wide show_as_toggle=True %}
+                {% endif %}
+                <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+                    {% form_field form.teams %}
+                    {% form_field form.groups %}
+                </div>
+                <div class="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+                    {% form_field form.invited_members %}
+                    {% form_field form.excluded_members %}
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-body">
+                <h2 class="card-title">{% lucide "calendar-clock" size=18 %} {% trans "Response window" %}</h2>
+                <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+                    {% form_field form.opens_at %}
+                    {% form_field form.closes_at %}
+                </div>
+                <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+                    {% form_field form.max_submissions_per_user %}
+                    {% form_field form.is_active show_as_toggle=True %}
+                </div>
+            </div>
+        </div>
+
+        <div class="flex justify-start gap-2">
+            <a class="btn btn-outline gap-2" href="{% url "management:form_detail" form_obj.pk %}">{% lucide "arrow-left" size=16 %} {% trans "Cancel" %}</a>
+            <button class="btn btn-primary gap-2" type="submit">{% lucide "send" size=16 %} {% if update_view %}{% trans "Save" %}{% else %}{% trans "Send" %}{% endif %}</button>
+        </div>
+    </form>
+{% endblock panel %}

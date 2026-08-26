@@ -1,0 +1,81 @@
+{% extends "management/base.html" %}
+{% load i18n lucide static ui %}
+
+{% block panel_title %}{% if update_view %}{% trans "Edit form" %}{% else %}{% trans "New form" %}{% endif %}{% endblock panel_title %}
+{% block heading %}{% if update_view %}{% blocktrans %}Edit {{ object }}{% endblocktrans %}{% else %}{% trans "New form" %}{% endif %}{% endblock heading %}
+
+{% block panel %}
+    <form method="post">
+        {% csrf_token %}
+        {% if not update_view %}{{ field_formset.management_form }}{% endif %}
+
+        {% for error in form.non_field_errors %}
+            <div class="alert alert-error mb-4">
+                {% lucide "circle-x" size=18 %}
+                <span>{{ error }}</span>
+            </div>
+        {% endfor %}
+
+        <div class="card mb-4 card-body">
+            <h2 class="card-title">{% trans "Basics" %}</h2>
+            <div class="grid grid-cols-2 gap-4">
+                {% form_field form.title %}
+                {% form_field form.is_active show_as_toggle=True %}
+            </div>
+            {% form_field form.description textarea_height="h-28" %}
+            {% form_field form.login_required show_as_toggle=True %}
+        </div>
+
+        {% if not update_view %}
+            {% comment %}
+                Optional question rows, filled in right here instead of forcing a
+                save-then-add-questions round trip -- FieldFormSet
+                (management/forms.py), extra=5 blank rows, same clone-from-<template>
+                mechanism as ProductCreateView's own variant rows
+                (static/js/bulk-add-rows.js).
+            {% endcomment %}
+            <div class="card mb-4 card-body">
+                <h2 class="card-title">{% lucide "list-checks" size=18 %} {% trans "Questions" %}</h2>
+                <p class="text-sm text-muted">{% trans "Add as many questions as this form needs. You can add, edit, or retire questions later from the form's own page." %}</p>
+
+                {% for error in field_formset.non_form_errors %}
+                    <div class="alert alert-error">
+                        <span>{{ error }}</span>
+                    </div>
+                {% endfor %}
+
+                <div class="flex items-center gap-2">
+                    <span class="flex-1 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Question" %}</span>
+                    <span class="w-40 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Type" %}</span>
+                    <span class="w-16 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Req." %}</span>
+                    <span class="w-48 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Options" %}</span>
+                    <span class="w-8"></span>
+                </div>
+                <div id="bulk-add-rows" data-prefix="{{ field_formset.prefix }}" class="flex flex-col gap-2">
+                    {% for ffield in field_formset %}
+                        {% include "management/_form_field_formset_row.html" with form=ffield %}
+                    {% endfor %}
+                </div>
+
+                <template id="bulk-add-row-template">
+                    {% include "management/_form_field_formset_row.html" with form=field_formset.empty_form %}
+                </template>
+
+                <div>
+                    <button class="btn btn-outline btn-sm gap-2" type="button" id="add-row">{% lucide "plus" size=14 %} {% trans "Add another question" %}</button>
+                </div>
+            </div>
+        {% endif %}
+
+        <div class="flex justify-start gap-2">
+            <a class="btn btn-outline gap-2" href="{% url "management:form_list" %}">{% lucide "arrow-left" size=16 %} {% trans "Cancel" %}</a>
+            <button class="btn btn-primary gap-2" type="submit">{% lucide "save" size=16 %} {% trans "Save" %}</button>
+        </div>
+    </form>
+{% endblock panel %}
+
+{% block extra_body %}
+    {% if not update_view %}
+        <script src="{% static 'js/bulk-add-rows.js' %}"></script>
+    {% endif %}
+{% endblock extra_body %}

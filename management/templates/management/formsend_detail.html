@@ -1,0 +1,47 @@
+{% extends "management/base.html" %}
+{% load i18n lucide ui %}
+
+{% block panel_title %}{{ send.form.title }}{% endblock panel_title %}
+{% block heading %}{% blocktrans with title=send.form.title %}Send &middot; {{ title }}{% endblocktrans %}{% endblock heading %}
+
+{% block topbar_context %}
+    <span class="badge badge-sm {% if send.is_active %}badge-success{% else %}badge-neutral{% endif %}">
+        {% if send.is_active %}{% trans "Open" %}{% else %}{% trans "Closed" %}{% endif %}
+    </span>
+{% endblock topbar_context %}
+
+{% block actions %}
+    <a class="btn btn-outline btn-sm gap-2" href="{% url 'management:formsend_update' send.form.pk send.pk %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</a>
+    <a class="btn btn-primary btn-sm gap-2" href="{% url 'management:formsend_responses' send.form.pk send.pk %}">{% lucide "table" size=14 %} {% trans "Responses" %}</a>
+{% endblock actions %}
+
+{% block panel %}
+    <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <div class="card card-body">
+            <div class="text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Audience" %}</div>
+            <div class="font-mono text-2xl tabular-nums">{{ audience_count }}</div>
+        </div>
+        <div class="card card-body">
+            <div class="text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Responded" %}</div>
+            <div class="font-mono text-2xl tabular-nums">{{ submission_count }}</div>
+        </div>
+        <div class="card card-body">
+            <div class="text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Still waiting on" %}</div>
+            <div class="font-mono text-2xl tabular-nums">{{ not_yet_count }}</div>
+        </div>
+    </div>
+
+    <div class="card mt-4 card-body">
+        <h2 class="card-title">{% lucide "calendar-clock" size=18 %} {% trans "Response window" %}</h2>
+        <dl class="grid grid-cols-1 gap-2 text-sm md:grid-cols-2">
+            <div>
+                <dt class="text-muted">{% trans "Opens" %}</dt>
+                <dd>{% if send.opens_at %}{{ send.opens_at }}{% else %}<span class="text-dim">{% trans "Immediately" %}</span>{% endif %}</dd>
+            </div>
+            <div>
+                <dt class="text-muted">{% trans "Closes" %}</dt>
+                <dd>{% if send.closes_at %}{{ send.closes_at }}{% else %}<span class="text-dim">{% trans "No deadline" %}</span>{% endif %}</dd>
+            </div>
+        </dl>
+    </div>
+{% endblock panel %}
