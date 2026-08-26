@@ -49,45 +49,110 @@
         </div>
     </div>
 
-    <div class="card overflow-hidden">
-        <table class="table">
-            <thead>
-                <tr>
-                    <th>{% trans "Order" %}</th>
-                    <th>{% trans "Purchaser" %}</th>
-                    <th>{% trans "Status" %}</th>
-                    <th>{% trans "Total" %}</th>
-                    <th>{% trans "Placed" %}</th>
-                    <th></th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for order in orders %}
+    {% comment %}
+        Bulk "Mark paid"/"Mark ready for pickup" -- same shape as membership_list.html's
+        own bulk-select form: row checkboxes + a "select all" live inside this one
+        <form>, and each bulk action is a submit button with its own formaction
+        overriding where THIS form posts to. The pickup-instructions modal's textarea
+        carries form="orders_bulk_form" so it submits alongside the checkboxes even
+        though a <dialog> isn't nested inside the <form> in the DOM.
+    {% endcomment %}
+    <form method="post" id="orders_bulk_form">
+        {% csrf_token %}
+        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+
+        <div class="card overflow-hidden">
+            <div class="flex flex-wrap items-center justify-between gap-2 border-b border-line px-4.5 py-3.5">
+                <span class="font-display text-sm font-bold tracking-wide text-muted uppercase">
+                    {% blocktrans count counter=orders|length %}{{ counter }} order{% plural %}{{ counter }} orders{% endblocktrans %}
+                </span>
+                <div class="flex gap-2">
+                    <button class="btn btn-success btn-sm gap-2" type="submit" formaction="{% url 'management:order_bulk_mark_paid' %}">{% lucide "circle-check" size=14 %} {% trans "Mark selected paid" %}</button>
+                    <button class="btn btn-info btn-sm gap-2" type="button" onclick="document.getElementById('bulk_ready_for_pickup_modal').showModal()">{% lucide "bell" size=14 %} {% trans "Mark selected ready for pickup" %}</button>
+                </div>
+            </div>
+
+            <table class="table">
+                <thead>
                     <tr>
-                        <td class="font-mono text-xs">{{ order.number }}</td>
-                        <td class="font-semibold">{{ order.purchaser }}</td>
-                        <td>
-                            <span class="badge badge-sm
-                                {% if order.status == "paid" or order.status == "delivered" %}badge-success
-                                {% elif order.status == "ready_for_pickup" %}badge-info
-                                {% elif order.status == "partially_paid" %}badge-warning
-                                {% elif order.status == "cancelled" or order.status == "refunded" %}badge-error
-                                {% else %}badge-neutral{% endif %}">
-                                {{ order.get_status_display }}
-                            </span>
-                        </td>
-                        <td class="font-mono tabular-nums">&euro; {{ order.total }}</td>
-                        <td class="font-mono text-xs">{{ order.created|date:"Y-m-d" }}</td>
-                        <td class="text-right">
-                            <a class="btn btn-outline btn-sm" href="{% url 'management:order_detail' order.pk %}">{% trans "View" %}</a>
-                        </td>
+                        <th><input type="checkbox" class="checkbox" id="select-all-orders"></th>
+                        <th>{% trans "Order" %}</th>
+                        <th>{% trans "Purchaser" %}</th>
+                        <th>{% trans "Status" %}</th>
+                        <th>{% trans "Total" %}</th>
+                        <th>{% trans "Placed" %}</th>
+                        <th></th>
                     </tr>
-                {% empty %}
-                    <tr>
-                        <td colspan="6" class="text-center text-dim">{% trans "No orders yet." %}</td>
-                    </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
+                </thead>
+                <tbody>
+                    {% for order in orders %}
+                        <tr>
+                            <td>{% if order.status != "cancelled" %}<input type="checkbox" class="checkbox order-row-checkbox" name="order_ids" value="{{ order.pk }}">{% endif %}</td>
+                            <td class="font-mono text-xs">{{ order.number }}</td>
+                            <td class="font-semibold">{{ order.purchaser }}</td>
+                            <td>
+                                <span class="badge badge-sm
+                                    {% if order.status == "paid" or order.status == "delivered" %}badge-success
+                                    {% elif order.status == "ready_for_pickup" %}badge-info
+                                    {% elif order.status == "partially_paid" %}badge-warning
+                                    {% elif order.status == "cancelled" or order.status == "refunded" %}badge-error
+                                    {% else %}badge-neutral{% endif %}">
+                                    {{ order.get_status_display }}
+                                </span>
+                            </td>
+                            <td class="font-mono text-xs tabular-nums">&euro; {{ order.total }}</td>
+                            <td class="font-mono text-xs">{{ order.created|date:"Y-m-d" }}</td>
+                            <td class="text-right">
+                                <a class="btn btn-outline btn-sm" href="{% url 'management:order_detail' order.pk %}">{% trans "View" %}</a>
+                            </td>
+                        </tr>
+                    {% empty %}
+                        <tr>
+                            <td colspan="7" class="text-center text-dim">{% trans "No orders yet." %}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </form>
+
+    <dialog id="bulk_ready_for_pickup_modal" class="modal">
+        <div class="modal-box">
+            <h3 class="text-lg font-bold">{% trans "Mark selected ready for pickup" %}</h3>
+            <p class="py-2 text-sm opacity-70">{% trans "Notifies every selected order's purchaser (app + email) that it's ready to collect. These instructions, if any, go out in every one of those notifications -- leave blank for none." %}</p>
+            {% comment %}
+                Hand-rolled rather than {% form_field %}: that tag's textarea
+                branch doesn't pass through arbitrary widget attrs, and this
+                field needs form="orders_bulk_form" to submit alongside the
+                row checkboxes despite living inside this <dialog>, which
+                isn't nested inside that <form> -- see the form's own
+                docstring (management/forms.py).
+            {% endcomment %}
+            <div class="form-control w-full">
+                <label class="label" for="id_bulk_pickup_instructions"><span class="label-text">{% trans "Pickup instructions" %}</span></label>
+                <textarea id="id_bulk_pickup_instructions" name="pickup_instructions" form="orders_bulk_form" class="textarea textarea-bordered h-28 w-full" rows="3" placeholder="{% trans 'e.g. "ask for it at the clubhouse desk"' %}">{{ bulk_ready_for_pickup_form.pickup_instructions.value|default:"" }}</textarea>
+            </div>
+        </div>
+        <div class="modal-action">
+            <form method="dialog">
+                <button class="btn btn-outline gap-2">{% lucide "x" size=16 %} {% trans "Cancel" %}</button>
+            </form>
+            <button class="btn btn-info gap-2" type="submit" form="orders_bulk_form" formaction="{% url 'management:order_bulk_mark_ready_for_pickup' %}">{% lucide "bell" size=16 %} {% trans "Notify selected" %}</button>
+        </div>
+        <form method="dialog" class="modal-backdrop"><button>close</button></form>
+    </dialog>
 {% endblock panel %}
+
+{% block extra_body %}
+    <script>
+        (() => {
+            const selectAll = document.getElementById("select-all-orders");
+            const rowCheckboxes = document.querySelectorAll(".order-row-checkbox");
+            if (!selectAll) return;
+
+            selectAll.addEventListener("change", () => {
+                rowCheckboxes.forEach((checkbox) => { checkbox.checked = selectAll.checked; });
+            });
+        })();
+    </script>
+{% endblock extra_body %}

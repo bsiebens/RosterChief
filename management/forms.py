@@ -1090,6 +1090,19 @@ class OrderMarkReadyForPickupForm(forms.Form):
     pickup_instructions = forms.CharField(label=_("Pickup instructions"), required=False, widget=forms.Textarea(attrs={"rows": 3}), help_text=_("Optional -- included in the notification, e.g. \"ask for it at the clubhouse desk\"."))
 
 
+class OrderBulkMarkReadyForPickupForm(forms.Form):
+    """The one shared pickup_instructions for a whole batch of orders marked
+    ready from the Orders list in one go -- order_list.html's own
+    bulk_ready_for_pickup_modal, same "one setting, not one per row" shape as
+    SendDuesInvoicesForm's due_in_days. Rendered by hand there (not via
+    {% form_field %}) so its textarea can carry form="orders_bulk_form" and
+    submit alongside the row checkboxes despite the modal not being nested
+    inside that form -- this class exists to validate/clean what that
+    textarea posts, same as SendDuesInvoicesForm validates due_in_days."""
+
+    pickup_instructions = forms.CharField(label=_("Pickup instructions"), required=False, widget=forms.Textarea(attrs={"rows": 3}), help_text=_("Optional -- goes out in every notification this batch sends."))
+
+
 class RequirementBypassForm(forms.Form):
     """Marks one OnboardingRequirement as not needed for one member -- see
     club.services.onboarding.mark_bypassed. A note is required here (unlike

@@ -87,6 +87,7 @@ from .forms import (
     NewsPublishForm,
     OnboardingRequirementForm,
     OpponentForm,
+    OrderBulkMarkReadyForPickupForm,
     OrderMarkPaidForm,
     OrderMarkReadyForPickupForm,
     PositionForm,
@@ -3826,7 +3827,79 @@ class OrderListView(ShopManagerRequiredMixin, ListView):
         # order_kpis reads every order for the club regardless of the ?status=
         # filter above -- the KPI strip is "how's the shop doing overall", not
         # "how many of the filtered rows below".
-        return super().get_context_data(status_choices=Order.OrderStatus.choices, selected_status=self.request.GET.get("status", ""), kpis=order_kpis(self.request.club), **kwargs)
+        return super().get_context_data(
+            status_choices=Order.OrderStatus.choices,
+            selected_status=self.request.GET.get("status", ""),
+            kpis=order_kpis(self.request.club),
+            bulk_ready_for_pickup_form=OrderBulkMarkReadyForPickupForm(),
+            **kwargs,
+        )
+
+
+class OrderBulkMarkPaidView(ShopManagerRequiredMixin, View):
+    """The Orders list's own "Mark selected paid" -- CASH, no reference: there's
+    no one reference that would meaningfully apply across a whole batch of
+    distinct orders, use the single-order modal (OrderMarkPaidView) for that.
+    Cancelled orders are excluded rather than erroring -- their own checkbox
+    isn't even rendered (order_list.html), so this only matters for a stale
+    selection left over from before a page reload."""
+
+    def post(self, request):
+        next_url = request.POST.get("next")
+        redirect_url = next_url if next_url and url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}, require_https=request.is_secure()) else reverse("management:order_list")
+
+        ids = request.POST.getlist("order_ids")
+        if not ids:
+            notify(request, f"e|{_('No orders selected')}|{_('Select at least one order.')}")
+            return redirect(redirect_url)
+
+        orders = Order.objects.filter(pk__in=ids, club=request.club).exclude(status=Order.OrderStatus.CANCELLED)
+        count = 0
+        with transaction.atomic():
+            for order in orders:
+                Payment.objects.create(order=order, amount=order.total, method=Payment.PaymentMethod.CASH, status=Payment.PaymentStatus.CONFIRMED, paid_at=timezone.now())
+                order.status = Order.OrderStatus.PAID
+                order.save(update_fields=["status"])
+                count += 1
+
+        notify(request, f"s|{_('Orders marked paid')}|{_('%(count)d order(s) marked paid.') % {'count': count}}")
+        return redirect(redirect_url)
+
+
+class OrderBulkMarkReadyForPickupView(ShopManagerRequiredMixin, View):
+    """The Orders list's own "Mark selected ready for pickup" -- one shared
+    pickup_instructions (OrderBulkMarkReadyForPickupForm) applied to every
+    selected order, exactly the "not retyping the same note 50 times" this
+    exists for. Notifies each purchaser individually, same as the
+    single-order action -- there's no batched "one email to everyone", every
+    purchaser only ever hears about their own order."""
+
+    def post(self, request):
+        next_url = request.POST.get("next")
+        redirect_url = next_url if next_url and url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}, require_https=request.is_secure()) else reverse("management:order_list")
+
+        ids = request.POST.getlist("order_ids")
+        if not ids:
+            notify(request, f"e|{_('No orders selected')}|{_('Select at least one order.')}")
+            return redirect(redirect_url)
+
+        form = OrderBulkMarkReadyForPickupForm(request.POST)
+        if not form.is_valid():
+            notify(request, f"e|{_('Could not mark ready for pickup')}|{_('Check the pickup instructions and try again.')}")
+            return redirect(redirect_url)
+
+        pickup_instructions = form.cleaned_data["pickup_instructions"]
+        orders = Order.objects.filter(pk__in=ids, club=request.club).exclude(status=Order.OrderStatus.CANCELLED)
+        count = 0
+        for order in orders:
+            order.pickup_instructions = pickup_instructions
+            order.status = Order.OrderStatus.READY_FOR_PICKUP
+            order.save(update_fields=["status", "pickup_instructions"])
+            dispatch_order_ready_for_pickup_notification(order)
+            count += 1
+
+        notify(request, f"s|{_('Orders ready for pickup')}|{_('%(count)d order(s) marked ready — purchasers notified.') % {'count': count}}")
+        return redirect(redirect_url)
 
 
 class OrderDetailView(ShopManagerRequiredMixin, DetailView):

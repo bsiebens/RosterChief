@@ -8837,6 +8837,110 @@ class OrderManagementTests(ShopTestBase):
 
         self.assertEqual(response.status_code, 404)
 
+    def test_bulk_mark_paid_marks_every_selected_order(self):
+        first = self.make_order()
+        second = self.make_order()
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_post("order_bulk_mark_paid", {"order_ids": [str(first.pk), str(second.pk)]})
+
+        self.assertRedirects(response, reverse("management:order_list"))
+        first.refresh_from_db()
+        second.refresh_from_db()
+        self.assertEqual(first.status, Order.OrderStatus.PAID)
+        self.assertEqual(second.status, Order.OrderStatus.PAID)
+        self.assertEqual(Payment.objects.filter(order__in=[first, second], status=Payment.PaymentStatus.CONFIRMED).count(), 2)
+
+    def test_bulk_mark_paid_skips_cancelled_orders(self):
+        cancelled = self.make_order(status=Order.OrderStatus.CANCELLED)
+        self.client.force_login(self.make_shop_manager())
+
+        self.club_post("order_bulk_mark_paid", {"order_ids": [str(cancelled.pk)]})
+
+        cancelled.refresh_from_db()
+        self.assertEqual(cancelled.status, Order.OrderStatus.CANCELLED)
+        self.assertFalse(Payment.objects.filter(order=cancelled).exists())
+
+    def test_bulk_mark_paid_with_nothing_selected_shows_an_error(self):
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_post("order_bulk_mark_paid", {})
+
+        self.assertRedirects(response, reverse("management:order_list"))
+        self.assertFalse(Payment.objects.exists())
+
+    def test_bulk_mark_paid_never_touches_another_clubs_order(self):
+        other_club = Club.objects.create(name="Other Club", slug="other-club-bulk-paid")
+        other_purchaser = Member.objects.create(first_name="Otto", last_name="Other", email="otto-bulk-paid@example.com")
+        foreign_order = Order.objects.create(club=other_club, purchaser=other_purchaser, status=Order.OrderStatus.PENDING, total=Decimal("10.00"))
+        self.client.force_login(self.make_shop_manager())
+
+        self.club_post("order_bulk_mark_paid", {"order_ids": [str(foreign_order.pk)]})
+
+        foreign_order.refresh_from_db()
+        self.assertEqual(foreign_order.status, Order.OrderStatus.PENDING)
+
+    def test_plain_staff_cannot_bulk_mark_paid(self):
+        order = self.make_order()
+        self.client.force_login(self.make_plain_staff())
+
+        response = self.club_post("order_bulk_mark_paid", {"order_ids": [str(order.pk)]})
+
+        self.assertEqual(response.status_code, 403)
+        order.refresh_from_db()
+        self.assertEqual(order.status, Order.OrderStatus.PENDING)
+
+    def test_bulk_mark_ready_for_pickup_applies_the_shared_instructions_to_every_order(self):
+        first = self.make_order()
+        second = self.make_order()
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_post("order_bulk_mark_ready_for_pickup", {"order_ids": [str(first.pk), str(second.pk)], "pickup_instructions": "Ring the bell."})
+
+        self.assertRedirects(response, reverse("management:order_list"))
+        first.refresh_from_db()
+        second.refresh_from_db()
+        self.assertEqual(first.status, Order.OrderStatus.READY_FOR_PICKUP)
+        self.assertEqual(second.status, Order.OrderStatus.READY_FOR_PICKUP)
+        self.assertEqual(first.pickup_instructions, "Ring the bell.")
+        self.assertEqual(second.pickup_instructions, "Ring the bell.")
+
+    def test_bulk_mark_ready_for_pickup_notifies_each_purchaser(self):
+        first = self.make_order()
+        second = self.make_order()
+        self.client.force_login(self.make_shop_manager())
+
+        self.club_post("order_bulk_mark_ready_for_pickup", {"order_ids": [str(first.pk), str(second.pk)], "pickup_instructions": ""})
+
+        self.assertEqual(Notification.objects.filter(member=self.purchaser, title__icontains=first.number).count(), 1)
+        self.assertEqual(Notification.objects.filter(member=self.purchaser, title__icontains=second.number).count(), 1)
+
+    def test_bulk_mark_ready_for_pickup_skips_cancelled_orders(self):
+        cancelled = self.make_order(status=Order.OrderStatus.CANCELLED)
+        self.client.force_login(self.make_shop_manager())
+
+        self.club_post("order_bulk_mark_ready_for_pickup", {"order_ids": [str(cancelled.pk)], "pickup_instructions": ""})
+
+        cancelled.refresh_from_db()
+        self.assertEqual(cancelled.status, Order.OrderStatus.CANCELLED)
+
+    def test_bulk_mark_ready_for_pickup_with_nothing_selected_shows_an_error(self):
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_post("order_bulk_mark_ready_for_pickup", {"pickup_instructions": ""})
+
+        self.assertRedirects(response, reverse("management:order_list"))
+
+    def test_plain_staff_cannot_bulk_mark_ready_for_pickup(self):
+        order = self.make_order()
+        self.client.force_login(self.make_plain_staff())
+
+        response = self.club_post("order_bulk_mark_ready_for_pickup", {"order_ids": [str(order.pk)], "pickup_instructions": ""})
+
+        self.assertEqual(response.status_code, 403)
+        order.refresh_from_db()
+        self.assertEqual(order.status, Order.OrderStatus.PENDING)
+
     def test_cancelling_an_order(self):
         order = self.make_order()
         self.client.force_login(self.admin_user)

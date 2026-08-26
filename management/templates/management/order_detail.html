@@ -86,8 +86,8 @@
                         <td class="font-semibold">{{ line.product }}{% if line.variant %} <span class="font-normal text-muted">&middot; {{ line.variant.name }}</span>{% endif %}</td>
                         <td>{{ line.beneficiary|default:"—" }}</td>
                         <td>{{ line.quantity }}</td>
-                        <td class="font-mono tabular-nums">&euro; {{ line.unit_price }}</td>
-                        <td class="font-mono tabular-nums">&euro; {{ line.line_total }}</td>
+                        <td class="font-mono text-xs tabular-nums">&euro; {{ line.unit_price }}</td>
+                        <td class="font-mono text-xs tabular-nums">&euro; {{ line.line_total }}</td>
                     </tr>
                 {% empty %}
                     <tr>
@@ -127,7 +127,7 @@
                 {% for payment in payments %}
                     <tr>
                         <td>{{ payment.get_method_display }}</td>
-                        <td class="font-mono tabular-nums">&euro; {{ payment.amount }}</td>
+                        <td class="font-mono text-xs tabular-nums">&euro; {{ payment.amount }}</td>
                         <td>
                             <span class="badge badge-sm {% if payment.status == "confirmed" %}badge-success{% elif payment.status == "failed" %}badge-error{% else %}badge-neutral{% endif %}">
                                 {{ payment.get_status_display }}
