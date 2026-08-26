@@ -222,14 +222,14 @@
             <h3 class="text-lg font-bold">{% trans "Send invoice" %}</h3>
             <p class="py-2 text-sm opacity-70">{% trans "Emails each selected member (or a parent/guardian, if they have no email on file) an invoice for their outstanding balance." %}</p>
             <div class="form-control w-full">
-                {% form_field send_invoice_form.due_in_days size="small" %}
+                {% form_field send_invoice_form.due_in_days %}
             </div>
-        </div>
-        <div class="modal-action">
-            <form method="dialog">
-                <button class="btn btn-outline gap-2">{% lucide "x" size=16 %} {% trans "Cancel" %}</button>
-            </form>
-            <button class="btn btn-primary gap-2" type="submit" form="membership-form" formaction="{% url 'management:membership_send_invoices' %}">{% lucide "send" size=16 %} {% trans "Send" %}</button>
+            <div class="modal-action">
+                <form method="dialog">
+                    <button class="btn btn-outline gap-2">{% lucide "x" size=16 %} {% trans "Cancel" %}</button>
+                </form>
+                <button class="btn btn-primary gap-2" type="submit" form="membership-form" formaction="{% url 'management:membership_send_invoices' %}">{% lucide "send" size=16 %} {% trans "Send" %}</button>
+            </div>
         </div>
         <form method="dialog" class="modal-backdrop"><button>close</button></form>
     </dialog>
