@@ -27,7 +27,7 @@
                     <div class="min-w-0 flex-1">
                         <div class="text-[15px] font-semibold text-ink">{{ item.product.name }}{% if item.variant %} &middot; {{ item.variant.name }}{% endif %}</div>
                         <div class="text-xs text-muted">
-                            {% if item.beneficiary %}{% blocktrans with name=item.beneficiary.first_name %}For {{ name }} &middot; {% endblocktrans %}{% endif %}{% blocktrans with amount=item.unit_price|floatformat:2 %}&euro; {{ amount }} each{% endblocktrans %}
+                            {% if item.beneficiary %}{% blocktrans with name=item.beneficiary.first_name %}For {{ name }} &middot; {% endblocktrans %}{% endif %}{% if item.personalization_number or item.personalization_name %}{% if item.personalization_number %}#{{ item.personalization_number }} {% endif %}{{ item.personalization_name }} &middot; {% endif %}{% blocktrans with amount=item.unit_price|floatformat:2 %}&euro; {{ amount }} each{% endblocktrans %}
                         </div>
                         <form method="post" action="{% url "mobile:shop_cart_item_update" item.pk %}" class="mt-2 flex items-center gap-2">
                             {% csrf_token %}

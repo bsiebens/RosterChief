@@ -87,6 +87,7 @@
                     <a class="nav-subitem {% if nav == 'product_list' %}active{% endif %}" href="{% url 'management:product_list' %}">{% trans "Products" %}</a>
                     <a class="nav-subitem {% if nav == 'order_list' %}active{% endif %}" href="{% url 'management:order_list' %}">{% trans "Orders" %}</a>
                     <a class="nav-subitem {% if nav == 'discount_list' %}active{% endif %}" href="{% url 'management:discount_list' %}">{% trans "Discounts" %}</a>
+                    <a class="nav-subitem {% if nav == 'voucher_list' %}active{% endif %}" href="{% url 'management:voucher_list' %}">{% trans "Vouchers" %}</a>
                     <a class="nav-subitem {% if nav == 'invoice_list' %}active{% endif %}" href="{% url 'management:invoice_list' %}">{% trans "Invoices" %}</a>
                 {% endif %}
             </div>

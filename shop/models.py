@@ -91,6 +91,14 @@ class Product(ClubScopedModel):
     is_public = models.BooleanField(_("is public?"), default=True, help_text=_("Non-public products are only visible to staff members for adding on to an order later on."))
     staff_role = models.ForeignKey(Position, on_delete=models.PROTECT, related_name="staff_products", verbose_name=_("staff role"), blank=True, null=True, limit_choices_to={"staff_position": True})
 
+    #: Off by default -- most products (dues, event fees, plain merch) have
+    #: nothing to personalize. Team gear (jerseys, warm-ups, ...) is the case
+    #: this exists for: a member picks it and optionally fills in a number
+    #: and/or the name to print on it (CartItem/OrderLine's own
+    #: personalization_number/personalization_name), carried through to the
+    #: manufacturer order export (management.shop_export).
+    personalization_enabled = models.BooleanField(_("personalization enabled?"), default=False, help_text=_("Lets a member enter a number and/or a name to print on this item when ordering, e.g. for a jersey."))
+
     early_bird_discount_enabled = models.BooleanField(_("early bird discount enabled?"), default=False)
     early_bird_discount_deadline = models.DateField(_("early bird discount deadline"), blank=True, null=True)
     early_bird_discount_type = models.CharField(_("early bird discount type"), max_length=255, choices=DiscountType.choices, default=DiscountType.PERCENTAGE)
@@ -182,12 +190,19 @@ class CartItem(UUIDModel):
 
     beneficiary = models.ForeignKey(Member, on_delete=models.PROTECT, related_name="cart_items", verbose_name=_("beneficiary"), blank=True, null=True)
     team = models.ForeignKey(Team, on_delete=models.PROTECT, related_name="cart_items", verbose_name=_("team"), blank=True, null=True)
+    #: Free-text per-item customization -- what to print on a jersey. Only
+    #: collected when Product.personalization_enabled is on for this item's
+    #: product (both blank otherwise); two fields since a jersey needs both a
+    #: number and a name, independently optional (a club might print one
+    #: without the other).
+    personalization_number = models.CharField(_("number"), max_length=20, blank=True, help_text=_("Optional -- e.g. the player number to print on this item."))
+    personalization_name = models.CharField(_("name"), max_length=100, blank=True, help_text=_("Optional -- e.g. the name to print on this item."))
 
     class Meta:
         verbose_name = _("cart item")
         verbose_name_plural = _("cart items")
         constraints = [
-            UniqueConstraint(fields=["cart", "product", "variant", "beneficiary"], name="unique_product_per_cart_per_beneficiary"),
+            UniqueConstraint(fields=["cart", "product", "variant", "beneficiary", "personalization_number", "personalization_name"], name="unique_product_per_cart_per_beneficiary"),
         ]
 
     def __str__(self):
@@ -280,6 +295,10 @@ class OrderLine(UUIDModel):
     beneficiary = models.ForeignKey(Member, on_delete=models.PROTECT, related_name="order_items", verbose_name=_("beneficiary"), blank=True, null=True)
     team = models.ForeignKey(Team, on_delete=models.PROTECT, related_name="order_items", verbose_name=_("team"), blank=True, null=True)
     line_total = models.DecimalField(_("line total"), max_digits=10, decimal_places=2)
+    #: Carried over from CartItem.personalization_number/_name at checkout --
+    #: see CartItem's own docstring.
+    personalization_number = models.CharField(_("number"), max_length=20, blank=True, help_text=_("Optional -- e.g. the player number to print on this item."))
+    personalization_name = models.CharField(_("name"), max_length=100, blank=True, help_text=_("Optional -- e.g. the name to print on this item."))
 
     class Meta:
         verbose_name = _("order line")
@@ -356,11 +375,68 @@ class AppliedDiscount(UUIDModel):
         validate_club_scope(self, club_id, same_club_fields=("discount",), member_fields=("applied_by",))
 
 
+class Voucher(ClubScopedModel):
+    """A prepaid credit for a fixed amount, redeemable in part or in full
+    against one or more orders' Payments (Payment.voucher) -- consumed_amount
+    tracks how much of it has been used so far, never reset or recomputed
+    from Payments directly (shop.services.payments.record_payment/
+    PaymentDeleteView are the only writers, keeping the two in lock-step
+    instead of ever re-deriving one from the other)."""
+
+    number = models.CharField(_("number"), max_length=255, blank=True)
+    #: Optional -- who this credit was issued to, for the management list to
+    #: search/filter by. Doesn't restrict which order it can be redeemed
+    #: against (any order in the club); it's a record of provenance, not an
+    #: ownership lock.
+    issued_to = models.ForeignKey(Member, on_delete=models.PROTECT, related_name="vouchers", verbose_name=_("issued to"), blank=True, null=True)
+    amount = models.DecimalField(_("amount"), max_digits=10, decimal_places=2)
+    consumed_amount = models.DecimalField(_("consumed amount"), max_digits=10, decimal_places=2, default=0)
+    expiry_date = models.DateField(_("expiry date"))
+    is_active = models.BooleanField(_("is active?"), default=True, help_text=_("Turn off to void a voucher before its expiry date, e.g. if it was issued by mistake."))
+    notes = models.TextField(_("notes"), blank=True)
+
+    class Meta:
+        verbose_name = _("voucher")
+        verbose_name_plural = _("vouchers")
+        ordering = ["-created"]
+        constraints = [
+            UniqueConstraint(fields=["club", "number"], name="unique_voucher_number_per_club"),
+        ]
+
+    def __str__(self):
+        return self.number
+
+    def clean(self):
+        validate_club_scope(self, self.club_id, member_fields=("issued_to",))
+        if self.consumed_amount > self.amount:
+            raise ValidationError({"consumed_amount": _("Cannot exceed the voucher's own amount.")})
+
+    @property
+    def available_amount(self):
+        return self.amount - self.consumed_amount
+
+    @property
+    def is_expired(self):
+        return self.expiry_date < timezone.localdate()
+
+    @property
+    def is_usable(self):
+        return self.is_active and not self.is_expired and self.available_amount > 0
+
+    def generate_number(self):
+        """Next per-club voucher number for the current year: ``VCH-<year>-<seq>``."""
+        return next_scoped_number(self, "VCH")
+
+    def save(self, *args, **kwargs):
+        return save_with_number(self, lambda: super(Voucher, self).save(*args, **kwargs))
+
+
 class Payment(UUIDModel):
     class PaymentMethod(models.TextChoices):
         CREDIT_CARD = "credit_card", _("Credit card")
         BANK_TRANSFER = "bank_transfer", _("Bank transfer")
         CASH = "cash", _("Cash")
+        VOUCHER = "voucher", _("Voucher")
 
     class PaymentStatus(models.TextChoices):
         PENDING = "pending", _("Pending")
@@ -374,6 +450,11 @@ class Payment(UUIDModel):
     status = models.CharField(_("status"), max_length=255, choices=PaymentStatus.choices, default=PaymentStatus.PENDING)
     reference = models.CharField(_("reference"), max_length=255, blank=True)
     paid_at = models.DateTimeField(_("paid at"), blank=True, null=True)
+    #: Set only when method == VOUCHER (see clean()) -- which voucher this
+    #: payment drew its amount from. shop.services.payments.record_payment is
+    #: the only place that both creates a Payment and deducts from the
+    #: voucher's own consumed_amount, in the same transaction.
+    voucher = models.ForeignKey(Voucher, on_delete=models.PROTECT, related_name="payments", verbose_name=_("voucher"), blank=True, null=True)
 
     class Meta:
         verbose_name = _("payment")
@@ -381,6 +462,14 @@ class Payment(UUIDModel):
 
     def __str__(self):
         return f"{self.order} - {self.status}"
+
+    def clean(self):
+        if self.method == self.PaymentMethod.VOUCHER and not self.voucher_id:
+            raise ValidationError({"voucher": _("Required when the method is voucher.")})
+        if self.method != self.PaymentMethod.VOUCHER and self.voucher_id:
+            raise ValidationError({"voucher": _("Only allowed when the method is voucher.")})
+        if self.voucher_id and self.order_id and self.voucher.club_id != self.order.club_id:
+            raise ValidationError({"voucher": _("Must belong to the same club as the order.")})
 
 
 class Invoice(ClubScopedModel):

@@ -21,9 +21,9 @@
             <div class="text-sm font-semibold text-ink">{{ order.purchaser.get_full_name }}</div>
             <div class="text-xs text-muted">{{ order.created|date:"d M Y" }}</div>
         </div>
-        <div class="flex shrink-0 gap-1.5">
-            <span class="pill {{ payment_pill_class }}">{{ order.get_payment_status_display }}</span>
-            <span class="pill {{ fulfillment_pill_class }}">{{ order.get_fulfillment_status_display }}</span>
+        <div class="flex shrink-0 flex-col items-end gap-1">
+            <span class="pill pill-sm {{ payment_pill_class }}">{% lucide "wallet" size=10 %} {{ order.get_payment_status_display }}</span>
+            <span class="pill pill-sm {{ fulfillment_pill_class }}">{% lucide "package" size=10 %} {{ order.get_fulfillment_status_display }}</span>
         </div>
     </div>
 
@@ -41,7 +41,7 @@
                 <div class="min-w-0 flex-1">
                     <div class="text-[15px] font-semibold text-ink">{{ line.product.name }}{% if line.variant %} &middot; {{ line.variant.name }}{% endif %}</div>
                     <div class="text-xs text-muted">
-                        {% if line.beneficiary %}{% blocktrans with name=line.beneficiary.first_name %}For {{ name }} &middot; {% endblocktrans %}{% endif %}{% blocktrans with qty=line.quantity %}{{ qty }}x{% endblocktrans %}
+                        {% if line.beneficiary %}{% blocktrans with name=line.beneficiary.first_name %}For {{ name }} &middot; {% endblocktrans %}{% endif %}{% if line.personalization_number or line.personalization_name %}{% if line.personalization_number %}#{{ line.personalization_number }} {% endif %}{{ line.personalization_name }} &middot; {% endif %}{% blocktrans with qty=line.quantity %}{{ qty }}x{% endblocktrans %}
                     </div>
                 </div>
                 <span class="font-display text-sm font-extrabold text-ink">{% blocktrans with amount=line.line_total|floatformat:2 %}&euro; {{ amount }}{% endblocktrans %}</span>

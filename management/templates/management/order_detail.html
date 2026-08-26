@@ -65,7 +65,10 @@
             <h2 class="card-title">{% lucide "package" size=18 %} {% trans "Line items" %}</h2>
             <div class="flex gap-2">
                 {% if order.fulfillment_status != "cancelled" %}
-                    <button class="btn btn-success btn-sm gap-2" type="button" onclick="document.getElementById('mark_paid_modal').showModal()">{% lucide "circle-check" size=14 %} {% trans "Mark paid" %}</button>
+                    {% if amount_due > 0 %}
+                        <button class="btn btn-success btn-sm gap-2" type="button" onclick="document.getElementById('mark_paid_modal').showModal()">{% lucide "circle-check" size=14 %} {% trans "Mark paid" %}</button>
+                        <button class="btn btn-outline btn-sm gap-2" type="button" onclick="document.getElementById('add_payment_modal').showModal()">{% lucide "banknote" size=14 %} {% trans "Add payment" %}</button>
+                    {% endif %}
                     <button class="btn btn-info btn-sm gap-2" type="button" onclick="document.getElementById('mark_ready_for_pickup_modal').showModal()">{% lucide "bell" size=14 %} {% trans "Mark ready for pickup" %}</button>
                     <form method="post" action="{% url 'management:order_mark_delivered' order.pk %}" class="inline-flex">
                         {% csrf_token %}
@@ -81,9 +84,11 @@
                 <tr>
                     <th>{% trans "Product" %}</th>
                     <th>{% trans "Beneficiary" %}</th>
+                    <th>{% trans "Personalization" %}</th>
                     <th>{% trans "Quantity" %}</th>
                     <th>{% trans "Unit price" %}</th>
                     <th>{% trans "Line total" %}</th>
+                    <th></th>
                 </tr>
             </thead>
             <tbody>
@@ -91,13 +96,24 @@
                     <tr>
                         <td class="font-semibold">{{ line.product }}{% if line.variant %} <span class="font-normal text-muted">&middot; {{ line.variant.name }}</span>{% endif %}</td>
                         <td>{{ line.beneficiary|default:"—" }}</td>
+                        <td class="font-mono text-xs">
+                            {% if line.personalization_number or line.personalization_name %}
+                                {{ line.personalization_number }}{% if line.personalization_number and line.personalization_name %} &middot; {% endif %}{{ line.personalization_name }}
+                            {% else %}—{% endif %}
+                        </td>
                         <td>{{ line.quantity }}</td>
                         <td class="font-mono text-xs tabular-nums">&euro; {{ line.unit_price }}</td>
                         <td class="font-mono text-xs tabular-nums">&euro; {{ line.line_total }}</td>
+                        <td class="text-right">
+                            <button class="btn btn-outline btn-xs gap-1" type="button" onclick="document.getElementById('{{ line.pk|dom_id:"edit_line_modal" }}').showModal()">{% lucide "pencil" size=12 %} {% trans "Edit" %}</button>
+                        </td>
                     </tr>
+                    {% trans "Edit line item" as edit_line_label %}
+                    {% url 'management:order_line_update' order.pk line.pk as edit_line_url %}
+                    {% include "controlpanel/_modal_form.html" with modal_id=line.pk|dom_id:"edit_line_modal" title=edit_line_label form=line.edit_form action_url=edit_line_url submit_label=edit_line_label submit_icon="save" %}
                 {% empty %}
                     <tr>
-                        <td colspan="5" class="text-center text-dim">{% trans "No line items." %}</td>
+                        <td colspan="7" class="text-center text-dim">{% trans "No line items." %}</td>
                     </tr>
                 {% endfor %}
             </tbody>
@@ -133,7 +149,7 @@
             <tbody>
                 {% for payment in payments %}
                     <tr>
-                        <td>{{ payment.get_method_display }}</td>
+                        <td>{{ payment.get_method_display }}{% if payment.voucher %} <span class="font-mono text-xs text-muted">({{ payment.voucher.number }})</span>{% endif %}</td>
                         <td class="font-mono text-xs tabular-nums">&euro; {{ payment.amount }}</td>
                         <td>
                             <span class="badge badge-sm {% if payment.status == "confirmed" %}badge-success{% elif payment.status == "failed" %}badge-error{% else %}badge-neutral{% endif %}">
@@ -168,9 +184,15 @@
 
     {% trans "Mark paid" as mark_paid_title %}
     {% trans "Mark paid" as mark_paid_submit_label %}
-    {% blocktrans with number=order.number asvar mark_paid_blurb %}Records a payment of the full order total for {{ number }} and marks it paid.{% endblocktrans %}
+    {% blocktrans with number=order.number amount=amount_due asvar mark_paid_blurb %}Records a payment of the remaining €{{ amount }} due on {{ number }} and marks it paid.{% endblocktrans %}
     {% url 'management:order_mark_paid' order.pk as mark_paid_url %}
     {% include "controlpanel/_modal_form.html" with modal_id="mark_paid_modal" title=mark_paid_title form=mark_paid_form action_url=mark_paid_url submit_label=mark_paid_submit_label submit_icon="circle-check" blurb=mark_paid_blurb %}
+
+    {% trans "Add payment" as add_payment_title %}
+    {% trans "Record payment" as add_payment_submit_label %}
+    {% blocktrans with number=order.number asvar add_payment_blurb %}Records a payment of any amount and method against {{ number }} -- e.g. a voucher covering part of it, with cash or a transfer covering the rest in a second submit.{% endblocktrans %}
+    {% url 'management:order_add_payment' order.pk as add_payment_url %}
+    {% include "controlpanel/_modal_form.html" with modal_id="add_payment_modal" title=add_payment_title form=add_payment_form action_url=add_payment_url submit_label=add_payment_submit_label submit_icon="banknote" blurb=add_payment_blurb %}
 
     {% trans "Mark ready for pickup" as mark_ready_for_pickup_title %}
     {% trans "Mark ready for pickup" as mark_ready_for_pickup_submit_label %}
@@ -184,3 +206,22 @@
     {% url 'management:order_cancel' order.pk as cancel_order_url %}
     {% include "controlpanel/_confirm_modal.html" with modal_id="cancel_order_modal" title=cancel_order_title body=cancel_order_body action_url=cancel_order_url submit_label=cancel_order_submit_label %}
 {% endblock panel %}
+
+{% block extra_body %}
+    <script>
+        (() => {
+            // Progressive enhancement only -- the field posts either way; this
+            // just hides "Voucher number" until it's actually relevant, same
+            // classList.toggle("hidden", ...) pattern as event_form.html's own
+            // kind-dependent fields.
+            const methodField = document.getElementById("id_add_payment-method");
+            const voucherField = document.getElementById("id_add_payment-voucher_number");
+            if (!methodField || !voucherField) return;
+            const voucherRow = voucherField.closest(".form-control");
+
+            const sync = () => voucherRow.classList.toggle("hidden", methodField.value !== "voucher");
+            methodField.addEventListener("change", sync);
+            sync();
+        })();
+    </script>
+{% endblock extra_body %}

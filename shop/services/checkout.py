@@ -60,6 +60,8 @@ def place_order(cart: Cart, *, purchaser, discount_code: str = "") -> Order:
             beneficiary=item.beneficiary,
             team=item.team,
             line_total=item.unit_price * item.quantity,
+            personalization_number=item.personalization_number,
+            personalization_name=item.personalization_name,
         )
 
     if discount is not None:

@@ -1073,9 +1073,26 @@ class ShopProductDetailView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
             if beneficiary is None:
                 return HttpResponseBadRequest(_("You can't order for that person."))
 
+        # Only collected -- and only trusted from the request -- when the
+        # product actually opted in; a crafted POST can't sneak personalization
+        # onto a product that doesn't offer it.
+        personalization_number = ""
+        personalization_name = ""
+        if product.personalization_enabled:
+            personalization_number = request.POST.get("personalization_number", "").strip()[:20]
+            personalization_name = request.POST.get("personalization_name", "").strip()[:100]
+
         unit_price = variant.effective_price if variant is not None else product.price
         cart, _created = Cart.objects.get_or_create(club=request.club, user=request.user, status=Cart.CartStatus.OPEN)
-        item, item_created = CartItem.objects.get_or_create(cart=cart, product=product, variant=variant, beneficiary=beneficiary, defaults={"quantity": quantity, "unit_price": unit_price})
+        item, item_created = CartItem.objects.get_or_create(
+            cart=cart,
+            product=product,
+            variant=variant,
+            beneficiary=beneficiary,
+            personalization_number=personalization_number,
+            personalization_name=personalization_name,
+            defaults={"quantity": quantity, "unit_price": unit_price},
+        )
         if not item_created:
             item.quantity += quantity
             item.save(update_fields=["quantity"])

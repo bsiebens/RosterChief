@@ -74,6 +74,19 @@
             </div>
         {% endif %}
 
+        {% if product.personalization_enabled %}
+            <div class="grid grid-cols-2 gap-3">
+                <div>
+                    <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Number (optional)" %}</div>
+                    <input type="text" name="personalization_number" maxlength="20" placeholder="{% trans "e.g. 7" %}" class="h-11 w-full rounded-lg border border-stroke bg-paper px-3 text-[15px] text-ink placeholder:text-dim focus:border-ink focus:outline-none">
+                </div>
+                <div>
+                    <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Name (optional)" %}</div>
+                    <input type="text" name="personalization_name" maxlength="100" placeholder="{% trans "e.g. on the back" %}" class="h-11 w-full rounded-lg border border-stroke bg-paper px-3 text-[15px] text-ink placeholder:text-dim focus:border-ink focus:outline-none">
+                </div>
+            </div>
+        {% endif %}
+
         <div class="flex items-center justify-between">
             <span class="font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Quantity" %}</span>
             <div class="flex items-center gap-3">

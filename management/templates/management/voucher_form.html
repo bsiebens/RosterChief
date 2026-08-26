@@ -1,0 +1,60 @@
+{% extends "management/base.html" %}
+{% load i18n lucide static ui %}
+
+{% block panel_title %}{% if update_view %}{% trans "Edit voucher" %}{% else %}{% trans "New voucher" %}{% endif %}{% endblock panel_title %}
+{% block heading %}{% if update_view %}{% blocktrans %}Edit {{ object }}{% endblocktrans %}{% else %}{% trans "New voucher" %}{% endif %}{% endblock heading %}
+
+{% block panel %}
+    <form method="post">
+        {% csrf_token %}
+
+        {% for error in form.non_field_errors %}
+            <div class="alert alert-error mb-4">
+                {% lucide "circle-x" size=18 %}
+                <span>{{ error }}</span>
+            </div>
+        {% endfor %}
+
+        {% if update_view %}
+            <div class="card mb-4 card-body">
+                <h2 class="card-title">{% trans "Balance" %}</h2>
+                <div class="grid grid-cols-2 gap-4 text-sm">
+                    <div>
+                        <div class="text-muted">{% trans "Consumed" %}</div>
+                        <div class="font-mono font-semibold text-ink">&euro; {{ object.consumed_amount }}</div>
+                    </div>
+                    <div>
+                        <div class="text-muted">{% trans "Available" %}</div>
+                        <div class="font-mono font-semibold text-ink">&euro; {{ object.available_amount }}</div>
+                    </div>
+                </div>
+            </div>
+        {% endif %}
+
+        <div class="card mb-4 card-body">
+            <h2 class="card-title">{% trans "Amount & expiry" %}</h2>
+            <div class="grid grid-cols-2 gap-4">
+                {% form_field form.amount %}
+                {% form_field form.expiry_date %}
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+                {% form_field form.issued_to %}
+                {% form_field form.is_active show_as_toggle=True %}
+            </div>
+        </div>
+
+        <div class="card mb-4 card-body">
+            <h2 class="card-title">{% trans "Notes" %}</h2>
+            {% form_field form.notes textarea_height="h-28" show_label=False %}
+        </div>
+
+        <div class="flex justify-start gap-2">
+            <a class="btn btn-outline gap-2" href="{% url "management:voucher_list" %}">{% lucide "arrow-left" size=16 %} {% trans "Cancel" %}</a>
+            <button class="btn btn-primary gap-2" type="submit">{% lucide "save" size=16 %} {% trans "Save" %}</button>
+        </div>
+    </form>
+{% endblock panel %}
+
+{% block extra_body %}
+    <script src="{% static 'js/searchable-select.js' %}"></script>
+{% endblock extra_body %}

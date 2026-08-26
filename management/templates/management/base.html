@@ -122,13 +122,22 @@
                             <div class="absolute top-full right-0 z-20 mt-2 w-80 rounded-xl border border-line bg-white p-1.5 shadow-lg">
                                 <div class="flex items-center justify-between px-2.5 py-2">
                                     <span class="font-display text-xs font-bold tracking-[.08em] text-ink uppercase">{% trans "Notifications" %}</span>
-                                    {% if unread_notification_count %}
-                                        <form method="post" action="{% url 'management:notification_mark_all_read' %}">
-                                            {% csrf_token %}
-                                            <input type="hidden" name="next" value="{{ request.get_full_path }}">
-                                            <button class="text-xs text-club hover:underline" type="submit">{% trans "Mark all read" %}</button>
-                                        </form>
-                                    {% endif %}
+                                    <div class="flex items-center gap-2">
+                                        {% if unread_notification_count %}
+                                            <form method="post" action="{% url 'management:notification_mark_all_read' %}">
+                                                {% csrf_token %}
+                                                <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                                                <button class="text-xs text-club hover:underline" type="submit">{% trans "Mark all read" %}</button>
+                                            </form>
+                                        {% endif %}
+                                        {% if recent_notifications %}
+                                            <form method="post" action="{% url 'management:notification_clear_all' %}">
+                                                {% csrf_token %}
+                                                <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                                                <button class="text-xs text-dim hover:underline" type="submit">{% trans "Clear all" %}</button>
+                                            </form>
+                                        {% endif %}
+                                    </div>
                                 </div>
                                 <div class="flex max-h-96 flex-col overflow-y-auto">
                                     {% for notification in recent_notifications %}

@@ -123,6 +123,7 @@
                         <td>
                             <strong>{{ line.product.name }}{% if line.variant %} — {{ line.variant.name }}{% endif %}</strong>
                             {% if line.beneficiary %}<div class="muted">{% trans "For" %} {{ line.beneficiary }}</div>{% endif %}
+                            {% if line.personalization_number or line.personalization_name %}<div class="muted">{% if line.personalization_number %}{% trans "Number" %}: {{ line.personalization_number }}{% endif %}{% if line.personalization_number and line.personalization_name %} &middot; {% endif %}{% if line.personalization_name %}{% trans "Name" %}: {{ line.personalization_name }}{% endif %}</div>{% endif %}
                         </td>
                         <td class="right">{{ line.quantity }}</td>
                         <td class="right">€{{ line.unit_price }}</td>

@@ -1,0 +1,60 @@
+{% extends "management/base.html" %}
+{% load i18n lucide ui %}
+
+{% block panel_title %}{% trans "Vouchers" %}{% endblock panel_title %}
+{% block heading %}{% trans "Vouchers" %}{% endblock heading %}
+
+{% block topbar_context %}
+    <span class="badge badge-neutral">{% blocktrans count counter=vouchers|length %}{{ counter }} voucher{% plural %}{{ counter }} vouchers{% endblocktrans %}</span>
+{% endblock topbar_context %}
+
+{% block actions %}
+    <a class="btn btn-primary gap-2" href="{% url 'management:voucher_create' %}">{% lucide "plus" size=16 %} {% trans "New voucher" %}</a>
+{% endblock actions %}
+
+{% block panel %}
+    <div class="card overflow-hidden">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>{% trans "Number" %}</th>
+                    <th>{% trans "Issued to" %}</th>
+                    <th>{% trans "Amount" %}</th>
+                    <th>{% trans "Available" %}</th>
+                    <th>{% trans "Expiry" %}</th>
+                    <th>{% trans "Status" %}</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for voucher in vouchers %}
+                    <tr>
+                        <td><a class="link link-hover font-mono text-xs" href="{% url 'management:voucher_update' voucher.pk %}">{{ voucher.number }}</a></td>
+                        <td>{{ voucher.issued_to|default:"—" }}</td>
+                        <td class="font-mono text-xs tabular-nums">&euro; {{ voucher.amount }}</td>
+                        <td class="font-mono text-xs tabular-nums">&euro; {{ voucher.available_amount }}</td>
+                        <td class="font-mono text-xs">{{ voucher.expiry_date|date:"Y-m-d" }}</td>
+                        <td>
+                            {% if not voucher.is_active %}
+                                <span class="badge badge-sm badge-neutral">{% trans "Inactive" %}</span>
+                            {% elif voucher.is_expired %}
+                                <span class="badge badge-sm badge-error">{% trans "Expired" %}</span>
+                            {% elif voucher.available_amount <= 0 %}
+                                <span class="badge badge-sm badge-neutral">{% trans "Fully used" %}</span>
+                            {% else %}
+                                <span class="badge badge-sm badge-success">{% trans "Usable" %}</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-right">
+                            <a class="btn btn-outline btn-sm" href="{% url 'management:voucher_update' voucher.pk %}" aria-label="{% trans 'Edit' %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</a>
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="7" class="text-center text-dim">{% trans "No vouchers yet." %}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+{% endblock panel %}

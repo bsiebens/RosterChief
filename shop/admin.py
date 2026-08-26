@@ -12,6 +12,7 @@ from .models import (
     Product,
     ProductCategory,
     ProductVariant,
+    Voucher,
 )
 
 
@@ -152,10 +153,19 @@ class AppliedDiscountAdmin(admin.ModelAdmin):
 
 @admin.register(Payment)
 class PaymentAdmin(admin.ModelAdmin):
-    list_display = ["order", "amount", "method", "status", "paid_at"]
+    list_display = ["order", "amount", "method", "status", "voucher", "paid_at"]
     list_filter = ["method", "status"]
     search_fields = ["order__number", "reference"]
-    raw_id_fields = ["order"]
+    raw_id_fields = ["order", "voucher"]
+
+
+@admin.register(Voucher)
+class VoucherAdmin(admin.ModelAdmin):
+    list_display = ["number", "issued_to", "amount", "consumed_amount", "expiry_date", "is_active", "club"]
+    list_filter = ["club", "is_active"]
+    search_fields = ["number", "issued_to__first_name", "issued_to__last_name"]
+    raw_id_fields = ["issued_to"]
+    readonly_fields = ["number", "created", "modified"]
 
 
 @admin.register(Invoice)

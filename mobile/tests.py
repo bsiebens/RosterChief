@@ -4805,6 +4805,27 @@ class ShopProductDetailViewTests(TestCase):
         self.assertIsNone(item.beneficiary)
         self.assertEqual(item.unit_price, self.product.price)
 
+    def test_personalization_is_saved_when_the_product_allows_it(self):
+        self.product.personalization_enabled = True
+        self.product.save(update_fields=["personalization_enabled"])
+        self.client.force_login(self.user)
+
+        response = self.client.post(self._url(), {"quantity": "1", "personalization_number": "7", "personalization_name": "BAKKER"}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertRedirects(response, reverse("mobile:shop_cart"), fetch_redirect_response=False)
+        [item] = CartItem.objects.all()
+        self.assertEqual(item.personalization_number, "7")
+        self.assertEqual(item.personalization_name, "BAKKER")
+
+    def test_personalization_is_ignored_when_the_product_doesnt_allow_it(self):
+        self.client.force_login(self.user)
+
+        self.client.post(self._url(), {"quantity": "1", "personalization_number": "7", "personalization_name": "BAKKER"}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        [item] = CartItem.objects.all()
+        self.assertEqual(item.personalization_number, "")
+        self.assertEqual(item.personalization_name, "")
+
     def test_add_to_cart_with_a_beneficiary(self):
         family = Family.objects.create(name="Bakker")
         FamilyMembership.objects.create(family=family, member=self.member, role=FamilyMembership.FamilyRole.PARENT)

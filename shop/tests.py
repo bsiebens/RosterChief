@@ -31,11 +31,13 @@ from .models import (
     Product,
     ProductCategory,
     ProductVariant,
+    Voucher,
 )
 from .services.checkout import CheckoutError, find_discount, place_order
 from .services.invoices import ShopInvoicePDFError, create_invoice_for_order, invalidate_cached_invoice_pdf, render_invoice_pdf
 from .services.notifications import dispatch_order_ready_for_pickup_notification
-from .services.pricing import cart_totals
+from .services.payments import PaymentError, amount_due, amount_paid, record_payment, sync_payment_status
+from .services.pricing import cart_totals, order_total
 from .services.stats import order_kpis, quantity_sold_by_product, quantity_sold_by_variant
 
 
@@ -418,6 +420,88 @@ class PaymentTests(ShopEntitiesTestBase):
         self.order.delete()
         self.assertFalse(Payment.objects.exists())
 
+    def test_voucher_method_without_a_voucher_is_rejected(self):
+        payment = Payment(order=self.order, amount=Decimal("10.00"), method=Payment.PaymentMethod.VOUCHER)
+
+        with self.assertRaises(ValidationError) as ctx:
+            payment.full_clean()
+        self.assertIn("voucher", ctx.exception.error_dict)
+
+    def test_a_voucher_with_a_non_voucher_method_is_rejected(self):
+        voucher = Voucher.objects.create(club=self.club, amount=Decimal("50.00"), expiry_date=timezone.localdate() + timedelta(days=1))
+        payment = Payment(order=self.order, amount=Decimal("10.00"), method=Payment.PaymentMethod.CASH, voucher=voucher)
+
+        with self.assertRaises(ValidationError) as ctx:
+            payment.full_clean()
+        self.assertIn("voucher", ctx.exception.error_dict)
+
+    def test_a_voucher_from_another_club_is_rejected(self):
+        other_club = Club.objects.create(name="Rival FC", slug="rival-fc-payment")
+        voucher = Voucher.objects.create(club=other_club, amount=Decimal("50.00"), expiry_date=timezone.localdate() + timedelta(days=1))
+        payment = Payment(order=self.order, amount=Decimal("10.00"), method=Payment.PaymentMethod.VOUCHER, voucher=voucher)
+
+        with self.assertRaises(ValidationError) as ctx:
+            payment.full_clean()
+        self.assertIn("voucher", ctx.exception.error_dict)
+
+    def test_a_matching_voucher_payment_is_valid(self):
+        voucher = Voucher.objects.create(club=self.club, amount=Decimal("50.00"), expiry_date=timezone.localdate() + timedelta(days=1))
+        payment = Payment(order=self.order, amount=Decimal("10.00"), method=Payment.PaymentMethod.VOUCHER, voucher=voucher)
+
+        payment.full_clean()  # must not raise
+
+
+class VoucherTests(ShopEntitiesTestBase):
+    def test_number_is_generated_and_str(self):
+        voucher = Voucher.objects.create(club=self.club, amount=Decimal("50.00"), expiry_date=timezone.localdate() + timedelta(days=1))
+
+        self.assertEqual(voucher.number, f"VCH-{self.year}-00001")
+        self.assertEqual(str(voucher), voucher.number)
+
+    def test_number_increments_per_club(self):
+        Voucher.objects.create(club=self.club, amount=Decimal("10.00"), expiry_date=timezone.localdate() + timedelta(days=1))
+        second = Voucher.objects.create(club=self.club, amount=Decimal("20.00"), expiry_date=timezone.localdate() + timedelta(days=1))
+
+        self.assertEqual(second.number, f"VCH-{self.year}-00002")
+
+    def test_available_amount_subtracts_consumed(self):
+        voucher = Voucher.objects.create(club=self.club, amount=Decimal("50.00"), consumed_amount=Decimal("20.00"), expiry_date=timezone.localdate() + timedelta(days=1))
+
+        self.assertEqual(voucher.available_amount, Decimal("30.00"))
+
+    def test_consumed_amount_over_the_total_is_rejected(self):
+        voucher = Voucher(club=self.club, amount=Decimal("50.00"), consumed_amount=Decimal("60.00"), expiry_date=timezone.localdate() + timedelta(days=1))
+
+        with self.assertRaises(ValidationError) as ctx:
+            voucher.full_clean()
+        self.assertIn("consumed_amount", ctx.exception.error_dict)
+
+    def test_is_expired(self):
+        expired = Voucher.objects.create(club=self.club, amount=Decimal("50.00"), expiry_date=timezone.localdate() - timedelta(days=1))
+        not_expired = Voucher.objects.create(club=self.club, amount=Decimal("50.00"), expiry_date=timezone.localdate() + timedelta(days=1))
+
+        self.assertTrue(expired.is_expired)
+        self.assertFalse(not_expired.is_expired)
+
+    def test_is_usable_requires_active_unexpired_and_available(self):
+        usable = Voucher.objects.create(club=self.club, amount=Decimal("50.00"), expiry_date=timezone.localdate() + timedelta(days=1))
+        inactive = Voucher.objects.create(club=self.club, amount=Decimal("50.00"), is_active=False, expiry_date=timezone.localdate() + timedelta(days=1))
+        expired = Voucher.objects.create(club=self.club, amount=Decimal("50.00"), expiry_date=timezone.localdate() - timedelta(days=1))
+        depleted = Voucher.objects.create(club=self.club, amount=Decimal("50.00"), consumed_amount=Decimal("50.00"), expiry_date=timezone.localdate() + timedelta(days=1))
+
+        self.assertTrue(usable.is_usable)
+        self.assertFalse(inactive.is_usable)
+        self.assertFalse(expired.is_usable)
+        self.assertFalse(depleted.is_usable)
+
+    def test_issued_to_must_be_a_member_of_the_club(self):
+        outsider = Member.objects.create(first_name="Otto", last_name="Outsider")
+        voucher = Voucher(club=self.club, amount=Decimal("50.00"), expiry_date=timezone.localdate() + timedelta(days=1), issued_to=outsider)
+
+        with self.assertRaises(ValidationError) as ctx:
+            voucher.full_clean()
+        self.assertIn("issued_to", ctx.exception.error_dict)
+
 
 class InvoiceTests(ShopEntitiesTestBase):
     def test_number_generated_and_str(self):
@@ -729,6 +813,16 @@ class PlaceOrderTests(TestCase):
         self.assertEqual(line.unit_price, Decimal("30.00"))
         self.assertEqual(order.total, Decimal("30.00"))
 
+    def test_a_cart_items_personalization_carries_through_to_the_order_line(self):
+        cart = Cart.objects.create(club=self.club, user=self.user)
+        CartItem.objects.create(cart=cart, product=self.product, quantity=1, unit_price=self.product.price, personalization_number="7", personalization_name="DOE")
+
+        order = place_order(cart, purchaser=self.member)
+
+        [line] = order.order_items.all()
+        self.assertEqual(line.personalization_number, "7")
+        self.assertEqual(line.personalization_name, "DOE")
+
     def test_an_applied_discount_reduces_the_total_and_is_recorded(self):
         cart = self.make_cart(quantity=2)  # 50.00
         Discount.objects.create(club=self.club, name="Ten off", code="TEN10", discount_type=DiscountType.PERCENTAGE, discount_amount=Decimal("10"))
@@ -891,6 +985,160 @@ class InvoicePdfTests(TestCase):
         # The order created in setUpTestData already has its own invoice; a second
         # order's invoice must not collide with it.
         self.assertEqual(Invoice.objects.filter(club=self.club).count(), 2)
+
+
+class RecordPaymentServiceTests(TestCase):
+    """shop.services.payments -- record_payment/amount_paid/amount_due/
+    sync_payment_status. The management views (OrderAddPaymentView,
+    OrderMarkPaidView, PaymentDeleteView) are thin wrappers around this;
+    covered again from the view layer in management.tests for the
+    request/permission/form side, but the actual business rules (voucher
+    balance, status derivation) belong here."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        cls.member = Member.objects.create(first_name="Jane", last_name="Doe")
+        cls.order = Order.objects.create(club=cls.club, purchaser=cls.member, total=Decimal("50.00"))
+
+    def make_voucher(self, amount=Decimal("30.00"), club=None, expiry_date=None, **overrides):
+        return Voucher.objects.create(club=club or self.club, amount=amount, expiry_date=expiry_date or timezone.localdate() + timedelta(days=1), **overrides)
+
+    def test_amount_paid_sums_only_confirmed_payments(self):
+        Payment.objects.create(order=self.order, amount=Decimal("10.00"), status=Payment.PaymentStatus.CONFIRMED)
+        Payment.objects.create(order=self.order, amount=Decimal("99.00"), status=Payment.PaymentStatus.FAILED)
+
+        self.assertEqual(amount_paid(self.order), Decimal("10.00"))
+
+    def test_amount_due_is_the_total_minus_amount_paid(self):
+        Payment.objects.create(order=self.order, amount=Decimal("20.00"), status=Payment.PaymentStatus.CONFIRMED)
+
+        self.assertEqual(amount_due(self.order), Decimal("30.00"))
+
+    def test_amount_due_never_goes_negative(self):
+        Payment.objects.create(order=self.order, amount=Decimal("999.00"), status=Payment.PaymentStatus.CONFIRMED)
+
+        self.assertEqual(amount_due(self.order), Decimal("0"))
+
+    def test_a_zero_or_negative_amount_is_rejected(self):
+        with self.assertRaises(PaymentError):
+            record_payment(self.order, amount=Decimal("0"), method=Payment.PaymentMethod.CASH)
+
+    def test_a_cash_payment_creates_a_confirmed_payment_and_syncs_status(self):
+        payment = record_payment(self.order, amount=Decimal("20.00"), method=Payment.PaymentMethod.CASH, reference="receipt-1")
+
+        self.assertEqual(payment.status, Payment.PaymentStatus.CONFIRMED)
+        self.assertEqual(payment.reference, "receipt-1")
+        self.assertIsNotNone(payment.paid_at)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.payment_status, Order.PaymentStatus.PARTIALLY_PAID)
+
+    def test_paying_the_full_total_marks_the_order_paid(self):
+        record_payment(self.order, amount=Decimal("50.00"), method=Payment.PaymentMethod.CASH)
+
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.payment_status, Order.PaymentStatus.PAID)
+
+    def test_voucher_method_without_a_voucher_is_rejected(self):
+        with self.assertRaises(PaymentError):
+            record_payment(self.order, amount=Decimal("20.00"), method=Payment.PaymentMethod.VOUCHER)
+
+    def test_a_voucher_payment_deducts_from_the_vouchers_balance(self):
+        voucher = self.make_voucher(amount=Decimal("30.00"))
+
+        payment = record_payment(self.order, amount=Decimal("20.00"), method=Payment.PaymentMethod.VOUCHER, voucher=voucher)
+
+        self.assertEqual(payment.voucher, voucher)
+        voucher.refresh_from_db()
+        self.assertEqual(voucher.consumed_amount, Decimal("20.00"))
+
+    def test_a_voucher_payment_over_its_available_balance_is_rejected_and_nothing_is_deducted(self):
+        voucher = self.make_voucher(amount=Decimal("10.00"))
+
+        with self.assertRaises(PaymentError):
+            record_payment(self.order, amount=Decimal("20.00"), method=Payment.PaymentMethod.VOUCHER, voucher=voucher)
+
+        voucher.refresh_from_db()
+        self.assertEqual(voucher.consumed_amount, Decimal("0"))
+        self.assertFalse(Payment.objects.filter(order=self.order).exists())
+
+    def test_an_expired_voucher_is_rejected(self):
+        voucher = self.make_voucher(amount=Decimal("30.00"), expiry_date=timezone.localdate() - timedelta(days=1))
+
+        with self.assertRaises(PaymentError):
+            record_payment(self.order, amount=Decimal("20.00"), method=Payment.PaymentMethod.VOUCHER, voucher=voucher)
+
+    def test_an_inactive_voucher_is_rejected(self):
+        voucher = self.make_voucher(amount=Decimal("30.00"), is_active=False)
+
+        with self.assertRaises(PaymentError):
+            record_payment(self.order, amount=Decimal("20.00"), method=Payment.PaymentMethod.VOUCHER, voucher=voucher)
+
+    def test_a_voucher_from_another_club_is_rejected(self):
+        other_club = Club.objects.create(name="Rival FC", slug="rival-fc-record-payment")
+        voucher = self.make_voucher(amount=Decimal("30.00"), club=other_club)
+
+        with self.assertRaises(PaymentError):
+            record_payment(self.order, amount=Decimal("20.00"), method=Payment.PaymentMethod.VOUCHER, voucher=voucher)
+
+    def test_a_voucher_passed_with_a_non_voucher_method_is_rejected(self):
+        voucher = self.make_voucher(amount=Decimal("30.00"))
+
+        with self.assertRaises(PaymentError):
+            record_payment(self.order, amount=Decimal("20.00"), method=Payment.PaymentMethod.CASH, voucher=voucher)
+
+    def test_sync_payment_status_recomputes_from_scratch(self):
+        Payment.objects.create(order=self.order, amount=Decimal("50.00"), status=Payment.PaymentStatus.CONFIRMED)
+        self.order.payment_status = Order.PaymentStatus.PENDING
+        self.order.save(update_fields=["payment_status"])
+
+        sync_payment_status(self.order)
+
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.payment_status, Order.PaymentStatus.PAID)
+
+    def test_sync_payment_status_is_a_noop_when_nothing_changed(self):
+        self.order.payment_status = Order.PaymentStatus.PENDING
+        self.order.save(update_fields=["payment_status"])
+
+        with self.assertNumQueries(1):  # the amount_paid aggregate only, no write
+            sync_payment_status(self.order)
+
+
+class OrderTotalServiceTests(TestCase):
+    """shop.services.pricing.order_total -- re-derives Order.total from its
+    own line items and applied discounts, used after a staff edit to an
+    existing OrderLine (management.views.OrderLineUpdateView)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        cls.member = Member.objects.create(first_name="Jane", last_name="Doe")
+        cls.product = Product.objects.create(club=cls.club, name="Home Jersey", price=Decimal("25.00"))
+        cls.order = Order.objects.create(club=cls.club, purchaser=cls.member, total=Decimal("0"))
+
+    def test_sums_line_totals(self):
+        OrderLine.objects.create(order=self.order, product=self.product, quantity=2, unit_price=Decimal("25.00"), line_total=Decimal("50.00"))
+        OrderLine.objects.create(order=self.order, product=self.product, quantity=1, unit_price=Decimal("25.00"), line_total=Decimal("25.00"))
+
+        self.assertEqual(order_total(self.order), Decimal("75.00"))
+
+    def test_subtracts_applied_discounts(self):
+        OrderLine.objects.create(order=self.order, product=self.product, quantity=2, unit_price=Decimal("25.00"), line_total=Decimal("50.00"))
+        discount = Discount.objects.create(club=self.club, name="Ten off", code="TEN10")
+        AppliedDiscount.objects.create(order=self.order, discount=discount, discount_amount=Decimal("10.00"))
+
+        self.assertEqual(order_total(self.order), Decimal("40.00"))
+
+    def test_never_goes_negative(self):
+        OrderLine.objects.create(order=self.order, product=self.product, quantity=1, unit_price=Decimal("5.00"), line_total=Decimal("5.00"))
+        discount = Discount.objects.create(club=self.club, name="Big discount", code="BIG")
+        AppliedDiscount.objects.create(order=self.order, discount=discount, discount_amount=Decimal("999.00"))
+
+        self.assertEqual(order_total(self.order), Decimal("0"))
+
+    def test_no_lines_is_zero(self):
+        self.assertEqual(order_total(self.order), Decimal("0"))
 
 
 class OrderKPIsTests(TestCase):

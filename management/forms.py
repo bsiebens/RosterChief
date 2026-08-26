@@ -13,7 +13,8 @@ from events.services.rbihf_import import RBIHFImportError, extract_team_id
 from members.models import Family, FamilyMembership, Group, Member
 from members.services.family import find_member_by_email
 from news.models import News
-from shop.models import Discount, Payment, Product, ProductCategory, ProductVariant
+from shop.models import Discount, OrderLine, Payment, Product, ProductCategory, ProductVariant, Voucher
+from shop.services.payments import amount_due
 from teams.models import Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
 from teams.services import eligible_roster_members
 
@@ -1002,7 +1003,7 @@ class ProductCategoryForm(forms.ModelForm):
 class ProductForm(forms.ModelForm):
     class Meta:
         model = Product
-        fields = ["name", "category", "description", "image", "price", "is_active"]
+        fields = ["name", "category", "description", "image", "price", "is_active", "personalization_enabled"]
         widgets = {"image": forms.ClearableFileInput(attrs={"accept": "image/png,image/jpeg,image/gif,image/webp"})}
 
     def __init__(self, *args, club=None, **kwargs):
@@ -1070,12 +1071,19 @@ class DiscountForm(forms.ModelForm):
         fields = ["name", "description", "code", "discount_type", "discount_amount", "is_active"]
 
 
-class OrderMarkPaidForm(forms.Form):
-    """The "mark paid" modal on an order's detail page -- creates a Payment row.
-    Defaults to CASH: pay-on-pickup is the realistic case, there's no online
-    payment for this shop."""
+#: Voucher deliberately excluded from both forms below -- settling an order
+#: by voucher needs a specific voucher number entered and validated (amount
+#: available, not expired), which neither "quick, pay-what's-left" modal has
+#: room for. Use OrderAddPaymentView for that instead.
+NON_VOUCHER_PAYMENT_METHODS = [choice for choice in Payment.PaymentMethod.choices if choice[0] != Payment.PaymentMethod.VOUCHER]
 
-    method = forms.ChoiceField(label=_("Method"), choices=Payment.PaymentMethod.choices, initial=Payment.PaymentMethod.CASH)
+
+class OrderMarkPaidForm(forms.Form):
+    """The "mark paid" modal on an order's detail page -- creates a Payment row
+    for whatever's still due. Defaults to CASH: pay-on-pickup is the realistic
+    case, there's no online payment for this shop."""
+
+    method = forms.ChoiceField(label=_("Method"), choices=NON_VOUCHER_PAYMENT_METHODS, initial=Payment.PaymentMethod.CASH)
     reference = forms.CharField(label=_("Reference"), required=False, help_text=_("Optional -- a receipt number, whatever lets you find this again."))
 
 
@@ -1092,7 +1100,7 @@ class OrderBulkMarkPaidForm(forms.Form):
     through, unlike its textarea branch (see OrderBulkMarkReadyForPickupForm
     below for why that one is rendered by hand instead)."""
 
-    method = forms.ChoiceField(label=_("Method"), choices=Payment.PaymentMethod.choices, initial=Payment.PaymentMethod.CASH, widget=forms.Select(attrs={"form": "orders_bulk_form"}))
+    method = forms.ChoiceField(label=_("Method"), choices=NON_VOUCHER_PAYMENT_METHODS, initial=Payment.PaymentMethod.CASH, widget=forms.Select(attrs={"form": "orders_bulk_form"}))
 
 
 class PaymentEditForm(forms.ModelForm):
@@ -1101,11 +1109,52 @@ class PaymentEditForm(forms.ModelForm):
     payment was first created. Amount/status/paid_at stay out of reach here:
     changing the amount would silently desync from the order total no
     on-screen control re-checks, and status/paid_at are what "delete this
-    payment and mark paid again" is for, not an inline edit."""
+    payment and mark paid again" is for, not an inline edit. Voucher is only
+    offered here when the payment already is one -- turning a cash/card/
+    transfer payment INTO a voucher payment would always fail validation
+    anyway (this form has no voucher field to attach one), so there's no
+    point offering it; a real voucher payment goes through
+    OrderAddPaymentView, which does."""
 
     class Meta:
         model = Payment
         fields = ["method", "reference"]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.instance.method != Payment.PaymentMethod.VOUCHER:
+            self.fields["method"].choices = NON_VOUCHER_PAYMENT_METHODS
+
+
+class OrderLineEditForm(forms.ModelForm):
+    """The "Edit" modal on a line item row (order detail page) -- fixing a
+    mistake after the fact: wrong size, wrong beneficiary, a number/name the
+    member forgot to add. Product itself stays out of reach (that's "delete
+    and re-add", not an edit); unit_price/line_total are recomputed by
+    OrderLineUpdateView from quantity and the (possibly new) variant's own
+    price, not editable directly, for the same "don't let the screen and the
+    number silently disagree" reason as PaymentEditForm's own amount.
+    personalization_number/_name are dropped from the form entirely -- not
+    just hidden -- when the product doesn't have Product.personalization_enabled
+    on, so there's nothing to silently ignore."""
+
+    class Meta:
+        model = OrderLine
+        fields = ["variant", "beneficiary", "quantity", "personalization_number", "personalization_name"]
+        widgets = {"beneficiary": forms.Select(attrs={"data-searchable": "true", "data-search-placeholder": _("Type a name to search...")})}
+
+    def __init__(self, *args, club=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["variant"].required = False
+        self.fields["beneficiary"].required = False
+        instance = kwargs.get("instance")
+        if instance is not None and instance.pk:
+            self.fields["variant"].queryset = instance.product.variants.filter(is_active=True)
+            if not instance.product.personalization_enabled:
+                del self.fields["personalization_number"]
+                del self.fields["personalization_name"]
+        if club is not None:
+            self.fields["beneficiary"].queryset = Member.objects.filter(member_of__club=club).distinct()
 
 
 class OrderMarkReadyForPickupForm(forms.Form):
@@ -1130,6 +1179,72 @@ class OrderBulkMarkReadyForPickupForm(forms.Form):
     textarea posts, same as SendDuesInvoicesForm validates due_in_days."""
 
     pickup_instructions = forms.CharField(label=_("Pickup instructions"), required=False, widget=forms.Textarea(attrs={"rows": 3}), help_text=_("Optional -- goes out in every notification this batch sends."))
+
+
+class AddPaymentForm(forms.Form):
+    """The "Add payment" modal on an order's detail page -- the flexible
+    counterpart to OrderMarkPaidForm's "pay everything now, in cash" quick
+    action. Amount is free (defaults to the order's remaining balance in the
+    view, but a smaller amount is exactly the point: a voucher covering part
+    of an order, cash covering the rest, in two separate submits). voucher_number
+    only applies -- and is only required -- when method is voucher; looked up
+    and validated here (exists, same club, not expired/inactive/depleted,
+    covers the amount requested) so a bad voucher number surfaces as a plain
+    field error rather than an exception out of the service layer. The
+    service (shop.services.payments.record_payment) re-validates the same
+    rules regardless -- this is for a friendlier error message, not the only
+    line of defence."""
+
+    amount = forms.DecimalField(label=_("Amount"), max_digits=10, decimal_places=2, min_value=Decimal("0.01"))
+    method = forms.ChoiceField(label=_("Method"), choices=Payment.PaymentMethod.choices, initial=Payment.PaymentMethod.CASH)
+    voucher_number = forms.CharField(label=_("Voucher number"), required=False, help_text=_("Required when the method is voucher."))
+    reference = forms.CharField(label=_("Reference"), required=False, help_text=_("Optional -- a receipt number, whatever lets you find this again."))
+
+    def __init__(self, *args, club=None, order=None, **kwargs):
+        self.club = club
+        self.order = order
+        super().__init__(*args, **kwargs)
+
+    def clean(self):
+        cleaned_data = super().clean()
+        method = cleaned_data.get("method")
+        amount = cleaned_data.get("amount")
+        voucher_number = cleaned_data.get("voucher_number", "").strip()
+
+        if method == Payment.PaymentMethod.VOUCHER:
+            if not voucher_number:
+                self.add_error("voucher_number", _("Required when paying by voucher."))
+            else:
+                voucher = Voucher.objects.filter(club=self.club, number=voucher_number).first()
+                if voucher is None:
+                    self.add_error("voucher_number", _("No voucher with that number."))
+                elif not voucher.is_usable:
+                    self.add_error("voucher_number", _("This voucher is expired, inactive, or fully used."))
+                elif amount is not None and amount > voucher.available_amount:
+                    self.add_error("voucher_number", _("Only €%(amount)s is available on this voucher.") % {"amount": voucher.available_amount})
+                else:
+                    cleaned_data["voucher"] = voucher
+
+        if amount is not None and self.order is not None and amount > amount_due(self.order):
+            self.add_error("amount", _("Only €%(amount)s is still due on this order.") % {"amount": amount_due(self.order)})
+
+        return cleaned_data
+
+
+class VoucherForm(forms.ModelForm):
+    class Meta:
+        model = Voucher
+        fields = ["issued_to", "amount", "expiry_date", "is_active", "notes"]
+        widgets = {
+            "expiry_date": forms.DateInput(attrs={"type": "date"}),
+            "issued_to": forms.Select(attrs={"data-searchable": "true", "data-search-placeholder": _("Type a name to search...")}),
+        }
+
+    def __init__(self, *args, club=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        if club is not None:
+            self.fields["issued_to"].queryset = Member.objects.filter(member_of__club=club).distinct()
+        self.fields["issued_to"].required = False
 
 
 class RequirementBypassForm(forms.Form):

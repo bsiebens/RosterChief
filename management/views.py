@@ -54,9 +54,12 @@ from members.services.family import add_child_to_family, add_parent_to_family, a
 from news.models import News, NewsPhoto
 from news.services import dispatch_send_publish_notification, notify_editors_of_pending_review
 from notifications.models import Notification
-from shop.models import Discount, Invoice, Order, Payment, Product, ProductCategory, ProductVariant
+from shop.models import Discount, Invoice, Order, OrderLine, Payment, Product, ProductCategory, ProductVariant, Voucher
 from shop.services.invoices import ShopInvoicePDFError, render_invoice_pdf
 from shop.services.notifications import dispatch_order_ready_for_pickup_notification
+from shop.services.payments import PaymentError, amount_due, sync_payment_status
+from shop.services.payments import record_payment as record_shop_payment
+from shop.services.pricing import order_total
 from shop.services.stats import order_kpis, quantity_sold_by_product, quantity_sold_by_variant
 from teams.models import Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
 from teams.services import eligible_roster_members
@@ -66,6 +69,7 @@ from .email_previews import EMAIL_PREVIEWS, EMAIL_PREVIEWS_BY_KEY, render_previe
 from .forms import (
     AddChildForm,
     AddParentForm,
+    AddPaymentForm,
     AttachToFamilyForm,
     ClubMembershipForm,
     ClubRoleAssignForm,
@@ -90,6 +94,7 @@ from .forms import (
     OpponentForm,
     OrderBulkMarkPaidForm,
     OrderBulkMarkReadyForPickupForm,
+    OrderLineEditForm,
     OrderMarkPaidForm,
     OrderMarkReadyForPickupForm,
     PaymentEditForm,
@@ -111,11 +116,13 @@ from .forms import (
     TeamForm,
     TeamMembershipForm,
     TeamPhotoForm,
+    VoucherForm,
     bulk_add_member_label,
 )
 from .pdf import PDFExportError, event_referee_form_pdf, membership_list_pdf, referee_form_colors
 from .pdf_previews import PDF_PREVIEWS, PDF_PREVIEWS_BY_KEY, render_pdf_preview
 from .recurrence_ui import describe_rrule
+from .shop_export import build_product_order_export
 
 
 class HomeView(ClubStaffRequiredMixin, TemplateView):
@@ -241,6 +248,23 @@ class NotificationMarkAllReadView(ClubStaffRequiredMixin, View):
         member = Member.objects.filter(user=request.user).first()
         if member is not None:
             Notification.objects.filter(club=request.club, member=member, read_at__isnull=True).update(read_at=timezone.now())
+
+        next_url = request.POST.get("next")
+        if next_url and url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}, require_https=request.is_secure()):
+            return redirect(next_url)
+        return redirect("management:home")
+
+
+class NotificationClearAllView(ClubStaffRequiredMixin, View):
+    """The topbar bell dropdown's "Clear all" action -- deletes every one of
+    the signed-in staff member's own notifications in this club (read or
+    not), not just marks them read. A harder reset than "Mark all read" for
+    someone who wants the dropdown actually empty."""
+
+    def post(self, request):
+        member = Member.objects.filter(user=request.user).first()
+        if member is not None:
+            Notification.objects.filter(club=request.club, member=member).delete()
 
         next_url = request.POST.get("next")
         if next_url and url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}, require_https=request.is_secure()):
@@ -3621,6 +3645,21 @@ class ProductUpdateView(ShopManagerRequiredMixin, UpdateView):
         )
 
 
+class ProductOrderExportView(ShopManagerRequiredMixin, View):
+    """The product page's own "Download order list" button -- an .xlsx of
+    every order line for this product (build_product_order_export), ready to
+    hand to a manufacturer/printer: who it's for and the personalization
+    number, if any."""
+
+    def get(self, request, pk):
+        product = get_object_or_404(Product.objects.filter(club=request.club), pk=pk)
+        workbook = build_product_order_export(product)
+        response = HttpResponse(content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        response["Content-Disposition"] = f'attachment; filename="{product.slug}-order-list.xlsx"'
+        workbook.save(response)
+        return response
+
+
 class ProductCategoryCreateView(ShopManagerRequiredMixin, RedirectOnInvalidMixin, FormView):
     """Reachable only via the "Add category" modal on the products page --
     no standalone template, same shape as ProductVariantCreateView."""
@@ -3812,6 +3851,69 @@ class DiscountToggleActiveView(ShopManagerRequiredMixin, View):
         return redirect("management:discount_list")
 
 
+class VoucherListView(ShopManagerRequiredMixin, ListView):
+    template_name = "management/voucher_list.html"
+    context_object_name = "vouchers"
+
+    def get_queryset(self):
+        return Voucher.objects.filter(club=self.request.club).select_related("issued_to")
+
+
+class VoucherCreateView(ShopManagerRequiredMixin, CreateView):
+    model = Voucher
+    form_class = VoucherForm
+    template_name = "management/voucher_form.html"
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs["club"] = self.request.club
+        return kwargs
+
+    def get_form(self, form_class=None):
+        # Set before is_valid() runs, not in form_valid() -- Voucher.clean()'s
+        # member_fields check (issued_to) needs self.club_id already resolved
+        # at full_clean() time, which happens inside is_valid(), earlier than
+        # form_valid() ever runs.
+        form = super().get_form(form_class)
+        form.instance.club = self.request.club
+        return form
+
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        body = _("“%(voucher)s” created.") % {"voucher": self.object}
+        notify(self.request, f"s|{_('Voucher created')}|{body}")
+        return response
+
+    def get_success_url(self):
+        return reverse("management:voucher_list")
+
+
+class VoucherUpdateView(ShopManagerRequiredMixin, UpdateView):
+    model = Voucher
+    form_class = VoucherForm
+    template_name = "management/voucher_form.html"
+
+    def get_queryset(self):
+        return Voucher.objects.filter(club=self.request.club)
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs["club"] = self.request.club
+        return kwargs
+
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        body = _("“%(voucher)s” updated.") % {"voucher": self.object}
+        notify(self.request, f"s|{_('Voucher updated')}|{body}")
+        return response
+
+    def get_success_url(self):
+        return reverse("management:voucher_list")
+
+    def get_context_data(self, **kwargs):
+        return super().get_context_data(update_view=True, **kwargs)
+
+
 class OrderListView(ShopManagerRequiredMixin, ListView):
     """Default view hides closed orders (Order.is_closed -- delivered *and*
     paid, see its own docstring for why both) so the list reads as "what
@@ -3877,7 +3979,11 @@ class OrderBulkMarkPaidView(ShopManagerRequiredMixin, View):
     single-order modal (OrderMarkPaidView) for that. Cancelled orders are
     excluded rather than erroring -- their own checkbox isn't even rendered
     (order_list.html), so this only matters for a stale selection left over
-    from before a page reload."""
+    from before a page reload. Settles whatever's actually still due
+    (shop.services.payments.amount_due), not blindly the full total -- an
+    order with an existing partial payment (e.g. a voucher already applied
+    via OrderAddPaymentView) only gets topped up, never double-charged.
+    Already-fully-paid orders are silently skipped."""
 
     def post(self, request):
         next_url = request.POST.get("next")
@@ -3898,9 +4004,10 @@ class OrderBulkMarkPaidView(ShopManagerRequiredMixin, View):
         count = 0
         with transaction.atomic():
             for order in orders:
-                Payment.objects.create(order=order, amount=order.total, method=method, status=Payment.PaymentStatus.CONFIRMED, paid_at=timezone.now())
-                order.payment_status = Order.PaymentStatus.PAID
-                order.save(update_fields=["payment_status"])
+                due = amount_due(order)
+                if due <= 0:
+                    continue
+                record_shop_payment(order, amount=due, method=method)
                 count += 1
 
         notify(request, f"s|{_('Orders marked paid')}|{_('%(count)d order(s) marked paid.') % {'count': count}}")
@@ -3952,21 +4059,69 @@ class OrderDetailView(ShopManagerRequiredMixin, DetailView):
 
     def get_context_data(self, **kwargs):
         order = self.object
-        lines = order.order_items.select_related("product", "variant", "beneficiary", "team")
+        lines = list(order.order_items.select_related("product", "variant", "beneficiary", "team"))
+        for line in lines:
+            line.edit_form = OrderLineEditForm(instance=line, club=self.request.club)
         applied_discounts = order.applied_discounts.select_related("discount")
         # Bound per-row so each payment's own "Edit" modal can render its own
         # form -- same reasoning as ProductUpdateView's variants.
-        payments = list(order.payments.all())
+        payments = list(order.payments.select_related("voucher").all())
         for payment in payments:
             payment.edit_form = PaymentEditForm(instance=payment)
         return super().get_context_data(
             lines=lines,
             applied_discounts=applied_discounts,
             payments=payments,
+            amount_due=amount_due(order),
             mark_paid_form=OrderMarkPaidForm(),
             mark_ready_for_pickup_form=OrderMarkReadyForPickupForm(initial={"pickup_instructions": order.pickup_instructions}),
+            add_payment_form=AddPaymentForm(club=self.request.club, order=order, prefix="add_payment", initial={"amount": amount_due(order)}),
             **kwargs,
         )
+
+
+class OrderLineUpdateView(ShopManagerRequiredMixin, RedirectOnInvalidMixin, UpdateView):
+    """The "Edit" modal on a line item row (order detail page) -- fixing a
+    mistake after the fact (wrong size, wrong beneficiary, a forgotten
+    number/name), not a general line-item editor: there's no add/delete
+    here, and product itself isn't editable (see OrderLineEditForm's own
+    docstring). unit_price/line_total are recomputed from quantity and the
+    (possibly changed) variant's own price rather than taken from the form,
+    and the order's own total and payment_status are kept in sync with
+    whatever that recompute changed."""
+
+    model = OrderLine
+    form_class = OrderLineEditForm
+    http_method_names = ["post"]
+    invalid_redirect_url_name = "management:order_detail"
+
+    def get_invalid_redirect_kwargs(self):
+        return {"pk": self.kwargs["order_pk"]}
+
+    def get_queryset(self):
+        return OrderLine.objects.filter(order__club=self.request.club, order__pk=self.kwargs["order_pk"]).select_related("product", "order")
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs["club"] = self.request.club
+        return kwargs
+
+    def form_valid(self, form):
+        line = form.save(commit=False)
+        line.unit_price = line.variant.effective_price if line.variant_id else line.product.price
+        line.line_total = line.unit_price * line.quantity
+        line.save()
+
+        order = line.order
+        order.total = order_total(order)
+        order.save(update_fields=["total"])
+        sync_payment_status(order)
+
+        notify(self.request, f"s|{_('Line item updated')}|{_('“%(product)s” updated.') % {'product': line.product}}")
+        return redirect("management:order_detail", pk=order.pk)
+
+    def get_success_url(self):
+        return reverse("management:order_detail", kwargs={"pk": self.kwargs["order_pk"]})
 
 
 class PaymentUpdateView(ShopManagerRequiredMixin, RedirectOnInvalidMixin, UpdateView):
@@ -3998,25 +4153,34 @@ class PaymentDeleteView(ShopManagerRequiredMixin, View):
     """No PROTECT to work around -- Payment is only ever referenced by its
     own Order (CASCADE the other way), so deleting one is a plain delete.
 
-    Drops the order's payment_status back to PENDING once it has no payments
-    left at all -- covers "staff marked this paid by mistake" without
-    leaving the order reading as settled with nothing behind it.
-    fulfillment_status is untouched either way (deleting a payment record
-    says nothing about whether the item was handed over). Left alone if
-    payments remain (a partial refund/correction on an order with several)
-    or if payment_status is already REFUNDED -- that's a deliberate,
-    terminal state a payment row disappearing shouldn't resurrect."""
+    Recomputes the order's payment_status from whatever confirmed Payments
+    remain (shop.services.payments.sync_payment_status) -- covers "staff
+    marked this paid by mistake" the same as before, but now also correctly
+    drops PAID to PARTIALLY_PAID when deleting just one of several partial
+    payments, rather than leaving it reading as settled. fulfillment_status
+    is untouched either way (deleting a payment record says nothing about
+    whether the item was handed over). Left alone if payment_status is
+    already REFUNDED -- that's a deliberate, terminal state a payment row
+    disappearing shouldn't resurrect. A deleted voucher payment restores its
+    amount back onto the voucher's own available balance."""
 
     def post(self, request, order_pk, pk):
-        payment = get_object_or_404(Payment.objects.filter(order__club=request.club, order__pk=order_pk), pk=pk)
+        payment = get_object_or_404(Payment.objects.filter(order__club=request.club, order__pk=order_pk).select_related("voucher"), pk=pk)
         order = payment.order
+        voucher = payment.voucher
+        amount = payment.amount
+        was_confirmed = payment.status == Payment.PaymentStatus.CONFIRMED
         payment.delete()
 
+        if voucher is not None and was_confirmed:
+            voucher.consumed_amount = max(Decimal("0"), voucher.consumed_amount - amount)
+            voucher.save(update_fields=["consumed_amount"])
+
         reverted_to_pending = False
-        if not order.payments.exists() and order.payment_status != Order.PaymentStatus.REFUNDED:
-            order.payment_status = Order.PaymentStatus.PENDING
-            order.save(update_fields=["payment_status"])
-            reverted_to_pending = True
+        if order.payment_status != Order.PaymentStatus.REFUNDED:
+            sync_payment_status(order)
+            order.refresh_from_db(fields=["payment_status"])
+            reverted_to_pending = order.payment_status == Order.PaymentStatus.PENDING
 
         if reverted_to_pending:
             notify(request, f"s|{_('Payment deleted')}|{_('Payment deleted -- order %(number)s has no payments left and is back to pending.') % {'number': order.number}}")
@@ -4025,11 +4189,60 @@ class PaymentDeleteView(ShopManagerRequiredMixin, View):
         return redirect("management:order_detail", pk=order_pk)
 
 
+class OrderAddPaymentView(ShopManagerRequiredMixin, RedirectOnInvalidMixin, FormView):
+    """The "Add payment" modal on an order's detail page -- records a
+    payment of a specific amount and method, including by voucher. This is
+    what a partial settlement actually looks like: a voucher covering part
+    of the total (AddPaymentForm validates the voucher and amount), then a
+    second submit with method=cash/bank_transfer/credit_card for whatever's
+    still due. OrderMarkPaidView's "Mark paid" stays the one-click shortcut
+    for the common "pay it all now" case; this is the flexible one behind
+    it."""
+
+    form_class = AddPaymentForm
+    invalid_redirect_url_name = "management:order_detail"
+
+    def get_invalid_redirect_kwargs(self):
+        return {"pk": self.kwargs["pk"]}
+
+    def get_order(self):
+        return get_object_or_404(Order.objects.filter(club=self.request.club), pk=self.kwargs["pk"])
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs["club"] = self.request.club
+        kwargs["order"] = self.get_order()
+        kwargs["prefix"] = "add_payment"
+        return kwargs
+
+    def form_valid(self, form):
+        order = self.get_order()
+        try:
+            record_shop_payment(
+                order,
+                amount=form.cleaned_data["amount"],
+                method=form.cleaned_data["method"],
+                reference=form.cleaned_data.get("reference", ""),
+                voucher=form.cleaned_data.get("voucher"),
+            )
+        except PaymentError as error:
+            notify(self.request, f"e|{_('Could not record payment')}|{error}")
+            return redirect("management:order_detail", pk=order.pk)
+
+        notify(self.request, f"s|{_('Payment recorded')}|{_('Payment recorded for order %(number)s.') % {'number': order.number}}")
+        return redirect("management:order_detail", pk=order.pk)
+
+    def get_success_url(self):
+        return reverse("management:order_detail", kwargs={"pk": self.kwargs["pk"]})
+
+
 class OrderMarkPaidView(ShopManagerRequiredMixin, View):
     """Reachable only via the "Mark paid" modal on the order detail page --
-    creates a Payment row and settles the order. There's no online payment for
-    this shop, so this is how every order actually gets marked paid: someone on
-    staff, on pickup."""
+    creates a Payment row for whatever's still due (shop.services.payments.
+    amount_due) and settles the order. There's no online payment for this
+    shop, so this is how most orders get marked paid: someone on staff, on
+    pickup. If a voucher already covered part of it (OrderAddPaymentView),
+    this only tops up the remainder -- not the full order total again."""
 
     def post(self, request, pk):
         order = get_object_or_404(Order.objects.filter(club=request.club), pk=pk)
@@ -4040,16 +4253,12 @@ class OrderMarkPaidView(ShopManagerRequiredMixin, View):
                 notify(request, f"e|{_('Could not record payment')}|{' '.join(error)}")
             return redirect("management:order_detail", pk=pk)
 
-        Payment.objects.create(
-            order=order,
-            amount=order.total,
-            method=form.cleaned_data["method"],
-            status=Payment.PaymentStatus.CONFIRMED,
-            reference=form.cleaned_data["reference"],
-            paid_at=timezone.now(),
-        )
-        order.payment_status = Order.PaymentStatus.PAID
-        order.save(update_fields=["payment_status"])
+        due = amount_due(order)
+        if due <= 0:
+            notify(request, f"e|{_('Nothing to collect')}|{_('Order %(number)s is already fully paid.') % {'number': order.number}}")
+            return redirect("management:order_detail", pk=pk)
+
+        record_shop_payment(order, amount=due, method=form.cleaned_data["method"], reference=form.cleaned_data["reference"])
 
         notify(request, f"s|{_('Order marked paid')}|{_('Order %(number)s is now paid.') % {'number': order.number}}")
         return redirect("management:order_detail", pk=pk)

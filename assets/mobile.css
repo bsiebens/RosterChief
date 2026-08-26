@@ -371,6 +371,17 @@
         align-items: center;
     }
 
+    /* Two pills stacked in one row (shop_orders.html/shop_order_detail.html's
+       payment + fulfillment status) need to read as a pair of small, distinct
+       facts, not two full-size pills competing for attention -- smaller text/
+       padding plus a leading icon (wallet vs package, set in the template) so
+       which axis is which is legible without a text label eating the space. */
+    .pill-sm {
+        padding: 3px 8px;
+        font-size: 0.625rem;
+        gap: 3px;
+    }
+
     .pill-ok {
         background: var(--color-ok-bg);
         color: var(--color-ok-text);

@@ -39,7 +39,7 @@ from members.services.claims import children_awaiting_a_parent
 from news.models import News, NewsPhoto
 from news.services import _send_and_mark_notified
 from notifications.models import Notification
-from shop.models import Discount, DiscountType, Invoice, Order, OrderLine, Payment, Product, ProductCategory, ProductVariant
+from shop.models import Discount, DiscountType, Invoice, Order, OrderLine, Payment, Product, ProductCategory, ProductVariant, Voucher
 from shop.services.invoices import ShopInvoicePDFError, create_invoice_for_order
 from teams.models import Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
 from teams.services import eligible_roster_members
@@ -7656,6 +7656,33 @@ class NotificationMarkAllReadViewTests(ManagementTestBase):
         self.assertRedirects(response, reverse("management:member_list"))
 
 
+class NotificationClearAllViewTests(ManagementTestBase):
+    def setUp(self):
+        super().setUp()
+        self.client.force_login(self.admin_user)
+
+    def test_deletes_every_notification_read_or_not(self):
+        Notification.objects.create(club=self.club, member=self.admin_member, title="One", body="Body.", read_at=timezone.now())
+        Notification.objects.create(club=self.club, member=self.admin_member, title="Two", body="Body.")
+
+        self.club_post("notification_clear_all", {})
+
+        self.assertFalse(Notification.objects.filter(member=self.admin_member).exists())
+
+    def test_does_not_touch_another_members_notification(self):
+        other_member = Member.objects.create(first_name="Other", last_name="Staff")
+        other_notification = Notification.objects.create(club=self.club, member=other_member, title="Not yours", body="Body.")
+
+        self.club_post("notification_clear_all", {})
+
+        self.assertTrue(Notification.objects.filter(pk=other_notification.pk).exists())
+
+    def test_redirects_to_next_when_given(self):
+        response = self.club_post("notification_clear_all", {"next": reverse("management:member_list")})
+
+        self.assertRedirects(response, reverse("management:member_list"))
+
+
 class ManagementListPaginationTests(ManagementTestBase):
     """paginate_by on the six paginated lists (MemberListView/EventListView/
     TeamListView/GroupListView/NewsListView/FamilyListView) and the shared
@@ -8676,6 +8703,73 @@ class DiscountManagementTests(ShopTestBase):
         self.assertEqual(response.status_code, 403)
 
 
+class VoucherManagementTests(ShopTestBase):
+    def voucher_data(self, **overrides):
+        data = {"issued_to": "", "amount": "50.00", "expiry_date": "2030-01-01", "is_active": "on", "notes": ""}
+        data.update(overrides)
+        return data
+
+    def test_a_shop_manager_can_view_the_voucher_list(self):
+        Voucher.objects.create(club=self.club, amount=Decimal("20.00"), expiry_date=datetime.date(2030, 1, 1))
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_get("voucher_list")
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_plain_staff_cannot_view_the_voucher_list(self):
+        self.client.force_login(self.make_plain_staff())
+
+        self.assertEqual(self.club_get("voucher_list").status_code, 403)
+
+    def test_a_shop_manager_can_create_a_voucher_and_gets_a_number(self):
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_post("voucher_create", self.voucher_data())
+
+        self.assertRedirects(response, reverse("management:voucher_list"))
+        voucher = Voucher.objects.get(club=self.club, amount=Decimal("50.00"))
+        self.assertTrue(voucher.number.startswith("VCH-"))
+        self.assertEqual(voucher.consumed_amount, Decimal("0"))
+
+    def test_a_voucher_can_be_issued_to_a_member(self):
+        member = Member.objects.create(first_name="Gigi", last_name="Given")
+        ClubMembership.objects.create(club=self.club, member=member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        self.client.force_login(self.make_shop_manager())
+
+        self.club_post("voucher_create", self.voucher_data(issued_to=member.pk))
+
+        voucher = Voucher.objects.get(club=self.club, amount=Decimal("50.00"))
+        self.assertEqual(voucher.issued_to, member)
+
+    def test_plain_staff_cannot_create_a_voucher(self):
+        self.client.force_login(self.make_plain_staff())
+
+        response = self.club_post("voucher_create", self.voucher_data())
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(Voucher.objects.filter(club=self.club).exists())
+
+    def test_a_shop_manager_can_edit_a_voucher(self):
+        voucher = Voucher.objects.create(club=self.club, amount=Decimal("20.00"), expiry_date=datetime.date(2030, 1, 1))
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_post("voucher_update", self.voucher_data(amount="30.00"), voucher.pk)
+
+        self.assertRedirects(response, reverse("management:voucher_list"))
+        voucher.refresh_from_db()
+        self.assertEqual(voucher.amount, Decimal("30.00"))
+
+    def test_a_voucher_from_another_club_404s(self):
+        other_club = Club.objects.create(name="Other Club", slug="other-club-voucher")
+        voucher = Voucher.objects.create(club=other_club, amount=Decimal("20.00"), expiry_date=datetime.date(2030, 1, 1))
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_post("voucher_update", self.voucher_data(), voucher.pk)
+
+        self.assertEqual(response.status_code, 404)
+
+
 class OrderManagementTests(ShopTestBase):
     @classmethod
     def setUpTestData(cls):
@@ -9115,7 +9209,10 @@ class PaymentManagementTests(ShopTestBase):
         self.assertEqual(order.payment_status, Order.PaymentStatus.PENDING)
         self.assertContains(response, "back to pending")
 
-    def test_deleting_one_of_several_payments_leaves_status_alone(self):
+    def test_deleting_one_of_several_payments_recomputes_the_remaining_balance(self):
+        # order.total is 50.00 (make_order's own default); two payments of 20 +
+        # 30 sum to exactly that, hence PAID initially. Deleting the 20 leaves
+        # only 30 collected -- genuinely PARTIALLY_PAID now, not still PAID.
         order = self.make_order()
         first = self.make_payment(order, amount=Decimal("20.00"))
         self.make_payment(order, amount=Decimal("30.00"))
@@ -9124,7 +9221,7 @@ class PaymentManagementTests(ShopTestBase):
         self.club_post("payment_delete", {}, order.pk, first.pk)
 
         order.refresh_from_db()
-        self.assertEqual(order.payment_status, Order.PaymentStatus.PAID)
+        self.assertEqual(order.payment_status, Order.PaymentStatus.PARTIALLY_PAID)
         self.assertEqual(order.payments.count(), 1)
 
     def test_deleting_the_only_payment_on_a_cancelled_order_still_drops_payment_to_pending(self):
@@ -9170,6 +9267,281 @@ class PaymentManagementTests(ShopTestBase):
         response = self.club_post("payment_delete", {}, other_order.pk, payment.pk)
 
         self.assertEqual(response.status_code, 404)
+
+
+class OrderAddPaymentTests(ShopTestBase):
+    """OrderAddPaymentView -- the flexible counterpart to OrderMarkPaidView's
+    quick "pay everything now" shortcut. Covers what the voucher feature is
+    actually for: a voucher covering part of an order, cash/OrderMarkPaidView
+    covering the rest, in two separate submits."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.purchaser = Member.objects.create(first_name="Olly", last_name="Orderer", email="olly-addpay@example.com")
+
+    def make_order(self, total=Decimal("50.00")):
+        return Order.objects.create(club=self.club, purchaser=self.purchaser, total=total)
+
+    def make_voucher(self, amount=Decimal("30.00"), expiry_date=datetime.date(2030, 1, 1), club=None):
+        return Voucher.objects.create(club=club or self.club, amount=amount, expiry_date=expiry_date)
+
+    def add_payment_data(self, **overrides):
+        data = {"add_payment-amount": "20.00", "add_payment-method": Payment.PaymentMethod.CASH, "add_payment-voucher_number": "", "add_payment-reference": ""}
+        data.update(overrides)
+        return data
+
+    def test_a_shop_manager_can_record_a_partial_cash_payment(self):
+        order = self.make_order()
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_post("order_add_payment", self.add_payment_data(), order.pk)
+
+        self.assertRedirects(response, reverse("management:order_detail", args=[order.pk]))
+        order.refresh_from_db()
+        self.assertEqual(order.payment_status, Order.PaymentStatus.PARTIALLY_PAID)
+        payment = Payment.objects.get(order=order)
+        self.assertEqual(payment.amount, Decimal("20.00"))
+
+    def test_a_voucher_payment_deducts_from_the_vouchers_balance(self):
+        order = self.make_order()
+        voucher = self.make_voucher(amount=Decimal("30.00"))
+        self.client.force_login(self.make_shop_manager())
+
+        self.club_post("order_add_payment", self.add_payment_data(**{"add_payment-amount": "30.00", "add_payment-method": Payment.PaymentMethod.VOUCHER, "add_payment-voucher_number": voucher.number}), order.pk)
+
+        voucher.refresh_from_db()
+        self.assertEqual(voucher.consumed_amount, Decimal("30.00"))
+        payment = Payment.objects.get(order=order)
+        self.assertEqual(payment.voucher, voucher)
+        order.refresh_from_db()
+        self.assertEqual(order.payment_status, Order.PaymentStatus.PARTIALLY_PAID)
+
+    def test_a_voucher_and_then_cash_together_fully_settle_the_order(self):
+        order = self.make_order()
+        voucher = self.make_voucher(amount=Decimal("30.00"))
+        self.client.force_login(self.make_shop_manager())
+
+        self.club_post("order_add_payment", self.add_payment_data(**{"add_payment-amount": "30.00", "add_payment-method": Payment.PaymentMethod.VOUCHER, "add_payment-voucher_number": voucher.number}), order.pk)
+        self.club_post("order_add_payment", self.add_payment_data(**{"add_payment-amount": "20.00"}), order.pk)
+
+        order.refresh_from_db()
+        self.assertEqual(order.payment_status, Order.PaymentStatus.PAID)
+        self.assertEqual(order.payments.count(), 2)
+
+    def test_a_voucher_payment_over_the_available_balance_is_rejected(self):
+        order = self.make_order()
+        voucher = self.make_voucher(amount=Decimal("10.00"))
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_post("order_add_payment", self.add_payment_data(**{"add_payment-amount": "20.00", "add_payment-method": Payment.PaymentMethod.VOUCHER, "add_payment-voucher_number": voucher.number}), order.pk)
+
+        self.assertRedirects(response, reverse("management:order_detail", args=[order.pk]))
+        self.assertFalse(Payment.objects.filter(order=order).exists())
+        voucher.refresh_from_db()
+        self.assertEqual(voucher.consumed_amount, Decimal("0"))
+
+    def test_an_expired_voucher_is_rejected(self):
+        order = self.make_order()
+        voucher = self.make_voucher(amount=Decimal("50.00"), expiry_date=datetime.date(2020, 1, 1))
+        self.client.force_login(self.make_shop_manager())
+
+        self.club_post("order_add_payment", self.add_payment_data(**{"add_payment-amount": "20.00", "add_payment-method": Payment.PaymentMethod.VOUCHER, "add_payment-voucher_number": voucher.number}), order.pk)
+
+        self.assertFalse(Payment.objects.filter(order=order).exists())
+
+    def test_an_unknown_voucher_number_is_rejected(self):
+        order = self.make_order()
+        self.client.force_login(self.make_shop_manager())
+
+        self.club_post("order_add_payment", self.add_payment_data(**{"add_payment-amount": "20.00", "add_payment-method": Payment.PaymentMethod.VOUCHER, "add_payment-voucher_number": "NOPE"}), order.pk)
+
+        self.assertFalse(Payment.objects.filter(order=order).exists())
+
+    def test_a_voucher_from_another_club_is_rejected(self):
+        order = self.make_order()
+        other_club = Club.objects.create(name="Other Club", slug="other-club-voucher-pay")
+        voucher = self.make_voucher(amount=Decimal("50.00"), club=other_club)
+        self.client.force_login(self.make_shop_manager())
+
+        self.club_post("order_add_payment", self.add_payment_data(**{"add_payment-amount": "20.00", "add_payment-method": Payment.PaymentMethod.VOUCHER, "add_payment-voucher_number": voucher.number}), order.pk)
+
+        self.assertFalse(Payment.objects.filter(order=order).exists())
+
+    def test_an_amount_over_the_orders_remaining_balance_is_rejected(self):
+        order = self.make_order(total=Decimal("50.00"))
+        self.client.force_login(self.make_shop_manager())
+
+        self.club_post("order_add_payment", self.add_payment_data(**{"add_payment-amount": "100.00"}), order.pk)
+
+        self.assertFalse(Payment.objects.filter(order=order).exists())
+
+    def test_mark_paid_only_tops_up_the_remaining_balance_after_a_voucher_payment(self):
+        order = self.make_order()
+        voucher = self.make_voucher(amount=Decimal("30.00"))
+        self.client.force_login(self.make_shop_manager())
+        self.club_post("order_add_payment", self.add_payment_data(**{"add_payment-amount": "30.00", "add_payment-method": Payment.PaymentMethod.VOUCHER, "add_payment-voucher_number": voucher.number}), order.pk)
+
+        self.club_post("order_mark_paid", {"method": Payment.PaymentMethod.CASH, "reference": ""}, order.pk)
+
+        order.refresh_from_db()
+        self.assertEqual(order.payment_status, Order.PaymentStatus.PAID)
+        cash_payment = Payment.objects.get(order=order, method=Payment.PaymentMethod.CASH)
+        self.assertEqual(cash_payment.amount, Decimal("20.00"))
+
+    def test_plain_staff_cannot_add_a_payment(self):
+        order = self.make_order()
+        self.client.force_login(self.make_plain_staff())
+
+        response = self.club_post("order_add_payment", self.add_payment_data(), order.pk)
+
+        self.assertEqual(response.status_code, 403)
+
+
+class OrderLineManagementTests(ShopTestBase):
+    """OrderLineUpdateView -- fixing a mistake on an existing line item after
+    the fact. product/unit_price/line_total stay derived, not directly
+    editable (OrderLineEditForm/OrderLineUpdateView's own docstrings)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.purchaser = Member.objects.create(first_name="Olly", last_name="Orderer", email="olly-lines@example.com")
+
+    def make_order_with_line(self, quantity=2, unit_price=Decimal("25.00")):
+        order = Order.objects.create(club=self.club, purchaser=self.purchaser, total=unit_price * quantity)
+        line = OrderLine.objects.create(order=order, product=self.product, quantity=quantity, unit_price=unit_price, line_total=unit_price * quantity)
+        return order, line
+
+    def test_a_shop_manager_can_change_the_quantity_and_the_order_total_recomputes(self):
+        order, line = self.make_order_with_line(quantity=2, unit_price=Decimal("25.00"))
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_post("order_line_update", {"quantity": "3", "beneficiary": "", "variant": ""}, order.pk, line.pk)
+
+        self.assertRedirects(response, reverse("management:order_detail", args=[order.pk]))
+        line.refresh_from_db()
+        self.assertEqual(line.quantity, 3)
+        self.assertEqual(line.line_total, Decimal("75.00"))
+        order.refresh_from_db()
+        self.assertEqual(order.total, Decimal("75.00"))
+
+    def test_changing_the_variant_recomputes_the_unit_price(self):
+        order, line = self.make_order_with_line(quantity=1, unit_price=Decimal("25.00"))
+        variant = ProductVariant.objects.create(product=self.product, name="XL", price=Decimal("30.00"))
+        self.client.force_login(self.make_shop_manager())
+
+        self.club_post("order_line_update", {"quantity": "1", "beneficiary": "", "variant": variant.pk}, order.pk, line.pk)
+
+        line.refresh_from_db()
+        self.assertEqual(line.unit_price, Decimal("30.00"))
+        self.assertEqual(line.line_total, Decimal("30.00"))
+
+    def test_growing_the_total_drops_a_paid_order_back_to_partially_paid(self):
+        order, line = self.make_order_with_line(quantity=1, unit_price=Decimal("25.00"))
+        Payment.objects.create(order=order, amount=Decimal("25.00"), method=Payment.PaymentMethod.CASH, status=Payment.PaymentStatus.CONFIRMED)
+        order.payment_status = Order.PaymentStatus.PAID
+        order.save(update_fields=["payment_status"])
+        self.client.force_login(self.make_shop_manager())
+
+        self.club_post("order_line_update", {"quantity": "2", "beneficiary": "", "variant": ""}, order.pk, line.pk)
+
+        order.refresh_from_db()
+        self.assertEqual(order.total, Decimal("50.00"))
+        self.assertEqual(order.payment_status, Order.PaymentStatus.PARTIALLY_PAID)
+
+    def test_personalization_fields_are_only_editable_when_the_product_allows_it(self):
+        self.product.personalization_enabled = True
+        self.product.save(update_fields=["personalization_enabled"])
+        order, line = self.make_order_with_line()
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_post("order_line_update", {"quantity": "2", "beneficiary": "", "variant": "", "personalization_number": "7", "personalization_name": "SMITH"}, order.pk, line.pk)
+
+        self.assertRedirects(response, reverse("management:order_detail", args=[order.pk]))
+        line.refresh_from_db()
+        self.assertEqual(line.personalization_number, "7")
+        self.assertEqual(line.personalization_name, "SMITH")
+
+    def test_personalization_is_ignored_when_the_product_doesnt_allow_it(self):
+        order, line = self.make_order_with_line()
+        self.client.force_login(self.make_shop_manager())
+
+        self.club_post("order_line_update", {"quantity": "2", "beneficiary": "", "variant": "", "personalization_number": "7", "personalization_name": "SMITH"}, order.pk, line.pk)
+
+        line.refresh_from_db()
+        self.assertEqual(line.personalization_number, "")
+        self.assertEqual(line.personalization_name, "")
+
+    def test_a_beneficiary_can_be_set(self):
+        order, line = self.make_order_with_line()
+        beneficiary = Member.objects.create(first_name="Cy", last_name="Child")
+        ClubMembership.objects.create(club=self.club, member=beneficiary, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        self.client.force_login(self.make_shop_manager())
+
+        self.club_post("order_line_update", {"quantity": "2", "beneficiary": beneficiary.pk, "variant": ""}, order.pk, line.pk)
+
+        line.refresh_from_db()
+        self.assertEqual(line.beneficiary, beneficiary)
+
+    def test_plain_staff_cannot_edit_a_line_item(self):
+        order, line = self.make_order_with_line()
+        self.client.force_login(self.make_plain_staff())
+
+        response = self.club_post("order_line_update", {"quantity": "3", "beneficiary": "", "variant": ""}, order.pk, line.pk)
+
+        self.assertEqual(response.status_code, 403)
+        line.refresh_from_db()
+        self.assertEqual(line.quantity, 2)
+
+    def test_a_line_item_from_another_club_404s(self):
+        other_club = Club.objects.create(name="Other Club", slug="other-club-line")
+        other_purchaser = Member.objects.create(first_name="Otto", last_name="Other", email="otto-line@example.com")
+        other_product = Product.objects.create(club=other_club, name="Other Jersey", price=Decimal("25.00"))
+        other_order = Order.objects.create(club=other_club, purchaser=other_purchaser, total=Decimal("25.00"))
+        other_line = OrderLine.objects.create(order=other_order, product=other_product, quantity=1, unit_price=Decimal("25.00"), line_total=Decimal("25.00"))
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_post("order_line_update", {"quantity": "2", "beneficiary": "", "variant": ""}, other_order.pk, other_line.pk)
+
+        self.assertEqual(response.status_code, 404)
+
+
+class ProductOrderExportTests(ShopTestBase):
+    def test_the_export_lists_beneficiary_and_personalization(self):
+        self.product.personalization_enabled = True
+        self.product.save(update_fields=["personalization_enabled"])
+        purchaser = Member.objects.create(first_name="Olly", last_name="Orderer", email="olly-export@example.com")
+        beneficiary = Member.objects.create(first_name="Cy", last_name="Child")
+        order = Order.objects.create(club=self.club, purchaser=purchaser, total=Decimal("25.00"))
+        OrderLine.objects.create(order=order, product=self.product, beneficiary=beneficiary, quantity=1, unit_price=Decimal("25.00"), line_total=Decimal("25.00"), personalization_number="7", personalization_name="SMITH")
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_get("product_order_export", self.product.pk)
+
+        self.assertEqual(response.status_code, 200)
+        workbook = openpyxl.load_workbook(BytesIO(response.content))
+        rows = list(workbook.active.iter_rows(values_only=True))
+        self.assertIn((order.number, "Child", "Cy", None, "7", "SMITH", 1), rows)
+
+    def test_cancelled_orders_are_excluded(self):
+        purchaser = Member.objects.create(first_name="Olly", last_name="Orderer", email="olly-export2@example.com")
+        order = Order.objects.create(club=self.club, purchaser=purchaser, total=Decimal("25.00"), fulfillment_status=Order.FulfillmentStatus.CANCELLED)
+        OrderLine.objects.create(order=order, product=self.product, quantity=1, unit_price=Decimal("25.00"), line_total=Decimal("25.00"))
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_get("product_order_export", self.product.pk)
+
+        workbook = openpyxl.load_workbook(BytesIO(response.content))
+        rows = list(workbook.active.iter_rows(values_only=True))
+        self.assertEqual(len(rows), 1)  # header only
+
+    def test_plain_staff_cannot_download_the_export(self):
+        self.client.force_login(self.make_plain_staff())
+
+        response = self.club_get("product_order_export", self.product.pk)
+
+        self.assertEqual(response.status_code, 403)
 
 
 class InvoicePdfViewTests(ShopTestBase):

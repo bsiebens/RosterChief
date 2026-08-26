@@ -4,6 +4,12 @@
 {% block panel_title %}{% if update_view %}{% trans "Edit product" %}{% else %}{% trans "New product" %}{% endif %}{% endblock panel_title %}
 {% block heading %}{% if update_view %}{% blocktrans %}Edit {{ object }}{% endblocktrans %}{% else %}{% trans "New product" %}{% endif %}{% endblock heading %}
 
+{% block actions %}
+    {% if update_view and object.product_type == "merchandise" %}
+        <a class="btn btn-outline gap-2" href="{% url 'management:product_order_export' object.pk %}">{% lucide "file-down" size=16 %} {% trans "Download order list" %}</a>
+    {% endif %}
+{% endblock actions %}
+
 {% block panel %}
     <form method="post" enctype="multipart/form-data">
         {% csrf_token %}
@@ -25,6 +31,9 @@
             <div class="grid grid-cols-2 gap-4">
                 {% form_field form.category %}
                 {% form_field form.price %}
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+                {% form_field form.personalization_enabled show_as_toggle=True %}
             </div>
         </div>
 
