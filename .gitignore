@@ -385,3 +385,6 @@ pyrightconfig.json
 # Node
 node_modules/
 staticfiles/
+
+# macOS Finder metadata
+.DS_Store
