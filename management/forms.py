@@ -3,6 +3,7 @@ from decimal import Decimal
 
 from django import forms
 from django.contrib.auth import get_user_model
+from django.db.models import F, Q
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
@@ -1181,49 +1182,66 @@ class OrderBulkMarkReadyForPickupForm(forms.Form):
     pickup_instructions = forms.CharField(label=_("Pickup instructions"), required=False, widget=forms.Textarea(attrs={"rows": 3}), help_text=_("Optional -- goes out in every notification this batch sends."))
 
 
+class VoucherChoiceField(forms.ModelChoiceField):
+    """Renders each option as its number, who it's issued to (if anyone),
+    and what's left on it -- a bare voucher number means nothing to someone
+    picking from a list."""
+
+    def label_from_instance(self, voucher):
+        owner = f" — {voucher.issued_to}" if voucher.issued_to_id else ""
+        return _("%(number)s%(owner)s (€%(available)s available)") % {"number": voucher.number, "owner": owner, "available": voucher.available_amount}
+
+
 class AddPaymentForm(forms.Form):
     """The "Add payment" modal on an order's detail page -- the flexible
     counterpart to OrderMarkPaidForm's "pay everything now, in cash" quick
     action. Amount is free (defaults to the order's remaining balance in the
     view, but a smaller amount is exactly the point: a voucher covering part
-    of an order, cash covering the rest, in two separate submits). voucher_number
-    only applies -- and is only required -- when method is voucher; looked up
-    and validated here (exists, same club, not expired/inactive/depleted,
-    covers the amount requested) so a bad voucher number surfaces as a plain
-    field error rather than an exception out of the service layer. The
-    service (shop.services.payments.record_payment) re-validates the same
-    rules regardless -- this is for a friendlier error message, not the only
-    line of defence."""
+    of an order, cash covering the rest, in two separate submits).
+
+    ``voucher`` only applies -- and is only required -- when method is
+    voucher. Its queryset is scoped to usable vouchers issued to the order's
+    own purchaser or anyone in their family (Member.family_members) -- the
+    common case by far, and lets staff pick from a short list instead of
+    needing to know an opaque voucher number by heart. A voucher issued to
+    someone outside that family is simply never a valid choice here, same
+    "hide, don't disable" reasoning used elsewhere in this app; the service
+    (shop.services.payments.record_payment) re-validates amount/expiry/active
+    regardless -- this queryset is for a friendlier picker, not the only line
+    of defence."""
 
     amount = forms.DecimalField(label=_("Amount"), max_digits=10, decimal_places=2, min_value=Decimal("0.01"))
     method = forms.ChoiceField(label=_("Method"), choices=Payment.PaymentMethod.choices, initial=Payment.PaymentMethod.CASH)
-    voucher_number = forms.CharField(label=_("Voucher number"), required=False, help_text=_("Required when the method is voucher."))
+    voucher = VoucherChoiceField(
+        queryset=Voucher.objects.none(),
+        required=False,
+        label=_("Voucher"),
+        empty_label=_("Select a voucher..."),
+        help_text=_("Required when the method is voucher -- only vouchers issued to the purchaser or their family are listed."),
+    )
     reference = forms.CharField(label=_("Reference"), required=False, help_text=_("Optional -- a receipt number, whatever lets you find this again."))
 
     def __init__(self, *args, club=None, order=None, **kwargs):
         self.club = club
         self.order = order
         super().__init__(*args, **kwargs)
+        if club is not None and order is not None:
+            eligible = {order.purchaser.pk, *order.purchaser.family_members.values_list("pk", flat=True)}
+            self.fields["voucher"].queryset = Voucher.objects.filter(club=club, is_active=True, expiry_date__gte=timezone.localdate(), consumed_amount__lt=F("amount")).filter(Q(issued_to__isnull=True) | Q(issued_to__in=eligible))
 
     def clean(self):
         cleaned_data = super().clean()
         method = cleaned_data.get("method")
         amount = cleaned_data.get("amount")
-        voucher_number = cleaned_data.get("voucher_number", "").strip()
+        voucher = cleaned_data.get("voucher")
 
         if method == Payment.PaymentMethod.VOUCHER:
-            if not voucher_number:
-                self.add_error("voucher_number", _("Required when paying by voucher."))
-            else:
-                voucher = Voucher.objects.filter(club=self.club, number=voucher_number).first()
-                if voucher is None:
-                    self.add_error("voucher_number", _("No voucher with that number."))
-                elif not voucher.is_usable:
-                    self.add_error("voucher_number", _("This voucher is expired, inactive, or fully used."))
-                elif amount is not None and amount > voucher.available_amount:
-                    self.add_error("voucher_number", _("Only €%(amount)s is available on this voucher.") % {"amount": voucher.available_amount})
-                else:
-                    cleaned_data["voucher"] = voucher
+            if voucher is None:
+                self.add_error("voucher", _("Choose a voucher."))
+            elif amount is not None and amount > voucher.available_amount:
+                self.add_error("voucher", _("Only €%(amount)s is available on this voucher.") % {"amount": voucher.available_amount})
+        elif voucher is not None:
+            self.add_error("voucher", _("Only relevant when the method is voucher."))
 
         if amount is not None and self.order is not None and amount > amount_due(self.order):
             self.add_error("amount", _("Only €%(amount)s is still due on this order.") % {"amount": amount_due(self.order)})

@@ -168,6 +168,38 @@ class MemberGuardiansTests(TestCase):
         self.assertEqual(set(kid.guardians), {parent_a})
 
 
+class MemberFamilyMembersTests(TestCase):
+    """Member.family_members -- every role, both directions, unlike the
+    one-directional child->guardians shape of Member.guardians."""
+
+    def test_includes_parents_children_and_guardians_but_not_self(self):
+        family = Family.objects.create(name="The Does")
+        parent = Member.objects.create(first_name="Mary", last_name="Doe")
+        guardian = Member.objects.create(first_name="Lee", last_name="Doe")
+        kid = Member.objects.create(first_name="Kit", last_name="Doe")
+        FamilyMembership.objects.create(family=family, member=parent, role=FamilyMembership.FamilyRole.PARENT)
+        FamilyMembership.objects.create(family=family, member=guardian, role=FamilyMembership.FamilyRole.GUARDIAN)
+        FamilyMembership.objects.create(family=family, member=kid, role=FamilyMembership.FamilyRole.CHILD)
+
+        self.assertEqual(set(parent.family_members), {guardian, kid})
+        self.assertEqual(set(kid.family_members), {parent, guardian})
+
+    def test_a_lone_member_has_no_family_members(self):
+        lone = Member.objects.create(first_name="Lonnie", last_name="Loner")
+
+        self.assertEqual(list(lone.family_members), [])
+
+    def test_does_not_leak_across_families(self):
+        family_a = Family.objects.create(name="Family A")
+        family_b = Family.objects.create(name="Family B")
+        member_a = Member.objects.create(first_name="Ann", last_name="A")
+        member_b = Member.objects.create(first_name="Ben", last_name="B")
+        FamilyMembership.objects.create(family=family_a, member=member_a, role=FamilyMembership.FamilyRole.PARENT)
+        FamilyMembership.objects.create(family=family_b, member=member_b, role=FamilyMembership.FamilyRole.PARENT)
+
+        self.assertEqual(list(member_a.family_members), [])
+
+
 class FamilyMembershipModelTests(TestCase):
     def test_default_role_is_parent(self):
         family = Family.objects.create(name="Fam")

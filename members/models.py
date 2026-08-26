@@ -77,6 +77,15 @@ class Member(UUIDModel):
             family_memberships__family__memberships__role=FamilyMembership.FamilyRole.CHILD,
         ).distinct()
 
+    @property
+    def family_members(self):
+        """Everyone sharing any Family with this member, any role, either
+        direction -- not just this member's own children (see ``guardians``
+        for the parent-scoped, one-directional version). Excludes self.
+        Used e.g. to decide whose vouchers are relevant to an order this
+        member placed (management.forms.AddPaymentForm)."""
+        return Member.objects.filter(family_memberships__family__memberships__member=self).exclude(pk=self.pk).distinct()
+
 
 class FamilyMembership(models.Model):
     class FamilyRole(models.TextChoices):

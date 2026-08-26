@@ -9283,11 +9283,11 @@ class OrderAddPaymentTests(ShopTestBase):
     def make_order(self, total=Decimal("50.00")):
         return Order.objects.create(club=self.club, purchaser=self.purchaser, total=total)
 
-    def make_voucher(self, amount=Decimal("30.00"), expiry_date=datetime.date(2030, 1, 1), club=None):
-        return Voucher.objects.create(club=club or self.club, amount=amount, expiry_date=expiry_date)
+    def make_voucher(self, amount=Decimal("30.00"), expiry_date=datetime.date(2030, 1, 1), club=None, **overrides):
+        return Voucher.objects.create(club=club or self.club, amount=amount, expiry_date=expiry_date, **overrides)
 
     def add_payment_data(self, **overrides):
-        data = {"add_payment-amount": "20.00", "add_payment-method": Payment.PaymentMethod.CASH, "add_payment-voucher_number": "", "add_payment-reference": ""}
+        data = {"add_payment-amount": "20.00", "add_payment-method": Payment.PaymentMethod.CASH, "add_payment-voucher": "", "add_payment-reference": ""}
         data.update(overrides)
         return data
 
@@ -9308,7 +9308,7 @@ class OrderAddPaymentTests(ShopTestBase):
         voucher = self.make_voucher(amount=Decimal("30.00"))
         self.client.force_login(self.make_shop_manager())
 
-        self.club_post("order_add_payment", self.add_payment_data(**{"add_payment-amount": "30.00", "add_payment-method": Payment.PaymentMethod.VOUCHER, "add_payment-voucher_number": voucher.number}), order.pk)
+        self.club_post("order_add_payment", self.add_payment_data(**{"add_payment-amount": "30.00", "add_payment-method": Payment.PaymentMethod.VOUCHER, "add_payment-voucher": voucher.pk}), order.pk)
 
         voucher.refresh_from_db()
         self.assertEqual(voucher.consumed_amount, Decimal("30.00"))
@@ -9317,12 +9317,55 @@ class OrderAddPaymentTests(ShopTestBase):
         order.refresh_from_db()
         self.assertEqual(order.payment_status, Order.PaymentStatus.PARTIALLY_PAID)
 
+    def test_a_voucher_issued_to_the_purchaser_is_selectable(self):
+        order = self.make_order()
+        voucher = self.make_voucher(amount=Decimal("30.00"), issued_to=self.purchaser)
+        self.client.force_login(self.make_shop_manager())
+
+        self.club_post("order_add_payment", self.add_payment_data(**{"add_payment-amount": "30.00", "add_payment-method": Payment.PaymentMethod.VOUCHER, "add_payment-voucher": voucher.pk}), order.pk)
+
+        self.assertTrue(Payment.objects.filter(order=order, voucher=voucher).exists())
+
+    def test_a_voucher_issued_to_a_family_member_is_selectable(self):
+        order = self.make_order()
+        parent = Member.objects.create(first_name="Pat", last_name="Orderer")
+        family = Family.objects.create(name="Orderer family")
+        FamilyMembership.objects.create(family=family, member=self.purchaser, role=FamilyMembership.FamilyRole.CHILD)
+        FamilyMembership.objects.create(family=family, member=parent, role=FamilyMembership.FamilyRole.PARENT)
+        voucher = self.make_voucher(amount=Decimal("30.00"), issued_to=parent)
+        self.client.force_login(self.make_shop_manager())
+
+        self.club_post("order_add_payment", self.add_payment_data(**{"add_payment-amount": "30.00", "add_payment-method": Payment.PaymentMethod.VOUCHER, "add_payment-voucher": voucher.pk}), order.pk)
+
+        self.assertTrue(Payment.objects.filter(order=order, voucher=voucher).exists())
+
+    def test_an_unassigned_voucher_is_selectable(self):
+        order = self.make_order()
+        voucher = self.make_voucher(amount=Decimal("30.00"))  # no issued_to
+        self.client.force_login(self.make_shop_manager())
+
+        self.club_post("order_add_payment", self.add_payment_data(**{"add_payment-amount": "30.00", "add_payment-method": Payment.PaymentMethod.VOUCHER, "add_payment-voucher": voucher.pk}), order.pk)
+
+        self.assertTrue(Payment.objects.filter(order=order, voucher=voucher).exists())
+
+    def test_a_voucher_issued_to_someone_outside_the_family_is_not_selectable(self):
+        order = self.make_order()
+        outsider = Member.objects.create(first_name="Otto", last_name="Outsider")
+        voucher = self.make_voucher(amount=Decimal("30.00"), issued_to=outsider)
+        self.client.force_login(self.make_shop_manager())
+
+        self.club_post("order_add_payment", self.add_payment_data(**{"add_payment-amount": "30.00", "add_payment-method": Payment.PaymentMethod.VOUCHER, "add_payment-voucher": voucher.pk}), order.pk)
+
+        self.assertFalse(Payment.objects.filter(order=order).exists())
+        voucher.refresh_from_db()
+        self.assertEqual(voucher.consumed_amount, Decimal("0"))
+
     def test_a_voucher_and_then_cash_together_fully_settle_the_order(self):
         order = self.make_order()
         voucher = self.make_voucher(amount=Decimal("30.00"))
         self.client.force_login(self.make_shop_manager())
 
-        self.club_post("order_add_payment", self.add_payment_data(**{"add_payment-amount": "30.00", "add_payment-method": Payment.PaymentMethod.VOUCHER, "add_payment-voucher_number": voucher.number}), order.pk)
+        self.club_post("order_add_payment", self.add_payment_data(**{"add_payment-amount": "30.00", "add_payment-method": Payment.PaymentMethod.VOUCHER, "add_payment-voucher": voucher.pk}), order.pk)
         self.club_post("order_add_payment", self.add_payment_data(**{"add_payment-amount": "20.00"}), order.pk)
 
         order.refresh_from_db()
@@ -9334,37 +9377,37 @@ class OrderAddPaymentTests(ShopTestBase):
         voucher = self.make_voucher(amount=Decimal("10.00"))
         self.client.force_login(self.make_shop_manager())
 
-        response = self.club_post("order_add_payment", self.add_payment_data(**{"add_payment-amount": "20.00", "add_payment-method": Payment.PaymentMethod.VOUCHER, "add_payment-voucher_number": voucher.number}), order.pk)
+        response = self.club_post("order_add_payment", self.add_payment_data(**{"add_payment-amount": "20.00", "add_payment-method": Payment.PaymentMethod.VOUCHER, "add_payment-voucher": voucher.pk}), order.pk)
 
         self.assertRedirects(response, reverse("management:order_detail", args=[order.pk]))
         self.assertFalse(Payment.objects.filter(order=order).exists())
         voucher.refresh_from_db()
         self.assertEqual(voucher.consumed_amount, Decimal("0"))
 
-    def test_an_expired_voucher_is_rejected(self):
+    def test_an_expired_voucher_is_not_selectable(self):
         order = self.make_order()
         voucher = self.make_voucher(amount=Decimal("50.00"), expiry_date=datetime.date(2020, 1, 1))
         self.client.force_login(self.make_shop_manager())
 
-        self.club_post("order_add_payment", self.add_payment_data(**{"add_payment-amount": "20.00", "add_payment-method": Payment.PaymentMethod.VOUCHER, "add_payment-voucher_number": voucher.number}), order.pk)
+        self.club_post("order_add_payment", self.add_payment_data(**{"add_payment-amount": "20.00", "add_payment-method": Payment.PaymentMethod.VOUCHER, "add_payment-voucher": voucher.pk}), order.pk)
 
         self.assertFalse(Payment.objects.filter(order=order).exists())
 
-    def test_an_unknown_voucher_number_is_rejected(self):
+    def test_no_voucher_selected_is_rejected(self):
         order = self.make_order()
         self.client.force_login(self.make_shop_manager())
 
-        self.club_post("order_add_payment", self.add_payment_data(**{"add_payment-amount": "20.00", "add_payment-method": Payment.PaymentMethod.VOUCHER, "add_payment-voucher_number": "NOPE"}), order.pk)
+        self.club_post("order_add_payment", self.add_payment_data(**{"add_payment-amount": "20.00", "add_payment-method": Payment.PaymentMethod.VOUCHER}), order.pk)
 
         self.assertFalse(Payment.objects.filter(order=order).exists())
 
-    def test_a_voucher_from_another_club_is_rejected(self):
+    def test_a_voucher_from_another_club_is_not_selectable(self):
         order = self.make_order()
         other_club = Club.objects.create(name="Other Club", slug="other-club-voucher-pay")
         voucher = self.make_voucher(amount=Decimal("50.00"), club=other_club)
         self.client.force_login(self.make_shop_manager())
 
-        self.club_post("order_add_payment", self.add_payment_data(**{"add_payment-amount": "20.00", "add_payment-method": Payment.PaymentMethod.VOUCHER, "add_payment-voucher_number": voucher.number}), order.pk)
+        self.club_post("order_add_payment", self.add_payment_data(**{"add_payment-amount": "20.00", "add_payment-method": Payment.PaymentMethod.VOUCHER, "add_payment-voucher": voucher.pk}), order.pk)
 
         self.assertFalse(Payment.objects.filter(order=order).exists())
 
@@ -9380,7 +9423,7 @@ class OrderAddPaymentTests(ShopTestBase):
         order = self.make_order()
         voucher = self.make_voucher(amount=Decimal("30.00"))
         self.client.force_login(self.make_shop_manager())
-        self.club_post("order_add_payment", self.add_payment_data(**{"add_payment-amount": "30.00", "add_payment-method": Payment.PaymentMethod.VOUCHER, "add_payment-voucher_number": voucher.number}), order.pk)
+        self.club_post("order_add_payment", self.add_payment_data(**{"add_payment-amount": "30.00", "add_payment-method": Payment.PaymentMethod.VOUCHER, "add_payment-voucher": voucher.pk}), order.pk)
 
         self.club_post("order_mark_paid", {"method": Payment.PaymentMethod.CASH, "reference": ""}, order.pk)
 
