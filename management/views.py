@@ -54,12 +54,13 @@ from members.services.family import add_child_to_family, add_parent_to_family, a
 from news.models import News, NewsPhoto
 from news.services import dispatch_send_publish_notification, notify_editors_of_pending_review
 from notifications.models import Notification
-from shop.models import Discount, Invoice, Order, OrderLine, Payment, Product, ProductCategory, ProductVariant, Voucher
+from shop.models import Discount, Invoice, Order, OrderLine, Payment, Product, ProductCategory, ProductionStatus, ProductVariant, Voucher
 from shop.services.invoices import ShopInvoicePDFError, render_invoice_pdf
 from shop.services.notifications import dispatch_order_ready_for_pickup_notification
 from shop.services.payments import PaymentError, amount_due, sync_payment_status
 from shop.services.payments import record_payment as record_shop_payment
 from shop.services.pricing import order_total
+from shop.services.production import mark_lines_in_production, pending_production_lines, sync_production_status
 from shop.services.stats import order_kpis, quantity_sold_by_product, quantity_sold_by_variant
 from teams.models import Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
 from teams.services import eligible_roster_members
@@ -122,7 +123,7 @@ from .forms import (
 from .pdf import PDFExportError, event_referee_form_pdf, membership_list_pdf, referee_form_colors
 from .pdf_previews import PDF_PREVIEWS, PDF_PREVIEWS_BY_KEY, render_pdf_preview
 from .recurrence_ui import describe_rrule
-from .shop_export import build_product_order_export
+from .shop_export import build_production_export
 
 
 class HomeView(ClubStaffRequiredMixin, TemplateView):
@@ -3645,21 +3646,6 @@ class ProductUpdateView(ShopManagerRequiredMixin, UpdateView):
         )
 
 
-class ProductOrderExportView(ShopManagerRequiredMixin, View):
-    """The product page's own "Download order list" button -- an .xlsx of
-    every order line for this product (build_product_order_export), ready to
-    hand to a manufacturer/printer: who it's for and the personalization
-    number, if any."""
-
-    def get(self, request, pk):
-        product = get_object_or_404(Product.objects.filter(club=request.club), pk=pk)
-        workbook = build_product_order_export(product)
-        response = HttpResponse(content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-        response["Content-Disposition"] = f'attachment; filename="{product.slug}-order-list.xlsx"'
-        workbook.save(response)
-        return response
-
-
 class ProductCategoryCreateView(ShopManagerRequiredMixin, RedirectOnInvalidMixin, FormView):
     """Reachable only via the "Add category" modal on the products page --
     no standalone template, same shape as ProductVariantCreateView."""
@@ -3957,6 +3943,14 @@ class OrderListView(ShopManagerRequiredMixin, ListView):
         # order_kpis reads every order for the club regardless of the filters
         # above -- the KPI strip is "how's the shop doing overall", not "how
         # many of the filtered rows below".
+        # Every merchandise product in the club, with how many of its lines are
+        # still waiting to be sent to a manufacturer -- the "Download order
+        # list" modal's own checklist (order_list.html).
+        production_products = (
+            Product.objects.filter(club=self.request.club, product_type=Product.ProductType.MERCHANDISE)
+            .annotate(pending_count=Count("order_items", filter=Q(order_items__production_status=ProductionStatus.PENDING) & ~Q(order_items__order__fulfillment_status=Order.FulfillmentStatus.CANCELLED)))
+            .order_by("name")
+        )
         return super().get_context_data(
             payment_status_choices=Order.PaymentStatus.choices,
             fulfillment_status_choices=Order.FulfillmentStatus.choices,
@@ -3967,8 +3961,40 @@ class OrderListView(ShopManagerRequiredMixin, ListView):
             kpis=order_kpis(self.request.club),
             bulk_mark_paid_form=OrderBulkMarkPaidForm(),
             bulk_ready_for_pickup_form=OrderBulkMarkReadyForPickupForm(),
+            production_products=production_products,
             **kwargs,
         )
+
+
+class OrderProductionExportView(ShopManagerRequiredMixin, View):
+    """The Orders list's own "Download order list" modal -- exports every
+    not-yet-submitted OrderLine (shop.services.production.
+    pending_production_lines) for the selected merchandise products to one
+    .xlsx (one sheet per product, management.shop_export.build_production_export)
+    and marks them IN_PRODUCTION so a repeat download doesn't resend what's
+    already gone out. The file is built before anything is marked, so a
+    failed export never marks lines sent that weren't. Manual correction
+    lives on the line item's own edit modal (OrderLineEditForm)."""
+
+    def post(self, request):
+        product_ids = request.POST.getlist("product_ids")
+        if not product_ids:
+            notify(request, f"e|{_('No products selected')}|{_('Select at least one product.')}")
+            return redirect("management:order_list")
+
+        products = Product.objects.filter(club=request.club, product_type=Product.ProductType.MERCHANDISE, pk__in=product_ids)
+        lines = list(pending_production_lines(products))
+        if not lines:
+            notify(request, f"e|{_('Nothing to export')}|{_('No pending items for the selected products.')}")
+            return redirect("management:order_list")
+
+        workbook = build_production_export(lines)
+        mark_lines_in_production(lines)
+
+        response = HttpResponse(content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        response["Content-Disposition"] = 'attachment; filename="order-production-list.xlsx"'
+        workbook.save(response)
+        return response
 
 
 class OrderBulkMarkPaidView(ShopManagerRequiredMixin, View):
@@ -4083,12 +4109,13 @@ class OrderDetailView(ShopManagerRequiredMixin, DetailView):
 class OrderLineUpdateView(ShopManagerRequiredMixin, RedirectOnInvalidMixin, UpdateView):
     """The "Edit" modal on a line item row (order detail page) -- fixing a
     mistake after the fact (wrong size, wrong beneficiary, a forgotten
-    number/name), not a general line-item editor: there's no add/delete
-    here, and product itself isn't editable (see OrderLineEditForm's own
-    docstring). unit_price/line_total are recomputed from quantity and the
-    (possibly changed) variant's own price rather than taken from the form,
-    and the order's own total and payment_status are kept in sync with
-    whatever that recompute changed."""
+    number/name, or by-hand production_status correction), not a general
+    line-item editor: there's no add/delete here, and product itself isn't
+    editable (see OrderLineEditForm's own docstring). unit_price/line_total
+    are recomputed from quantity and the (possibly changed) variant's own
+    price rather than taken from the form, and the order's own total,
+    payment_status and production_status are kept in sync with whatever
+    changed."""
 
     model = OrderLine
     form_class = OrderLineEditForm
@@ -4116,6 +4143,7 @@ class OrderLineUpdateView(ShopManagerRequiredMixin, RedirectOnInvalidMixin, Upda
         order.total = order_total(order)
         order.save(update_fields=["total"])
         sync_payment_status(order)
+        sync_production_status(order)
 
         notify(self.request, f"s|{_('Line item updated')}|{_('“%(product)s” updated.') % {'product': line.product}}")
         return redirect("management:order_detail", pk=order.pk)

@@ -39,7 +39,7 @@ from members.services.claims import children_awaiting_a_parent
 from news.models import News, NewsPhoto
 from news.services import _send_and_mark_notified
 from notifications.models import Notification
-from shop.models import Discount, DiscountType, Invoice, Order, OrderLine, Payment, Product, ProductCategory, ProductVariant, Voucher
+from shop.models import Discount, DiscountType, Invoice, Order, OrderLine, Payment, Product, ProductCategory, ProductionStatus, ProductVariant, Voucher
 from shop.services.invoices import ShopInvoicePDFError, create_invoice_for_order
 from teams.models import Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
 from teams.services import eligible_roster_members
@@ -8320,6 +8320,7 @@ class ProductManagementTests(ShopTestBase):
             "name": "Away Jersey",
             "description": "",
             "price": "30.00",
+            "product_type": Product.ProductType.MERCHANDISE,
             "is_active": "on",
             # ProductCreateView's own variant formset (management/forms.py's
             # ProductVariantFormSet) -- zero submitted rows is a valid "no
@@ -8459,7 +8460,7 @@ class ProductCreateWithVariantsTests(ShopTestBase):
 
     def test_variant_rows_are_created_alongside_the_product(self):
         self.client.force_login(self.make_shop_manager())
-        data = {"name": "Away Jersey", "description": "", "price": "30.00", "is_active": "on"}
+        data = {"name": "Away Jersey", "description": "", "price": "30.00", "product_type": Product.ProductType.MERCHANDISE, "is_active": "on"}
         data.update(self.formset_data({"name": "Small"}, {"name": "Large", "price": "35.00"}))
 
         response = self.club_post("product_create", data)
@@ -8471,7 +8472,7 @@ class ProductCreateWithVariantsTests(ShopTestBase):
 
     def test_a_blank_row_is_simply_skipped(self):
         self.client.force_login(self.make_shop_manager())
-        data = {"name": "Away Jersey", "description": "", "price": "30.00", "is_active": "on"}
+        data = {"name": "Away Jersey", "description": "", "price": "30.00", "product_type": Product.ProductType.MERCHANDISE, "is_active": "on"}
         data.update(self.formset_data({"name": "Small"}, {"name": ""}))
 
         self.club_post("product_create", data)
@@ -9527,6 +9528,29 @@ class OrderLineManagementTests(ShopTestBase):
         line.refresh_from_db()
         self.assertEqual(line.beneficiary, beneficiary)
 
+    def test_production_status_can_be_set_by_hand_for_a_merchandise_product(self):
+        self.product.product_type = Product.ProductType.MERCHANDISE
+        self.product.save(update_fields=["product_type"])
+        order, line = self.make_order_with_line()
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_post("order_line_update", {"quantity": "2", "beneficiary": "", "variant": "", "production_status": ProductionStatus.RECEIVED}, order.pk, line.pk)
+
+        self.assertRedirects(response, reverse("management:order_detail", args=[order.pk]))
+        line.refresh_from_db()
+        self.assertEqual(line.production_status, ProductionStatus.RECEIVED)
+        order.refresh_from_db()
+        self.assertEqual(order.production_status, ProductionStatus.RECEIVED)
+
+    def test_production_status_is_ignored_for_a_non_merchandise_product(self):
+        order, line = self.make_order_with_line()
+        self.client.force_login(self.make_shop_manager())
+
+        self.club_post("order_line_update", {"quantity": "2", "beneficiary": "", "variant": "", "production_status": ProductionStatus.RECEIVED}, order.pk, line.pk)
+
+        line.refresh_from_db()
+        self.assertEqual(line.production_status, ProductionStatus.PENDING)
+
     def test_plain_staff_cannot_edit_a_line_item(self):
         order, line = self.make_order_with_line()
         self.client.force_login(self.make_plain_staff())
@@ -9550,39 +9574,92 @@ class OrderLineManagementTests(ShopTestBase):
         self.assertEqual(response.status_code, 404)
 
 
-class ProductOrderExportTests(ShopTestBase):
-    def test_the_export_lists_beneficiary_and_personalization(self):
+class OrderProductionExportTests(ShopTestBase):
+    """OrderProductionExportView -- the Orders list's own "Download order
+    list" modal. Exports pending (not-yet-in-production) lines for the
+    selected merchandise products and marks them in production, so a repeat
+    download only ever includes what's new since."""
+
+    def setUp(self):
+        super().setUp()
+        self.product.product_type = Product.ProductType.MERCHANDISE
         self.product.personalization_enabled = True
-        self.product.save(update_fields=["personalization_enabled"])
-        purchaser = Member.objects.create(first_name="Olly", last_name="Orderer", email="olly-export@example.com")
+        self.product.save(update_fields=["product_type", "personalization_enabled"])
+        self.purchaser = Member.objects.create(first_name="Olly", last_name="Orderer", email="olly-export@example.com")
+
+    def make_line(self, product=None, order=None, **overrides):
+        order = order or Order.objects.create(club=self.club, purchaser=self.purchaser, total=Decimal("25.00"))
+        kwargs = {"order": order, "product": product or self.product, "quantity": 1, "unit_price": Decimal("25.00"), "line_total": Decimal("25.00")}
+        kwargs.update(overrides)
+        return OrderLine.objects.create(**kwargs)
+
+    def test_the_export_lists_beneficiary_and_personalization(self):
         beneficiary = Member.objects.create(first_name="Cy", last_name="Child")
-        order = Order.objects.create(club=self.club, purchaser=purchaser, total=Decimal("25.00"))
-        OrderLine.objects.create(order=order, product=self.product, beneficiary=beneficiary, quantity=1, unit_price=Decimal("25.00"), line_total=Decimal("25.00"), personalization_number="7", personalization_name="SMITH")
+        line = self.make_line(beneficiary=beneficiary, personalization_number="7", personalization_name="SMITH")
         self.client.force_login(self.make_shop_manager())
 
-        response = self.club_get("product_order_export", self.product.pk)
+        response = self.club_post("order_production_export", {"product_ids": [str(self.product.pk)]})
 
         self.assertEqual(response.status_code, 200)
         workbook = openpyxl.load_workbook(BytesIO(response.content))
         rows = list(workbook.active.iter_rows(values_only=True))
-        self.assertIn((order.number, "Child", "Cy", None, "7", "SMITH", 1), rows)
+        self.assertIn((line.order.number, "Child", "Cy", None, "7", "SMITH", 1), rows)
 
-    def test_cancelled_orders_are_excluded(self):
-        purchaser = Member.objects.create(first_name="Olly", last_name="Orderer", email="olly-export2@example.com")
-        order = Order.objects.create(club=self.club, purchaser=purchaser, total=Decimal("25.00"), fulfillment_status=Order.FulfillmentStatus.CANCELLED)
-        OrderLine.objects.create(order=order, product=self.product, quantity=1, unit_price=Decimal("25.00"), line_total=Decimal("25.00"))
+    def test_exported_lines_are_marked_in_production(self):
+        line = self.make_line()
         self.client.force_login(self.make_shop_manager())
 
-        response = self.club_get("product_order_export", self.product.pk)
+        self.club_post("order_production_export", {"product_ids": [str(self.product.pk)]})
+
+        line.refresh_from_db()
+        self.assertEqual(line.production_status, ProductionStatus.IN_PRODUCTION)
+        line.order.refresh_from_db()
+        self.assertEqual(line.order.production_status, ProductionStatus.IN_PRODUCTION)
+
+    def test_a_repeat_download_has_nothing_pending_left_to_export(self):
+        self.make_line()
+        self.client.force_login(self.make_shop_manager())
+        self.club_post("order_production_export", {"product_ids": [str(self.product.pk)]})
+
+        response = self.club_post("order_production_export", {"product_ids": [str(self.product.pk)]})
+
+        # Nothing pending -> notify + redirect, not a second file.
+        self.assertRedirects(response, reverse("management:order_list"))
+
+    def test_cancelled_orders_are_excluded(self):
+        order = Order.objects.create(club=self.club, purchaser=self.purchaser, total=Decimal("25.00"), fulfillment_status=Order.FulfillmentStatus.CANCELLED)
+        self.make_line(order=order)
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_post("order_production_export", {"product_ids": [str(self.product.pk)]})
+
+        self.assertRedirects(response, reverse("management:order_list"))
+
+    def test_only_selected_products_are_included(self):
+        other_product = Product.objects.create(club=self.club, name="Away Kit", price=Decimal("20.00"), product_type=Product.ProductType.MERCHANDISE)
+        self.make_line()
+        other_line = self.make_line(product=other_product)
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_post("order_production_export", {"product_ids": [str(self.product.pk)]})
 
         workbook = openpyxl.load_workbook(BytesIO(response.content))
-        rows = list(workbook.active.iter_rows(values_only=True))
-        self.assertEqual(len(rows), 1)  # header only
+        self.assertEqual(workbook.sheetnames, [self.product.name])
+        other_line.refresh_from_db()
+        self.assertEqual(other_line.production_status, ProductionStatus.PENDING)
+
+    def test_no_products_selected_shows_an_error(self):
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_post("order_production_export", {})
+
+        self.assertRedirects(response, reverse("management:order_list"))
 
     def test_plain_staff_cannot_download_the_export(self):
+        self.make_line()
         self.client.force_login(self.make_plain_staff())
 
-        response = self.club_get("product_order_export", self.product.pk)
+        response = self.club_post("order_production_export", {"product_ids": [str(self.product.pk)]})
 
         self.assertEqual(response.status_code, 403)
 

@@ -30,6 +30,7 @@ from .models import (
     Payment,
     Product,
     ProductCategory,
+    ProductionStatus,
     ProductVariant,
     Voucher,
 )
@@ -38,6 +39,7 @@ from .services.invoices import ShopInvoicePDFError, create_invoice_for_order, in
 from .services.notifications import dispatch_order_ready_for_pickup_notification
 from .services.payments import PaymentError, amount_due, amount_paid, record_payment, sync_payment_status
 from .services.pricing import cart_totals, order_total
+from .services.production import mark_lines_in_production, pending_production_lines, sync_production_status
 from .services.stats import order_kpis, quantity_sold_by_product, quantity_sold_by_variant
 
 
@@ -349,6 +351,34 @@ class OrderLineTests(ShopEntitiesTestBase):
         self.make_line()
         with self.assertRaises(ProtectedError):
             self.product.delete()
+
+
+class OrderProductionStatusTests(ShopEntitiesTestBase):
+    """Order.has_production_lines/production_status -- the rollup is only
+    ever meaningful once a merchandise line actually exists on the order."""
+
+    def make_line(self, product=None, **kwargs):
+        kwargs.setdefault("order", self.order)
+        kwargs.setdefault("product", product or self.product)
+        kwargs.setdefault("quantity", 1)
+        kwargs.setdefault("unit_price", Decimal("25.00"))
+        kwargs.setdefault("line_total", Decimal("25.00"))
+        return OrderLine.objects.create(**kwargs)
+
+    def test_has_no_production_lines_when_the_product_isnt_merchandise(self):
+        self.make_line()  # self.product defaults to MEMBERSHIP
+
+        self.assertFalse(self.order.has_production_lines)
+
+    def test_has_production_lines_once_a_merchandise_line_exists(self):
+        self.product.product_type = Product.ProductType.MERCHANDISE
+        self.product.save(update_fields=["product_type"])
+        self.make_line()
+
+        self.assertTrue(self.order.has_production_lines)
+
+    def test_production_status_defaults_to_pending(self):
+        self.assertEqual(self.order.production_status, ProductionStatus.PENDING)
 
 
 class DiscountTests(ShopEntitiesTestBase):
@@ -1139,6 +1169,100 @@ class OrderTotalServiceTests(TestCase):
 
     def test_no_lines_is_zero(self):
         self.assertEqual(order_total(self.order), Decimal("0"))
+
+
+class ProductionServiceTests(TestCase):
+    """shop.services.production -- pending_production_lines/
+    sync_production_status/mark_lines_in_production."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        cls.member = Member.objects.create(first_name="Jane", last_name="Doe")
+        cls.product = Product.objects.create(club=cls.club, name="Home Jersey", price=Decimal("25.00"), product_type=Product.ProductType.MERCHANDISE)
+        cls.order = Order.objects.create(club=cls.club, purchaser=cls.member, total=Decimal("25.00"))
+
+    def make_line(self, order=None, product=None, **kwargs):
+        kwargs.setdefault("order", order or self.order)
+        kwargs.setdefault("product", product or self.product)
+        kwargs.setdefault("quantity", 1)
+        kwargs.setdefault("unit_price", Decimal("25.00"))
+        kwargs.setdefault("line_total", Decimal("25.00"))
+        return OrderLine.objects.create(**kwargs)
+
+    def test_pending_production_lines_excludes_already_started_lines(self):
+        pending = self.make_line()
+        self.make_line(production_status=ProductionStatus.IN_PRODUCTION)
+
+        self.assertEqual(list(pending_production_lines([self.product])), [pending])
+
+    def test_pending_production_lines_excludes_cancelled_orders(self):
+        cancelled_order = Order.objects.create(club=self.club, purchaser=self.member, total=Decimal("25.00"), fulfillment_status=Order.FulfillmentStatus.CANCELLED)
+        self.make_line(order=cancelled_order)
+
+        self.assertEqual(list(pending_production_lines([self.product])), [])
+
+    def test_pending_production_lines_is_scoped_to_the_given_products(self):
+        other_product = Product.objects.create(club=self.club, name="Away Kit", price=Decimal("20.00"), product_type=Product.ProductType.MERCHANDISE)
+        self.make_line(product=other_product)
+
+        self.assertEqual(list(pending_production_lines([self.product])), [])
+
+    def test_sync_is_a_noop_with_no_merchandise_lines(self):
+        non_merch = Product.objects.create(club=self.club, name="Membership", price=Decimal("10.00"))
+        OrderLine.objects.create(order=self.order, product=non_merch, quantity=1, unit_price=Decimal("10.00"), line_total=Decimal("10.00"))
+
+        sync_production_status(self.order)
+
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.production_status, ProductionStatus.PENDING)
+
+    def test_sync_is_pending_while_every_line_is(self):
+        self.make_line()
+        self.make_line()
+
+        sync_production_status(self.order)
+
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.production_status, ProductionStatus.PENDING)
+
+    def test_sync_is_in_production_when_mixed(self):
+        self.make_line()
+        self.make_line(production_status=ProductionStatus.IN_PRODUCTION)
+
+        sync_production_status(self.order)
+
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.production_status, ProductionStatus.IN_PRODUCTION)
+
+    def test_sync_is_received_once_every_line_is(self):
+        self.make_line(production_status=ProductionStatus.RECEIVED)
+        self.make_line(production_status=ProductionStatus.RECEIVED)
+
+        sync_production_status(self.order)
+
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.production_status, ProductionStatus.RECEIVED)
+
+    def test_mark_lines_in_production_flips_lines_and_resyncs_orders(self):
+        line = self.make_line()
+
+        mark_lines_in_production([line])
+
+        line.refresh_from_db()
+        self.assertEqual(line.production_status, ProductionStatus.IN_PRODUCTION)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.production_status, ProductionStatus.IN_PRODUCTION)
+
+    def test_mark_lines_in_production_resyncs_every_affected_order(self):
+        other_order = Order.objects.create(club=self.club, purchaser=self.member, total=Decimal("25.00"))
+        other_line = self.make_line(order=other_order)
+        line = self.make_line()
+
+        mark_lines_in_production([line, other_line])
+
+        other_order.refresh_from_db()
+        self.assertEqual(other_order.production_status, ProductionStatus.IN_PRODUCTION)
 
 
 class OrderKPIsTests(TestCase):

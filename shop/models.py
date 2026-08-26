@@ -20,6 +20,19 @@ class DiscountType(models.TextChoices):
     FIXED_AMOUNT = "fixed_amount", _("Fixed amount")
 
 
+class ProductionStatus(models.TextChoices):
+    """Shared by ``OrderLine`` (where it's actually tracked) and ``Order``
+    (its own rollup across every merchandise line -- see Order.production_status's
+    own docstring for how the two relate). Independent from payment_status/
+    fulfillment_status: whether the club has sent an item to a manufacturer
+    and gotten it back says nothing about whether the member has paid for or
+    collected it."""
+
+    PENDING = "pending", _("Pending")
+    IN_PRODUCTION = "in_production", _("In production")
+    RECEIVED = "received", _("Received")
+
+
 def product_image_path(instance, filename):
     return f"clubs/{instance.club.slug}/shop/products/{filename}"
 
@@ -75,7 +88,6 @@ class Product(ClubScopedModel):
         MEMBERSHIP = "membership", _("Membership")
         EVENT_FEE = "event_fee", _("Event fee")
         MERCHANDISE = "merchandise", _("Merchandise")
-        DONATION = "donation", _("Donation")
 
     name = models.CharField(_("name"), max_length=255)
     slug = models.SlugField(_("slug"), max_length=255, blank=True)
@@ -242,6 +254,13 @@ class Order(ClubScopedModel):
     purchaser = models.ForeignKey(Member, on_delete=models.PROTECT, related_name="orders", verbose_name=_("purchaser"))
     payment_status = models.CharField(_("payment status"), max_length=255, choices=PaymentStatus.choices, default=PaymentStatus.PENDING)
     fulfillment_status = models.CharField(_("fulfillment status"), max_length=255, choices=FulfillmentStatus.choices, default=FulfillmentStatus.NOT_READY)
+    #: Rolled up from this order's own merchandise OrderLines (shop.services.
+    #: production.sync_production_status) -- PENDING while every merchandise
+    #: line is, IN_PRODUCTION once any line has been exported to a
+    #: manufacturer or received but not all have, RECEIVED once every one
+    #: has. Meaningless (left at its PENDING default, never displayed -- see
+    #: has_production_lines) for an order with no merchandise lines at all.
+    production_status = models.CharField(_("production status"), max_length=255, choices=ProductionStatus.choices, default=ProductionStatus.PENDING)
     total = models.DecimalField(_("total"), max_digits=10, decimal_places=2)
     #: Set (optionally) the moment an order is marked ready for pickup --
     #: shown to the member on their own order and in the notification that
@@ -276,6 +295,14 @@ class Order(ClubScopedModel):
         disagree."""
         return self.fulfillment_status == self.FulfillmentStatus.DELIVERED and self.payment_status == self.PaymentStatus.PAID
 
+    @property
+    def has_production_lines(self) -> bool:
+        """Whether production_status means anything for this order at all --
+        gates its display everywhere (order_list.html/order_detail.html),
+        since a dues/membership-only order has nothing to send a
+        manufacturer and its production_status is just an unused default."""
+        return self.order_items.filter(product__product_type=Product.ProductType.MERCHANDISE).exists()
+
     def generate_number(self):
         """Next per-club order number for the current year: ``ORD-<year>-<seq>``."""
         return next_scoped_number(self, "ORD")
@@ -299,6 +326,13 @@ class OrderLine(UUIDModel):
     #: see CartItem's own docstring.
     personalization_number = models.CharField(_("number"), max_length=20, blank=True, help_text=_("Optional -- e.g. the player number to print on this item."))
     personalization_name = models.CharField(_("name"), max_length=100, blank=True, help_text=_("Optional -- e.g. the name to print on this item."))
+    #: Only meaningful for a merchandise line -- see ProductionStatus's own
+    #: docstring. Flipped to IN_PRODUCTION by management.views.
+    #: OrderProductionExportView's export, or by hand via OrderLineEditForm
+    #: (e.g. an order phoned in to the manufacturer outside this app, or
+    #: correcting a mistake); RECEIVED is always a manual step -- nothing
+    #: here knows when a physical delivery actually arrives.
+    production_status = models.CharField(_("production status"), max_length=255, choices=ProductionStatus.choices, default=ProductionStatus.PENDING)
 
     class Meta:
         verbose_name = _("order line")

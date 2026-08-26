@@ -1004,7 +1004,7 @@ class ProductCategoryForm(forms.ModelForm):
 class ProductForm(forms.ModelForm):
     class Meta:
         model = Product
-        fields = ["name", "category", "description", "image", "price", "is_active", "personalization_enabled"]
+        fields = ["name", "category", "product_type", "description", "image", "price", "is_active", "personalization_enabled"]
         widgets = {"image": forms.ClearableFileInput(attrs={"accept": "image/png,image/jpeg,image/gif,image/webp"})}
 
     def __init__(self, *args, club=None, **kwargs):
@@ -1130,18 +1130,21 @@ class PaymentEditForm(forms.ModelForm):
 class OrderLineEditForm(forms.ModelForm):
     """The "Edit" modal on a line item row (order detail page) -- fixing a
     mistake after the fact: wrong size, wrong beneficiary, a number/name the
-    member forgot to add. Product itself stays out of reach (that's "delete
-    and re-add", not an edit); unit_price/line_total are recomputed by
-    OrderLineUpdateView from quantity and the (possibly new) variant's own
-    price, not editable directly, for the same "don't let the screen and the
-    number silently disagree" reason as PaymentEditForm's own amount.
-    personalization_number/_name are dropped from the form entirely -- not
+    member forgot to add, or by-hand production_status correction (an order
+    phoned in to the manufacturer outside this app, or undoing an accidental
+    export -- see OrderProductionExportView for the normal, automatic path).
+    Product itself stays out of reach (that's "delete and re-add", not an
+    edit); unit_price/line_total are recomputed by OrderLineUpdateView from
+    quantity and the (possibly new) variant's own price, not editable
+    directly, for the same "don't let the screen and the number silently
+    disagree" reason as PaymentEditForm's own amount. personalization_number/
+    _name and production_status are dropped from the form entirely -- not
     just hidden -- when the product doesn't have Product.personalization_enabled
-    on, so there's nothing to silently ignore."""
+    on / isn't merchandise, so there's nothing to silently ignore."""
 
     class Meta:
         model = OrderLine
-        fields = ["variant", "beneficiary", "quantity", "personalization_number", "personalization_name"]
+        fields = ["variant", "beneficiary", "quantity", "personalization_number", "personalization_name", "production_status"]
         widgets = {"beneficiary": forms.Select(attrs={"data-searchable": "true", "data-search-placeholder": _("Type a name to search...")})}
 
     def __init__(self, *args, club=None, **kwargs):
@@ -1154,6 +1157,8 @@ class OrderLineEditForm(forms.ModelForm):
             if not instance.product.personalization_enabled:
                 del self.fields["personalization_number"]
                 del self.fields["personalization_name"]
+            if instance.product.product_type != Product.ProductType.MERCHANDISE:
+                del self.fields["production_status"]
         if club is not None:
             self.fields["beneficiary"].queryset = Member.objects.filter(member_of__club=club).distinct()
 

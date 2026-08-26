@@ -41,6 +41,14 @@
                     {% else %}badge-neutral{% endif %}">
                     {{ order.get_fulfillment_status_display }}
                 </span>
+                {% if order.has_production_lines %}
+                    <span class="badge badge-sm
+                        {% if order.production_status == "received" %}badge-success
+                        {% elif order.production_status == "in_production" %}badge-info
+                        {% else %}badge-neutral{% endif %}">
+                        {{ order.get_production_status_display }}
+                    </span>
+                {% endif %}
             </div>
             {% if order.pickup_instructions %}
                 <div class="mt-2 text-[13px] text-muted">{% trans "Pickup instructions:" %} {{ order.pickup_instructions }}</div>
@@ -85,6 +93,7 @@
                     <th>{% trans "Product" %}</th>
                     <th>{% trans "Beneficiary" %}</th>
                     <th>{% trans "Personalization" %}</th>
+                    <th>{% trans "Production" %}</th>
                     <th>{% trans "Quantity" %}</th>
                     <th>{% trans "Unit price" %}</th>
                     <th>{% trans "Line total" %}</th>
@@ -101,6 +110,18 @@
                                 {{ line.personalization_number }}{% if line.personalization_number and line.personalization_name %} &middot; {% endif %}{{ line.personalization_name }}
                             {% else %}—{% endif %}
                         </td>
+                        <td>
+                            {% if line.product.product_type == "merchandise" %}
+                                <span class="badge badge-sm
+                                    {% if line.production_status == "received" %}badge-success
+                                    {% elif line.production_status == "in_production" %}badge-info
+                                    {% else %}badge-neutral{% endif %}">
+                                    {{ line.get_production_status_display }}
+                                </span>
+                            {% else %}
+                                <span class="text-dim">—</span>
+                            {% endif %}
+                        </td>
                         <td>{{ line.quantity }}</td>
                         <td class="font-mono text-xs tabular-nums">&euro; {{ line.unit_price }}</td>
                         <td class="font-mono text-xs tabular-nums">&euro; {{ line.line_total }}</td>
@@ -113,7 +134,7 @@
                     {% include "controlpanel/_modal_form.html" with modal_id=line.pk|dom_id:"edit_line_modal" title=edit_line_label form=line.edit_form action_url=edit_line_url submit_label=edit_line_label submit_icon="save" %}
                 {% empty %}
                     <tr>
-                        <td colspan="7" class="text-center text-dim">{% trans "No line items." %}</td>
+                        <td colspan="8" class="text-center text-dim">{% trans "No line items." %}</td>
                     </tr>
                 {% endfor %}
             </tbody>
