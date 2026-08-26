@@ -79,3 +79,32 @@ class CoachRosterEditForm(forms.ModelForm):
             if clash:
                 self.add_error("jersey_number", _("Another player on this team already has this jersey number this season."))
         return cleaned
+
+
+#: By widget type, not field name -- the fields on a formbuilder.services.
+#: form_factory.build_form result aren't known ahead of time (they're built
+#: from a club-defined Form's Fields at request time), so the by-name idiom
+#: every other form on this page uses doesn't apply. First matching type
+#: wins; anything left over (CharField/DecimalField/EmailField/DateField)
+#: falls through to the plain _INPUT_CLASSES default.
+_DYNAMIC_WIDGET_CLASSES = (
+    (forms.CheckboxInput, "h-5 w-5 shrink-0 accent-ink"),
+    (forms.Textarea, _TEXTAREA_CLASSES),
+    (forms.SelectMultiple, _INPUT_CLASSES),
+    (forms.Select, _INPUT_CLASSES),
+    (forms.ClearableFileInput, "block w-full text-sm text-ink file:mr-3 file:rounded-lg file:border-0 file:bg-ink file:px-3 file:py-2 file:text-sm file:font-semibold file:text-paper"),
+)
+
+
+def style_dynamic_form(bound_form):
+    """Applies this app's own input styling to a formbuilder-built dynamic
+    Form's widgets, by widget type rather than by field name -- see
+    mobile.views.FormFillView. Mutates and returns ``bound_form``."""
+    for field in bound_form.fields.values():
+        for widget_class, css in _DYNAMIC_WIDGET_CLASSES:
+            if isinstance(field.widget, widget_class):
+                field.widget.attrs["class"] = css
+                break
+        else:
+            field.widget.attrs["class"] = _INPUT_CLASSES
+    return bound_form

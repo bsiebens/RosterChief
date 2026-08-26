@@ -31,7 +31,9 @@ from events.services.attendance import blocked_upcoming_events_for_member
 from events.services.calendar import agenda_groups, week_bounds
 from events.services.lineup import notify_dropout, selected_members_by_position
 from events.services.referees import RefereeAssignmentError, accept_referee_signup, decline_referee_signup
-from formbuilder.models import FormSend
+from formbuilder.models import FormSend, Submission
+from formbuilder.services import FormSubmissionError, build_form, pending_sends_for, submit_form
+from formbuilder.services.audience import effective_members as form_effective_members
 from members.models import FamilyMembership, Member
 from members.views import ClubScopedPublicMixin
 from news.models import News
@@ -43,7 +45,7 @@ from shop.services.invoices import ShopInvoicePDFError, render_invoice_pdf
 from shop.services.pricing import cart_totals
 from teams.models import StaffAssignment, TeamMembership
 
-from .forms import MemberProfileForm
+from .forms import MemberProfileForm, style_dynamic_form
 from .mixins import PersonScopeMixin, ShopScopeMixin
 from .models import CalendarFeedToken, PushSubscription
 from .services.calendar_feed import build_feed
@@ -204,6 +206,8 @@ class HomeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
     NEEDS_ANSWER_LIMIT = 5
     #: Same reasoning -- mobile:news_list is the place to see everything.
     NEWS_LIMIT = 3
+    #: Same reasoning again -- mobile:me lists every form, not just the pending ones.
+    FORMS_LIMIT = 5
 
     def get_context_data(self, **kwargs):
         people = self.people_in_scope
@@ -215,6 +219,7 @@ class HomeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         needs_answer_total = 0
         dues_rows = []
         news_items = []
+        forms_to_complete = []
 
         if people:
             upcoming = Attendance.objects.filter(
@@ -270,6 +275,11 @@ class HomeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
                 .order_by("-published_at")[: self.NEWS_LIMIT]
             )
 
+            # Above the Club news block, per the design ask -- what's still
+            # outstanding, capped the same way as the other "see the full list
+            # elsewhere" cards above (mobile:me is that full list here).
+            forms_to_complete = pending_sends_for(people, self.request.club)[: self.FORMS_LIMIT]
+
         return super().get_context_data(
             hero_attendance=hero_attendance,
             rsvp_closed=rsvp_closed,
@@ -277,6 +287,7 @@ class HomeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
             needs_answer_remaining=max(needs_answer_total - len(needs_answer), 0),
             dues_rows=dues_rows,
             news_items=news_items,
+            forms_to_complete=forms_to_complete,
             # Club-wide, not person-specific -- shown regardless of managed_people,
             # unlike every other card on this screen. Reshuffled on every request
             # (see club.services.sponsors.active_sponsors) rather than once per
@@ -767,6 +778,21 @@ class MeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
                 Voucher.objects.filter(club=club, issued_to__in=family_ids, is_active=True, expiry_date__gte=timezone.localdate(), consumed_amount__lt=F("amount")).select_related("issued_to").order_by("expiry_date")
             )
 
+        # Every form send self.managed_people are/were ever addressed to,
+        # each row's own submitted_at (None while still pending) --
+        # unbounded by is_active/opens_at/closes_at unlike
+        # formbuilder.services.audience.pending_sends_for, since this is the
+        # full record ("forms, status and the date submitted"), not just
+        # what's currently actionable.
+        forms_status = []
+        if self.managed_people:
+            submitted_at_by_send_and_member = {(submission.send_id, submission.member_id): submission.submitted_at for submission in Submission.objects.filter(send__club=club, member__in=self.managed_people)}
+            for send in FormSend.objects.filter(club=club).select_related("form").order_by("-created"):
+                audience_ids = {member.pk for member in form_effective_members(send)}
+                for person in self.managed_people:
+                    if person.pk in audience_ids:
+                        forms_status.append({"send": send, "person": person, "submitted_at": submitted_at_by_send_and_member.get((send.pk, person.pk))})
+
         return super().get_context_data(
             member_since=member_since,
             team_manager_label=team_manager_label,
@@ -774,8 +800,52 @@ class MeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
             open_dues_count=open_dues_count,
             staff_assignments=staff_assignments,
             vouchers=vouchers,
+            forms_status=forms_status,
             **kwargs,
         )
+
+
+class FormFillView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
+    """Renders and submits one FormSend's dynamic form -- reached from the
+    Home "Forms to complete" card, the Me page's Forms section, or a form
+    notification's own link (mobile.views._notification_source_link).
+
+    GET always renders (even once closed/already submitted -- the club_wide/
+    audience/window checks all live in formbuilder.services.submission.
+    submit_form, run for real on POST, not duplicated here as a second,
+    read-only copy that could drift from it); a rejected POST re-renders the
+    same screen with the service layer's own field-level errors attached,
+    the same "translate a service exception into notify() + stay on the
+    screen" idiom ShopCheckoutView uses for CheckoutError, except re-render
+    instead of redirect so those field errors are actually visible."""
+
+    template_name = "mobile/form_fill.html"
+    screen_title = _("Form")
+
+    def get_send(self):
+        return get_object_or_404(FormSend.objects.select_related("form").filter(club=self.request.club), pk=self.kwargs["pk"])
+
+    def get(self, request, *args, **kwargs):
+        send = self.get_send()
+        return self.render_to_response(self.get_context_data(send=send, form=style_dynamic_form(build_form(send.form))))
+
+    def post(self, request, *args, **kwargs):
+        send = self.get_send()
+        try:
+            submit_form(send, self.me, request.POST, files=request.FILES)
+        except FormSubmissionError as error:
+            bound_form = style_dynamic_form(build_form(send.form, data=request.POST, files=request.FILES))
+            for key, messages in error.errors.items():
+                for message in messages:
+                    bound_form.add_error(key, message) if key in bound_form.fields else bound_form.add_error(None, message)
+            notify(request, f"e|{_('Could not submit')}|{error}")
+            return self.render_to_response(self.get_context_data(send=send, form=bound_form))
+
+        notify(request, f"s|{_('Submitted')}|{_('Thanks -- your response has been recorded.')}")
+        return HttpResponseRedirect(reverse("mobile:home"))
+
+    def get_context_data(self, **kwargs):
+        return super().get_context_data(screen_title=kwargs["send"].form.title, **kwargs)
 
 
 class PaymentsView(PersonScopeMixin, LoginRequiredMixin, TemplateView):

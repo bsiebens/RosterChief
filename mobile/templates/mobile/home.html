@@ -104,6 +104,29 @@
             </div>
         {% endif %}
 
+        {% if forms_to_complete %}
+            <div>
+                <div class="mb-2.5 flex items-baseline justify-between">
+                    <span class="font-display text-xs font-extrabold text-muted uppercase tracking-wide">{% trans "Forms to complete" %}</span>
+                    <a class="text-xs font-semibold text-club" href="{% url "mobile:me" %}">{% trans "All forms" %}</a>
+                </div>
+                <div class="m-card overflow-hidden">
+                    {% for send in forms_to_complete %}
+                        {% if not forloop.first %}<div class="h-px bg-rule"></div>{% endif %}
+                        <a class="flex items-center gap-3 p-3.5" href="{% url "mobile:form_fill" send.pk %}">
+                            <div class="min-w-0 flex-1">
+                                <div class="text-sm font-semibold text-ink">{{ send.form.title }}</div>
+                                {% if send.closes_at %}
+                                    <div class="text-xs text-muted">{% blocktrans with date=send.closes_at|date:"d M" %}Due {{ date }}{% endblocktrans %}</div>
+                                {% endif %}
+                            </div>
+                            <span class="pill pill-warn shrink-0">{% trans "Complete" %}</span>
+                        </a>
+                    {% endfor %}
+                </div>
+            </div>
+        {% endif %}
+
         <div>
             <div class="mb-2.5 flex items-baseline justify-between">
                 <span class="font-display text-xs font-extrabold text-muted uppercase tracking-wide">{% trans "Club news" %}</span>
@@ -145,7 +168,7 @@
             {% endif %}
         </div>
 
-        {% if not hero_attendance and not needs_answer and not dues_rows %}
+        {% if not hero_attendance and not needs_answer and not dues_rows and not forms_to_complete %}
             <div class="m-card p-6 text-center">
                 <p class="text-sm text-muted">{% trans "Nothing to show right now." %}</p>
             </div>

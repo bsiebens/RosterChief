@@ -19,6 +19,9 @@ from events.models import Attendance, Competition, Event, EventReferee, EventSer
 from events.services.attendance import record_check_in
 from events.services.calendar import week_bounds
 from events.services.notifications import notify_new_event
+from formbuilder.models import Answer, FormSend, Submission
+from formbuilder.models import Field as FormBuilderField
+from formbuilder.models import Form as FormBuilderForm
 from members.models import Family, FamilyMembership, Member
 from news.models import News, NewsPhoto
 from notifications.models import Notification
@@ -5355,3 +5358,167 @@ class ShopInvoiceViewTests(TestCase):
         response = self.client.get(reverse("mobile:shop_invoice", kwargs={"pk": self.order.pk}), HTTP_HOST="ajax-united.rosterchief.app")
 
         self.assertEqual(response.status_code, 404)
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class HomeFormsCardTests(TestCase):
+    """HomeView's "Forms to complete" card -- formbuilder.services.audience.
+    pending_sends_for, see mobile.views.HomeView.get_context_data."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        today = timezone.localdate()
+        cls.season = Season.objects.create(club=cls.club, start_date=today - datetime.timedelta(days=30), end_date=today + datetime.timedelta(days=300))
+        cls.user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", email="parent@example.com", user=cls.user)
+        ClubMembership.objects.create(club=cls.club, member=cls.member, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
+        cls.form = FormBuilderForm.objects.create(club=cls.club, title="Sign-up")
+
+    def _get(self):
+        return self.client.get(reverse("mobile:home"), HTTP_HOST="ajax-united.rosterchief.app")
+
+    def test_an_open_send_addressed_to_me_shows_up(self):
+        send = FormSend.objects.create(club=self.club, form=self.form, club_wide=True)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertIn(send, response.context["forms_to_complete"])
+        self.assertContains(response, "Sign-up")
+
+    def test_a_send_i_already_submitted_is_omitted(self):
+        send = FormSend.objects.create(club=self.club, form=self.form, club_wide=True)
+        Submission.objects.create(send=send, member=self.member)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertNotIn(send, response.context["forms_to_complete"])
+
+    def test_a_send_outside_my_audience_is_omitted(self):
+        FormSend.objects.create(club=self.club, form=self.form, club_wide=False)  # nobody invited
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertEqual(response.context["forms_to_complete"], [])
+
+    def test_a_closed_send_is_omitted(self):
+        FormSend.objects.create(club=self.club, form=self.form, club_wide=True, closes_at=timezone.now() - datetime.timedelta(days=1))
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertEqual(response.context["forms_to_complete"], [])
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class MeFormsSectionTests(TestCase):
+    """MeView's Forms section -- every send self.managed_people are/were
+    addressed to, pending or completed, see mobile.views.MeView.get_context_data."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        today = timezone.localdate()
+        cls.season = Season.objects.create(club=cls.club, start_date=today - datetime.timedelta(days=30), end_date=today + datetime.timedelta(days=300))
+        cls.user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", email="parent@example.com", user=cls.user)
+        ClubMembership.objects.create(club=cls.club, member=cls.member, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
+        cls.form = FormBuilderForm.objects.create(club=cls.club, title="Sign-up")
+
+    def _get(self):
+        return self.client.get(reverse("mobile:me"), HTTP_HOST="ajax-united.rosterchief.app")
+
+    def test_a_pending_send_shows_the_pending_pill(self):
+        FormSend.objects.create(club=self.club, form=self.form, club_wide=True)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, "Sign-up")
+        self.assertContains(response, "Pending")
+
+    def test_a_completed_send_shows_its_submitted_date(self):
+        send = FormSend.objects.create(club=self.club, form=self.form, club_wide=True)
+        Submission.objects.create(send=send, member=self.member)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, "Completed")
+
+    def test_a_send_outside_my_audience_is_absent(self):
+        FormSend.objects.create(club=self.club, form=self.form, club_wide=False)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertEqual(response.context["forms_status"], [])
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class FormFillViewTests(TestCase):
+    """mobile.views.FormFillView -- render + submit a FormSend's dynamic form."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        today = timezone.localdate()
+        cls.season = Season.objects.create(club=cls.club, start_date=today - datetime.timedelta(days=30), end_date=today + datetime.timedelta(days=300))
+        cls.user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", email="parent@example.com", user=cls.user)
+        ClubMembership.objects.create(club=cls.club, member=cls.member, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
+        cls.form = FormBuilderForm.objects.create(club=cls.club, title="Sign-up")
+        cls.name_field = FormBuilderField.objects.create(form=cls.form, key="name", label="Name", field_type=FormBuilderField.FieldType.TEXT, required=True, order=1)
+
+    def _url(self, send):
+        return reverse("mobile:form_fill", kwargs={"pk": send.pk})
+
+    def test_get_renders_the_dynamic_fields(self):
+        send = FormSend.objects.create(club=self.club, form=self.form, club_wide=True)
+        self.client.force_login(self.user)
+
+        response = self.client.get(self._url(send), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, "Name")
+
+    def test_a_successful_submission_redirects_home_and_records_it(self):
+        send = FormSend.objects.create(club=self.club, form=self.form, club_wide=True)
+        self.client.force_login(self.user)
+
+        response = self.client.post(self._url(send), {"name": "Jane"}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertRedirects(response, reverse("mobile:home"))
+        submission = Submission.objects.get(send=send, member=self.member)
+        self.assertEqual(Answer.objects.get(submission=submission, field=self.name_field).value, "Jane")
+
+    def test_a_missing_required_field_re_renders_with_an_inline_error(self):
+        send = FormSend.objects.create(club=self.club, form=self.form, club_wide=True)
+        self.client.force_login(self.user)
+
+        response = self.client.post(self._url(send), {}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Submission.objects.exists())
+        self.assertContains(response, "This field is required")
+
+    def test_a_member_outside_the_audience_is_rejected(self):
+        # club_wide=False and nobody invited -- self.member isn't in the audience.
+        send = FormSend.objects.create(club=self.club, form=self.form, club_wide=False)
+        self.client.force_login(self.user)
+
+        response = self.client.post(self._url(send), {"name": "Jane"}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Submission.objects.exists())
+
+    def test_tapping_a_form_notification_redirects_here(self):
+        send = FormSend.objects.create(club=self.club, form=self.form, club_wide=True)
+        notification = Notification.objects.create(club=self.club, member=self.member, title="Sign-up", body="Please complete it.", source=send)
+        self.client.force_login(self.user)
+
+        response = self.client.post(reverse("mobile:notifications"), {"action": "mark_read", "notification_id": str(notification.pk)}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertRedirects(response, self._url(send))

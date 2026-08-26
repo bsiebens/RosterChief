@@ -1,0 +1,46 @@
+{% extends "mobile/base.html" %}
+{% load i18n lucide %}
+
+{% comment %}
+    Renders send.form's dynamic Field set (formbuilder.services.form_factory.
+    build_form, styled by mobile.forms.style_dynamic_form) -- generic, one
+    .m-card row per field, since the field set isn't known ahead of time the
+    way every other mobile form (edit_profile.html, ...) is. See
+    mobile.views.FormFillView.
+{% endcomment %}
+
+{% block content %}
+    <form method="post" enctype="multipart/form-data" class="flex flex-col gap-4" hx-boost="false">
+        {% csrf_token %}
+
+        <div class="-mx-4 -mt-4 flex items-center gap-1 border-b border-line bg-white px-4 py-3">
+            <a class="-ml-2.5 flex h-11 w-11 shrink-0 items-center justify-center" href="{% url "mobile:home" %}" aria-label="{% trans "Back" %}">
+                {% lucide "chevron-left" size=20 stroke_width=2.4 class="text-ink" %}
+            </a>
+            <span class="min-w-0 flex-1 truncate font-display text-xl leading-none font-extrabold text-ink uppercase">{{ send.form.title }}</span>
+            <button type="submit" class="btn btn-primary h-9 px-3.5 text-sm">{% trans "Submit" %}</button>
+        </div>
+
+        {% if send.form.description %}
+            <p class="text-sm text-muted">{{ send.form.description|linebreaksbr }}</p>
+        {% endif %}
+
+        {% for error in form.non_field_errors %}
+            <div class="rounded-box border border-warn-border bg-warn-bg p-3.5 text-sm text-warn-deep">{{ error }}</div>
+        {% endfor %}
+
+        <div class="m-card overflow-hidden">
+            {% for field in form %}
+                {% if not forloop.first %}<div class="h-px bg-rule"></div>{% endif %}
+                <div class="p-3.5">
+                    <label class="mb-1 block text-xs text-muted" for="{{ field.id_for_label }}">
+                        {{ field.label }}{% if field.field.required %} *{% endif %}
+                    </label>
+                    {{ field }}
+                    {% if field.help_text %}<p class="mt-1 text-xs text-muted">{{ field.help_text }}</p>{% endif %}
+                    {% for error in field.errors %}<p class="mt-1 text-xs text-club">{{ error }}</p>{% endfor %}
+                </div>
+            {% endfor %}
+        </div>
+    </form>
+{% endblock content %}
