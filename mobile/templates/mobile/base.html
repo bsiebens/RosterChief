@@ -1,4 +1,4 @@
-{% load static i18n lucide %}
+{% load static i18n lucide ui %}
 
 {% comment %}
     App shell for Member mode (M1-M7) -- design_handoff_rosterchief_platform/README.md.
@@ -106,9 +106,18 @@
         <main class="flex-1">
             <div class="flex flex-col gap-4 px-4 py-4">
                 {% if messages %}
+                    {# Same alert styling as _auth_base.html's own messages block -- level-aware (colour/icon), not the flat neutral card this used to be. Django's messages framework already consumes each one after this render, so this doubles as the "shown once" banner mobile:home redirects need (e.g. ShopScopeMixin's own "the shop is closed" notice). #}
                     <div class="flex flex-col gap-2">
                         {% for message in messages %}
-                            <div class="m-card p-3 text-sm font-medium text-ink">{{ message }}</div>
+                            {% with alert=message|as_alert %}
+                                <div class="alert {{ alert.css }}" role="alert">
+                                    {% lucide alert.icon size=18 %}
+                                    <div>
+                                        <div class="font-display text-sm font-bold tracking-wide uppercase">{{ alert.title }}</div>
+                                        <div class="text-sm">{{ alert.body }}</div>
+                                    </div>
+                                </div>
+                            {% endwith %}
                         {% endfor %}
                     </div>
                 {% endif %}

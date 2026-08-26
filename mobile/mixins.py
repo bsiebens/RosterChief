@@ -7,8 +7,11 @@ them) don't each re-derive this.
 
 from django.conf import settings
 from django.http import Http404
+from django.shortcuts import redirect
+from django.utils.translation import gettext_lazy as _
 
 from club.services.access import current_season, has_management_access, teams_staffed_by
+from controlpanel.messages import notify
 from members.models import FamilyMembership, Member
 from members.views import ClubScopedPublicMixin
 from notifications.models import Notification
@@ -113,12 +116,24 @@ class PersonScopeMixin(ClubScopedPublicMixin):
 
 
 class ShopScopeMixin(PersonScopeMixin):
-    """Every shop screen 404s once ``shop_open`` is off -- there's no read-only
-    "browse while closed" mode, matching the tab's own absence from the tab
-    bar (base.html) and Product.is_public's own help text. Layered on top of
-    PersonScopeMixin rather than duplicated onto each shop view."""
+    """Every shop screen bounces to Home once ``shop_open`` is off -- there's no
+    read-only "browse while closed" mode, matching the tab's own absence from
+    the tab bar (base.html) and Product.is_public's own help text. A redirect
+    with a flashed notice reads better here than a bare 404: someone who had
+    the Shop tab open in a background tab, or followed an old link/bookmark,
+    lands somewhere useful with an explanation instead of a dead end -- the
+    notice is a normal Django message, so it's shown once and gone, same as
+    every other flashed message in the app (see mobile/base.html's own
+    comment on its messages block). Layered on top of PersonScopeMixin rather
+    than duplicated onto each shop view.
+
+    No club on the request at all is a different, more fundamental case (the
+    base domain has no tenant to redirect within) and still 404s."""
 
     def dispatch(self, request, *args, **kwargs):
-        if getattr(request, "club", None) is None or not request.club.shop_open:
-            raise Http404("The shop is closed.")
+        if getattr(request, "club", None) is None:
+            raise Http404("No club on this request.")
+        if not request.club.shop_open:
+            notify(request, f"w|{_('Shop closed')}|{_("The shop isn't taking orders right now.")}")
+            return redirect("mobile:home")
         return super().dispatch(request, *args, **kwargs)

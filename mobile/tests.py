@@ -4626,9 +4626,10 @@ class ShopTabVisibilityTests(TestCase):
     """The Shop tab (base.html) is present only while Club.shop_open is on --
     absent otherwise, same "just missing, not disabled" treatment as the
     Coach/Member switcher (MobileShellTests.test_mode_switcher_hidden_without_a_staff_assignment).
-    Every shop URL also 404s while closed (mobile.mixins.ShopScopeMixin) --
-    Club.shop_open's own help text is explicit the shop is "hidden from the
-    member app entirely" while off, not just unlinked."""
+    Every shop URL also bounces to Home with a flashed notice while closed
+    (mobile.mixins.ShopScopeMixin) -- Club.shop_open's own help text is
+    explicit the shop is "hidden from the member app entirely" while off,
+    not just unlinked."""
 
     def _login(self, **club_kwargs):
         club = make_club(**club_kwargs)
@@ -4651,10 +4652,27 @@ class ShopTabVisibilityTests(TestCase):
 
         self.assertNotContains(response, reverse("mobile:shop_home"))
 
-    def test_shop_home_404s_when_closed(self):
+    def test_shop_home_redirects_to_home_when_closed(self):
         self._login(shop_open=False)
 
         response = self.client.get(reverse("mobile:shop_home"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertRedirects(response, reverse("mobile:home"))
+
+    def test_a_flashed_notice_explains_the_redirect(self):
+        self._login(shop_open=False)
+
+        response = self.client.get(reverse("mobile:shop_home"), HTTP_HOST="ajax-united.rosterchief.app", follow=True)
+
+        self.assertContains(response, "Shop closed")
+
+    def test_no_club_on_the_request_still_404s(self):
+        # A more fundamental case than "closed" -- the base domain has no
+        # tenant to redirect within at all.
+        user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
+        self.client.force_login(user)
+
+        response = self.client.get(reverse("mobile:shop_home"), HTTP_HOST="rosterchief.app")
 
         self.assertEqual(response.status_code, 404)
 
@@ -4994,7 +5012,7 @@ class ShopCheckoutViewTests(TestCase):
 
         response = self._checkout()
 
-        self.assertEqual(response.status_code, 404)
+        self.assertRedirects(response, reverse("mobile:home"))
         self.assertFalse(Order.objects.exists())
 
 
