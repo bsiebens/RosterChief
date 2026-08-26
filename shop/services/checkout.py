@@ -43,7 +43,7 @@ def place_order(cart: Cart, *, purchaser, discount_code: str = "") -> Order:
     if not cart.club.shop_open:
         raise CheckoutError(_("The shop is closed right now."))
 
-    items = list(cart.items.select_related("product", "beneficiary", "team"))
+    items = list(cart.items.select_related("product", "variant", "beneficiary", "team"))
     if not items:
         raise CheckoutError(_("Your cart is empty."))
 
@@ -55,6 +55,7 @@ def place_order(cart: Cart, *, purchaser, discount_code: str = "") -> Order:
         OrderLine.objects.create(
             order=order,
             product=item.product,
+            variant=item.variant,
             quantity=item.quantity,
             unit_price=item.unit_price,
             beneficiary=item.beneficiary,

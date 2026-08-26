@@ -1,3 +1,4 @@
+from django.core.exceptions import ValidationError
 from django.db import IntegrityError, models, transaction
 from django.db.models import Q, UniqueConstraint
 from django.utils import timezone
@@ -93,6 +94,44 @@ class Product(ClubScopedModel):
         validate_club_scope(self, self.club_id, same_club_fields=("season", "staff_role"))
 
 
+class ProductVariant(UUIDModel):
+    """One orderable option of a Product -- "Small", "Medium — Red", whatever
+    label the club actually sells by. Deliberately a single free-text label
+    rather than separate size/colour axes with a generated combination
+    matrix: a club merch shop needs "the same jersey in different sizes",
+    not a full options/variants system, and a label an admin types once
+    covers "size", "colour", or "size and colour together" equally well
+    without extra UI for axes nobody asked for.
+
+    No club FK of its own -- scoped via ``product.club``, same shape as
+    CartItem/OrderLine below (plain UUIDModel, club implied by a parent FK).
+    """
+
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="variants", verbose_name=_("product"))
+    name = models.CharField(_("name"), max_length=255, help_text=_("e.g. “Small”, “Medium — Red”, “XL”."))
+    #: Overrides Product.price when set; leave blank when every variant of a
+    #: product costs the same (most of the time) so there's nothing to keep
+    #: in sync with the product's own price.
+    price = models.DecimalField(_("price"), max_digits=10, decimal_places=2, blank=True, null=True, help_text=_("Leave blank to use the product's own price."))
+    is_active = models.BooleanField(_("is active?"), default=True)
+    ordering = models.PositiveSmallIntegerField(_("ordering"), default=0)
+
+    class Meta:
+        verbose_name = _("product variant")
+        verbose_name_plural = _("product variants")
+        ordering = ["ordering", "name"]
+        constraints = [
+            UniqueConstraint(fields=["product", "name"], name="unique_variant_name_per_product"),
+        ]
+
+    def __str__(self):
+        return f"{self.product} — {self.name}"
+
+    @property
+    def effective_price(self):
+        return self.price if self.price is not None else self.product.price
+
+
 class Cart(ClubScopedModel):
     class CartStatus(models.TextChoices):
         OPEN = "open", _("Open")
@@ -117,6 +156,7 @@ class Cart(ClubScopedModel):
 class CartItem(UUIDModel):
     cart = models.ForeignKey(Cart, on_delete=models.CASCADE, related_name="items", verbose_name=_("cart"))
     product = models.ForeignKey(Product, on_delete=models.PROTECT, related_name="cart_items", verbose_name=_("product"))
+    variant = models.ForeignKey(ProductVariant, on_delete=models.PROTECT, related_name="cart_items", verbose_name=_("variant"), blank=True, null=True)
 
     quantity = models.PositiveSmallIntegerField(_("quantity"), default=1)
     unit_price = models.DecimalField(_("unit price"), max_digits=10, decimal_places=2)
@@ -128,15 +168,18 @@ class CartItem(UUIDModel):
         verbose_name = _("cart item")
         verbose_name_plural = _("cart items")
         constraints = [
-            UniqueConstraint(fields=["cart", "product", "beneficiary"], name="unique_product_per_cart_per_beneficiary"),
+            UniqueConstraint(fields=["cart", "product", "variant", "beneficiary"], name="unique_product_per_cart_per_beneficiary"),
         ]
 
     def __str__(self):
-        return f"{self.product} - {self.quantity}x"
+        suffix = f" ({self.variant.name})" if self.variant_id else ""
+        return f"{self.product}{suffix} - {self.quantity}x"
 
     def clean(self):
         club_id = self.cart.club_id if self.cart_id else None
         validate_club_scope(self, club_id, same_club_fields=("product", "team"), member_fields=("beneficiary",))
+        if self.variant_id and self.product_id and self.variant.product_id != self.product_id:
+            raise ValidationError({"variant": _("Must be a variant of this product.")})
 
 
 class Order(ClubScopedModel):
@@ -181,6 +224,7 @@ class Order(ClubScopedModel):
 class OrderLine(UUIDModel):
     order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name="order_items", verbose_name=_("order"))
     product = models.ForeignKey(Product, on_delete=models.PROTECT, related_name="order_items", verbose_name=_("product"))
+    variant = models.ForeignKey(ProductVariant, on_delete=models.PROTECT, related_name="order_items", verbose_name=_("variant"), blank=True, null=True)
 
     quantity = models.PositiveSmallIntegerField(_("quantity"), default=1)
     unit_price = models.DecimalField(_("unit price"), max_digits=10, decimal_places=2)
@@ -194,11 +238,14 @@ class OrderLine(UUIDModel):
         verbose_name_plural = _("order lines")
 
     def __str__(self):
-        return f"{self.product} - {self.quantity}x"
+        suffix = f" ({self.variant.name})" if self.variant_id else ""
+        return f"{self.product}{suffix} - {self.quantity}x"
 
     def clean(self):
         club_id = self.order.club_id if self.order_id else None
         validate_club_scope(self, club_id, same_club_fields=("product", "team"), member_fields=("beneficiary",))
+        if self.variant_id and self.product_id and self.variant.product_id != self.product_id:
+            raise ValidationError({"variant": _("Must be a variant of this product.")})
 
 
 class Discount(ClubScopedModel):

@@ -13,7 +13,7 @@ from events.services.rbihf_import import RBIHFImportError, extract_team_id
 from members.models import Family, FamilyMembership, Group, Member
 from members.services.family import find_member_by_email
 from news.models import News
-from shop.models import Discount, Payment, Product
+from shop.models import Discount, Payment, Product, ProductVariant
 from teams.models import Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
 from teams.services import eligible_roster_members
 
@@ -998,6 +998,16 @@ class ProductForm(forms.ModelForm):
         model = Product
         fields = ["name", "description", "image", "price", "is_active"]
         widgets = {"image": forms.ClearableFileInput(attrs={"accept": "image/png,image/jpeg,image/gif,image/webp"})}
+
+
+class ProductVariantForm(forms.ModelForm):
+    """One orderable option of a product -- "Small", "Medium — Red", whatever
+    label the club actually sells by (see ProductVariant's own docstring for
+    why this is a single free-text field, not separate size/colour axes)."""
+
+    class Meta:
+        model = ProductVariant
+        fields = ["name", "price", "is_active"]
 
 
 class DiscountForm(forms.ModelForm):

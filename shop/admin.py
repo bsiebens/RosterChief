@@ -10,6 +10,7 @@ from .models import (
     OrderLine,
     Payment,
     Product,
+    ProductVariant,
 )
 
 
@@ -40,6 +41,11 @@ class ClubScopedFKMixin:
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
 
+class ProductVariantInline(admin.TabularInline):
+    model = ProductVariant
+    extra = 0
+
+
 @admin.register(Product)
 class ProductAdmin(ClubScopedFKMixin, admin.ModelAdmin):
     scoped_fk_fields = ("season", "staff_role")
@@ -47,13 +53,25 @@ class ProductAdmin(ClubScopedFKMixin, admin.ModelAdmin):
     list_filter = ["club", "product_type", "is_active", "is_public"]
     search_fields = ["name", "slug"]
     prepopulated_fields = {"slug": ["name"]}
+    inlines = [ProductVariantInline]
+
+
+@admin.register(ProductVariant)
+class ProductVariantAdmin(admin.ModelAdmin):
+    list_display = ["name", "product", "price", "is_active"]
+    list_filter = ["is_active"]
+    search_fields = ["name", "product__name"]
+    raw_id_fields = ["product"]
 
 
 class CartItemInline(ClubScopedFKMixin, admin.TabularInline):
     model = CartItem
+    # variant excluded from scoped_fk_fields -- ProductVariant has no club FK of
+    # its own for the mixin's flat club_id filter to use (see its own docstring);
+    # raw_id_fields below is enough for this admin-only, low-traffic dropdown.
     scoped_fk_fields = ("product", "team")
     extra = 0
-    raw_id_fields = ["beneficiary"]
+    raw_id_fields = ["beneficiary", "variant"]
 
 
 @admin.register(Cart)
@@ -67,16 +85,17 @@ class CartAdmin(admin.ModelAdmin):
 
 @admin.register(CartItem)
 class CartItemAdmin(admin.ModelAdmin):
-    list_display = ["cart", "product", "quantity", "beneficiary"]
+    list_display = ["cart", "product", "variant", "quantity", "beneficiary"]
     search_fields = ["product__name"]
-    raw_id_fields = ["cart", "product", "beneficiary", "team"]
+    raw_id_fields = ["cart", "product", "variant", "beneficiary", "team"]
 
 
 class OrderLineInline(ClubScopedFKMixin, admin.TabularInline):
     model = OrderLine
+    # Same variant exclusion as CartItemInline above -- see that one's own comment.
     scoped_fk_fields = ("product", "team")
     extra = 0
-    raw_id_fields = ["beneficiary"]
+    raw_id_fields = ["beneficiary", "variant"]
 
 
 class AppliedDiscountInline(ClubScopedFKMixin, admin.TabularInline):
@@ -103,9 +122,9 @@ class OrderAdmin(admin.ModelAdmin):
 
 @admin.register(OrderLine)
 class OrderLineAdmin(admin.ModelAdmin):
-    list_display = ["order", "product", "quantity", "line_total"]
+    list_display = ["order", "product", "variant", "quantity", "line_total"]
     search_fields = ["product__name", "order__number"]
-    raw_id_fields = ["order", "product", "beneficiary", "team"]
+    raw_id_fields = ["order", "product", "variant", "beneficiary", "team"]
 
 
 @admin.register(Discount)

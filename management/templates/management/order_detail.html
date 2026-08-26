@@ -75,7 +75,7 @@
             <tbody>
                 {% for line in lines %}
                     <tr>
-                        <td class="font-semibold">{{ line.product }}</td>
+                        <td class="font-semibold">{{ line.product }}{% if line.variant %} <span class="font-normal text-muted">&middot; {{ line.variant.name }}</span>{% endif %}</td>
                         <td>{{ line.beneficiary|default:"—" }}</td>
                         <td>{{ line.quantity }}</td>
                         <td class="font-mono tabular-nums">&euro; {{ line.unit_price }}</td>

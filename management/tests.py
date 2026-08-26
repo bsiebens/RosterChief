@@ -39,7 +39,7 @@ from members.services.claims import children_awaiting_a_parent
 from news.models import News, NewsPhoto
 from news.services import _send_and_mark_notified
 from notifications.models import Notification
-from shop.models import Discount, DiscountType, Invoice, Order, OrderLine, Payment, Product
+from shop.models import Discount, DiscountType, Invoice, Order, OrderLine, Payment, Product, ProductVariant
 from shop.services.invoices import ShopInvoicePDFError, create_invoice_for_order
 from teams.models import Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
 from teams.services import eligible_roster_members
@@ -8344,6 +8344,87 @@ class ProductManagementTests(ShopTestBase):
         # path, see ProductToggleActiveView's own docstring.
         with self.assertRaises(NoReverseMatch):
             reverse("management:product_delete")
+
+
+class ProductVariantManagementTests(ShopTestBase):
+    """"Small", "Medium — Red", whatever label the club actually sells by --
+    see ProductVariant's own docstring for why it's one free-text field, not
+    separate size/colour axes."""
+
+    def test_a_shop_manager_can_add_a_variant(self):
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_post("product_variant_create", {"name": "Small", "is_active": "on"}, self.product.pk)
+
+        self.assertRedirects(response, reverse("management:product_update", kwargs={"pk": self.product.pk}))
+        self.assertTrue(self.product.variants.filter(name="Small").exists())
+
+    def test_a_variant_can_override_the_products_price(self):
+        self.client.force_login(self.make_shop_manager())
+
+        self.club_post("product_variant_create", {"name": "XXL", "price": "35.00", "is_active": "on"}, self.product.pk)
+
+        variant = self.product.variants.get(name="XXL")
+        self.assertEqual(variant.price, Decimal("35.00"))
+        self.assertEqual(variant.effective_price, Decimal("35.00"))
+
+    def test_plain_staff_cannot_add_a_variant(self):
+        self.client.force_login(self.make_plain_staff())
+
+        response = self.club_post("product_variant_create", {"name": "Small", "is_active": "on"}, self.product.pk)
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(self.product.variants.filter(name="Small").exists())
+
+    def test_a_shop_manager_can_edit_a_variant(self):
+        variant = ProductVariant.objects.create(product=self.product, name="Small")
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_post("product_variant_update", {"name": "S", "is_active": "on"}, self.product.pk, variant.pk)
+
+        self.assertRedirects(response, reverse("management:product_update", kwargs={"pk": self.product.pk}))
+        variant.refresh_from_db()
+        self.assertEqual(variant.name, "S")
+
+    def test_a_shop_manager_can_toggle_a_variant_active(self):
+        variant = ProductVariant.objects.create(product=self.product, name="Small")
+        self.client.force_login(self.make_shop_manager())
+
+        self.club_post("product_variant_toggle_active", {}, self.product.pk, variant.pk)
+
+        variant.refresh_from_db()
+        self.assertFalse(variant.is_active)
+
+    def test_plain_staff_cannot_toggle_a_variant(self):
+        variant = ProductVariant.objects.create(product=self.product, name="Small")
+        self.client.force_login(self.make_plain_staff())
+
+        response = self.club_post("product_variant_toggle_active", {}, self.product.pk, variant.pk)
+
+        self.assertEqual(response.status_code, 403)
+        variant.refresh_from_db()
+        self.assertTrue(variant.is_active)
+
+    def test_a_variant_from_another_products_edit_page_404s(self):
+        other_product = Product.objects.create(club=self.club, name="Away Jersey")
+        variant = ProductVariant.objects.create(product=other_product, name="Small")
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_post("product_variant_toggle_active", {}, self.product.pk, variant.pk)
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_there_is_no_variant_delete_view(self):
+        with self.assertRaises(NoReverseMatch):
+            reverse("management:product_variant_delete")
+
+    def test_the_product_edit_page_lists_its_variants(self):
+        ProductVariant.objects.create(product=self.product, name="Small")
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_get("product_update", self.product.pk)
+
+        self.assertContains(response, "Small")
 
 
 class DiscountManagementTests(ShopTestBase):

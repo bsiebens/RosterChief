@@ -28,6 +28,7 @@ from .models import (
     OrderLine,
     Payment,
     Product,
+    ProductVariant,
 )
 from .services.checkout import CheckoutError, find_discount, place_order
 from .services.invoices import create_invoice_for_order, render_invoice_pdf
@@ -72,6 +73,83 @@ class ProductSlugTests(TestCase):
         product = Product.objects.create(club=self.club, name="Home Jersey")
 
         self.assertEqual(str(product), "Home Jersey")
+
+
+class ProductVariantModelTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        cls.product = Product.objects.create(club=cls.club, name="Home Jersey", price=Decimal("40.00"))
+
+    def test_str_includes_the_product(self):
+        variant = ProductVariant.objects.create(product=self.product, name="Small")
+
+        self.assertEqual(str(variant), "Home Jersey — Small")
+
+    def test_effective_price_falls_back_to_the_products_price(self):
+        variant = ProductVariant.objects.create(product=self.product, name="Small")
+
+        self.assertEqual(variant.effective_price, Decimal("40.00"))
+
+    def test_effective_price_uses_its_own_price_when_set(self):
+        variant = ProductVariant.objects.create(product=self.product, name="XXL", price=Decimal("45.00"))
+
+        self.assertEqual(variant.effective_price, Decimal("45.00"))
+
+    def test_variant_name_is_unique_per_product(self):
+        ProductVariant.objects.create(product=self.product, name="Small")
+
+        with self.assertRaises(IntegrityError):
+            ProductVariant.objects.create(product=self.product, name="Small")
+
+    def test_the_same_name_is_fine_on_a_different_product(self):
+        other_product = Product.objects.create(club=self.club, name="Away Jersey")
+        ProductVariant.objects.create(product=self.product, name="Small")
+
+        ProductVariant.objects.create(product=other_product, name="Small")  # must not raise
+
+        self.assertEqual(ProductVariant.objects.filter(name="Small").count(), 2)
+
+
+class CartItemVariantTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        cls.user = User.objects.create_user(email="shopper@example.com", password="pw")
+        cls.product = Product.objects.create(club=cls.club, name="Home Jersey", price=Decimal("40.00"))
+        cls.variant = ProductVariant.objects.create(product=cls.product, name="Small")
+
+    def test_two_variants_of_the_same_product_coexist_in_one_cart(self):
+        cart = Cart.objects.create(club=self.club, user=self.user)
+        other_variant = ProductVariant.objects.create(product=self.product, name="Medium")
+
+        CartItem.objects.create(cart=cart, product=self.product, variant=self.variant, quantity=1, unit_price=Decimal("40"))
+        CartItem.objects.create(cart=cart, product=self.product, variant=other_variant, quantity=1, unit_price=Decimal("40"))  # must not raise
+
+        self.assertEqual(cart.items.count(), 2)
+
+    def test_a_variant_and_no_variant_of_the_same_product_coexist(self):
+        cart = Cart.objects.create(club=self.club, user=self.user)
+
+        CartItem.objects.create(cart=cart, product=self.product, variant=self.variant, quantity=1, unit_price=Decimal("40"))
+        CartItem.objects.create(cart=cart, product=self.product, variant=None, quantity=1, unit_price=Decimal("40"))  # must not raise
+
+        self.assertEqual(cart.items.count(), 2)
+
+    def test_rejects_a_variant_belonging_to_a_different_product(self):
+        other_product = Product.objects.create(club=self.club, name="Away Jersey")
+        cart = Cart.objects.create(club=self.club, user=self.user)
+        item = CartItem(cart=cart, product=other_product, variant=self.variant, quantity=1, unit_price=Decimal("40"))
+
+        with self.assertRaises(ValidationError) as ctx:
+            item.full_clean()
+        self.assertIn("variant", ctx.exception.error_dict)
+
+    def test_str_includes_the_variant(self):
+        cart = Cart.objects.create(club=self.club, user=self.user)
+        item = CartItem.objects.create(cart=cart, product=self.product, variant=self.variant, quantity=2, unit_price=Decimal("40"))
+
+        self.assertEqual(str(item), "Home Jersey (Small) - 2x")
 
 
 class OpenCartConstraintTests(TestCase):
@@ -601,6 +679,18 @@ class PlaceOrderTests(TestCase):
 
         cart.refresh_from_db()
         self.assertEqual(cart.status, Cart.CartStatus.CHECKED_OUT)
+
+    def test_a_cart_items_variant_carries_through_to_the_order_line(self):
+        variant = ProductVariant.objects.create(product=self.product, name="Small", price=Decimal("30.00"))
+        cart = Cart.objects.create(club=self.club, user=self.user)
+        CartItem.objects.create(cart=cart, product=self.product, variant=variant, quantity=1, unit_price=variant.effective_price)
+
+        order = place_order(cart, purchaser=self.member)
+
+        [line] = order.order_items.all()
+        self.assertEqual(line.variant, variant)
+        self.assertEqual(line.unit_price, Decimal("30.00"))
+        self.assertEqual(order.total, Decimal("30.00"))
 
     def test_an_applied_discount_reduces_the_total_and_is_recorded(self):
         cart = self.make_cart(quantity=2)  # 50.00

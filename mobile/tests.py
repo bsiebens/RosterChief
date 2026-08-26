@@ -18,7 +18,7 @@ from events.services.notifications import notify_new_event
 from members.models import Family, FamilyMembership, Member
 from news.models import News, NewsPhoto
 from notifications.models import Notification
-from shop.models import Cart, CartItem, Discount, Order, OrderLine, Product
+from shop.models import Cart, CartItem, Discount, Order, OrderLine, Product, ProductVariant
 from shop.services.checkout import place_order
 from teams.models import Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership
 
@@ -4771,6 +4771,65 @@ class ShopProductDetailViewTests(TestCase):
         self.assertEqual(response.status_code, 302)
         [item] = CartItem.objects.all()
         self.assertEqual(item.quantity, 3)
+
+    def test_add_to_cart_with_a_variant_uses_the_variants_price(self):
+        variant = ProductVariant.objects.create(product=self.product, name="Small", price=Decimal("30.00"))
+        self.client.force_login(self.user)
+
+        response = self.client.post(self._url(), {"quantity": "1", "variant": str(variant.pk)}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertRedirects(response, reverse("mobile:shop_cart"), fetch_redirect_response=False)
+        [item] = CartItem.objects.all()
+        self.assertEqual(item.variant, variant)
+        self.assertEqual(item.unit_price, Decimal("30.00"))
+
+    def test_add_to_cart_with_a_variant_with_no_price_override_uses_the_products_price(self):
+        variant = ProductVariant.objects.create(product=self.product, name="Small")
+        self.client.force_login(self.user)
+
+        self.client.post(self._url(), {"quantity": "1", "variant": str(variant.pk)}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        [item] = CartItem.objects.all()
+        self.assertEqual(item.unit_price, self.product.price)
+
+    def test_two_variants_of_the_same_product_are_separate_cart_rows(self):
+        small = ProductVariant.objects.create(product=self.product, name="Small")
+        medium = ProductVariant.objects.create(product=self.product, name="Medium")
+        self.client.force_login(self.user)
+
+        self.client.post(self._url(), {"quantity": "1", "variant": str(small.pk)}, HTTP_HOST="ajax-united.rosterchief.app")
+        self.client.post(self._url(), {"quantity": "1", "variant": str(medium.pk)}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(CartItem.objects.count(), 2)
+
+    def test_an_inactive_variant_is_rejected(self):
+        variant = ProductVariant.objects.create(product=self.product, name="Small", is_active=False)
+        self.client.force_login(self.user)
+
+        response = self.client.post(self._url(), {"quantity": "1", "variant": str(variant.pk)}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(CartItem.objects.exists())
+
+    def test_a_variant_belonging_to_another_product_is_rejected(self):
+        other_product = Product.objects.create(club=self.club, name="Away Jersey")
+        variant = ProductVariant.objects.create(product=other_product, name="Small")
+        self.client.force_login(self.user)
+
+        response = self.client.post(self._url(), {"quantity": "1", "variant": str(variant.pk)}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(CartItem.objects.exists())
+
+    def test_only_active_variants_are_offered(self):
+        ProductVariant.objects.create(product=self.product, name="Small")
+        ProductVariant.objects.create(product=self.product, name="Retired", is_active=False)
+        self.client.force_login(self.user)
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, "Small")
+        self.assertNotContains(response, "Retired")
 
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])

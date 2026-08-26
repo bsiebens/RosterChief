@@ -53,7 +53,7 @@ from members.services.family import add_child_to_family, add_parent_to_family, a
 from news.models import News, NewsPhoto
 from news.services import dispatch_send_publish_notification, notify_editors_of_pending_review
 from notifications.models import Notification
-from shop.models import Discount, Invoice, Order, Payment, Product
+from shop.models import Discount, Invoice, Order, Payment, Product, ProductVariant
 from shop.services.invoices import ShopInvoicePDFError, render_invoice_pdf
 from teams.models import Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
 from teams.services import eligible_roster_members
@@ -88,6 +88,7 @@ from .forms import (
     OrderMarkPaidForm,
     PositionForm,
     ProductForm,
+    ProductVariantForm,
     RBIHFImportForm,
     RecordFeePaymentForm,
     RefereeLevelForm,
@@ -3550,7 +3551,17 @@ class ProductUpdateView(ShopManagerRequiredMixin, UpdateView):
         return reverse("management:product_list")
 
     def get_context_data(self, **kwargs):
-        return super().get_context_data(update_view=True, **kwargs)
+        # Bound per-row so each variant's own "Edit" modal can render its own
+        # form -- same reasoning as FeatureListView's flags/competitions.
+        variants = list(self.object.variants.all())
+        for variant in variants:
+            variant.edit_form = ProductVariantForm(instance=variant)
+        return super().get_context_data(
+            update_view=True,
+            variants=variants,
+            variant_form=ProductVariantForm(),
+            **kwargs,
+        )
 
 
 class ProductToggleActiveView(ShopManagerRequiredMixin, View):
@@ -3567,6 +3578,71 @@ class ProductToggleActiveView(ShopManagerRequiredMixin, View):
         else:
             notify(request, f"w|{_('Product deactivated')}|{_('“%(product)s” is no longer active.') % {'product': product}}")
         return redirect("management:product_list")
+
+
+class ProductVariantCreateView(ShopManagerRequiredMixin, RedirectOnInvalidMixin, FormView):
+    """Reachable only via the "Add variant" modal on the product's own edit
+    page -- no standalone template, same shape as NewsPhotoUploadView."""
+
+    form_class = ProductVariantForm
+    http_method_names = ["post"]
+    invalid_redirect_url_name = "management:product_update"
+
+    def get_invalid_redirect_kwargs(self):
+        return {"pk": self.kwargs["pk"]}
+
+    def get_product(self):
+        return get_object_or_404(Product.objects.filter(club=self.request.club), pk=self.kwargs["pk"])
+
+    def form_valid(self, form):
+        product = self.get_product()
+        form.instance.product = product
+        form.save()
+        response = super().form_valid(form)
+        notify(self.request, f"s|{_('Variant added')}|{_('“%(variant)s” added to %(product)s.') % {'variant': form.instance.name, 'product': product}}")
+        return response
+
+    def get_success_url(self):
+        return reverse("management:product_update", kwargs={"pk": self.kwargs["pk"]})
+
+
+class ProductVariantUpdateView(ShopManagerRequiredMixin, RedirectOnInvalidMixin, UpdateView):
+    """Reachable only via a variant's own "Edit" modal on the product's edit
+    page -- same reasoning as ProductVariantCreateView."""
+
+    model = ProductVariant
+    form_class = ProductVariantForm
+    http_method_names = ["post"]
+    invalid_redirect_url_name = "management:product_update"
+
+    def get_invalid_redirect_kwargs(self):
+        return {"pk": self.kwargs["product_pk"]}
+
+    def get_queryset(self):
+        return ProductVariant.objects.filter(product__club=self.request.club, product__pk=self.kwargs["product_pk"])
+
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        notify(self.request, f"s|{_('Variant updated')}|{_('“%(variant)s” updated.') % {'variant': self.object.name}}")
+        return response
+
+    def get_success_url(self):
+        return reverse("management:product_update", kwargs={"pk": self.kwargs["product_pk"]})
+
+
+class ProductVariantToggleActiveView(ShopManagerRequiredMixin, View):
+    """No delete view -- same PROTECT-by-OrderLine reasoning as
+    ProductToggleActiveView, one level down."""
+
+    def post(self, request, product_pk, pk):
+        variant = get_object_or_404(ProductVariant.objects.filter(product__club=request.club, product__pk=product_pk), pk=pk)
+        variant.is_active = not variant.is_active
+        variant.save(update_fields=["is_active"])
+        if variant.is_active:
+            notify(request, f"s|{_('Variant activated')}|{_('“%(variant)s” is now active.') % {'variant': variant.name}}")
+        else:
+            notify(request, f"w|{_('Variant deactivated')}|{_('“%(variant)s” is no longer active.') % {'variant': variant.name}}")
+        return redirect("management:product_update", pk=product_pk)
 
 
 class DiscountListView(ShopManagerRequiredMixin, ListView):
@@ -3653,7 +3729,7 @@ class OrderDetailView(ShopManagerRequiredMixin, DetailView):
 
     def get_context_data(self, **kwargs):
         order = self.object
-        lines = order.order_items.select_related("product", "beneficiary", "team")
+        lines = order.order_items.select_related("product", "variant", "beneficiary", "team")
         applied_discounts = order.applied_discounts.select_related("discount")
         payments = order.payments.all()
         return super().get_context_data(

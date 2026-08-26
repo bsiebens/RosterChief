@@ -107,7 +107,7 @@
                 {% for line in lines %}
                     <tr>
                         <td>
-                            <strong>{{ line.product.name }}</strong>
+                            <strong>{{ line.product.name }}{% if line.variant %} — {{ line.variant.name }}{% endif %}</strong>
                             {% if line.beneficiary %}<div class="muted">{% trans "For" %} {{ line.beneficiary }}</div>{% endif %}
                         </td>
                         <td class="right">{{ line.quantity }}</td>

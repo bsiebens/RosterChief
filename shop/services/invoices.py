@@ -65,7 +65,7 @@ def _logo_data_uri(club) -> str | None:
 
 def render_invoice_pdf(invoice) -> bytes:
     order = invoice.order
-    lines = order.order_items.select_related("product", "beneficiary")
+    lines = order.order_items.select_related("product", "variant", "beneficiary")
     html = render_to_string(
         "shop/order_invoice_pdf.html",
         {

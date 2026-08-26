@@ -12,6 +12,12 @@
     nothing to disambiguate, so the hidden "beneficiary" field simply isn't
     submitted in that case (ShopProductDetailView.post then leaves the
     CartItem's beneficiary unset).
+
+    The variant picker (same chip styling, reused rather than inventing a
+    second chip look) only renders when the product actually has any active
+    variants -- most products don't. The first variant is pre-selected by
+    default so "Add to cart" always carries a valid one once any exist;
+    there's no unpicked/blank state to guard against.
 {% endcomment %}
 
 {% block content %}
@@ -36,8 +42,22 @@
         </div>
     </div>
 
-    <form method="post" class="m-card flex flex-col gap-4 p-4" x-data="{ qty: 1, beneficiary: '{{ me.pk }}' }">
+    <form method="post" class="m-card flex flex-col gap-4 p-4" x-data="{ qty: 1, beneficiary: '{{ me.pk }}', variant: '{{ variants.0.pk|default:"" }}' }">
         {% csrf_token %}
+
+        {% if variants %}
+            <div>
+                <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Option" %}</div>
+                <div class="scrollbar-hide flex gap-2 overflow-x-auto pb-0.5">
+                    {% for option in variants %}
+                        <button type="button" class="person-chip pl-2.5" :class="variant === '{{ option.pk }}' && 'person-chip-active'" @click="variant = '{{ option.pk }}'">
+                            <span class="person-chip-label">{{ option.name }}{% if option.price is not None %} &middot; &euro;{{ option.price|floatformat:2 }}{% endif %}</span>
+                        </button>
+                    {% endfor %}
+                </div>
+                <input type="hidden" name="variant" :value="variant">
+            </div>
+        {% endif %}
 
         {% if managed_people|length > 1 %}
             <div>

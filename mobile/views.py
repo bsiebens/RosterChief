@@ -998,15 +998,18 @@ class ShopHomeView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
 
 
 class ShopProductDetailView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
-    """Photo/description/price, a quantity stepper and -- since CartItem.beneficiary
-    exists specifically for this -- a chip row to say who it's for, mirroring
-    Home's own person-chip pattern. Only rendered once self.managed_people has
-    more than one person: a member ordering just for themselves has nothing to
-    disambiguate, so the item's beneficiary is simply left unset in that case.
+    """Photo/description/price, a variant picker (when the product has any --
+    see ProductVariant's own docstring for why it's one free-text label, not
+    separate size/colour axes), a quantity stepper and -- since CartItem.
+    beneficiary exists specifically for this -- a chip row to say who it's
+    for, mirroring Home's own person-chip pattern. The beneficiary chip row
+    only renders once self.managed_people has more than one person: a member
+    ordering just for themselves has nothing to disambiguate, so the item's
+    beneficiary is simply left unset in that case.
 
     "Add to cart" get-or-creates the member's open Cart for this club and
-    bumps quantity on the (cart, product, beneficiary) row if it already
-    exists, rather than erroring on the model's own unique constraint.
+    bumps quantity on the (cart, product, variant, beneficiary) row if it
+    already exists, rather than erroring on the model's own unique constraint.
     """
 
     template_name = "mobile/shop_product_detail.html"
@@ -1018,7 +1021,8 @@ class ShopProductDetailView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
 
     def get(self, request, *args, **kwargs):
         product = self._product()
-        return self.render_to_response(self.get_context_data(product=product))
+        variants = list(product.variants.filter(is_active=True))
+        return self.render_to_response(self.get_context_data(product=product, variants=variants))
 
     def get_context_data(self, **kwargs):
         return super().get_context_data(screen_title=kwargs["product"].name, **kwargs)
@@ -1033,6 +1037,13 @@ class ShopProductDetailView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
         except ValueError:
             quantity = 1
 
+        variant = None
+        variant_id = request.POST.get("variant")
+        if variant_id:
+            variant = product.variants.filter(pk=variant_id, is_active=True).first()
+            if variant is None:
+                return HttpResponseBadRequest(_("That option isn't available."))
+
         beneficiary = None
         beneficiary_id = request.POST.get("beneficiary")
         if beneficiary_id:
@@ -1040,8 +1051,9 @@ class ShopProductDetailView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
             if beneficiary is None:
                 return HttpResponseBadRequest(_("You can't order for that person."))
 
+        unit_price = variant.effective_price if variant is not None else product.price
         cart, _created = Cart.objects.get_or_create(club=request.club, user=request.user, status=Cart.CartStatus.OPEN)
-        item, item_created = CartItem.objects.get_or_create(cart=cart, product=product, beneficiary=beneficiary, defaults={"quantity": quantity, "unit_price": product.price})
+        item, item_created = CartItem.objects.get_or_create(cart=cart, product=product, variant=variant, beneficiary=beneficiary, defaults={"quantity": quantity, "unit_price": unit_price})
         if not item_created:
             item.quantity += quantity
             item.save(update_fields=["quantity"])
@@ -1068,7 +1080,7 @@ class ShopCartView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
 
     def get_context_data(self, **kwargs):
         cart = Cart.objects.filter(club=self.request.club, user=self.request.user, status=Cart.CartStatus.OPEN).first()
-        items = list(cart.items.select_related("product", "beneficiary").order_by("created")) if cart is not None else []
+        items = list(cart.items.select_related("product", "variant", "beneficiary").order_by("created")) if cart is not None else []
         for item in items:
             item.line_total = item.unit_price * item.quantity
 
@@ -1165,7 +1177,7 @@ class ShopOrderDetailView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
 
     def get_context_data(self, **kwargs):
         order = get_object_or_404(Order.objects.select_related("purchaser"), pk=self.kwargs["pk"], club=self.request.club, purchaser__in=self.managed_people)
-        lines = order.order_items.select_related("product", "beneficiary")
+        lines = order.order_items.select_related("product", "variant", "beneficiary")
         pill_class = ORDER_STATUS_PILL_CLASSES.get(order.status, "pill-neutral")
         return super().get_context_data(screen_title=order.number, order=order, lines=lines, pill_class=pill_class, **kwargs)
 

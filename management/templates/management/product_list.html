@@ -17,18 +17,20 @@
         The shop's own open/closed switch -- Club.shop_open, gating whether members
         can order at all. This is the natural "shop home" page for an admin, so it
         lives here rather than tucked away in club settings. Same banner-card
-        treatment as controlpanel's Maintenance mode card: the active state gets
-        the full club-colour treatment, not just a badge, since it's the one switch
-        on this page with real consequences for members.
+        treatment as controlpanel's Maintenance mode card (full colour, not just a
+        badge, since it's the one switch on this page with real consequences for
+        members) -- but the polarity is the opposite of Maintenance's: open is the
+        normal/good state here (green), closed is the one that needs noticing (red),
+        where for Maintenance "active" always means something's locked down.
     {% endcomment %}
-    <div class="card mb-4 overflow-hidden {% if club.shop_open %}border-2 border-club{% endif %}">
-        <div class="flex flex-wrap items-center gap-2.5 border-b border-line px-4 py-3 {% if club.shop_open %}bg-club{% else %}bg-subhead{% endif %}">
+    <div class="card mb-4 overflow-hidden border-2 {% if club.shop_open %}border-ok{% else %}border-club{% endif %}">
+        <div class="flex flex-wrap items-center gap-2.5 border-b border-line px-4 py-3 {% if club.shop_open %}bg-ok{% else %}bg-club{% endif %}">
             {% if club.shop_open %}
                 {% lucide "lock-open" size=18 class="shrink-0 text-white" %}
                 <span class="font-display text-sm font-extrabold tracking-[.1em] text-white uppercase">{% trans "Shop is open" %}</span>
             {% else %}
-                {% lucide "lock" size=18 class="shrink-0 text-muted" %}
-                <span class="font-display text-sm font-extrabold tracking-[.1em] text-ink uppercase">{% trans "Shop is closed" %}</span>
+                {% lucide "lock" size=18 class="shrink-0 text-white" %}
+                <span class="font-display text-sm font-extrabold tracking-[.1em] text-white uppercase">{% trans "Shop is closed" %}</span>
             {% endif %}
         </div>
         <div class="card-body flex-row flex-wrap items-center justify-between gap-3">
