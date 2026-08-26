@@ -2,7 +2,9 @@ import datetime
 from datetime import timedelta
 
 from django import forms
+from django.core.cache import cache
 from django.core.exceptions import ValidationError
+from django.core.management import call_command
 from django.db import IntegrityError
 from django.db.models import ProtectedError
 from django.test import TestCase
@@ -596,3 +598,86 @@ class NotifyFormSendTests(FormbuilderTestBase):
         result = notify_form_send("00000000-0000-0000-0000-000000000000")
 
         self.assertEqual(result, "Skipped: send no longer exists.")
+
+
+class SendFormRemindersTests(FormbuilderTestBase):
+    """formbuilder.management.commands.send_form_reminders -- one reminder
+    push per send, FORM_REMINDER_LEAD_TIME before it closes, to whoever
+    hasn't submitted yet. Same idempotent-via-timestamp shape as events'
+    own send_deadline_reminders."""
+
+    def setUp(self):
+        # Maintenance.save() writes through to the cache -- a DB rollback
+        # between tests doesn't clear it, see events.tests's own identical
+        # comment on this.
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def test_reminds_within_the_window_before_closing(self):
+        self.send.closes_at = timezone.now() + timedelta(days=2)
+        self.send.save()
+
+        result = call_command("send_form_reminders")
+
+        self.assertTrue(Notification.objects.filter(member=self.member, title=self.form.title).exists())
+        self.assertIn("Reminded 1 member(s) across 1 send(s)", result)
+
+    def test_does_not_remind_before_the_window_opens(self):
+        self.send.closes_at = timezone.now() + timedelta(days=10)
+        self.send.save()
+
+        call_command("send_form_reminders")
+
+        self.assertFalse(Notification.objects.exists())
+
+    def test_does_not_remind_after_closing(self):
+        self.send.closes_at = timezone.now() - timedelta(hours=1)
+        self.send.save()
+
+        call_command("send_form_reminders")
+
+        self.assertFalse(Notification.objects.exists())
+
+    def test_a_send_with_no_closes_at_is_never_picked_up(self):
+        call_command("send_form_reminders")
+
+        self.assertFalse(Notification.objects.exists())
+
+    def test_does_not_remind_someone_who_already_submitted(self):
+        self.send.closes_at = timezone.now() + timedelta(days=2)
+        self.send.save()
+        submit_form(self.fresh_send(), self.member, {"name": "Jane"})
+        Notification.objects.all().delete()
+
+        call_command("send_form_reminders")
+
+        self.assertFalse(Notification.objects.filter(member=self.member).exists())
+
+    def test_does_not_remind_the_same_send_twice(self):
+        self.send.closes_at = timezone.now() + timedelta(days=2)
+        self.send.save()
+
+        call_command("send_form_reminders")
+        Notification.objects.all().delete()
+        call_command("send_form_reminders")
+
+        self.assertFalse(Notification.objects.exists())
+
+    def test_marks_processed_even_when_nobody_needed_reminding(self):
+        self.send.closes_at = timezone.now() + timedelta(days=2)
+        self.send.save()
+        submit_form(self.fresh_send(), self.member, {"name": "Jane"})
+
+        call_command("send_form_reminders")
+
+        self.send.refresh_from_db()
+        self.assertIsNotNone(self.send.reminder_sent_at)
+
+    def test_an_inactive_send_is_skipped(self):
+        self.send.closes_at = timezone.now() + timedelta(days=2)
+        self.send.is_active = False
+        self.send.save()
+
+        call_command("send_form_reminders")
+
+        self.assertFalse(Notification.objects.exists())

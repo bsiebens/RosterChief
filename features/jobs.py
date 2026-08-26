@@ -77,4 +77,11 @@ JOB_REGISTRY = {
         "command": "notify_published_news",
         "args": [],
     },
+    "formbuilder.tasks.send_form_reminders": {
+        "label": _("Send form reminders"),
+        "description": _("Nudges whoever hasn't submitted a form send yet, a few days before it closes."),
+        "schedule": _("Daily at 07:30"),
+        "command": "send_form_reminders",
+        "args": [],
+    },
 }

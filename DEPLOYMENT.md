@@ -171,7 +171,7 @@ docker compose up -d --no-deps web
 
 ## Scheduled jobs
 
-Eight jobs run on a schedule via **host cron** calling `manage.py <job>` directly — there is no
+Nine jobs run on a schedule via **host cron** calling `manage.py <job>` directly — there is no
 `worker`/`beat` process (see "Sizing the server" for why: on a small box, two more persistent
 Django processes was real, measured memory pressure for a job volume light enough that a plain
 `docker compose run` one-off pays that cost for a few seconds instead of 24/7). Each job is a
@@ -189,10 +189,11 @@ class every one of them runs through.
 | `archive_overdue_clubs --commit` | daily 06:00 | archives clubs unpaid past their grace period |
 | `generate_seasons` | monthly, 1st 05:00 | generates the next 2 years of seasons for every active club |
 | `notify_published_news` | every 15 min | notifies the audience of any published news item whose publish time has arrived and hasn't been notified yet |
+| `send_form_reminders` | daily 07:30 | nudges whoever hasn't submitted a form send yet, a few days before it closes |
 
 **`--commit` is not optional for the two billing jobs it's shown on** — `send_billing_reminders`
 and `archive_overdue_clubs` default to a dry-run/report-only preview (per their own `--help`);
-without `--commit` cron would run them forever and nothing would actually happen. The other six
+without `--commit` cron would run them forever and nothing would actually happen. The other seven
 act by default. `renew_subscriptions` also has a `--dry-run` to preview instead, for manual use.
 
 ```cron
@@ -207,6 +208,7 @@ COMPOSE_FILE=compose.yaml
 0  5 * * *  flock -n /tmp/rosterchief-send_billing_reminders.lock -c "cd $REMOTE_DIR && docker compose -f $COMPOSE_FILE run --rm web python manage.py send_billing_reminders --commit"
 0  6 * * *  flock -n /tmp/rosterchief-archive_overdue_clubs.lock -c "cd $REMOTE_DIR && docker compose -f $COMPOSE_FILE run --rm web python manage.py archive_overdue_clubs --commit"
 0  5 1 * *  flock -n /tmp/rosterchief-generate_seasons.lock -c "cd $REMOTE_DIR && docker compose -f $COMPOSE_FILE run --rm web python manage.py generate_seasons"
+30 7 * * *  flock -n /tmp/rosterchief-send_form_reminders.lock -c "cd $REMOTE_DIR && docker compose -f $COMPOSE_FILE run --rm web python manage.py send_form_reminders"
 
 */15 * * * * flock -n /tmp/rosterchief-publish_scheduled_lineups.lock -c "cd $REMOTE_DIR && docker compose -f $COMPOSE_FILE run --rm web python manage.py publish_scheduled_lineups"
 */15 * * * * flock -n /tmp/rosterchief-notify_published_news.lock -c "cd $REMOTE_DIR && docker compose -f $COMPOSE_FILE run --rm web python manage.py notify_published_news"
@@ -252,7 +254,7 @@ Control panel → **Features → Maintenance mode**. While it is on:
   you with no way to turn it back off;
 - `/healthz` keeps answering on every host, or the load balancer would take the node out of
   rotation and the control panel with it;
-- the **scheduled jobs stand down** — the eight jobs in the table above, plus
+- the **scheduled jobs stand down** — the nine jobs in the table above, plus
   `import_members_csv` when run by hand.
 
 `migrate` and `collectstatic` are deliberately **not** blocked. Maintenance is usually
