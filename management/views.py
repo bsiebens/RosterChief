@@ -60,7 +60,7 @@ from shop.services.notifications import dispatch_order_ready_for_pickup_notifica
 from shop.services.payments import PaymentError, amount_due, sync_payment_status
 from shop.services.payments import record_payment as record_shop_payment
 from shop.services.pricing import order_total
-from shop.services.production import mark_lines_in_production, pending_production_lines, sync_production_status
+from shop.services.production import in_production_lines, mark_lines_in_production, pending_production_lines, sync_production_status
 from shop.services.stats import order_kpis, quantity_sold_by_product, quantity_sold_by_variant
 from teams.models import Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
 from teams.services import eligible_roster_members
@@ -3948,7 +3948,10 @@ class OrderListView(ShopManagerRequiredMixin, ListView):
         # list" modal's own checklist (order_list.html).
         production_products = (
             Product.objects.filter(club=self.request.club, product_type=Product.ProductType.MERCHANDISE)
-            .annotate(pending_count=Count("order_items", filter=Q(order_items__production_status=ProductionStatus.PENDING) & ~Q(order_items__order__fulfillment_status=Order.FulfillmentStatus.CANCELLED)))
+            .annotate(
+                pending_count=Count("order_items", filter=Q(order_items__production_status=ProductionStatus.PENDING) & ~Q(order_items__order__fulfillment_status=Order.FulfillmentStatus.CANCELLED)),
+                in_production_count=Count("order_items", filter=Q(order_items__production_status=ProductionStatus.IN_PRODUCTION) & ~Q(order_items__order__fulfillment_status=Order.FulfillmentStatus.CANCELLED)),
+            )
             .order_by("name")
         )
         return super().get_context_data(
@@ -3966,23 +3969,34 @@ class OrderListView(ShopManagerRequiredMixin, ListView):
         )
 
 
+def _selected_merchandise_products(request):
+    """Product queryset for the "Download order list" modal's two actions
+    below -- club-scoped, merchandise-only, resolved from ?product_ids=.
+    None (with a flashed error already sent) if nothing was selected."""
+    product_ids = request.POST.getlist("product_ids")
+    if not product_ids:
+        notify(request, f"e|{_('No products selected')}|{_('Select at least one product.')}")
+        return None
+    return Product.objects.filter(club=request.club, product_type=Product.ProductType.MERCHANDISE, pk__in=product_ids)
+
+
 class OrderProductionExportView(ShopManagerRequiredMixin, View):
-    """The Orders list's own "Download order list" modal -- exports every
-    not-yet-submitted OrderLine (shop.services.production.
+    """The Orders list's own "Download & mark in production" action -- exports
+    every not-yet-submitted OrderLine (shop.services.production.
     pending_production_lines) for the selected merchandise products to one
     .xlsx (one sheet per product, management.shop_export.build_production_export)
     and marks them IN_PRODUCTION so a repeat download doesn't resend what's
     already gone out. The file is built before anything is marked, so a
     failed export never marks lines sent that weren't. Manual correction
-    lives on the line item's own edit modal (OrderLineEditForm)."""
+    lives on the line item's own edit modal (OrderLineEditForm); to get a
+    fresh copy of what's already out without sending anything new, see
+    OrderProductionReprintView below."""
 
     def post(self, request):
-        product_ids = request.POST.getlist("product_ids")
-        if not product_ids:
-            notify(request, f"e|{_('No products selected')}|{_('Select at least one product.')}")
+        products = _selected_merchandise_products(request)
+        if products is None:
             return redirect("management:order_list")
 
-        products = Product.objects.filter(club=request.club, product_type=Product.ProductType.MERCHANDISE, pk__in=product_ids)
         lines = list(pending_production_lines(products))
         if not lines:
             notify(request, f"e|{_('Nothing to export')}|{_('No pending items for the selected products.')}")
@@ -3993,6 +4007,31 @@ class OrderProductionExportView(ShopManagerRequiredMixin, View):
 
         response = HttpResponse(content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
         response["Content-Disposition"] = 'attachment; filename="order-production-list.xlsx"'
+        workbook.save(response)
+        return response
+
+
+class OrderProductionReprintView(ShopManagerRequiredMixin, View):
+    """The Orders list's own "Redownload in production" action -- a fresh
+    copy of whatever's currently IN_PRODUCTION (shop.services.production.
+    in_production_lines) for the selected merchandise products, unchanged:
+    no line gets marked anything by this, it's purely for when the original
+    export is lost or a manufacturer needs it resent."""
+
+    def post(self, request):
+        products = _selected_merchandise_products(request)
+        if products is None:
+            return redirect("management:order_list")
+
+        lines = list(in_production_lines(products))
+        if not lines:
+            notify(request, f"e|{_('Nothing to download')}|{_('No items currently in production for the selected products.')}")
+            return redirect("management:order_list")
+
+        workbook = build_production_export(lines)
+
+        response = HttpResponse(content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        response["Content-Disposition"] = 'attachment; filename="order-in-production-list.xlsx"'
         workbook.save(response)
         return response
 

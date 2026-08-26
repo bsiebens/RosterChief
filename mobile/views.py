@@ -752,15 +752,19 @@ class MeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         if self.me is not None and season is not None:
             staff_assignments = list(StaffAssignment.objects.filter(member=self.me, season=season).select_related("team", "position").order_by("team__name"))
 
-        # Same managed_people aggregation as people_rows/open_dues_count above --
-        # a voucher issued to a managed child is just as much "mine" here as
-        # one issued to self.me. Fully consumed ones are excluded outright
-        # (nothing left to show for), but an expired or deactivated one with
-        # money still nominally on it stays visible with its own status pill --
-        # that's information, not just a used-up husk.
+        # Same family scoping as the "Add payment" voucher dropdown
+        # (management.forms.AddPaymentForm) -- self.me plus anyone sharing a
+        # Family with them (any role, both directions: Member.family_members),
+        # not just managed_people's one-directional children. Only ever
+        # usable vouchers show at all: expired, deactivated, or fully
+        # consumed ones are excluded outright rather than shown with a
+        # status pill -- nothing here can actually be spent.
         vouchers = []
-        if self.managed_people:
-            vouchers = list(Voucher.objects.filter(club=club, issued_to__in=self.managed_people).exclude(consumed_amount__gte=F("amount")).select_related("issued_to").order_by("expiry_date"))
+        if self.me is not None:
+            family_ids = {self.me.pk, *self.me.family_members.values_list("pk", flat=True)}
+            vouchers = list(
+                Voucher.objects.filter(club=club, issued_to__in=family_ids, is_active=True, expiry_date__gte=timezone.localdate(), consumed_amount__lt=F("amount")).select_related("issued_to").order_by("expiry_date")
+            )
 
         return super().get_context_data(
             member_since=member_since,

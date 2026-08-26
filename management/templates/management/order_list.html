@@ -207,26 +207,30 @@
 
     {% if production_products %}
         <dialog id="download_production_modal" class="modal">
-            <div class="modal-box">
+            <div class="modal-box w-[48rem]">
                 <h3 class="text-lg font-bold">{% trans "Download order list" %}</h3>
-                <p class="py-2 text-sm opacity-70">{% trans "Exports every not-yet-submitted line for the products you pick, one sheet per product, and marks them in production -- a repeat download only ever includes what's new since." %}</p>
+                <p class="py-2 text-sm opacity-70">{% trans "Pick which products, then either send new items to production or get a fresh copy of what's already out." %}</p>
                 <form method="post" action="{% url 'management:order_production_export' %}" id="download_production_form" class="flex flex-col gap-2">
                     {% csrf_token %}
                     {% for product in production_products %}
-                        <label class="flex cursor-pointer items-center justify-between gap-2 rounded-lg border border-line px-3 py-2 {% if not product.pending_count %}opacity-50{% endif %}">
+                        <label class="flex cursor-pointer items-center justify-between gap-2 rounded-lg border border-line px-3 py-2 {% if not product.pending_count and not product.in_production_count %}opacity-50{% endif %}">
                             <span class="flex items-center gap-2 text-sm text-ink">
-                                <input type="checkbox" class="checkbox" name="product_ids" value="{{ product.pk }}" {% if not product.pending_count %}disabled{% endif %}>
+                                <input type="checkbox" class="checkbox" name="product_ids" value="{{ product.pk }}" {% if not product.pending_count and not product.in_production_count %}disabled{% endif %}>
                                 {{ product.name }}
                             </span>
-                            <span class="badge badge-sm badge-neutral">{% blocktrans count counter=product.pending_count %}{{ counter }} pending{% plural %}{{ counter }} pending{% endblocktrans %}</span>
+                            <span class="flex gap-1.5">
+                                <span class="badge badge-sm badge-neutral">{% blocktrans count counter=product.pending_count %}{{ counter }} pending{% plural %}{{ counter }} pending{% endblocktrans %}</span>
+                                <span class="badge badge-sm badge-info">{% blocktrans count counter=product.in_production_count %}{{ counter }} in production{% plural %}{{ counter }} in production{% endblocktrans %}</span>
+                            </span>
                         </label>
                     {% endfor %}
                 </form>
-                <div class="modal-action">
+                <div class="modal-action flex-nowrap">
                     <form method="dialog">
                         <button class="btn btn-outline gap-2">{% lucide "x" size=16 %} {% trans "Cancel" %}</button>
                     </form>
-                    <button class="btn btn-primary gap-2" type="submit" form="download_production_form">{% lucide "file-down" size=16 %} {% trans "Download" %}</button>
+                    <button class="btn btn-outline gap-2" type="submit" form="download_production_form" formaction="{% url 'management:order_production_reprint' %}">{% lucide "refresh-cw" size=16 %} {% trans "Redownload in production" %}</button>
+                    <button class="btn btn-primary gap-2" type="submit" form="download_production_form">{% lucide "file-down" size=16 %} {% trans "Download & mark in production" %}</button>
                 </div>
             </div>
             <form method="dialog" class="modal-backdrop"><button>close</button></form>

@@ -97,20 +97,11 @@
                             <div class="min-w-0 flex-1">
                                 <div class="text-[15px] font-semibold text-ink">
                                     {{ voucher.number }}
-                                    {% if managed_people|length > 1 %}<span class="font-normal text-muted">&middot; {{ voucher.issued_to.first_name }}</span>{% endif %}
+                                    {% if voucher.issued_to != me %}<span class="font-normal text-muted">&middot; {{ voucher.issued_to.first_name }}</span>{% endif %}
                                 </div>
                                 <div class="text-xs text-muted">{% blocktrans with date=voucher.expiry_date|date:"d M Y" %}Expires {{ date }}{% endblocktrans %}</div>
                             </div>
-                            <div class="flex shrink-0 flex-col items-end gap-1">
-                                <span class="font-display text-sm font-extrabold text-ink">{% blocktrans with amount=voucher.available_amount|floatformat:2 %}&euro; {{ amount }}{% endblocktrans %}</span>
-                                {% if not voucher.is_active %}
-                                    <span class="pill pill-sm pill-neutral">{% trans "Inactive" %}</span>
-                                {% elif voucher.is_expired %}
-                                    <span class="pill pill-sm pill-danger">{% trans "Expired" %}</span>
-                                {% else %}
-                                    <span class="pill pill-sm pill-ok">{% trans "Usable" %}</span>
-                                {% endif %}
-                            </div>
+                            <span class="shrink-0 font-display text-sm font-extrabold text-ink">{% blocktrans with amount=voucher.available_amount|floatformat:2 %}&euro; {{ amount }}{% endblocktrans %}</span>
                         </div>
                     {% endfor %}
                 </div>

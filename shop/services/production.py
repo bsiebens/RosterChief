@@ -20,6 +20,19 @@ def pending_production_lines(products):
     )
 
 
+def in_production_lines(products):
+    """Every OrderLine for these products currently in production -- already
+    sent to a manufacturer, not yet received back. What "redownload the
+    in-production list" reprints, unchanged: no mutation, just a fresh copy
+    of what's already out (e.g. the original export got lost)."""
+    return (
+        OrderLine.objects.filter(product__in=products, production_status=ProductionStatus.IN_PRODUCTION)
+        .exclude(order__fulfillment_status=Order.FulfillmentStatus.CANCELLED)
+        .select_related("order", "order__purchaser", "beneficiary", "variant", "product")
+        .order_by("product__name", "order__number")
+    )
+
+
 def sync_production_status(order):
     """Recomputes Order.production_status from its own merchandise
     OrderLines: PENDING while every one is, RECEIVED once every one is,

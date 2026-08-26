@@ -9664,6 +9664,85 @@ class OrderProductionExportTests(ShopTestBase):
         self.assertEqual(response.status_code, 403)
 
 
+class OrderProductionReprintTests(ShopTestBase):
+    """OrderProductionReprintView -- the Orders list's own "Redownload in
+    production" action. A fresh, unchanged copy of whatever's already been
+    sent to a manufacturer for the selected products; unlike
+    OrderProductionExportView, this never marks anything."""
+
+    def setUp(self):
+        super().setUp()
+        self.product.product_type = Product.ProductType.MERCHANDISE
+        self.product.save(update_fields=["product_type"])
+        self.purchaser = Member.objects.create(first_name="Olly", last_name="Orderer", email="olly-reprint@example.com")
+
+    def make_line(self, product=None, order=None, **overrides):
+        order = order or Order.objects.create(club=self.club, purchaser=self.purchaser, total=Decimal("25.00"))
+        kwargs = {"order": order, "product": product or self.product, "quantity": 1, "unit_price": Decimal("25.00"), "line_total": Decimal("25.00")}
+        kwargs.update(overrides)
+        return OrderLine.objects.create(**kwargs)
+
+    def test_reprints_lines_currently_in_production(self):
+        line = self.make_line(production_status=ProductionStatus.IN_PRODUCTION)
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_post("order_production_reprint", {"product_ids": [str(self.product.pk)]})
+
+        self.assertEqual(response.status_code, 200)
+        workbook = openpyxl.load_workbook(BytesIO(response.content))
+        rows = list(workbook.active.iter_rows(values_only=True))
+        self.assertIn((line.order.number, "Orderer", "Olly", None, None, None, 1), rows)
+
+    def test_does_not_mark_anything(self):
+        line = self.make_line(production_status=ProductionStatus.IN_PRODUCTION)
+        self.client.force_login(self.make_shop_manager())
+
+        self.club_post("order_production_reprint", {"product_ids": [str(self.product.pk)]})
+
+        line.refresh_from_db()
+        self.assertEqual(line.production_status, ProductionStatus.IN_PRODUCTION)
+
+    def test_pending_lines_are_not_included(self):
+        self.make_line()  # still PENDING, never exported
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_post("order_production_reprint", {"product_ids": [str(self.product.pk)]})
+
+        self.assertRedirects(response, reverse("management:order_list"))
+
+    def test_received_lines_are_not_included(self):
+        self.make_line(production_status=ProductionStatus.RECEIVED)
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_post("order_production_reprint", {"product_ids": [str(self.product.pk)]})
+
+        self.assertRedirects(response, reverse("management:order_list"))
+
+    def test_cancelled_orders_are_excluded(self):
+        order = Order.objects.create(club=self.club, purchaser=self.purchaser, total=Decimal("25.00"), fulfillment_status=Order.FulfillmentStatus.CANCELLED)
+        self.make_line(order=order, production_status=ProductionStatus.IN_PRODUCTION)
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_post("order_production_reprint", {"product_ids": [str(self.product.pk)]})
+
+        self.assertRedirects(response, reverse("management:order_list"))
+
+    def test_no_products_selected_shows_an_error(self):
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_post("order_production_reprint", {})
+
+        self.assertRedirects(response, reverse("management:order_list"))
+
+    def test_plain_staff_cannot_reprint(self):
+        self.make_line(production_status=ProductionStatus.IN_PRODUCTION)
+        self.client.force_login(self.make_plain_staff())
+
+        response = self.club_post("order_production_reprint", {"product_ids": [str(self.product.pk)]})
+
+        self.assertEqual(response.status_code, 403)
+
+
 class InvoicePdfViewTests(ShopTestBase):
     """Mirrors club.tests.InvoicePdfTests/shop.tests.InvoicePdfTests's own mocking
     technique -- patched where management.views imported it, not at its source."""

@@ -2028,14 +2028,43 @@ class MeViewTests(TestCase):
 
         self.assertNotContains(response, voucher.number)
 
-    def test_an_expired_voucher_still_shows_with_its_own_status(self):
+    def test_an_expired_voucher_is_hidden(self):
         voucher = Voucher.objects.create(club=self.club, issued_to=self.member, amount=Decimal("50.00"), expiry_date=timezone.localdate() - datetime.timedelta(days=1))
         self.client.force_login(self.user)
 
         response = self._get()
 
+        self.assertNotContains(response, voucher.number)
+
+    def test_an_inactive_voucher_is_hidden(self):
+        voucher = Voucher.objects.create(club=self.club, issued_to=self.member, amount=Decimal("50.00"), is_active=False, expiry_date=timezone.localdate() + datetime.timedelta(days=30))
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertNotContains(response, voucher.number)
+
+    def test_a_voucher_issued_to_a_family_member_outside_managed_people_shows_up(self):
+        # The other parent -- family-scoped (Member.family_members), not the
+        # narrower one-directional managed_people (self.me's own children).
+        other_parent = Member.objects.create(first_name="Piet", last_name="Bakker")
+        FamilyMembership.objects.create(family=self.family, member=other_parent, role=FamilyMembership.FamilyRole.PARENT)
+        voucher = Voucher.objects.create(club=self.club, issued_to=other_parent, amount=Decimal("15.00"), expiry_date=timezone.localdate() + datetime.timedelta(days=30))
+        self.client.force_login(self.user)
+
+        response = self._get()
+
         self.assertContains(response, voucher.number)
-        self.assertContains(response, "Expired")
+        self.assertContains(response, "Piet")
+
+    def test_a_voucher_issued_to_someone_outside_the_family_is_not_shown(self):
+        outsider = Member.objects.create(first_name="Otto", last_name="Outsider")
+        voucher = Voucher.objects.create(club=self.club, issued_to=outsider, amount=Decimal("15.00"), expiry_date=timezone.localdate() + datetime.timedelta(days=30))
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertNotContains(response, voucher.number)
 
     def test_a_voucher_from_another_club_is_not_shown(self):
         other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
