@@ -202,18 +202,31 @@ class CartItem(UUIDModel):
 
 
 class Order(ClubScopedModel):
-    class OrderStatus(models.TextChoices):
+    #: Independent from FulfillmentStatus on purpose -- "paid" and "picked up"
+    #: are two different questions (see FulfillmentStatus's own docstring for
+    #: why a single combined status field couldn't answer both at once
+    #: without a member-comment.md-worthy JOIN against Payment every time
+    #: something needed to know just one of them).
+    class PaymentStatus(models.TextChoices):
         PENDING = "pending", _("Pending")
-        PAID = "paid", _("Paid")
         PARTIALLY_PAID = "partially_paid", _("Partially paid")
-        READY_FOR_PICKUP = "ready_for_pickup", _("Ready for pickup")
-        CANCELLED = "cancelled", _("Cancelled")
+        PAID = "paid", _("Paid")
         REFUNDED = "refunded", _("Refunded")
+
+    class FulfillmentStatus(models.TextChoices):
+        NOT_READY = "not_ready", _("Not ready")
+        READY_FOR_PICKUP = "ready_for_pickup", _("Ready for pickup")
         DELIVERED = "delivered", _("Delivered")
+        #: A fulfillment outcome, not a payment one -- an order can be
+        #: cancelled before or after being paid (payment_status keeps
+        #: tracking independently; a cancelled-but-unrefunded order is a
+        #: real, valid combination, not a contradiction).
+        CANCELLED = "cancelled", _("Cancelled")
 
     number = models.CharField(_("number"), max_length=255, blank=True)
     purchaser = models.ForeignKey(Member, on_delete=models.PROTECT, related_name="orders", verbose_name=_("purchaser"))
-    status = models.CharField(_("status"), max_length=255, choices=OrderStatus.choices, default=OrderStatus.PENDING)
+    payment_status = models.CharField(_("payment status"), max_length=255, choices=PaymentStatus.choices, default=PaymentStatus.PENDING)
+    fulfillment_status = models.CharField(_("fulfillment status"), max_length=255, choices=FulfillmentStatus.choices, default=FulfillmentStatus.NOT_READY)
     total = models.DecimalField(_("total"), max_digits=10, decimal_places=2)
     #: Set (optionally) the moment an order is marked ready for pickup --
     #: shown to the member on their own order and in the notification that
@@ -236,6 +249,17 @@ class Order(ClubScopedModel):
 
     def clean(self):
         validate_club_scope(self, self.club_id, member_fields=("purchaser",))
+
+    @property
+    def is_closed(self) -> bool:
+        """Delivered *and* paid -- genuinely finished, nothing left to
+        collect or hand over. A delivered-but-unpaid order is deliberately
+        still "open": someone still needs to collect payment for it. Drives
+        OrderListView's own default "hide closed" filter and
+        shop.services.stats.order_kpis' open_orders count -- both read this
+        exact property so the KPI strip and the list underneath it never
+        disagree."""
+        return self.fulfillment_status == self.FulfillmentStatus.DELIVERED and self.payment_status == self.PaymentStatus.PAID
 
     def generate_number(self):
         """Next per-club order number for the current year: ``ORD-<year>-<seq>``."""

@@ -29,8 +29,12 @@ from teams.models import StaffAssignment, Team, TeamMembership
 
 ZERO = Decimal("0.00")
 
-PAID_STATUSES = (Order.OrderStatus.PAID, Order.OrderStatus.DELIVERED)
-OWED_STATUSES = (Order.OrderStatus.PENDING, Order.OrderStatus.PARTIALLY_PAID, Order.OrderStatus.READY_FOR_PICKUP)
+#: Order.payment_status, not fulfillment_status -- "has the club actually
+#: been paid" is a payment question regardless of whether the item's been
+#: handed over yet (see Order.is_closed's own docstring for why the two are
+#: independent).
+PAID_STATUSES = (Order.PaymentStatus.PAID,)
+OWED_STATUSES = (Order.PaymentStatus.PENDING, Order.PaymentStatus.PARTIALLY_PAID)
 
 #: A club with nothing scheduled inside this window has stopped using the product.
 DORMANT_DAYS = 30
@@ -82,7 +86,7 @@ def clubs_with_health(queryset=None, today=None, now=None):
             has_season=Exists(Season.objects.filter(club=OuterRef("pk"), start_date__lte=today, end_date__gte=today)),
             active_members=_subquery(ClubMembership.objects.filter(in_season, kind=ClubMembership.Kind.MEMBER, status=ClubMembership.StatusChoices.ACTIVE), Count("pk"), IntegerField()),
             unpaid_members=_subquery(ClubMembership.objects.filter(in_season, kind=ClubMembership.Kind.MEMBER, fee_status=ClubMembership.FeeStatus.UNPAID), Count("pk"), IntegerField()),
-            outstanding=_subquery(Order.objects.filter(status__in=OWED_STATUSES), Sum("total"), DecimalField(max_digits=10, decimal_places=2)),
+            outstanding=_subquery(Order.objects.filter(payment_status__in=OWED_STATUSES), Sum("total"), DecimalField(max_digits=10, decimal_places=2)),
             upcoming_events=_subquery(Event.objects.filter(start__gte=now, start__lte=now + timedelta(days=DORMANT_DAYS)), Count("pk"), IntegerField()),
             team_count=_subquery(Team.objects.all(), Count("pk"), IntegerField()),
             teams_managed=_subquery(Team.objects.filter(managed_this_season), Count("pk", distinct=True), IntegerField()),
@@ -227,7 +231,7 @@ def platform_attention():
         "clubs_without_season": clubs_without_a_season().count(),
         "dormant_clubs": dormant_clubs().count(),
         "admins_pending_mfa": admins_pending_mfa().count(),
-        "outstanding": _money(Order.objects.filter(status__in=OWED_STATUSES)),
+        "outstanding": _money(Order.objects.filter(payment_status__in=OWED_STATUSES)),
         "members_without_login": Member.objects.filter(user__isnull=True).count(),
         "members": members,
         # Platform billing: what the clubs owe US. Distinct from `outstanding`, which is
@@ -274,7 +278,7 @@ def platform_charts():
         # `club_revenue` is members paying their clubs — never ours, and labelling it
         # "revenue" on our dashboard would be a lie.
         "dues": _monthly(DuePayment.objects.all(), "paid_at", Sum("amount")),
-        "club_revenue": _monthly(Order.objects.filter(status__in=PAID_STATUSES), "created", Sum("total")),
+        "club_revenue": _monthly(Order.objects.filter(payment_status__in=PAID_STATUSES), "created", Sum("total")),
     }
 
 
@@ -388,7 +392,7 @@ def fee_aging(club):
     """Unpaid orders bucketed by age. "€2,400 overdue past 60 days" drives a phone call;
     "€2,400 outstanding" does not."""
     now = timezone.now()
-    owed = Order.objects.filter(club=club, status__in=OWED_STATUSES)
+    owed = Order.objects.filter(club=club, payment_status__in=OWED_STATUSES)
 
     buckets = []
     for label, older_than, newer_than in ((_("0-30 days"), 0, 30), (_("30-60 days"), 30, 60), (_("60+ days"), 60, None)):
@@ -433,7 +437,7 @@ def club_attention(club):
     return {
         "season": season,
         "no_season": season is None,
-        "outstanding": _money(Order.objects.filter(club=club, status__in=OWED_STATUSES)),
+        "outstanding": _money(Order.objects.filter(club=club, payment_status__in=OWED_STATUSES)),
         "aging": fee_aging(club),
         "unpaid_members": memberships.filter(season=season, fee_status=ClubMembership.FeeStatus.UNPAID).count() if season else 0,
         "pending_approvals": memberships.filter(status=ClubMembership.StatusChoices.PENDING).count(),
@@ -506,13 +510,13 @@ def club_statistics(club):
             "icon": "shopping-cart",
             "stats": [
                 (_("Orders"), orders.count()),
-                (_("Revenue"), _money(orders.filter(status__in=PAID_STATUSES))),
-                (_("Outstanding"), _money(orders.filter(status__in=OWED_STATUSES))),
+                (_("Revenue"), _money(orders.filter(payment_status__in=PAID_STATUSES))),
+                (_("Outstanding"), _money(orders.filter(payment_status__in=OWED_STATUSES))),
                 # Same order set as "Outstanding" above (OWED_STATUSES), just a
                 # count instead of a total -- "Open carts" (never-checked-out
                 # Cart rows) measured the wrong thing entirely for a club admin
                 # deciding whether anyone needs chasing.
-                (_("Orders unpaid"), orders.filter(status__in=OWED_STATUSES).count()),
+                (_("Orders unpaid"), orders.filter(payment_status__in=OWED_STATUSES).count()),
             ],
         },
     ]

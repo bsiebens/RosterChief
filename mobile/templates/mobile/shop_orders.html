@@ -27,7 +27,10 @@
                             {% blocktrans with name=row.order.purchaser.first_name date=row.order.created|date:"d M Y" %}{{ name }} &middot; {{ date }}{% endblocktrans %}
                         </div>
                     </div>
-                    <span class="pill {{ row.pill_class }} shrink-0">{{ row.order.get_status_display }}</span>
+                    <div class="flex shrink-0 flex-col items-end gap-1">
+                        <span class="pill {{ row.payment_pill_class }}">{{ row.order.get_payment_status_display }}</span>
+                        <span class="pill {{ row.fulfillment_pill_class }}">{{ row.order.get_fulfillment_status_display }}</span>
+                    </div>
                     {% lucide "chevron-right" size=18 class="shrink-0 text-dim" %}
                 </a>
             {% endfor %}

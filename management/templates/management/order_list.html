@@ -16,14 +16,23 @@
                 {# No submit button -- data-autosubmit (base.html-loaded script) submits the form itself, debounced, as soon as typing pauses. #}
                 <input type="search" name="q" value="{{ search }}" placeholder="{% trans 'Name, family, or order number ...' %}" class="input w-72 pl-9" data-autosubmit>
             </div>
-            {# Empty value is the default view (closed/delivered orders hidden, see OrderListView's own docstring) -- "all" is an explicit opt-in to see everything, not the same as no filter at all. #}
-            <select name="status" class="select w-auto" onchange="this.form.submit()">
-                <option value="" {% if not selected_status %}selected{% endif %}>{% trans "Open (hides closed)" %}</option>
-                <option value="all" {% if selected_status == "all" %}selected{% endif %}>{% trans "All statuses" %}</option>
-                {% for value, label in status_choices %}
-                    <option value="{{ value }}" {% if value == selected_status %}selected{% endif %}>{{ label }}</option>
+            {# Neither select set + show!=all is the default view (closed orders hidden, see OrderListView's own docstring) -- "Show closed" is an explicit opt-in to see everything, not the same as no filter at all. #}
+            <select name="payment_status" class="select w-auto" onchange="this.form.submit()">
+                <option value="" {% if not selected_payment_status %}selected{% endif %}>{% trans "Any payment status" %}</option>
+                {% for value, label in payment_status_choices %}
+                    <option value="{{ value }}" {% if value == selected_payment_status %}selected{% endif %}>{{ label }}</option>
                 {% endfor %}
             </select>
+            <select name="fulfillment_status" class="select w-auto" onchange="this.form.submit()">
+                <option value="" {% if not selected_fulfillment_status %}selected{% endif %}>{% trans "Any fulfillment status" %}</option>
+                {% for value, label in fulfillment_status_choices %}
+                    <option value="{{ value }}" {% if value == selected_fulfillment_status %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+            <label class="label cursor-pointer gap-2">
+                <input type="checkbox" name="show" value="all" class="checkbox checkbox-sm" {% if show_all %}checked{% endif %} onchange="this.form.submit()">
+                <span class="label-text">{% trans "Show closed" %}</span>
+            </label>
             {% if search %}
                 <a class="btn btn-outline gap-2" href="{% url "management:order_list" %}">{% lucide "x" size=14 %} {% trans "Clear" %}</a>
             {% endif %}
@@ -87,7 +96,8 @@
                         <th><input type="checkbox" class="checkbox" id="select-all-orders"></th>
                         <th>{% trans "Order" %}</th>
                         <th>{% trans "Purchaser" %}</th>
-                        <th>{% trans "Status" %}</th>
+                        <th>{% trans "Payment" %}</th>
+                        <th>{% trans "Fulfillment" %}</th>
                         <th>{% trans "Total" %}</th>
                         <th>{% trans "Placed" %}</th>
                         <th></th>
@@ -96,17 +106,25 @@
                 <tbody>
                     {% for order in orders %}
                         <tr>
-                            <td>{% if order.status != "cancelled" %}<input type="checkbox" class="checkbox order-row-checkbox" name="order_ids" value="{{ order.pk }}">{% endif %}</td>
+                            <td>{% if order.fulfillment_status != "cancelled" %}<input type="checkbox" class="checkbox order-row-checkbox" name="order_ids" value="{{ order.pk }}">{% endif %}</td>
                             <td><a class="link link-hover font-mono text-xs" href="{% url 'management:order_detail' order.pk %}">{{ order.number }}</a></td>
                             <td class="font-semibold">{{ order.purchaser }}</td>
                             <td>
                                 <span class="badge badge-sm
-                                    {% if order.status == "paid" or order.status == "delivered" %}badge-success
-                                    {% elif order.status == "ready_for_pickup" %}badge-info
-                                    {% elif order.status == "partially_paid" %}badge-warning
-                                    {% elif order.status == "cancelled" or order.status == "refunded" %}badge-error
+                                    {% if order.payment_status == "paid" %}badge-success
+                                    {% elif order.payment_status == "partially_paid" %}badge-warning
+                                    {% elif order.payment_status == "refunded" %}badge-error
                                     {% else %}badge-neutral{% endif %}">
-                                    {{ order.get_status_display }}
+                                    {{ order.get_payment_status_display }}
+                                </span>
+                            </td>
+                            <td>
+                                <span class="badge badge-sm
+                                    {% if order.fulfillment_status == "delivered" %}badge-success
+                                    {% elif order.fulfillment_status == "ready_for_pickup" %}badge-info
+                                    {% elif order.fulfillment_status == "cancelled" %}badge-error
+                                    {% else %}badge-neutral{% endif %}">
+                                    {{ order.get_fulfillment_status_display }}
                                 </span>
                             </td>
                             <td class="font-mono text-xs tabular-nums">&euro; {{ order.total }}</td>
@@ -117,7 +135,7 @@
                         </tr>
                     {% empty %}
                         <tr>
-                            <td colspan="7" class="text-center text-dim">{% trans "No orders yet." %}</td>
+                            <td colspan="8" class="text-center text-dim">{% trans "No orders yet." %}</td>
                         </tr>
                     {% endfor %}
                 </tbody>

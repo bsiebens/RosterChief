@@ -275,7 +275,7 @@ class OrderNumberTests(TestCase):
         order = self.make_order()
         original = order.number
 
-        order.status = Order.OrderStatus.PAID
+        order.payment_status = Order.PaymentStatus.PAID
         order.save()
 
         order.refresh_from_db()
@@ -797,7 +797,7 @@ class OrderReadyForPickupNotificationTests(TestCase):
     def setUpTestData(cls):
         cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
         cls.member = Member.objects.create(first_name="Jane", last_name="Doe", email="shopper@example.com", user=User.objects.create_user(email="shopper@example.com", password="pw-secret-123"))
-        cls.order = Order.objects.create(club=cls.club, purchaser=cls.member, status=Order.OrderStatus.READY_FOR_PICKUP, total=Decimal("50.00"))
+        cls.order = Order.objects.create(club=cls.club, purchaser=cls.member, fulfillment_status=Order.FulfillmentStatus.READY_FOR_PICKUP, total=Decimal("50.00"))
 
     def test_creates_an_in_app_notification(self):
         dispatch_order_ready_for_pickup_notification(self.order)
@@ -900,38 +900,39 @@ class OrderKPIsTests(TestCase):
         cls.member = Member.objects.create(first_name="Jane", last_name="Doe")
         cls.product = Product.objects.create(club=cls.club, name="Home Jersey", price=Decimal("25.00"))
 
-    def make_order(self, status, total=Decimal("50.00"), quantity=2):
-        order = Order.objects.create(club=self.club, purchaser=self.member, status=status, total=total)
+    def make_order(self, payment_status=Order.PaymentStatus.PENDING, fulfillment_status=Order.FulfillmentStatus.NOT_READY, total=Decimal("50.00"), quantity=2):
+        order = Order.objects.create(club=self.club, purchaser=self.member, payment_status=payment_status, fulfillment_status=fulfillment_status, total=total)
         OrderLine.objects.create(order=order, product=self.product, quantity=quantity, unit_price=Decimal("25.00"), line_total=total)
         return order
 
-    def test_open_orders_excludes_delivered_cancelled_and_refunded(self):
-        self.make_order(Order.OrderStatus.PENDING)
-        self.make_order(Order.OrderStatus.PAID)
-        self.make_order(Order.OrderStatus.PARTIALLY_PAID)
-        self.make_order(Order.OrderStatus.DELIVERED)
-        self.make_order(Order.OrderStatus.CANCELLED)
-        self.make_order(Order.OrderStatus.REFUNDED)
+    def test_open_orders_excludes_only_delivered_and_paid_orders(self):
+        self.make_order(Order.PaymentStatus.PENDING, Order.FulfillmentStatus.NOT_READY)
+        self.make_order(Order.PaymentStatus.PAID, Order.FulfillmentStatus.NOT_READY)
+        self.make_order(Order.PaymentStatus.PARTIALLY_PAID, Order.FulfillmentStatus.NOT_READY)
+        self.make_order(Order.PaymentStatus.PAID, Order.FulfillmentStatus.DELIVERED)
+        # Delivered but unpaid still counts as open -- payment still needs collecting.
+        self.make_order(Order.PaymentStatus.PENDING, Order.FulfillmentStatus.DELIVERED)
+        self.make_order(Order.PaymentStatus.REFUNDED, Order.FulfillmentStatus.CANCELLED)
 
-        self.assertEqual(order_kpis(self.club)["open_orders"], 3)
+        self.assertEqual(order_kpis(self.club)["open_orders"], 5)
 
     def test_total_orders_counts_every_status(self):
-        self.make_order(Order.OrderStatus.PENDING)
-        self.make_order(Order.OrderStatus.CANCELLED)
+        self.make_order(Order.PaymentStatus.PENDING, Order.FulfillmentStatus.NOT_READY)
+        self.make_order(Order.PaymentStatus.REFUNDED, Order.FulfillmentStatus.CANCELLED)
 
         self.assertEqual(order_kpis(self.club)["total_orders"], 2)
 
-    def test_total_sold_only_counts_paid_and_delivered(self):
-        self.make_order(Order.OrderStatus.PAID, total=Decimal("30.00"))
-        self.make_order(Order.OrderStatus.DELIVERED, total=Decimal("20.00"))
-        self.make_order(Order.OrderStatus.PENDING, total=Decimal("999.00"))
-        self.make_order(Order.OrderStatus.CANCELLED, total=Decimal("999.00"))
+    def test_total_sold_only_counts_paid_orders_regardless_of_fulfillment(self):
+        self.make_order(Order.PaymentStatus.PAID, Order.FulfillmentStatus.NOT_READY, total=Decimal("30.00"))
+        self.make_order(Order.PaymentStatus.PAID, Order.FulfillmentStatus.DELIVERED, total=Decimal("20.00"))
+        self.make_order(Order.PaymentStatus.PENDING, Order.FulfillmentStatus.DELIVERED, total=Decimal("999.00"))
+        self.make_order(Order.PaymentStatus.REFUNDED, Order.FulfillmentStatus.CANCELLED, total=Decimal("999.00"))
 
         self.assertEqual(order_kpis(self.club)["total_sold"], Decimal("50.00"))
 
     def test_items_sold_matches_total_sold_scope(self):
-        self.make_order(Order.OrderStatus.PAID, quantity=3)
-        self.make_order(Order.OrderStatus.PENDING, quantity=99)
+        self.make_order(Order.PaymentStatus.PAID, Order.FulfillmentStatus.NOT_READY, quantity=3)
+        self.make_order(Order.PaymentStatus.PENDING, Order.FulfillmentStatus.NOT_READY, quantity=99)
 
         self.assertEqual(order_kpis(self.club)["items_sold"], 3)
 
@@ -942,7 +943,7 @@ class OrderKPIsTests(TestCase):
 
     def test_kpis_are_scoped_to_the_club(self):
         other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
-        Order.objects.create(club=other_club, purchaser=self.member, status=Order.OrderStatus.PAID, total=Decimal("100.00"))
+        Order.objects.create(club=other_club, purchaser=self.member, payment_status=Order.PaymentStatus.PAID, total=Decimal("100.00"))
 
         self.assertEqual(order_kpis(self.club)["total_orders"], 0)
 
@@ -956,15 +957,16 @@ class QuantitySoldTests(TestCase):
         cls.small = ProductVariant.objects.create(product=cls.product, name="Small")
         cls.large = ProductVariant.objects.create(product=cls.product, name="Large")
 
-    def make_line(self, status, quantity, variant=None, product=None):
-        order = Order.objects.create(club=self.club, purchaser=self.member, status=status, total=Decimal("1.00"))
+    def make_line(self, payment_status, quantity, variant=None, product=None, fulfillment_status=Order.FulfillmentStatus.NOT_READY):
+        order = Order.objects.create(club=self.club, purchaser=self.member, payment_status=payment_status, fulfillment_status=fulfillment_status, total=Decimal("1.00"))
         OrderLine.objects.create(order=order, product=product or self.product, variant=variant, quantity=quantity, unit_price=Decimal("25.00"), line_total=Decimal("1.00"))
 
-    def test_only_paid_and_delivered_lines_count(self):
-        self.make_line(Order.OrderStatus.PAID, 2)
-        self.make_line(Order.OrderStatus.DELIVERED, 1)
-        self.make_line(Order.OrderStatus.PENDING, 99)
-        self.make_line(Order.OrderStatus.CANCELLED, 99)
+    def test_only_paid_lines_count_regardless_of_fulfillment(self):
+        self.make_line(Order.PaymentStatus.PAID, 2, fulfillment_status=Order.FulfillmentStatus.NOT_READY)
+        self.make_line(Order.PaymentStatus.PAID, 1, fulfillment_status=Order.FulfillmentStatus.DELIVERED)
+        # Delivered but unpaid must not count -- no revenue actually collected.
+        self.make_line(Order.PaymentStatus.PENDING, 99, fulfillment_status=Order.FulfillmentStatus.DELIVERED)
+        self.make_line(Order.PaymentStatus.REFUNDED, 99, fulfillment_status=Order.FulfillmentStatus.CANCELLED)
 
         self.assertEqual(quantity_sold_by_product(self.club), {self.product.pk: 3})
 
@@ -974,9 +976,9 @@ class QuantitySoldTests(TestCase):
         self.assertNotIn(other_product.pk, quantity_sold_by_product(self.club))
 
     def test_variant_breakdown_is_per_variant(self):
-        self.make_line(Order.OrderStatus.PAID, 2, variant=self.small)
-        self.make_line(Order.OrderStatus.PAID, 5, variant=self.large)
-        self.make_line(Order.OrderStatus.PAID, 1)  # no variant -- base sale
+        self.make_line(Order.PaymentStatus.PAID, 2, variant=self.small)
+        self.make_line(Order.PaymentStatus.PAID, 5, variant=self.large)
+        self.make_line(Order.PaymentStatus.PAID, 1)  # no variant -- base sale
 
         breakdown = quantity_sold_by_variant(self.product)
 
@@ -985,20 +987,21 @@ class QuantitySoldTests(TestCase):
     def test_another_products_sales_dont_leak_into_this_breakdown(self):
         other_product = Product.objects.create(club=self.club, name="Away Jersey")
         other_variant = ProductVariant.objects.create(product=other_product, name="Small")
-        self.make_line(Order.OrderStatus.PAID, 4, variant=other_variant, product=other_product)
+        self.make_line(Order.PaymentStatus.PAID, 4, variant=other_variant, product=other_product)
 
         self.assertEqual(quantity_sold_by_variant(self.product), {})
 
 
 class InvoicePdfCachingTests(TestCase):
     """render_invoice_pdf's own caching, and shop.signals' invalidation of it
-    on Order.status change -- see that module's own docstring."""
+    on Order.payment_status/fulfillment_status change -- see that module's own
+    docstring."""
 
     @classmethod
     def setUpTestData(cls):
         cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
         cls.member = Member.objects.create(first_name="Jane", last_name="Doe")
-        cls.order = Order.objects.create(club=cls.club, purchaser=cls.member, status=Order.OrderStatus.PENDING, total=Decimal("25.00"))
+        cls.order = Order.objects.create(club=cls.club, purchaser=cls.member, payment_status=Order.PaymentStatus.PENDING, total=Decimal("25.00"))
         cls.invoice = create_invoice_for_order(cls.order)
 
     def setUp(self):
@@ -1012,12 +1015,12 @@ class InvoicePdfCachingTests(TestCase):
         renderer.assert_called_once()
         self.assertEqual(first, second)
 
-    def test_changing_the_orders_status_busts_the_cache(self):
+    def test_changing_the_orders_payment_status_busts_the_cache(self):
         with patch("shop.services.invoices.render_pdf", side_effect=lambda html: b"%PDF-fake"):
             render_invoice_pdf(self.invoice)
 
-        self.order.status = Order.OrderStatus.PAID
-        self.order.save(update_fields=["status"])
+        self.order.payment_status = Order.PaymentStatus.PAID
+        self.order.save(update_fields=["payment_status"])
 
         with patch("shop.services.invoices.render_pdf", side_effect=lambda html: b"%PDF-fake-2") as renderer:
             second = render_invoice_pdf(self.invoice)
@@ -1029,7 +1032,7 @@ class InvoicePdfCachingTests(TestCase):
         with patch("shop.services.invoices.render_pdf", side_effect=lambda html: b"%PDF-fake"):
             render_invoice_pdf(self.invoice)
 
-        self.order.save(update_fields=["status"])  # same status, re-saved
+        self.order.save(update_fields=["payment_status"])  # same status, re-saved
 
         with patch("shop.services.invoices.render_pdf") as renderer:
             render_invoice_pdf(self.invoice)
@@ -1038,4 +1041,4 @@ class InvoicePdfCachingTests(TestCase):
 
     def test_a_freshly_created_order_has_nothing_cached_to_invalidate(self):
         # pre_save's own pk-less branch -- must not raise on a brand-new Order.
-        Order.objects.create(club=self.club, purchaser=self.member, status=Order.OrderStatus.PENDING, total=Decimal("1"))  # must not raise
+        Order.objects.create(club=self.club, purchaser=self.member, payment_status=Order.PaymentStatus.PENDING, total=Decimal("1"))  # must not raise

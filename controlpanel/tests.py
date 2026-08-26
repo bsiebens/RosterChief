@@ -487,8 +487,8 @@ class StatisticsTests(TestCase):
         team = Team.objects.create(club=self.club, name="First", short_name="1st")
         position = Position.objects.create(club=self.club, name="Forward", short_name="FW")
         TeamMembership.objects.create(team=team, member=self.member, season=self.season, position=position)
-        Order.objects.create(club=self.club, purchaser=self.member, total=Decimal("50.00"), status=Order.OrderStatus.PAID)
-        Order.objects.create(club=self.club, purchaser=self.member, total=Decimal("20.00"), status=Order.OrderStatus.PENDING)
+        Order.objects.create(club=self.club, purchaser=self.member, total=Decimal("50.00"), payment_status=Order.PaymentStatus.PAID)
+        Order.objects.create(club=self.club, purchaser=self.member, total=Decimal("20.00"), payment_status=Order.PaymentStatus.PENDING)
 
         groups = self.groups_for(self.club)
 
@@ -499,14 +499,15 @@ class StatisticsTests(TestCase):
         self.assertEqual(groups["Shop"]["Orders unpaid"], 1)
 
     def test_orders_unpaid_matches_the_outstanding_order_set(self):
-        # Same OWED_STATUSES order set as "Outstanding" -- a paid/delivered
-        # order counts toward neither, a cancelled/refunded one counts
-        # toward neither either.
-        Order.objects.create(club=self.club, purchaser=self.member, total=Decimal("10.00"), status=Order.OrderStatus.PENDING)
-        Order.objects.create(club=self.club, purchaser=self.member, total=Decimal("10.00"), status=Order.OrderStatus.PARTIALLY_PAID)
-        Order.objects.create(club=self.club, purchaser=self.member, total=Decimal("10.00"), status=Order.OrderStatus.READY_FOR_PICKUP)
-        Order.objects.create(club=self.club, purchaser=self.member, total=Decimal("10.00"), status=Order.OrderStatus.PAID)
-        Order.objects.create(club=self.club, purchaser=self.member, total=Decimal("10.00"), status=Order.OrderStatus.CANCELLED)
+        # Same OWED_STATUSES order set as "Outstanding" -- purely payment_status
+        # (PAID_STATUSES/OWED_STATUSES's own comment), fulfillment_status doesn't
+        # factor in: a paid order counts toward neither, and a cancelled order
+        # only drops out once it's actually refunded.
+        Order.objects.create(club=self.club, purchaser=self.member, total=Decimal("10.00"), payment_status=Order.PaymentStatus.PENDING)
+        Order.objects.create(club=self.club, purchaser=self.member, total=Decimal("10.00"), payment_status=Order.PaymentStatus.PARTIALLY_PAID)
+        Order.objects.create(club=self.club, purchaser=self.member, total=Decimal("10.00"), fulfillment_status=Order.FulfillmentStatus.READY_FOR_PICKUP)
+        Order.objects.create(club=self.club, purchaser=self.member, total=Decimal("10.00"), payment_status=Order.PaymentStatus.PAID)
+        Order.objects.create(club=self.club, purchaser=self.member, total=Decimal("10.00"), fulfillment_status=Order.FulfillmentStatus.CANCELLED, payment_status=Order.PaymentStatus.REFUNDED)
 
         groups = self.groups_for(self.club)
 
@@ -1159,8 +1160,8 @@ class PlatformChartTests(TestCase):
     def test_only_paid_orders_count_as_club_revenue(self):
         # `club_revenue` is members paying their clubs. It is NOT platform income, which is
         # why it no longer shares a chart (or a name) with our dues.
-        Order.objects.create(club=self.club, purchaser=self.member, total=Decimal("50.00"), status=Order.OrderStatus.PAID)
-        Order.objects.create(club=self.club, purchaser=self.member, total=Decimal("30.00"), status=Order.OrderStatus.PENDING)
+        Order.objects.create(club=self.club, purchaser=self.member, total=Decimal("50.00"), payment_status=Order.PaymentStatus.PAID)
+        Order.objects.create(club=self.club, purchaser=self.member, total=Decimal("30.00"), payment_status=Order.PaymentStatus.PENDING)
 
         self.assertEqual(platform_charts()["club_revenue"][-1]["value"], 50.0)
         self.assertEqual(platform_attention()["outstanding"], Decimal("30.00"))
@@ -1257,10 +1258,10 @@ class ClubAttentionTests(TestCase):
         self.assertIsNone(renewal_rate(self.club, self.season))
 
     def test_unpaid_orders_are_bucketed_by_age(self):
-        old = Order.objects.create(club=self.club, purchaser=self.member, total=Decimal("100.00"), status=Order.OrderStatus.PENDING)
+        old = Order.objects.create(club=self.club, purchaser=self.member, total=Decimal("100.00"), payment_status=Order.PaymentStatus.PENDING)
         Order.objects.filter(pk=old.pk).update(created=timezone.now() - datetime.timedelta(days=90))
-        Order.objects.create(club=self.club, purchaser=self.member, total=Decimal("40.00"), status=Order.OrderStatus.PENDING)
-        Order.objects.create(club=self.club, purchaser=self.member, total=Decimal("999.00"), status=Order.OrderStatus.PAID)
+        Order.objects.create(club=self.club, purchaser=self.member, total=Decimal("40.00"), payment_status=Order.PaymentStatus.PENDING)
+        Order.objects.create(club=self.club, purchaser=self.member, total=Decimal("999.00"), payment_status=Order.PaymentStatus.PAID)
 
         buckets = {bucket["label"]: bucket["total"] for bucket in fee_aging(self.club)}
 
@@ -1412,7 +1413,7 @@ class ClubHealthTableTests(TestCase):
         for name in ("Bob", "Carol", "Dave"):
             member = Member.objects.create(first_name=name, last_name="Bobson")
             ClubMembership.objects.create(club=self.club, season=self.season, member=member, status=ClubMembership.StatusChoices.ACTIVE)
-        Order.objects.create(club=self.club, purchaser=self.member, total=Decimal("100.00"), status=Order.OrderStatus.PENDING)
+        Order.objects.create(club=self.club, purchaser=self.member, total=Decimal("100.00"), payment_status=Order.PaymentStatus.PENDING)
 
         health = self.health()
 

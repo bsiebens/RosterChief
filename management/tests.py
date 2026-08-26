@@ -8320,9 +8320,9 @@ class ProductManagementTests(ShopTestBase):
 
     def test_the_sold_column_reflects_paid_orders_only(self):
         purchaser = Member.objects.create(first_name="Olly", last_name="Orderer", email="olly-sold@example.com")
-        paid = Order.objects.create(club=self.club, purchaser=purchaser, status=Order.OrderStatus.PAID, total=Decimal("50.00"))
+        paid = Order.objects.create(club=self.club, purchaser=purchaser, payment_status=Order.PaymentStatus.PAID, total=Decimal("50.00"))
         OrderLine.objects.create(order=paid, product=self.product, quantity=2, unit_price=Decimal("25.00"), line_total=Decimal("50.00"))
-        pending = Order.objects.create(club=self.club, purchaser=purchaser, status=Order.OrderStatus.PENDING, total=Decimal("999.00"))
+        pending = Order.objects.create(club=self.club, purchaser=purchaser, payment_status=Order.PaymentStatus.PENDING, total=Decimal("999.00"))
         OrderLine.objects.create(order=pending, product=self.product, quantity=99, unit_price=Decimal("999.00"), line_total=Decimal("999.00"))
         self.client.force_login(self.make_shop_manager())
 
@@ -8528,7 +8528,7 @@ class ProductVariantManagementTests(ShopTestBase):
         small = ProductVariant.objects.create(product=self.product, name="Small")
         ProductVariant.objects.create(product=self.product, name="Large")
         purchaser = Member.objects.create(first_name="Olly", last_name="Orderer", email="olly-variant-sold@example.com")
-        order = Order.objects.create(club=self.club, purchaser=purchaser, status=Order.OrderStatus.DELIVERED, total=Decimal("50.00"))
+        order = Order.objects.create(club=self.club, purchaser=purchaser, payment_status=Order.PaymentStatus.PAID, fulfillment_status=Order.FulfillmentStatus.DELIVERED, total=Decimal("50.00"))
         OrderLine.objects.create(order=order, product=self.product, variant=small, quantity=3, unit_price=Decimal("25.00"), line_total=Decimal("75.00"))
         self.client.force_login(self.make_shop_manager())
 
@@ -8682,8 +8682,8 @@ class OrderManagementTests(ShopTestBase):
         super().setUpTestData()
         cls.purchaser = Member.objects.create(first_name="Olly", last_name="Orderer", email="olly@example.com")
 
-    def make_order(self, status=Order.OrderStatus.PENDING, total=Decimal("50.00")):
-        order = Order.objects.create(club=self.club, purchaser=self.purchaser, status=status, total=total)
+    def make_order(self, payment_status=Order.PaymentStatus.PENDING, fulfillment_status=Order.FulfillmentStatus.NOT_READY, total=Decimal("50.00")):
+        order = Order.objects.create(club=self.club, purchaser=self.purchaser, payment_status=payment_status, fulfillment_status=fulfillment_status, total=total)
         OrderLine.objects.create(order=order, product=self.product, quantity=2, unit_price=Decimal("25.00"), line_total=total)
         create_invoice_for_order(order)
         return order
@@ -8703,55 +8703,66 @@ class OrderManagementTests(ShopTestBase):
         self.assertEqual(self.club_get("order_list").status_code, 403)
 
     def test_the_kpi_strip_reflects_paid_orders_regardless_of_the_status_filter(self):
-        self.make_order(status=Order.OrderStatus.PAID, total=Decimal("30.00"))
-        self.make_order(status=Order.OrderStatus.PENDING, total=Decimal("999.00"))
+        self.make_order(payment_status=Order.PaymentStatus.PAID, total=Decimal("30.00"))
+        self.make_order(payment_status=Order.PaymentStatus.PENDING, total=Decimal("999.00"))
         self.client.force_login(self.make_shop_manager())
 
-        response = self.club_get("order_list", params={"status": Order.OrderStatus.PAID})
+        response = self.club_get("order_list", params={"payment_status": Order.PaymentStatus.PAID})
 
         self.assertEqual(response.context["kpis"]["total_orders"], 2)
         self.assertEqual(response.context["kpis"]["open_orders"], 2)
         self.assertEqual(response.context["kpis"]["total_sold"], Decimal("30.00"))
 
-    def test_the_status_filter_narrows_the_list(self):
+    def test_the_payment_status_filter_narrows_the_list(self):
         pending = self.make_order()
-        paid = self.make_order(status=Order.OrderStatus.PAID)
+        paid = self.make_order(payment_status=Order.PaymentStatus.PAID)
         self.client.force_login(self.admin_user)
 
-        response = self.club_get("order_list", params={"status": Order.OrderStatus.PAID})
+        response = self.club_get("order_list", params={"payment_status": Order.PaymentStatus.PAID})
 
         self.assertContains(response, paid.number)
         self.assertNotContains(response, pending.number)
 
-    def test_the_default_view_hides_delivered_orders(self):
+    def test_the_default_view_hides_delivered_and_paid_orders(self):
         pending = self.make_order()
-        delivered = self.make_order(status=Order.OrderStatus.DELIVERED)
+        closed = self.make_order(payment_status=Order.PaymentStatus.PAID, fulfillment_status=Order.FulfillmentStatus.DELIVERED)
         self.client.force_login(self.admin_user)
 
         response = self.club_get("order_list")
 
         self.assertContains(response, pending.number)
-        self.assertNotContains(response, delivered.number)
+        self.assertNotContains(response, closed.number)
 
-    def test_status_all_shows_delivered_orders_too(self):
-        delivered = self.make_order(status=Order.OrderStatus.DELIVERED)
+    def test_the_default_view_still_shows_delivered_but_unpaid_orders(self):
+        # Payment still needs collecting -- delivered alone isn't "closed"
+        # (Order.is_closed's own docstring; this is the exact case that used
+        # to be wrongly hidden before payment/fulfillment status were split).
+        delivered_unpaid = self.make_order(payment_status=Order.PaymentStatus.PENDING, fulfillment_status=Order.FulfillmentStatus.DELIVERED)
         self.client.force_login(self.admin_user)
 
-        response = self.club_get("order_list", params={"status": "all"})
+        response = self.club_get("order_list")
 
-        self.assertContains(response, delivered.number)
+        self.assertContains(response, delivered_unpaid.number)
+
+    def test_show_all_shows_closed_orders_too(self):
+        closed = self.make_order(payment_status=Order.PaymentStatus.PAID, fulfillment_status=Order.FulfillmentStatus.DELIVERED)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("order_list", params={"show": "all"})
+
+        self.assertContains(response, closed.number)
 
     def test_explicitly_filtering_on_delivered_still_shows_it(self):
-        delivered = self.make_order(status=Order.OrderStatus.DELIVERED)
+        delivered = self.make_order(fulfillment_status=Order.FulfillmentStatus.DELIVERED)
         self.client.force_login(self.admin_user)
 
-        response = self.club_get("order_list", params={"status": Order.OrderStatus.DELIVERED})
+        response = self.club_get("order_list", params={"fulfillment_status": Order.FulfillmentStatus.DELIVERED})
 
         self.assertContains(response, delivered.number)
 
     def test_search_matches_the_purchasers_name(self):
         match = Member.objects.create(first_name="Zelda", last_name="Zephyr")
-        order = Order.objects.create(club=self.club, purchaser=match, status=Order.OrderStatus.PENDING, total=Decimal("10.00"))
+        order = Order.objects.create(club=self.club, purchaser=match, payment_status=Order.PaymentStatus.PENDING, total=Decimal("10.00"))
         other = self.make_order()
         self.client.force_login(self.admin_user)
 
@@ -8766,7 +8777,7 @@ class OrderManagementTests(ShopTestBase):
         family = Family.objects.create(name="Family")
         FamilyMembership.objects.create(family=family, member=parent, role=FamilyMembership.FamilyRole.PARENT)
         FamilyMembership.objects.create(family=family, member=child, role=FamilyMembership.FamilyRole.CHILD)
-        order = Order.objects.create(club=self.club, purchaser=child, status=Order.OrderStatus.PENDING, total=Decimal("10.00"))
+        order = Order.objects.create(club=self.club, purchaser=child, payment_status=Order.PaymentStatus.PENDING, total=Decimal("10.00"))
         self.client.force_login(self.admin_user)
 
         response = self.club_get("order_list", params={"q": "Family"})
@@ -8807,7 +8818,7 @@ class OrderManagementTests(ShopTestBase):
 
         self.assertRedirects(response, reverse("management:order_detail", args=[order.pk]))
         order.refresh_from_db()
-        self.assertEqual(order.status, Order.OrderStatus.PAID)
+        self.assertEqual(order.payment_status, Order.PaymentStatus.PAID)
 
         payment = Payment.objects.get(order=order)
         self.assertEqual(payment.amount, order.total)
@@ -8842,7 +8853,7 @@ class OrderManagementTests(ShopTestBase):
 
         self.assertRedirects(response, reverse("management:order_detail", args=[order.pk]))
         order.refresh_from_db()
-        self.assertEqual(order.status, Order.OrderStatus.DELIVERED)
+        self.assertEqual(order.fulfillment_status, Order.FulfillmentStatus.DELIVERED)
 
     def test_marking_an_order_ready_for_pickup(self):
         order = self.make_order()
@@ -8852,7 +8863,7 @@ class OrderManagementTests(ShopTestBase):
 
         self.assertRedirects(response, reverse("management:order_detail", args=[order.pk]))
         order.refresh_from_db()
-        self.assertEqual(order.status, Order.OrderStatus.READY_FOR_PICKUP)
+        self.assertEqual(order.fulfillment_status, Order.FulfillmentStatus.READY_FOR_PICKUP)
         self.assertEqual(order.pickup_instructions, "Ask at reception.")
 
     def test_pickup_instructions_are_optional(self):
@@ -8863,7 +8874,7 @@ class OrderManagementTests(ShopTestBase):
 
         self.assertRedirects(response, reverse("management:order_detail", args=[order.pk]))
         order.refresh_from_db()
-        self.assertEqual(order.status, Order.OrderStatus.READY_FOR_PICKUP)
+        self.assertEqual(order.fulfillment_status, Order.FulfillmentStatus.READY_FOR_PICKUP)
         self.assertEqual(order.pickup_instructions, "")
 
     def test_marking_ready_for_pickup_notifies_the_purchaser(self):
@@ -8884,13 +8895,13 @@ class OrderManagementTests(ShopTestBase):
 
         self.assertEqual(response.status_code, 403)
         order.refresh_from_db()
-        self.assertEqual(order.status, Order.OrderStatus.PENDING)
+        self.assertEqual(order.fulfillment_status, Order.FulfillmentStatus.NOT_READY)
         self.assertFalse(Notification.objects.filter(member=self.purchaser).exists())
 
     def test_an_order_from_another_club_404s(self):
         other_club = Club.objects.create(name="Other Club", slug="other-club-order")
         other_purchaser = Member.objects.create(first_name="Otto", last_name="Other", email="otto@example.com")
-        order = Order.objects.create(club=other_club, purchaser=other_purchaser, status=Order.OrderStatus.PENDING, total=Decimal("10.00"))
+        order = Order.objects.create(club=other_club, purchaser=other_purchaser, payment_status=Order.PaymentStatus.PENDING, total=Decimal("10.00"))
         self.client.force_login(self.make_shop_manager())
 
         response = self.club_post("order_mark_ready_for_pickup", {"pickup_instructions": ""}, order.pk)
@@ -8907,8 +8918,8 @@ class OrderManagementTests(ShopTestBase):
         self.assertRedirects(response, reverse("management:order_list"))
         first.refresh_from_db()
         second.refresh_from_db()
-        self.assertEqual(first.status, Order.OrderStatus.PAID)
-        self.assertEqual(second.status, Order.OrderStatus.PAID)
+        self.assertEqual(first.payment_status, Order.PaymentStatus.PAID)
+        self.assertEqual(second.payment_status, Order.PaymentStatus.PAID)
         self.assertEqual(Payment.objects.filter(order__in=[first, second], status=Payment.PaymentStatus.CONFIRMED).count(), 2)
 
     def test_bulk_mark_paid_uses_the_chosen_method(self):
@@ -8922,13 +8933,13 @@ class OrderManagementTests(ShopTestBase):
         self.assertEqual(payment.reference, "")
 
     def test_bulk_mark_paid_skips_cancelled_orders(self):
-        cancelled = self.make_order(status=Order.OrderStatus.CANCELLED)
+        cancelled = self.make_order(fulfillment_status=Order.FulfillmentStatus.CANCELLED)
         self.client.force_login(self.make_shop_manager())
 
         self.club_post("order_bulk_mark_paid", {"order_ids": [str(cancelled.pk)], "method": Payment.PaymentMethod.CASH})
 
         cancelled.refresh_from_db()
-        self.assertEqual(cancelled.status, Order.OrderStatus.CANCELLED)
+        self.assertEqual(cancelled.fulfillment_status, Order.FulfillmentStatus.CANCELLED)
         self.assertFalse(Payment.objects.filter(order=cancelled).exists())
 
     def test_bulk_mark_paid_with_nothing_selected_shows_an_error(self):
@@ -8942,13 +8953,13 @@ class OrderManagementTests(ShopTestBase):
     def test_bulk_mark_paid_never_touches_another_clubs_order(self):
         other_club = Club.objects.create(name="Other Club", slug="other-club-bulk-paid")
         other_purchaser = Member.objects.create(first_name="Otto", last_name="Other", email="otto-bulk-paid@example.com")
-        foreign_order = Order.objects.create(club=other_club, purchaser=other_purchaser, status=Order.OrderStatus.PENDING, total=Decimal("10.00"))
+        foreign_order = Order.objects.create(club=other_club, purchaser=other_purchaser, payment_status=Order.PaymentStatus.PENDING, total=Decimal("10.00"))
         self.client.force_login(self.make_shop_manager())
 
         self.club_post("order_bulk_mark_paid", {"order_ids": [str(foreign_order.pk)], "method": Payment.PaymentMethod.CASH})
 
         foreign_order.refresh_from_db()
-        self.assertEqual(foreign_order.status, Order.OrderStatus.PENDING)
+        self.assertEqual(foreign_order.payment_status, Order.PaymentStatus.PENDING)
 
     def test_plain_staff_cannot_bulk_mark_paid(self):
         order = self.make_order()
@@ -8958,7 +8969,7 @@ class OrderManagementTests(ShopTestBase):
 
         self.assertEqual(response.status_code, 403)
         order.refresh_from_db()
-        self.assertEqual(order.status, Order.OrderStatus.PENDING)
+        self.assertEqual(order.payment_status, Order.PaymentStatus.PENDING)
 
     def test_bulk_mark_ready_for_pickup_applies_the_shared_instructions_to_every_order(self):
         first = self.make_order()
@@ -8970,8 +8981,8 @@ class OrderManagementTests(ShopTestBase):
         self.assertRedirects(response, reverse("management:order_list"))
         first.refresh_from_db()
         second.refresh_from_db()
-        self.assertEqual(first.status, Order.OrderStatus.READY_FOR_PICKUP)
-        self.assertEqual(second.status, Order.OrderStatus.READY_FOR_PICKUP)
+        self.assertEqual(first.fulfillment_status, Order.FulfillmentStatus.READY_FOR_PICKUP)
+        self.assertEqual(second.fulfillment_status, Order.FulfillmentStatus.READY_FOR_PICKUP)
         self.assertEqual(first.pickup_instructions, "Ring the bell.")
         self.assertEqual(second.pickup_instructions, "Ring the bell.")
 
@@ -8986,13 +8997,13 @@ class OrderManagementTests(ShopTestBase):
         self.assertEqual(Notification.objects.filter(member=self.purchaser, title__icontains=second.number).count(), 1)
 
     def test_bulk_mark_ready_for_pickup_skips_cancelled_orders(self):
-        cancelled = self.make_order(status=Order.OrderStatus.CANCELLED)
+        cancelled = self.make_order(fulfillment_status=Order.FulfillmentStatus.CANCELLED)
         self.client.force_login(self.make_shop_manager())
 
         self.club_post("order_bulk_mark_ready_for_pickup", {"order_ids": [str(cancelled.pk)], "pickup_instructions": ""})
 
         cancelled.refresh_from_db()
-        self.assertEqual(cancelled.status, Order.OrderStatus.CANCELLED)
+        self.assertEqual(cancelled.fulfillment_status, Order.FulfillmentStatus.CANCELLED)
 
     def test_bulk_mark_ready_for_pickup_with_nothing_selected_shows_an_error(self):
         self.client.force_login(self.make_shop_manager())
@@ -9009,7 +9020,7 @@ class OrderManagementTests(ShopTestBase):
 
         self.assertEqual(response.status_code, 403)
         order.refresh_from_db()
-        self.assertEqual(order.status, Order.OrderStatus.PENDING)
+        self.assertEqual(order.fulfillment_status, Order.FulfillmentStatus.NOT_READY)
 
     def test_cancelling_an_order(self):
         order = self.make_order()
@@ -9019,7 +9030,7 @@ class OrderManagementTests(ShopTestBase):
 
         self.assertRedirects(response, reverse("management:order_detail", args=[order.pk]))
         order.refresh_from_db()
-        self.assertEqual(order.status, Order.OrderStatus.CANCELLED)
+        self.assertEqual(order.fulfillment_status, Order.FulfillmentStatus.CANCELLED)
 
     def test_plain_staff_cannot_cancel_an_order(self):
         order = self.make_order()
@@ -9029,7 +9040,7 @@ class OrderManagementTests(ShopTestBase):
 
         self.assertEqual(response.status_code, 403)
         order.refresh_from_db()
-        self.assertEqual(order.status, Order.OrderStatus.PENDING)
+        self.assertEqual(order.fulfillment_status, Order.FulfillmentStatus.NOT_READY)
 
 
 class PaymentManagementTests(ShopTestBase):
@@ -9038,8 +9049,8 @@ class PaymentManagementTests(ShopTestBase):
         super().setUpTestData()
         cls.purchaser = Member.objects.create(first_name="Olly", last_name="Orderer", email="olly-payment@example.com")
 
-    def make_order(self, status=Order.OrderStatus.PAID, total=Decimal("50.00")):
-        return Order.objects.create(club=self.club, purchaser=self.purchaser, status=status, total=total)
+    def make_order(self, payment_status=Order.PaymentStatus.PAID, fulfillment_status=Order.FulfillmentStatus.NOT_READY, total=Decimal("50.00")):
+        return Order.objects.create(club=self.club, purchaser=self.purchaser, payment_status=payment_status, fulfillment_status=fulfillment_status, total=total)
 
     def make_payment(self, order, **overrides):
         kwargs = {"order": order, "amount": order.total, "method": Payment.PaymentMethod.CASH, "status": Payment.PaymentStatus.CONFIRMED, "paid_at": timezone.now()}
@@ -9101,7 +9112,7 @@ class PaymentManagementTests(ShopTestBase):
         self.assertRedirects(response, reverse("management:order_detail", args=[order.pk]))
         self.assertFalse(Payment.objects.filter(pk=payment.pk).exists())
         order.refresh_from_db()
-        self.assertEqual(order.status, Order.OrderStatus.PENDING)
+        self.assertEqual(order.payment_status, Order.PaymentStatus.PENDING)
         self.assertContains(response, "back to pending")
 
     def test_deleting_one_of_several_payments_leaves_status_alone(self):
@@ -9113,18 +9124,31 @@ class PaymentManagementTests(ShopTestBase):
         self.club_post("payment_delete", {}, order.pk, first.pk)
 
         order.refresh_from_db()
-        self.assertEqual(order.status, Order.OrderStatus.PAID)
+        self.assertEqual(order.payment_status, Order.PaymentStatus.PAID)
         self.assertEqual(order.payments.count(), 1)
 
-    def test_deleting_the_only_payment_on_a_cancelled_order_leaves_it_cancelled(self):
-        order = self.make_order(status=Order.OrderStatus.CANCELLED)
+    def test_deleting_the_only_payment_on_a_cancelled_order_still_drops_payment_to_pending(self):
+        # fulfillment_status=CANCELLED is untouched -- only payment_status ==
+        # REFUNDED blocks the pending-revert (PaymentDeleteView's own docstring).
+        order = self.make_order(fulfillment_status=Order.FulfillmentStatus.CANCELLED)
         payment = self.make_payment(order)
         self.client.force_login(self.make_shop_manager())
 
         self.club_post("payment_delete", {}, order.pk, payment.pk)
 
         order.refresh_from_db()
-        self.assertEqual(order.status, Order.OrderStatus.CANCELLED)
+        self.assertEqual(order.fulfillment_status, Order.FulfillmentStatus.CANCELLED)
+        self.assertEqual(order.payment_status, Order.PaymentStatus.PENDING)
+
+    def test_deleting_the_only_payment_on_a_refunded_order_leaves_payment_status_alone(self):
+        order = self.make_order(payment_status=Order.PaymentStatus.REFUNDED)
+        payment = self.make_payment(order)
+        self.client.force_login(self.make_shop_manager())
+
+        self.club_post("payment_delete", {}, order.pk, payment.pk)
+
+        order.refresh_from_db()
+        self.assertEqual(order.payment_status, Order.PaymentStatus.REFUNDED)
 
     def test_plain_staff_cannot_delete_a_payment(self):
         order = self.make_order()
@@ -9139,7 +9163,7 @@ class PaymentManagementTests(ShopTestBase):
     def test_a_payment_from_another_club_404s(self):
         other_club = Club.objects.create(name="Other Club", slug="other-club-payment")
         other_purchaser = Member.objects.create(first_name="Otto", last_name="Other", email="otto-payment@example.com")
-        other_order = Order.objects.create(club=other_club, purchaser=other_purchaser, status=Order.OrderStatus.PAID, total=Decimal("10.00"))
+        other_order = Order.objects.create(club=other_club, purchaser=other_purchaser, payment_status=Order.PaymentStatus.PAID, total=Decimal("10.00"))
         payment = self.make_payment(other_order)
         self.client.force_login(self.make_shop_manager())
 

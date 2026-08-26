@@ -3813,13 +3813,15 @@ class DiscountToggleActiveView(ShopManagerRequiredMixin, View):
 
 
 class OrderListView(ShopManagerRequiredMixin, ListView):
-    """Default view hides DELIVERED orders -- "closed", paid and picked up --
-    so the list reads as "what still needs attention" rather than the club's
-    entire order history. ?status=all shows everything; ?status=<value>
-    narrows to exactly one status (including "delivered" itself, if that's
-    what's actually wanted). ?q= searches by purchaser first/last/family
-    name or the order's own number, same search shape as
-    MembershipListView/InvoiceListView's own ?q=."""
+    """Default view hides closed orders (Order.is_closed -- delivered *and*
+    paid, see its own docstring for why both) so the list reads as "what
+    still needs attention" rather than the club's entire order history.
+    ?show=all includes them too. ?payment_status=/?fulfillment_status=
+    narrow independently -- once either is set, the closed-hiding above is
+    skipped entirely (picking a specific fulfillment status and *also*
+    silently dropping paid orders from it would be surprising). ?q=
+    searches by purchaser first/last/family name or the order's own number,
+    same search shape as MembershipListView/InvoiceListView's own ?q=."""
 
     template_name = "management/order_list.html"
     context_object_name = "orders"
@@ -3827,11 +3829,14 @@ class OrderListView(ShopManagerRequiredMixin, ListView):
     def get_queryset(self):
         orders = Order.objects.filter(club=self.request.club).select_related("purchaser")
 
-        status = self.request.GET.get("status")
-        if not status:
-            orders = orders.exclude(status=Order.OrderStatus.DELIVERED)
-        elif status != "all":
-            orders = orders.filter(status=status)
+        payment_status = self.request.GET.get("payment_status", "")
+        fulfillment_status = self.request.GET.get("fulfillment_status", "")
+        if payment_status:
+            orders = orders.filter(payment_status=payment_status)
+        if fulfillment_status:
+            orders = orders.filter(fulfillment_status=fulfillment_status)
+        if not payment_status and not fulfillment_status and self.request.GET.get("show") != "all":
+            orders = orders.exclude(fulfillment_status=Order.FulfillmentStatus.DELIVERED, payment_status=Order.PaymentStatus.PAID)
 
         search = self.request.GET.get("q", "").strip()
         if search:
@@ -3847,12 +3852,15 @@ class OrderListView(ShopManagerRequiredMixin, ListView):
         return orders
 
     def get_context_data(self, **kwargs):
-        # order_kpis reads every order for the club regardless of the ?status=/
-        # ?q= filters above -- the KPI strip is "how's the shop doing overall",
-        # not "how many of the filtered rows below".
+        # order_kpis reads every order for the club regardless of the filters
+        # above -- the KPI strip is "how's the shop doing overall", not "how
+        # many of the filtered rows below".
         return super().get_context_data(
-            status_choices=Order.OrderStatus.choices,
-            selected_status=self.request.GET.get("status", ""),
+            payment_status_choices=Order.PaymentStatus.choices,
+            fulfillment_status_choices=Order.FulfillmentStatus.choices,
+            selected_payment_status=self.request.GET.get("payment_status", ""),
+            selected_fulfillment_status=self.request.GET.get("fulfillment_status", ""),
+            show_all=self.request.GET.get("show") == "all",
             search=self.request.GET.get("q", "").strip(),
             kpis=order_kpis(self.request.club),
             bulk_mark_paid_form=OrderBulkMarkPaidForm(),
@@ -3886,13 +3894,13 @@ class OrderBulkMarkPaidView(ShopManagerRequiredMixin, View):
             return redirect(redirect_url)
 
         method = form.cleaned_data["method"]
-        orders = Order.objects.filter(pk__in=ids, club=request.club).exclude(status=Order.OrderStatus.CANCELLED)
+        orders = Order.objects.filter(pk__in=ids, club=request.club).exclude(fulfillment_status=Order.FulfillmentStatus.CANCELLED)
         count = 0
         with transaction.atomic():
             for order in orders:
                 Payment.objects.create(order=order, amount=order.total, method=method, status=Payment.PaymentStatus.CONFIRMED, paid_at=timezone.now())
-                order.status = Order.OrderStatus.PAID
-                order.save(update_fields=["status"])
+                order.payment_status = Order.PaymentStatus.PAID
+                order.save(update_fields=["payment_status"])
                 count += 1
 
         notify(request, f"s|{_('Orders marked paid')}|{_('%(count)d order(s) marked paid.') % {'count': count}}")
@@ -3922,12 +3930,12 @@ class OrderBulkMarkReadyForPickupView(ShopManagerRequiredMixin, View):
             return redirect(redirect_url)
 
         pickup_instructions = form.cleaned_data["pickup_instructions"]
-        orders = Order.objects.filter(pk__in=ids, club=request.club).exclude(status=Order.OrderStatus.CANCELLED)
+        orders = Order.objects.filter(pk__in=ids, club=request.club).exclude(fulfillment_status=Order.FulfillmentStatus.CANCELLED)
         count = 0
         for order in orders:
             order.pickup_instructions = pickup_instructions
-            order.status = Order.OrderStatus.READY_FOR_PICKUP
-            order.save(update_fields=["status", "pickup_instructions"])
+            order.fulfillment_status = Order.FulfillmentStatus.READY_FOR_PICKUP
+            order.save(update_fields=["fulfillment_status", "pickup_instructions"])
             dispatch_order_ready_for_pickup_notification(order)
             count += 1
 
@@ -3990,12 +3998,14 @@ class PaymentDeleteView(ShopManagerRequiredMixin, View):
     """No PROTECT to work around -- Payment is only ever referenced by its
     own Order (CASCADE the other way), so deleting one is a plain delete.
 
-    Drops the order back to PENDING once it has no payments left at all --
-    covers "staff marked this paid by mistake" without leaving the order
-    reading as settled with nothing behind it. Left alone if payments remain
-    (a partial refund/correction on an order with several) or if the order
-    is CANCELLED/REFUNDED -- those are deliberate, terminal states a payment
-    row disappearing shouldn't resurrect."""
+    Drops the order's payment_status back to PENDING once it has no payments
+    left at all -- covers "staff marked this paid by mistake" without
+    leaving the order reading as settled with nothing behind it.
+    fulfillment_status is untouched either way (deleting a payment record
+    says nothing about whether the item was handed over). Left alone if
+    payments remain (a partial refund/correction on an order with several)
+    or if payment_status is already REFUNDED -- that's a deliberate,
+    terminal state a payment row disappearing shouldn't resurrect."""
 
     def post(self, request, order_pk, pk):
         payment = get_object_or_404(Payment.objects.filter(order__club=request.club, order__pk=order_pk), pk=pk)
@@ -4003,9 +4013,9 @@ class PaymentDeleteView(ShopManagerRequiredMixin, View):
         payment.delete()
 
         reverted_to_pending = False
-        if not order.payments.exists() and order.status not in (Order.OrderStatus.CANCELLED, Order.OrderStatus.REFUNDED):
-            order.status = Order.OrderStatus.PENDING
-            order.save(update_fields=["status"])
+        if not order.payments.exists() and order.payment_status != Order.PaymentStatus.REFUNDED:
+            order.payment_status = Order.PaymentStatus.PENDING
+            order.save(update_fields=["payment_status"])
             reverted_to_pending = True
 
         if reverted_to_pending:
@@ -4038,8 +4048,8 @@ class OrderMarkPaidView(ShopManagerRequiredMixin, View):
             reference=form.cleaned_data["reference"],
             paid_at=timezone.now(),
         )
-        order.status = Order.OrderStatus.PAID
-        order.save(update_fields=["status"])
+        order.payment_status = Order.PaymentStatus.PAID
+        order.save(update_fields=["payment_status"])
 
         notify(request, f"s|{_('Order marked paid')}|{_('Order %(number)s is now paid.') % {'number': order.number}}")
         return redirect("management:order_detail", pk=pk)
@@ -4063,8 +4073,8 @@ class OrderMarkReadyForPickupView(ShopManagerRequiredMixin, View):
             return redirect("management:order_detail", pk=pk)
 
         order.pickup_instructions = form.cleaned_data["pickup_instructions"]
-        order.status = Order.OrderStatus.READY_FOR_PICKUP
-        order.save(update_fields=["status", "pickup_instructions"])
+        order.fulfillment_status = Order.FulfillmentStatus.READY_FOR_PICKUP
+        order.save(update_fields=["fulfillment_status", "pickup_instructions"])
         dispatch_order_ready_for_pickup_notification(order)
 
         notify(request, f"s|{_('Order ready for pickup')}|{_('%(purchaser)s has been notified order %(number)s is ready.') % {'purchaser': order.purchaser, 'number': order.number}}")
@@ -4077,8 +4087,8 @@ class OrderMarkDeliveredView(ShopManagerRequiredMixin, View):
 
     def post(self, request, pk):
         order = get_object_or_404(Order.objects.filter(club=request.club), pk=pk)
-        order.status = Order.OrderStatus.DELIVERED
-        order.save(update_fields=["status"])
+        order.fulfillment_status = Order.FulfillmentStatus.DELIVERED
+        order.save(update_fields=["fulfillment_status"])
         notify(request, f"s|{_('Order marked delivered')}|{_('Order %(number)s is now delivered.') % {'number': order.number}}")
         return redirect("management:order_detail", pk=pk)
 
@@ -4086,8 +4096,8 @@ class OrderMarkDeliveredView(ShopManagerRequiredMixin, View):
 class OrderCancelView(ShopManagerRequiredMixin, View):
     def post(self, request, pk):
         order = get_object_or_404(Order.objects.filter(club=request.club), pk=pk)
-        order.status = Order.OrderStatus.CANCELLED
-        order.save(update_fields=["status"])
+        order.fulfillment_status = Order.FulfillmentStatus.CANCELLED
+        order.save(update_fields=["fulfillment_status"])
         notify(request, f"w|{_('Order cancelled')}|{_('Order %(number)s has been cancelled.') % {'number': order.number}}")
         return redirect("management:order_detail", pk=pk)
 
@@ -4109,15 +4119,17 @@ class InvoicePdfView(ShopManagerRequiredMixin, View):
 
 
 def _order_invoice_status(order):
-    if order.status in (Order.OrderStatus.PAID, Order.OrderStatus.DELIVERED):
-        return _("Paid"), "badge-success"
-    if order.status == Order.OrderStatus.READY_FOR_PICKUP:
-        return order.get_status_display(), "badge-info"
-    if order.status == Order.OrderStatus.PARTIALLY_PAID:
-        return order.get_status_display(), "badge-warning"
-    if order.status in (Order.OrderStatus.CANCELLED, Order.OrderStatus.REFUNDED):
-        return order.get_status_display(), "badge-error"
-    return order.get_status_display(), "badge-neutral"
+    # An invoice is fundamentally about money -- payment_status, not
+    # fulfillment_status, same reasoning _dues_invoice_status (below) already
+    # has nothing but payment to go on. The order's own detail page is where
+    # fulfillment_status gets its own badge.
+    if order.payment_status == Order.PaymentStatus.PAID:
+        return order.get_payment_status_display(), "badge-success"
+    if order.payment_status == Order.PaymentStatus.PARTIALLY_PAID:
+        return order.get_payment_status_display(), "badge-warning"
+    if order.payment_status == Order.PaymentStatus.REFUNDED:
+        return order.get_payment_status_display(), "badge-error"
+    return order.get_payment_status_display(), "badge-neutral"
 
 
 def _dues_invoice_status(invoice):

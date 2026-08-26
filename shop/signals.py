@@ -1,8 +1,8 @@
-"""Bust an order's cached invoice PDF the moment its status actually
-changes -- the PDF's paid/owed styling and status line are derived from
-Order.status (see shop/templates/shop/order_invoice_pdf.html), so a stale
-cached copy would otherwise keep showing a status the order no longer has.
-Registered from ShopConfig.ready.
+"""Bust an order's cached invoice PDF the moment its payment_status or
+fulfillment_status actually changes -- the PDF's paid/owed styling and
+status line are derived from both (see shop/templates/shop/
+order_invoice_pdf.html), so a stale cached copy would otherwise keep
+showing a status the order no longer has. Registered from ShopConfig.ready.
 """
 
 from django.db.models.signals import pre_save
@@ -17,8 +17,10 @@ def invalidate_invoice_pdf_on_status_change(sender, instance, **kwargs):
     if not instance.pk:
         return
 
-    previous_status = Order.objects.filter(pk=instance.pk).values_list("status", flat=True).first()
-    if previous_status is None or previous_status == instance.status:
+    previous = Order.objects.filter(pk=instance.pk).values("payment_status", "fulfillment_status").first()
+    if previous is None:
+        return
+    if previous["payment_status"] == instance.payment_status and previous["fulfillment_status"] == instance.fulfillment_status:
         return
 
     invoice = Invoice.objects.filter(order_id=instance.pk).first()

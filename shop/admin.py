@@ -120,8 +120,8 @@ class PaymentInline(admin.TabularInline):
 
 @admin.register(Order)
 class OrderAdmin(admin.ModelAdmin):
-    list_display = ["number", "purchaser", "status", "total", "club", "created"]
-    list_filter = ["club", "status"]
+    list_display = ["number", "purchaser", "payment_status", "fulfillment_status", "total", "club", "created"]
+    list_filter = ["club", "payment_status", "fulfillment_status"]
     search_fields = ["number", "purchaser__first_name", "purchaser__last_name"]
     raw_id_fields = ["purchaser"]
     readonly_fields = ["number", "created", "modified"]

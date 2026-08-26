@@ -21,7 +21,10 @@
             <div class="text-sm font-semibold text-ink">{{ order.purchaser.get_full_name }}</div>
             <div class="text-xs text-muted">{{ order.created|date:"d M Y" }}</div>
         </div>
-        <span class="pill {{ pill_class }}">{{ order.get_status_display }}</span>
+        <div class="flex shrink-0 gap-1.5">
+            <span class="pill {{ payment_pill_class }}">{{ order.get_payment_status_display }}</span>
+            <span class="pill {{ fulfillment_pill_class }}">{{ order.get_fulfillment_status_display }}</span>
+        </div>
     </div>
 
     {% if order.pickup_instructions %}
