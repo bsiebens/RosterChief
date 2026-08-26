@@ -670,20 +670,22 @@
     }
 
     .select {
-        /* display:flex + align-items:center is what actually centers a native
-           <select>'s selected-option text -- Safari otherwise sizes its text
-           box against its own internal line-height rather than this element's
-           padding, leaving it sitting low in the box (same family of "Safari
-           ignores author layout on a native control" issue as .file-input's
-           own comment above). */
-        display: flex;
-        align-items: center;
+        /* display:flex on a native <select> is a no-op in Chrome -- its
+           selected-option text renders through internal UA layout that
+           doesn't participate in the host's flex formatting, so align-items
+           never touches it. line-height sized to the box's own content
+           height (2.25rem height minus the 1px top+bottom border) is what
+           actually centers it, everywhere -- padding-block goes to 0 so
+           that height is the whole story, not padding plus line-height both
+           fighting over the same space. */
         appearance: none;
         background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236C7787' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
         background-repeat: no-repeat;
         background-position: right 0.6rem center;
         background-size: 1rem;
+        padding-block: 0;
         padding-right: 2rem;
+        line-height: 2.125rem;
     }
 
     /* The browser's own "Choose File" control has no author styling at all, so it

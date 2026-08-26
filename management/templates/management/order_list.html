@@ -29,9 +29,9 @@
                     <option value="{{ value }}" {% if value == selected_fulfillment_status %}selected{% endif %}>{{ label }}</option>
                 {% endfor %}
             </select>
-            <label class="label cursor-pointer gap-2">
-                <input type="checkbox" name="show" value="all" class="checkbox checkbox-sm" {% if show_all %}checked{% endif %} onchange="this.form.submit()">
-                <span class="label-text">{% trans "Show closed" %}</span>
+            <label class="flex cursor-pointer items-center gap-2 text-sm text-slate">
+                <input type="checkbox" name="show" value="all" class="checkbox" {% if show_all %}checked{% endif %} onchange="this.form.submit()">
+                {% trans "Show closed" %}
             </label>
             {% if search %}
                 <a class="btn btn-outline gap-2" href="{% url "management:order_list" %}">{% lucide "x" size=14 %} {% trans "Clear" %}</a>
