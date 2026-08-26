@@ -7,8 +7,8 @@
     inside a plain card, not a table.
 {% endcomment %}
 <div class="bulk-add-row flex items-start gap-2">
-    <div class="flex-1">
-        {{ form.name }}
+    <div class="flex-1 flex flex-row items-center gap-2">
+        <span>{{ form.name }}</span>
         {% for error in form.name.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
     </div>
     <div class="w-32">

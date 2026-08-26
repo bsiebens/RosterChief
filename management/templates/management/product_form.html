@@ -107,7 +107,12 @@
                 <tbody>
                     {% for variant in variants %}
                         <tr>
-                            <td class="font-semibold text-ink">{{ variant.name }}{% if not variant.is_active %} <span class="badge badge-sm badge-neutral">{% trans "Inactive" %}</span>{% endif %}</td>
+                            <td class="font-semibold text-ink">
+                                <div class="flex items-center gap-3">
+                                    <span>{{ variant.name }}</span>
+                                    {% if not variant.is_active %}<span class="badge badge-sm badge-neutral">{% trans "Inactive" %}</span>{% endif %}
+                                </div>
+                            </td>
                             <td class="font-mono tabular-nums">{% if variant.price is not None %}&euro; {{ variant.price }}{% else %}<span class="text-dim">{% trans "Same as product" %}</span>{% endif %}</td>
                             <td class="font-mono text-xs tabular-nums text-muted">{{ variant.sold_count }}</td>
                             <td class="text-right">
