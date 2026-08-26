@@ -24,7 +24,7 @@ from billing.services.dues import dues_in_grace, dues_overdue, subscriptions_due
 from club.models import Club, ClubMembership, ClubRole, Season
 from events.models import Attendance, Event
 from members.models import Member
-from shop.models import Cart, Order
+from shop.models import Order
 from teams.models import StaffAssignment, Team, TeamMembership
 
 ZERO = Decimal("0.00")
@@ -508,7 +508,11 @@ def club_statistics(club):
                 (_("Orders"), orders.count()),
                 (_("Revenue"), _money(orders.filter(status__in=PAID_STATUSES))),
                 (_("Outstanding"), _money(orders.filter(status__in=OWED_STATUSES))),
-                (_("Open carts"), Cart.objects.filter(club=club, status=Cart.CartStatus.OPEN).count()),
+                # Same order set as "Outstanding" above (OWED_STATUSES), just a
+                # count instead of a total -- "Open carts" (never-checked-out
+                # Cart rows) measured the wrong thing entirely for a club admin
+                # deciding whether anyone needs chasing.
+                (_("Orders unpaid"), orders.filter(status__in=OWED_STATUSES).count()),
             ],
         },
     ]

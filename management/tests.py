@@ -3681,7 +3681,7 @@ class HomeViewTests(ManagementTestBase):
         self.assertContains(response, 'id="fees-chart"')
         self.assertContains(response, 'id="signups-chart"')
         self.assertContains(response, "Renewal rate")
-        self.assertContains(response, "Open carts")
+        self.assertContains(response, "Orders unpaid")
         self.assertContains(response, "md:grid-cols-4")
 
     def test_non_admin_staff_does_not_see_the_financial_sections(self):
@@ -3693,7 +3693,7 @@ class HomeViewTests(ManagementTestBase):
         self.assertNotContains(response, 'id="fees-chart"')
         self.assertNotContains(response, 'id="signups-chart"')
         self.assertNotContains(response, "Renewal rate")
-        self.assertNotContains(response, "Open carts")
+        self.assertNotContains(response, "Orders unpaid")
         self.assertContains(response, "md:grid-cols-3")
 
     def test_the_season_pill_shows_the_season_years_not_the_short_name(self):

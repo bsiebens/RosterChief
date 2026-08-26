@@ -496,6 +496,21 @@ class StatisticsTests(TestCase):
         self.assertEqual(groups["Teams & staff"]["Players this season"], 1)
         self.assertEqual(groups["Shop"]["Revenue"], Decimal("50.00"))
         self.assertEqual(groups["Shop"]["Outstanding"], Decimal("20.00"))
+        self.assertEqual(groups["Shop"]["Orders unpaid"], 1)
+
+    def test_orders_unpaid_matches_the_outstanding_order_set(self):
+        # Same OWED_STATUSES order set as "Outstanding" -- a paid/delivered
+        # order counts toward neither, a cancelled/refunded one counts
+        # toward neither either.
+        Order.objects.create(club=self.club, purchaser=self.member, total=Decimal("10.00"), status=Order.OrderStatus.PENDING)
+        Order.objects.create(club=self.club, purchaser=self.member, total=Decimal("10.00"), status=Order.OrderStatus.PARTIALLY_PAID)
+        Order.objects.create(club=self.club, purchaser=self.member, total=Decimal("10.00"), status=Order.OrderStatus.READY_FOR_PICKUP)
+        Order.objects.create(club=self.club, purchaser=self.member, total=Decimal("10.00"), status=Order.OrderStatus.PAID)
+        Order.objects.create(club=self.club, purchaser=self.member, total=Decimal("10.00"), status=Order.OrderStatus.CANCELLED)
+
+        groups = self.groups_for(self.club)
+
+        self.assertEqual(groups["Shop"]["Orders unpaid"], 3)
 
     def test_statistics_cope_with_no_current_season(self):
         # A brand-new club has no season covering today; it must not blow up.

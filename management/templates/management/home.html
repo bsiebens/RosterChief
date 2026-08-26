@@ -79,7 +79,7 @@
             <div class="card min-w-0 flex-1 p-4">
                 <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Missing documentation" %}</div>
                 <div class="mt-1 font-display text-[34px] leading-none font-extrabold tabular-nums {% if missing_documentation_count %}text-warn{% else %}text-ink{% endif %}">{{ missing_documentation_count }}</div>
-                <div class="mt-1 text-[13px] text-muted">{% trans "Members with an open checklist item" %}</div>
+                <div class="mt-1 text-[13px] text-muted">{% trans "Members with missing info" %}</div>
             </div>
         {% endif %}
     </div>
@@ -274,7 +274,7 @@
                         {% for label, value in group.stats %}
                             <div class="flex items-center justify-between py-1.5">
                                 <dt class="text-[13px] text-muted">{{ label }}</dt>
-                                <dd class="font-mono text-sm font-semibold text-ink">{% if group.title == "Shop" and label == "Outstanding" or label == "Revenue" %}&euro;{% endif %}{{ value }}</dd>
+                                <dd class="font-mono text-sm font-semibold text-ink">{% if group.title == "Shop" and label == "Outstanding" or group.title == "Shop" and label == "Revenue" %}&euro;{{ value|floatformat:2 }}{% else %}{{ value }}{% endif %}</dd>
                             </div>
                         {% endfor %}
                     </dl>

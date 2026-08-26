@@ -167,7 +167,7 @@
                             {% for label, value in group.stats %}
                                 <div class="flex items-center justify-between py-2">
                                     <dt class="text-sm text-muted">{{ label }}</dt>
-                                    <dd class="font-mono font-semibold text-ink tabular-nums">{% if group.title == "Shop" and label == "Outstanding" or label == "Revenue" %}&euro;{% endif %}{{ value }}</dd>
+                                    <dd class="font-mono font-semibold text-ink tabular-nums">{% if group.title == "Shop" and label == "Outstanding" or group.title == "Shop" and label == "Revenue" %}&euro;{{ value|floatformat:2 }}{% else %}{{ value }}{% endif %}</dd>
                                 </div>
                             {% endfor %}
                         </dl>
