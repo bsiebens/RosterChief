@@ -177,11 +177,17 @@
         background: var(--color-paper);
         color: var(--color-slate);
         font-family: var(--font-sans);
-        /* env(safe-area-inset-*) support -- design doc: "The app content starts below a
-           54px status-bar inset and ends above a 26-30px home-indicator inset -- preserve
-           those safe areas via env(safe-area-inset-*), not fixed padding." */
-        padding-top: env(safe-area-inset-top);
-        padding-bottom: env(safe-area-inset-bottom);
+        /* No top/bottom padding here for env(safe-area-inset-*) -- design doc: "The app
+           content starts below a 54px status-bar inset and ends above a 26-30px
+           home-indicator inset -- preserve those safe areas via env(safe-area-inset-*),
+           not fixed padding." That's handled by .app-header/.tab-bar instead (both
+           sticky to the very top/bottom edge, each with their own env(safe-area-inset-*)
+           padding below): padding here too double-applied the inset on iOS standalone
+           PWAs -- body's own padding pushed the (still bg-paper-coloured) safe area
+           below the status bar, then the header's padding pushed it down *again*
+           inside its own already-dark background, showing as a large blank
+           bg-paper gap above the header instead of the header's colour simply
+           extending up under the status bar the way a native app's chrome would. */
     }
 
     /* Standard Alpine convention -- hides an x-cloak'd element until Alpine has
