@@ -7,7 +7,7 @@ from django.core import mail
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError
 from django.db.models import ProtectedError
-from django.test import RequestFactory, TestCase
+from django.test import RequestFactory, TestCase, override_settings
 from django.utils import timezone
 
 from authentication.models import User
@@ -872,6 +872,19 @@ class InvoicePdfTests(TestCase):
         html = self.render()
 
         self.assertIn("AU", html)
+
+    @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app")
+    def test_a_scannable_qr_code_is_embedded(self):
+        html = self.render()
+
+        self.assertIn("data:image/png;base64,", html)
+        self.assertIn("Scan at pickup", html)
+
+    @override_settings(ROSTERCHIEF_BASE_DOMAIN="")
+    def test_no_qr_code_without_a_base_domain_configured(self):
+        html = self.render()
+
+        self.assertNotIn("Scan at pickup", html)
 
     def test_invoice_gets_its_own_number(self):
         create_invoice_for_order(Order.objects.create(club=self.club, purchaser=self.member, total=Decimal("1")))

@@ -21,10 +21,14 @@ gives for not sharing with management.pdf/billing.services.invoices either.
 """
 
 import base64
+import io
 
+import qrcode
+from django.conf import settings
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from django.template.loader import render_to_string
+from django.urls import reverse
 from django.utils.translation import gettext_lazy as _
 
 from club.services.invoicing import resolve_document_address
@@ -74,6 +78,31 @@ def _logo_data_uri(club) -> str | None:
     return f"data:{mimetype};base64,{base64.b64encode(data).decode('ascii')}"
 
 
+def _order_url(order) -> str:
+    """Absolute link to this order's own management page -- not request-
+    bound (render_invoice_pdf has no request to build one from; this can run
+    from a background email-attachment path just as easily as a live
+    download), so built by hand from the club's subdomain + ROSTERCHIEF_BASE_DOMAIN,
+    same tenancy convention as club.tenancy's own subdomain resolution."""
+    path = reverse("management:order_detail", kwargs={"pk": order.pk})
+    return f"https://{order.club.slug}.{settings.ROSTERCHIEF_BASE_DOMAIN}{path}"
+
+
+def _order_qr_data_uri(order) -> str | None:
+    """A QR code scannable at pickup -- lands staff straight on this order's
+    own management page (mark paid/ready/delivered) without hunting for it
+    by number. Never fatal: a club running before ROSTERCHIEF_BASE_DOMAIN is
+    configured (local dev without it set) just prints without one rather
+    than encoding a broken link."""
+    if not settings.ROSTERCHIEF_BASE_DOMAIN:
+        return None
+
+    image = qrcode.make(_order_url(order))
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    return f"data:image/png;base64,{base64.b64encode(buffer.getvalue()).decode('ascii')}"
+
+
 def _cache_path(invoice) -> str:
     return f"clubs/{invoice.club.slug}/shop/invoices/cache/{invoice.pk}.pdf"
 
@@ -103,6 +132,7 @@ def render_invoice_pdf(invoice) -> bytes:
             "order": order,
             "lines": lines,
             "logo_data_uri": _logo_data_uri(invoice.club),
+            "qr_data_uri": _order_qr_data_uri(order),
         },
     )
     pdf_bytes = render_pdf(html)

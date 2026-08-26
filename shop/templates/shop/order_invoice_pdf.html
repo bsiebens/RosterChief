@@ -10,6 +10,12 @@
     renders. Falls back to the initials badge dues_invoice_pdf.html doesn't
     need (that one has no logo treatment at all yet) -- same initials-on-a-
     tinted-square fallback the rest of the app uses when a club has no logo.
+
+    qr_data_uri (same base64 data: URI embedding, see _order_qr_data_uri)
+    encodes a link straight to this order's own management page -- scan it
+    at pickup instead of hunting the order down by number. Absent (and the
+    block simply doesn't render) when ROSTERCHIEF_BASE_DOMAIN isn't
+    configured, e.g. local dev without it set.
 {% endcomment %}
 <!DOCTYPE html>
 <html lang="en">
@@ -58,6 +64,8 @@
             .balance { font-size: 12pt; font-weight: bold; }
             .status-paid { color: #15803d; }
             .status-owed { color: #b91c1c; }
+            .qr { height: 20mm; width: 20mm; margin-top: 3mm; }
+            .qr-caption { font-size: 7pt; text-transform: uppercase; letter-spacing: 0.5pt; color: #999; margin-top: 1mm; }
         </style>
     </head>
     <body>
@@ -93,6 +101,10 @@
                 <h2>{% trans "Order" %}</h2>
                 <div>{{ order.number }}</div>
                 <div class="muted">{% trans "Payable on pickup" %}</div>
+                {% if qr_data_uri %}
+                    <img class="qr" src="{{ qr_data_uri }}" alt="">
+                    <div class="qr-caption">{% trans "Scan at pickup" %}</div>
+                {% endif %}
             </div>
         </div>
 
