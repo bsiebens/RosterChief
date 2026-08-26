@@ -132,12 +132,12 @@
                 <label class="label" for="id_bulk_pickup_instructions"><span class="label-text">{% trans "Pickup instructions" %}</span></label>
                 <textarea id="id_bulk_pickup_instructions" name="pickup_instructions" form="orders_bulk_form" class="textarea textarea-bordered h-28 w-full" rows="3" placeholder="{% trans 'e.g. "ask for it at the clubhouse desk"' %}">{{ bulk_ready_for_pickup_form.pickup_instructions.value|default:"" }}</textarea>
             </div>
-        </div>
-        <div class="modal-action">
-            <form method="dialog">
-                <button class="btn btn-outline gap-2">{% lucide "x" size=16 %} {% trans "Cancel" %}</button>
-            </form>
-            <button class="btn btn-info gap-2" type="submit" form="orders_bulk_form" formaction="{% url 'management:order_bulk_mark_ready_for_pickup' %}">{% lucide "bell" size=16 %} {% trans "Notify selected" %}</button>
+            <div class="modal-action">
+                <form method="dialog">
+                    <button class="btn btn-outline gap-2">{% lucide "x" size=16 %} {% trans "Cancel" %}</button>
+                </form>
+                <button class="btn btn-info gap-2" type="submit" form="orders_bulk_form" formaction="{% url 'management:order_bulk_mark_ready_for_pickup' %}">{% lucide "bell" size=16 %} {% trans "Notify selected" %}</button>
+            </div>
         </div>
         <form method="dialog" class="modal-backdrop"><button>close</button></form>
     </dialog>

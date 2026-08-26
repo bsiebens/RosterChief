@@ -28,6 +28,7 @@
             }
             body { font-family: sans-serif; font-size: 10pt; color: #111; }
             h1 { font-size: 20pt; margin: 0 0 2mm; }
+            .brand-name { font-size: 13pt; margin: 0 0 2mm; }
             .muted { color: #666; }
             .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12mm; }
             .brand { display: flex; align-items: center; gap: 4mm; }
@@ -67,7 +68,7 @@
                     <span class="logo-fallback">{{ club.initials }}</span>
                 {% endif %}
                 <div>
-                    <h1>{{ club.official_name }}</h1>
+                    <h1 class="brand-name">{{ club.official_name }}</h1>
                     {% with snapshot=invoice.billing_snapshot %}
                         {% if snapshot.address %}<div class="muted">{{ snapshot.address }}</div>{% endif %}
                         {% if snapshot.zip_code or snapshot.city %}<div class="muted">{{ snapshot.zip_code }} {{ snapshot.city }}</div>{% endif %}
