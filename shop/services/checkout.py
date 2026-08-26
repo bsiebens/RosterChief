@@ -8,10 +8,9 @@ duplicated between the mobile checkout view and any future admin-side
 from django.db import transaction
 from django.utils.translation import gettext_lazy as _
 
-from notifications.services import notify_members
-
 from ..models import AppliedDiscount, Cart, Discount, Order, OrderLine
 from .invoices import create_invoice_for_order
+from .notifications import dispatch_order_placed_notification
 from .pricing import cart_totals
 
 
@@ -80,14 +79,3 @@ def place_order(cart: Cart, *, purchaser, discount_code: str = "") -> Order:
     dispatch_order_placed_notification(order)
 
     return order
-
-
-def dispatch_order_placed_notification(order) -> None:
-    """The one notification this feature asks for: the purchaser, and only the
-    purchaser (not every shop admin), told their order is in and payable on
-    pickup. Uses notifications.services.notify_members as-is -- it already
-    accepts any iterable of Member, single-recipient calls are the normal
-    case, not a special one."""
-    title = _("Order %(number)s placed") % {"number": order.number}
-    body = _("Your order is in — pay when you pick it up. Total: €%(total)s.") % {"total": order.total}
-    notify_members([order.purchaser], club=order.club, title=title, body=body, source=order)

@@ -8784,6 +8784,59 @@ class OrderManagementTests(ShopTestBase):
         order.refresh_from_db()
         self.assertEqual(order.status, Order.OrderStatus.DELIVERED)
 
+    def test_marking_an_order_ready_for_pickup(self):
+        order = self.make_order()
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_post("order_mark_ready_for_pickup", {"pickup_instructions": "Ask at reception."}, order.pk)
+
+        self.assertRedirects(response, reverse("management:order_detail", args=[order.pk]))
+        order.refresh_from_db()
+        self.assertEqual(order.status, Order.OrderStatus.READY_FOR_PICKUP)
+        self.assertEqual(order.pickup_instructions, "Ask at reception.")
+
+    def test_pickup_instructions_are_optional(self):
+        order = self.make_order()
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_post("order_mark_ready_for_pickup", {"pickup_instructions": ""}, order.pk)
+
+        self.assertRedirects(response, reverse("management:order_detail", args=[order.pk]))
+        order.refresh_from_db()
+        self.assertEqual(order.status, Order.OrderStatus.READY_FOR_PICKUP)
+        self.assertEqual(order.pickup_instructions, "")
+
+    def test_marking_ready_for_pickup_notifies_the_purchaser(self):
+        order = self.make_order()
+        self.client.force_login(self.make_shop_manager())
+
+        self.club_post("order_mark_ready_for_pickup", {"pickup_instructions": ""}, order.pk)
+
+        notification = Notification.objects.get(member=self.purchaser)
+        self.assertIn(order.number, notification.title)
+        self.assertEqual(notification.source, order)
+
+    def test_plain_staff_cannot_mark_ready_for_pickup(self):
+        order = self.make_order()
+        self.client.force_login(self.make_plain_staff())
+
+        response = self.club_post("order_mark_ready_for_pickup", {"pickup_instructions": ""}, order.pk)
+
+        self.assertEqual(response.status_code, 403)
+        order.refresh_from_db()
+        self.assertEqual(order.status, Order.OrderStatus.PENDING)
+        self.assertFalse(Notification.objects.filter(member=self.purchaser).exists())
+
+    def test_an_order_from_another_club_404s(self):
+        other_club = Club.objects.create(name="Other Club", slug="other-club-order")
+        other_purchaser = Member.objects.create(first_name="Otto", last_name="Other", email="otto@example.com")
+        order = Order.objects.create(club=other_club, purchaser=other_purchaser, status=Order.OrderStatus.PENDING, total=Decimal("10.00"))
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_post("order_mark_ready_for_pickup", {"pickup_instructions": ""}, order.pk)
+
+        self.assertEqual(response.status_code, 404)
+
     def test_cancelling_an_order(self):
         order = self.make_order()
         self.client.force_login(self.admin_user)

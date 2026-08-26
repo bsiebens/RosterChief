@@ -1079,6 +1079,17 @@ class OrderMarkPaidForm(forms.Form):
     reference = forms.CharField(label=_("Reference"), required=False, help_text=_("Optional -- a receipt number, whatever lets you find this again."))
 
 
+class OrderMarkReadyForPickupForm(forms.Form):
+    """The "mark ready for pickup" modal on an order's detail page. A plain
+    Form, not a ModelForm bound to the order -- same reasoning as
+    OrderMarkPaidForm's own shape: this only ever sets pickup_instructions +
+    status directly (OrderMarkReadyForPickupView), it never runs the order's
+    own full_clean(), which would needlessly re-validate club/purchaser
+    scoping on an already-persisted, already-valid order."""
+
+    pickup_instructions = forms.CharField(label=_("Pickup instructions"), required=False, widget=forms.Textarea(attrs={"rows": 3}), help_text=_("Optional -- included in the notification, e.g. \"ask for it at the clubhouse desk\"."))
+
+
 class RequirementBypassForm(forms.Form):
     """Marks one OnboardingRequirement as not needed for one member -- see
     club.services.onboarding.mark_bypassed. A note is required here (unlike

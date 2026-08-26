@@ -13,7 +13,7 @@ PAID_STATUSES = (Order.OrderStatus.PAID, Order.OrderStatus.DELIVERED)
 
 #: Still needs staff attention -- payment collection or handover -- as
 #: opposed to a settled (delivered) or dead (cancelled/refunded) order.
-OPEN_STATUSES = (Order.OrderStatus.PENDING, Order.OrderStatus.PAID, Order.OrderStatus.PARTIALLY_PAID)
+OPEN_STATUSES = (Order.OrderStatus.PENDING, Order.OrderStatus.PAID, Order.OrderStatus.PARTIALLY_PAID, Order.OrderStatus.READY_FOR_PICKUP)
 
 
 def order_kpis(club):

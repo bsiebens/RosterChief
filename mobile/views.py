@@ -972,6 +972,7 @@ class NotificationsView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
 ORDER_STATUS_PILL_CLASSES = {
     Order.OrderStatus.PENDING: "pill-warn",
     Order.OrderStatus.PARTIALLY_PAID: "pill-warn",
+    Order.OrderStatus.READY_FOR_PICKUP: "pill-info",
     Order.OrderStatus.PAID: "pill-ok",
     Order.OrderStatus.DELIVERED: "pill-ok",
     Order.OrderStatus.CANCELLED: "pill-neutral",

@@ -55,6 +55,7 @@ from news.services import dispatch_send_publish_notification, notify_editors_of_
 from notifications.models import Notification
 from shop.models import Discount, Invoice, Order, Payment, Product, ProductCategory, ProductVariant
 from shop.services.invoices import ShopInvoicePDFError, render_invoice_pdf
+from shop.services.notifications import dispatch_order_ready_for_pickup_notification
 from shop.services.stats import order_kpis, quantity_sold_by_product, quantity_sold_by_variant
 from teams.models import Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
 from teams.services import eligible_roster_members
@@ -87,6 +88,7 @@ from .forms import (
     OnboardingRequirementForm,
     OpponentForm,
     OrderMarkPaidForm,
+    OrderMarkReadyForPickupForm,
     PositionForm,
     ProductCategoryForm,
     ProductForm,
@@ -3844,6 +3846,7 @@ class OrderDetailView(ShopManagerRequiredMixin, DetailView):
             applied_discounts=applied_discounts,
             payments=payments,
             mark_paid_form=OrderMarkPaidForm(),
+            mark_ready_for_pickup_form=OrderMarkReadyForPickupForm(initial={"pickup_instructions": order.pickup_instructions}),
             **kwargs,
         )
 
@@ -3875,6 +3878,32 @@ class OrderMarkPaidView(ShopManagerRequiredMixin, View):
         order.save(update_fields=["status"])
 
         notify(request, f"s|{_('Order marked paid')}|{_('Order %(number)s is now paid.') % {'number': order.number}}")
+        return redirect("management:order_detail", pk=pk)
+
+
+class OrderMarkReadyForPickupView(ShopManagerRequiredMixin, View):
+    """Reachable only via the "Mark ready for pickup" modal on the order
+    detail page. Saves the (optional) pickup_instructions onto the order
+    itself -- so it stays visible on the order afterwards, not just in the
+    one-off notification -- then dispatches that notification. Plain status
+    set, no state machine, same reasoning as OrderMarkDeliveredView: an
+    order can be flagged ready regardless of its current payment state."""
+
+    def post(self, request, pk):
+        order = get_object_or_404(Order.objects.filter(club=request.club), pk=pk)
+        form = OrderMarkReadyForPickupForm(request.POST)
+
+        if not form.is_valid():
+            for error in form.errors.values():
+                notify(request, f"e|{_('Could not mark ready for pickup')}|{' '.join(error)}")
+            return redirect("management:order_detail", pk=pk)
+
+        order.pickup_instructions = form.cleaned_data["pickup_instructions"]
+        order.status = Order.OrderStatus.READY_FOR_PICKUP
+        order.save(update_fields=["status", "pickup_instructions"])
+        dispatch_order_ready_for_pickup_notification(order)
+
+        notify(request, f"s|{_('Order ready for pickup')}|{_('%(purchaser)s has been notified order %(number)s is ready.') % {'purchaser': order.purchaser, 'number': order.number}}")
         return redirect("management:order_detail", pk=pk)
 
 

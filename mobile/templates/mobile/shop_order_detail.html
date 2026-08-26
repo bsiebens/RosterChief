@@ -24,6 +24,13 @@
         <span class="pill {{ pill_class }}">{{ order.get_status_display }}</span>
     </div>
 
+    {% if order.pickup_instructions %}
+        <div class="m-card p-4">
+            <div class="mb-1 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Pickup instructions" %}</div>
+            <p class="text-sm text-ink">{{ order.pickup_instructions }}</p>
+        </div>
+    {% endif %}
+
     <div class="m-card overflow-hidden">
         {% for line in lines %}
             {% if not forloop.first %}<div class="h-px bg-rule"></div>{% endif %}

@@ -3,6 +3,7 @@ from decimal import Decimal
 from unittest.mock import patch
 
 from django.contrib.admin.sites import AdminSite
+from django.core import mail
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError
 from django.db.models import ProtectedError
@@ -32,7 +33,8 @@ from .models import (
     ProductVariant,
 )
 from .services.checkout import CheckoutError, find_discount, place_order
-from .services.invoices import create_invoice_for_order, render_invoice_pdf
+from .services.invoices import ShopInvoicePDFError, create_invoice_for_order, render_invoice_pdf
+from .services.notifications import dispatch_order_ready_for_pickup_notification
 from .services.pricing import cart_totals
 from .services.stats import order_kpis, quantity_sold_by_product, quantity_sold_by_variant
 
@@ -762,6 +764,69 @@ class PlaceOrderTests(TestCase):
         notification = Notification.objects.get(member=self.member)
         self.assertIn(order.number, notification.title)
         self.assertEqual(notification.source, order)
+
+    def test_the_notification_email_has_the_invoice_pdf_attached(self):
+        cart = self.make_cart()
+
+        with patch("shop.services.invoices.render_pdf", side_effect=lambda html: html.encode()):
+            order = place_order(cart, purchaser=self.member)
+
+        [attachment] = mail.outbox[0].attachments
+        filename, _content, mimetype = attachment
+        self.assertEqual(filename, f"{order.invoice.number}.pdf")
+        self.assertEqual(mimetype, "application/pdf")
+
+    def test_no_attachment_when_pdf_rendering_is_unavailable(self):
+        # WeasyPrint missing its native libraries (ShopInvoicePDFError) must
+        # never block the notification itself -- see _invoice_attachment's
+        # own docstring.
+        cart = self.make_cart()
+
+        with patch("shop.services.invoices.render_pdf", side_effect=ShopInvoicePDFError("no native libs")):
+            order = place_order(cart, purchaser=self.member)
+
+        self.assertEqual(mail.outbox[0].attachments, [])
+        self.assertEqual(Notification.objects.get(member=self.member).source, order)
+
+
+class OrderReadyForPickupNotificationTests(TestCase):
+    """shop.services.notifications.dispatch_order_ready_for_pickup_notification --
+    the purchaser told (app + email) their order is ready to collect."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        cls.member = Member.objects.create(first_name="Jane", last_name="Doe", email="shopper@example.com", user=User.objects.create_user(email="shopper@example.com", password="pw-secret-123"))
+        cls.order = Order.objects.create(club=cls.club, purchaser=cls.member, status=Order.OrderStatus.READY_FOR_PICKUP, total=Decimal("50.00"))
+
+    def test_creates_an_in_app_notification(self):
+        dispatch_order_ready_for_pickup_notification(self.order)
+
+        notification = Notification.objects.get(member=self.member)
+        self.assertIn(self.order.number, notification.title)
+        self.assertIn("ready", notification.title.lower())
+        self.assertEqual(notification.source, self.order)
+
+    def test_emails_the_purchaser(self):
+        dispatch_order_ready_for_pickup_notification(self.order)
+
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ["shopper@example.com"])
+
+    def test_pickup_instructions_are_folded_into_the_body_when_set(self):
+        self.order.pickup_instructions = "Ask for it at the clubhouse desk."
+        self.order.save(update_fields=["pickup_instructions"])
+
+        dispatch_order_ready_for_pickup_notification(self.order)
+
+        notification = Notification.objects.get(member=self.member)
+        self.assertIn("Ask for it at the clubhouse desk.", notification.body)
+
+    def test_no_instructions_is_a_plain_body(self):
+        dispatch_order_ready_for_pickup_notification(self.order)
+
+        notification = Notification.objects.get(member=self.member)
+        self.assertNotIn("None", notification.body)
 
 
 class InvoicePdfTests(TestCase):

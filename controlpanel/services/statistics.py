@@ -30,7 +30,7 @@ from teams.models import StaffAssignment, Team, TeamMembership
 ZERO = Decimal("0.00")
 
 PAID_STATUSES = (Order.OrderStatus.PAID, Order.OrderStatus.DELIVERED)
-OWED_STATUSES = (Order.OrderStatus.PENDING, Order.OrderStatus.PARTIALLY_PAID)
+OWED_STATUSES = (Order.OrderStatus.PENDING, Order.OrderStatus.PARTIALLY_PAID, Order.OrderStatus.READY_FOR_PICKUP)
 
 #: A club with nothing scheduled inside this window has stopped using the product.
 DORMANT_DAYS = 30

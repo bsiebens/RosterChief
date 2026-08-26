@@ -206,6 +206,7 @@ class Order(ClubScopedModel):
         PENDING = "pending", _("Pending")
         PAID = "paid", _("Paid")
         PARTIALLY_PAID = "partially_paid", _("Partially paid")
+        READY_FOR_PICKUP = "ready_for_pickup", _("Ready for pickup")
         CANCELLED = "cancelled", _("Cancelled")
         REFUNDED = "refunded", _("Refunded")
         DELIVERED = "delivered", _("Delivered")
@@ -214,6 +215,10 @@ class Order(ClubScopedModel):
     purchaser = models.ForeignKey(Member, on_delete=models.PROTECT, related_name="orders", verbose_name=_("purchaser"))
     status = models.CharField(_("status"), max_length=255, choices=OrderStatus.choices, default=OrderStatus.PENDING)
     total = models.DecimalField(_("total"), max_digits=10, decimal_places=2)
+    #: Set (optionally) the moment an order is marked ready for pickup --
+    #: shown to the member on their own order and in the notification that
+    #: told them so (shop.services.notifications.dispatch_order_ready_for_pickup_notification).
+    pickup_instructions = models.TextField(_("pickup instructions"), blank=True, help_text=_("Optional -- shown to the member, e.g. \"ask for it at the clubhouse desk\"."))
 
     # `created`/`modified` come from TimeStampedModel — declaring them here as well
     # would clash with the abstract base.

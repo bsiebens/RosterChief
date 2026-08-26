@@ -127,6 +127,24 @@ class NotifyMembersTests(TestCase):
         self.assertEqual(mimetype, "text/html")
         self.assertIn("Big win", html_body)
 
+    def test_attachments_are_carried_on_every_recipients_email(self):
+        member = self.make_member()
+
+        notify_members([member], club=self.club, title="Big win", body="We won 3-0.", attachments=[("invoice.pdf", b"%PDF-fake", "application/pdf")])
+
+        [attachment] = mail.outbox[0].attachments
+        filename, content, mimetype = attachment
+        self.assertEqual(filename, "invoice.pdf")
+        self.assertEqual(content, b"%PDF-fake")
+        self.assertEqual(mimetype, "application/pdf")
+
+    def test_no_attachments_by_default(self):
+        member = self.make_member()
+
+        notify_members([member], club=self.club, title="Big win", body="We won 3-0.")
+
+        self.assertEqual(mail.outbox[0].attachments, [])
+
     def test_sent_at_and_sent_to_emails_are_recorded(self):
         member = self.make_member(email="jamie@example.com")
 

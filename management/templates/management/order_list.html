@@ -69,6 +69,7 @@
                         <td>
                             <span class="badge badge-sm
                                 {% if order.status == "paid" or order.status == "delivered" %}badge-success
+                                {% elif order.status == "ready_for_pickup" %}badge-info
                                 {% elif order.status == "partially_paid" %}badge-warning
                                 {% elif order.status == "cancelled" or order.status == "refunded" %}badge-error
                                 {% else %}badge-neutral{% endif %}">

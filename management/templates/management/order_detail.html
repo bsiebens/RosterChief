@@ -2,11 +2,14 @@
 {% load i18n lucide ui %}
 
 {% comment %}
-    Status actions are each a small POST -- "mark paid" via a modal form
-    (controlpanel/_modal_form.html, a tiny method/reference form), "mark delivered"
+    Status actions are each a small POST -- "mark paid" and "mark ready for
+    pickup" via a modal form (controlpanel/_modal_form.html), "mark delivered"
     a plain one-click POST, "cancel" a confirm modal (controlpanel/_confirm_modal.html).
     No state machine enforced server-side: a picked-up-before-paid order can happen
     in real life, so every action stays available regardless of current status.
+    "Mark ready for pickup" is also the one action that sends the purchaser a
+    fresh notification (app + email) -- see shop.services.notifications.
+    dispatch_order_ready_for_pickup_notification.
 {% endcomment %}
 
 {% block panel_title %}{% blocktrans with number=order.number %}Order {{ number }}{% endblocktrans %}{% endblock panel_title %}
@@ -26,12 +29,16 @@
             <div class="mt-1 text-[13px] text-muted">
                 <span class="badge badge-sm
                     {% if order.status == "paid" or order.status == "delivered" %}badge-success
+                    {% elif order.status == "ready_for_pickup" %}badge-info
                     {% elif order.status == "partially_paid" %}badge-warning
                     {% elif order.status == "cancelled" or order.status == "refunded" %}badge-error
                     {% else %}badge-neutral{% endif %}">
                     {{ order.get_status_display }}
                 </span>
             </div>
+            {% if order.pickup_instructions %}
+                <div class="mt-2 text-[13px] text-muted">{% trans "Pickup instructions:" %} {{ order.pickup_instructions }}</div>
+            {% endif %}
         </div>
         <div class="card p-4">
             <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Purchaser" %}</div>
@@ -53,6 +60,7 @@
             <div class="flex gap-2">
                 {% if order.status != "cancelled" %}
                     <button class="btn btn-success btn-sm gap-2" type="button" onclick="document.getElementById('mark_paid_modal').showModal()">{% lucide "circle-check" size=14 %} {% trans "Mark paid" %}</button>
+                    <button class="btn btn-info btn-sm gap-2" type="button" onclick="document.getElementById('mark_ready_for_pickup_modal').showModal()">{% lucide "bell" size=14 %} {% trans "Mark ready for pickup" %}</button>
                     <form method="post" action="{% url 'management:order_mark_delivered' order.pk %}" class="inline-flex">
                         {% csrf_token %}
                         <button class="btn btn-outline btn-sm gap-2" type="submit">{% lucide "package-check" size=14 %} {% trans "Mark delivered" %}</button>
@@ -142,6 +150,12 @@
     {% blocktrans with number=order.number asvar mark_paid_blurb %}Records a payment of the full order total for {{ number }} and marks it paid.{% endblocktrans %}
     {% url 'management:order_mark_paid' order.pk as mark_paid_url %}
     {% include "controlpanel/_modal_form.html" with modal_id="mark_paid_modal" title=mark_paid_title form=mark_paid_form action_url=mark_paid_url submit_label=mark_paid_submit_label submit_icon="circle-check" blurb=mark_paid_blurb %}
+
+    {% trans "Mark ready for pickup" as mark_ready_for_pickup_title %}
+    {% trans "Mark ready for pickup" as mark_ready_for_pickup_submit_label %}
+    {% blocktrans with number=order.number asvar mark_ready_for_pickup_blurb %}Notifies the purchaser (app + email) that order {{ number }} is ready to collect. Add pickup instructions below if there's anything they need to know.{% endblocktrans %}
+    {% url 'management:order_mark_ready_for_pickup' order.pk as mark_ready_for_pickup_url %}
+    {% include "controlpanel/_modal_form.html" with modal_id="mark_ready_for_pickup_modal" title=mark_ready_for_pickup_title form=mark_ready_for_pickup_form action_url=mark_ready_for_pickup_url submit_label=mark_ready_for_pickup_submit_label submit_icon="bell" blurb=mark_ready_for_pickup_blurb %}
 
     {% trans "Cancel order" as cancel_order_title %}
     {% trans "Cancel order" as cancel_order_submit_label %}

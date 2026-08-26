@@ -146,6 +146,7 @@ urlpatterns = [
     path("shop/orders/", views.OrderListView.as_view(), name="order_list"),
     path("shop/orders/<uuid:pk>/", views.OrderDetailView.as_view(), name="order_detail"),
     path("shop/orders/<uuid:pk>/mark-paid/", views.OrderMarkPaidView.as_view(), name="order_mark_paid"),
+    path("shop/orders/<uuid:pk>/mark-ready-for-pickup/", views.OrderMarkReadyForPickupView.as_view(), name="order_mark_ready_for_pickup"),
     path("shop/orders/<uuid:pk>/mark-delivered/", views.OrderMarkDeliveredView.as_view(), name="order_mark_delivered"),
     path("shop/orders/<uuid:pk>/cancel/", views.OrderCancelView.as_view(), name="order_cancel"),
     path("shop/orders/<uuid:pk>/invoice/pdf/", views.InvoicePdfView.as_view(), name="order_invoice_pdf"),
