@@ -23,7 +23,7 @@
         </div>
         <div class="flex shrink-0 flex-col items-end gap-1">
             <span class="pill pill-sm {{ payment_pill_class }}">{% lucide "wallet" size=10 %} {{ order.get_payment_status_display }}</span>
-            <span class="pill pill-sm {{ fulfillment_pill_class }}">{% lucide "package" size=10 %} {{ order.get_fulfillment_status_display }}</span>
+            <span class="pill pill-sm {{ member_status_pill_class }}">{% lucide "package" size=10 %} {{ order.member_status.label }}</span>
         </div>
     </div>
 

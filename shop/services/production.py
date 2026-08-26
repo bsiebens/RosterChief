@@ -57,6 +57,17 @@ def sync_production_status(order):
 
 
 @transaction.atomic
+def mark_line_received(line):
+    """Flips a single OrderLine straight to RECEIVED and resyncs its order's
+    own rollup -- the "Mark received" quick action on a line already
+    IN_PRODUCTION (order_detail.html), for advancing the common case without
+    opening the full edit modal just to pick RECEIVED from a dropdown."""
+    line.production_status = ProductionStatus.RECEIVED
+    line.save(update_fields=["production_status"])
+    sync_production_status(line.order)
+
+
+@transaction.atomic
 def mark_lines_in_production(lines):
     """Flips every given OrderLine to IN_PRODUCTION and resyncs each
     affected order's own rollup -- the state-changing half of exporting a

@@ -60,7 +60,7 @@ from shop.services.notifications import dispatch_order_ready_for_pickup_notifica
 from shop.services.payments import PaymentError, amount_due, sync_payment_status
 from shop.services.payments import record_payment as record_shop_payment
 from shop.services.pricing import order_total
-from shop.services.production import in_production_lines, mark_lines_in_production, pending_production_lines, sync_production_status
+from shop.services.production import in_production_lines, mark_line_received, mark_lines_in_production, pending_production_lines, sync_production_status
 from shop.services.stats import order_kpis, quantity_sold_by_product, quantity_sold_by_variant
 from teams.models import Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
 from teams.services import eligible_roster_members
@@ -4212,6 +4212,20 @@ class OrderLineUpdateView(ShopManagerRequiredMixin, RedirectOnInvalidMixin, Upda
 
     def get_success_url(self):
         return reverse("management:order_detail", kwargs={"pk": self.kwargs["order_pk"]})
+
+
+class OrderLineMarkReceivedView(ShopManagerRequiredMixin, View):
+    """Quick one-click alternative to the "Edit" modal's production_status
+    dropdown, next to a line already IN_PRODUCTION -- advancing to RECEIVED
+    is the common case, not a correction, so it shouldn't need a modal.
+    Plain status set, no state machine, same reasoning as
+    OrderMarkDeliveredView: works regardless of the line's current status."""
+
+    def post(self, request, order_pk, pk):
+        line = get_object_or_404(OrderLine.objects.filter(order__club=request.club, order__pk=order_pk).select_related("order", "product"), pk=pk)
+        mark_line_received(line)
+        notify(request, f"s|{_('Marked received')}|{_('“%(product)s” is now marked received.') % {'product': line.product}}")
+        return redirect("management:order_detail", pk=order_pk)
 
 
 class PaymentUpdateView(ShopManagerRequiredMixin, RedirectOnInvalidMixin, UpdateView):

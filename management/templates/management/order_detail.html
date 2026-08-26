@@ -126,7 +126,15 @@
                         <td class="font-mono text-xs tabular-nums">&euro; {{ line.unit_price }}</td>
                         <td class="font-mono text-xs tabular-nums">&euro; {{ line.line_total }}</td>
                         <td class="text-right">
-                            <button class="btn btn-outline btn-xs gap-1" type="button" onclick="document.getElementById('{{ line.pk|dom_id:"edit_line_modal" }}').showModal()">{% lucide "pencil" size=12 %} {% trans "Edit" %}</button>
+                            <div class="inline-flex gap-1">
+                                {% if line.production_status == "in_production" %}
+                                    <form method="post" action="{% url 'management:order_line_mark_received' order.pk line.pk %}" class="inline-flex">
+                                        {% csrf_token %}
+                                        <button class="btn btn-outline btn-success btn-xs gap-1" type="submit">{% lucide "package-check" size=12 %} {% trans "Mark received" %}</button>
+                                    </form>
+                                {% endif %}
+                                <button class="btn btn-outline btn-xs gap-1" type="button" onclick="document.getElementById('{{ line.pk|dom_id:"edit_line_modal" }}').showModal()">{% lucide "pencil" size=12 %} {% trans "Edit" %}</button>
+                            </div>
                         </td>
                     </tr>
                     {% trans "Edit line item" as edit_line_label %}

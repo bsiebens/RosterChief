@@ -29,7 +29,7 @@
                     </div>
                     <div class="flex shrink-0 flex-col items-end gap-1">
                         <span class="pill pill-sm {{ row.payment_pill_class }}">{% lucide "wallet" size=10 %} {{ row.order.get_payment_status_display }}</span>
-                        <span class="pill pill-sm {{ row.fulfillment_pill_class }}">{% lucide "package" size=10 %} {{ row.order.get_fulfillment_status_display }}</span>
+                        <span class="pill pill-sm {{ row.member_status_pill_class }}">{% lucide "package" size=10 %} {{ row.order.member_status.label }}</span>
                     </div>
                     {% lucide "chevron-right" size=18 class="shrink-0 text-dim" %}
                 </a>

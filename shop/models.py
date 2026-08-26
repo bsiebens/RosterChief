@@ -250,6 +250,18 @@ class Order(ClubScopedModel):
         #: real, valid combination, not a contradiction).
         CANCELLED = "cancelled", _("Cancelled")
 
+    class MemberStatus(models.TextChoices):
+        """The single, member-facing progress status shown on the mobile app
+        (Order.member_status) -- folds fulfillment_status and
+        production_status into the one sequence a member actually cares
+        about, instead of showing two independent pills."""
+
+        NOT_READY = "not_ready", _("Not ready")
+        IN_PRODUCTION = "in_production", _("In production")
+        READY_FOR_PICKUP = "ready_for_pickup", _("Ready for pickup")
+        COMPLETED = "completed", _("Completed")
+        CANCELLED = "cancelled", _("Cancelled")
+
     number = models.CharField(_("number"), max_length=255, blank=True)
     purchaser = models.ForeignKey(Member, on_delete=models.PROTECT, related_name="orders", verbose_name=_("purchaser"))
     payment_status = models.CharField(_("payment status"), max_length=255, choices=PaymentStatus.choices, default=PaymentStatus.PENDING)
@@ -302,6 +314,25 @@ class Order(ClubScopedModel):
         since a dues/membership-only order has nothing to send a
         manufacturer and its production_status is just an unused default."""
         return self.order_items.filter(product__product_type=Product.ProductType.MERCHANDISE).exists()
+
+    @property
+    def member_status(self) -> Order.MemberStatus:
+        """Consolidated status for the mobile app -- see MemberStatus. An
+        order sitting on fulfillment_status NOT_READY because its jersey is
+        still being made looks the same as one nobody's touched yet unless
+        production_status is folded in here too; once fulfillment_status
+        moves past NOT_READY, production_status no longer matters (the
+        member cares that it's ready/delivered, not the manufacturing step
+        that got it there)."""
+        if self.fulfillment_status == self.FulfillmentStatus.CANCELLED:
+            return self.MemberStatus.CANCELLED
+        if self.fulfillment_status == self.FulfillmentStatus.DELIVERED:
+            return self.MemberStatus.COMPLETED
+        if self.fulfillment_status == self.FulfillmentStatus.READY_FOR_PICKUP:
+            return self.MemberStatus.READY_FOR_PICKUP
+        if self.has_production_lines and self.production_status == ProductionStatus.IN_PRODUCTION:
+            return self.MemberStatus.IN_PRODUCTION
+        return self.MemberStatus.NOT_READY
 
     def generate_number(self):
         """Next per-club order number for the current year: ``ORD-<year>-<seq>``."""

@@ -22,7 +22,7 @@ from events.services.notifications import notify_new_event
 from members.models import Family, FamilyMembership, Member
 from news.models import News, NewsPhoto
 from notifications.models import Notification
-from shop.models import Cart, CartItem, Discount, Order, OrderLine, Product, ProductCategory, ProductVariant, Voucher
+from shop.models import Cart, CartItem, Discount, Order, OrderLine, Product, ProductCategory, ProductionStatus, ProductVariant, Voucher
 from shop.services.checkout import place_order
 from shop.services.invoices import create_invoice_for_order
 from teams.models import Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership
@@ -5255,6 +5255,19 @@ class ShopOrdersViewTests(TestCase):
 
         self.assertContains(response, "No orders yet.")
 
+    def test_shows_the_consolidated_member_status_not_the_raw_fulfillment_status(self):
+        # fulfillment_status alone is still NOT_READY while a jersey is being
+        # made -- the mobile app should say "In production", not "Not ready".
+        product = Product.objects.create(club=self.club, name="Home Jersey", price=Decimal("25.00"), product_type=Product.ProductType.MERCHANDISE)
+        order = Order.objects.create(club=self.club, purchaser=self.member, total=Decimal("25.00"), production_status=ProductionStatus.IN_PRODUCTION)
+        OrderLine.objects.create(order=order, product=product, quantity=1, unit_price=product.price, line_total=product.price, production_status=ProductionStatus.IN_PRODUCTION)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, "In production")
+        self.assertNotContains(response, "Not ready")
+
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
 class ShopOrderDetailViewTests(TestCase):
@@ -5286,6 +5299,15 @@ class ShopOrderDetailViewTests(TestCase):
         response = self.client.get(reverse("mobile:shop_order_detail", kwargs={"pk": self.order.pk}), HTTP_HOST="ajax-united.rosterchief.app")
 
         self.assertEqual(response.status_code, 404)
+
+    def test_shows_completed_once_delivered(self):
+        self.order.fulfillment_status = Order.FulfillmentStatus.DELIVERED
+        self.order.save(update_fields=["fulfillment_status"])
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mobile:shop_order_detail", kwargs={"pk": self.order.pk}), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, "Completed")
 
     def test_the_download_invoice_link_is_not_htmx_boosted(self):
         # hx-boost="true" is set globally on <body> (base.html) -- without an

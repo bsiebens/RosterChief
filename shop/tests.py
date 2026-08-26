@@ -39,7 +39,7 @@ from .services.invoices import ShopInvoicePDFError, create_invoice_for_order, in
 from .services.notifications import dispatch_order_ready_for_pickup_notification
 from .services.payments import PaymentError, amount_due, amount_paid, record_payment, sync_payment_status
 from .services.pricing import cart_totals, order_total
-from .services.production import mark_lines_in_production, pending_production_lines, sync_production_status
+from .services.production import mark_line_received, mark_lines_in_production, pending_production_lines, sync_production_status
 from .services.stats import order_kpis, quantity_sold_by_product, quantity_sold_by_variant
 
 
@@ -379,6 +379,61 @@ class OrderProductionStatusTests(ShopEntitiesTestBase):
 
     def test_production_status_defaults_to_pending(self):
         self.assertEqual(self.order.production_status, ProductionStatus.PENDING)
+
+
+class OrderMemberStatusTests(ShopEntitiesTestBase):
+    """Order.member_status -- the single, consolidated status the mobile app
+    shows, folding production_status into fulfillment_status."""
+
+    def make_line(self, **kwargs):
+        kwargs.setdefault("order", self.order)
+        kwargs.setdefault("product", self.product)
+        kwargs.setdefault("quantity", 1)
+        kwargs.setdefault("unit_price", Decimal("25.00"))
+        kwargs.setdefault("line_total", Decimal("25.00"))
+        return OrderLine.objects.create(**kwargs)
+
+    def test_not_ready_with_no_production_lines(self):
+        self.assertEqual(self.order.member_status, Order.MemberStatus.NOT_READY)
+
+    def test_not_ready_while_a_merchandise_line_is_still_pending(self):
+        self.product.product_type = Product.ProductType.MERCHANDISE
+        self.product.save(update_fields=["product_type"])
+        self.make_line()
+
+        self.assertEqual(self.order.member_status, Order.MemberStatus.NOT_READY)
+
+    def test_in_production_once_a_merchandise_line_is_sent(self):
+        self.product.product_type = Product.ProductType.MERCHANDISE
+        self.product.save(update_fields=["product_type"])
+        self.make_line(production_status=ProductionStatus.IN_PRODUCTION)
+        sync_production_status(self.order)  # member_status reads the rolled-up Order.production_status, not the line directly
+
+        self.assertEqual(self.order.member_status, Order.MemberStatus.IN_PRODUCTION)
+
+    def test_ready_for_pickup_overrides_production_status(self):
+        self.product.product_type = Product.ProductType.MERCHANDISE
+        self.product.save(update_fields=["product_type"])
+        self.make_line(production_status=ProductionStatus.IN_PRODUCTION)
+        self.order.fulfillment_status = Order.FulfillmentStatus.READY_FOR_PICKUP
+        self.order.save(update_fields=["fulfillment_status"])
+
+        self.assertEqual(self.order.member_status, Order.MemberStatus.READY_FOR_PICKUP)
+
+    def test_completed_once_delivered(self):
+        self.order.fulfillment_status = Order.FulfillmentStatus.DELIVERED
+        self.order.save(update_fields=["fulfillment_status"])
+
+        self.assertEqual(self.order.member_status, Order.MemberStatus.COMPLETED)
+
+    def test_cancelled_overrides_everything_else(self):
+        self.product.product_type = Product.ProductType.MERCHANDISE
+        self.product.save(update_fields=["product_type"])
+        self.make_line(production_status=ProductionStatus.IN_PRODUCTION)
+        self.order.fulfillment_status = Order.FulfillmentStatus.CANCELLED
+        self.order.save(update_fields=["fulfillment_status"])
+
+        self.assertEqual(self.order.member_status, Order.MemberStatus.CANCELLED)
 
 
 class DiscountTests(ShopEntitiesTestBase):
@@ -1263,6 +1318,25 @@ class ProductionServiceTests(TestCase):
 
         other_order.refresh_from_db()
         self.assertEqual(other_order.production_status, ProductionStatus.IN_PRODUCTION)
+
+    def test_mark_line_received_flips_the_line_and_resyncs_its_order(self):
+        line = self.make_line(production_status=ProductionStatus.IN_PRODUCTION)
+
+        mark_line_received(line)
+
+        line.refresh_from_db()
+        self.assertEqual(line.production_status, ProductionStatus.RECEIVED)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.production_status, ProductionStatus.RECEIVED)
+
+    def test_mark_line_received_leaves_the_order_in_production_while_a_sibling_line_isnt_received_yet(self):
+        received = self.make_line(production_status=ProductionStatus.IN_PRODUCTION)
+        self.make_line(production_status=ProductionStatus.IN_PRODUCTION)
+
+        mark_line_received(received)
+
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.production_status, ProductionStatus.IN_PRODUCTION)
 
 
 class OrderKPIsTests(TestCase):

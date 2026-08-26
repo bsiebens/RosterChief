@@ -157,6 +157,7 @@ urlpatterns = [
     path("shop/orders/<uuid:pk>/cancel/", views.OrderCancelView.as_view(), name="order_cancel"),
     path("shop/orders/<uuid:pk>/invoice/pdf/", views.InvoicePdfView.as_view(), name="order_invoice_pdf"),
     path("shop/orders/<uuid:order_pk>/lines/<uuid:pk>/edit/", views.OrderLineUpdateView.as_view(), name="order_line_update"),
+    path("shop/orders/<uuid:order_pk>/lines/<uuid:pk>/mark-received/", views.OrderLineMarkReceivedView.as_view(), name="order_line_mark_received"),
     path("shop/orders/<uuid:order_pk>/payments/<uuid:pk>/edit/", views.PaymentUpdateView.as_view(), name="payment_update"),
     path("shop/orders/<uuid:order_pk>/payments/<uuid:pk>/delete/", views.PaymentDeleteView.as_view(), name="payment_delete"),
     path("shop/orders/<uuid:pk>/payments/add/", views.OrderAddPaymentView.as_view(), name="order_add_payment"),

@@ -982,22 +982,25 @@ class NotificationsView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         return HttpResponseBadRequest(_("Unknown action."))
 
 
-#: Pill styling for an Order's two independent status axes (assets/mobile.css's
-#: .pill-*) -- shared by ShopOrdersView's list rows and ShopOrderDetailView's
-#: own header. Shown as two separate pills (not merged into one) since this
-#: app is pay-on-pickup: "Ready for pickup" + "Pending" is a real, common, and
-#: informative combination for a member to see at a glance.
+#: Pill styling shared by ShopOrdersView's list rows and ShopOrderDetailView's
+#: own header. Payment and the consolidated member-facing status
+#: (Order.member_status, which already folds production_status into
+#: fulfillment_status -- see its own docstring) are shown as two separate
+#: pills, not merged into one: this app is pay-on-pickup, so "Ready for
+#: pickup" + "Pending" is a real, common, and informative combination for a
+#: member to see at a glance.
 ORDER_PAYMENT_STATUS_PILL_CLASSES = {
     Order.PaymentStatus.PENDING: "pill-warn",
     Order.PaymentStatus.PARTIALLY_PAID: "pill-warn",
     Order.PaymentStatus.PAID: "pill-ok",
     Order.PaymentStatus.REFUNDED: "pill-neutral",
 }
-ORDER_FULFILLMENT_STATUS_PILL_CLASSES = {
-    Order.FulfillmentStatus.NOT_READY: "pill-neutral",
-    Order.FulfillmentStatus.READY_FOR_PICKUP: "pill-info",
-    Order.FulfillmentStatus.DELIVERED: "pill-ok",
-    Order.FulfillmentStatus.CANCELLED: "pill-neutral",
+ORDER_MEMBER_STATUS_PILL_CLASSES = {
+    Order.MemberStatus.NOT_READY: "pill-neutral",
+    Order.MemberStatus.IN_PRODUCTION: "pill-info",
+    Order.MemberStatus.READY_FOR_PICKUP: "pill-info",
+    Order.MemberStatus.COMPLETED: "pill-ok",
+    Order.MemberStatus.CANCELLED: "pill-neutral",
 }
 
 
@@ -1220,7 +1223,7 @@ class ShopOrdersView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
             {
                 "order": order,
                 "payment_pill_class": ORDER_PAYMENT_STATUS_PILL_CLASSES.get(order.payment_status, "pill-neutral"),
-                "fulfillment_pill_class": ORDER_FULFILLMENT_STATUS_PILL_CLASSES.get(order.fulfillment_status, "pill-neutral"),
+                "member_status_pill_class": ORDER_MEMBER_STATUS_PILL_CLASSES.get(order.member_status, "pill-neutral"),
             }
             for order in orders
         ]
@@ -1240,13 +1243,13 @@ class ShopOrderDetailView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
         order = get_object_or_404(Order.objects.select_related("purchaser"), pk=self.kwargs["pk"], club=self.request.club, purchaser__in=self.managed_people)
         lines = order.order_items.select_related("product", "variant", "beneficiary")
         payment_pill_class = ORDER_PAYMENT_STATUS_PILL_CLASSES.get(order.payment_status, "pill-neutral")
-        fulfillment_pill_class = ORDER_FULFILLMENT_STATUS_PILL_CLASSES.get(order.fulfillment_status, "pill-neutral")
+        member_status_pill_class = ORDER_MEMBER_STATUS_PILL_CLASSES.get(order.member_status, "pill-neutral")
         return super().get_context_data(
             screen_title=order.number,
             order=order,
             lines=lines,
             payment_pill_class=payment_pill_class,
-            fulfillment_pill_class=fulfillment_pill_class,
+            member_status_pill_class=member_status_pill_class,
             **kwargs,
         )
 

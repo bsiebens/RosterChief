@@ -9576,6 +9576,58 @@ class OrderLineManagementTests(ShopTestBase):
         self.assertEqual(response.status_code, 404)
 
 
+class OrderLineMarkReceivedTests(ShopTestBase):
+    """OrderLineMarkReceivedView -- the one-click "Mark received" button next
+    to a line already IN_PRODUCTION (order_detail.html), an alternative to
+    OrderLineEditForm's production_status dropdown for the common case."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.product.product_type = Product.ProductType.MERCHANDISE
+        cls.product.save(update_fields=["product_type"])
+        cls.purchaser = Member.objects.create(first_name="Olly", last_name="Orderer", email="olly-received@example.com")
+
+    def make_order_with_line(self, production_status=ProductionStatus.IN_PRODUCTION, quantity=1, unit_price=Decimal("25.00")):
+        order = Order.objects.create(club=self.club, purchaser=self.purchaser, total=unit_price * quantity)
+        line = OrderLine.objects.create(order=order, product=self.product, quantity=quantity, unit_price=unit_price, line_total=unit_price * quantity, production_status=production_status)
+        return order, line
+
+    def test_a_shop_manager_can_mark_a_line_received(self):
+        order, line = self.make_order_with_line()
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_post("order_line_mark_received", {}, order.pk, line.pk)
+
+        self.assertRedirects(response, reverse("management:order_detail", args=[order.pk]))
+        line.refresh_from_db()
+        self.assertEqual(line.production_status, ProductionStatus.RECEIVED)
+        order.refresh_from_db()
+        self.assertEqual(order.production_status, ProductionStatus.RECEIVED)
+
+    def test_plain_staff_cannot_mark_a_line_received(self):
+        order, line = self.make_order_with_line()
+        self.client.force_login(self.make_plain_staff())
+
+        response = self.club_post("order_line_mark_received", {}, order.pk, line.pk)
+
+        self.assertEqual(response.status_code, 403)
+        line.refresh_from_db()
+        self.assertEqual(line.production_status, ProductionStatus.IN_PRODUCTION)
+
+    def test_a_line_item_from_another_club_404s(self):
+        other_club = Club.objects.create(name="Other Club", slug="other-club-received")
+        other_purchaser = Member.objects.create(first_name="Otto", last_name="Other", email="otto-received@example.com")
+        other_product = Product.objects.create(club=other_club, name="Other Jersey", price=Decimal("25.00"))
+        other_order = Order.objects.create(club=other_club, purchaser=other_purchaser, total=Decimal("25.00"))
+        other_line = OrderLine.objects.create(order=other_order, product=other_product, quantity=1, unit_price=Decimal("25.00"), line_total=Decimal("25.00"), production_status=ProductionStatus.IN_PRODUCTION)
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_post("order_line_mark_received", {}, other_order.pk, other_line.pk)
+
+        self.assertEqual(response.status_code, 404)
+
+
 class OrderProductionExportTests(ShopTestBase):
     """OrderProductionExportView -- the Orders list's own "Download order
     list" modal. Exports pending (not-yet-in-production) lines for the
