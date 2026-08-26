@@ -9035,12 +9035,14 @@ class PaymentManagementTests(ShopTestBase):
         payment = self.make_payment(order)
         self.client.force_login(self.make_shop_manager())
 
-        response = self.club_post("payment_delete", {}, order.pk, payment.pk)
+        url = reverse("management:payment_delete", args=[order.pk, payment.pk])
+        response = self.client.post(url, {}, HTTP_HOST="ajax-united.rosterchief.app", follow=True)
 
         self.assertRedirects(response, reverse("management:order_detail", args=[order.pk]))
         self.assertFalse(Payment.objects.filter(pk=payment.pk).exists())
         order.refresh_from_db()
         self.assertEqual(order.status, Order.OrderStatus.PENDING)
+        self.assertContains(response, "back to pending")
 
     def test_deleting_one_of_several_payments_leaves_status_alone(self):
         order = self.make_order()

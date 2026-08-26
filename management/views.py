@@ -3980,11 +3980,16 @@ class PaymentDeleteView(ShopManagerRequiredMixin, View):
         order = payment.order
         payment.delete()
 
+        reverted_to_pending = False
         if not order.payments.exists() and order.status not in (Order.OrderStatus.CANCELLED, Order.OrderStatus.REFUNDED):
             order.status = Order.OrderStatus.PENDING
             order.save(update_fields=["status"])
+            reverted_to_pending = True
 
-        notify(request, f"s|{_('Payment deleted')}|{_('Payment deleted.')}")
+        if reverted_to_pending:
+            notify(request, f"s|{_('Payment deleted')}|{_('Payment deleted -- order %(number)s has no payments left and is back to pending.') % {'number': order.number}}")
+        else:
+            notify(request, f"s|{_('Payment deleted')}|{_('Payment deleted.')}")
         return redirect("management:order_detail", pk=order_pk)
 
 
