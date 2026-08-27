@@ -18,12 +18,25 @@
 
         <div class="card mb-4 card-body">
             <h2 class="card-title">{% trans "Basics" %}</h2>
-            <div class="grid grid-cols-2 gap-4">
-                {% form_field form.title %}
-                {% form_field form.is_active show_as_toggle=True %}
+            <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
+                <div class="md:col-span-2">
+                    {% form_field form.title %}
+                </div>
+                <div class="flex flex-col justify-center gap-3">
+                    <label class="flex cursor-pointer items-start justify-between gap-3">
+                        <span class="min-w-0">
+                            <span class="block text-sm font-semibold text-ink">{% trans "Active" %}</span>
+                            <span class="block text-xs text-muted">{% trans "Can still be picked for a new send." %}</span>
+                        </span>
+                        {{ form.is_active|daisy:"toggle toggle-sm mt-0.5 shrink-0" }}
+                    </label>
+                    <label class="flex cursor-pointer items-center justify-between gap-3">
+                        <span class="text-sm font-semibold text-ink">{% trans "Login required" %}</span>
+                        {{ form.login_required|daisy:"toggle toggle-sm shrink-0" }}
+                    </label>
+                </div>
             </div>
             {% form_field form.description textarea_height="h-28" %}
-            {% form_field form.login_required show_as_toggle=True %}
         </div>
 
         {% if not update_view %}
