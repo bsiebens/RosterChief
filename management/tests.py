@@ -46,7 +46,7 @@ from news.models import News, NewsPhoto
 from news.services import _send_and_mark_notified
 from notifications.models import Notification
 from registration.models import RegistrationBatch, RegistrationDetails
-from shop.models import Discount, DiscountType, Invoice, Order, OrderLine, Payment, Product, ProductCategory, ProductionStatus, ProductVariant, Voucher, VoucherConsumption
+from shop.models import Discount, DiscountType, Invoice, Order, OrderLine, Payment, Product, ProductCategory, ProductionStatus, ProductRegistrantDiscountTier, ProductVariant, Voucher, VoucherConsumption
 from shop.services.invoices import ShopInvoicePDFError, create_invoice_for_order
 from teams.models import Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
 from teams.services import eligible_roster_members
@@ -8426,6 +8426,14 @@ class ProductManagementTests(ShopTestBase):
             "variants-INITIAL_FORMS": "0",
             "variants-MIN_NUM_FORMS": "0",
             "variants-MAX_NUM_FORMS": "1000",
+            # ProductRegistrantDiscountTierFormSet -- both ProductCreateView
+            # and ProductUpdateView now save this alongside ProductForm; zero
+            # submitted rows is a valid "no tiers" formset, same reasoning as
+            # the variant formset above.
+            "tiers-TOTAL_FORMS": "0",
+            "tiers-INITIAL_FORMS": "0",
+            "tiers-MIN_NUM_FORMS": "0",
+            "tiers-MAX_NUM_FORMS": "1000",
         }
         data.update(overrides)
         return data
@@ -8555,10 +8563,16 @@ class ProductCreateWithVariantsTests(ShopTestBase):
                 data[f"variants-{index}-{field}"] = value
         return data
 
+    def tier_formset_data(self):
+        # Zero submitted rows is a valid "no tiers" formset -- ProductRegistrantDiscountTierFormSetTests
+        # below covers actually submitting tier rows.
+        return {"tiers-TOTAL_FORMS": "0", "tiers-INITIAL_FORMS": "0", "tiers-MIN_NUM_FORMS": "0", "tiers-MAX_NUM_FORMS": "1000"}
+
     def test_variant_rows_are_created_alongside_the_product(self):
         self.client.force_login(self.make_shop_manager())
         data = {"name": "Away Jersey", "description": "", "price": "30.00", "product_type": Product.ProductType.MERCHANDISE, "is_active": "on"}
         data.update(self.formset_data({"name": "Small"}, {"name": "Large", "price": "35.00"}))
+        data.update(self.tier_formset_data())
 
         response = self.club_post("product_create", data)
 
@@ -8571,6 +8585,7 @@ class ProductCreateWithVariantsTests(ShopTestBase):
         self.client.force_login(self.make_shop_manager())
         data = {"name": "Away Jersey", "description": "", "price": "30.00", "product_type": Product.ProductType.MERCHANDISE, "is_active": "on"}
         data.update(self.formset_data({"name": "Small"}, {"name": ""}))
+        data.update(self.tier_formset_data())
 
         self.club_post("product_create", data)
 
@@ -8581,11 +8596,107 @@ class ProductCreateWithVariantsTests(ShopTestBase):
         self.client.force_login(self.make_shop_manager())
         data = {"name": "Away Jersey", "description": "", "price": "30.00", "is_active": "on"}
         data.update(self.formset_data({"name": "Small"}, {"name": "small"}))
+        data.update(self.tier_formset_data())
 
         response = self.club_post("product_create", data)
 
         self.assertEqual(response.status_code, 200)
         self.assertFalse(Product.objects.filter(club=self.club, name="Away Jersey").exists())
+
+
+class ProductRegistrantDiscountTierManagementTests(ShopTestBase):
+    """The product form's own registrant-discount-tier formset
+    (ProductRegistrantDiscountTierFormSet) -- "x people = x% off, y people =
+    y% off" staircase pricing, available on both create and edit (unlike
+    variants, which only get their inline formset on create)."""
+
+    def base_data(self, **overrides):
+        data = {
+            "name": "Player Registration",
+            "description": "",
+            "price": "100.00",
+            "product_type": Product.ProductType.MEMBERSHIP,
+            "is_active": "on",
+            "variants-TOTAL_FORMS": "0",
+            "variants-INITIAL_FORMS": "0",
+            "variants-MIN_NUM_FORMS": "0",
+            "variants-MAX_NUM_FORMS": "1000",
+        }
+        data.update(overrides)
+        return data
+
+    def tier_formset_data(self, *rows, total=None):
+        data = {"tiers-TOTAL_FORMS": str(total if total is not None else len(rows)), "tiers-INITIAL_FORMS": "0", "tiers-MIN_NUM_FORMS": "0", "tiers-MAX_NUM_FORMS": "1000"}
+        for index, row in enumerate(rows):
+            for field, value in row.items():
+                data[f"tiers-{index}-{field}"] = value
+        return data
+
+    def test_tier_rows_are_created_alongside_the_product(self):
+        self.client.force_login(self.make_shop_manager())
+        data = self.base_data()
+        data.update(self.tier_formset_data({"min_registrants": "2", "discount_type": "percentage", "discount_amount": "5"}, {"min_registrants": "4", "discount_type": "percentage", "discount_amount": "10"}))
+
+        response = self.club_post("product_create", data)
+
+        self.assertRedirects(response, reverse("management:product_list"))
+        product = Product.objects.get(club=self.club, name="Player Registration")
+        self.assertEqual(product.registrant_discount_tiers.count(), 2)
+        self.assertEqual(product.registrant_discount_tiers.get(min_registrants=4).discount_amount, Decimal("10.00"))
+
+    def test_a_blank_row_is_simply_skipped(self):
+        self.client.force_login(self.make_shop_manager())
+        data = self.base_data()
+        data.update(self.tier_formset_data({"min_registrants": "2", "discount_type": "percentage", "discount_amount": "5"}, {}))
+
+        self.club_post("product_create", data)
+
+        product = Product.objects.get(club=self.club, name="Player Registration")
+        self.assertEqual(product.registrant_discount_tiers.count(), 1)
+
+    def test_two_tiers_with_the_same_threshold_are_rejected(self):
+        self.client.force_login(self.make_shop_manager())
+        data = self.base_data()
+        data.update(self.tier_formset_data({"min_registrants": "3", "discount_type": "percentage", "discount_amount": "5"}, {"min_registrants": "3", "discount_type": "percentage", "discount_amount": "10"}))
+
+        response = self.club_post("product_create", data)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Product.objects.filter(club=self.club, name="Player Registration").exists())
+
+    def test_editing_a_product_replaces_its_tiers(self):
+        product = Product.objects.create(club=self.club, name="Player Registration", product_type=Product.ProductType.MEMBERSHIP, price=Decimal("100.00"))
+        ProductRegistrantDiscountTier.objects.create(product=product, min_registrants=2, discount_type="percentage", discount_amount=Decimal("5"))
+        self.client.force_login(self.make_shop_manager())
+        data = self.base_data()
+        data.update(self.tier_formset_data({"min_registrants": "3", "discount_type": "fixed_amount", "discount_amount": "15"}))
+
+        response = self.club_post("product_update", data, product.pk)
+
+        self.assertRedirects(response, reverse("management:product_list"))
+        tiers = list(product.registrant_discount_tiers.all())
+        self.assertEqual(len(tiers), 1)
+        self.assertEqual(tiers[0].min_registrants, 3)
+        self.assertEqual(tiers[0].discount_amount, Decimal("15.00"))
+
+    def test_the_edit_form_is_prefilled_with_existing_tiers(self):
+        product = Product.objects.create(club=self.club, name="Player Registration", product_type=Product.ProductType.MEMBERSHIP, price=Decimal("100.00"))
+        ProductRegistrantDiscountTier.objects.create(product=product, min_registrants=2, discount_type="percentage", discount_amount=Decimal("5"))
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_get("product_update", product.pk)
+
+        self.assertContains(response, 'value="2"')
+
+    def test_a_tier_below_2_people_is_rejected(self):
+        self.client.force_login(self.make_shop_manager())
+        data = self.base_data()
+        data.update(self.tier_formset_data({"min_registrants": "1", "discount_type": "percentage", "discount_amount": "5"}))
+
+        response = self.club_post("product_create", data)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Product.objects.filter(club=self.club, name="Player Registration").exists())
 
 
 class ProductCategoryManagementTests(ShopTestBase):

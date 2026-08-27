@@ -61,7 +61,7 @@ from news.models import News, NewsPhoto
 from news.services import dispatch_send_publish_notification, notify_editors_of_pending_review
 from notifications.models import Notification
 from registration.models import RegistrationDetails
-from shop.models import Discount, Invoice, Order, OrderLine, Payment, Product, ProductCategory, ProductionStatus, ProductVariant, Voucher, VoucherConsumption
+from shop.models import Discount, Invoice, Order, OrderLine, Payment, Product, ProductCategory, ProductionStatus, ProductRegistrantDiscountTier, ProductVariant, Voucher, VoucherConsumption
 from shop.services.invoices import ShopInvoicePDFError, render_invoice_pdf
 from shop.services.notifications import dispatch_order_ready_for_pickup_notification
 from shop.services.payments import PaymentError, amount_due, sync_payment_status
@@ -114,6 +114,7 @@ from .forms import (
     PositionForm,
     ProductCategoryForm,
     ProductForm,
+    ProductRegistrantDiscountTierFormSet,
     ProductVariantForm,
     ProductVariantFormSet,
     RBIHFImportForm,
@@ -3577,12 +3578,14 @@ class ProductListView(ShopManagerRequiredMixin, ListView):
 
 
 class ProductCreateView(ShopManagerRequiredMixin, View):
-    """Product + its first batch of variants in one submit -- the standalone
-    "Add variant" modal (ProductVariantCreateView) still exists for adding
-    more later, but making someone save the product first just to give it
-    sizes was needless friction. A plain View, not CreateView: this needs a
-    second, independent form (the variant formset) alongside ProductForm,
-    which CreateView's single-form flow doesn't have room for."""
+    """Product + its first batch of variants and registrant-discount tiers
+    in one submit -- the standalone "Add variant" modal
+    (ProductVariantCreateView) still exists for adding more variants later,
+    but making someone save the product first just to give it sizes (or
+    tiers) was needless friction. A plain View, not CreateView: this needs
+    two more independent forms (the variant and tier formsets) alongside
+    ProductForm, which CreateView's single-form flow doesn't have room
+    for."""
 
     template_name = "management/product_form.html"
 
@@ -3595,69 +3598,96 @@ class ProductCreateView(ShopManagerRequiredMixin, View):
         return (
             ProductForm(data, files=self.request.FILES or None, club=self.request.club, instance=Product(club=self.request.club)),
             ProductVariantFormSet(data, prefix="variants"),
+            ProductRegistrantDiscountTierFormSet(data, prefix="tiers"),
         )
 
-    def render_form(self, form, formset):
-        return render(self.request, self.template_name, {"form": form, "variant_formset": formset})
+    def render_form(self, form, variant_formset, tier_formset):
+        return render(self.request, self.template_name, {"form": form, "variant_formset": variant_formset, "tier_formset": tier_formset})
 
     def get(self, request, *args, **kwargs):
-        form, formset = self.get_forms()
-        return self.render_form(form, formset)
+        form, variant_formset, tier_formset = self.get_forms()
+        return self.render_form(form, variant_formset, tier_formset)
 
     def post(self, request, *args, **kwargs):
-        form, formset = self.get_forms(request.POST)
-        if not form.is_valid() or not formset.is_valid():
-            return self.render_form(form, formset)
+        form, variant_formset, tier_formset = self.get_forms(request.POST)
+        if not form.is_valid() or not variant_formset.is_valid() or not tier_formset.is_valid():
+            return self.render_form(form, variant_formset, tier_formset)
 
         with transaction.atomic():
             product = form.save(commit=False)
             product.club = request.club
             product.save()
             ProductVariant.objects.bulk_create(
-                [ProductVariant(product=product, name=row["name"], price=row.get("price")) for row in formset.cleaned_data if row.get("name")]
+                [ProductVariant(product=product, name=row["name"], price=row.get("price")) for row in variant_formset.cleaned_data if row.get("name")]
+            )
+            ProductRegistrantDiscountTier.objects.bulk_create(
+                [ProductRegistrantDiscountTier(product=product, min_registrants=row["min_registrants"], discount_type=row["discount_type"], discount_amount=row["discount_amount"]) for row in tier_formset.cleaned_data if row.get("min_registrants")]
             )
 
         notify(request, f"s|{_('Product created')}|{_('“%(product)s” created.') % {'product': product}}")
         return redirect("management:product_list")
 
 
-class ProductUpdateView(ShopManagerRequiredMixin, UpdateView):
-    model = Product
-    form_class = ProductForm
+class ProductUpdateView(ShopManagerRequiredMixin, View):
+    """A plain View, not UpdateView, for the same reason as ProductCreateView
+    above -- the registrant-discount-tier formset needs to be replaced in
+    one atomic step alongside ProductForm's own save, on both create and
+    edit (unlike variants, which only get their bulk-add formset on create;
+    editing one is a separate modal-based flow, since a variant has its own
+    identity OrderLine can reference -- a tier has no such external
+    reference, so an edit just discards and recreates the whole set)."""
+
     template_name = "management/product_form.html"
 
-    def get_queryset(self):
-        return Product.objects.filter(club=self.request.club)
+    def get_object(self):
+        return get_object_or_404(Product.objects.filter(club=self.request.club), pk=self.kwargs["pk"])
 
-    def get_form_kwargs(self):
-        kwargs = super().get_form_kwargs()
-        kwargs["club"] = self.request.club
-        return kwargs
+    def get_forms(self, product, data=None):
+        tier_kwargs = {"prefix": "tiers"}
+        if data is None:
+            tier_kwargs["initial"] = [{"min_registrants": tier.min_registrants, "discount_type": tier.discount_type, "discount_amount": tier.discount_amount} for tier in product.registrant_discount_tiers.all()]
+        return (
+            ProductForm(data, files=self.request.FILES or None, club=self.request.club, instance=product),
+            ProductRegistrantDiscountTierFormSet(data, **tier_kwargs),
+        )
 
-    def form_valid(self, form):
-        response = super().form_valid(form)
-        body = _("“%(product)s” updated.") % {"product": self.object}
-        notify(self.request, f"s|{_('Product updated')}|{body}")
-        return response
-
-    def get_success_url(self):
-        return reverse("management:product_list")
-
-    def get_context_data(self, **kwargs):
-        # Bound per-row so each variant's own "Edit" modal can render its own
-        # form -- same reasoning as FeatureListView's flags/competitions.
-        variants = list(self.object.variants.all())
-        sold_by_variant = quantity_sold_by_variant(self.object)
+    def render_form(self, product, form, tier_formset):
+        variants = list(product.variants.all())
+        sold_by_variant = quantity_sold_by_variant(product)
         for variant in variants:
             variant.edit_form = ProductVariantForm(instance=variant)
             variant.sold_count = sold_by_variant.get(variant.pk, 0)
-        return super().get_context_data(
-            update_view=True,
-            variants=variants,
-            variant_form=ProductVariantForm(),
-            product_sold_count=quantity_sold_by_product(self.request.club).get(self.object.pk, 0),
-            **kwargs,
-        )
+        context = {
+            "object": product,
+            "form": form,
+            "tier_formset": tier_formset,
+            "update_view": True,
+            "variants": variants,
+            "variant_form": ProductVariantForm(),
+            "product_sold_count": quantity_sold_by_product(self.request.club).get(product.pk, 0),
+        }
+        return render(self.request, self.template_name, context)
+
+    def get(self, request, *args, **kwargs):
+        product = self.get_object()
+        form, tier_formset = self.get_forms(product)
+        return self.render_form(product, form, tier_formset)
+
+    def post(self, request, *args, **kwargs):
+        product = self.get_object()
+        form, tier_formset = self.get_forms(product, request.POST)
+        if not form.is_valid() or not tier_formset.is_valid():
+            return self.render_form(product, form, tier_formset)
+
+        with transaction.atomic():
+            form.save()
+            product.registrant_discount_tiers.all().delete()
+            ProductRegistrantDiscountTier.objects.bulk_create(
+                [ProductRegistrantDiscountTier(product=product, min_registrants=row["min_registrants"], discount_type=row["discount_type"], discount_amount=row["discount_amount"]) for row in tier_formset.cleaned_data if row.get("min_registrants")]
+            )
+
+        notify(request, f"s|{_('Product updated')}|{_('“%(product)s” updated.') % {'product': product}}")
+        return redirect("management:product_list")
 
 
 class ProductCategoryCreateView(ShopManagerRequiredMixin, RedirectOnInvalidMixin, FormView):

@@ -7,15 +7,18 @@ inventing a parallel one, and shop.services.pricing.discount_amount_for for
 the actual currency math so the two never disagree about what a
 percentage/fixed discount is worth.
 
-Two independent discount conditions live on Product itself, mirroring its
-own pre-existing (previously unwired) early_bird_discount_* fields:
+Two independent discount conditions apply to a registration, on different
+schedules:
 
-- min_registrants_discount_* -- how many entries in the same batch chose a
-  variant of this same product. Known immediately at submission time,
-  applied straight onto the resulting ClubMembership.fee_amount.
-- early_bird_discount_* -- whether the fee is paid by a deadline. NOT known
-  at registration time (payment happens later, see club.services.fees) --
-  never baked into fee_amount. Stored instead as ClubMembership.
+- ProductRegistrantDiscountTier -- a staircase of "N+ people through this
+  product get X% off" steps. How many entries in the same batch chose a
+  variant of this same product is known immediately at submission time, so
+  the *best* tier a batch qualifies for (the highest min_registrants still
+  at or below the count) is applied straight onto the resulting
+  ClubMembership.fee_amount.
+- Product.early_bird_discount_* -- whether the fee is paid by a deadline.
+  NOT known at registration time (payment happens later, see club.services.
+  fees) -- never baked into fee_amount. Stored instead as ClubMembership.
   early_payment_deadline/early_payment_discount and re-evaluated by
   club.services.fees.effective_fee_amount only once the member actually
   pays.
@@ -25,11 +28,11 @@ no cross-entry splitting of a single discount the way a whole-cart Discount
 would need, since both conditions here are evaluated per (product, entry).
 """
 
-from collections import Counter
+from collections import Counter, defaultdict
 from decimal import Decimal
 from types import SimpleNamespace
 
-from shop.models import Product
+from shop.models import Product, ProductRegistrantDiscountTier
 from shop.services.pricing import discount_amount_for
 
 
@@ -58,6 +61,19 @@ def resolve_registration_season(variants):
     return seasons.pop()
 
 
+def _best_tier(tiers, count):
+    """The highest-threshold tier ``count`` still qualifies for -- ``tiers``
+    must already be sorted by ``min_registrants`` ascending. ``None`` if
+    none apply yet."""
+    best = None
+    for tier in tiers:
+        if count >= tier.min_registrants:
+            best = tier
+        else:
+            break
+    return best
+
+
 def price_entries(variants):
     """``variants`` -- one ProductVariant per entry, in submission order
     (``None`` for a free/no-charge entry, e.g. many volunteer roles).
@@ -65,11 +81,16 @@ def price_entries(variants):
     "min_registrants_discount", "deadline", "deadline_discount"}``.
 
     ``min_registrants_discount`` is immediate (known now, from how many of
-    ``variants`` share a product). ``deadline``/``deadline_discount``
-    describe a *conditional* early-payment discount the caller stores on
-    the resulting ClubMembership rather than applying now -- see this
-    module's own docstring."""
+    ``variants`` share a product, matched against that product's own
+    ProductRegistrantDiscountTier staircase). ``deadline``/
+    ``deadline_discount`` describe a *conditional* early-payment discount
+    the caller stores on the resulting ClubMembership rather than applying
+    now -- see this module's own docstring."""
     counts = Counter(variant.product_id for variant in variants if variant is not None)
+
+    tiers_by_product = defaultdict(list)
+    for tier in ProductRegistrantDiscountTier.objects.filter(product_id__in=counts.keys()).order_by("min_registrants"):
+        tiers_by_product[tier.product_id].append(tier)
 
     rows = []
     for variant in variants:
@@ -81,8 +102,9 @@ def price_entries(variants):
         price = variant.effective_price
 
         min_registrants_discount = Decimal("0")
-        if product.min_registrants_discount_enabled and product.min_registrants and counts[product.pk] >= product.min_registrants:
-            min_registrants_discount = discount_amount_for(price, SimpleNamespace(discount_type=product.min_registrants_discount_type, discount_amount=product.min_registrants_discount_amount))
+        tier = _best_tier(tiers_by_product.get(product.pk, []), counts[product.pk])
+        if tier is not None:
+            min_registrants_discount = discount_amount_for(price, tier)
 
         deadline = None
         deadline_discount = Decimal("0")

@@ -8,6 +8,7 @@
     <form method="post" enctype="multipart/form-data">
         {% csrf_token %}
         {% if not update_view %}{{ variant_formset.management_form }}{% endif %}
+        {{ tier_formset.management_form }}
 
         {% for error in form.non_field_errors %}
             <div class="alert alert-error mb-4">
@@ -43,8 +44,8 @@
         </div>
 
         <div class="card mb-4 card-body" id="discounts-card">
-            <h2 class="card-title">{% trans "Discounts" %}</h2>
-            <p class="text-sm text-muted">{% trans "Both are optional and independent of each other -- a membership-type product used for registration can use either, both, or neither." %}</p>
+            <h2 class="card-title">{% trans "Early-bird discount" %}</h2>
+            <p class="text-sm text-muted">{% trans "Applies once the fee is actually paid by the deadline below -- not known at registration time, so it isn't reflected in the price shown there until it's paid." %}</p>
             <div class="grid grid-cols-2 gap-4">
                 {% form_field form.early_bird_discount_enabled show_as_toggle=True %}
                 {% form_field form.early_bird_discount_deadline %}
@@ -53,15 +54,45 @@
                 {% form_field form.early_bird_discount_type %}
                 {% form_field form.early_bird_discount_amount %}
             </div>
-            <div class="h-px bg-rule"></div>
-            <div class="grid grid-cols-2 gap-4">
-                {% form_field form.min_registrants_discount_enabled show_as_toggle=True %}
-                {% form_field form.min_registrants %}
+        </div>
+
+        <div class="card mb-4 card-body" id="tiers-card">
+            {% comment %}
+                Registrant-count staircase pricing -- "x people = x% off, y
+                people = y% off" -- one row per tier, fixed extra=4 blank
+                rows (ProductRegistrantDiscountTierFormSet), same "no JS
+                needed" idiom as formbuilder's own FieldFormSet: a handful
+                of rows doesn't need the variant formset's dynamic clone-row
+                machinery. Available on both create and edit (unlike
+                variants) since a tier has no identity anything else
+                references -- editing just discards and recreates the whole
+                set (ProductUpdateView).
+            {% endcomment %}
+            <h2 class="card-title">{% trans "Multi-registrant discount" %}</h2>
+            <p class="text-sm text-muted">{% trans "Register several people through this product in one go and everyone gets the best tier the group qualifies for -- e.g. 3+ people get 10% off, 5+ get 15% off. Leave every row blank for no discount." %}</p>
+
+            {% for error in tier_formset.non_form_errors %}
+                <div class="alert alert-error"><span>{{ error }}</span></div>
+            {% endfor %}
+
+            <div class="flex items-center gap-2">
+                <span class="w-28 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "People" %}</span>
+                <span class="flex-1 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Type" %}</span>
+                <span class="flex-1 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Discount" %}</span>
             </div>
-            <div class="grid grid-cols-2 gap-4">
-                {% form_field form.min_registrants_discount_type %}
-                {% form_field form.min_registrants_discount_amount %}
-            </div>
+            {% for tform in tier_formset %}
+                <div class="flex items-start gap-2">
+                    <div class="w-28">
+                        {{ tform.min_registrants }}
+                        {% for error in tform.min_registrants.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
+                    </div>
+                    <div class="flex-1">{{ tform.discount_type }}</div>
+                    <div class="flex-1">
+                        {{ tform.discount_amount }}
+                        {% for error in tform.discount_amount.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
+                    </div>
+                </div>
+            {% endfor %}
         </div>
 
         {% if not update_view %}

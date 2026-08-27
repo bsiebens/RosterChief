@@ -1,4 +1,5 @@
 from django.core.exceptions import ValidationError
+from django.core.validators import MinValueValidator
 from django.db import IntegrityError, models, transaction
 from django.db.models import Q, UniqueConstraint
 from django.utils import timezone
@@ -124,18 +125,6 @@ class Product(ClubScopedModel):
     early_bird_discount_type = models.CharField(_("early bird discount type"), max_length=255, choices=DiscountType.choices, default=DiscountType.PERCENTAGE, blank=True)
     early_bird_discount_amount = models.DecimalField(_("early bird discount amount"), max_digits=10, decimal_places=2, default=0, blank=True)
 
-    #: Same shape as early_bird_discount_* above, for a different condition --
-    #: registering several people through this same product in one go (e.g.
-    #: siblings), rather than registering by a certain date. Consumed by
-    #: registration.services.pricing, not the regular shop checkout -- see
-    #: that module's own docstring for why the two conditions apply at
-    #: different times (min_registrants immediately, early_bird only once
-    #: the fee is actually paid).
-    min_registrants_discount_enabled = models.BooleanField(_("multi-registrant discount enabled?"), default=False)
-    min_registrants = models.PositiveSmallIntegerField(_("minimum registrants"), blank=True, null=True, help_text=_("Applies once a single registration includes at least this many people registering through this product."))
-    min_registrants_discount_type = models.CharField(_("multi-registrant discount type"), max_length=255, choices=DiscountType.choices, default=DiscountType.PERCENTAGE, blank=True)
-    min_registrants_discount_amount = models.DecimalField(_("multi-registrant discount amount"), max_digits=10, decimal_places=2, default=0, blank=True)
-
     slug_source = "name"
 
     class Meta:
@@ -189,6 +178,37 @@ class ProductVariant(UUIDModel):
     @property
     def effective_price(self):
         return self.price if self.price is not None else self.product.price
+
+
+class ProductRegistrantDiscountTier(UUIDModel):
+    """One step of a staircase discount for registering several people
+    through the same product in one go (e.g. siblings) -- "3+ people get
+    10% off, 5+ get 15% off". Consumed by registration.services.pricing,
+    not the regular shop checkout -- unlike Product.early_bird_discount_*
+    (a single, always-applies-once-enabled condition, evaluated at payment
+    time since it can't be known at registration time), a registrant count
+    is known immediately at submission time, so the *best* tier a batch
+    qualifies for is applied straight onto the resulting ClubMembership.
+    fee_amount then and there -- see that module's own docstring.
+
+    No club FK of its own -- scoped via ``product.club``, same shape as
+    ProductVariant above."""
+
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="registrant_discount_tiers", verbose_name=_("product"))
+    min_registrants = models.PositiveSmallIntegerField(_("minimum registrants"), validators=[MinValueValidator(2)], help_text=_("Applies once a single registration includes at least this many people registering through this product."))
+    discount_type = models.CharField(_("discount type"), max_length=255, choices=DiscountType.choices, default=DiscountType.PERCENTAGE)
+    discount_amount = models.DecimalField(_("discount amount"), max_digits=10, decimal_places=2)
+
+    class Meta:
+        verbose_name = _("registrant discount tier")
+        verbose_name_plural = _("registrant discount tiers")
+        ordering = ["product", "min_registrants"]
+        constraints = [
+            UniqueConstraint(fields=["product", "min_registrants"], name="unique_tier_threshold_per_product"),
+        ]
+
+    def __str__(self):
+        return f"{self.product} — {self.min_registrants}+ ({self.get_discount_type_display()} {self.discount_amount})"
 
 
 class Cart(ClubScopedModel):

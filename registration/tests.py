@@ -8,7 +8,7 @@ from authentication.models import User
 from club.models import Club, ClubMembership, Season
 from club.services.fees import effective_fee_amount, record_payment, remaining_balance
 from members.models import Family, FamilyMembership, Member
-from shop.models import Product, ProductVariant
+from shop.models import Product, ProductRegistrantDiscountTier, ProductVariant
 from teams.models import Position, Team
 
 from .models import RegistrationBatch, RegistrationDetails
@@ -50,11 +50,7 @@ class PricingTests(TestCase):
         self.assertIsNone(rows[0]["deadline"])
 
     def test_min_registrants_discount_applies_once_the_threshold_is_met(self):
-        self.product.min_registrants_discount_enabled = True
-        self.product.min_registrants = 2
-        self.product.min_registrants_discount_type = "percentage"
-        self.product.min_registrants_discount_amount = Decimal("10")
-        self.product.save()
+        ProductRegistrantDiscountTier.objects.create(product=self.product, min_registrants=2, discount_type="percentage", discount_amount=Decimal("10"))
 
         below_threshold = price_entries([self.u10])
         at_threshold = price_entries([self.u10, self.u12])
@@ -65,11 +61,30 @@ class PricingTests(TestCase):
     def test_min_registrants_only_counts_entries_of_the_same_product(self):
         other_product = Product.objects.create(club=self.club, name="Volunteer Registration", product_type=Product.ProductType.MEMBERSHIP, season=self.season, price=Decimal("0"))
         other_variant = ProductVariant.objects.create(product=other_product, name="Coach", price=Decimal("0"))
-        self.product.min_registrants_discount_enabled = True
-        self.product.min_registrants = 2
-        self.product.save()
+        ProductRegistrantDiscountTier.objects.create(product=self.product, min_registrants=2, discount_type="percentage", discount_amount=Decimal("10"))
 
         rows = price_entries([self.u10, other_variant])
+
+        self.assertEqual(rows[0]["min_registrants_discount"], Decimal("0"))
+
+    def test_the_best_qualifying_tier_applies_not_just_the_first(self):
+        # x people = x% off, y people = y% off -- a staircase, not a single
+        # threshold. Three tiers: 2+ -> 5%, 3+ -> 10%, 5+ -> 15%.
+        ProductRegistrantDiscountTier.objects.create(product=self.product, min_registrants=2, discount_type="percentage", discount_amount=Decimal("5"))
+        ProductRegistrantDiscountTier.objects.create(product=self.product, min_registrants=3, discount_type="percentage", discount_amount=Decimal("10"))
+        ProductRegistrantDiscountTier.objects.create(product=self.product, min_registrants=5, discount_type="percentage", discount_amount=Decimal("15"))
+        u10_c = ProductVariant.objects.create(product=self.product, name="U10-C", price=Decimal("80.00"))
+
+        two_people = price_entries([self.u10, self.u12])
+        three_people = price_entries([self.u10, self.u12, u10_c])
+
+        self.assertEqual(two_people[0]["min_registrants_discount"], Decimal("4.00"))  # 5% of 80
+        self.assertEqual(three_people[0]["min_registrants_discount"], Decimal("8.00"))  # 10% of 80, not 5%
+
+    def test_a_tier_never_applies_below_its_own_threshold(self):
+        ProductRegistrantDiscountTier.objects.create(product=self.product, min_registrants=5, discount_type="percentage", discount_amount=Decimal("15"))
+
+        rows = price_entries([self.u10, self.u12])
 
         self.assertEqual(rows[0]["min_registrants_discount"], Decimal("0"))
 
@@ -174,11 +189,7 @@ class SubmitRegistrationTests(TestCase):
         self.assertIsNone(details.requested_position)
 
     def test_min_registrants_discount_reduces_fee_amount_immediately(self):
-        self.player_product.min_registrants_discount_enabled = True
-        self.player_product.min_registrants = 2
-        self.player_product.min_registrants_discount_type = "percentage"
-        self.player_product.min_registrants_discount_amount = Decimal("10")
-        self.player_product.save()
+        ProductRegistrantDiscountTier.objects.create(product=self.player_product, min_registrants=2, discount_type="percentage", discount_amount=Decimal("10"))
         u12 = ProductVariant.objects.create(product=self.player_product, name="U12", price=Decimal("90.00"))
         entries = [
             EntryInput(first_name="Timmy", last_name="Tester", product_variant=self.u10),

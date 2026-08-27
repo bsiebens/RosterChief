@@ -17,7 +17,7 @@ from formbuilder.models import FormSend
 from members.models import Family, FamilyMembership, Group, Member
 from members.services.family import find_member_by_email
 from news.models import News
-from shop.models import Discount, OrderLine, Payment, Product, ProductCategory, ProductVariant, Voucher
+from shop.models import Discount, DiscountType, OrderLine, Payment, Product, ProductCategory, ProductVariant, Voucher
 from shop.services.payments import amount_due
 from teams.models import Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
 from teams.services import eligible_roster_members
@@ -1044,10 +1044,6 @@ class ProductForm(forms.ModelForm):
             "early_bird_discount_deadline",
             "early_bird_discount_type",
             "early_bird_discount_amount",
-            "min_registrants_discount_enabled",
-            "min_registrants",
-            "min_registrants_discount_type",
-            "min_registrants_discount_amount",
         ]
         widgets = {
             "image": forms.ClearableFileInput(attrs={"accept": "image/png,image/jpeg,image/gif,image/webp"}),
@@ -1113,6 +1109,55 @@ class BaseProductVariantFormSet(forms.BaseFormSet):
 
 
 ProductVariantFormSet = forms.formset_factory(ProductVariantRowForm, formset=BaseProductVariantFormSet, extra=3)
+
+
+class ProductRegistrantDiscountTierRowForm(forms.Form):
+    """One row of the product form's own registrant-discount-tier formset --
+    "x people = x% off, y people = y% off" staircase pricing
+    (shop.models.ProductRegistrantDiscountTier), consumed by registration.
+    services.pricing. Entirely optional, same "a row left blank is simply
+    skipped" idiom as ProductVariantRowForm's own rows -- kept separate
+    from a ModelForm for the same reason: on the create page there's no
+    Product to attach these to until it's actually saved."""
+
+    min_registrants = forms.IntegerField(label=_("People"), min_value=2, required=False, widget=forms.NumberInput(attrs={"class": "input input-bordered w-full", "placeholder": _("e.g. 3")}))
+    discount_type = forms.ChoiceField(label=_("Type"), choices=DiscountType.choices, required=False, initial=DiscountType.PERCENTAGE, widget=forms.Select(attrs={"class": "select select-bordered w-full"}))
+    discount_amount = forms.DecimalField(label=_("Discount"), max_digits=10, decimal_places=2, required=False, widget=forms.NumberInput(attrs={"class": "input input-bordered w-full", "step": "0.01", "placeholder": _("e.g. 10")}))
+
+    def clean(self):
+        cleaned = super().clean()
+        if not cleaned.get("min_registrants") and cleaned.get("discount_amount") is None:
+            return cleaned  # a genuinely blank row -- skipped entirely
+
+        if not cleaned.get("min_registrants"):
+            self.add_error("min_registrants", _("Set how many people this tier needs."))
+        if cleaned.get("discount_amount") is None:
+            self.add_error("discount_amount", _("Set a discount amount."))
+        return cleaned
+
+
+class BaseProductRegistrantDiscountTierFormSet(forms.BaseFormSet):
+    """Catches two rows claiming the same threshold -- ProductRegistrantDiscountTier's
+    own unique-per-product constraint would reject the second at save time,
+    but that's a worse error to discover after the product itself has
+    already been saved."""
+
+    def clean(self):
+        super().clean()
+        if any(self.errors):
+            return
+
+        seen = set()
+        for form in self.forms:
+            threshold = (form.cleaned_data or {}).get("min_registrants")
+            if not threshold:
+                continue
+            if threshold in seen:
+                form.add_error("min_registrants", _("Another tier already uses this many people."))
+            seen.add(threshold)
+
+
+ProductRegistrantDiscountTierFormSet = forms.formset_factory(ProductRegistrantDiscountTierRowForm, formset=BaseProductRegistrantDiscountTierFormSet, extra=4)
 
 
 class DiscountForm(forms.ModelForm):

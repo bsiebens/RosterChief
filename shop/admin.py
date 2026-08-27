@@ -11,6 +11,7 @@ from .models import (
     Payment,
     Product,
     ProductCategory,
+    ProductRegistrantDiscountTier,
     ProductVariant,
     Voucher,
     VoucherConsumption,
@@ -49,6 +50,11 @@ class ProductVariantInline(admin.TabularInline):
     extra = 0
 
 
+class ProductRegistrantDiscountTierInline(admin.TabularInline):
+    model = ProductRegistrantDiscountTier
+    extra = 0
+
+
 @admin.register(Product)
 class ProductAdmin(ClubScopedFKMixin, admin.ModelAdmin):
     scoped_fk_fields = ("season", "staff_role", "category")
@@ -56,7 +62,7 @@ class ProductAdmin(ClubScopedFKMixin, admin.ModelAdmin):
     list_filter = ["club", "product_type", "is_active", "is_public"]
     search_fields = ["name", "slug"]
     prepopulated_fields = {"slug": ["name"]}
-    inlines = [ProductVariantInline]
+    inlines = [ProductVariantInline, ProductRegistrantDiscountTierInline]
 
 
 @admin.register(ProductCategory)
@@ -71,6 +77,14 @@ class ProductVariantAdmin(admin.ModelAdmin):
     list_display = ["name", "product", "price", "is_active"]
     list_filter = ["is_active"]
     search_fields = ["name", "product__name"]
+    raw_id_fields = ["product"]
+
+
+@admin.register(ProductRegistrantDiscountTier)
+class ProductRegistrantDiscountTierAdmin(admin.ModelAdmin):
+    list_display = ["product", "min_registrants", "discount_type", "discount_amount"]
+    list_filter = ["discount_type"]
+    search_fields = ["product__name"]
     raw_id_fields = ["product"]
 
 
