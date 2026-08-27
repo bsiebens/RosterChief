@@ -208,7 +208,7 @@
                                         <span id="preview-website-join" class="preview-website-join">{% trans "Join" %}</span>
                                     </div>
                                     <div class="preview-website-hero">
-                                        <div class="preview-website-headline">{% trans "#Fear the Sharks" %}</div>
+                                        <div class="preview-website-headline">#{{ club.name|default:_("Your club")|cut:" " }}</div>
                                         <div class="preview-skeleton-line"></div>
                                         <div class="preview-skeleton-line preview-skeleton-line-short"></div>
                                     </div>
