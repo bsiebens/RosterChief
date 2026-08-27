@@ -1,4 +1,4 @@
-{% extends "_club_base.html" %}
+{% extends "registration/_base.html" %}
 {% load i18n lucide ui static %}
 
 {% comment %}
@@ -10,100 +10,104 @@
     actually creates the records. See registration.views.RegistrationView.
 {% endcomment %}
 
-{% block head_title %}{% trans "Register" %}{% endblock head_title %}
+{% block page_title %}{% trans "Register" %}{% endblock page_title %}
 
-{% block main %}
-    <div class="flex justify-center">
-        <div class="card w-full max-w-3xl bg-base-100 shadow">
-            <div class="card-body">
-                <h1 class="card-title">{% lucide "clipboard-list" size=20 %} {% blocktrans with club=club.name %}Register at {{ club }}{% endblocktrans %}</h1>
+{% block content %}
+    <div class="mb-5">
+        <h1 class="font-display text-3xl font-extrabold text-ink uppercase">{% blocktrans with club=club.name %}Register at {{ club }}{% endblocktrans %}</h1>
+        {% if registration_open %}
+            <p class="mt-1 text-sm text-muted">{% trans "Register yourself, or one or more children, as a player or a volunteer (coach, team manager, referee, ...). The club will review this before it's final." %}</p>
+        {% endif %}
+    </div>
 
-                {% if not registration_open %}
-                    <p class="text-sm opacity-70">{% trans "Registration isn't open right now -- check back soon, or get in touch with the club." %}</p>
+    {% if not registration_open %}
+        <div class="card card-body">
+            <p class="text-sm text-muted">{% trans "Registration isn't open right now -- check back soon, or get in touch with the club." %}</p>
+        </div>
+    {% else %}
+        <form method="post" class="flex flex-col gap-4">
+            {% csrf_token %}
+
+            {% for error in form.non_field_errors %}
+                <div class="alert alert-error" role="alert">{% lucide "circle-x" size=18 %} <span>{{ error }}</span></div>
+            {% endfor %}
+            {% for error in entry_formset.non_form_errors %}
+                <div class="alert alert-error" role="alert">{% lucide "circle-x" size=18 %} <span>{{ error }}</span></div>
+            {% endfor %}
+
+            <div class="card card-body">
+                <h2 class="card-title">{% trans "About you" %}</h2>
+                {% if locked_member %}
+                    <p class="rounded-box border border-line bg-paper px-3 py-2.5 text-sm text-ink">
+                        {% blocktrans with name=locked_member.get_full_name email=locked_member.contact_email %}Submitting as: {{ name }} ({{ email }}){% endblocktrans %}
+                    </p>
                 {% else %}
-                    <p class="text-sm opacity-70">{% trans "Register yourself, or one or more children, as a player or a volunteer (coach, team manager, referee, ...). The club will review this before it's final." %}</p>
-
-                    <form method="post" class="mt-2">
-                        {% csrf_token %}
-
-                        {% for error in form.non_field_errors %}
-                            <div class="alert alert-error my-2"><span>{{ error }}</span></div>
-                        {% endfor %}
-                        {% for error in entry_formset.non_form_errors %}
-                            <div class="alert alert-error my-2"><span>{{ error }}</span></div>
-                        {% endfor %}
-
-                        <h2 class="font-semibold text-sm mt-2">{% trans "About you" %}</h2>
-                        {% if locked_member %}
-                            <p class="text-sm bg-base-200 rounded-box px-3 py-2">
-                                {% blocktrans with name=locked_member.get_full_name email=locked_member.contact_email %}Submitting as: {{ name }} ({{ email }}){% endblocktrans %}
-                            </p>
-                        {% else %}
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                {% form_field form.contact_first_name %}
-                                {% form_field form.contact_last_name %}
-                            </div>
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                {% form_field form.contact_email %}
-                                {% form_field form.contact_phone %}
-                            </div>
-                        {% endif %}
-
-                        <h2 class="font-semibold text-sm mt-4">{% trans "Who's registering" %}</h2>
-                        {{ entry_formset.management_form }}
-                        <div id="bulk-add-rows" data-prefix="{{ entry_formset.prefix }}" class="flex flex-col gap-3">
-                            {% for entry_form in entry_formset %}
-                                {% include "registration/_entry_row.html" with form=entry_form %}
-                            {% endfor %}
-                        </div>
-                        <template id="bulk-add-row-template">
-                            {% include "registration/_entry_row.html" with form=entry_formset.empty_form %}
-                        </template>
-                        <div class="mt-2">
-                            <button class="btn btn-outline btn-sm gap-2" type="button" id="add-row">{% lucide "plus" size=14 %} {% trans "Add another person" %}</button>
-                        </div>
-
-                        {% if priced_entries %}
-                            <div class="mt-4 rounded-box border border-base-300 p-4">
-                                <h2 class="font-semibold text-sm mb-2">{% trans "Price" %}</h2>
-                                <table class="table table-sm">
-                                    <tbody>
-                                        {% for entry, price in priced_entries %}
-                                            <tr>
-                                                <td>{{ entry.first_name }} {{ entry.last_name }}</td>
-                                                <td class="text-right font-mono tabular-nums">&euro; {{ price.price }}</td>
-                                            </tr>
-                                            {% if price.min_registrants_discount > 0 %}
-                                                <tr>
-                                                    <td class="text-sm opacity-70">{% trans "Multi-registrant discount" %}</td>
-                                                    <td class="text-right font-mono tabular-nums text-sm opacity-70">&minus;&euro; {{ price.min_registrants_discount }}</td>
-                                                </tr>
-                                            {% endif %}
-                                            {% if price.deadline %}
-                                                <tr>
-                                                    <td class="text-sm opacity-70">{% blocktrans with date=price.deadline %}€{{ price.deadline_discount }} off if paid by {{ date }}{% endblocktrans %}</td>
-                                                    <td></td>
-                                                </tr>
-                                            {% endif %}
-                                        {% endfor %}
-                                    </tbody>
-                                </table>
-                                <p class="text-xs opacity-70 mt-2">{% trans "This is what's owed once the club confirms your registration -- payment happens separately, not on this page." %}</p>
-                            </div>
-                            <div class="card-actions justify-start pt-4">
-                                <button class="btn btn-primary gap-2" type="submit" name="action" value="submit">{% lucide "send" size=16 %} {% trans "Confirm & submit" %}</button>
-                            </div>
-                        {% else %}
-                            <div class="card-actions justify-start pt-4">
-                                <button class="btn btn-primary gap-2" type="submit" name="action" value="preview">{% lucide "calculator" size=16 %} {% trans "Calculate price" %}</button>
-                            </div>
-                        {% endif %}
-                    </form>
+                    <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+                        {% form_field form.contact_first_name %}
+                        {% form_field form.contact_last_name %}
+                    </div>
+                    <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+                        {% form_field form.contact_email %}
+                        {% form_field form.contact_phone %}
+                    </div>
                 {% endif %}
             </div>
-        </div>
-    </div>
-{% endblock main %}
+
+            <div class="card card-body">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                    <h2 class="card-title">{% trans "Who's registering" %}</h2>
+                    <button class="btn btn-outline btn-sm gap-2" type="button" id="add-row">{% lucide "plus" size=14 %} {% trans "Add another person" %}</button>
+                </div>
+                {{ entry_formset.management_form }}
+                <div id="bulk-add-rows" data-prefix="{{ entry_formset.prefix }}" class="flex flex-col gap-3">
+                    {% for entry_form in entry_formset %}
+                        {% include "registration/_entry_row.html" with form=entry_form %}
+                    {% endfor %}
+                </div>
+                <template id="bulk-add-row-template">
+                    {% include "registration/_entry_row.html" with form=entry_formset.empty_form %}
+                </template>
+            </div>
+
+            {% if priced_entries %}
+                <div class="card card-body">
+                    <h2 class="card-title">{% lucide "receipt" size=18 %} {% trans "Price" %}</h2>
+                    <div class="overflow-hidden rounded-box border border-line">
+                        <table class="table">
+                            <tbody>
+                                {% for entry, price in priced_entries %}
+                                    <tr>
+                                        <td class="font-semibold text-ink">{{ entry.first_name }} {{ entry.last_name }}</td>
+                                        <td class="text-right font-mono text-sm tabular-nums text-ink">&euro; {{ price.price }}</td>
+                                    </tr>
+                                    {% if price.min_registrants_discount > 0 %}
+                                        <tr>
+                                            <td class="text-sm text-muted">{% trans "Multi-registrant discount" %}</td>
+                                            <td class="text-right font-mono text-sm tabular-nums text-muted">&minus;&euro; {{ price.min_registrants_discount }}</td>
+                                        </tr>
+                                    {% endif %}
+                                    {% if price.deadline %}
+                                        <tr>
+                                            <td colspan="2" class="text-xs text-muted">{% blocktrans with amount=price.deadline_discount date=price.deadline %}€{{ amount }} off if paid by {{ date }}{% endblocktrans %}</td>
+                                        </tr>
+                                    {% endif %}
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    <p class="text-xs text-muted">{% trans "This is what's owed once the club confirms your registration -- payment happens separately, not on this page." %}</p>
+                </div>
+                <div>
+                    <button class="btn btn-primary gap-2" type="submit" name="action" value="submit">{% lucide "send" size=16 %} {% trans "Confirm & submit" %}</button>
+                </div>
+            {% else %}
+                <div>
+                    <button class="btn btn-primary gap-2" type="submit" name="action" value="preview">{% lucide "calculator" size=16 %} {% trans "Calculate price" %}</button>
+                </div>
+            {% endif %}
+        </form>
+    {% endif %}
+{% endblock content %}
 
 {% block extra_body %}
     <script src="{% static 'js/searchable-select.js' %}"></script>

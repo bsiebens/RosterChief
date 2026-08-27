@@ -1,0 +1,83 @@
+{% load static lucide ui i18n %}
+{% comment %}
+    Standalone shell for the public registration page -- same "does NOT
+    extend templates/_base.html or _club_base.html, does not load
+    assets/app.css or daisyUI" approach as management/templates/management/
+    base.html, so a club's own registration page looks like the rest of the
+    platform (management.css's Barlow/Barlow Condensed/IBM Plex Mono type
+    system, --color-ink/-paper/-club tokens) instead of the older generic
+    daisyUI chrome members/templates/members/parent_claim.html still uses.
+    No sidebar/nav/notification bell here (unauthenticated, single page) --
+    just a branded header, centered card content, and a footer.
+
+    --tenant-club/--tenant-club-dark/--tenant-club-content mirror management/
+    base.html's own per-request override from Club.secondary_color exactly,
+    so a club's real accent colour (not just the generic default) drives
+    .btn-primary/.badge/etc. here too.
+{% endcomment %}
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+        <title>{% block title %}{% block page_title %}{% trans "Register" %}{% endblock page_title %} &middot; {{ club.name }}{% endblock title %}</title>
+
+        <link rel="stylesheet" href="{% static 'css/management.css' %}">
+        {% if club.secondary_color %}
+            <style>
+                :root {
+                    --tenant-club: {{ club.secondary_color }};
+                    --tenant-club-dark: color-mix(in srgb, {{ club.secondary_color }} 80%, black);
+                    --tenant-club-content: {{ club.secondary_content_color }};
+                }
+            </style>
+        {% endif %}
+        {% block extra_head %}{% endblock extra_head %}
+    </head>
+
+    <body class="flex min-h-screen flex-col bg-paper font-sans text-slate">
+        <header class="flex h-16 shrink-0 items-center gap-2.5 border-b border-line bg-white px-5 sm:px-7">
+            <a class="flex items-center gap-2.5" href="{% url "registration:register" %}">
+                {% if club.logo %}
+                    <img class="crest h-[30px] w-7 shrink-0 object-cover" src="{{ club.logo.url }}" alt="">
+                {% else %}
+                    <span class="crest flex h-[30px] w-7 shrink-0 items-center justify-center bg-club">
+                        <span class="font-display text-[10px] font-extrabold text-club-content">{{ club.initials }}</span>
+                    </span>
+                {% endif %}
+                <span class="min-w-0">
+                    <span class="block truncate font-display text-[17px] leading-none font-extrabold tracking-[.06em] text-ink uppercase">{{ club.name }}</span>
+                </span>
+            </a>
+        </header>
+
+        <main class="flex flex-1 justify-center px-5 py-8 sm:px-7">
+            <div class="w-full max-w-2xl">
+                {% if messages %}
+                    <div class="mb-4 flex flex-col gap-2">
+                        {% for message in messages %}
+                            {% with alert=message|as_alert %}
+                                <div class="alert {{ alert.css }}" role="alert">
+                                    {% lucide alert.icon size=18 %}
+                                    <div>
+                                        <div class="font-display text-sm font-bold tracking-wide uppercase">{{ alert.title }}</div>
+                                        <div class="text-sm">{{ alert.body }}</div>
+                                    </div>
+                                </div>
+                            {% endwith %}
+                        {% endfor %}
+                    </div>
+                {% endif %}
+
+                {% block content %}{% endblock content %}
+            </div>
+        </main>
+
+        <footer class="border-t border-line px-5 py-4 text-center font-mono text-[11px] text-dim sm:px-7">
+            {{ club.name }}
+        </footer>
+
+        {% block extra_body %}{% endblock extra_body %}
+    </body>
+</html>

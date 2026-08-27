@@ -24,6 +24,13 @@
 
 @source "../management";
 
+/* The public registration page (registration/templates/registration/*.html)
+ * deliberately shares this same visual language -- see that app's own
+ * _base.html for why -- so it needs scanning here too, or its Tailwind
+ * utility classes would compile to nothing.
+ */
+@source "../registration";
+
 @theme {
     --font-display: "Barlow Condensed", ui-sans-serif, system-ui, sans-serif;
     --font-sans: "Barlow", ui-sans-serif, system-ui, sans-serif;
