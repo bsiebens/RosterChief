@@ -11,8 +11,8 @@
 {% endblock topbar_context %}
 
 {% block actions %}
-    <a class="btn btn-outline btn-sm gap-2" href="{% url 'management:form_update' form.pk %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</a>
-    <a class="btn btn-primary btn-sm gap-2" href="{% url 'management:formsend_create' form.pk %}">{% lucide "send" size=14 %} {% trans "Send" %}</a>
+    <a class="btn btn-outline gap-2" href="{% url 'management:form_update' form.pk %}">{% lucide "pencil" size=16 %} {% trans "Edit" %}</a>
+    <a class="btn btn-primary gap-2" href="{% url 'management:formsend_create' form.pk %}">{% lucide "send" size=16 %} {% trans "Send" %}</a>
 {% endblock actions %}
 
 {% block panel %}

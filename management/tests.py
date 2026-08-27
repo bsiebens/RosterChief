@@ -10344,7 +10344,7 @@ class FormManagementTests(ManagementTestBase):
             response = self.club_post("formsend_create", data, form_obj.pk)
 
         send = FormSend.objects.get(form=form_obj)
-        self.assertRedirects(response, reverse("management:formsend_detail", args=[form_obj.pk, send.pk]))
+        self.assertRedirects(response, reverse("management:formsend_responses", args=[form_obj.pk, send.pk]))
         self.assertTrue(Notification.objects.filter(member=member).exists())
 
     def test_a_send_from_another_club_404s(self):
@@ -10353,11 +10353,29 @@ class FormManagementTests(ManagementTestBase):
         other_send = FormSend.objects.create(club=other_club, form=other_form)
         self.client.force_login(self.admin_user)
 
-        response = self.club_get("formsend_detail", other_form.pk, other_send.pk)
+        response = self.club_get("formsend_responses", other_form.pk, other_send.pk)
 
         self.assertEqual(response.status_code, 404)
 
     # --- responses ---
+
+    def test_responses_page_shows_the_audience_summary_and_the_table_together(self):
+        form_obj = self.make_form()
+        send = FormSend.objects.create(club=self.club, form=form_obj, club_wide=True)
+        member = Member.objects.create(first_name="Jane", last_name="Doe")
+        ClubMembership.objects.create(club=self.club, member=member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        Submission.objects.create(send=send, member=member)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("formsend_responses", form_obj.pk, send.pk)
+
+        self.assertEqual(response.status_code, 200)
+        # club_wide -- also picks up every other active member setUpTestData
+        # created (admin, editor), not just Jane -- hence >=1, not ==1.
+        self.assertGreaterEqual(response.context["audience_count"], 1)
+        self.assertEqual(response.context["submission_count"], 1)
+        self.assertEqual(response.context["audience_count"] - response.context["not_yet_count"], 1)
+        self.assertEqual(response.context["report"].count, 1)
 
     def test_responses_export_is_a_csv_of_the_sends_own_submissions(self):
         form_obj = self.make_form()

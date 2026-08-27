@@ -163,7 +163,6 @@ _NAV_SECTIONS = {
     "form_field_update": "form_list",
     "form_field_toggle_active": "form_list",
     "formsend_create": "form_list",
-    "formsend_detail": "form_list",
     "formsend_update": "form_list",
     "formsend_responses": "form_list",
     "formsend_responses_export": "form_list",

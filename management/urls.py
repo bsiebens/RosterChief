@@ -178,7 +178,6 @@ urlpatterns = [
     path("forms/<uuid:form_pk>/fields/<uuid:pk>/edit/", views.FormFieldUpdateView.as_view(), name="form_field_update"),
     path("forms/<uuid:form_pk>/fields/<uuid:pk>/toggle-active/", views.FormFieldToggleActiveView.as_view(), name="form_field_toggle_active"),
     path("forms/<uuid:form_pk>/sends/new/", views.FormSendCreateView.as_view(), name="formsend_create"),
-    path("forms/<uuid:form_pk>/sends/<uuid:pk>/", views.FormSendDetailView.as_view(), name="formsend_detail"),
     path("forms/<uuid:form_pk>/sends/<uuid:pk>/edit/", views.FormSendUpdateView.as_view(), name="formsend_update"),
     path("forms/<uuid:form_pk>/sends/<uuid:pk>/responses/", views.FormSendResponsesView.as_view(), name="formsend_responses"),
     path("forms/<uuid:form_pk>/sends/<uuid:pk>/responses/export/", views.FormSendResponsesExportView.as_view(), name="formsend_responses_export"),

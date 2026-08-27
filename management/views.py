@@ -4776,27 +4776,11 @@ class FormSendCreateView(FormManagerRequiredMixin, CreateView):
         return response
 
     def get_success_url(self):
-        return reverse("management:formsend_detail", args=[self.kwargs["form_pk"], self.object.pk])
-
-
-class FormSendDetailView(FormManagerRequiredMixin, DetailView):
-    model = FormSend
-    template_name = "management/formsend_detail.html"
-    context_object_name = "send"
-
-    def get_queryset(self):
-        return FormSend.objects.filter(club=self.request.club, form__pk=self.kwargs["form_pk"]).select_related("form")
-
-    def get_context_data(self, **kwargs):
-        send = self.object
-        audience_count = form_effective_members(send).count()
-        submission_count = send.submissions.count()
-        return super().get_context_data(
-            audience_count=audience_count,
-            submission_count=submission_count,
-            not_yet_count=max(audience_count - submission_count, 0),
-            **kwargs,
-        )
+        # Straight to Responses -- the one page that shows this send's audience/
+        # response-window summary *and* its (empty, for now) responses table, so
+        # there's a single "nice screen" for a send, not two that show overlapping
+        # information (see FormSendResponsesView's own docstring).
+        return reverse("management:formsend_responses", args=[self.kwargs["form_pk"], self.object.pk])
 
 
 class FormSendUpdateView(FormManagerRequiredMixin, UpdateView):
@@ -4819,10 +4803,18 @@ class FormSendUpdateView(FormManagerRequiredMixin, UpdateView):
         return response
 
     def get_success_url(self):
-        return reverse("management:formsend_detail", args=[self.kwargs["form_pk"], self.object.pk])
+        return reverse("management:formsend_responses", args=[self.kwargs["form_pk"], self.object.pk])
 
 
 class FormSendResponsesView(FormManagerRequiredMixin, DetailView):
+    """The one page for a send: audience/response-window summary *and* its
+    responses table together -- what used to be a separate FormSendDetailView
+    (reached only right after creating a send, with no way back to it) plus
+    this page (reached from the form's own Sends list) showed overlapping,
+    non-equivalent information depending which path got you there. Now every
+    path -- creating a send, editing one, or the Sends list's own "Responses"
+    link -- lands here."""
+
     model = FormSend
     template_name = "management/formsend_responses.html"
     context_object_name = "send"
@@ -4831,15 +4823,27 @@ class FormSendResponsesView(FormManagerRequiredMixin, DetailView):
         return FormSend.objects.filter(club=self.request.club, form__pk=self.kwargs["form_pk"]).select_related("form")
 
     def get_context_data(self, **kwargs):
+        send = self.object
+        audience_count = form_effective_members(send).count()
+        submission_count = send.submissions.count()
+
         # Pre-shaped for the template rather than looked up there by a dynamic
         # key (Field.id, a UUID) -- Django templates can't index a dict by a
         # variable key without a custom filter this repo doesn't otherwise
         # have, so each column carries its own summary (already sorted) and
         # each row carries its cells in the same column order.
-        report = form_report(self.object)
+        report = form_report(send)
         columns = [{"field": column, "summary": sorted(report.summaries[column.id].items()) if column.id in report.summaries else None} for column in report.columns]
         rows = [{"submission": row.submission, "cells": [row.values.get(column.id) for column in report.columns]} for row in report.rows]
-        return super().get_context_data(report=report, columns=columns, rows=rows, **kwargs)
+        return super().get_context_data(
+            audience_count=audience_count,
+            submission_count=submission_count,
+            not_yet_count=max(audience_count - submission_count, 0),
+            report=report,
+            columns=columns,
+            rows=rows,
+            **kwargs,
+        )
 
 
 class FormSendResponsesExportView(FormManagerRequiredMixin, View):
