@@ -496,6 +496,32 @@ class Voucher(ClubScopedModel):
         return save_with_number(self, lambda: super(Voucher, self).save(*args, **kwargs))
 
 
+class VoucherConsumption(UUIDModel):
+    """A manual record of a voucher being (partly) used outside the shop's
+    own checkout flow -- e.g. an offline/cash payment for something not sold
+    through the shop. A second, independent way (alongside Payment.voucher /
+    shop.services.payments.record_payment) to draw down a voucher's own
+    consumed_amount, kept in lock-step the same way -- see Voucher's own
+    docstring for why the two writers never re-derive one from the other.
+    Not itself club-scoped -- its club is reached through ``voucher``, same
+    reasoning as club.models.FeePayment's own recorded_by/note shape, which
+    this mirrors."""
+
+    voucher = models.ForeignKey(Voucher, on_delete=models.CASCADE, related_name="consumptions", verbose_name=_("voucher"))
+    amount = models.DecimalField(_("amount"), max_digits=10, decimal_places=2)
+    note = models.TextField(_("note"), help_text=_("What this was for, e.g. “Cash payment for the tournament fee, collected at the clubhouse.”"))
+    recorded_by = models.ForeignKey(User, on_delete=models.SET_NULL, related_name="voucher_consumptions_recorded", blank=True, null=True, verbose_name=_("recorded by"))
+    recorded_at = models.DateTimeField(_("recorded at"), default=timezone.now)
+
+    class Meta:
+        verbose_name = _("voucher consumption")
+        verbose_name_plural = _("voucher consumptions")
+        ordering = ["-recorded_at"]
+
+    def __str__(self):
+        return f"{self.voucher} — €{self.amount}"
+
+
 class Payment(UUIDModel):
     class PaymentMethod(models.TextChoices):
         CREDIT_CARD = "credit_card", _("Credit card")

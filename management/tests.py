@@ -45,7 +45,7 @@ from members.services.claims import children_awaiting_a_parent
 from news.models import News, NewsPhoto
 from news.services import _send_and_mark_notified
 from notifications.models import Notification
-from shop.models import Discount, DiscountType, Invoice, Order, OrderLine, Payment, Product, ProductCategory, ProductionStatus, ProductVariant, Voucher
+from shop.models import Discount, DiscountType, Invoice, Order, OrderLine, Payment, Product, ProductCategory, ProductionStatus, ProductVariant, Voucher, VoucherConsumption
 from shop.services.invoices import ShopInvoicePDFError, create_invoice_for_order
 from teams.models import Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
 from teams.services import eligible_roster_members
@@ -8734,8 +8734,8 @@ class VoucherManagementTests(ShopTestBase):
 
         response = self.club_post("voucher_create", self.voucher_data())
 
-        self.assertRedirects(response, reverse("management:voucher_list"))
         voucher = Voucher.objects.get(club=self.club, amount=Decimal("50.00"))
+        self.assertRedirects(response, reverse("management:voucher_detail", args=[voucher.pk]))
         self.assertTrue(voucher.number.startswith("VCH-"))
         self.assertEqual(voucher.consumed_amount, Decimal("0"))
 
@@ -8763,7 +8763,7 @@ class VoucherManagementTests(ShopTestBase):
 
         response = self.club_post("voucher_update", self.voucher_data(amount="30.00"), voucher.pk)
 
-        self.assertRedirects(response, reverse("management:voucher_list"))
+        self.assertRedirects(response, reverse("management:voucher_detail", args=[voucher.pk]))
         voucher.refresh_from_db()
         self.assertEqual(voucher.amount, Decimal("30.00"))
 
@@ -8775,6 +8775,114 @@ class VoucherManagementTests(ShopTestBase):
         response = self.club_post("voucher_update", self.voucher_data(), voucher.pk)
 
         self.assertEqual(response.status_code, 404)
+
+
+class VoucherConsumptionManagementTests(ShopTestBase):
+    def make_voucher(self, amount=Decimal("50.00")):
+        return Voucher.objects.create(club=self.club, amount=amount, expiry_date=datetime.date(2030, 1, 1))
+
+    def test_a_shop_manager_can_record_a_manual_consumption(self):
+        voucher = self.make_voucher()
+        manager = self.make_shop_manager()
+        self.client.force_login(manager)
+
+        response = self.club_post("voucher_consumption_create", {"amount": "20.00", "note": "Cash payment at the clubhouse."}, voucher.pk)
+
+        self.assertRedirects(response, reverse("management:voucher_detail", args=[voucher.pk]))
+        voucher.refresh_from_db()
+        self.assertEqual(voucher.consumed_amount, Decimal("20.00"))
+        consumption = VoucherConsumption.objects.get(voucher=voucher)
+        self.assertEqual(consumption.amount, Decimal("20.00"))
+        self.assertEqual(consumption.note, "Cash payment at the clubhouse.")
+        self.assertEqual(consumption.recorded_by, manager)
+
+    def test_a_consumption_exceeding_the_available_amount_is_rejected(self):
+        voucher = self.make_voucher(amount=Decimal("20.00"))
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_post("voucher_consumption_create", {"amount": "50.00", "note": "Too much."}, voucher.pk)
+
+        self.assertRedirects(response, reverse("management:voucher_detail", args=[voucher.pk]))
+        voucher.refresh_from_db()
+        self.assertEqual(voucher.consumed_amount, Decimal("0"))
+        self.assertFalse(VoucherConsumption.objects.filter(voucher=voucher).exists())
+
+    def test_a_consumption_without_a_note_is_rejected(self):
+        voucher = self.make_voucher()
+        self.client.force_login(self.make_shop_manager())
+
+        self.club_post("voucher_consumption_create", {"amount": "10.00", "note": ""}, voucher.pk)
+
+        voucher.refresh_from_db()
+        self.assertEqual(voucher.consumed_amount, Decimal("0"))
+        self.assertFalse(VoucherConsumption.objects.filter(voucher=voucher).exists())
+
+    def test_plain_staff_cannot_record_a_consumption(self):
+        voucher = self.make_voucher()
+        self.client.force_login(self.make_plain_staff())
+
+        response = self.club_post("voucher_consumption_create", {"amount": "10.00", "note": "Nope."}, voucher.pk)
+
+        self.assertEqual(response.status_code, 403)
+        voucher.refresh_from_db()
+        self.assertEqual(voucher.consumed_amount, Decimal("0"))
+
+    def test_deleting_a_consumption_restores_the_available_amount(self):
+        voucher = self.make_voucher()
+        consumption = VoucherConsumption.objects.create(voucher=voucher, amount=Decimal("15.00"), note="Refundable test entry")
+        voucher.consumed_amount = Decimal("15.00")
+        voucher.save(update_fields=["consumed_amount"])
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_post("voucher_consumption_delete", {}, voucher.pk, consumption.pk)
+
+        self.assertRedirects(response, reverse("management:voucher_detail", args=[voucher.pk]))
+        voucher.refresh_from_db()
+        self.assertEqual(voucher.consumed_amount, Decimal("0"))
+        self.assertFalse(VoucherConsumption.objects.filter(pk=consumption.pk).exists())
+
+    def test_plain_staff_cannot_delete_a_consumption(self):
+        voucher = self.make_voucher()
+        consumption = VoucherConsumption.objects.create(voucher=voucher, amount=Decimal("15.00"), note="Entry")
+        voucher.consumed_amount = Decimal("15.00")
+        voucher.save(update_fields=["consumed_amount"])
+        self.client.force_login(self.make_plain_staff())
+
+        response = self.club_post("voucher_consumption_delete", {}, voucher.pk, consumption.pk)
+
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(VoucherConsumption.objects.filter(pk=consumption.pk).exists())
+
+    def test_a_consumption_from_another_clubs_voucher_404s(self):
+        other_club = Club.objects.create(name="Other Club", slug="other-club-consumption")
+        voucher = Voucher.objects.create(club=other_club, amount=Decimal("20.00"), expiry_date=datetime.date(2030, 1, 1))
+        consumption = VoucherConsumption.objects.create(voucher=voucher, amount=Decimal("5.00"), note="Entry")
+        self.client.force_login(self.make_shop_manager())
+
+        create_response = self.club_post("voucher_consumption_create", {"amount": "5.00", "note": "Entry"}, voucher.pk)
+        delete_response = self.club_post("voucher_consumption_delete", {}, voucher.pk, consumption.pk)
+
+        self.assertEqual(create_response.status_code, 404)
+        self.assertEqual(delete_response.status_code, 404)
+
+    def test_the_voucher_detail_page_shows_manual_and_order_history_together(self):
+        voucher = self.make_voucher()
+        VoucherConsumption.objects.create(voucher=voucher, amount=Decimal("10.00"), note="Cash payment for the tournament fee.")
+        voucher.consumed_amount = Decimal("10.00")
+        voucher.save(update_fields=["consumed_amount"])
+        purchaser = Member.objects.create(first_name="Olly", last_name="Orderer")
+        order = Order.objects.create(club=self.club, purchaser=purchaser, total=Decimal("10.00"))
+        Payment.objects.create(order=order, voucher=voucher, amount=Decimal("10.00"), method=Payment.PaymentMethod.VOUCHER, status=Payment.PaymentStatus.CONFIRMED)
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_get("voucher_detail", voucher.pk)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Cash payment for the tournament fee.")
+        self.assertContains(response, order.number)
+        history = response.context["history"]
+        self.assertEqual(len(history), 2)
+        self.assertEqual({row["kind"] for row in history}, {"manual", "order"})
 
 
 class OrderManagementTests(ShopTestBase):

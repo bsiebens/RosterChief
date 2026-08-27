@@ -29,7 +29,7 @@
             <tbody>
                 {% for voucher in vouchers %}
                     <tr>
-                        <td><a class="link link-hover font-mono text-xs" href="{% url 'management:voucher_update' voucher.pk %}">{{ voucher.number }}</a></td>
+                        <td><a class="link link-hover font-mono text-xs" href="{% url 'management:voucher_detail' voucher.pk %}">{{ voucher.number }}</a></td>
                         <td>{{ voucher.issued_to|default:"—" }}</td>
                         <td class="font-mono text-xs tabular-nums">&euro; {{ voucher.amount }}</td>
                         <td class="font-mono text-xs tabular-nums">&euro; {{ voucher.available_amount }}</td>
@@ -46,7 +46,10 @@
                             {% endif %}
                         </td>
                         <td class="text-right">
-                            <a class="btn btn-outline btn-sm" href="{% url 'management:voucher_update' voucher.pk %}" aria-label="{% trans 'Edit' %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</a>
+                            <div class="flex justify-end gap-1">
+                                <a class="btn btn-outline btn-sm" href="{% url 'management:voucher_detail' voucher.pk %}" aria-label="{% trans 'View' %}">{% lucide "eye" size=14 %} {% trans "View" %}</a>
+                                <a class="btn btn-outline btn-sm" href="{% url 'management:voucher_update' voucher.pk %}" aria-label="{% trans 'Edit' %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</a>
+                            </div>
                         </td>
                     </tr>
                 {% empty %}

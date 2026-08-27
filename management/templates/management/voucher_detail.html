@@ -1,0 +1,108 @@
+{% extends "management/base.html" %}
+{% load i18n lucide ui %}
+
+{% block panel_title %}{{ voucher.number }}{% endblock panel_title %}
+{% block heading %}{{ voucher.number }}{% endblock heading %}
+{% block topbar_context %}
+    {% if not voucher.is_active %}
+        <span class="badge badge-sm badge-neutral">{% trans "Inactive" %}</span>
+    {% elif voucher.is_expired %}
+        <span class="badge badge-sm badge-error">{% trans "Expired" %}</span>
+    {% elif voucher.available_amount <= 0 %}
+        <span class="badge badge-sm badge-neutral">{% trans "Fully used" %}</span>
+    {% else %}
+        <span class="badge badge-sm badge-success">{% trans "Usable" %}</span>
+    {% endif %}
+{% endblock topbar_context %}
+
+{% block actions %}
+    <a class="btn btn-outline gap-2" href="{% url 'management:voucher_list' %}">{% lucide "arrow-left" size=16 %} {% trans "Vouchers" %}</a>
+    <a class="btn btn-outline gap-2" href="{% url 'management:voucher_update' voucher.pk %}">{% lucide "pencil" size=16 %} {% trans "Edit" %}</a>
+{% endblock actions %}
+
+{% block panel %}
+    <div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <div class="card p-4">
+            <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Available" %}</div>
+            <div class="mt-1 font-display text-[34px] leading-none font-extrabold tabular-nums text-ink">&euro;{{ voucher.available_amount }}</div>
+            <div class="mt-1 text-[13px] text-muted">{% blocktrans with amount=voucher.amount %}of €{{ amount }} total{% endblocktrans %}</div>
+        </div>
+        <div class="card p-4">
+            <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Issued to" %}</div>
+            <div class="mt-1 font-display text-[22px] leading-none font-extrabold text-ink">
+                {% if voucher.issued_to %}
+                    <a class="link link-hover" href="{% url 'management:member_detail' voucher.issued_to.pk %}">{{ voucher.issued_to }}</a>
+                {% else %}
+                    &mdash;
+                {% endif %}
+            </div>
+        </div>
+        <div class="card p-4">
+            <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Expiry" %}</div>
+            <div class="mt-1 font-display text-[22px] leading-none font-extrabold text-ink">{{ voucher.expiry_date|date:"j M Y" }}</div>
+        </div>
+    </div>
+
+    {% if voucher.notes %}
+        <div class="card card-body gap-1">
+            <h2 class="card-title">{% lucide "sticky-note" size=18 %} {% trans "Notes" %}</h2>
+            <p class="text-sm text-muted">{{ voucher.notes|linebreaksbr }}</p>
+        </div>
+    {% endif %}
+
+    <div class="card card-body gap-3">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+            <h2 class="card-title">{% lucide "history" size=18 %} {% trans "History" %}</h2>
+            {% if voucher.available_amount > 0 %}
+                <button class="btn btn-outline btn-sm gap-2" type="button" onclick="document.getElementById('record_consumption_modal').showModal()">{% lucide "minus-circle" size=14 %} {% trans "Record consumption" %}</button>
+            {% endif %}
+        </div>
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>{% trans "When" %}</th>
+                    <th>{% trans "Amount" %}</th>
+                    <th>{% trans "For" %}</th>
+                    <th>{% trans "Recorded by" %}</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in history %}
+                    <tr>
+                        <td class="font-mono text-xs">{{ row.when|date:"Y-m-d H:i" }}</td>
+                        <td class="font-mono text-xs tabular-nums">&euro; {{ row.amount }}</td>
+                        <td class="text-sm">
+                            {% if row.kind == "manual" %}
+                                {{ row.detail }}
+                            {% else %}
+                                <a class="link link-hover" href="{% url 'management:order_detail' row.detail.pk %}">{% blocktrans with number=row.detail.number %}Order {{ number }}{% endblocktrans %}</a>
+                            {% endif %}
+                        </td>
+                        <td class="text-sm text-muted">{{ row.recorded_by|default:"—" }}</td>
+                        <td class="text-right">
+                            {% if row.kind == "manual" %}
+                                <button class="btn btn-outline btn-xs btn-error gap-1" type="button" onclick="document.getElementById('{{ row.consumption.pk|dom_id:"delete_consumption_modal" }}').showModal()">{% lucide "trash-2" size=12 %} {% trans "Delete" %}</button>
+                                {% trans "Delete consumption" as delete_consumption_label %}
+                                {% trans "Delete" as delete_label %}
+                                {% url 'management:voucher_consumption_delete' voucher.pk row.consumption.pk as delete_consumption_url %}
+                                {% blocktrans with amount=row.amount asvar delete_consumption_body %}Delete this €{{ amount }} consumption? The amount is restored to the voucher's balance. This cannot be undone.{% endblocktrans %}
+                                {% include "controlpanel/_confirm_modal.html" with modal_id=row.consumption.pk|dom_id:"delete_consumption_modal" title=delete_consumption_label body=delete_consumption_body action_url=delete_consumption_url submit_label=delete_label %}
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="5" class="text-center text-dim">{% trans "No activity yet." %}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    {% trans "Record consumption" as record_consumption_title %}
+    {% trans "Record" as record_consumption_submit_label %}
+    {% blocktrans with number=voucher.number asvar record_consumption_blurb %}Manually draws down the balance on {{ number }} -- e.g. an offline/cash payment for something outside the shop.{% endblocktrans %}
+    {% url 'management:voucher_consumption_create' voucher.pk as record_consumption_url %}
+    {% include "controlpanel/_modal_form.html" with modal_id="record_consumption_modal" title=record_consumption_title form=consumption_form action_url=record_consumption_url submit_label=record_consumption_submit_label submit_icon="minus-circle" blurb=record_consumption_blurb %}
+{% endblock panel %}

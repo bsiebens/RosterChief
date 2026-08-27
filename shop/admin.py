@@ -13,6 +13,7 @@ from .models import (
     ProductCategory,
     ProductVariant,
     Voucher,
+    VoucherConsumption,
 )
 
 
@@ -166,6 +167,15 @@ class VoucherAdmin(admin.ModelAdmin):
     search_fields = ["number", "issued_to__first_name", "issued_to__last_name"]
     raw_id_fields = ["issued_to"]
     readonly_fields = ["number", "created", "modified"]
+
+
+@admin.register(VoucherConsumption)
+class VoucherConsumptionAdmin(admin.ModelAdmin):
+    list_display = ["voucher", "amount", "recorded_by", "recorded_at"]
+    list_filter = ["recorded_at"]
+    search_fields = ["voucher__number", "note"]
+    raw_id_fields = ["voucher", "recorded_by"]
+    readonly_fields = ["created", "modified"]
 
 
 @admin.register(Invoice)

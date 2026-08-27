@@ -167,7 +167,10 @@ urlpatterns = [
     path("shop/discounts/<uuid:pk>/toggle-active/", views.DiscountToggleActiveView.as_view(), name="discount_toggle_active"),
     path("shop/vouchers/", views.VoucherListView.as_view(), name="voucher_list"),
     path("shop/vouchers/new/", views.VoucherCreateView.as_view(), name="voucher_create"),
+    path("shop/vouchers/<uuid:pk>/", views.VoucherDetailView.as_view(), name="voucher_detail"),
     path("shop/vouchers/<uuid:pk>/edit/", views.VoucherUpdateView.as_view(), name="voucher_update"),
+    path("shop/vouchers/<uuid:pk>/consumptions/new/", views.VoucherConsumptionCreateView.as_view(), name="voucher_consumption_create"),
+    path("shop/vouchers/<uuid:pk>/consumptions/<uuid:consumption_pk>/delete/", views.VoucherConsumptionDeleteView.as_view(), name="voucher_consumption_delete"),
     path("shop/invoices/", views.InvoiceListView.as_view(), name="invoice_list"),
     # Forms
     path("forms/", views.FormListView.as_view(), name="form_list"),

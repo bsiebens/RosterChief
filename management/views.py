@@ -60,7 +60,7 @@ from members.services.family import add_child_to_family, add_parent_to_family, a
 from news.models import News, NewsPhoto
 from news.services import dispatch_send_publish_notification, notify_editors_of_pending_review
 from notifications.models import Notification
-from shop.models import Discount, Invoice, Order, OrderLine, Payment, Product, ProductCategory, ProductionStatus, ProductVariant, Voucher
+from shop.models import Discount, Invoice, Order, OrderLine, Payment, Product, ProductCategory, ProductionStatus, ProductVariant, Voucher, VoucherConsumption
 from shop.services.invoices import ShopInvoicePDFError, render_invoice_pdf
 from shop.services.notifications import dispatch_order_ready_for_pickup_notification
 from shop.services.payments import PaymentError, amount_due, sync_payment_status
@@ -68,6 +68,7 @@ from shop.services.payments import record_payment as record_shop_payment
 from shop.services.pricing import order_total
 from shop.services.production import in_production_lines, mark_line_received, mark_lines_in_production, pending_production_lines, sync_production_status
 from shop.services.stats import order_kpis, quantity_sold_by_product, quantity_sold_by_variant
+from shop.services.vouchers import delete_manual_consumption, record_manual_consumption, voucher_history
 from teams.models import Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
 from teams.services import eligible_roster_members
 
@@ -127,6 +128,7 @@ from .forms import (
     TeamForm,
     TeamMembershipForm,
     TeamPhotoForm,
+    VoucherConsumptionForm,
     VoucherForm,
     bulk_add_member_label,
 )
@@ -3881,7 +3883,7 @@ class VoucherCreateView(ShopManagerRequiredMixin, CreateView):
         return response
 
     def get_success_url(self):
-        return reverse("management:voucher_list")
+        return reverse("management:voucher_detail", args=[self.object.pk])
 
 
 class VoucherUpdateView(ShopManagerRequiredMixin, UpdateView):
@@ -3904,10 +3906,61 @@ class VoucherUpdateView(ShopManagerRequiredMixin, UpdateView):
         return response
 
     def get_success_url(self):
-        return reverse("management:voucher_list")
+        return reverse("management:voucher_detail", args=[self.object.pk])
 
     def get_context_data(self, **kwargs):
         return super().get_context_data(update_view=True, **kwargs)
+
+
+class VoucherDetailView(ShopManagerRequiredMixin, DetailView):
+    model = Voucher
+    template_name = "management/voucher_detail.html"
+    context_object_name = "voucher"
+
+    def get_queryset(self):
+        return Voucher.objects.filter(club=self.request.club).select_related("issued_to")
+
+    def get_context_data(self, **kwargs):
+        return super().get_context_data(consumption_form=VoucherConsumptionForm(), history=voucher_history(self.object), **kwargs)
+
+
+class VoucherConsumptionCreateView(ShopManagerRequiredMixin, RedirectOnInvalidMixin, FormView):
+    """The "Record consumption" modal on a voucher's own detail page -- see
+    shop.services.vouchers.record_manual_consumption. No standalone template,
+    same shape as ProductVariantCreateView."""
+
+    form_class = VoucherConsumptionForm
+    http_method_names = ["post"]
+    invalid_redirect_url_name = "management:voucher_detail"
+
+    def get_invalid_redirect_kwargs(self):
+        return {"pk": self.kwargs["pk"]}
+
+    def get_voucher(self):
+        return get_object_or_404(Voucher.objects.filter(club=self.request.club), pk=self.kwargs["pk"])
+
+    def form_valid(self, form):
+        voucher = self.get_voucher()
+        try:
+            record_manual_consumption(voucher, amount=form.cleaned_data["amount"], note=form.cleaned_data["note"], recorded_by=self.request.user)
+        except PaymentError as error:
+            form.add_error(None, str(error))
+            return self.form_invalid(form)
+        response = super().form_valid(form)
+        notify(self.request, f"s|{_('Consumption recorded')}|{_('“%(voucher)s” recorded.') % {'voucher': voucher}}")
+        return response
+
+    def get_success_url(self):
+        return reverse("management:voucher_detail", args=[self.kwargs["pk"]])
+
+
+class VoucherConsumptionDeleteView(ShopManagerRequiredMixin, View):
+    def post(self, request, pk, consumption_pk):
+        consumption = get_object_or_404(VoucherConsumption.objects.filter(voucher__club=request.club, voucher__pk=pk).select_related("voucher"), pk=consumption_pk)
+        voucher = consumption.voucher
+        delete_manual_consumption(consumption)
+        notify(request, f"s|{_('Consumption removed')}|{_('Consumption removed from “%(voucher)s”.') % {'voucher': voucher}}")
+        return redirect("management:voucher_detail", pk=pk)
 
 
 class OrderListView(ShopManagerRequiredMixin, ListView):

@@ -1273,6 +1273,18 @@ class VoucherForm(forms.ModelForm):
         self.fields["issued_to"].required = False
 
 
+class VoucherConsumptionForm(forms.Form):
+    """The "Record consumption" modal on a voucher's own detail page --
+    manually drawing down a voucher's balance for something outside the
+    shop's own checkout (see shop.services.vouchers.record_manual_consumption).
+    A note is required here (same reasoning as RequirementBypassForm's own
+    note below): "what this was for" is the whole point of the entry
+    existing, not an afterthought."""
+
+    amount = forms.DecimalField(label=_("Amount"), max_digits=10, decimal_places=2, min_value=Decimal("0.01"), widget=forms.NumberInput(attrs={"step": "0.01"}))
+    note = forms.CharField(label=_("What was this for?"), widget=forms.Textarea(attrs={"rows": 2}), help_text=_("e.g. \"Cash payment for the tournament fee, collected at the clubhouse.\""))
+
+
 class RequirementBypassForm(forms.Form):
     """Marks one OnboardingRequirement as not needed for one member -- see
     club.services.onboarding.mark_bypassed. A note is required here (unlike
