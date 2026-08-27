@@ -54,7 +54,7 @@ def grant_login(member, email):
     return user
 
 
-def _enrol(club, season, member, kind=ClubMembership.Kind.MEMBER):
+def _enrol(club, season, member, kind=ClubMembership.Kind.MEMBER, status=ClubMembership.StatusChoices.ACTIVE):
     """Sign a member up for the club's current season, if there is one. The
     implicit MEMBER role follows automatically (club/signals.py).
 
@@ -63,6 +63,13 @@ def _enrol(club, season, member, kind=ClubMembership.Kind.MEMBER):
     left out of every member list and count. A parent who also plays is enrolled
     as a MEMBER instead; the two are not exclusive of each other in the family
     graph, which records the parent relationship separately.
+
+    ``status`` defaults to ACTIVE (every existing caller here is a staff-driven
+    add, trusted to skip the Sign-up queue) -- registration.services.submission
+    passes PENDING instead, so a public/mobile registration lands in that
+    existing queue rather than going live unreviewed. Only meaningful for
+    kind=MEMBER: a guardian is never queued (see approve_claim's own docstring
+    for why that's a deliberate, separate decision).
     """
     if season is None:
         return None
@@ -71,7 +78,7 @@ def _enrol(club, season, member, kind=ClubMembership.Kind.MEMBER):
         club=club,
         member=member,
         season=season,
-        defaults={"kind": kind, "status": ClubMembership.StatusChoices.ACTIVE, "signed_up_at": timezone.localdate()},
+        defaults={"kind": kind, "status": status if kind == ClubMembership.Kind.MEMBER else ClubMembership.StatusChoices.ACTIVE, "signed_up_at": timezone.localdate()},
     )
     if kind == ClubMembership.Kind.GUARDIAN:
         carry_guardians_forward(club, member, from_season=season)
@@ -102,12 +109,16 @@ def carry_guardians_forward(club, member, *, from_season):
 
 
 @transaction.atomic
-def register_family(club, season, *, parent_email, parent_first_name, parent_last_name, child_first_name, child_last_name, child_date_of_birth=None, parent_is_member=False):
+def register_family(club, season, *, parent_email, parent_first_name, parent_last_name, child_first_name, child_last_name, child_date_of_birth=None, parent_is_member=False, child_status=ClubMembership.StatusChoices.ACTIVE):
     """Create a new family in one go: a parent (with a login) and a child
     (without one), linked to each other and signed up for ``season``.
 
     The child is always a member; the parent is a guardian unless
-    ``parent_is_member`` says they play (or otherwise belong) in their own right.
+    ``parent_is_member`` says they play (or otherwise belong) in their own
+    right. ``child_status`` -- see _enrol's own docstring -- lets
+    registration.services.submission land the child's membership in the
+    existing Sign-up queue (PENDING) instead of going active immediately;
+    the parent's own guardian membership is unaffected either way.
     """
     parent = get_or_create_login_member(parent_email, parent_first_name, parent_last_name)
     child = Member.objects.create(first_name=child_first_name, last_name=child_last_name, date_of_birth=child_date_of_birth)
@@ -116,24 +127,25 @@ def register_family(club, season, *, parent_email, parent_first_name, parent_las
     FamilyMembership.objects.create(family=family, member=parent, role=FamilyMembership.FamilyRole.PARENT)
     FamilyMembership.objects.create(family=family, member=child, role=FamilyMembership.FamilyRole.CHILD)
 
-    _enrol(club, season, parent, kind=ClubMembership.Kind.MEMBER if parent_is_member else ClubMembership.Kind.GUARDIAN)
-    _enrol(club, season, child)
+    _enrol(club, season, parent, kind=ClubMembership.Kind.MEMBER if parent_is_member else ClubMembership.Kind.GUARDIAN, status=child_status)
+    _enrol(club, season, child, status=child_status)
 
     return family
 
 
 @transaction.atomic
-def add_child_to_family(club, season, family, *, first_name, last_name, date_of_birth=None):
-    """A family that needs one more child registered -- a sibling joining, most often."""
+def add_child_to_family(club, season, family, *, first_name, last_name, date_of_birth=None, status=ClubMembership.StatusChoices.ACTIVE):
+    """A family that needs one more child registered -- a sibling joining, most
+    often. ``status`` -- see _enrol's own docstring."""
     child = Member.objects.create(first_name=first_name, last_name=last_name, date_of_birth=date_of_birth)
     FamilyMembership.objects.create(family=family, member=child, role=FamilyMembership.FamilyRole.CHILD)
-    _enrol(club, season, child)
+    _enrol(club, season, child, status=status)
 
     return child
 
 
 @transaction.atomic
-def add_parent_to_family(club, season, family, *, email="", first_name="", last_name="", parent_is_member=False, parent=None):
+def add_parent_to_family(club, season, family, *, email="", first_name="", last_name="", parent_is_member=False, parent=None, status=ClubMembership.StatusChoices.ACTIVE):
     """A family that needs one more parent/guardian registered. A guardian
     unless ``parent_is_member`` says they belong to the club in their own right.
 
@@ -141,14 +153,15 @@ def add_parent_to_family(club, season, family, *, email="", first_name="", last_
     members.services.claims.approve_claim, once a claim carries a signed-in
     submitter) attach them directly instead of resolving ``email`` again --
     authoritative when the caller has it, and the only way to guarantee no
-    second User/Member is ever created for the same person.
+    second User/Member is ever created for the same person. ``status`` --
+    see _enrol's own docstring -- only matters when ``parent_is_member``.
     """
     if parent is None:
         parent = get_or_create_login_member(email, first_name, last_name)
     # get_or_create, not create: re-adding a parent already on this family (a typo'd
     # re-submit, or a second claim that merged into it) must not trip unique_member_per_family.
     FamilyMembership.objects.get_or_create(family=family, member=parent, defaults={"role": FamilyMembership.FamilyRole.PARENT})
-    _enrol(club, season, parent, kind=ClubMembership.Kind.MEMBER if parent_is_member else ClubMembership.Kind.GUARDIAN)
+    _enrol(club, season, parent, kind=ClubMembership.Kind.MEMBER if parent_is_member else ClubMembership.Kind.GUARDIAN, status=status)
 
     return parent
 

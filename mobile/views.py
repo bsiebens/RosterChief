@@ -1156,7 +1156,12 @@ class ShopHomeView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
     active_tab = "shop"
 
     def get_context_data(self, **kwargs):
-        products = list(Product.objects.filter(club=self.request.club, is_active=True, is_public=True).select_related("category"))
+        # MEMBERSHIP-type products are never orderable through the shop --
+        # they're priced through registration/re-registration instead
+        # (registration.services.pricing) -- excluded structurally here
+        # regardless of is_public, not left to staff remembering to flag
+        # each one.
+        products = list(Product.objects.filter(club=self.request.club, is_active=True, is_public=True).exclude(product_type=Product.ProductType.MEMBERSHIP).select_related("category"))
         cart = Cart.objects.filter(club=self.request.club, user=self.request.user, status=Cart.CartStatus.OPEN).first()
         cart_item_count = cart.items.count() if cart is not None else 0
 
@@ -1197,7 +1202,7 @@ class ShopProductDetailView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
     active_tab = "shop"
 
     def _product(self):
-        return get_object_or_404(Product, club=self.request.club, slug=self.kwargs["slug"], is_active=True, is_public=True)
+        return get_object_or_404(Product.objects.exclude(product_type=Product.ProductType.MEMBERSHIP), club=self.request.club, slug=self.kwargs["slug"], is_active=True, is_public=True)
 
     def get(self, request, *args, **kwargs):
         product = self._product()

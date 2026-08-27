@@ -4839,6 +4839,17 @@ class ShopHomeViewTests(TestCase):
 
         self.assertEqual(list(response.context["products"]), [visible])
 
+    def test_membership_type_products_never_show_even_if_public(self):
+        # Priced through registration/re-registration instead
+        # (registration.services.pricing) -- excluded structurally,
+        # regardless of is_public, not left to a staff flag.
+        Product.objects.create(club=self.club, name="2026-27 Registration", price=Decimal("120.00"), product_type=Product.ProductType.MEMBERSHIP, is_public=True)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertEqual(list(response.context["products"]), [])
+
     def test_empty_catalogue_shows_an_empty_state(self):
         self.client.force_login(self.user)
 
@@ -4920,6 +4931,15 @@ class ShopProductDetailViewTests(TestCase):
 
     def test_inactive_product_404s(self):
         self.product.is_active = False
+        self.product.save()
+        self.client.force_login(self.user)
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_membership_type_product_404s(self):
+        self.product.product_type = Product.ProductType.MEMBERSHIP
         self.product.save()
         self.client.force_login(self.user)
 

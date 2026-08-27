@@ -332,6 +332,15 @@ class ClubMembership(ClubScopedModel):
     fee_amount = models.DecimalField(_("fee amount"), max_digits=10, decimal_places=2, default=Decimal("0.00"), blank=True)
     amount_paid = models.DecimalField(_("amount paid"), max_digits=10, decimal_places=2, default=Decimal("0.00"), blank=True, help_text=_("Kept in step with payments by the fee service; not hand-edited."))
 
+    #: An early-payment discount, e.g. from shop.models.Product.early_bird_discount_*
+    #: at registration time (registration.services.pricing) -- knocked off
+    #: fee_amount only if the balance is settled on or before the deadline.
+    #: Re-evaluated at the moment a payment is recorded (club.services.fees.
+    #: effective_fee_amount), not baked into fee_amount up front, since
+    #: whether it applies isn't known until the member actually pays.
+    early_payment_deadline = models.DateField(_("early payment deadline"), blank=True, null=True)
+    early_payment_discount = models.DecimalField(_("early payment discount"), max_digits=10, decimal_places=2, default=Decimal("0.00"), blank=True)
+
     signed_up_at = models.DateField(_("signed up at"), blank=True, null=True)
     activated_at = models.DateField(_("activated at"), blank=True, null=True)
 

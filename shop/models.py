@@ -96,7 +96,15 @@ class Product(ClubScopedModel):
     image = models.ImageField(_("photo"), upload_to=product_image_path, blank=True)
     price = models.DecimalField(_("price"), max_digits=10, decimal_places=2, default=0)
 
-    product_type = models.CharField(_("product type"), max_length=255, choices=ProductType.choices, default=ProductType.MEMBERSHIP)
+    # EVENT_FEE, not MEMBERSHIP -- most products staff creates through the
+    # ordinary "New product" flow are regular shop items; MEMBERSHIP is a
+    # deliberate choice for registration pricing (registration.services.
+    # pricing) and hides a product from the member-facing shop entirely
+    # (mobile.views.ShopHomeView/ShopProductDetailView), so it shouldn't be
+    # what a new product silently defaults to. Not MERCHANDISE either --
+    # that turns on production-status tracking (Order.has_production_lines),
+    # which shouldn't switch on by default for an arbitrary new product.
+    product_type = models.CharField(_("product type"), max_length=255, choices=ProductType.choices, default=ProductType.EVENT_FEE)
     season = models.ForeignKey(Season, on_delete=models.PROTECT, related_name="products", verbose_name=_("season"), blank=True, null=True)
 
     is_active = models.BooleanField(_("is active?"), default=True)
@@ -113,8 +121,20 @@ class Product(ClubScopedModel):
 
     early_bird_discount_enabled = models.BooleanField(_("early bird discount enabled?"), default=False)
     early_bird_discount_deadline = models.DateField(_("early bird discount deadline"), blank=True, null=True)
-    early_bird_discount_type = models.CharField(_("early bird discount type"), max_length=255, choices=DiscountType.choices, default=DiscountType.PERCENTAGE)
-    early_bird_discount_amount = models.DecimalField(_("early bird discount amount"), max_digits=10, decimal_places=2, default=0)
+    early_bird_discount_type = models.CharField(_("early bird discount type"), max_length=255, choices=DiscountType.choices, default=DiscountType.PERCENTAGE, blank=True)
+    early_bird_discount_amount = models.DecimalField(_("early bird discount amount"), max_digits=10, decimal_places=2, default=0, blank=True)
+
+    #: Same shape as early_bird_discount_* above, for a different condition --
+    #: registering several people through this same product in one go (e.g.
+    #: siblings), rather than registering by a certain date. Consumed by
+    #: registration.services.pricing, not the regular shop checkout -- see
+    #: that module's own docstring for why the two conditions apply at
+    #: different times (min_registrants immediately, early_bird only once
+    #: the fee is actually paid).
+    min_registrants_discount_enabled = models.BooleanField(_("multi-registrant discount enabled?"), default=False)
+    min_registrants = models.PositiveSmallIntegerField(_("minimum registrants"), blank=True, null=True, help_text=_("Applies once a single registration includes at least this many people registering through this product."))
+    min_registrants_discount_type = models.CharField(_("multi-registrant discount type"), max_length=255, choices=DiscountType.choices, default=DiscountType.PERCENTAGE, blank=True)
+    min_registrants_discount_amount = models.DecimalField(_("multi-registrant discount amount"), max_digits=10, decimal_places=2, default=0, blank=True)
 
     slug_source = "name"
 

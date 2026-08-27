@@ -7,7 +7,7 @@ from django.db.models import F, Q
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
-from club.models import Club, ClubMembership, ClubRole, FeePayment, OnboardingRequirement, Sponsor
+from club.models import Club, ClubMembership, ClubRole, FeePayment, OnboardingRequirement, Season, Sponsor
 from club.services.access import groups_manageable_by, is_club_admin, teams_managed_by
 from events.models import Competition, Event, EventReferee, EventSeries, Location, Opponent
 from events.services.rbihf_import import RBIHFImportError, extract_team_id
@@ -1007,13 +1007,37 @@ class ProductCategoryForm(forms.ModelForm):
 class ProductForm(forms.ModelForm):
     class Meta:
         model = Product
-        fields = ["name", "category", "product_type", "description", "image", "price", "is_active", "personalization_enabled"]
-        widgets = {"image": forms.ClearableFileInput(attrs={"accept": "image/png,image/jpeg,image/gif,image/webp"})}
+        fields = [
+            "name",
+            "category",
+            "product_type",
+            "season",
+            "description",
+            "image",
+            "price",
+            "is_active",
+            "is_public",
+            "personalization_enabled",
+            "early_bird_discount_enabled",
+            "early_bird_discount_deadline",
+            "early_bird_discount_type",
+            "early_bird_discount_amount",
+            "min_registrants_discount_enabled",
+            "min_registrants",
+            "min_registrants_discount_type",
+            "min_registrants_discount_amount",
+        ]
+        widgets = {
+            "image": forms.ClearableFileInput(attrs={"accept": "image/png,image/jpeg,image/gif,image/webp"}),
+            "early_bird_discount_deadline": forms.DateInput(attrs={"type": "date"}),
+        }
 
     def __init__(self, *args, club=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields["category"].queryset = ProductCategory.objects.filter(club=club)
         self.fields["category"].empty_label = _("No category")
+        self.fields["season"].queryset = Season.objects.filter(club=club)
+        self.fields["season"].required = False
 
 
 class ProductVariantForm(forms.ModelForm):

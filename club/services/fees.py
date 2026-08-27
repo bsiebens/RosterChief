@@ -8,12 +8,27 @@ step here, never recomputed by re-aggregating FeePayment on every read.
 from decimal import Decimal
 
 from django.db.models import F
+from django.utils import timezone
 
 from club.models import ClubMembership, FeePayment
 
 
-def remaining_balance(membership):
-    return max(membership.fee_amount - membership.amount_paid, Decimal("0.00"))
+def effective_fee_amount(membership, when=None):
+    """What's actually owed, accounting for an early-payment discount
+    (membership.early_payment_deadline/early_payment_discount, set by
+    registration.services.pricing when a matched Product.early_bird_discount_*
+    condition can't be confirmed until the fee is paid). ``when`` defaults to
+    today; record_payment/_sync_fee_status pass the triggering payment's own
+    paid_at date instead, so a payment made before the deadline is judged
+    against it even if recorded/backdated later."""
+    when = when or timezone.localdate()
+    if membership.early_payment_deadline is not None and when <= membership.early_payment_deadline:
+        return max(membership.fee_amount - membership.early_payment_discount, Decimal("0.00"))
+    return membership.fee_amount
+
+
+def remaining_balance(membership, when=None):
+    return max(effective_fee_amount(membership, when) - membership.amount_paid, Decimal("0.00"))
 
 
 def open_dues_rows(club, people, season):
@@ -43,7 +58,7 @@ def record_payment(membership, *, amount, method=FeePayment.Method.BANK_TRANSFER
     membership.amount_paid = F("amount_paid") + amount
     membership.save(update_fields=["amount_paid"])
     membership.refresh_from_db(fields=["amount_paid"])
-    _sync_fee_status(membership)
+    _sync_fee_status(membership, when=payment.paid_at.date())
 
     return payment
 
@@ -60,11 +75,12 @@ def mark_as_paid(membership, *, recorded_by=None):
         _sync_fee_status(membership, force_paid=True)
 
 
-def _sync_fee_status(membership, *, force_paid=False):
+def _sync_fee_status(membership, *, force_paid=False, when=None):
     if membership.fee_status == ClubMembership.FeeStatus.WAIVED:
         return  # manual, independent of payments -- this never overrides it
 
-    if force_paid or (membership.fee_amount > 0 and membership.amount_paid >= membership.fee_amount):
+    effective_amount = effective_fee_amount(membership, when)
+    if force_paid or (effective_amount > 0 and membership.amount_paid >= effective_amount):
         new_status = ClubMembership.FeeStatus.PAID
     elif membership.amount_paid > 0:
         new_status = ClubMembership.FeeStatus.PARTIALLY_PAID
