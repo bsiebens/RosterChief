@@ -32,6 +32,7 @@
             <a class="nav-subitem {% if nav == 'family_list' %}active{% endif %}" href="{% url 'management:family_list' %}">{% trans "Households" %}</a>
             {% if can_manage_members %}
                 <a class="nav-subitem {% if nav == 'group_list' %}active{% endif %}" href="{% url 'management:group_list' %}">{% trans "Groups" %}</a>
+                <a class="nav-subitem {% if nav == 'volunteer_list' %}active{% endif %}" href="{% url 'management:volunteer_list' %}">{% trans "Volunteers" %}</a>
                 {% comment %}
                     Placeholder -- nothing else is built yet (see ARCHITECTURE.md §5.8 and
                     management.views.EvaluationsComingSoonView). Gated on forms_enabled,

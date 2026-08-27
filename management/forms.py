@@ -998,6 +998,28 @@ class SignupTeamPlacementForm(forms.ModelForm):
         self.fields["team"].queryset = Team.objects.filter(club=club)
 
 
+class VolunteerPlacementForm(forms.ModelForm):
+    """Places one already-known volunteer (fixed by the view, not a form
+    field -- same reasoning as SignupTeamPlacementForm) into a real
+    StaffAssignment from the Volunteers list. Unlike that form, both team
+    *and* position are picked here -- a volunteer isn't visible to anyone
+    until they hold a real position on a real team, unlike a player roster
+    spot which is useful the moment it exists. Initial team/position come
+    from the registration.models.RegistrationDetails request, if any, but
+    staff can change either before confirming."""
+
+    class Meta:
+        model = StaffAssignment
+        fields = ["team", "position"]
+        widgets = {"team": forms.Select(attrs={"data-searchable": "true", "data-search-placeholder": _("Type a team name...")}), "position": forms.Select(attrs={"data-searchable": "true"})}
+
+    def __init__(self, *args, club=None, season=None, member=None, **kwargs):
+        kwargs.setdefault("instance", StaffAssignment(season=season, member=member))
+        super().__init__(*args, **kwargs)
+        self.fields["team"].queryset = Team.objects.filter(club=club)
+        self.fields["position"].queryset = Position.objects.filter(club=club, staff_position=True)
+
+
 class ProductCategoryForm(forms.ModelForm):
     class Meta:
         model = ProductCategory

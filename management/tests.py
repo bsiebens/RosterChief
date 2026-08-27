@@ -45,6 +45,7 @@ from members.services.claims import children_awaiting_a_parent
 from news.models import News, NewsPhoto
 from news.services import _send_and_mark_notified
 from notifications.models import Notification
+from registration.models import RegistrationBatch, RegistrationDetails
 from shop.models import Discount, DiscountType, Invoice, Order, OrderLine, Payment, Product, ProductCategory, ProductionStatus, ProductVariant, Voucher, VoucherConsumption
 from shop.services.invoices import ShopInvoicePDFError, create_invoice_for_order
 from teams.models import Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
@@ -8089,6 +8090,16 @@ class SignupDashboardTests(ManagementTestBase):
 
         self.assertIn(membership.pk, {m.pk for m in response.context["memberships"]})
 
+    def test_a_requested_team_from_registration_shows_as_a_hint(self):
+        _member, membership = self.make_pending_member()
+        team = Team.objects.create(club=self.club, name="U9", short_name="U9")
+        batch = RegistrationBatch.objects.create(club=self.club, season=self.season, contact_first_name="Pat", contact_last_name="Parent", contact_email="pat@example.com")
+        RegistrationDetails.objects.create(membership=membership, batch=batch, requested_team=team)
+
+        response = self.club_get("signup_list")
+
+        self.assertContains(response, "Requested U9 at registration.")
+
     def test_two_members_sharing_an_unstarted_requirement_get_distinct_bypass_dialog_ids(self):
         # Regression: the bypass dialog id used to fall back to the requirement's
         # own pk whenever a member hadn't started it yet, so every member sharing
@@ -8228,6 +8239,9 @@ class MemberAdminAccessTests(ManagementTestBase):
     def test_can_reach_group_list(self):
         self.assertEqual(self.club_get("group_list").status_code, 200)
 
+    def test_can_reach_volunteer_list(self):
+        self.assertEqual(self.club_get("volunteer_list").status_code, 200)
+
     def test_cannot_reach_finance(self):
         self.assertEqual(self.club_get("membership_list").status_code, 403)
 
@@ -8253,6 +8267,83 @@ class MemberAdminAccessTests(ManagementTestBase):
 
     def test_cannot_reach_positions(self):
         self.assertEqual(self.club_get("position_create").status_code, 403)
+
+
+class VolunteerListTests(ManagementTestBase):
+    """management:volunteer_list/volunteer_place -- the club-wide staff
+    roster plus pending registration.models.RegistrationDetails volunteer
+    entries awaiting placement into a real StaffAssignment."""
+
+    def setUp(self):
+        self.client.force_login(self.admin_user)
+        self.team = Team.objects.create(club=self.club, name="U9", short_name="U9")
+        self.position = Position.objects.create(club=self.club, name="Coach", short_name="CO", staff_position=True)
+
+    def make_pending_volunteer(self, requested_team=None, requested_position=None):
+        member = Member.objects.create(first_name="Val", last_name="Volunteer")
+        membership = ClubMembership.objects.create(club=self.club, member=member, season=self.season, status=ClubMembership.StatusChoices.PENDING)
+        batch = RegistrationBatch.objects.create(club=self.club, season=self.season, contact_first_name="Val", contact_last_name="Volunteer", contact_email="val@example.com")
+        details = RegistrationDetails.objects.create(membership=membership, batch=batch, entry_kind=RegistrationDetails.EntryKind.VOLUNTEER, requested_team=requested_team, requested_position=requested_position)
+        return member, details
+
+    def test_is_member_admin_gated(self):
+        plain = User.objects.create_user(email="plain-volunteer@example.com", password="pw-secret-123")
+        Member.objects.create(user=plain, first_name="Plain", last_name="Staffer")
+        self.client.force_login(plain)
+
+        self.assertEqual(self.club_get("volunteer_list").status_code, 403)
+
+    def test_shows_existing_staff_assignments(self):
+        coach_member = Member.objects.create(first_name="Cara", last_name="Coach")
+        StaffAssignment.objects.create(team=self.team, member=coach_member, season=self.season, position=self.position)
+
+        response = self.club_get("volunteer_list")
+
+        self.assertContains(response, "Cara Coach")
+        self.assertContains(response, "U9")
+
+    def test_shows_a_pending_volunteer_awaiting_placement(self):
+        member, _details = self.make_pending_volunteer(requested_team=self.team, requested_position=self.position)
+
+        response = self.club_get("volunteer_list")
+
+        self.assertContains(response, member.get_full_name())
+        self.assertEqual(len(response.context["pending"]), 1)
+
+    def test_placing_creates_a_staff_assignment_and_clears_the_pending_row(self):
+        member, details = self.make_pending_volunteer(requested_team=self.team, requested_position=self.position)
+
+        response = self.club_post("volunteer_place", {"team": self.team.pk, "position": self.position.pk}, details.pk)
+
+        self.assertRedirects(response, reverse("management:volunteer_list"))
+        assignment = StaffAssignment.objects.get(member=member, team=self.team, season=self.season)
+        self.assertEqual(assignment.position, self.position)
+        details.refresh_from_db()
+        self.assertEqual(details.resulting_staff_assignment, assignment)
+        self.assertEqual(len(self.club_get("volunteer_list").context["pending"]), 0)
+
+    def test_placing_into_an_already_held_team_is_rejected(self):
+        member, details = self.make_pending_volunteer()
+        StaffAssignment.objects.create(team=self.team, member=member, season=self.season, position=self.position)
+        other_position = Position.objects.create(club=self.club, name="Manager", short_name="MG", staff_position=True)
+
+        self.club_post("volunteer_place", {"team": self.team.pk, "position": other_position.pk}, details.pk)
+
+        details.refresh_from_db()
+        self.assertIsNone(details.resulting_staff_assignment)
+        self.assertEqual(StaffAssignment.objects.filter(member=member, team=self.team).count(), 1)
+
+    def test_placement_from_another_club_404s(self):
+        other_club = Club.objects.create(name="Other Club", slug="other-club-volunteer")
+        other_season = make_season(other_club)
+        other_member = Member.objects.create(first_name="Out", last_name="Sider")
+        other_membership = ClubMembership.objects.create(club=other_club, member=other_member, season=other_season, status=ClubMembership.StatusChoices.PENDING)
+        other_batch = RegistrationBatch.objects.create(club=other_club, season=other_season, contact_first_name="Out", contact_last_name="Sider", contact_email="out@example.com")
+        other_details = RegistrationDetails.objects.create(membership=other_membership, batch=other_batch, entry_kind=RegistrationDetails.EntryKind.VOLUNTEER)
+
+        response = self.club_post("volunteer_place", {"team": self.team.pk, "position": self.position.pk}, other_details.pk)
+
+        self.assertEqual(response.status_code, 404)
 
 
 class ShopTestBase(ManagementTestBase):

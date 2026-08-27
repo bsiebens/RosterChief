@@ -1,0 +1,73 @@
+{% extends "management/base.html" %}
+{% load i18n lucide ui static %}
+
+{% block heading %}{% trans "Volunteers" %}{% endblock heading %}
+{% block topbar_context %}
+    {% if season %}
+        <span class="font-mono text-[13px] text-muted">{% blocktrans with start=season.start_date|date:"Y" end=season.end_date|date:"Y" %}Season {{ start }}-{{ end }}{% endblocktrans %}</span>
+    {% endif %}
+{% endblock topbar_context %}
+
+{% block panel %}
+    {% if not season %}
+        <div class="alert alert-warning">
+            {% lucide "calendar-x" size=20 %}
+            <span>{% trans "No season covers today, so there is nothing to show here." %}</span>
+        </div>
+    {% else %}
+        {% if pending %}
+            <div class="card mb-4 card-body">
+                <h2 class="card-title">{% lucide "user-plus" size=18 %} {% trans "Awaiting placement" %}</h2>
+                <p class="text-sm text-muted">{% trans "Registered as a volunteer -- pick a team and role to make it official. Until then they hold no real position." %}</p>
+                <div class="flex flex-col gap-3">
+                    {% for details in pending %}
+                        <form method="post" action="{% url 'management:volunteer_place' details.pk %}" class="flex flex-wrap items-end gap-3 rounded-box border border-line p-3">
+                            {% csrf_token %}
+                            <div class="min-w-40 flex-1">
+                                <div class="mb-1 text-xs text-muted">{% trans "Volunteer" %}</div>
+                                <a class="link link-hover font-semibold" href="{% url 'management:member_detail' details.membership.member.pk %}">{{ details.membership.member.get_full_name }}</a>
+                                {% if details.requested_team or details.requested_position %}
+                                    <div class="text-xs text-muted">{% blocktrans with team=details.requested_team.short_name|default:_("any team") position=details.requested_position.name|default:_("any role") %}Requested: {{ team }} · {{ position }}{% endblocktrans %}</div>
+                                {% endif %}
+                            </div>
+                            <div class="w-44">{% form_field details.placement_form.team show_label=False %}</div>
+                            <div class="w-44">{% form_field details.placement_form.position show_label=False %}</div>
+                            <button class="btn btn-primary btn-sm gap-1" type="submit">{% lucide "check" size=14 %} {% trans "Place" %}</button>
+                        </form>
+                    {% endfor %}
+                </div>
+            </div>
+        {% endif %}
+
+        <div class="card overflow-hidden">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>{% trans "Volunteer" %}</th>
+                        <th>{% trans "Team" %}</th>
+                        <th>{% trans "Position" %}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for assignment in assignments %}
+                        <tr>
+                            <td>
+                                <a class="link link-hover font-semibold" href="{% url 'management:member_detail' assignment.member.pk %}">{{ assignment.member.get_full_name }}</a>
+                            </td>
+                            <td class="text-sm text-ink">{{ assignment.team.name }}</td>
+                            <td class="text-sm text-ink">{{ assignment.position.name }}</td>
+                        </tr>
+                    {% empty %}
+                        <tr>
+                            <td colspan="3" class="py-6 text-center text-muted">{% trans "No one holds a staff position this season yet." %}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% endif %}
+{% endblock panel %}
+
+{% block extra_body %}
+    <script src="{% static 'js/searchable-select.js' %}"></script>
+{% endblock extra_body %}

@@ -60,6 +60,7 @@ from members.services.family import add_child_to_family, add_parent_to_family, a
 from news.models import News, NewsPhoto
 from news.services import dispatch_send_publish_notification, notify_editors_of_pending_review
 from notifications.models import Notification
+from registration.models import RegistrationDetails
 from shop.models import Discount, Invoice, Order, OrderLine, Payment, Product, ProductCategory, ProductionStatus, ProductVariant, Voucher, VoucherConsumption
 from shop.services.invoices import ShopInvoicePDFError, render_invoice_pdf
 from shop.services.notifications import dispatch_order_ready_for_pickup_notification
@@ -128,6 +129,7 @@ from .forms import (
     TeamForm,
     TeamMembershipForm,
     TeamPhotoForm,
+    VolunteerPlacementForm,
     VoucherConsumptionForm,
     VoucherForm,
     bulk_add_member_label,
@@ -5208,7 +5210,7 @@ class SignupDashboardView(ClubAdminRequiredMixin, TemplateView):
             # priority order" reasoning as D3's own longest-waiting-on-top table,
             # with anyone already ACTIVE but not yet clean (unpaid, or an open
             # checklist item) trailing behind since it's lower priority, not done.
-            memberships = list(ClubMembership.objects.filter(club=club, season=season, kind=ClubMembership.Kind.MEMBER).select_related("member"))
+            memberships = list(ClubMembership.objects.filter(club=club, season=season, kind=ClubMembership.Kind.MEMBER).select_related("member", "registration_details", "registration_details__requested_team"))
             # Sorted in Python, not via .order_by("-status", ...): StatusChoices'
             # string values only put PENDING first alphabetically by accident, and
             # that would silently break the moment a choice's value changes.
@@ -5317,3 +5319,71 @@ class SignupPlaceInTeamView(ClubAdminRequiredMixin, View):
             return JsonResponse({"ok": ok, "title": str(title), "body": str(body)})
         notify(request, f"{level}|{title}|{body}")
         return redirect("management:signup_list")
+
+
+class VolunteerListView(MemberAdminRequiredMixin, TemplateView):
+    """Every current-season StaffAssignment club-wide -- no cross-team "who
+    holds what role" view exists otherwise, RefereeListView being the
+    closest precedent (and referee-specific) -- plus anyone who registered
+    as a volunteer (registration.models.RegistrationDetails) and hasn't
+    been placed into a real StaffAssignment yet. Placing one (team +
+    position, VolunteerPlacementForm) is the one new action here; everything
+    else about a StaffAssignment is still managed from the team's own staff
+    page."""
+
+    template_name = "management/volunteer_list.html"
+
+    def get_context_data(self, **kwargs):
+        club = self.request.club
+        season = current_season(club)
+        assignments = []
+        pending = []
+
+        if season is not None:
+            assignments = list(StaffAssignment.objects.filter(team__club=club, season=season).select_related("member", "team", "position").order_by("team__name", "position__name"))
+            pending = list(
+                RegistrationDetails.objects.filter(
+                    entry_kind=RegistrationDetails.EntryKind.VOLUNTEER,
+                    resulting_staff_assignment__isnull=True,
+                    membership__club=club,
+                    membership__season=season,
+                ).select_related("membership__member", "requested_team", "requested_position")
+            )
+            for details in pending:
+                details.placement_form = VolunteerPlacementForm(
+                    club=club, season=season, member=details.membership.member, initial={"team": details.requested_team_id, "position": details.requested_position_id}
+                )
+
+        return super().get_context_data(season=season, assignments=assignments, pending=pending, **kwargs)
+
+
+class VolunteerPlaceView(MemberAdminRequiredMixin, View):
+    """The Volunteers list's own "Place" action -- creates the real
+    StaffAssignment a RegistrationDetails row could only request, and
+    stamps it back so the row drops out of the pending list."""
+
+    def post(self, request, pk):
+        club = request.club
+        season = current_season(club)
+        if season is None:
+            raise Http404("No active season to place this volunteer in.")
+
+        details = get_object_or_404(
+            RegistrationDetails.objects.filter(entry_kind=RegistrationDetails.EntryKind.VOLUNTEER, resulting_staff_assignment__isnull=True, membership__club=club, membership__season=season).select_related("membership__member"),
+            pk=pk,
+        )
+        member = details.membership.member
+        form = VolunteerPlacementForm(request.POST, club=club, season=season, member=member)
+
+        if not form.is_valid():
+            body = " ".join(str(error) for errors in form.errors.values() for error in errors)
+            notify(request, f"e|{_('Could not place')}|{body}")
+        elif StaffAssignment.objects.filter(team=form.cleaned_data["team"], season=season, member=member).exists():
+            notify(request, f"w|{_('Already placed')}|" + _("%(member)s already holds a position on %(team)s.") % {"member": member, "team": form.cleaned_data["team"]})
+        else:
+            assignment = form.save()
+            details.resulting_staff_assignment = assignment
+            details.save(update_fields=["resulting_staff_assignment"])
+            notify(request, f"s|{_('Volunteer placed')}|" + _("%(member)s is now %(position)s for %(team)s.") % {"member": member, "position": assignment.position, "team": assignment.team})
+
+        return redirect("management:volunteer_list")
