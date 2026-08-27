@@ -1,4 +1,4 @@
-from .audience import effective_members, members_not_yet_submitted, pending_sends_for, resolve_season
+from .audience import effective_members, form_status_rows_for, is_send_open, members_not_yet_submitted, resolve_season
 from .form_factory import build_form, build_form_class
 from .options import allowed_values, field_choices
 from .reporting import FormReport, ReportRow, form_report
@@ -14,8 +14,9 @@ __all__ = [
     "effective_members",
     "field_choices",
     "form_report",
+    "form_status_rows_for",
+    "is_send_open",
     "members_not_yet_submitted",
-    "pending_sends_for",
     "resolve_season",
     "submit_form",
 ]

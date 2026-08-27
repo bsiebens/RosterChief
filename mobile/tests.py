@@ -5363,7 +5363,7 @@ class ShopInvoiceViewTests(TestCase):
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
 class HomeFormsCardTests(TestCase):
     """HomeView's "Forms to complete" card -- formbuilder.services.audience.
-    pending_sends_for, see mobile.views.HomeView.get_context_data."""
+    form_status_rows_for/is_send_open, see mobile.views.HomeView.get_context_data."""
 
     @classmethod
     def setUpTestData(cls):
@@ -5378,13 +5378,22 @@ class HomeFormsCardTests(TestCase):
     def _get(self):
         return self.client.get(reverse("mobile:home"), HTTP_HOST="ajax-united.rosterchief.app")
 
+    def add_child(self, first_name="Noor"):
+        family = Family.objects.create(name="Bakker")
+        FamilyMembership.objects.create(family=family, member=self.member, role=FamilyMembership.FamilyRole.PARENT)
+        child = Member.objects.create(first_name=first_name, last_name="Bakker")
+        FamilyMembership.objects.create(family=family, member=child, role=FamilyMembership.FamilyRole.CHILD)
+        ClubMembership.objects.create(club=self.club, member=child, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        return child
+
     def test_an_open_send_addressed_to_me_shows_up(self):
         send = FormSend.objects.create(club=self.club, form=self.form, club_wide=True)
         self.client.force_login(self.user)
 
         response = self._get()
 
-        self.assertIn(send, response.context["forms_to_complete"])
+        rows = response.context["forms_to_complete"]
+        self.assertEqual([row["send"] for row in rows], [send])
         self.assertContains(response, "Sign-up")
 
     def test_a_send_i_already_submitted_is_omitted(self):
@@ -5394,7 +5403,7 @@ class HomeFormsCardTests(TestCase):
 
         response = self._get()
 
-        self.assertNotIn(send, response.context["forms_to_complete"])
+        self.assertEqual(response.context["forms_to_complete"], [])
 
     def test_a_send_outside_my_audience_is_omitted(self):
         FormSend.objects.create(club=self.club, form=self.form, club_wide=False)  # nobody invited
@@ -5412,11 +5421,31 @@ class HomeFormsCardTests(TestCase):
 
         self.assertEqual(response.context["forms_to_complete"], [])
 
+    def test_on_all_a_send_addressed_to_a_managed_child_shows_their_name(self):
+        self.add_child()
+        FormSend.objects.create(club=self.club, form=self.form, club_wide=True)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, "Noor")
+
+    def test_a_send_addressed_to_two_managed_people_is_two_rows(self):
+        child = self.add_child()
+        FormSend.objects.create(club=self.club, form=self.form, club_wide=True)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        rows = response.context["forms_to_complete"]
+        self.assertCountEqual([row["member"] for row in rows], [self.member, child])
+
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
-class MeFormsSectionTests(TestCase):
-    """MeView's Forms section -- every send self.managed_people are/were
-    addressed to, pending or completed, see mobile.views.MeView.get_context_data."""
+class MeFormsMenuRowTests(TestCase):
+    """Me's "Forms" menu row -- links to mobile:forms_list, with an "N OPEN"
+    pill only once open_forms_count is actually > 0 (same shape as
+    "Payments & dues"'s own pill)."""
 
     @classmethod
     def setUpTestData(cls):
@@ -5430,6 +5459,51 @@ class MeFormsSectionTests(TestCase):
 
     def _get(self):
         return self.client.get(reverse("mobile:me"), HTTP_HOST="ajax-united.rosterchief.app")
+
+    def test_no_pill_when_nothing_is_open(self):
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, "Forms")
+        self.assertNotContains(response, "OPEN")
+
+    def test_pill_counts_open_forms(self):
+        FormSend.objects.create(club=self.club, form=self.form, club_wide=True)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertEqual(response.context["open_forms_count"], 1)
+        self.assertContains(response, "1 OPEN")
+
+    def test_a_completed_send_does_not_count_as_open(self):
+        send = FormSend.objects.create(club=self.club, form=self.form, club_wide=True)
+        Submission.objects.create(send=send, member=self.member)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertEqual(response.context["open_forms_count"], 0)
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class FormsListViewTests(TestCase):
+    """mobile:forms_list -- the full record behind Me's "Forms" row, pending
+    and completed, unbounded by is_send_open (see mobile.views.FormsListView)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        today = timezone.localdate()
+        cls.season = Season.objects.create(club=cls.club, start_date=today - datetime.timedelta(days=30), end_date=today + datetime.timedelta(days=300))
+        cls.user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", email="parent@example.com", user=cls.user)
+        ClubMembership.objects.create(club=cls.club, member=cls.member, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
+        cls.form = FormBuilderForm.objects.create(club=cls.club, title="Sign-up")
+
+    def _get(self):
+        return self.client.get(reverse("mobile:forms_list"), HTTP_HOST="ajax-united.rosterchief.app")
 
     def test_a_pending_send_shows_the_pending_pill(self):
         FormSend.objects.create(club=self.club, form=self.form, club_wide=True)
@@ -5456,6 +5530,16 @@ class MeFormsSectionTests(TestCase):
         response = self._get()
 
         self.assertEqual(response.context["forms_status"], [])
+
+    def test_a_closed_send_still_shows_here_unlike_home(self):
+        # form_status_rows_for is the full record -- not gated on
+        # is_send_open the way Home's own card is.
+        FormSend.objects.create(club=self.club, form=self.form, club_wide=True, closes_at=timezone.now() - datetime.timedelta(days=1))
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertEqual(len(response.context["forms_status"]), 1)
 
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])

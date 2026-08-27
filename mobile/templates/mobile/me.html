@@ -108,43 +108,19 @@
             </div>
         {% endif %}
 
-        {% if forms_status %}
-            <div>
-                <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Forms" %}</div>
-                <div class="m-card overflow-hidden">
-                    {% for row in forms_status %}
-                        {% if not forloop.first %}<div class="h-px bg-rule"></div>{% endif %}
-                        {% if row.submitted_at %}
-                            <div class="flex items-center gap-3 p-3.5">
-                                <div class="min-w-0 flex-1">
-                                    <div class="text-[15px] font-semibold text-ink">
-                                        {{ row.send.form.title }}
-                                        {% if row.person != me %}<span class="font-normal text-muted">&middot; {{ row.person.first_name }}</span>{% endif %}
-                                    </div>
-                                    <div class="text-xs text-muted">{% blocktrans with date=row.submitted_at|date:"d M Y" %}Submitted {{ date }}{% endblocktrans %}</div>
-                                </div>
-                                <span class="pill pill-ok shrink-0">{% trans "Completed" %}</span>
-                            </div>
-                        {% else %}
-                            <a class="flex items-center gap-3 p-3.5" href="{% url "mobile:form_fill" row.send.pk %}">
-                                <div class="min-w-0 flex-1">
-                                    <div class="text-[15px] font-semibold text-ink">
-                                        {{ row.send.form.title }}
-                                        {% if row.person != me %}<span class="font-normal text-muted">&middot; {{ row.person.first_name }}</span>{% endif %}
-                                    </div>
-                                    {% if row.send.closes_at %}<div class="text-xs text-muted">{% blocktrans with date=row.send.closes_at|date:"d M Y" %}Due {{ date }}{% endblocktrans %}</div>{% endif %}
-                                </div>
-                                <span class="pill pill-warn shrink-0">{% trans "Pending" %}</span>
-                            </a>
-                        {% endif %}
-                    {% endfor %}
-                </div>
-            </div>
-        {% endif %}
-
         <div class="m-card overflow-hidden">
             <a class="flex items-center gap-3 p-3.5" href="{% url "mobile:edit_profile" me.pk %}">
                 <span class="flex-1 text-[15px] font-semibold text-ink">{% trans "Personal details" %}</span>
+                {% lucide "chevron-right" size=18 class="shrink-0 text-dim" %}
+            </a>
+            <div class="h-px bg-rule"></div>
+            <a class="flex items-center gap-3 p-3.5" href="{% url "mobile:forms_list" %}">
+                <span class="flex-1 text-[15px] font-semibold text-ink">{% trans "Forms" %}</span>
+                {% if open_forms_count %}
+                    <span class="pill pill-warn shrink-0">
+                        {% blocktrans count counter=open_forms_count %}{{ counter }} OPEN{% plural %}{{ counter }} OPEN{% endblocktrans %}
+                    </span>
+                {% endif %}
                 {% lucide "chevron-right" size=18 class="shrink-0 text-dim" %}
             </a>
             <div class="h-px bg-rule"></div>

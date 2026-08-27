@@ -1,0 +1,54 @@
+{% extends "mobile/base.html" %}
+{% load i18n lucide %}
+
+{% comment %}
+    The "Forms" row off Me -- every form send self.managed_people are or were
+    ever addressed to, pending or completed with its submitted date. White
+    sticky back-header, same pattern as payments.html/calendar_feed_settings.html
+    -- not a tab of its own, active_tab stays "me" (FormsListView's own docstring).
+{% endcomment %}
+
+{% block content %}
+    <div class="-mx-4 -mt-4 flex items-center gap-1 border-b border-line bg-white px-4 py-3">
+        <a class="-ml-2.5 flex h-11 w-11 shrink-0 items-center justify-center" href="{% url "mobile:me" %}" aria-label="{% trans "Back" %}">
+            {% lucide "chevron-left" size=20 stroke_width=2.4 class="text-ink" %}
+        </a>
+        <span class="min-w-0 flex-1 truncate font-display text-xl leading-none font-extrabold text-ink uppercase">{% trans "Forms" %}</span>
+    </div>
+
+    {% if forms_status %}
+        <div class="m-card overflow-hidden">
+            {% for row in forms_status %}
+                {% if not forloop.first %}<div class="h-px bg-rule"></div>{% endif %}
+                {% if row.submitted_at %}
+                    <div class="flex items-center gap-3 p-3.5">
+                        <div class="min-w-0 flex-1">
+                            <div class="text-[15px] font-semibold text-ink">
+                                {{ row.send.form.title }}
+                                {% if row.member != me %}<span class="font-normal text-muted">&middot; {{ row.member.first_name }}</span>{% endif %}
+                            </div>
+                            <div class="text-xs text-muted">{% blocktrans with date=row.submitted_at|date:"d M Y" %}Submitted {{ date }}{% endblocktrans %}</div>
+                        </div>
+                        <span class="pill pill-ok shrink-0">{% trans "Completed" %}</span>
+                    </div>
+                {% else %}
+                    <a class="flex items-center gap-3 p-3.5" href="{% url "mobile:form_fill" row.send.pk %}">
+                        <div class="min-w-0 flex-1">
+                            <div class="text-[15px] font-semibold text-ink">
+                                {{ row.send.form.title }}
+                                {% if row.member != me %}<span class="font-normal text-muted">&middot; {{ row.member.first_name }}</span>{% endif %}
+                            </div>
+                            {% if row.send.closes_at %}<div class="text-xs text-muted">{% blocktrans with date=row.send.closes_at|date:"d M Y" %}Due {{ date }}{% endblocktrans %}</div>{% endif %}
+                        </div>
+                        <span class="pill pill-warn shrink-0">{% trans "Pending" %}</span>
+                    </a>
+                {% endif %}
+            {% endfor %}
+        </div>
+    {% else %}
+        <div class="m-card p-6 text-center">
+            <p class="font-display text-lg font-extrabold text-ink uppercase">{% trans "Nothing here yet" %}</p>
+            <p class="mt-1 text-sm text-muted">{% trans "Any form sent to you or the people you manage will show up here." %}</p>
+        </div>
+    {% endif %}
+{% endblock content %}

@@ -23,8 +23,9 @@ from .services import (
     effective_members,
     field_choices,
     form_report,
+    form_status_rows_for,
+    is_send_open,
     members_not_yet_submitted,
-    pending_sends_for,
     resolve_season,
     submit_form,
 )
@@ -182,8 +183,9 @@ class FieldChoicesTests(FormbuilderTestBase):
 
 class FormSendAudienceTests(FormbuilderTestBase):
     """formbuilder.services.audience -- effective_members/members_not_yet_submitted/
-    resolve_season/pending_sends_for. Same union/subtract shape as events'
-    own effective_members, verified independently here rather than assumed."""
+    resolve_season/form_status_rows_for/is_send_open. Same union/subtract
+    shape as events' own effective_members, verified independently here
+    rather than assumed."""
 
     def make_season(self, **kwargs):
         kwargs.setdefault("club", self.club)
@@ -249,33 +251,70 @@ class FormSendAudienceTests(FormbuilderTestBase):
 
         self.assertNotIn(self.member, members_not_yet_submitted(self.send))
 
-    def test_pending_sends_for_includes_an_open_send_the_member_hasnt_answered(self):
-        self.assertEqual(pending_sends_for([self.member], self.club), [self.send])
+    def test_is_send_open_by_default(self):
+        self.assertTrue(is_send_open(self.send))
 
-    def test_pending_sends_for_omits_a_send_already_submitted(self):
-        Submission.objects.create(send=self.send, member=self.member)
-
-        self.assertEqual(pending_sends_for([self.member], self.club), [])
-
-    def test_pending_sends_for_omits_a_send_thats_not_currently_active(self):
+    def test_is_send_open_false_once_inactive(self):
         self.send.is_active = False
-        self.send.save(update_fields=["is_active"])
 
-        self.assertEqual(pending_sends_for([self.member], self.fresh_send().club), [])
+        self.assertFalse(is_send_open(self.send))
 
-    def test_pending_sends_for_omits_a_send_outside_its_window(self):
+    def test_is_send_open_false_before_opens_at(self):
+        self.send.opens_at = timezone.now() + timedelta(days=1)
+
+        self.assertFalse(is_send_open(self.send))
+
+    def test_is_send_open_false_after_closes_at(self):
         self.send.closes_at = timezone.now() - timedelta(days=1)
-        self.send.save(update_fields=["closes_at"])
 
-        self.assertEqual(pending_sends_for([self.member], self.club), [])
+        self.assertFalse(is_send_open(self.send))
 
-    def test_pending_sends_for_ignores_the_forms_own_template_lifecycle_flag(self):
+    def test_form_status_rows_for_includes_a_pending_row(self):
+        rows = form_status_rows_for([self.member], self.club)
+
+        self.assertEqual(rows, [{"send": self.send, "member": self.member, "submitted_at": None}])
+
+    def test_form_status_rows_for_carries_the_submitted_at_once_answered(self):
+        submission = Submission.objects.create(send=self.send, member=self.member)
+
+        rows = form_status_rows_for([self.member], self.club)
+
+        self.assertEqual(rows, [{"send": self.send, "member": self.member, "submitted_at": submission.submitted_at}])
+
+    def test_form_status_rows_for_ignores_the_forms_own_template_lifecycle_flag(self):
         # A retired template shouldn't retroactively hide a send already out --
         # Form.is_active only governs whether it can be picked for a *new* send.
         self.form.is_active = False
         self.form.save(update_fields=["is_active"])
 
-        self.assertEqual(pending_sends_for([self.member], self.club), [self.send])
+        rows = form_status_rows_for([self.member], self.club)
+
+        self.assertEqual([row["send"] for row in rows], [self.send])
+
+    def test_form_status_rows_for_includes_a_closed_send_too(self):
+        # Unlike is_send_open -- this is the full historical record, not
+        # "what's actionable right now".
+        self.send.closes_at = timezone.now() - timedelta(days=1)
+        self.send.save(update_fields=["closes_at"])
+
+        rows = form_status_rows_for([self.member], self.club)
+
+        self.assertEqual([row["send"] for row in rows], [self.send])
+
+    def test_form_status_rows_for_has_one_row_per_member_addressed(self):
+        other = Member.objects.create(first_name="Joe", last_name="Roe")
+        self.send.invited_members.add(other)
+
+        rows = form_status_rows_for([self.member, other], self.club)
+
+        self.assertCountEqual([row["member"] for row in rows], [self.member, other])
+
+    def test_form_status_rows_for_omits_someone_outside_the_audience(self):
+        outsider = Member.objects.create(first_name="Out", last_name="Sider")
+
+        rows = form_status_rows_for([self.member, outsider], self.club)
+
+        self.assertEqual([row["member"] for row in rows], [self.member])
 
 
 class SubmitFormTests(FormbuilderTestBase):

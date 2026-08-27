@@ -13,7 +13,7 @@ from django.utils import timezone
 
 from club.models import ClubMembership
 from club.services.access import current_season
-from formbuilder.models import FormSend
+from formbuilder.models import FormSend, Submission
 from members.models import Member
 from teams.models import TeamMembership
 
@@ -57,29 +57,47 @@ def members_not_yet_submitted(send):
     return effective_members(send).exclude(id__in=submitted_ids)
 
 
-def pending_sends_for(members, club):
-    """Every currently-open FormSend in ``club`` whose still-pending audience
-    intersects ``members`` -- what mobile.views.HomeView's "Forms to
-    complete" card shows. Gated on the send's own is_active/opens_at/
-    closes_at window only -- not on Form.is_active, which only governs
-    whether the template can be picked for a *new* send (see Form's own
-    docstring), and shouldn't retroactively hide a send already out.
+def is_send_open(send, when=None):
+    """Whether ``send`` is currently accepting submissions -- its own
+    is_active/opens_at/closes_at window, independent of Form.is_active
+    (which only governs whether the template can be picked for a *new*
+    send, see Form's own docstring, and shouldn't retroactively hide a send
+    already out)."""
+    when = when or timezone.now()
+    if not send.is_active:
+        return False
+    if send.opens_at is not None and when < send.opens_at:
+        return False
+    if send.closes_at is not None and when > send.closes_at:
+        return False
+    return True
+
+
+def form_status_rows_for(members, club):
+    """Every FormSend any of ``members`` is or was ever addressed to, one
+    row per (send, member) pair -- ``{"send": ..., "member": ...,
+    "submitted_at": ...}`` (``None`` while still pending). Newest send
+    first. The one shared building block behind mobile's Home "Forms to
+    complete" card, Me's Forms counter, and the dedicated Forms list page --
+    each just filters/caps this differently rather than re-deriving it.
+
     ``members`` is a small, already-resolved list (the viewer's own
-    person-scope, e.g. self + managed children), so this checks each open
-    send in turn rather than trying to express the intersection as one query
-    -- the number of open sends for a club at any moment is small, matching
-    the same non-vectorised cost profile events.services.attendance.
-    effective_members itself already accepts."""
-    member_ids = {member.pk for member in members}
-    if not member_ids:
+    person-scope, e.g. self + managed children), so this checks each of the
+    club's sends in turn rather than trying to express the intersection as
+    one query -- the number of sends for a club at any moment is small,
+    matching the same non-vectorised cost profile events.services.
+    attendance.effective_members itself already accepts."""
+    members_by_id = {member.pk: member for member in members}
+    if not members_by_id:
         return []
 
-    now = timezone.now()
-    open_sends = FormSend.objects.filter(club=club, is_active=True).exclude(opens_at__gt=now).exclude(closes_at__lt=now).select_related("form")
+    submitted_at_by_send_and_member = {
+        (submission.send_id, submission.member_id): submission.submitted_at for submission in Submission.objects.filter(send__club=club, member_id__in=members_by_id)
+    }
 
-    pending = []
-    for send in open_sends:
-        not_yet = set(members_not_yet_submitted(send).values_list("id", flat=True))
-        if member_ids & not_yet:
-            pending.append(send)
-    return pending
+    rows = []
+    for send in FormSend.objects.filter(club=club).select_related("form").order_by("-created"):
+        audience_ids = {member.pk for member in effective_members(send)}
+        for member_id in audience_ids & members_by_id.keys():
+            rows.append({"send": send, "member": members_by_id[member_id], "submitted_at": submitted_at_by_send_and_member.get((send.pk, member_id))})
+    return rows

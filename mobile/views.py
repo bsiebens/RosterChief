@@ -31,9 +31,8 @@ from events.services.attendance import blocked_upcoming_events_for_member
 from events.services.calendar import agenda_groups, week_bounds
 from events.services.lineup import notify_dropout, selected_members_by_position
 from events.services.referees import RefereeAssignmentError, accept_referee_signup, decline_referee_signup
-from formbuilder.models import FormSend, Submission
-from formbuilder.services import FormSubmissionError, build_form, pending_sends_for, submit_form
-from formbuilder.services.audience import effective_members as form_effective_members
+from formbuilder.models import FormSend
+from formbuilder.services import FormSubmissionError, build_form, form_status_rows_for, is_send_open, submit_form
 from members.models import FamilyMembership, Member
 from members.views import ClubScopedPublicMixin
 from news.models import News
@@ -277,8 +276,13 @@ class HomeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
 
             # Above the Club news block, per the design ask -- what's still
             # outstanding, capped the same way as the other "see the full list
-            # elsewhere" cards above (mobile:me is that full list here).
-            forms_to_complete = pending_sends_for(people, self.request.club)[: self.FORMS_LIMIT]
+            # elsewhere" cards above (mobile:forms_list is that full list
+            # here). One row per (send, member) rather than per send -- while
+            # on the "All" chip this is what actually shows *whose* form it
+            # is (a send addressed to two managed children is two rows, each
+            # named), the same shape needs_answer's own per-Attendance rows
+            # already use for the exact same reason.
+            forms_to_complete = [row for row in form_status_rows_for(people, self.request.club) if row["submitted_at"] is None and is_send_open(row["send"], now)][: self.FORMS_LIMIT]
 
         return super().get_context_data(
             hero_attendance=hero_attendance,
@@ -778,20 +782,10 @@ class MeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
                 Voucher.objects.filter(club=club, issued_to__in=family_ids, is_active=True, expiry_date__gte=timezone.localdate(), consumed_amount__lt=F("amount")).select_related("issued_to").order_by("expiry_date")
             )
 
-        # Every form send self.managed_people are/were ever addressed to,
-        # each row's own submitted_at (None while still pending) --
-        # unbounded by is_active/opens_at/closes_at unlike
-        # formbuilder.services.audience.pending_sends_for, since this is the
-        # full record ("forms, status and the date submitted"), not just
-        # what's currently actionable.
-        forms_status = []
-        if self.managed_people:
-            submitted_at_by_send_and_member = {(submission.send_id, submission.member_id): submission.submitted_at for submission in Submission.objects.filter(send__club=club, member__in=self.managed_people)}
-            for send in FormSend.objects.filter(club=club).select_related("form").order_by("-created"):
-                audience_ids = {member.pk for member in form_effective_members(send)}
-                for person in self.managed_people:
-                    if person.pk in audience_ids:
-                        forms_status.append({"send": send, "person": person, "submitted_at": submitted_at_by_send_and_member.get((send.pk, person.pk))})
+        # Just the count for the "Forms" menu row's own pill -- the full,
+        # per-person list (formbuilder.services.audience.form_status_rows_for)
+        # lives on its own page now, FormsListView below.
+        open_forms_count = len([row for row in form_status_rows_for(self.managed_people, club) if row["submitted_at"] is None])
 
         return super().get_context_data(
             member_since=member_since,
@@ -800,9 +794,26 @@ class MeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
             open_dues_count=open_dues_count,
             staff_assignments=staff_assignments,
             vouchers=vouchers,
-            forms_status=forms_status,
+            open_forms_count=open_forms_count,
             **kwargs,
         )
+
+
+class FormsListView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
+    """The "Forms" row off Me -- every form send self.managed_people are or
+    were ever addressed to, one row per (send, member), pending or
+    completed with its submitted date. Unbounded by is_active/opens_at/
+    closes_at unlike Home's own "Forms to complete" card (formbuilder.
+    services.audience.is_send_open): this is the full record, not just
+    what's currently actionable."""
+
+    template_name = "mobile/forms_list.html"
+    screen_title = _("Forms")
+    active_tab = "me"
+
+    def get_context_data(self, **kwargs):
+        forms_status = form_status_rows_for(self.managed_people, self.request.club)
+        return super().get_context_data(forms_status=forms_status, **kwargs)
 
 
 class FormFillView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
