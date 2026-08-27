@@ -845,10 +845,22 @@ class FormFillView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         try:
             submit_form(send, self.me, request.POST, files=request.FILES)
         except FormSubmissionError as error:
+            # Re-run the same validation Django's own full_clean() already did
+            # once inside submit_form, rather than manually replaying
+            # error.errors' messages onto a second bound_form via add_error():
+            # add_error()'s first call lazily triggers full_clean() as a side
+            # effect (it reads self.errors internally), which re-validates
+            # every field itself -- so a manually copied "this field is
+            # required" landed *on top of* Django's own identical one, twice.
+            # Calling is_valid() up front here instead means there's only
+            # ever one real validation pass, so nothing to duplicate.
+            # error.errors is only non-empty for that field-level case; a
+            # window/audience/quota/login rejection has no field to attach
+            # to at all, so that's the one case still surfaced by hand.
             bound_form = style_dynamic_form(build_form(send.form, data=request.POST, files=request.FILES))
-            for key, messages in error.errors.items():
-                for message in messages:
-                    bound_form.add_error(key, message) if key in bound_form.fields else bound_form.add_error(None, message)
+            bound_form.is_valid()
+            if not error.errors:
+                bound_form.add_error(None, str(error))
             notify(request, f"e|{_('Could not submit')}|{error}")
             return self.render_to_response(self.get_context_data(send=send, form=bound_form))
 

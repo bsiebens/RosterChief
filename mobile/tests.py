@@ -5588,6 +5588,29 @@ class FormFillViewTests(TestCase):
         self.assertFalse(Submission.objects.exists())
         self.assertContains(response, "This field is required")
 
+    def test_a_missing_required_field_error_is_not_duplicated(self):
+        # add_error()'s first call lazily triggers the bound form's own
+        # full_clean() as a side effect -- replaying submit_form's error
+        # messages on top of that (rather than just letting that one
+        # validation pass populate the errors) used to show "This field is
+        # required." twice under the same field.
+        send = FormSend.objects.create(club=self.club, form=self.form, club_wide=True)
+        self.client.force_login(self.user)
+
+        response = self.client.post(self._url(send), {}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.content.decode().count("This field is required."), 1)
+
+    def test_an_audience_rejection_still_shows_as_a_banner_not_a_field_error(self):
+        # No Field to attach this one to -- unlike a missing-required-field
+        # rejection, this is the one case still surfaced by hand.
+        send = FormSend.objects.create(club=self.club, form=self.form, club_wide=False)  # nobody invited
+        self.client.force_login(self.user)
+
+        response = self.client.post(self._url(send), {"name": "Jane"}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, "bg-warn-bg")
+
     def test_a_member_outside_the_audience_is_rejected(self):
         # club_wide=False and nobody invited -- self.member isn't in the audience.
         send = FormSend.objects.create(club=self.club, form=self.form, club_wide=False)
