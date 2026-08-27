@@ -54,7 +54,7 @@
         <div class="flex flex-wrap items-center justify-between gap-2">
             <h2 class="card-title">{% lucide "history" size=18 %} {% trans "History" %}</h2>
             {% if voucher.available_amount > 0 %}
-                <button class="btn btn-outline btn-sm gap-2" type="button" onclick="document.getElementById('record_consumption_modal').showModal()">{% lucide "minus-circle" size=14 %} {% trans "Record consumption" %}</button>
+                <button class="btn btn-outline btn-sm gap-2" type="button" onclick="document.getElementById('record_consumption_modal').showModal()">{% lucide "coins" size=14 %} {% trans "Record consumption" %}</button>
             {% endif %}
         </div>
         <table class="table">
@@ -104,5 +104,5 @@
     {% trans "Record" as record_consumption_submit_label %}
     {% blocktrans with number=voucher.number asvar record_consumption_blurb %}Manually draws down the balance on {{ number }} -- e.g. an offline/cash payment for something outside the shop.{% endblocktrans %}
     {% url 'management:voucher_consumption_create' voucher.pk as record_consumption_url %}
-    {% include "controlpanel/_modal_form.html" with modal_id="record_consumption_modal" title=record_consumption_title form=consumption_form action_url=record_consumption_url submit_label=record_consumption_submit_label submit_icon="minus-circle" blurb=record_consumption_blurb %}
+    {% include "controlpanel/_modal_form.html" with modal_id="record_consumption_modal" title=record_consumption_title form=consumption_form action_url=record_consumption_url submit_label=record_consumption_submit_label submit_icon="coins" blurb=record_consumption_blurb %}
 {% endblock panel %}
