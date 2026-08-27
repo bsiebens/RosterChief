@@ -1,5 +1,5 @@
 {% extends "management/base.html" %}
-{% load i18n lucide ui %}
+{% load i18n lucide static ui %}
 
 {% block panel_title %}{% if update_view %}{% trans "Edit send" %}{% else %}{% trans "Send form" %}{% endif %}{% endblock panel_title %}
 {% block heading %}{% if update_view %}{% blocktrans %}Edit send &middot; {{ form_obj }}{% endblocktrans %}{% else %}{% blocktrans %}Send &middot; {{ form_obj }}{% endblocktrans %}{% endif %}{% endblock heading %}
@@ -58,3 +58,7 @@
         </div>
     </form>
 {% endblock panel %}
+
+{% block extra_body %}
+    <script src="{% static 'js/searchable-select.js' %}"></script>
+{% endblock extra_body %}
