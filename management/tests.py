@@ -10243,6 +10243,41 @@ class FormManagementTests(ManagementTestBase):
         field = form_obj.fields.get()
         self.assertEqual(field.label, "Shirt size")
         self.assertEqual(field.options, ["S", "M", "L"])
+        # A blank key here means the row was bulk_create()'d straight to the
+        # DB, bypassing Field.save()'s own auto-slugify -- and every question
+        # created that way collapses onto the same `name=""` dynamic form
+        # field, which a browser's own form serialization drops, making a
+        # member's answer look permanently unanswered/required no matter
+        # what they actually picked.
+        self.assertEqual(field.key, "shirt-size")
+
+    def test_each_question_gets_its_own_distinct_key(self):
+        self.client.force_login(self.admin_user)
+        data = {
+            "title": "Sign-up",
+            "description": "",
+            "login_required": "",
+            "is_active": "on",
+            "fields-TOTAL_FORMS": "2",
+            "fields-INITIAL_FORMS": "0",
+            "fields-MIN_NUM_FORMS": "0",
+            "fields-MAX_NUM_FORMS": "1000",
+            "fields-0-label": "First question",
+            "fields-0-field_type": "text",
+            "fields-0-required": "on",
+            "fields-0-options": "",
+            "fields-1-label": "Second question",
+            "fields-1-field_type": "text",
+            "fields-1-required": "on",
+            "fields-1-options": "",
+        }
+
+        self.club_post("form_create", data)
+
+        form_obj = FormBuilderForm.objects.get(club=self.club, title="Sign-up")
+        keys = list(form_obj.fields.order_by("order").values_list("key", flat=True))
+        self.assertEqual(keys, ["first-question", "second-question"])
+        self.assertNotIn("", keys)
 
     def test_a_blank_question_row_is_skipped(self):
         self.client.force_login(self.admin_user)

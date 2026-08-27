@@ -4614,13 +4614,20 @@ class FormCreateView(FormManagerRequiredMixin, View):
             form_obj = form.save(commit=False)
             form_obj.club = request.club
             form_obj.save()
-            FormBuilderField.objects.bulk_create(
-                [
-                    FormBuilderField(form=form_obj, label=row["label"], field_type=row["field_type"], required=row["required"], options=row["options"], order=index)
-                    for index, row in enumerate(field_formset.cleaned_data)
-                    if row.get("label")
-                ]
-            )
+            # One .create() per row, not bulk_create() -- bulk_create() writes
+            # straight to the DB without ever calling Field.save(), which is
+            # where a blank key gets auto-slugified from the label. Every
+            # question created here would otherwise end up with key="",
+            # meaning every one of them collapses onto the *same* dynamic
+            # form field (formbuilder.services.form_factory.build_form_class
+            # keys its fields dict by Field.key) and renders as an
+            # `name=""` input -- invisible to a browser's own form
+            # serialization, so it always looks unanswered/required
+            # regardless of what a member actually picks.
+            for index, row in enumerate(field_formset.cleaned_data):
+                if not row.get("label"):
+                    continue
+                FormBuilderField.objects.create(form=form_obj, label=row["label"], field_type=row["field_type"], required=row["required"], options=row["options"], order=index)
 
         notify(request, f"s|{_('Form created')}|{_('“%(form)s” created.') % {'form': form_obj}}")
         return redirect("management:form_detail", pk=form_obj.pk)
