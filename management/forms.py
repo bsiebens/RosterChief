@@ -1054,7 +1054,11 @@ class ProductForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         self.fields["category"].queryset = ProductCategory.objects.filter(club=club)
         self.fields["category"].empty_label = _("No category")
-        self.fields["season"].queryset = Season.objects.filter(club=club)
+        # Current + upcoming only -- a season whose end_date has already
+        # passed can't be registered against anymore (registration.services.
+        # pricing.available_registration_products excludes it the same way),
+        # so offering it here would just be a dead end.
+        self.fields["season"].queryset = Season.objects.filter(club=club, end_date__gte=timezone.localdate())
         self.fields["season"].required = False
 
 

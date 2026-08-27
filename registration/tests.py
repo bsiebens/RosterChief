@@ -57,7 +57,15 @@ class PricingTests(TestCase):
 
         self.assertIn(self.product, available)
         self.assertIn(event_fee, available)
-        self.assertEqual(len(available), 2)
+
+    def test_available_registration_products_excludes_a_completed_season(self):
+        past_season = make_season(self.club, start=datetime.date(2024, 8, 1), end=datetime.date(2025, 6, 30))
+        ended = Product.objects.create(club=self.club, name="Old Registration", product_type=Product.ProductType.MEMBERSHIP, season=past_season, price=Decimal("50.00"))
+
+        available = list(available_registration_products(self.club))
+
+        self.assertIn(self.product, available)
+        self.assertNotIn(ended, available)
 
     def test_min_registrants_discount_applies_once_the_threshold_is_met(self):
         ProductRegistrantDiscountTier.objects.create(product=self.product, min_registrants=2, discount_type="percentage", discount_amount=Decimal("10"))

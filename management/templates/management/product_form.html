@@ -29,7 +29,7 @@
             </div>
             <div class="grid grid-cols-2 gap-4">
                 {% form_field form.product_type %}
-                {% form_field form.season %}
+                <div id="season-field">{% form_field form.season %}</div>
             </div>
             <div class="grid grid-cols-2 gap-4">
                 {% form_field form.is_public show_as_toggle=True %}
@@ -216,18 +216,24 @@
         // Discounts (early-bird/multi-registrant) only ever apply to a
         // MEMBERSHIP or EVENT_FEE product (registration.services.pricing.
         // REGISTRATION_PRODUCT_TYPES) -- hidden for MERCHANDISE rather than
-        // shown-but-irrelevant. Hiding, not disabling: the fields are all
-        // optional (Product.early_bird_discount_* is blank=True, and a
-        // blank tier formset is a valid "no tiers" submission), so leaving
-        // them in the DOM while hidden is harmless.
+        // shown-but-irrelevant. Season is narrower still -- only ever set
+        // for a Membership product (a club's per-season registration
+        // fee) -- hidden for both EVENT_FEE and MERCHANDISE. Hiding, not
+        // disabling: every field here is optional (Product.
+        // early_bird_discount_*/season are blank=True, and a blank tier
+        // formset is a valid "no tiers" submission), so leaving them in
+        // the DOM while hidden is harmless.
         (() => {
             const productType = document.getElementById("id_product_type");
-            const cards = [document.getElementById("discounts-card"), document.getElementById("tiers-card")].filter(Boolean);
-            if (!productType || !cards.length) return;
+            const discountCards = [document.getElementById("discounts-card"), document.getElementById("tiers-card")].filter(Boolean);
+            const seasonField = document.getElementById("season-field");
+            if (!productType || (!discountCards.length && !seasonField)) return;
 
             const sync = () => {
-                const hidden = !["membership", "event_fee"].includes(productType.value);
-                cards.forEach((card) => card.classList.toggle("hidden", hidden));
+                const isMembership = productType.value === "membership";
+                const isRegistrationType = isMembership || productType.value === "event_fee";
+                discountCards.forEach((card) => card.classList.toggle("hidden", !isRegistrationType));
+                if (seasonField) seasonField.classList.toggle("hidden", !isMembership);
             };
             productType.addEventListener("change", sync);
             sync();

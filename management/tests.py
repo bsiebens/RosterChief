@@ -8438,6 +8438,19 @@ class ProductManagementTests(ShopTestBase):
         data.update(overrides)
         return data
 
+    def test_the_season_field_excludes_a_completed_season(self):
+        today = timezone.localdate()
+        past_season = Season.objects.create(club=self.club, start_date=today - datetime.timedelta(days=400), end_date=today - datetime.timedelta(days=31))
+        future_season = Season.objects.create(club=self.club, start_date=today + datetime.timedelta(days=301), end_date=today + datetime.timedelta(days=600))
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_get("product_create")
+
+        available_seasons = response.context["form"].fields["season"].queryset
+        self.assertIn(self.season, available_seasons)
+        self.assertIn(future_season, available_seasons)
+        self.assertNotIn(past_season, available_seasons)
+
     def test_a_shop_manager_can_view_the_product_list(self):
         self.client.force_login(self.make_shop_manager())
 

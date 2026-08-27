@@ -32,6 +32,8 @@ from collections import Counter, defaultdict
 from decimal import Decimal
 from types import SimpleNamespace
 
+from django.utils import timezone
+
 from shop.models import Product, ProductRegistrantDiscountTier
 from shop.services.pricing import discount_amount_for
 
@@ -45,8 +47,14 @@ REGISTRATION_PRODUCT_TYPES = (Product.ProductType.MEMBERSHIP, Product.ProductTyp
 def available_registration_products(club):
     """Active MEMBERSHIP/EVENT_FEE products a registration can be priced
     against -- what staff configures via the ordinary product management UI
-    (ProductForm)."""
-    return Product.objects.filter(club=club, product_type__in=REGISTRATION_PRODUCT_TYPES, is_active=True).prefetch_related("variants").order_by("name")
+    (ProductForm). A product whose own season has already ended is excluded
+    -- once a season is over, nobody should still be able to register
+    against it (management.forms.ProductForm's own season queryset applies
+    the same "current + upcoming only" rule when staff picks it in the
+    first place). A season-less product is left alone -- resolve_registration_season
+    already rejects it for a different reason (nothing to resolve)."""
+    today = timezone.localdate()
+    return Product.objects.filter(club=club, product_type__in=REGISTRATION_PRODUCT_TYPES, is_active=True).exclude(season__end_date__lt=today).prefetch_related("variants").order_by("name")
 
 
 class PricingError(Exception):
