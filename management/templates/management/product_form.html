@@ -42,7 +42,7 @@
             {% form_field form.description textarea_height="h-28" %}
         </div>
 
-        <div class="card mb-4 card-body">
+        <div class="card mb-4 card-body" id="discounts-card">
             <h2 class="card-title">{% trans "Discounts" %}</h2>
             <p class="text-sm text-muted">{% trans "Both are optional and independent of each other -- a membership-type product used for registration can use either, both, or neither." %}</p>
             <div class="grid grid-cols-2 gap-4">
@@ -181,4 +181,21 @@
     {% if not update_view %}
         <script src="{% static 'js/bulk-add-rows.js' %}"></script>
     {% endif %}
+    <script>
+        // Discounts (early-bird/multi-registrant) only ever apply to a
+        // MEMBERSHIP-type product (registration.services.pricing) -- hidden
+        // for every other type rather than shown-but-irrelevant. Hiding, not
+        // disabling: the fields are all optional (Product.early_bird_discount_*/
+        // min_registrants_discount_* are blank=True), so leaving them in the
+        // DOM while hidden is harmless.
+        (() => {
+            const productType = document.getElementById("id_product_type");
+            const discountsCard = document.getElementById("discounts-card");
+            if (!productType || !discountsCard) return;
+
+            const sync = () => discountsCard.classList.toggle("hidden", productType.value !== "membership");
+            productType.addEventListener("change", sync);
+            sync();
+        })();
+    </script>
 {% endblock extra_body %}
