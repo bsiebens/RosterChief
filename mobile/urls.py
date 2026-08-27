@@ -25,6 +25,7 @@ urlpatterns = [
     path("me/<uuid:member_id>/edit/", views.EditProfileView.as_view(), name="edit_profile"),
     path("notifications/", views.NotificationsView.as_view(), name="notifications"),
     path("forms/<uuid:pk>/", views.FormFillView.as_view(), name="form_fill"),
+    path("forms/responses/<uuid:pk>/", views.FormResponseView.as_view(), name="form_response"),
     # Shop.
     path("shop/", views.ShopHomeView.as_view(), name="shop_home"),
     path("shop/products/<slug:slug>/", views.ShopProductDetailView.as_view(), name="shop_product_detail"),

@@ -76,10 +76,12 @@ def is_send_open(send, when=None):
 def form_status_rows_for(members, club):
     """Every FormSend any of ``members`` is or was ever addressed to, one
     row per (send, member) pair -- ``{"send": ..., "member": ...,
-    "submitted_at": ...}`` (``None`` while still pending). Newest send
-    first. The one shared building block behind mobile's Home "Forms to
-    complete" card, Me's Forms counter, and the dedicated Forms list page --
-    each just filters/caps this differently rather than re-deriving it.
+    "submission": ..., "submitted_at": ...}`` (the latter two ``None`` while
+    still pending). Newest send first. The one shared building block behind
+    mobile's Home "Forms to complete" card, Me's Forms counter, and the
+    dedicated Forms list page (which also uses ``submission`` to link a
+    completed row to that submission's own read-only "my responses" screen)
+    -- each just filters/caps this differently rather than re-deriving it.
 
     ``members`` is a small, already-resolved list (the viewer's own
     person-scope, e.g. self + managed children), so this checks each of the
@@ -91,13 +93,12 @@ def form_status_rows_for(members, club):
     if not members_by_id:
         return []
 
-    submitted_at_by_send_and_member = {
-        (submission.send_id, submission.member_id): submission.submitted_at for submission in Submission.objects.filter(send__club=club, member_id__in=members_by_id)
-    }
+    submission_by_send_and_member = {(submission.send_id, submission.member_id): submission for submission in Submission.objects.filter(send__club=club, member_id__in=members_by_id)}
 
     rows = []
     for send in FormSend.objects.filter(club=club).select_related("form").order_by("-created"):
         audience_ids = {member.pk for member in effective_members(send)}
         for member_id in audience_ids & members_by_id.keys():
-            rows.append({"send": send, "member": members_by_id[member_id], "submitted_at": submitted_at_by_send_and_member.get((send.pk, member_id))})
+            submission = submission_by_send_and_member.get((send.pk, member_id))
+            rows.append({"send": send, "member": members_by_id[member_id], "submission": submission, "submitted_at": submission.submitted_at if submission else None})
     return rows

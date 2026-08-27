@@ -31,7 +31,7 @@ from events.services.attendance import blocked_upcoming_events_for_member
 from events.services.calendar import agenda_groups, week_bounds
 from events.services.lineup import notify_dropout, selected_members_by_position
 from events.services.referees import RefereeAssignmentError, accept_referee_signup, decline_referee_signup
-from formbuilder.models import FormSend
+from formbuilder.models import FormSend, Submission
 from formbuilder.services import FormSubmissionError, build_form, form_status_rows_for, is_send_open, submit_form
 from members.models import FamilyMembership, Member
 from members.views import ClubScopedPublicMixin
@@ -869,6 +869,50 @@ class FormFillView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
 
     def get_context_data(self, **kwargs):
         return super().get_context_data(screen_title=kwargs["send"].form.title, **kwargs)
+
+
+class FormResponseView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
+    """Read-only "my responses" screen for one already-submitted Submission --
+    reached by tapping a "Completed" row on the Forms list (mobile:forms_list).
+    Keyed by the submission itself, not the send, so there's no ambiguity
+    about which of self.managed_people it belongs to the way a send-keyed
+    URL would have. Shows every field on the form (not just Field.is_active
+    ones -- a retired field an answer still references stays visible here,
+    same "is_active only gates new sends" reasoning as FormFieldUpdateView's
+    own docstring), each with the value actually recorded or "--" if it was
+    left blank."""
+
+    template_name = "mobile/form_response.html"
+    screen_title = _("Your responses")
+
+    def get_submission(self):
+        managed_ids = {person.pk for person in self.managed_people}
+        submission = get_object_or_404(Submission.objects.select_related("send__form", "member").filter(send__club=self.request.club), pk=self.kwargs["pk"])
+        if submission.member_id not in managed_ids:
+            raise Http404("Not one of your own submissions.")
+        return submission
+
+    def get_context_data(self, **kwargs):
+        submission = self.get_submission()
+        answers_by_field_id = {answer.field_id: answer.value for answer in submission.answers.all()}
+        rows = [{"field": field, "display": _display_answer(answers_by_field_id.get(field.id))} for field in submission.send.form.fields.order_by("order")]
+        return super().get_context_data(submission=submission, rows=rows, screen_title=submission.send.form.title, **kwargs)
+
+
+def _display_answer(value):
+    """Render a stored Answer.value for the read-only responses screen --
+    None (a skipped optional field) and a CHECKBOX's bool need a word
+    rather than Django's own str(), and a MULTICHOICE's list reads better
+    comma-joined than as a Python repr."""
+    if value is None:
+        return None
+    if value is True:
+        return _("Yes")
+    if value is False:
+        return _("No")
+    if isinstance(value, list):
+        return ", ".join(str(item) for item in value)
+    return str(value)
 
 
 class PaymentsView(PersonScopeMixin, LoginRequiredMixin, TemplateView):

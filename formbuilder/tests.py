@@ -272,14 +272,14 @@ class FormSendAudienceTests(FormbuilderTestBase):
     def test_form_status_rows_for_includes_a_pending_row(self):
         rows = form_status_rows_for([self.member], self.club)
 
-        self.assertEqual(rows, [{"send": self.send, "member": self.member, "submitted_at": None}])
+        self.assertEqual(rows, [{"send": self.send, "member": self.member, "submission": None, "submitted_at": None}])
 
     def test_form_status_rows_for_carries_the_submitted_at_once_answered(self):
         submission = Submission.objects.create(send=self.send, member=self.member)
 
         rows = form_status_rows_for([self.member], self.club)
 
-        self.assertEqual(rows, [{"send": self.send, "member": self.member, "submitted_at": submission.submitted_at}])
+        self.assertEqual(rows, [{"send": self.send, "member": self.member, "submission": submission, "submitted_at": submission.submitted_at}])
 
     def test_form_status_rows_for_ignores_the_forms_own_template_lifecycle_flag(self):
         # A retired template shouldn't retroactively hide a send already out --

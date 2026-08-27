@@ -5516,12 +5516,13 @@ class FormsListViewTests(TestCase):
 
     def test_a_completed_send_shows_its_submitted_date(self):
         send = FormSend.objects.create(club=self.club, form=self.form, club_wide=True)
-        Submission.objects.create(send=send, member=self.member)
+        submission = Submission.objects.create(send=send, member=self.member)
         self.client.force_login(self.user)
 
         response = self._get()
 
         self.assertContains(response, "Completed")
+        self.assertContains(response, reverse("mobile:form_response", kwargs={"pk": submission.pk}))
 
     def test_a_send_outside_my_audience_is_absent(self):
         FormSend.objects.create(club=self.club, form=self.form, club_wide=False)
@@ -5540,6 +5541,61 @@ class FormsListViewTests(TestCase):
         response = self._get()
 
         self.assertEqual(len(response.context["forms_status"]), 1)
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class FormResponseViewTests(TestCase):
+    """mobile:form_response -- the read-only "my responses" screen a
+    Forms-list "Completed" row now links to (mobile.views.FormResponseView)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        today = timezone.localdate()
+        cls.season = Season.objects.create(club=cls.club, start_date=today - datetime.timedelta(days=30), end_date=today + datetime.timedelta(days=300))
+        cls.user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", email="parent@example.com", user=cls.user)
+        ClubMembership.objects.create(club=cls.club, member=cls.member, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
+        cls.form = FormBuilderForm.objects.create(club=cls.club, title="Sign-up")
+        cls.name_field = FormBuilderField.objects.create(form=cls.form, key="name", label="Name", field_type=FormBuilderField.FieldType.TEXT, required=True, order=1)
+        cls.happy_field = FormBuilderField.objects.create(form=cls.form, key="happy", label="Happy?", field_type=FormBuilderField.FieldType.CHECKBOX, required=False, order=2)
+
+    def _url(self, submission):
+        return reverse("mobile:form_response", kwargs={"pk": submission.pk})
+
+    def test_shows_the_recorded_answers(self):
+        send = FormSend.objects.create(club=self.club, form=self.form, club_wide=True)
+        submission = Submission.objects.create(send=send, member=self.member)
+        Answer.objects.create(submission=submission, field=self.name_field, value="Jane")
+        Answer.objects.create(submission=submission, field=self.happy_field, value=True)
+        self.client.force_login(self.user)
+
+        response = self.client.get(self._url(submission), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Jane")
+        self.assertContains(response, "Yes")
+
+    def test_a_skipped_optional_field_shows_no_answer(self):
+        send = FormSend.objects.create(club=self.club, form=self.form, club_wide=True)
+        submission = Submission.objects.create(send=send, member=self.member)
+        Answer.objects.create(submission=submission, field=self.name_field, value="Jane")
+        self.client.force_login(self.user)
+
+        response = self.client.get(self._url(submission), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, "No answer")
+
+    def test_someone_elses_submission_404s(self):
+        other_user = User.objects.create_user(email="other@example.com", password="pw-secret-123")
+        Member.objects.create(first_name="Otto", last_name="Other", email="other@example.com", user=other_user)
+        send = FormSend.objects.create(club=self.club, form=self.form, club_wide=True)
+        submission = Submission.objects.create(send=send, member=self.member)
+        self.client.force_login(other_user)
+
+        response = self.client.get(self._url(submission), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 404)
 
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])

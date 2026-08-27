@@ -21,7 +21,7 @@
             {% for row in forms_status %}
                 {% if not forloop.first %}<div class="h-px bg-rule"></div>{% endif %}
                 {% if row.submitted_at %}
-                    <div class="flex items-center gap-3 p-3.5">
+                    <a class="flex items-center gap-3 p-3.5" href="{% url "mobile:form_response" row.submission.pk %}">
                         <div class="min-w-0 flex-1">
                             <div class="text-[15px] font-semibold text-ink">
                                 {{ row.send.form.title }}
@@ -30,7 +30,7 @@
                             <div class="text-xs text-muted">{% blocktrans with date=row.submitted_at|date:"d M Y" %}Submitted {{ date }}{% endblocktrans %}</div>
                         </div>
                         <span class="pill pill-ok shrink-0">{% trans "Completed" %}</span>
-                    </div>
+                    </a>
                 {% else %}
                     <a class="flex items-center gap-3 p-3.5" href="{% url "mobile:form_fill" row.send.pk %}">
                         <div class="min-w-0 flex-1">

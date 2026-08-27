@@ -1,0 +1,37 @@
+{% extends "mobile/base.html" %}
+{% load i18n lucide %}
+
+{% comment %}
+    Read-only "my responses" screen for one Submission -- reached by tapping
+    a "Completed" row on the Forms list (forms_list.html). Same one-.m-card-
+    row-per-field shape as form_fill.html, but showing the value already
+    recorded instead of an editable widget. See mobile.views.FormResponseView.
+{% endcomment %}
+
+{% block content %}
+    <div class="-mx-4 -mt-4 flex items-center gap-1 border-b border-line bg-white px-4 py-3">
+        <a class="-ml-2.5 flex h-11 w-11 shrink-0 items-center justify-center" href="{% url "mobile:forms_list" %}" aria-label="{% trans "Back" %}">
+            {% lucide "chevron-left" size=20 stroke_width=2.4 class="text-ink" %}
+        </a>
+        <span class="min-w-0 flex-1 truncate font-display text-xl leading-none font-extrabold text-ink uppercase">{{ submission.send.form.title }}</span>
+    </div>
+
+    <div class="flex items-center gap-2 text-xs text-muted">
+        {% if submission.member != me %}<span>{{ submission.member.first_name }} &middot;</span>{% endif %}
+        <span>{% blocktrans with date=submission.submitted_at|date:"d M Y H:i" %}Submitted {{ date }}{% endblocktrans %}</span>
+    </div>
+
+    <div class="m-card overflow-hidden">
+        {% for row in rows %}
+            {% if not forloop.first %}<div class="h-px bg-rule"></div>{% endif %}
+            <div class="p-3.5">
+                <div class="mb-1 text-xs text-muted">{{ row.field.label }}</div>
+                {% if row.display is None %}
+                    <div class="text-[15px] text-dim">{% trans "No answer" %}</div>
+                {% else %}
+                    <div class="text-[15px] whitespace-pre-line text-ink">{{ row.display }}</div>
+                {% endif %}
+            </div>
+        {% endfor %}
+    </div>
+{% endblock content %}
