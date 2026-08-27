@@ -72,4 +72,16 @@ async function unsubscribe() {
     await subscription.unsubscribe();
 }
 
-window.rosterchiefPush = { subscribe, unsubscribe };
+// Whether *this* browser already holds an active push subscription -- a
+// server-side PushSubscription row proves some device subscribed, not
+// necessarily this one, so the "Enable" card (notifications.html) checks
+// this on load rather than any server-side flag.
+async function isSubscribed() {
+    if (!("serviceWorker" in navigator) || !("PushManager" in window)) return false;
+    const registration = await navigator.serviceWorker.getRegistration();
+    if (!registration) return false;
+    const subscription = await registration.pushManager.getSubscription();
+    return subscription !== null;
+}
+
+window.rosterchiefPush = { subscribe, unsubscribe, isSubscribed };

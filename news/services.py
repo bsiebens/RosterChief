@@ -46,6 +46,12 @@ def render_body_excerpt(body: str, *, words: int) -> str:
     return Truncator(plain_text).words(words, truncate=" …")
 
 
+#: Notification body is a one-line teaser in the inbox row and a push toast,
+#: not a place to read the article -- much shorter than api.py's own
+#: EXCERPT_WORDS=40 card teaser.
+_NOTIFICATION_EXCERPT_WORDS = 15
+
+
 def _notify_audience(news_item):
     """Every current-season, active member linked to this news item -- via its
     teams if it has any, or every active member if it's club-wide. Guardians
@@ -112,7 +118,7 @@ def send_publish_notification(news_item):
     if not members:
         return []
 
-    return notify_members(members, club=news_item.club, title=news_item.title, body=strip_tags(render_body_html(news_item.body)), source=news_item)
+    return notify_members(members, club=news_item.club, title=news_item.title, body=render_body_excerpt(news_item.body, words=_NOTIFICATION_EXCERPT_WORDS), source=news_item)
 
 
 def _send_and_mark_notified(news_id):

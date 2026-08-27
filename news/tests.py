@@ -270,6 +270,19 @@ class SendPublishNotificationTests(TestCase):
         self.assertEqual(notification.body, "Bold text.")
         self.assertEqual(len(mail.outbox), 1)
 
+    def test_a_long_body_is_shortened_to_a_teaser(self):
+        # The notification is an inbox row + push toast, not a place to read
+        # the whole article -- a long body used to be copied in full.
+        member = self.make_member("Jamie", email="jamie@example.com")
+        long_body = " ".join(f"word{i}" for i in range(60))
+        news_item = News.objects.create(club=self.club, title="News", body=long_body, status=News.Status.PUBLISHED, published_at=timezone.now())
+
+        send_publish_notification(news_item)
+
+        notification = Notification.objects.get(member=member)
+        self.assertLess(len(notification.body), len(long_body))
+        self.assertTrue(notification.body.endswith("…"))
+
 
 class NotifyPublishedNewsCommandTests(TestCase):
     """The notify_published_news management command -- the periodic sweep that

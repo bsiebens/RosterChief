@@ -25,9 +25,13 @@
             identical to success: the card vanished and nothing else ever
             happened. failed swaps the description for an explanation
             instead, and the button stays put so it can be retried (e.g.
-            after fixing the browser's own site permission).
+            after fixing the browser's own site permission). x-init checks
+            this browser's own push subscription state on load -- a
+            server-side PushSubscription row would only prove *some* device
+            subscribed, not this one -- so a returning visitor who already
+            enabled push doesn't see the card at all.
         {% endcomment %}
-        <div class="m-card flex items-center gap-3 p-4" x-data="{ requested: false, failed: false, pending: false }" x-show="!requested">
+        <div class="m-card flex items-center gap-3 p-4" x-data="{ requested: false, failed: false, pending: false }" x-init="requested = await window.rosterchiefPush.isSubscribed()" x-show="!requested">
             <div class="min-w-0 flex-1">
                 <div class="text-sm font-semibold text-ink">{% trans "Enable push notifications" %}</div>
                 <div class="text-xs text-muted" x-show="!failed">{% trans "Get notified on this device as soon as something new comes in." %}</div>
