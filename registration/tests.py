@@ -1,7 +1,8 @@
 import datetime
 from decimal import Decimal
 
-from django.test import TestCase
+from django.test import TestCase, override_settings
+from django.urls import reverse
 
 from authentication.models import User
 from club.models import Club, ClubMembership, Season
@@ -308,3 +309,112 @@ class EarlyPaymentDeadlineFeeTests(TestCase):
 
         membership.refresh_from_db()
         self.assertEqual(membership.fee_status, ClubMembership.FeeStatus.PARTIALLY_PAID)
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class RegistrationViewTests(TestCase):
+    """registration:register -- the public, unauthenticated registration
+    page (registration.views.RegistrationView)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        cls.season = make_season(cls.club)
+        cls.product = Product.objects.create(club=cls.club, name="Player Registration", product_type=Product.ProductType.MEMBERSHIP, season=cls.season, price=Decimal("100.00"))
+        cls.u10 = ProductVariant.objects.create(product=cls.product, name="U10", price=Decimal("80.00"))
+        cls.team = Team.objects.create(club=cls.club, name="U10 Boys", short_name="U10B")
+
+    def _url(self):
+        return reverse("registration:register")
+
+    def formset_management(self, total=1, prefix="entries"):
+        return {f"{prefix}-TOTAL_FORMS": str(total), f"{prefix}-INITIAL_FORMS": "0", f"{prefix}-MIN_NUM_FORMS": "0", f"{prefix}-MAX_NUM_FORMS": "1000"}
+
+    def entry_data(self, index=0, prefix="entries", **overrides):
+        data = {
+            f"{prefix}-{index}-first_name": "Timmy",
+            f"{prefix}-{index}-last_name": "Tester",
+            f"{prefix}-{index}-date_of_birth": "2016-05-01",
+            f"{prefix}-{index}-entry_kind": RegistrationDetails.EntryKind.PLAYER,
+            f"{prefix}-{index}-product_variant": str(self.u10.pk),
+        }
+        data.update({f"{prefix}-{index}-{key}": value for key, value in overrides.items()})
+        return data
+
+    def contact_data(self, **overrides):
+        data = {"contact_first_name": "Pat", "contact_last_name": "Parent", "contact_email": "pat@example.com", "contact_phone": ""}
+        data.update(overrides)
+        return data
+
+    def test_get_renders_the_form(self):
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Register")
+
+    def test_no_registration_products_shows_an_empty_state(self):
+        self.product.is_active = False
+        self.product.save()
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, "isn't open right now")
+
+    def test_calculating_the_price_does_not_create_any_records(self):
+        data = self.contact_data() | self.formset_management() | self.entry_data()
+        data["action"] = "preview"
+
+        response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "80.00")
+        self.assertFalse(RegistrationBatch.objects.exists())
+        self.assertFalse(Member.objects.filter(first_name="Timmy").exists())
+
+    def test_submitting_creates_the_registration(self):
+        data = self.contact_data() | self.formset_management() | self.entry_data()
+        data["action"] = "submit"
+
+        response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertRedirects(response, self._url())
+        self.assertEqual(RegistrationBatch.objects.count(), 1)
+        child = Member.objects.get(first_name="Timmy", last_name="Tester")
+        membership = ClubMembership.objects.get(club=self.club, member=child, season=self.season)
+        self.assertEqual(membership.status, ClubMembership.StatusChoices.PENDING)
+        self.assertEqual(membership.fee_amount, Decimal("80.00"))
+
+    def test_a_missing_last_name_is_rejected(self):
+        data = self.contact_data() | self.formset_management() | self.entry_data(last_name="")
+        data["action"] = "preview"
+
+        response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(RegistrationBatch.objects.exists())
+
+    def test_an_empty_formset_is_rejected(self):
+        data = self.contact_data() | self.formset_management()
+        data["action"] = "preview"
+
+        response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Register at least one person.")
+
+    def test_an_authenticated_submitter_sees_locked_contact_fields_and_is_used_as_the_contact(self):
+        user = User.objects.create_user(email="pat@example.com", password="pw-secret-123")
+        Member.objects.create(user=user, first_name="Pat", last_name="Parent")
+        self.client.force_login(user)
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, "Submitting as:")
+
+        data = self.formset_management() | self.entry_data()
+        data["action"] = "submit"
+        self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+        batch = RegistrationBatch.objects.get()
+        self.assertEqual(batch.submitted_by_user, user)
+        self.assertEqual(Member.objects.filter(first_name="Pat", last_name="Parent").count(), 1)

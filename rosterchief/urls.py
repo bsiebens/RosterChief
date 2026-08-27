@@ -32,6 +32,7 @@ urlpatterns = [
     path("accounts/signup/", signup_closed, name="account_signup"),
     path("accounts/", include("allauth.urls")),
     path("", include("members.urls")),
+    path("register/", include("registration.urls")),
     path("controlpanel/", include("controlpanel.urls")),
     path("manage/", include("management.urls")),
     path("app/", include("mobile.urls")),
