@@ -38,6 +38,8 @@ from members.views import ClubScopedPublicMixin
 from news.models import News
 from news.services import render_body_html
 from notifications.models import Notification
+from registration.forms import RegistrationEntryFormSet, entries_from_formset
+from registration.services import PricingError, RegistrationError, available_registration_products, price_entries, resolve_registration_season, submit_registration
 from shop.models import Cart, CartItem, Order, Product, ProductCategory, Voucher
 from shop.services.checkout import CheckoutError, find_discount, place_order
 from shop.services.invoices import ShopInvoicePDFError, render_invoice_pdf
@@ -787,6 +789,12 @@ class MeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         # lives on its own page now, FormsListView below.
         open_forms_count = len([row for row in form_status_rows_for(self.managed_people, club) if row["submitted_at"] is None])
 
+        # Gates the "Register" menu row -- no dead link when the club has no
+        # active MEMBERSHIP-type product configured (registration.services.
+        # pricing.available_registration_products), same "just absent, not
+        # disabled" treatment as every other row here.
+        registration_open = available_registration_products(club).exists()
+
         return super().get_context_data(
             member_since=member_since,
             team_manager_label=team_manager_label,
@@ -795,6 +803,7 @@ class MeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
             staff_assignments=staff_assignments,
             vouchers=vouchers,
             open_forms_count=open_forms_count,
+            registration_open=registration_open,
             **kwargs,
         )
 
@@ -1023,6 +1032,88 @@ class EditProfileView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
             open_requirement_summary=", ".join(open_requirement_names),
             **kwargs,
         )
+
+
+class ReRegisterView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
+    """Re-register self/managed_people for a new season -- reuses the exact
+    same registration.services.submission.submit_registration the public
+    registration page (registration.views.RegistrationView) uses, so the
+    two can never disagree about what happens next (a new PENDING
+    ClubMembership, straight into the existing Sign-up queue, no separate
+    review gate of its own). One formset row per managed_people (existing_
+    member pre-filled, so re-registering never creates a duplicate Member),
+    plus one blank row for someone not yet known to the club (e.g. a
+    newborn sibling). Same two-step "calculate price, then confirm" flow as
+    the public page, no client-side pricing logic."""
+
+    template_name = "mobile/reregister.html"
+    screen_title = _("Register")
+    active_tab = "me"
+
+    def get_initial_entries(self):
+        return [
+            {"existing_member": person.pk, "first_name": person.first_name, "last_name": person.last_name, "date_of_birth": person.date_of_birth, "is_contact": self.me is not None and person.pk == self.me.pk}
+            for person in self.managed_people
+        ]
+
+    def get_formset(self, data=None):
+        kwargs = {"club": self.request.club, "people": self.managed_people, "prefix": "entries"}
+        if data is None:
+            kwargs["initial"] = self.get_initial_entries()
+        formset = RegistrationEntryFormSet(data, **kwargs)
+        for row in formset.forms:
+            style_dynamic_form(row)
+        return formset
+
+    def render_page(self, entry_formset, priced_entries=None, season_error=None):
+        registration_open = available_registration_products(self.request.club).exists()
+        # The formset's first len(managed_people) rows are pre-seeded with an
+        # existing_member each (get_initial_entries) -- shown as a fixed,
+        # read-only-identity row per person; the one trailing "extra" row
+        # (RegistrationEntryFormSet's own extra=1) is a free-text "someone
+        # new" row, e.g. a newborn sibling not yet known to the club.
+        person_rows = list(zip(self.managed_people, entry_formset.forms, strict=False))
+        extra_row = entry_formset.forms[len(self.managed_people)] if len(entry_formset.forms) > len(self.managed_people) else None
+        return self.render_to_response(
+            self.get_context_data(
+                entry_formset=entry_formset, person_rows=person_rows, extra_row=extra_row, priced_entries=priced_entries, season_error=season_error, registration_open=registration_open
+            )
+        )
+
+    def get(self, request, *args, **kwargs):
+        return self.render_page(self.get_formset())
+
+    def post(self, request, *args, **kwargs):
+        entry_formset = self.get_formset(request.POST)
+        if not entry_formset.is_valid():
+            return self.render_page(entry_formset)
+
+        entries = entries_from_formset(entry_formset)
+        try:
+            resolve_registration_season([entry.product_variant for entry in entries])
+        except PricingError as error:
+            return self.render_page(entry_formset, season_error=str(error))
+
+        priced_rows = list(zip(entries, price_entries([entry.product_variant for entry in entries]), strict=True))
+
+        if request.POST.get("action") != "submit":
+            return self.render_page(entry_formset, priced_entries=priced_rows)
+
+        contact_member = self.me or (entries[0].existing_member if entries and entries[0].existing_member else None)
+        contact = {
+            "contact_first_name": contact_member.first_name if contact_member else "",
+            "contact_last_name": contact_member.last_name if contact_member else "",
+            "contact_email": contact_member.contact_email if contact_member else "",
+            "contact_phone": "",
+        }
+
+        try:
+            submit_registration(request.club, submitted_by_user=request.user, entries=entries, **contact)
+        except RegistrationError as error:
+            return self.render_page(entry_formset, season_error=str(error))
+
+        notify(request, f"s|{_('Registration received')}|{_('Thanks -- the club will review this and be in touch.')}")
+        return HttpResponseRedirect(reverse("mobile:me"))
 
 
 def _notification_source_link(source):

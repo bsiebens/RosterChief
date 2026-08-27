@@ -2,11 +2,13 @@ from django import forms
 from django.core.exceptions import ValidationError
 from django.utils.translation import gettext_lazy as _
 
+from members.models import Member
 from shop.models import ProductVariant
 from teams.models import Position, Team
 
 from .models import RegistrationDetails
 from .services.pricing import available_registration_products
+from .services.submission import EntryInput
 
 
 class RegistrationContactForm(forms.Form):
@@ -31,22 +33,31 @@ class RegistrationContactForm(forms.Form):
 
 
 class RegistrationEntryRowForm(forms.Form):
-    """One row of the public registration form -- a person being
-    registered. Entirely optional at the field level, same "a row left
-    blank is simply skipped" idiom as management.forms.FieldRowForm/
-    ProductVariantRowForm; the formset itself (BaseRegistrationEntryFormSet)
-    requires at least one non-blank row."""
+    """One row of the registration form -- a person being registered.
+    Entirely optional at the field level, same "a row left blank is simply
+    skipped" idiom as management.forms.FieldRowForm/ProductVariantRowForm;
+    the formset itself (BaseRegistrationEntryFormSet) requires at least one
+    non-blank row.
+
+    ``existing_member`` is a hidden field, unused by the public registration
+    page (nothing there is a known Member yet) -- mobile.views.
+    ReRegisterView sets it (scoped to the signed-in member's own
+    managed_people via the ``people`` kwarg) so re-registering an existing
+    child reuses their Member row instead of creating a duplicate. Its
+    presence alone counts as "a person" for has_a_person()/clean(), same as
+    a typed first/last name."""
 
     first_name = forms.CharField(label=_("First name"), max_length=150, required=False)
     last_name = forms.CharField(label=_("Last name"), max_length=150, required=False)
     date_of_birth = forms.DateField(label=_("Date of birth"), required=False, widget=forms.DateInput(attrs={"type": "date"}))
     is_contact = forms.BooleanField(label=_("This is me"), required=False)
+    existing_member = forms.ModelChoiceField(queryset=Member.objects.none(), required=False, widget=forms.HiddenInput())
     entry_kind = forms.ChoiceField(label=_("Registering as"), choices=RegistrationDetails.EntryKind.choices, required=False, initial=RegistrationDetails.EntryKind.PLAYER)
     requested_team = forms.ModelChoiceField(label=_("Team (optional)"), queryset=Team.objects.none(), required=False, widget=forms.Select(attrs={"data-searchable": "true", "data-search-placeholder": _("Type a team name...")}))
     requested_position = forms.ModelChoiceField(label=_("Role (optional, volunteers only)"), queryset=Position.objects.none(), required=False, widget=forms.Select(attrs={"data-searchable": "true"}))
     product_variant = forms.ModelChoiceField(label=_("Registering for"), queryset=ProductVariant.objects.none(), required=False, widget=forms.Select(attrs={"data-searchable": "true", "data-search-placeholder": _("Type to search...")}))
 
-    def __init__(self, *args, club=None, **kwargs):
+    def __init__(self, *args, club=None, people=None, **kwargs):
         super().__init__(*args, **kwargs)
         if club is not None:
             self.fields["requested_team"].queryset = Team.objects.filter(club=club).order_by("name")
@@ -54,16 +65,19 @@ class RegistrationEntryRowForm(forms.Form):
             variants = ProductVariant.objects.filter(product__in=available_registration_products(club), is_active=True).select_related("product").order_by("product__name", "name")
             self.fields["product_variant"].queryset = variants
             self.fields["product_variant"].label_from_instance = lambda variant: f"{variant.product.name} — {variant.name} (€{variant.effective_price})"
+        if people is not None:
+            self.fields["existing_member"].queryset = Member.objects.filter(pk__in=[person.pk for person in people])
 
     def has_a_person(self):
-        return bool(self.cleaned_data.get("first_name") or self.cleaned_data.get("last_name"))
+        data = self.cleaned_data
+        return bool(data.get("first_name") or data.get("last_name") or data.get("existing_member"))
 
     def clean(self):
         cleaned = super().clean()
-        if not (cleaned.get("first_name") or cleaned.get("last_name")):
+        if not (cleaned.get("first_name") or cleaned.get("last_name") or cleaned.get("existing_member")):
             return cleaned  # a genuinely blank row -- the formset skips it entirely
 
-        if not cleaned.get("last_name"):
+        if not cleaned.get("existing_member") and not cleaned.get("last_name"):
             self.add_error("last_name", _("Enter a last name."))
         if not cleaned.get("product_variant"):
             self.add_error("product_variant", _("Choose what this person is registering for."))
@@ -71,13 +85,15 @@ class RegistrationEntryRowForm(forms.Form):
 
 
 class BaseRegistrationEntryFormSet(forms.BaseFormSet):
-    def __init__(self, *args, club=None, **kwargs):
+    def __init__(self, *args, club=None, people=None, **kwargs):
         self.club = club
+        self.people = people
         super().__init__(*args, **kwargs)
 
     def get_form_kwargs(self, index):
         kwargs = super().get_form_kwargs(index)
         kwargs["club"] = self.club
+        kwargs["people"] = self.people
         return kwargs
 
     def non_blank_forms(self):
@@ -94,3 +110,28 @@ class BaseRegistrationEntryFormSet(forms.BaseFormSet):
 
 
 RegistrationEntryFormSet = forms.formset_factory(RegistrationEntryRowForm, formset=BaseRegistrationEntryFormSet, extra=1)
+
+
+def entries_from_formset(entry_formset):
+    """The shared bridge from a validated RegistrationEntryFormSet to the
+    EntryInput list registration.services.submission.submit_registration
+    expects -- used by both the public registration page and mobile's
+    re-registration screen so the two can never map form fields to service
+    kwargs differently."""
+    entries = []
+    for row in entry_formset.non_blank_forms():
+        data = row.cleaned_data
+        entries.append(
+            EntryInput(
+                first_name=data.get("first_name", ""),
+                last_name=data.get("last_name", ""),
+                date_of_birth=data.get("date_of_birth"),
+                entry_kind=data.get("entry_kind") or RegistrationDetails.EntryKind.PLAYER,
+                requested_team=data.get("requested_team"),
+                requested_position=data.get("requested_position"),
+                product_variant=data.get("product_variant"),
+                existing_member=data.get("existing_member"),
+                is_contact=bool(data.get("is_contact")),
+            )
+        )
+    return entries

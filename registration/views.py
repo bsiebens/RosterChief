@@ -16,9 +16,8 @@ from controlpanel.messages import notify
 from members.models import Member
 from members.views import ClubScopedPublicMixin
 
-from .forms import RegistrationContactForm, RegistrationEntryFormSet
-from .models import RegistrationDetails
-from .services import EntryInput, PricingError, RegistrationError, available_registration_products, price_entries, resolve_registration_season, submit_registration
+from .forms import RegistrationContactForm, RegistrationEntryFormSet, entries_from_formset
+from .services import PricingError, RegistrationError, available_registration_products, price_entries, resolve_registration_season, submit_registration
 
 
 class RegistrationView(ClubScopedPublicMixin, View):
@@ -58,7 +57,7 @@ class RegistrationView(ClubScopedPublicMixin, View):
         if not contact_form.is_valid() or not entry_formset.is_valid():
             return self.render_page(request, contact_form, entry_formset)
 
-        entries = self._build_entries(entry_formset)
+        entries = entries_from_formset(entry_formset)
         try:
             # Validated here too (not just inside submit_registration) so a
             # mismatched-season error already shows up at the preview step,
@@ -86,21 +85,3 @@ class RegistrationView(ClubScopedPublicMixin, View):
 
         notify(request, f"s|{_('Registration received')}|{_('Thanks -- the club will review this and be in touch.')}")
         return redirect("registration:register")
-
-    def _build_entries(self, entry_formset):
-        entries = []
-        for row in entry_formset.non_blank_forms():
-            data = row.cleaned_data
-            entries.append(
-                EntryInput(
-                    first_name=data.get("first_name", ""),
-                    last_name=data.get("last_name", ""),
-                    date_of_birth=data.get("date_of_birth"),
-                    entry_kind=data.get("entry_kind") or RegistrationDetails.EntryKind.PLAYER,
-                    requested_team=data.get("requested_team"),
-                    requested_position=data.get("requested_position"),
-                    product_variant=data.get("product_variant"),
-                    is_contact=bool(data.get("is_contact")),
-                )
-            )
-        return entries

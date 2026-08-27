@@ -113,6 +113,13 @@
                 <span class="flex-1 text-[15px] font-semibold text-ink">{% trans "Personal details" %}</span>
                 {% lucide "chevron-right" size=18 class="shrink-0 text-dim" %}
             </a>
+            {% if registration_open %}
+                <div class="h-px bg-rule"></div>
+                <a class="flex items-center gap-3 p-3.5" href="{% url "mobile:reregister" %}">
+                    <span class="flex-1 text-[15px] font-semibold text-ink">{% trans "Register" %}</span>
+                    {% lucide "chevron-right" size=18 class="shrink-0 text-dim" %}
+                </a>
+            {% endif %}
             <div class="h-px bg-rule"></div>
             <a class="flex items-center gap-3 p-3.5" href="{% url "mobile:forms_list" %}">
                 <span class="flex-1 text-[15px] font-semibold text-ink">{% trans "Forms" %}</span>

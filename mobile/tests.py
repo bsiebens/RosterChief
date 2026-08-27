@@ -25,6 +25,7 @@ from formbuilder.models import Form as FormBuilderForm
 from members.models import Family, FamilyMembership, Member
 from news.models import News, NewsPhoto
 from notifications.models import Notification
+from registration.models import RegistrationBatch
 from shop.models import Cart, CartItem, Discount, Order, OrderLine, Product, ProductCategory, ProductionStatus, ProductVariant, Voucher
 from shop.services.checkout import place_order
 from shop.services.invoices import create_invoice_for_order
@@ -2042,6 +2043,21 @@ class MeViewTests(TestCase):
         self.assertContains(response, "Lars Bakker")
         self.assertContains(response, "(me)")
 
+    def test_no_register_link_without_an_active_registration_product(self):
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertNotContains(response, reverse("mobile:reregister"))
+
+    def test_register_link_shows_once_a_registration_product_is_active(self):
+        Product.objects.create(club=self.club, name="Player Registration", product_type=Product.ProductType.MEMBERSHIP, season=self.season, price=Decimal("100.00"))
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, reverse("mobile:reregister"))
+
     def test_header_is_merged_into_the_shared_navy_header_not_a_separate_block(self):
         self.client.force_login(self.user)
 
@@ -2416,6 +2432,119 @@ class EditProfileViewTests(TestCase):
         response = self._get(self.child)
 
         self.assertNotContains(response, "still open")
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class ReRegisterViewTests(TestCase):
+    """mobile:reregister -- reuses the exact same registration.services.
+    submission.submit_registration the public registration page uses (see
+    mobile.views.ReRegisterView's own docstring)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        today = timezone.localdate()
+        cls.season = Season.objects.create(club=cls.club, start_date=today - datetime.timedelta(days=30), end_date=today + datetime.timedelta(days=300))
+        cls.user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", email="lars@example.com", user=cls.user)
+        ClubMembership.objects.create(club=cls.club, member=cls.member, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
+
+        cls.family = Family.objects.create(name="Bakker")
+        FamilyMembership.objects.create(family=cls.family, member=cls.member, role=FamilyMembership.FamilyRole.PARENT)
+        cls.child = Member.objects.create(first_name="Noor", last_name="Bakker")
+        FamilyMembership.objects.create(family=cls.family, member=cls.child, role=FamilyMembership.FamilyRole.CHILD)
+        # PersonScopeMixin._managed_people requires the child to already have
+        # *some* ClubMembership for this club (any season) to show up as
+        # managed -- a prior, already-lapsed season's row, distinct from
+        # cls.season, so re-registering for cls.season below genuinely
+        # creates a new row rather than reusing this one.
+        last_season = Season.objects.create(club=cls.club, start_date=today - datetime.timedelta(days=395), end_date=today - datetime.timedelta(days=31))
+        ClubMembership.objects.create(club=cls.club, member=cls.child, season=last_season, status=ClubMembership.StatusChoices.LAPSED)
+
+        cls.product = Product.objects.create(club=cls.club, name="Player Registration", product_type=Product.ProductType.MEMBERSHIP, season=cls.season, price=Decimal("100.00"))
+        cls.u10 = ProductVariant.objects.create(product=cls.product, name="U10", price=Decimal("80.00"))
+
+    def _url(self):
+        return reverse("mobile:reregister")
+
+    def formset_management(self, total, prefix="entries"):
+        return {f"{prefix}-TOTAL_FORMS": str(total), f"{prefix}-INITIAL_FORMS": "0", f"{prefix}-MIN_NUM_FORMS": "0", f"{prefix}-MAX_NUM_FORMS": "1000"}
+
+    def test_requires_login(self):
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 302)
+
+    def test_get_shows_a_row_per_managed_person(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Lars")
+        self.assertContains(response, "Noor")
+
+    def test_no_registration_products_shows_an_empty_state(self):
+        self.product.is_active = False
+        self.product.save()
+        self.client.force_login(self.user)
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, "isn't open right now")
+
+    def test_calculating_the_price_does_not_create_any_records(self):
+        self.client.force_login(self.user)
+        data = self.formset_management(3)
+        data["entries-0-existing_member"] = str(self.member.pk)
+        data["entries-0-is_contact"] = "on"
+        data["entries-0-product_variant"] = str(self.u10.pk)
+        data["entries-1-existing_member"] = str(self.child.pk)
+        data["entries-1-product_variant"] = str(self.u10.pk)
+        data["action"] = "preview"
+
+        response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "80.00")
+        self.assertFalse(RegistrationBatch.objects.exists())
+
+    def test_submitting_reuses_the_existing_members_no_duplicates(self):
+        self.client.force_login(self.user)
+        data = self.formset_management(3)
+        data["entries-0-existing_member"] = str(self.member.pk)
+        data["entries-0-is_contact"] = "on"
+        data["entries-0-product_variant"] = str(self.u10.pk)
+        data["entries-1-existing_member"] = str(self.child.pk)
+        data["entries-1-product_variant"] = str(self.u10.pk)
+        data["action"] = "submit"
+
+        response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertRedirects(response, reverse("mobile:me"))
+        self.assertEqual(Member.objects.filter(first_name="Noor").count(), 1)
+        batch = RegistrationBatch.objects.get()
+        self.assertEqual(batch.submitted_by_user, self.user)
+        child_membership = ClubMembership.objects.get(club=self.club, member=self.child, season=self.season)
+        self.assertEqual(child_membership.status, ClubMembership.StatusChoices.PENDING)
+        self.assertEqual(child_membership.fee_amount, Decimal("80.00"))
+
+    def test_a_new_family_member_can_be_added_via_the_extra_row(self):
+        self.client.force_login(self.user)
+        data = self.formset_management(3)
+        data["entries-0-existing_member"] = str(self.member.pk)
+        data["entries-0-is_contact"] = "on"
+        data["entries-0-product_variant"] = str(self.u10.pk)
+        data["entries-2-first_name"] = "Baby"
+        data["entries-2-last_name"] = "Bakker"
+        data["entries-2-product_variant"] = str(self.u10.pk)
+        data["action"] = "submit"
+
+        response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertRedirects(response, reverse("mobile:me"))
+        new_member = Member.objects.get(first_name="Baby", last_name="Bakker")
+        self.assertEqual(new_member.family_memberships.get().family, self.family)
 
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "other-club.rosterchief.app", "testserver"])

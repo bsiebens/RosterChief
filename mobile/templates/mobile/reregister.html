@@ -1,0 +1,144 @@
+{% extends "mobile/base.html" %}
+{% load i18n lucide static %}
+
+{% comment %}
+    Re-register self/managed_people for a new season -- see
+    mobile.views.ReRegisterView's own docstring. One row per managed person
+    (identity fixed, existing_member hidden field set) plus one free-text
+    row for someone not yet known to the club. Same two-step "calculate
+    price, then confirm" flow as the public registration page
+    (registration/templates/registration/register.html), no client-side
+    pricing logic.
+{% endcomment %}
+
+{% block content %}
+    <div class="-mx-4 -mt-4 flex items-center gap-1 border-b border-line bg-white px-4 py-3">
+        <a class="-ml-2.5 flex h-11 w-11 shrink-0 items-center justify-center" href="{% url "mobile:me" %}" aria-label="{% trans "Back" %}">
+            {% lucide "chevron-left" size=20 stroke_width=2.4 class="text-ink" %}
+        </a>
+        <span class="min-w-0 flex-1 truncate font-display text-xl leading-none font-extrabold text-ink uppercase">{% trans "Register" %}</span>
+    </div>
+
+    {% if not registration_open %}
+        <div class="m-card p-6 text-center">
+            <p class="font-display text-lg font-extrabold text-ink uppercase">{% trans "Not open yet" %}</p>
+            <p class="mt-1 text-sm text-muted">{% trans "Registration isn't open right now -- check back soon." %}</p>
+        </div>
+    {% else %}
+        <form method="post" class="flex flex-col gap-4" hx-boost="false">
+            {% csrf_token %}
+            {{ entry_formset.management_form }}
+
+            {% if season_error %}
+                <div class="rounded-box border border-warn-border bg-warn-bg p-3.5 text-sm text-warn-deep">{{ season_error }}</div>
+            {% endif %}
+            {% for error in entry_formset.non_form_errors %}
+                <div class="rounded-box border border-warn-border bg-warn-bg p-3.5 text-sm text-warn-deep">{{ error }}</div>
+            {% endfor %}
+
+            {% for person, row in person_rows %}
+                <div>
+                    <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{{ person.get_full_name }}</div>
+                    <div class="m-card overflow-hidden">
+                        {{ row.existing_member }}
+                        <div class="p-3.5">
+                            <label class="mb-1 block text-xs text-muted" for="{{ row.is_contact.id_for_label }}">{% trans "Include this person" %}</label>
+                            {{ row.is_contact }}
+                        </div>
+                        <div class="h-px bg-rule"></div>
+                        <div class="p-3.5">
+                            <label class="mb-1 block text-xs text-muted" for="{{ row.entry_kind.id_for_label }}">{{ row.entry_kind.label }}</label>
+                            {{ row.entry_kind }}
+                        </div>
+                        <div class="h-px bg-rule"></div>
+                        <div class="p-3.5">
+                            <label class="mb-1 block text-xs text-muted" for="{{ row.product_variant.id_for_label }}">{{ row.product_variant.label }}</label>
+                            {{ row.product_variant }}
+                            {% for error in row.product_variant.errors %}<p class="mt-1 text-xs text-club">{{ error }}</p>{% endfor %}
+                        </div>
+                        <div class="h-px bg-rule"></div>
+                        <div class="p-3.5">
+                            <label class="mb-1 block text-xs text-muted" for="{{ row.requested_team.id_for_label }}">{{ row.requested_team.label }}</label>
+                            {{ row.requested_team }}
+                        </div>
+                        <div class="h-px bg-rule"></div>
+                        <div class="p-3.5">
+                            <label class="mb-1 block text-xs text-muted" for="{{ row.requested_position.id_for_label }}">{{ row.requested_position.label }}</label>
+                            {{ row.requested_position }}
+                        </div>
+                    </div>
+                </div>
+            {% endfor %}
+
+            {% if extra_row %}
+                <div>
+                    <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Someone new" %}</div>
+                    <div class="m-card overflow-hidden">
+                        <div class="p-3.5">
+                            <label class="mb-1 block text-xs text-muted" for="{{ extra_row.first_name.id_for_label }}">{{ extra_row.first_name.label }}</label>
+                            {{ extra_row.first_name }}
+                        </div>
+                        <div class="h-px bg-rule"></div>
+                        <div class="p-3.5">
+                            <label class="mb-1 block text-xs text-muted" for="{{ extra_row.last_name.id_for_label }}">{{ extra_row.last_name.label }}</label>
+                            {{ extra_row.last_name }}
+                            {% for error in extra_row.last_name.errors %}<p class="mt-1 text-xs text-club">{{ error }}</p>{% endfor %}
+                        </div>
+                        <div class="h-px bg-rule"></div>
+                        <div class="p-3.5">
+                            <label class="mb-1 block text-xs text-muted" for="{{ extra_row.date_of_birth.id_for_label }}">{{ extra_row.date_of_birth.label }}</label>
+                            {{ extra_row.date_of_birth }}
+                        </div>
+                        <div class="h-px bg-rule"></div>
+                        <div class="p-3.5">
+                            <label class="mb-1 block text-xs text-muted" for="{{ extra_row.entry_kind.id_for_label }}">{{ extra_row.entry_kind.label }}</label>
+                            {{ extra_row.entry_kind }}
+                        </div>
+                        <div class="h-px bg-rule"></div>
+                        <div class="p-3.5">
+                            <label class="mb-1 block text-xs text-muted" for="{{ extra_row.product_variant.id_for_label }}">{{ extra_row.product_variant.label }}</label>
+                            {{ extra_row.product_variant }}
+                            {% for error in extra_row.product_variant.errors %}<p class="mt-1 text-xs text-club">{{ error }}</p>{% endfor %}
+                        </div>
+                        <div class="h-px bg-rule"></div>
+                        <div class="p-3.5">
+                            <label class="mb-1 block text-xs text-muted" for="{{ extra_row.requested_team.id_for_label }}">{{ extra_row.requested_team.label }}</label>
+                            {{ extra_row.requested_team }}
+                        </div>
+                        <div class="h-px bg-rule"></div>
+                        <div class="p-3.5">
+                            <label class="mb-1 block text-xs text-muted" for="{{ extra_row.requested_position.id_for_label }}">{{ extra_row.requested_position.label }}</label>
+                            {{ extra_row.requested_position }}
+                        </div>
+                    </div>
+                </div>
+            {% endif %}
+
+            {% if priced_entries %}
+                <div>
+                    <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Price" %}</div>
+                    <div class="m-card overflow-hidden">
+                        {% for entry, price in priced_entries %}
+                            {% if not forloop.first %}<div class="h-px bg-rule"></div>{% endif %}
+                            <div class="flex items-center justify-between p-3.5">
+                                <span class="text-[15px] text-ink">{{ entry.first_name }} {{ entry.last_name }}</span>
+                                <span class="font-mono text-sm tabular-nums text-ink">&euro; {{ price.price }}</span>
+                            </div>
+                            {% if price.deadline %}
+                                <div class="px-3.5 pb-3 text-xs text-muted">{% blocktrans with amount=price.deadline_discount date=price.deadline %}€{{ amount }} off if paid by {{ date }}{% endblocktrans %}</div>
+                            {% endif %}
+                        {% endfor %}
+                    </div>
+                    <p class="mt-2 text-xs text-muted">{% trans "This is what's owed once the club confirms this -- payment happens separately, not on this page." %}</p>
+                </div>
+                <button type="submit" name="action" value="submit" class="btn btn-primary h-11">{% trans "Confirm & submit" %}</button>
+            {% else %}
+                <button type="submit" name="action" value="preview" class="btn btn-primary h-11">{% trans "Calculate price" %}</button>
+            {% endif %}
+        </form>
+    {% endif %}
+{% endblock content %}
+
+{% block extra_body %}
+    <script src="{% static 'js/searchable-select.js' %}"></script>
+{% endblock extra_body %}

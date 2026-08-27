@@ -23,6 +23,7 @@ urlpatterns = [
     path("me/payments/", views.PaymentsView.as_view(), name="payments"),
     path("me/calendar-sync/", views.CalendarFeedSettingsView.as_view(), name="calendar_feed_settings"),
     path("me/<uuid:member_id>/edit/", views.EditProfileView.as_view(), name="edit_profile"),
+    path("me/register/", views.ReRegisterView.as_view(), name="reregister"),
     path("notifications/", views.NotificationsView.as_view(), name="notifications"),
     path("forms/<uuid:pk>/", views.FormFillView.as_view(), name="form_fill"),
     path("forms/responses/<uuid:pk>/", views.FormResponseView.as_view(), name="form_response"),
