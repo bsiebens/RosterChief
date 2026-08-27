@@ -366,7 +366,9 @@ class OrderProductionStatusTests(ShopEntitiesTestBase):
         return OrderLine.objects.create(**kwargs)
 
     def test_has_no_production_lines_when_the_product_isnt_merchandise(self):
-        self.make_line()  # self.product defaults to MEMBERSHIP
+        self.product.product_type = Product.ProductType.MEMBERSHIP
+        self.product.save(update_fields=["product_type"])
+        self.make_line()
 
         self.assertFalse(self.order.has_production_lines)
 

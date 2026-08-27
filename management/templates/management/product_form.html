@@ -214,17 +214,21 @@
     {% endif %}
     <script>
         // Discounts (early-bird/multi-registrant) only ever apply to a
-        // MEMBERSHIP-type product (registration.services.pricing) -- hidden
-        // for every other type rather than shown-but-irrelevant. Hiding, not
-        // disabling: the fields are all optional (Product.early_bird_discount_*/
-        // min_registrants_discount_* are blank=True), so leaving them in the
-        // DOM while hidden is harmless.
+        // MEMBERSHIP or EVENT_FEE product (registration.services.pricing.
+        // REGISTRATION_PRODUCT_TYPES) -- hidden for MERCHANDISE rather than
+        // shown-but-irrelevant. Hiding, not disabling: the fields are all
+        // optional (Product.early_bird_discount_* is blank=True, and a
+        // blank tier formset is a valid "no tiers" submission), so leaving
+        // them in the DOM while hidden is harmless.
         (() => {
             const productType = document.getElementById("id_product_type");
-            const discountsCard = document.getElementById("discounts-card");
-            if (!productType || !discountsCard) return;
+            const cards = [document.getElementById("discounts-card"), document.getElementById("tiers-card")].filter(Boolean);
+            if (!productType || !cards.length) return;
 
-            const sync = () => discountsCard.classList.toggle("hidden", productType.value !== "membership");
+            const sync = () => {
+                const hidden = !["membership", "event_fee"].includes(productType.value);
+                cards.forEach((card) => card.classList.toggle("hidden", hidden));
+            };
             productType.addEventListener("change", sync);
             sync();
         })();

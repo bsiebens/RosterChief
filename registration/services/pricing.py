@@ -1,11 +1,11 @@
 """Pricing for a registration entry.
 
-Reuses shop.models.Product/ProductVariant as the price catalog --
-Product.ProductType.MEMBERSHIP already exists in that enum for exactly this
-purpose (see the module-level note on shop.models.Product) -- rather than
-inventing a parallel one, and shop.services.pricing.discount_amount_for for
-the actual currency math so the two never disagree about what a
-percentage/fixed discount is worth.
+Reuses shop.models.Product/ProductVariant as the price catalog -- Product.
+ProductType.MEMBERSHIP and EVENT_FEE (REGISTRATION_PRODUCT_TYPES below)
+already exist in that enum for exactly this purpose (see the module-level
+note on shop.models.Product) -- rather than inventing a parallel one, and
+shop.services.pricing.discount_amount_for for the actual currency math so
+the two never disagree about what a percentage/fixed discount is worth.
 
 Two independent discount conditions apply to a registration, on different
 schedules:
@@ -35,12 +35,18 @@ from types import SimpleNamespace
 from shop.models import Product, ProductRegistrantDiscountTier
 from shop.services.pricing import discount_amount_for
 
+#: Registration -- and the discounts that go with it (ProductRegistrantDiscountTier,
+#: Product.early_bird_discount_*) -- applies to a membership fee or an event
+#: fee (e.g. a camp/tournament a family registers kids for), never plain
+#: merchandise.
+REGISTRATION_PRODUCT_TYPES = (Product.ProductType.MEMBERSHIP, Product.ProductType.EVENT_FEE)
+
 
 def available_registration_products(club):
-    """Active MEMBERSHIP-type products a registration can be priced
+    """Active MEMBERSHIP/EVENT_FEE products a registration can be priced
     against -- what staff configures via the ordinary product management UI
-    (ProductForm), just with product_type=MEMBERSHIP."""
-    return Product.objects.filter(club=club, product_type=Product.ProductType.MEMBERSHIP, is_active=True).prefetch_related("variants").order_by("name")
+    (ProductForm)."""
+    return Product.objects.filter(club=club, product_type__in=REGISTRATION_PRODUCT_TYPES, is_active=True).prefetch_related("variants").order_by("name")
 
 
 class PricingError(Exception):

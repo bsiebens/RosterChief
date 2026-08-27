@@ -12,7 +12,7 @@ from shop.models import Product, ProductRegistrantDiscountTier, ProductVariant
 from teams.models import Position, Team
 
 from .models import RegistrationBatch, RegistrationDetails
-from .services import EntryInput, PricingError, RegistrationError, price_entries, resolve_registration_season, submit_registration
+from .services import EntryInput, PricingError, RegistrationError, available_registration_products, price_entries, resolve_registration_season, submit_registration
 
 
 def make_club(**kwargs):
@@ -48,6 +48,16 @@ class PricingTests(TestCase):
         self.assertEqual(rows[0]["price"], Decimal("0"))
         self.assertEqual(rows[0]["min_registrants_discount"], Decimal("0"))
         self.assertIsNone(rows[0]["deadline"])
+
+    def test_available_registration_products_includes_event_fee_not_merchandise(self):
+        event_fee = Product.objects.create(club=self.club, name="Summer Camp", product_type=Product.ProductType.EVENT_FEE, season=self.season, price=Decimal("50.00"))
+        Product.objects.create(club=self.club, name="Home Jersey", product_type=Product.ProductType.MERCHANDISE, season=self.season, price=Decimal("30.00"))
+
+        available = list(available_registration_products(self.club))
+
+        self.assertIn(self.product, available)
+        self.assertIn(event_fee, available)
+        self.assertEqual(len(available), 2)
 
     def test_min_registrants_discount_applies_once_the_threshold_is_met(self):
         ProductRegistrantDiscountTier.objects.create(product=self.product, min_registrants=2, discount_type="percentage", discount_amount=Decimal("10"))

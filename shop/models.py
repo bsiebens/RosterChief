@@ -97,15 +97,13 @@ class Product(ClubScopedModel):
     image = models.ImageField(_("photo"), upload_to=product_image_path, blank=True)
     price = models.DecimalField(_("price"), max_digits=10, decimal_places=2, default=0)
 
-    # EVENT_FEE, not MEMBERSHIP -- most products staff creates through the
-    # ordinary "New product" flow are regular shop items; MEMBERSHIP is a
-    # deliberate choice for registration pricing (registration.services.
-    # pricing) and hides a product from the member-facing shop entirely
-    # (mobile.views.ShopHomeView/ShopProductDetailView), so it shouldn't be
-    # what a new product silently defaults to. Not MERCHANDISE either --
-    # that turns on production-status tracking (Order.has_production_lines),
-    # which shouldn't switch on by default for an arbitrary new product.
-    product_type = models.CharField(_("product type"), max_length=255, choices=ProductType.choices, default=ProductType.EVENT_FEE)
+    # MERCHANDISE -- most products staff creates through the ordinary "New
+    # product" flow are regular shop items; MEMBERSHIP/EVENT_FEE are
+    # deliberate choices for registration pricing (registration.services.
+    # pricing), and MEMBERSHIP also hides a product from the member-facing
+    # shop entirely (mobile.views.ShopHomeView/ShopProductDetailView), so
+    # neither should be what a new product silently defaults to.
+    product_type = models.CharField(_("product type"), max_length=255, choices=ProductType.choices, default=ProductType.MERCHANDISE)
     season = models.ForeignKey(Season, on_delete=models.PROTECT, related_name="products", verbose_name=_("season"), blank=True, null=True)
 
     is_active = models.BooleanField(_("is active?"), default=True)

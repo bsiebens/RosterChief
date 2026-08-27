@@ -9777,7 +9777,7 @@ class OrderLineManagementTests(ShopTestBase):
         order, line = self.make_order_with_line(quantity=2, unit_price=Decimal("25.00"))
         self.client.force_login(self.make_shop_manager())
 
-        response = self.club_post("order_line_update", {"quantity": "3", "beneficiary": "", "variant": ""}, order.pk, line.pk)
+        response = self.club_post("order_line_update", {"quantity": "3", "beneficiary": "", "variant": "", "production_status": ProductionStatus.PENDING}, order.pk, line.pk)
 
         self.assertRedirects(response, reverse("management:order_detail", args=[order.pk]))
         line.refresh_from_db()
@@ -9791,7 +9791,7 @@ class OrderLineManagementTests(ShopTestBase):
         variant = ProductVariant.objects.create(product=self.product, name="XL", price=Decimal("30.00"))
         self.client.force_login(self.make_shop_manager())
 
-        self.club_post("order_line_update", {"quantity": "1", "beneficiary": "", "variant": variant.pk}, order.pk, line.pk)
+        self.club_post("order_line_update", {"quantity": "1", "beneficiary": "", "variant": variant.pk, "production_status": ProductionStatus.PENDING}, order.pk, line.pk)
 
         line.refresh_from_db()
         self.assertEqual(line.unit_price, Decimal("30.00"))
@@ -9804,7 +9804,7 @@ class OrderLineManagementTests(ShopTestBase):
         order.save(update_fields=["payment_status"])
         self.client.force_login(self.make_shop_manager())
 
-        self.club_post("order_line_update", {"quantity": "2", "beneficiary": "", "variant": ""}, order.pk, line.pk)
+        self.club_post("order_line_update", {"quantity": "2", "beneficiary": "", "variant": "", "production_status": ProductionStatus.PENDING}, order.pk, line.pk)
 
         order.refresh_from_db()
         self.assertEqual(order.total, Decimal("50.00"))
@@ -9816,7 +9816,9 @@ class OrderLineManagementTests(ShopTestBase):
         order, line = self.make_order_with_line()
         self.client.force_login(self.make_shop_manager())
 
-        response = self.club_post("order_line_update", {"quantity": "2", "beneficiary": "", "variant": "", "personalization_number": "7", "personalization_name": "SMITH"}, order.pk, line.pk)
+        response = self.club_post(
+            "order_line_update", {"quantity": "2", "beneficiary": "", "variant": "", "personalization_number": "7", "personalization_name": "SMITH", "production_status": ProductionStatus.PENDING}, order.pk, line.pk
+        )
 
         self.assertRedirects(response, reverse("management:order_detail", args=[order.pk]))
         line.refresh_from_db()
@@ -9839,7 +9841,7 @@ class OrderLineManagementTests(ShopTestBase):
         ClubMembership.objects.create(club=self.club, member=beneficiary, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
         self.client.force_login(self.make_shop_manager())
 
-        self.club_post("order_line_update", {"quantity": "2", "beneficiary": beneficiary.pk, "variant": ""}, order.pk, line.pk)
+        self.club_post("order_line_update", {"quantity": "2", "beneficiary": beneficiary.pk, "variant": "", "production_status": ProductionStatus.PENDING}, order.pk, line.pk)
 
         line.refresh_from_db()
         self.assertEqual(line.beneficiary, beneficiary)
@@ -9859,6 +9861,8 @@ class OrderLineManagementTests(ShopTestBase):
         self.assertEqual(order.production_status, ProductionStatus.RECEIVED)
 
     def test_production_status_is_ignored_for_a_non_merchandise_product(self):
+        self.product.product_type = Product.ProductType.MEMBERSHIP
+        self.product.save(update_fields=["product_type"])
         order, line = self.make_order_with_line()
         self.client.force_login(self.make_shop_manager())
 
