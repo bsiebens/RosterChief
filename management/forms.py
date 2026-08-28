@@ -1060,6 +1060,9 @@ class ProductForm(forms.ModelForm):
         # so offering it here would just be a dead end.
         self.fields["season"].queryset = Season.objects.filter(club=club, end_date__gte=timezone.localdate())
         self.fields["season"].required = False
+        # "Season 2026-2027", not Season.name's short "26-27" -- same full-year
+        # wording as the registration pages' own season labels.
+        self.fields["season"].label_from_instance = lambda season: _("Season %(start)s-%(end)s") % {"start": season.start_date.year, "end": season.end_date.year}
 
 
 class ProductVariantForm(forms.ModelForm):

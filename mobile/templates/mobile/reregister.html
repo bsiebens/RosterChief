@@ -32,7 +32,8 @@
             <form method="get" class="mt-3 flex flex-col gap-3">
                 <select name="season" class="h-11 w-full rounded-lg border border-stroke bg-paper px-3 text-[15px] text-ink focus:border-ink focus:outline-none">
                     {% for choice in available_seasons %}
-                        <option value="{{ choice.pk }}">{{ choice.name }}</option>
+                        {% blocktrans with start=choice.start_date|date:"Y" end=choice.end_date|date:"Y" asvar choice_label %}Season {{ start }}-{{ end }}{% endblocktrans %}
+                        <option value="{{ choice.pk }}">{{ choice_label }}</option>
                     {% endfor %}
                 </select>
                 <button type="submit" class="btn btn-primary h-11">{% trans "Continue" %}</button>
@@ -42,7 +43,7 @@
         {% if registration_season %}
             <div class="flex items-center gap-1.5 text-sm text-muted">
                 {% lucide "calendar" size=15 class="shrink-0 text-club" %}
-                {% blocktrans with season=registration_season.name %}Registering for the {{ season }} season{% endblocktrans %}
+                {% blocktrans with start=registration_season.start_date|date:"Y" end=registration_season.end_date|date:"Y" %}Registering for Season {{ start }}-{{ end }}{% endblocktrans %}
             </div>
         {% endif %}
         <form method="post" class="flex flex-col gap-4" hx-boost="false">

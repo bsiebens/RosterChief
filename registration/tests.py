@@ -393,7 +393,8 @@ class RegistrationViewTests(TestCase):
         response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, self.season.name)
+        # "Season 2026-2027", not Season.name's short "26-27" form.
+        self.assertContains(response, f"Season {self.season.start_date.year}-{self.season.end_date.year}")
         self.assertNotContains(response, "Which season?")
         self.assertEqual(response.context["season"], self.season)
 

@@ -8451,6 +8451,14 @@ class ProductManagementTests(ShopTestBase):
         self.assertIn(future_season, available_seasons)
         self.assertNotIn(past_season, available_seasons)
 
+    def test_the_season_dropdown_shows_the_full_year_label(self):
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_get("product_create")
+
+        # "Season 2026-2027", not Season.name's short "26-27" form.
+        self.assertContains(response, f"Season {self.season.start_date.year}-{self.season.end_date.year}")
+
     def test_a_shop_manager_can_view_the_product_list(self):
         self.client.force_login(self.make_shop_manager())
 

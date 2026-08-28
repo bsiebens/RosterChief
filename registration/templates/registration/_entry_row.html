@@ -6,13 +6,12 @@
     clones from -- same mechanism as management/_product_variant_formset_row.html
     (static/js/bulk-add-rows.js).
 {% endcomment %}
-<div class="bulk-add-row rounded-box border border-line p-3.5">
-    <div class="flex items-start justify-between gap-2">
-        <div class="grid flex-1 grid-cols-1 gap-4 md:grid-cols-2">
-            {% form_field form.first_name %}
-            {% form_field form.last_name %}
-        </div>
-        <button class="btn btn-ghost btn-sm btn-square remove-row mt-6" type="button" aria-label="{% trans 'Remove this person' %}" title="{% trans 'Remove this person' %}">{% lucide "x" size=16 %}</button>
+<div class="bulk-add-row relative rounded-box border border-line p-3.5 pt-9">
+    {# Top-right corner of the whole card, not sharing a row with First/Last name -- so that 2-column grid stays a clean, even 50/50 split instead of squeezing around this button. #}
+    <button class="btn btn-ghost btn-sm btn-square remove-row absolute top-1.5 right-1.5" type="button" aria-label="{% trans 'Remove this person' %}" title="{% trans 'Remove this person' %}">{% lucide "x" size=16 %}</button>
+    <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+        {% form_field form.first_name %}
+        {% form_field form.last_name %}
     </div>
     <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
         {% form_field form.date_of_birth %}

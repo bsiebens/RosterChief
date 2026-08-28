@@ -16,10 +16,10 @@
     <div class="mb-5">
         <h1 class="font-display text-3xl font-extrabold text-ink uppercase">{% blocktrans with club=club.name %}Register at {{ club }}{% endblocktrans %}</h1>
         {% if season %}
-            {# The clear "which season am I registering for" marker the rest of the page's field choices (product_variant, teams) are scoped to -- registration.services.pricing.resolve_chosen_season. #}
+            {# The clear "which season am I registering for" marker the rest of the page's field choices (product_variant, teams) are scoped to -- registration.services.pricing.resolve_chosen_season. Same "Season <full year>-<full year>" wording as management's own topbar season label (e.g. signup_list.html), not Season.name's short "26-27" form. #}
             <p class="mt-1 flex items-center gap-1.5 text-sm text-muted">
                 {% lucide "calendar" size=15 class="shrink-0 text-club" %}
-                {% blocktrans with season=season.name %}Registering for the {{ season }} season{% endblocktrans %}
+                {% blocktrans with start=season.start_date|date:"Y" end=season.end_date|date:"Y" %}Registering for Season {{ start }}-{{ end }}{% endblocktrans %}
             </p>
         {% endif %}
         {% if registration_open and not needs_season_choice %}
@@ -40,7 +40,8 @@
                 <div class="w-56">
                     <select name="season" class="select w-full">
                         {% for choice in available_seasons %}
-                            <option value="{{ choice.pk }}">{{ choice.name }}</option>
+                            {% blocktrans with start=choice.start_date|date:"Y" end=choice.end_date|date:"Y" asvar choice_label %}Season {{ start }}-{{ end }}{% endblocktrans %}
+                            <option value="{{ choice.pk }}">{{ choice_label }}</option>
                         {% endfor %}
                     </select>
                 </div>
