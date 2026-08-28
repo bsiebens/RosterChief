@@ -5248,7 +5248,11 @@ class SignupDashboardView(ClubAdminRequiredMixin, TemplateView):
             # priority order" reasoning as D3's own longest-waiting-on-top table,
             # with anyone already ACTIVE but not yet clean (unpaid, or an open
             # checklist item) trailing behind since it's lower priority, not done.
-            memberships = list(ClubMembership.objects.filter(club=club, season=season, kind=ClubMembership.Kind.MEMBER).select_related("member", "registration_details", "registration_details__requested_team"))
+            # registration_details is a plain FK now (one membership can carry
+            # more than one request -- a second team, or player and referee
+            # both), so it's a to-many relation: prefetch_related, not
+            # select_related.
+            memberships = list(ClubMembership.objects.filter(club=club, season=season, kind=ClubMembership.Kind.MEMBER).select_related("member").prefetch_related("registration_details__requested_team"))
             # Sorted in Python, not via .order_by("-status", ...): StatusChoices'
             # string values only put PENDING first alphabetically by accident, and
             # that would silently break the moment a choice's value changes.

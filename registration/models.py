@@ -53,13 +53,22 @@ class RegistrationDetails(UUIDModel):
     already was (club/services/onboarding.py's own queue, unchanged) rather
     than growing registration-specific fields. Not itself club-scoped -- its
     club is reached through ``membership``, same reasoning as
-    club.models.FeePayment."""
+    club.models.FeePayment.
+
+    A plain FK, not OneToOne -- one membership (one person, one club, one
+    season) can carry more than one of these: a kid playing on two teams, or
+    playing *and* refereeing, is two separate requests against the same
+    season-long ClubMembership, not two memberships (ClubMembership has
+    ``unique_member_per_club_per_season`` -- see club.models). registration.
+    services.submission.submit_registration always creates a new row here
+    rather than updating an existing one, adding the new entry's price onto
+    the membership's own fee_amount -- see that function's own docstring."""
 
     class EntryKind(models.TextChoices):
         PLAYER = "player", _("Player")
         VOLUNTEER = "volunteer", _("Volunteer")
 
-    membership = models.OneToOneField(ClubMembership, on_delete=models.CASCADE, related_name="registration_details", verbose_name=_("membership"))
+    membership = models.ForeignKey(ClubMembership, on_delete=models.CASCADE, related_name="registration_details", verbose_name=_("membership"))
     batch = models.ForeignKey(RegistrationBatch, on_delete=models.CASCADE, related_name="entries", verbose_name=_("batch"))
 
     entry_kind = models.CharField(_("entry kind"), max_length=20, choices=EntryKind.choices, default=EntryKind.PLAYER)

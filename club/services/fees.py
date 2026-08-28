@@ -18,7 +18,7 @@ def effective_fee_amount(membership, when=None):
     (membership.early_payment_deadline/early_payment_discount, set by
     registration.services.pricing when a matched Product.early_bird_discount_*
     condition can't be confirmed until the fee is paid). ``when`` defaults to
-    today; record_payment/_sync_fee_status pass the triggering payment's own
+    today; record_payment/sync_fee_status pass the triggering payment's own
     paid_at date instead, so a payment made before the deadline is judged
     against it even if recorded/backdated later."""
     when = when or timezone.localdate()
@@ -52,13 +52,13 @@ def record_payment(membership, *, amount, method=FeePayment.Method.BANK_TRANSFER
     """Record money received against one membership's fee. Several payments may
     land on one membership -- a family paying in two installments must not read as
     unpaid. Updates amount_paid and re-syncs fee_status to match; membership.status
-    is untouched -- see _sync_fee_status."""
+    is untouched -- see sync_fee_status."""
     payment = FeePayment.objects.create(membership=membership, amount=amount, method=method, reference=reference, note=note, recorded_by=recorded_by)
 
     membership.amount_paid = F("amount_paid") + amount
     membership.save(update_fields=["amount_paid"])
     membership.refresh_from_db(fields=["amount_paid"])
-    _sync_fee_status(membership, when=payment.paid_at.date())
+    sync_fee_status(membership, when=payment.paid_at.date())
 
     return payment
 
@@ -72,10 +72,10 @@ def mark_as_paid(membership, *, recorded_by=None):
     if remaining > 0:
         record_payment(membership, amount=remaining, method=FeePayment.Method.OTHER, note="Marked as paid", recorded_by=recorded_by)
     else:
-        _sync_fee_status(membership, force_paid=True)
+        sync_fee_status(membership, force_paid=True)
 
 
-def _sync_fee_status(membership, *, force_paid=False, when=None):
+def sync_fee_status(membership, *, force_paid=False, when=None):
     if membership.fee_status == ClubMembership.FeeStatus.WAIVED:
         return  # manual, independent of payments -- this never overrides it
 

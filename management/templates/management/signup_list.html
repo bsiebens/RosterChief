@@ -171,9 +171,11 @@
 
                     <div>
                         <div class="mb-2.5 font-display text-xs font-bold tracking-[.14em] text-muted uppercase">{% trans "Place in" %}</div>
-                        {% if membership.registration_details.requested_team %}
-                            <p class="mb-2 text-xs text-muted">{% blocktrans with team=membership.registration_details.requested_team.short_name %}Requested {{ team }} at registration.{% endblocktrans %}</p>
-                        {% endif %}
+                        {% for details in membership.registration_details.all %}
+                            {% if details.requested_team %}
+                                <p class="mb-2 text-xs text-muted">{% blocktrans with team=details.requested_team.short_name %}Requested {{ team }} at registration.{% endblocktrans %}</p>
+                            {% endif %}
+                        {% endfor %}
                         <div class="flex flex-wrap gap-2">
                             {% for team in teams %}
                                 <form method="post" action="{% url 'management:signup_place_in_team' membership.member.pk %}" data-place-in-team>

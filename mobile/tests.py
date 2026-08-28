@@ -25,7 +25,7 @@ from formbuilder.models import Form as FormBuilderForm
 from members.models import Family, FamilyMembership, Member
 from news.models import News, NewsPhoto
 from notifications.models import Notification
-from registration.models import RegistrationBatch
+from registration.models import RegistrationBatch, RegistrationDetails
 from shop.models import Cart, CartItem, Discount, Order, OrderLine, Product, ProductCategory, ProductionStatus, ProductVariant, Voucher
 from shop.services.checkout import place_order
 from shop.services.invoices import create_invoice_for_order
@@ -2058,6 +2058,22 @@ class MeViewTests(TestCase):
 
         self.assertContains(response, reverse("mobile:reregister"))
 
+    def test_a_per_person_add_registration_link_shows_once_registration_is_open(self):
+        Product.objects.create(club=self.club, name="Player Registration", product_type=Product.ProductType.MEMBERSHIP, season=self.season, price=Decimal("100.00"))
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, f'{reverse("mobile:reregister")}?as={self.member.pk}')
+        self.assertContains(response, f'{reverse("mobile:reregister")}?as={self.child.pk}')
+
+    def test_no_per_person_add_registration_link_without_an_active_registration_product(self):
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertNotContains(response, f'{reverse("mobile:reregister")}?as={self.child.pk}')
+
     def test_header_is_merged_into_the_shared_navy_header_not_a_separate_block(self):
         self.client.force_login(self.user)
 
@@ -2554,6 +2570,44 @@ class ReRegisterViewTests(TestCase):
         child_membership = ClubMembership.objects.get(club=self.club, member=self.child, season=self.season)
         self.assertEqual(child_membership.status, ClubMembership.StatusChoices.PENDING)
         self.assertEqual(child_membership.fee_amount, Decimal("80.00"))
+
+    def test_as_narrows_to_one_person_with_no_extra_row(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get(self._url(), {"as": str(self.child.pk)}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Noor")
+        self.assertNotContains(response, "Lars")
+        self.assertNotContains(response, "Someone new")
+
+    def test_as_shows_the_persons_name_in_the_header(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get(self._url(), {"as": str(self.child.pk)}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, "Register Noor")
+
+    def test_an_additional_registration_for_an_already_registered_person_adds_to_the_fee(self):
+        first_membership = ClubMembership.objects.create(
+            club=self.club, member=self.child, season=self.season, status=ClubMembership.StatusChoices.ACTIVE, fee_amount=Decimal("80.00"), fee_status=ClubMembership.FeeStatus.PAID, amount_paid=Decimal("80.00")
+        )
+        first_batch = RegistrationBatch.objects.create(club=self.club, season=self.season, contact_first_name="Lars", contact_last_name="Bakker", contact_email="parent@example.com")
+        RegistrationDetails.objects.create(membership=first_membership, batch=first_batch, entry_kind=RegistrationDetails.EntryKind.PLAYER, product_variant=self.u10, price=Decimal("80.00"))
+        self.client.force_login(self.user)
+        data = self.formset_management(1)
+        data["entries-0-existing_member"] = str(self.child.pk)
+        data["entries-0-product_variant"] = str(self.u10.pk)
+        data["entries-0-requested_team"] = str(self.team.pk)
+        data["action"] = "submit"
+
+        response = self.client.post(f"{self._url()}?as={self.child.pk}", data, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertRedirects(response, reverse("mobile:me"))
+        membership = ClubMembership.objects.get(club=self.club, member=self.child, season=self.season)
+        self.assertEqual(membership.fee_amount, Decimal("160.00"))
+        self.assertEqual(membership.status, ClubMembership.StatusChoices.PENDING)
+        self.assertEqual(membership.registration_details.count(), 2)
 
     def test_a_new_family_member_can_be_added_via_the_extra_row(self):
         self.client.force_login(self.user)

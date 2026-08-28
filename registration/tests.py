@@ -206,6 +206,29 @@ class SubmitRegistrationTests(TestCase):
         details = RegistrationDetails.objects.get(membership__member__first_name="Timmy")
         self.assertIsNone(details.requested_position)
 
+    def test_a_second_registration_for_the_same_member_and_season_adds_a_new_request(self):
+        second_team = Team.objects.create(club=self.club, name="U10 Girls", short_name="U10G")
+        existing_child = Member.objects.create(first_name="Timmy", last_name="Tester", date_of_birth=datetime.date(2016, 5, 1))
+        first_membership = ClubMembership.objects.create(
+            club=self.club, member=existing_child, season=self.season, status=ClubMembership.StatusChoices.ACTIVE, fee_amount=Decimal("80.00"), fee_status=ClubMembership.FeeStatus.PAID, amount_paid=Decimal("80.00")
+        )
+        first_batch = RegistrationBatch.objects.create(club=self.club, season=self.season, contact_first_name="Pat", contact_last_name="Parent", contact_email="pat@example.com")
+        RegistrationDetails.objects.create(membership=first_membership, batch=first_batch, entry_kind=RegistrationDetails.EntryKind.PLAYER, requested_team=self.team, product_variant=self.u10, price=Decimal("80.00"))
+
+        # Playing on a second team, on top of the first (already ACTIVE and
+        # PAID) registration -- not a duplicate ClubMembership (unique per
+        # club/member/season), a second request against the same one.
+        entries = [EntryInput(existing_member=existing_child, product_variant=self.u10, requested_team=second_team)]
+        submit_registration(self.club, contact_first_name="Pat", contact_last_name="Parent", contact_email="pat@example.com", entries=entries)
+
+        self.assertEqual(ClubMembership.objects.filter(club=self.club, member=existing_child, season=self.season).count(), 1)
+        membership = ClubMembership.objects.get(club=self.club, member=existing_child, season=self.season)
+        self.assertEqual(membership.fee_amount, Decimal("160.00"))  # 80 (first) + 80 (second)
+        self.assertEqual(membership.status, ClubMembership.StatusChoices.PENDING)  # back in the queue -- there's a new, unplaced request
+        self.assertEqual(membership.fee_status, ClubMembership.FeeStatus.PARTIALLY_PAID)  # 80 paid against a now-160 total
+        self.assertEqual(RegistrationDetails.objects.filter(membership=membership).count(), 2)
+        self.assertEqual({details.requested_team for details in RegistrationDetails.objects.filter(membership=membership)}, {self.team, second_team})
+
     def test_min_registrants_discount_reduces_fee_amount_immediately(self):
         ProductRegistrantDiscountTier.objects.create(product=self.player_product, min_registrants=2, discount_type="percentage", discount_amount=Decimal("10"))
         u12 = ProductVariant.objects.create(product=self.player_product, name="U12", price=Decimal("90.00"))

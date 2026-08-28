@@ -505,7 +505,7 @@ class OnboardingRequirement(ClubScopedModel):
     e.g. "provide a medical certificate", "upload a photo".
 
     ``ClubMembership.fee_status`` is still driven by payment alone (see
-    ``club.services.fees._sync_fee_status``) and this never touches it -- a member
+    ``club.services.fees.sync_fee_status``) and this never touches it -- a member
     reads as paid *and* still has an open checklist, both true at once. ``status``
     is different: paying in full only ever settles ``fee_status`` now -- it never
     flips ``status`` to ACTIVE by itself. The only path there is the deliberately

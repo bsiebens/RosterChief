@@ -2,7 +2,11 @@
 family link) and a PENDING ClubMembership per entry, landing straight in
 the existing Sign-up queue (club.services.onboarding) rather than a second,
 parallel review gate. See registration/models.py's own module docstrings
-for why RegistrationBatch/RegistrationDetails carry no status of their own.
+for why RegistrationBatch/RegistrationDetails carry no status of their own,
+and why RegistrationDetails.membership is a plain FK -- registering the same
+member again for an already-open season (a second team, or player and
+referee both) adds a new request onto their existing ClubMembership rather
+than erroring or replacing the first one.
 """
 
 from dataclasses import dataclass
@@ -10,9 +14,11 @@ from datetime import date
 from decimal import Decimal
 
 from django.db import transaction
+from django.db.models import F
 from django.utils import timezone
 
 from club.models import ClubMembership
+from club.services.fees import sync_fee_status
 from members.models import Family, FamilyMembership, Member
 from members.services.family import add_parent_to_family, find_member_by_email, get_or_create_login_member
 from shop.models import ProductVariant
@@ -64,7 +70,15 @@ def submit_registration(club, *, contact_first_name, contact_last_name, contact_
     """``entries`` -- a list of ``EntryInput``. Returns the created
     ``RegistrationBatch``. Raises ``RegistrationError`` if the batch can't
     be priced/scoped as submitted (empty, or chosen products spanning more
-    than one season)."""
+    than one season).
+
+    An entry for a member who already has a ClubMembership this season
+    (mobile's "add a registration" per family member -- a second team, or
+    player and referee both) doesn't create a second membership --
+    ClubMembership is unique per (club, member, season). It adds the new
+    entry's price onto the existing one's fee_amount, puts it back to
+    PENDING, and always adds a new RegistrationDetails row rather than
+    overwriting the existing one -- see this module's own docstring."""
     if not entries:
         raise RegistrationError("At least one person must be registered.")
 
@@ -112,7 +126,7 @@ def submit_registration(club, *, contact_first_name, contact_last_name, contact_
         member = _resolve_entry_member(family, parent, entry)
 
         price = row["price"] - row["min_registrants_discount"]
-        membership, _created = ClubMembership.objects.get_or_create(
+        membership, created = ClubMembership.objects.get_or_create(
             club=club,
             member=member,
             season=season,
@@ -126,17 +140,29 @@ def submit_registration(club, *, contact_first_name, contact_last_name, contact_
                 "early_payment_discount": row["deadline_discount"],
             },
         )
-        RegistrationDetails.objects.update_or_create(
+        if not created:
+            # An *additional* registration for someone already signed up this
+            # season (a second team, or player and referee both) -- adds to
+            # what's owed rather than replacing it, and puts the membership
+            # back in the Sign-up queue so staff sees the new request even if
+            # the first one was already placed/approved. early_payment_deadline/
+            # discount are left as whatever the first registration set --
+            # combining two different products' own early-bird terms has no
+            # single right answer, so the earliest-set one simply stands.
+            membership.fee_amount = F("fee_amount") + price
+            membership.status = ClubMembership.StatusChoices.PENDING
+            membership.save(update_fields=["fee_amount", "status"])
+            membership.refresh_from_db(fields=["fee_amount"])
+            sync_fee_status(membership)
+        RegistrationDetails.objects.create(
             membership=membership,
-            defaults={
-                "batch": batch,
-                "entry_kind": entry.entry_kind,
-                "requested_team": entry.requested_team,
-                "requested_position": entry.requested_position if entry.entry_kind == RegistrationDetails.EntryKind.VOLUNTEER else None,
-                "product_variant": row["variant"],
-                "price": row["price"],
-                "discount_amount": row["min_registrants_discount"],
-            },
+            batch=batch,
+            entry_kind=entry.entry_kind,
+            requested_team=entry.requested_team,
+            requested_position=entry.requested_position if entry.entry_kind == RegistrationDetails.EntryKind.VOLUNTEER else None,
+            product_variant=row["variant"],
+            price=row["price"],
+            discount_amount=row["min_registrants_discount"],
         )
         subtotal += row["price"]
         discount_total += row["min_registrants_discount"]

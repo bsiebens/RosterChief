@@ -226,7 +226,7 @@ def approve_one(membership) -> bool:
 def approve_all_clean(club, season) -> int:
     """Admin-triggered bulk activation from the Sign-up page -- the *only* path to
     ClubMembership.status ACTIVE (see OnboardingRequirement's docstring: paying in
-    full only settles fee_status now, club.services.fees._sync_fee_status never
+    full only settles fee_status now, club.services.fees.sync_fee_status never
     touches status). Only ever moves PENDING -> ACTIVE, and only for a membership
     that is both paid up (fee_status PAID or WAIVED) and has resolved every active
     requirement -- "manual documentation check to be done by the admin" means
