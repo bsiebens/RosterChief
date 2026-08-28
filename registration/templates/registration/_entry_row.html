@@ -6,25 +6,25 @@
     clones from -- same mechanism as management/_product_variant_formset_row.html
     (static/js/bulk-add-rows.js).
 {% endcomment %}
-<div class="bulk-add-row relative rounded-box border border-line p-3.5 pt-9">
-    {# Top-right corner of the whole card, not sharing a row with First/Last name -- so that 2-column grid stays a clean, even 50/50 split instead of squeezing around this button. #}
+<div class="bulk-add-row relative flex flex-col gap-4 rounded-box border border-line p-3.5 pt-9">
+    {# Top-right corner of the whole card, not sharing a row with anything else -- so the 2-column grids below stay a clean, even 50/50 split instead of squeezing around this button. #}
     <button class="btn btn-ghost btn-sm btn-square remove-row absolute top-1.5 right-1.5" type="button" aria-label="{% trans 'Remove this person' %}" title="{% trans 'Remove this person' %}">{% lucide "x" size=16 %}</button>
+
+    {# Full-width, on its own at the top -- checking it drives the auto-fill script below (register.html's extra_body), which is why it comes before the fields it fills. Inline checkbox + label (not a header label above an orphaned box): help_text is what field.html renders beside a checkbox, so the label swaps in as that instead of its own row. #}
+    {% form_field form.is_contact show_label=False help_text=form.is_contact.label %}
+
     <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
         {% form_field form.first_name %}
         {% form_field form.last_name %}
     </div>
-    <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
-        {% form_field form.date_of_birth %}
-        {# Inline checkbox + label (not a header label above an orphaned box) -- help_text is what field.html renders beside a checkbox, so the label swaps in as that instead of its own row. #}
-        <div class="flex items-center">{% form_field form.is_contact show_label=False help_text=form.is_contact.label %}</div>
-    </div>
-    <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
-        {% form_field form.entry_kind %}
-        {% form_field form.product_variant %}
-    </div>
-    <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
-        {% form_field form.requested_team %}
-        {# Volunteer-only -- entries.js (register.html) hides this whenever "Registering as" isn't "volunteer", so a player's row doesn't show an irrelevant field. #}
-        <div data-role="position-field">{% form_field form.requested_position %}</div>
-    </div>
+    {% form_field form.date_of_birth %}
+
+    <div class="h-px bg-rule"></div>
+
+    {% form_field form.entry_kind %}
+    {% form_field form.product_variant %}
+
+    <div class="h-px bg-rule"></div>
+
+    {% form_field form.requested_team %}
 </div>

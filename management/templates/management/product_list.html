@@ -75,23 +75,30 @@
             <tbody>
                 {% for category in categories %}
                     <tr>
-                        <td class="font-semibold text-ink">{{ category.name }}</td>
+                        <td class="font-semibold text-ink">
+                            {{ category.name }}
+                            {% if category.registration_kind %}<span class="badge badge-ghost badge-sm ml-1">{% trans "System" %}</span>{% endif %}
+                        </td>
                         <td class="text-muted">{{ category.products.count }}</td>
                         <td class="text-right">
                             <div class="flex justify-end gap-1">
                                 <button class="btn btn-outline btn-xs gap-1" type="button" onclick="document.getElementById('{{ category.pk|dom_id:"edit_category_modal" }}').showModal()">{% lucide "pencil" size=12 %} {% trans "Edit" %}</button>
-                                <button class="btn btn-outline btn-xs btn-error gap-1" type="button" onclick="document.getElementById('{{ category.pk|dom_id:"delete_category_modal" }}').showModal()">{% lucide "trash-2" size=12 %} {% trans "Delete" %}</button>
+                                {% if not category.registration_kind %}
+                                    <button class="btn btn-outline btn-xs btn-error gap-1" type="button" onclick="document.getElementById('{{ category.pk|dom_id:"delete_category_modal" }}').showModal()">{% lucide "trash-2" size=12 %} {% trans "Delete" %}</button>
+                                {% endif %}
                             </div>
                         </td>
                     </tr>
                     {% trans "Edit category" as edit_category_label %}
                     {% url 'management:product_category_update' category.pk as edit_category_url %}
                     {% include "controlpanel/_modal_form.html" with modal_id=category.pk|dom_id:"edit_category_modal" title=edit_category_label form=category.edit_form action_url=edit_category_url submit_label=edit_category_label submit_icon="save" %}
-                    {% trans "Delete category" as delete_category_label %}
-                    {% trans "Delete" as delete_label %}
-                    {% url 'management:product_category_delete' category.pk as delete_category_url %}
-                    {% blocktrans with name=category.name asvar delete_category_body %}Delete “{{ name }}”? Its products stay, just un-categorised.{% endblocktrans %}
-                    {% include "controlpanel/_confirm_modal.html" with modal_id=category.pk|dom_id:"delete_category_modal" title=delete_category_label body=delete_category_body action_url=delete_category_url submit_label=delete_label %}
+                    {% if not category.registration_kind %}
+                        {% trans "Delete category" as delete_category_label %}
+                        {% trans "Delete" as delete_label %}
+                        {% url 'management:product_category_delete' category.pk as delete_category_url %}
+                        {% blocktrans with name=category.name asvar delete_category_body %}Delete “{{ name }}”? Its products stay, just un-categorised.{% endblocktrans %}
+                        {% include "controlpanel/_confirm_modal.html" with modal_id=category.pk|dom_id:"delete_category_modal" title=delete_category_label body=delete_category_body action_url=delete_category_url submit_label=delete_label %}
+                    {% endif %}
                 {% empty %}
                     <tr>
                         <td colspan="3" class="py-4 text-center text-muted">{% trans "No categories yet -- products show up ungrouped in the shop." %}</td>

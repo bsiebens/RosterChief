@@ -4,7 +4,7 @@ from django.utils.translation import gettext_lazy as _
 
 from members.models import Member
 from shop.models import ProductVariant
-from teams.models import Position, Team
+from teams.models import Team
 
 from .models import RegistrationDetails
 from .services.pricing import available_registration_products
@@ -45,7 +45,15 @@ class RegistrationEntryRowForm(forms.Form):
     managed_people via the ``people`` kwarg) so re-registering an existing
     child reuses their Member row instead of creating a duplicate. Its
     presence alone counts as "a person" for has_a_person()/clean(), same as
-    a typed first/last name."""
+    a typed first/last name.
+
+    No ``requested_position`` field -- a role isn't something registration
+    asks for directly any more; it's implied by which product_variant was
+    chosen (see the entry_kind/category check in clean() below). Staff
+    still picks an actual Position by hand when placing a volunteer (the
+    Volunteer list's own placement form), same as it always has -- this
+    only drops the *request*, RegistrationDetails.requested_position
+    itself is untouched."""
 
     first_name = forms.CharField(label=_("First name"), max_length=150, required=False)
     last_name = forms.CharField(label=_("Last name"), max_length=150, required=False)
@@ -53,20 +61,18 @@ class RegistrationEntryRowForm(forms.Form):
     is_contact = forms.BooleanField(label=_("This is me"), required=False)
     existing_member = forms.ModelChoiceField(queryset=Member.objects.none(), required=False, widget=forms.HiddenInput())
     entry_kind = forms.ChoiceField(label=_("Registering as"), choices=RegistrationDetails.EntryKind.choices, required=False, initial=RegistrationDetails.EntryKind.PLAYER)
-    requested_team = forms.ModelChoiceField(label=_("Team (optional)"), queryset=Team.objects.none(), required=False, widget=forms.Select(attrs={"data-searchable": "true", "data-search-placeholder": _("Type a team name...")}))
-    requested_position = forms.ModelChoiceField(label=_("Role (optional, volunteers only)"), queryset=Position.objects.none(), required=False, widget=forms.Select(attrs={"data-searchable": "true"}))
     product_variant = forms.ModelChoiceField(label=_("Registering for"), queryset=ProductVariant.objects.none(), required=False, widget=forms.Select(attrs={"data-searchable": "true", "data-search-placeholder": _("Type to search...")}))
+    requested_team = forms.ModelChoiceField(label=_("Team"), queryset=Team.objects.none(), required=False, widget=forms.Select(attrs={"data-searchable": "true", "data-search-placeholder": _("Type a team name...")}))
 
     def __init__(self, *args, club=None, people=None, season=None, **kwargs):
         super().__init__(*args, **kwargs)
         if club is not None:
             self.fields["requested_team"].queryset = Team.objects.filter(club=club).order_by("name")
-            self.fields["requested_position"].queryset = Position.objects.filter(club=club, staff_position=True).order_by("name")
             # Scoped to the one season this whole registration targets (once
             # known -- see registration.services.pricing.resolve_chosen_season)
             # so a batch can't be built mixing products from two different,
             # simultaneously-open registration windows.
-            variants = ProductVariant.objects.filter(product__in=available_registration_products(club, season=season), is_active=True).select_related("product").order_by("product__name", "name")
+            variants = ProductVariant.objects.filter(product__in=available_registration_products(club, season=season), is_active=True).select_related("product__category").order_by("product__name", "name")
             self.fields["product_variant"].queryset = variants
             self.fields["product_variant"].label_from_instance = lambda variant: f"{variant.product.name} — {variant.name} (€{variant.effective_price})"
         if people is not None:
@@ -83,8 +89,22 @@ class RegistrationEntryRowForm(forms.Form):
 
         if not cleaned.get("existing_member") and not cleaned.get("last_name"):
             self.add_error("last_name", _("Enter a last name."))
-        if not cleaned.get("product_variant"):
+
+        variant = cleaned.get("product_variant")
+        if not variant:
             self.add_error("product_variant", _("Choose what this person is registering for."))
+        else:
+            # A product tagged with one of the two system categories (Player/
+            # Volunteer, ProductCategory.registration_kind) is only offered to
+            # a matching entry_kind -- an ordinary/uncategorised product stays
+            # available to either.
+            registration_kind = getattr(variant.product.category, "registration_kind", "")
+            if registration_kind and registration_kind != cleaned.get("entry_kind"):
+                expected = dict(RegistrationDetails.EntryKind.choices).get(registration_kind, registration_kind)
+                self.add_error("product_variant", _("This option is for %(kind)s registrations.") % {"kind": expected})
+
+        if not cleaned.get("requested_team"):
+            self.add_error("requested_team", _("Choose a team."))
         return cleaned
 
 
@@ -134,7 +154,6 @@ def entries_from_formset(entry_formset):
                 date_of_birth=data.get("date_of_birth"),
                 entry_kind=data.get("entry_kind") or RegistrationDetails.EntryKind.PLAYER,
                 requested_team=data.get("requested_team"),
-                requested_position=data.get("requested_position"),
                 product_variant=data.get("product_variant"),
                 existing_member=data.get("existing_member"),
                 is_contact=bool(data.get("is_contact")),

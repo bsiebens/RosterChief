@@ -70,9 +70,25 @@ class ProductCategory(ClubScopedModel):
     """A club-defined grouping for the shop's product grid ("Merch", "Fees",
     "Season tickets", ...) -- purely organisational, no behaviour of its own.
     Deleting one un-categorises its products (SET_NULL on Product.category)
-    rather than blocking the delete or taking products down with it."""
+    rather than blocking the delete or taking products down with it.
+
+    Two rows per club are the exception: the system "Player"/"Volunteer"
+    categories (``registration_kind`` set), seeded for every club by
+    ``shop.signals.create_registration_categories`` and protected from
+    deletion by that same module's ``prevent_deleting_system_category`` --
+    see registration.forms.RegistrationEntryRowForm.clean, which uses
+    registration_kind to check a chosen product_variant actually matches
+    what the entry says it's registering as."""
+
+    class RegistrationKind(models.TextChoices):
+        #: Same string values as registration.models.RegistrationDetails.
+        #: EntryKind -- compared directly, not cross-imported (registration
+        #: already depends on shop.models, not the other way around).
+        PLAYER = "player", _("Player")
+        VOLUNTEER = "volunteer", _("Volunteer")
 
     name = models.CharField(_("name"), max_length=255)
+    registration_kind = models.CharField(_("registration kind"), max_length=20, choices=RegistrationKind.choices, blank=True, help_text=_("System categories only (Player/Volunteer) -- leave blank for an ordinary category."))
 
     class Meta:
         verbose_name = _("product category")

@@ -84,11 +84,7 @@
                         <div class="p-3.5">
                             <label class="mb-1 block text-xs text-muted" for="{{ row.requested_team.id_for_label }}">{{ row.requested_team.label }}</label>
                             {{ row.requested_team }}
-                        </div>
-                        <div class="h-px bg-rule"></div>
-                        <div class="p-3.5">
-                            <label class="mb-1 block text-xs text-muted" for="{{ row.requested_position.id_for_label }}">{{ row.requested_position.label }}</label>
-                            {{ row.requested_position }}
+                            {% for error in row.requested_team.errors %}<p class="mt-1 text-xs text-club">{{ error }}</p>{% endfor %}
                         </div>
                     </div>
                 </div>
@@ -128,11 +124,7 @@
                         <div class="p-3.5">
                             <label class="mb-1 block text-xs text-muted" for="{{ extra_row.requested_team.id_for_label }}">{{ extra_row.requested_team.label }}</label>
                             {{ extra_row.requested_team }}
-                        </div>
-                        <div class="h-px bg-rule"></div>
-                        <div class="p-3.5">
-                            <label class="mb-1 block text-xs text-muted" for="{{ extra_row.requested_position.id_for_label }}">{{ extra_row.requested_position.label }}</label>
-                            {{ extra_row.requested_position }}
+                            {% for error in extra_row.requested_team.errors %}<p class="mt-1 text-xs text-club">{{ error }}</p>{% endfor %}
                         </div>
                     </div>
                 </div>

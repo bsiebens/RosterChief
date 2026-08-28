@@ -8773,7 +8773,10 @@ class ProductCategoryManagementTests(ShopTestBase):
         ProductCategory.objects.create(club=self.club, name="Merchandise")
         ProductCategory.objects.create(club=self.club, name="Fees")
 
-        self.assertEqual(list(ProductCategory.objects.filter(club=self.club).values_list("name", flat=True)), ["Fees", "Merchandise"])
+        # registration_kind="" -- the two system categories every club gets
+        # (shop.signals.create_registration_categories) aren't what this is
+        # testing.
+        self.assertEqual(list(ProductCategory.objects.filter(club=self.club, registration_kind="").values_list("name", flat=True)), ["Fees", "Merchandise"])
 
     def test_deleting_a_category_uncategorises_its_products(self):
         category = ProductCategory.objects.create(club=self.club, name="Merch")
@@ -8785,6 +8788,24 @@ class ProductCategoryManagementTests(ShopTestBase):
 
         self.assertRedirects(response, reverse("management:product_list"))
         self.assertFalse(ProductCategory.objects.filter(pk=category.pk).exists())
+
+    def test_a_system_category_cannot_be_deleted_via_the_view(self):
+        category = ProductCategory.objects.get(club=self.club, registration_kind=ProductCategory.RegistrationKind.PLAYER)
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_post("product_category_delete", {}, category.pk)
+
+        self.assertRedirects(response, reverse("management:product_list"))
+        self.assertTrue(ProductCategory.objects.filter(pk=category.pk).exists())
+
+    def test_the_product_list_page_has_no_delete_action_for_a_system_category(self):
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_get("product_list")
+
+        self.assertContains(response, "Player")
+        self.assertContains(response, "System")
+        self.assertNotContains(response, "product_category_delete")
         self.product.refresh_from_db()
         self.assertIsNone(self.product.category)
 

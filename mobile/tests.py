@@ -2463,6 +2463,7 @@ class ReRegisterViewTests(TestCase):
 
         cls.product = Product.objects.create(club=cls.club, name="Player Registration", product_type=Product.ProductType.MEMBERSHIP, season=cls.season, price=Decimal("100.00"))
         cls.u10 = ProductVariant.objects.create(product=cls.product, name="U10", price=Decimal("80.00"))
+        cls.team = Team.objects.create(club=cls.club, name="U10 Boys", short_name="U10B")
 
     def _url(self):
         return reverse("mobile:reregister")
@@ -2538,8 +2539,10 @@ class ReRegisterViewTests(TestCase):
         data["entries-0-existing_member"] = str(self.member.pk)
         data["entries-0-is_contact"] = "on"
         data["entries-0-product_variant"] = str(self.u10.pk)
+        data["entries-0-requested_team"] = str(self.team.pk)
         data["entries-1-existing_member"] = str(self.child.pk)
         data["entries-1-product_variant"] = str(self.u10.pk)
+        data["entries-1-requested_team"] = str(self.team.pk)
         data["action"] = "submit"
 
         response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
@@ -2558,9 +2561,11 @@ class ReRegisterViewTests(TestCase):
         data["entries-0-existing_member"] = str(self.member.pk)
         data["entries-0-is_contact"] = "on"
         data["entries-0-product_variant"] = str(self.u10.pk)
+        data["entries-0-requested_team"] = str(self.team.pk)
         data["entries-2-first_name"] = "Baby"
         data["entries-2-last_name"] = "Bakker"
         data["entries-2-product_variant"] = str(self.u10.pk)
+        data["entries-2-requested_team"] = str(self.team.pk)
         data["action"] = "submit"
 
         response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")

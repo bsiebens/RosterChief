@@ -3733,10 +3733,18 @@ class ProductCategoryUpdateView(ShopManagerRequiredMixin, RedirectOnInvalidMixin
 class ProductCategoryDeleteView(ShopManagerRequiredMixin, View):
     """No PROTECT to work around -- Product.category is SET_NULL, so deleting
     a category just un-categorises whatever it held (unlike Product/Variant,
-    which only ever get deactivated)."""
+    which only ever get deactivated). The two system categories (Player/
+    Volunteer, registration_kind set) are the exception -- shop.signals'
+    own pre_delete receiver would block the .delete() call regardless, but
+    checking here first means the modal that's reachable at all only shows
+    for an ordinary category (see product_list.html), and a stray direct
+    POST gets a friendly notice instead of a raw exception."""
 
     def post(self, request, pk):
         category = get_object_or_404(ProductCategory.objects.filter(club=request.club), pk=pk)
+        if category.registration_kind:
+            notify(request, f"w|{_('Cannot delete')}|{_('“%(category)s” is a system category used by registration and cannot be deleted.') % {'category': category.name}}")
+            return redirect("management:product_list")
         name = category.name
         category.delete()
         notify(request, f"s|{_('Category deleted')}|{_('“%(category)s” deleted.') % {'category': name}}")

@@ -84,7 +84,20 @@
                     <button class="btn btn-outline btn-sm gap-2" type="button" id="add-row">{% lucide "plus" size=14 %} {% trans "Add another person" %}</button>
                 </div>
                 {{ entry_formset.management_form }}
-                <div id="bulk-add-rows" data-prefix="{{ entry_formset.prefix }}" class="flex flex-col gap-3">
+                <div
+                    id="bulk-add-rows"
+                    data-prefix="{{ entry_formset.prefix }}"
+                    {% if locked_member %}
+                        {# Signed in -- fill "This is me" from the real Member record, date of birth included when the club has it on file. #}
+                        data-known-first-name="{{ locked_member.first_name }}"
+                        data-known-last-name="{{ locked_member.last_name }}"
+                        {% if locked_member.date_of_birth %}data-known-date-of-birth="{{ locked_member.date_of_birth|date:'Y-m-d' }}"{% endif %}
+                    {% else %}
+                        {# Anonymous -- nothing known yet, so fall back to whatever's currently typed into the contact fields above (entries.js reads these live, not a snapshot at page load). #}
+                        data-contact-first-name-id="{{ form.contact_first_name.id_for_label }}"
+                        data-contact-last-name-id="{{ form.contact_last_name.id_for_label }}"
+                    {% endif %}
+                    class="flex flex-col gap-3"
                     {% for entry_form in entry_formset %}
                         {% include "registration/_entry_row.html" with form=entry_form %}
                     {% endfor %}
@@ -138,28 +151,40 @@
     <script src="{% static 'js/searchable-select.js' %}"></script>
     <script src="{% static 'js/bulk-add-rows.js' %}"></script>
     <script>
-        // "Role" only ever means anything for a volunteer entry -- hidden
-        // for a player row rather than shown-but-irrelevant, same "hide,
-        // don't disable" idiom as management/product_form.html's own
-        // product-type-driven toggles. A change-event listener on the
-        // container (not per-row) so a row cloned later by bulk-add-rows.js
-        // is covered without needing its own wiring -- its entry_kind
-        // starts on "player" by default, matching the already-hidden state
-        // a fresh row renders with.
+        // Checking "This is me" on a row fills its name/date-of-birth from
+        // whoever is actually filling in the form -- the real Member record
+        // when signed in (data-known-* on #bulk-add-rows), otherwise
+        // whatever's currently typed into the contact fields above (read
+        // live, not a page-load snapshot, since a name typed after the row
+        // was added must still count). Date of birth only fills in when
+        // it's actually known -- an anonymous visitor's contact section has
+        // no such field, so it's left for the registrant to type themselves.
+        // A change-event listener on the container (not per-row) so a row
+        // cloned later by bulk-add-rows.js is covered without needing its
+        // own wiring.
         (() => {
             const container = document.getElementById("bulk-add-rows");
             if (!container) return;
 
-            const sync = (row) => {
-                const kindSelect = row.querySelector('select[name$="-entry_kind"]');
-                const positionField = row.querySelector('[data-role="position-field"]');
-                if (!kindSelect || !positionField) return;
-                positionField.classList.toggle("hidden", kindSelect.value !== "volunteer");
+            const knownFirstName = container.dataset.knownFirstName;
+            const knownLastName = container.dataset.knownLastName;
+            const knownDateOfBirth = container.dataset.knownDateOfBirth || "";
+            const contactFirstNameField = container.dataset.contactFirstNameId ? document.getElementById(container.dataset.contactFirstNameId) : null;
+            const contactLastNameField = container.dataset.contactLastNameId ? document.getElementById(container.dataset.contactLastNameId) : null;
+
+            const populate = (row) => {
+                const firstName = knownFirstName || contactFirstNameField?.value || "";
+                const lastName = knownLastName || contactLastNameField?.value || "";
+                const firstNameField = row.querySelector('input[name$="-first_name"]');
+                const lastNameField = row.querySelector('input[name$="-last_name"]');
+                const dateOfBirthField = row.querySelector('input[name$="-date_of_birth"]');
+                if (firstNameField && firstName) firstNameField.value = firstName;
+                if (lastNameField && lastName) lastNameField.value = lastName;
+                if (dateOfBirthField && knownDateOfBirth) dateOfBirthField.value = knownDateOfBirth;
             };
 
-            container.querySelectorAll(".bulk-add-row").forEach(sync);
             container.addEventListener("change", (event) => {
-                if (event.target.matches('select[name$="-entry_kind"]')) sync(event.target.closest(".bulk-add-row"));
+                if (event.target.matches('input[name$="-is_contact"]') && event.target.checked) populate(event.target.closest(".bulk-add-row"));
             });
         })();
     </script>

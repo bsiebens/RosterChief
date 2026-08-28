@@ -5,7 +5,7 @@ from unittest.mock import patch
 from django.contrib.admin.sites import AdminSite
 from django.core import mail
 from django.core.exceptions import ValidationError
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 from django.db.models import ProtectedError
 from django.test import RequestFactory, TestCase, override_settings
 from django.utils import timezone
@@ -41,6 +41,7 @@ from .services.payments import PaymentError, amount_due, amount_paid, record_pay
 from .services.pricing import cart_totals, order_total
 from .services.production import mark_line_received, mark_lines_in_production, pending_production_lines, sync_production_status
 from .services.stats import order_kpis, quantity_sold_by_product, quantity_sold_by_variant
+from .signals import ProtectedCategoryError
 
 
 class ProductSlugTests(TestCase):
@@ -114,6 +115,31 @@ class ProductCategoryModelTests(TestCase):
         product.refresh_from_db()
         self.assertIsNone(product.category)
         self.assertTrue(Product.objects.filter(pk=product.pk).exists())
+
+    def test_a_new_club_is_seeded_with_the_player_and_volunteer_categories(self):
+        club = Club.objects.create(name="Rival FC", slug="rival-fc-2")
+
+        self.assertEqual(ProductCategory.objects.get(club=club, registration_kind=ProductCategory.RegistrationKind.PLAYER).name, "Player")
+        self.assertEqual(ProductCategory.objects.get(club=club, registration_kind=ProductCategory.RegistrationKind.VOLUNTEER).name, "Volunteer")
+
+    def test_a_system_category_cannot_be_deleted_directly(self):
+        category = ProductCategory.objects.get(club=self.club, registration_kind=ProductCategory.RegistrationKind.PLAYER)
+
+        # The signal's raise happens inside .delete()'s own atomic block --
+        # isolate it in its own so the test's outer transaction survives to
+        # make the assertion below.
+        with self.assertRaises(ProtectedCategoryError), transaction.atomic():
+            category.delete()
+
+        self.assertTrue(ProductCategory.objects.filter(pk=category.pk).exists())
+
+    def test_a_system_category_is_still_removed_when_its_whole_club_is_deleted(self):
+        club = Club.objects.create(name="Rival FC", slug="rival-fc-3")
+        club_id = club.pk
+
+        club.delete()  # must not raise -- a full-tenant wipe isn't "deleting the category"
+
+        self.assertFalse(ProductCategory.objects.filter(club_id=club_id).exists())
 
 
 class ProductVariantModelTests(TestCase):

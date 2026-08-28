@@ -8,7 +8,7 @@ from authentication.models import User
 from club.models import Club, ClubMembership, Season
 from club.services.fees import effective_fee_amount, record_payment, remaining_balance
 from members.models import Family, FamilyMembership, Member
-from shop.models import Product, ProductRegistrantDiscountTier, ProductVariant
+from shop.models import Product, ProductCategory, ProductRegistrantDiscountTier, ProductVariant
 from teams.models import Position, Team
 
 from .models import RegistrationBatch, RegistrationDetails
@@ -366,6 +366,7 @@ class RegistrationViewTests(TestCase):
             f"{prefix}-{index}-date_of_birth": "2016-05-01",
             f"{prefix}-{index}-entry_kind": RegistrationDetails.EntryKind.PLAYER,
             f"{prefix}-{index}-product_variant": str(self.u10.pk),
+            f"{prefix}-{index}-requested_team": str(self.team.pk),
         }
         data.update({f"{prefix}-{index}-{key}": value for key, value in overrides.items()})
         return data
@@ -380,6 +381,13 @@ class RegistrationViewTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Register")
+
+    def test_the_form_no_longer_asks_for_a_role(self):
+        # Role is implied by the chosen product now, not asked for directly.
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertNotIn("requested_position", response.context["entry_formset"].forms[0].fields)
+        self.assertNotContains(response, "entries-0-requested_position")
 
     def test_no_registration_products_shows_an_empty_state(self):
         self.product.is_active = False
@@ -465,6 +473,29 @@ class RegistrationViewTests(TestCase):
         response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
 
         self.assertEqual(response.status_code, 200)
+        self.assertFalse(RegistrationBatch.objects.exists())
+
+    def test_a_missing_team_is_rejected(self):
+        data = self.contact_data() | self.formset_management() | self.entry_data(requested_team="")
+        data["action"] = "preview"
+
+        response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Choose a team.")
+        self.assertFalse(RegistrationBatch.objects.exists())
+
+    def test_a_product_tagged_for_volunteers_is_rejected_for_a_player_entry(self):
+        volunteer_category = ProductCategory.objects.get(club=self.club, registration_kind=ProductCategory.RegistrationKind.VOLUNTEER)
+        self.product.category = volunteer_category
+        self.product.save(update_fields=["category"])
+        data = self.contact_data() | self.formset_management() | self.entry_data(entry_kind=RegistrationDetails.EntryKind.PLAYER)
+        data["action"] = "preview"
+
+        response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "This option is for Volunteer registrations.")
         self.assertFalse(RegistrationBatch.objects.exists())
 
     def test_an_empty_formset_is_rejected(self):
