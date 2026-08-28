@@ -10,7 +10,7 @@ queue, no separate review gate of this app's own.
 
 from decimal import Decimal
 
-from django.http import Http404
+from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.translation import gettext_lazy as _
 from django.views import View
@@ -25,6 +25,7 @@ from members.views import ClubScopedPublicMixin
 from .forms import RegistrationContactForm, RegistrationEntryFormSet, RegistrationStatusDocumentForm, entries_from_formset
 from .models import RegistrationBatch, RegistrationDetails
 from .services import PricingError, RegistrationError, price_entries, resolve_chosen_season, resolve_registration_season, submit_registration, variant_registration_kinds
+from .services.invoicing import RegistrationInvoicePDFError, batch_invoice_pdf
 from .services.notifications import send_registration_confirmation_email
 
 
@@ -196,3 +197,22 @@ class RegistrationStatusView(ClubScopedPublicMixin, View):
             notify(request, f"e|{_('Upload failed')}|{_('Choose a file to upload.')}")
 
         return redirect("registration:status", token=batch.status_token)
+
+
+class RegistrationInvoiceView(ClubScopedPublicMixin, View):
+    """One PDF covering every entry in the batch (registration.services.
+    invoicing.batch_invoice_pdf), not one per membership -- reached from the
+    status page the same token-gated way as everything else there."""
+
+    def get(self, request, *args, **kwargs):
+        batch = get_object_or_404(RegistrationBatch, club=request.club, status_token=kwargs["token"])
+
+        try:
+            pdf = batch_invoice_pdf(batch)
+        except RegistrationInvoicePDFError as error:
+            notify(request, f"e|{_('PDF unavailable')}|{error}")
+            return redirect("registration:status", token=batch.status_token)
+
+        response = HttpResponse(pdf, content_type="application/pdf")
+        response["Content-Disposition"] = f'attachment; filename="{batch.club.slug}-registration-{batch.pk}.pdf"'
+        return response

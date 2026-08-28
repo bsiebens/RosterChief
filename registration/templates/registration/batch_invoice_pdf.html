@@ -1,0 +1,109 @@
+{% load i18n %}
+
+{% comment %}
+    Rendered by WeasyPrint, not a browser -- same convention as club/templates/
+    club/dues_invoice_pdf.html (standalone document, own print stylesheet, no
+    app.css), extended to a per-entry table since one of these covers every
+    person in the batch, not a single membership. See registration.services.
+    invoicing.batch_invoice_pdf.
+{% endcomment %}
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <title>{% blocktrans with club=club.name %}{{ club }} registration{% endblocktrans %}</title>
+        <style>
+            @page {
+                size: A4;
+                margin: 20mm;
+                @bottom-center {
+                    content: "{{ club.name }} — {% trans "registration invoice" %} — " counter(page) " / " counter(pages);
+                    font-size: 8pt;
+                    color: #666;
+                }
+            }
+            body { font-family: sans-serif; font-size: 10pt; color: #111; }
+            h1 { font-size: 20pt; margin: 0 0 2mm; }
+            .muted { color: #666; }
+            .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12mm; }
+            .accent { color: {{ club.primary_color|default:"#4f46e5" }}; }
+            .parties { display: flex; justify-content: space-between; margin-bottom: 10mm; }
+            .parties h2 { font-size: 9pt; text-transform: uppercase; letter-spacing: 0.5pt; color: #666; margin: 0 0 2mm; }
+            table { width: 100%; border-collapse: collapse; margin-bottom: 6mm; }
+            th { text-align: left; font-size: 9pt; text-transform: uppercase; letter-spacing: 0.5pt; color: #666; border-bottom: 1px solid #ccc; padding: 2mm 0; }
+            td { padding: 2mm 0; border-bottom: 1px solid #eee; }
+            .right { text-align: right; }
+            .discount td { color: #b91c1c; }
+            .total td { font-weight: bold; border-bottom: 2px solid #111; border-top: 1px solid #111; }
+            .balance { font-size: 12pt; font-weight: bold; }
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            <div>
+                <h1>{{ club.official_name }}</h1>
+                {% if document_address %}
+                    <div class="muted">{{ document_address.address }}</div>
+                    <div class="muted">{{ document_address.zip_code }} {{ document_address.city }}</div>
+                {% endif %}
+                {% if club.contact_email %}<div class="muted">{{ club.contact_email }}</div>{% endif %}
+            </div>
+            <div class="right">
+                <h1 class="accent">{% trans "Invoice" %}</h1>
+                <div class="muted">{% blocktrans with date=batch.created|date:"j F Y" %}Registered {{ date }}{% endblocktrans %}</div>
+            </div>
+        </div>
+
+        <div class="parties">
+            <div>
+                <h2>{% trans "Billed to" %}</h2>
+                <div><strong>{{ batch.contact_first_name }} {{ batch.contact_last_name }}</strong></div>
+                <div class="muted">{{ batch.contact_email }}</div>
+            </div>
+            <div class="right">
+                <h2>{% trans "Season" %}</h2>
+                <div>{{ batch.season }}</div>
+            </div>
+        </div>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>{% trans "Person" %}</th>
+                    <th>{% trans "Registered for" %}</th>
+                    <th class="right">{% trans "Amount" %}</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for entry in entries %}
+                    <tr>
+                        <td>
+                            <strong>{{ entry.membership.member }}</strong>
+                            {% if entry.requested_team %}<div class="muted">{{ entry.requested_team }}</div>{% endif %}
+                        </td>
+                        <td>{% if entry.product_variant %}{{ entry.product_variant.product.name }} — {{ entry.product_variant.name }}{% else %}—{% endif %}</td>
+                        <td class="right">€{{ entry.price }}</td>
+                    </tr>
+                    {% if entry.discount_amount > 0 %}
+                        <tr class="discount">
+                            <td colspan="2">{% trans "Multi-registrant discount" %}</td>
+                            <td class="right">−€{{ entry.discount_amount }}</td>
+                        </tr>
+                    {% endif %}
+                {% endfor %}
+                {% if batch.discount_amount > 0 %}
+                    <tr>
+                        <td colspan="2">{% trans "Subtotal" %}</td>
+                        <td class="right">€{{ batch.subtotal }}</td>
+                    </tr>
+                {% endif %}
+                <tr class="total">
+                    <td colspan="2">{% trans "Total" %}</td>
+                    <td class="right balance">€{{ batch.total }}</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <p class="muted">{% trans "This is what was owed once the club confirmed this registration -- payment happens separately from this document." %}</p>
+    </body>
+</html>

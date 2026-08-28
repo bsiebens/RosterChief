@@ -1,5 +1,6 @@
 import datetime
 from decimal import Decimal
+from unittest import mock
 
 from django.core import mail
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -15,6 +16,7 @@ from teams.models import Position, Team
 
 from .models import RegistrationBatch, RegistrationDetails
 from .services import EntryInput, PricingError, RegistrationError, available_registration_products, price_entries, resolve_registration_season, submit_registration
+from .services.invoicing import RegistrationInvoicePDFError
 
 
 def make_club(**kwargs):
@@ -710,3 +712,62 @@ class RegistrationStatusViewTests(TestCase):
 
         self.assertEqual(response.status_code, 404)
         self.assertFalse(MemberRequirementStatus.objects.filter(membership=other_membership).exists())
+
+    def test_the_download_invoice_link_points_at_the_batch_not_a_membership(self):
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, reverse("registration:invoice", kwargs={"token": self.batch.status_token}))
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class RegistrationInvoiceViewTests(TestCase):
+    """registration:invoice -- one PDF covering every person in the batch,
+    not one per membership (RegistrationInvoiceView)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        cls.season = make_season(cls.club)
+        cls.child = Member.objects.create(first_name="Timmy", last_name="Tester", date_of_birth=datetime.date(2016, 5, 1))
+        cls.sibling = Member.objects.create(first_name="Jamie", last_name="Tester", date_of_birth=datetime.date(2018, 3, 1))
+        cls.membership = ClubMembership.objects.create(club=cls.club, member=cls.child, season=cls.season, status=ClubMembership.StatusChoices.PENDING, fee_amount=Decimal("80.00"))
+        cls.sibling_membership = ClubMembership.objects.create(club=cls.club, member=cls.sibling, season=cls.season, status=ClubMembership.StatusChoices.PENDING, fee_amount=Decimal("80.00"))
+        cls.batch = RegistrationBatch.objects.create(club=cls.club, season=cls.season, contact_first_name="Pat", contact_last_name="Parent", contact_email="pat@example.com", subtotal=Decimal("160.00"), total=Decimal("160.00"))
+        RegistrationDetails.objects.create(membership=cls.membership, batch=cls.batch, entry_kind=RegistrationDetails.EntryKind.PLAYER, price=Decimal("80.00"))
+        RegistrationDetails.objects.create(membership=cls.sibling_membership, batch=cls.batch, entry_kind=RegistrationDetails.EntryKind.PLAYER, price=Decimal("80.00"))
+
+    def _url(self, token=None):
+        return reverse("registration:invoice", kwargs={"token": token or self.batch.status_token})
+
+    def test_an_unknown_token_404s(self):
+        response = self.client.get(self._url(token="not-a-real-token"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_downloads_as_a_single_pdf_covering_every_entry(self):
+        with mock.patch("registration.views.batch_invoice_pdf", return_value=b"%PDF-fake") as renderer:
+            response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response["Content-Type"], "application/pdf")
+        self.assertEqual(response.content, b"%PDF-fake")
+        renderer.assert_called_once_with(self.batch)
+
+    def test_the_rendered_pdf_lists_every_entry_and_the_batch_total(self):
+        # No mock here -- exercises the actual template against real data
+        # (batch_invoice_pdf's own render_to_string call), stopping short of
+        # the WeasyPrint step by patching just that.
+        with mock.patch("registration.services.invoicing.render_pdf", side_effect=lambda html: html.encode()) as renderer:
+            response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        renderer.assert_called_once()
+        html = response.content.decode()
+        self.assertIn("Timmy Tester", html)
+        self.assertIn("Jamie Tester", html)
+        self.assertIn("160.00", html)
+
+    def test_a_missing_pdf_library_is_reported_rather_than_a_500(self):
+        with mock.patch("registration.views.batch_invoice_pdf", side_effect=RegistrationInvoicePDFError("PDF rendering needs the native pango/cairo libraries.")):
+            response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+        response = self.client.get(response.url, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, "pango")
