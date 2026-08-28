@@ -414,6 +414,19 @@ class RegistrationViewTests(TestCase):
         self.assertNotIn("requested_position", response.context["entry_formset"].forms[0].fields)
         self.assertNotContains(response, "entries-0-requested_position")
 
+    def test_two_entries_both_claiming_to_be_the_submitter_is_rejected(self):
+        # The public page's is_contact genuinely means "this is me" -- at
+        # most one row can claim it. Unlike mobile's own "Include this
+        # person" reuse of the same field (see ReRegisterViewTests'
+        # equivalent, which must NOT hit this).
+        data = self.contact_data() | self.formset_management(2) | self.entry_data(0, is_contact="on") | self.entry_data(1, first_name="Jamie", is_contact="on")
+        data["action"] = "preview"
+
+        response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Only one entry can be")
+
     def test_no_registration_products_shows_an_empty_state(self):
         self.product.is_active = False
         self.product.save()

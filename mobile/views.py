@@ -1076,7 +1076,11 @@ class ReRegisterView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         ]
 
     def get_formset(self, season, data=None):
-        kwargs = {"club": self.request.club, "people": self.managed_people, "season": season, "prefix": "entries"}
+        # enforce_single_contact=False -- here, is_contact is "Include this
+        # person" per managed person (reregister.html), not "this is me, the
+        # submitter" the way it is on the public page. Registering yourself
+        # and a child in the same batch is the ordinary case, not a conflict.
+        kwargs = {"club": self.request.club, "people": self.managed_people, "season": season, "prefix": "entries", "enforce_single_contact": False}
         if data is None:
             kwargs["initial"] = self.get_initial_entries()
         formset = RegistrationEntryFormSet(data, **kwargs)

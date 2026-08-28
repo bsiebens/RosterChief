@@ -2552,6 +2552,30 @@ class ReRegisterViewTests(TestCase):
         self.assertContains(response, "80.00")
         self.assertFalse(RegistrationBatch.objects.exists())
 
+    def test_including_both_self_and_a_child_does_not_trip_the_single_contact_rule(self):
+        # The public page's is_contact means "this is me" (at most one row);
+        # mobile reuses the same field for "Include this person" per managed
+        # person, where checking it for both yourself and a child -- the
+        # ordinary way to register both at once -- is completely normal.
+        # ReRegisterView.get_formset must pass enforce_single_contact=False
+        # or this 400s with "Only one entry can be 'this is me'".
+        self.client.force_login(self.user)
+        data = self.formset_management(3)
+        data["entries-0-existing_member"] = str(self.member.pk)
+        data["entries-0-is_contact"] = "on"
+        data["entries-0-product_variant"] = str(self.u10.pk)
+        data["entries-0-requested_team"] = str(self.team.pk)
+        data["entries-1-existing_member"] = str(self.child.pk)
+        data["entries-1-is_contact"] = "on"
+        data["entries-1-product_variant"] = str(self.u10.pk)
+        data["entries-1-requested_team"] = str(self.team.pk)
+        data["action"] = "submit"
+
+        response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertRedirects(response, reverse("mobile:me"))
+        self.assertEqual(RegistrationBatch.objects.count(), 1)
+
     def test_submitting_reuses_the_existing_members_no_duplicates(self):
         self.client.force_login(self.user)
         data = self.formset_management(3)

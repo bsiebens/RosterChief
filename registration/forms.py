@@ -116,10 +116,17 @@ class RegistrationEntryRowForm(forms.Form):
 
 
 class BaseRegistrationEntryFormSet(forms.BaseFormSet):
-    def __init__(self, *args, club=None, people=None, season=None, **kwargs):
+    def __init__(self, *args, club=None, people=None, season=None, enforce_single_contact=True, **kwargs):
         self.club = club
         self.people = people
         self.season = season
+        # The public page's is_contact genuinely means "this is me, the person
+        # filling in the form" -- at most one row can claim that. Mobile
+        # reuses the same field for its "Include this person" toggle per
+        # managed person (mobile.views.ReRegisterView passes False here),
+        # where checking it for both yourself and a child -- the ordinary way
+        # to register both at once -- is completely normal, not a conflict.
+        self.enforce_single_contact = enforce_single_contact
         super().__init__(*args, **kwargs)
 
     def get_form_kwargs(self, index):
@@ -138,7 +145,7 @@ class BaseRegistrationEntryFormSet(forms.BaseFormSet):
             return
         if not self.non_blank_forms():
             raise ValidationError(_("Register at least one person."))
-        if sum(1 for form in self.non_blank_forms() if form.cleaned_data.get("is_contact")) > 1:
+        if self.enforce_single_contact and sum(1 for form in self.non_blank_forms() if form.cleaned_data.get("is_contact")) > 1:
             raise ValidationError(_("Only one entry can be “this is me”."))
 
 
