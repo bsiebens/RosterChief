@@ -1897,6 +1897,25 @@ class NewsDetailScreenTests(TestCase):
         self.assertContains(response, "Season Kickoff")
         self.assertContains(response, "We start training next week.")
 
+    def test_no_share_button_on_internal_only_news(self):
+        # Internal-only news has no public page for a shared link to land on --
+        # whoever opens it just hits the login wall.
+        news_item = News.objects.create(club=self.club, title="Internal only", body="Body.", status=News.Status.PUBLISHED, published_at=timezone.now(), visibility=News.Visibility.INTERNAL)
+        self.client.force_login(self.user)
+
+        response = self._get(news_item)
+
+        self.assertNotContains(response, "navigator.share")
+
+    def test_share_button_shows_for_external_and_both_visibility(self):
+        self.client.force_login(self.user)
+        for visibility in (News.Visibility.EXTERNAL, News.Visibility.BOTH):
+            news_item = News.objects.create(club=self.club, title=f"{visibility} news", body="Body.", status=News.Status.PUBLISHED, published_at=timezone.now(), visibility=visibility)
+
+            response = self._get(news_item)
+
+            self.assertContains(response, "navigator.share")
+
     def test_the_hero_photo_uses_its_stored_focal_point(self):
         news_item = News.objects.create(club=self.club, title="With a photo", body="Body.", status=News.Status.PUBLISHED, published_at=timezone.now())
         NewsPhoto.objects.create(news_item=news_item, image=make_image_file(), is_main=True, focal_x=15, focal_y=90)

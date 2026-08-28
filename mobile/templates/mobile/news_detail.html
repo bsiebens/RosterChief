@@ -51,7 +51,10 @@
             {% else %}
                 <span class="flex-1"></span>
             {% endif %}
-            <button type="button" class="btn btn-secondary h-[38px] px-3.5 text-sm" onclick="navigator.share ? navigator.share({title: '{{ article_title|escapejs }}', url: window.location.href}).catch(() => {}) : null">{% trans "Share" %}</button>
+            {# Internal-only news has no public page for the shared link to land on -- whoever opens it just hits the login wall, so there's nothing useful to share here. #}
+            {% if news_item.visibility != "internal" %}
+                <button type="button" class="btn btn-secondary h-[38px] px-3.5 text-sm" onclick="navigator.share ? navigator.share({title: '{{ article_title|escapejs }}', url: window.location.href}).catch(() => {}) : null">{% trans "Share" %}</button>
+            {% endif %}
         </div>
     </div>
 {% endblock content %}
