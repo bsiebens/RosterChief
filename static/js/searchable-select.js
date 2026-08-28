@@ -50,13 +50,34 @@
         // inline style can't lose that fight to a stale/missing class.
         list.style.backgroundColor = "#fff";
 
-
+        // max-h-60 (240px) is a fine cap, but not a floor: pinned below the
+        // input regardless of how little room was actually left there, a
+        // long list ran straight off the bottom of the viewport with no way
+        // to reach the rest -- overflow-y-auto only helps once the box
+        // itself is fully on screen. Below flips the list above the input
+        // when there's genuinely more room up there, and either way caps
+        // its height to whatever space actually exists on that side.
+        const MAX_LIST_HEIGHT = 240;
+        const MIN_LIST_HEIGHT = 100;
+        const MARGIN = 4;
 
         const positionList = () => {
             const rect = input.getBoundingClientRect();
+            const spaceBelow = window.innerHeight - rect.bottom - MARGIN;
+            const spaceAbove = rect.top - MARGIN;
+
             list.style.left = `${rect.left}px`;
-            list.style.top = `${rect.bottom + 4}px`;
             list.style.width = `${rect.width}px`;
+
+            if (spaceBelow >= MIN_LIST_HEIGHT || spaceBelow >= spaceAbove) {
+                list.style.top = `${rect.bottom + MARGIN}px`;
+                list.style.bottom = "";
+                list.style.maxHeight = `${Math.max(MIN_LIST_HEIGHT, Math.min(MAX_LIST_HEIGHT, spaceBelow))}px`;
+            } else {
+                list.style.top = "";
+                list.style.bottom = `${window.innerHeight - rect.top + MARGIN}px`;
+                list.style.maxHeight = `${Math.max(MIN_LIST_HEIGHT, Math.min(MAX_LIST_HEIGHT, spaceAbove))}px`;
+            }
         };
 
         // Capture phase: a "scroll" event on an inner scroll container (the
