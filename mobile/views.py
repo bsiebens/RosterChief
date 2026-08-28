@@ -5,12 +5,12 @@ routes here yet.
 """
 
 import json
+from collections import defaultdict
 from decimal import Decimal
 
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.paginator import Paginator
 from django.db.models import Count, F, Q
-from django.forms import formset_factory
 from django.http import Http404, HttpResponse, HttpResponseBadRequest, HttpResponseRedirect, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.template.loader import render_to_string
@@ -39,7 +39,7 @@ from members.views import ClubScopedPublicMixin
 from news.models import News
 from news.services import render_body_html
 from notifications.models import Notification
-from registration.forms import BaseRegistrationEntryFormSet, RegistrationEntryFormSet, RegistrationEntryRowForm, entries_from_formset
+from registration.forms import RegistrationEntryFormSet, entries_from_formset
 from registration.services import PricingError, RegistrationError, available_registration_products, price_entries, resolve_chosen_season, resolve_registration_season, submit_registration, variant_registration_kinds
 from shop.models import Cart, CartItem, Order, Product, ProductCategory, Voucher
 from shop.services.checkout import CheckoutError, find_discount, place_order
@@ -1035,48 +1035,34 @@ class EditProfileView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         )
 
 
-#: Same form/formset as the general registration flow, just with no trailing
-#: blank "someone new" row -- ReRegisterView.get_formset uses this instead
-#: of registration.forms.RegistrationEntryFormSet when narrowed to one
-#: person (?as=<id>).
-_NarrowedRegistrationEntryFormSet = formset_factory(RegistrationEntryRowForm, formset=BaseRegistrationEntryFormSet, extra=0)
-
-
 class ReRegisterView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
     """Re-register self/managed_people for a new season -- reuses the exact
     same registration.services.submission.submit_registration the public
     registration page (registration.views.RegistrationView) uses, so the
     two can never disagree about what happens next (a new PENDING
     ClubMembership, straight into the existing Sign-up queue, no separate
-    review gate of its own). One formset row per person in scope (existing_
-    member pre-filled, so re-registering never creates a duplicate Member),
-    plus one blank row for someone not yet known to the club (e.g. a
-    newborn sibling). Same two-step "calculate price, then confirm" flow as
-    the public page, no client-side pricing logic.
+    review gate of its own).
 
-    ``?as=<member-id>`` (PersonScopeMixin) narrows the row(s) shown to just
-    that one family member -- "Add a registration" next to a person on Me
-    (mobile/templates/mobile/me.html), for a second team or an additional
-    role (player *and* referee) rather than the general "register everyone"
-    flow. submit_registration itself already handles a member who already
-    has a ClubMembership this season by adding to it rather than erroring
-    -- see that function's own docstring. The "someone new" extra row is
-    dropped in this narrowed mode: it exists to register a person not yet
-    on file, which isn't what a per-person "add a registration" link is
-    for."""
+    One row per managed person by default (existing_member pre-filled, so
+    re-registering never creates a duplicate Member), plus one blank row for
+    someone not yet known to the club (e.g. a newborn sibling). Each
+    person's card also has its own "Add another registration" button
+    (mobile/templates/mobile/reregister.html's own extra_body script) that
+    clones a second (third, ...) entry row scoped to that same person --
+    a second team, or an additional role (player *and* referee), all on
+    this one screen rather than a separate entry point. submit_registration
+    already handles a member who already has a ClubMembership this season
+    by adding to it rather than erroring -- see that function's own
+    docstring. render_page groups the formset's forms back by their
+    existing_member value (not position) precisely because a person can now
+    carry more than one.
+
+    Same two-step "calculate price, then confirm" flow as the public page,
+    no client-side pricing logic."""
 
     template_name = "mobile/reregister.html"
     screen_title = _("Register")
     active_tab = "me"
-
-    @property
-    def narrowed_to_one_person(self):
-        requested_id = self.request.GET.get("as")
-        return bool(requested_id) and requested_id != "all" and self.scope_person is not None
-
-    @property
-    def people(self):
-        return self.people_in_scope
 
     def get_season(self, request, data=None):
         source = data if data is not None else request.GET
@@ -1085,40 +1071,34 @@ class ReRegisterView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
     def get_initial_entries(self):
         return [
             {"existing_member": person.pk, "first_name": person.first_name, "last_name": person.last_name, "date_of_birth": person.date_of_birth, "is_contact": self.me is not None and person.pk == self.me.pk}
-            for person in self.people
+            for person in self.managed_people
         ]
 
     def get_formset(self, season, data=None):
-        # No "someone new" extra row when narrowed to one person via ?as= --
-        # see this class's own docstring for why.
-        formset_class = _NarrowedRegistrationEntryFormSet if self.narrowed_to_one_person else RegistrationEntryFormSet
-        kwargs = {"club": self.request.club, "people": self.people, "season": season, "prefix": "entries"}
+        kwargs = {"club": self.request.club, "people": self.managed_people, "season": season, "prefix": "entries"}
         if data is None:
             kwargs["initial"] = self.get_initial_entries()
-        formset = formset_class(data, **kwargs)
+        formset = RegistrationEntryFormSet(data, **kwargs)
         for row in formset.forms:
             style_dynamic_form(row)
         return formset
 
     def render_season_picker(self, available_seasons):
-        return self.render_to_response(
-            self.get_context_data(
-                registration_open=bool(available_seasons),
-                needs_season_choice=True,
-                available_seasons=available_seasons,
-                narrowed_to_person=self.scope_person if self.narrowed_to_one_person else None,
-            )
-        )
+        return self.render_to_response(self.get_context_data(registration_open=bool(available_seasons), needs_season_choice=True, available_seasons=available_seasons))
 
     def render_page(self, season, entry_formset, priced_entries=None, season_error=None):
-        # The formset's first len(self.people) rows are pre-seeded with an
-        # existing_member each (get_initial_entries) -- shown as a fixed,
-        # read-only-identity row per person; the one trailing "extra" row
-        # (RegistrationEntryFormSet's own extra=1), when present, is a
-        # free-text "someone new" row, e.g. a newborn sibling not yet known
-        # to the club.
-        person_rows = list(zip(self.people, entry_formset.forms, strict=False))
-        extra_row = entry_formset.forms[len(self.people)] if len(entry_formset.forms) > len(self.people) else None
+        # Grouped by existing_member (not position): a person can now carry
+        # more than one row (Add another registration), so the old 1:1
+        # zip(self.managed_people, entry_formset.forms) no longer holds. A
+        # form with no existing_member at all is the trailing "someone new"
+        # row(s) -- normally exactly one (RegistrationEntryFormSet's own
+        # extra=1), shown separately from every known person's own card.
+        rows_by_member = defaultdict(list)
+        extra_rows = []
+        for form in entry_formset.forms:
+            member_value = form["existing_member"].value()
+            (rows_by_member[str(member_value)] if member_value else extra_rows).append(form)
+        person_rows = [(person, rows_by_member.get(str(person.pk), [])) for person in self.managed_people]
         return self.render_to_response(
             self.get_context_data(
                 # registration_season, not season -- PersonScopeMixin.get_context_data
@@ -1128,13 +1108,12 @@ class ReRegisterView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
                 # would collide with.
                 entry_formset=entry_formset,
                 person_rows=person_rows,
-                extra_row=extra_row,
+                extra_rows=extra_rows,
                 priced_entries=priced_entries,
                 season_error=season_error,
                 registration_open=True,
                 registration_season=season,
                 variant_registration_kinds=variant_registration_kinds(self.request.club, season),
-                narrowed_to_person=self.scope_person if self.narrowed_to_one_person else None,
             )
         )
 

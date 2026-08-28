@@ -46,29 +46,22 @@
             <div class="m-card overflow-hidden">
                 {% for row in people_rows %}
                     {% if not forloop.first %}<div class="h-px bg-rule"></div>{% endif %}
-                    <div class="flex items-center gap-3 p-3.5">
-                        <a class="flex min-w-0 flex-1 items-center gap-3" href="{% url "mobile:edit_profile" row.person.pk %}">
-                            {% include "mobile/_avatar.html" with person=row.person %}
-                            <div class="min-w-0 flex-1">
-                                <div class="text-[15px] font-semibold text-ink">
-                                    {{ row.person.get_full_name }}
-                                    {% if row.person == me %}<span class="text-xs text-muted">{% trans "(me)" %}</span>{% endif %}
-                                </div>
-                                {% if row.membership %}
-                                    <div class="text-xs text-muted">
-                                        {{ row.membership.team.short_name }}
-                                        {% if row.membership.jersey_number %}&middot; #{{ row.membership.jersey_number }}{% endif %}
-                                    </div>
-                                {% endif %}
+                    <a class="flex items-center gap-3 p-3.5" href="{% url "mobile:edit_profile" row.person.pk %}">
+                        {% include "mobile/_avatar.html" with person=row.person %}
+                        <div class="min-w-0 flex-1">
+                            <div class="text-[15px] font-semibold text-ink">
+                                {{ row.person.get_full_name }}
+                                {% if row.person == me %}<span class="text-xs text-muted">{% trans "(me)" %}</span>{% endif %}
                             </div>
-                        </a>
-                        {% if registration_open %}
-                            {# A second team, or an additional role (player *and* referee) -- submit_registration adds this onto their existing ClubMembership rather than erroring or replacing it. #}
-                            <a class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-line" href="{% url "mobile:reregister" %}?as={{ row.person.pk }}" aria-label="{% blocktrans with name=row.person.first_name %}Add a registration for {{ name }}{% endblocktrans %}" title="{% trans "Add a registration" %}">
-                                {% lucide "plus" size=16 stroke_width=2.4 class="text-ink" %}
-                            </a>
-                        {% endif %}
-                    </div>
+                            {% if row.membership %}
+                                <div class="text-xs text-muted">
+                                    {{ row.membership.team.short_name }}
+                                    {% if row.membership.jersey_number %}&middot; #{{ row.membership.jersey_number }}{% endif %}
+                                </div>
+                            {% endif %}
+                        </div>
+                        {% lucide "chevron-right" size=18 class="shrink-0 text-dim" %}
+                    </a>
                 {% endfor %}
             </div>
         </div>

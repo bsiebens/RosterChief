@@ -498,15 +498,16 @@ class RegistrationViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertFalse(RegistrationBatch.objects.exists())
 
-    def test_a_missing_team_is_rejected(self):
+    def test_team_is_optional(self):
         data = self.contact_data() | self.formset_management() | self.entry_data(requested_team="")
-        data["action"] = "preview"
+        data["action"] = "submit"
 
         response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
 
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Choose a team.")
-        self.assertFalse(RegistrationBatch.objects.exists())
+        self.assertRedirects(response, self._url())
+        child = Member.objects.get(first_name="Timmy", last_name="Tester")
+        details = RegistrationDetails.objects.get(membership__member=child)
+        self.assertIsNone(details.requested_team)
 
     def test_a_product_tagged_for_volunteers_is_rejected_for_a_player_entry(self):
         volunteer_category = ProductCategory.objects.get(club=self.club, registration_kind=ProductCategory.RegistrationKind.VOLUNTEER)

@@ -90,4 +90,9 @@
         const rows = container.querySelectorAll(".bulk-add-row");
         if (rows.length) syncVariantOptions(rows[rows.length - 1]);
     });
+
+    // Exposed for mobile-reregister-rows.js, which clones its own per-person
+    // sub-rows outside of #bulk-add-rows entirely -- same filtering, one
+    // implementation.
+    window.syncRegistrationVariantOptions = syncVariantOptions;
 })();

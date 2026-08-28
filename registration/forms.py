@@ -62,7 +62,7 @@ class RegistrationEntryRowForm(forms.Form):
     existing_member = forms.ModelChoiceField(queryset=Member.objects.none(), required=False, widget=forms.HiddenInput())
     entry_kind = forms.ChoiceField(label=_("Registering as"), choices=RegistrationDetails.EntryKind.choices, required=False, initial=RegistrationDetails.EntryKind.PLAYER)
     product_variant = forms.ModelChoiceField(label=_("Registering for"), queryset=ProductVariant.objects.none(), required=False, widget=forms.Select(attrs={"data-searchable": "true", "data-search-placeholder": _("Type to search...")}))
-    requested_team = forms.ModelChoiceField(label=_("Team"), queryset=Team.objects.none(), required=False, widget=forms.Select(attrs={"data-searchable": "true", "data-search-placeholder": _("Type a team name...")}))
+    requested_team = forms.ModelChoiceField(label=_("Team (optional)"), queryset=Team.objects.none(), required=False, widget=forms.Select(attrs={"data-searchable": "true", "data-search-placeholder": _("Type a team name...")}))
 
     def __init__(self, *args, club=None, people=None, season=None, **kwargs):
         super().__init__(*args, **kwargs)
@@ -103,8 +103,6 @@ class RegistrationEntryRowForm(forms.Form):
                 expected = dict(RegistrationDetails.EntryKind.choices).get(registration_kind, registration_kind)
                 self.add_error("product_variant", _("This option is for %(kind)s registrations.") % {"kind": expected})
 
-        if not cleaned.get("requested_team"):
-            self.add_error("requested_team", _("Choose a team."))
         return cleaned
 
 
@@ -147,10 +145,17 @@ def entries_from_formset(entry_formset):
     entries = []
     for row in entry_formset.non_blank_forms():
         data = row.cleaned_data
+        existing_member = data.get("existing_member")
+        # A mobile row for an already-known person never has its own visible
+        # first_name/last_name inputs (existing_member is enough to identify
+        # them) -- fall back to the Member's own name so the price summary
+        # doesn't show a blank line for it.
+        first_name = data.get("first_name") or (existing_member.first_name if existing_member else "")
+        last_name = data.get("last_name") or (existing_member.last_name if existing_member else "")
         entries.append(
             EntryInput(
-                first_name=data.get("first_name", ""),
-                last_name=data.get("last_name", ""),
+                first_name=first_name,
+                last_name=last_name,
                 date_of_birth=data.get("date_of_birth"),
                 entry_kind=data.get("entry_kind") or RegistrationDetails.EntryKind.PLAYER,
                 requested_team=data.get("requested_team"),

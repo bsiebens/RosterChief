@@ -1,0 +1,32 @@
+{% load i18n %}
+{% comment %}
+    One entry row scoped to a single, already-known person -- reregister.html's
+    own "Add another registration" per person (a second team, or an
+    additional role) clones this same markup client-side (see its extra_body
+    script), swapping __prefix__ for the next form index and filling in
+    existing_member itself; row=entry_formset.empty_form when used as that
+    clone source. Not used for the first/default row per person (that one
+    also carries the "Include this person" toggle, reregister.html's own
+    inline markup) or for the free-text "someone new" row (its own fields,
+    also inline in reregister.html).
+{% endcomment %}
+<div class="bulk-add-row relative m-card overflow-hidden">
+    {{ row.existing_member }}
+    <button type="button" class="remove-row absolute top-2.5 right-2.5 flex h-7 w-7 items-center justify-center rounded-full bg-line text-ink" aria-label="{% trans 'Remove this registration' %}">&times;</button>
+    <div class="p-3.5 pr-12">
+        <label class="mb-1 block text-xs text-muted" for="{{ row.entry_kind.id_for_label }}">{{ row.entry_kind.label }}</label>
+        {{ row.entry_kind }}
+    </div>
+    <div class="h-px bg-rule"></div>
+    <div class="p-3.5">
+        <label class="mb-1 block text-xs text-muted" for="{{ row.product_variant.id_for_label }}">{{ row.product_variant.label }}</label>
+        {{ row.product_variant }}
+        {% for error in row.product_variant.errors %}<p class="mt-1 text-xs text-club">{{ error }}</p>{% endfor %}
+    </div>
+    <div class="h-px bg-rule"></div>
+    <div class="p-3.5">
+        <label class="mb-1 block text-xs text-muted" for="{{ row.requested_team.id_for_label }}">{{ row.requested_team.label }}</label>
+        {{ row.requested_team }}
+        {% for error in row.requested_team.errors %}<p class="mt-1 text-xs text-club">{{ error }}</p>{% endfor %}
+    </div>
+</div>

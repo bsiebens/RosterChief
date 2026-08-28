@@ -4,11 +4,12 @@
 {% comment %}
     Re-register self/managed_people for a new season -- see
     mobile.views.ReRegisterView's own docstring. One row per managed person
-    (identity fixed, existing_member hidden field set) plus one free-text
-    row for someone not yet known to the club. Same two-step "calculate
-    price, then confirm" flow as the public registration page
-    (registration/templates/registration/register.html), no client-side
-    pricing logic.
+    by default (identity fixed, existing_member hidden field set), each with
+    its own "Add another registration" for a second team or an additional
+    role (player *and* referee), plus one free-text row for someone not yet
+    known to the club. Same two-step "calculate price, then confirm" flow as
+    the public registration page (registration/templates/registration/register.html),
+    no client-side pricing logic.
 {% endcomment %}
 
 {% block content %}
@@ -16,9 +17,7 @@
         <a class="-ml-2.5 flex h-11 w-11 shrink-0 items-center justify-center" href="{% url "mobile:me" %}" aria-label="{% trans "Back" %}">
             {% lucide "chevron-left" size=20 stroke_width=2.4 class="text-ink" %}
         </a>
-        <span class="min-w-0 flex-1 truncate font-display text-xl leading-none font-extrabold text-ink uppercase">
-            {% if narrowed_to_person %}{% blocktrans with name=narrowed_to_person.first_name %}Register {{ name }}{% endblocktrans %}{% else %}{% trans "Register" %}{% endif %}
-        </span>
+        <span class="min-w-0 flex-1 truncate font-display text-xl leading-none font-extrabold text-ink uppercase">{% trans "Register" %}</span>
     </div>
 
     {% if not registration_open %}
@@ -32,7 +31,6 @@
             <p class="text-[15px] font-semibold text-ink">{% trans "Which season?" %}</p>
             <p class="mt-1 text-sm text-muted">{% trans "Registration is currently open for more than one season -- pick which one this is for." %}</p>
             <form method="get" class="mt-3 flex flex-col gap-3">
-                {% if narrowed_to_person %}<input type="hidden" name="as" value="{{ narrowed_to_person.pk }}">{% endif %}
                 <select name="season" class="h-11 w-full rounded-lg border border-stroke bg-paper px-3 text-[15px] text-ink focus:border-ink focus:outline-none">
                     {% for choice in available_seasons %}
                         {% blocktrans with start=choice.start_date|date:"Y" end=choice.end_date|date:"Y" asvar choice_label %}Season {{ start }}-{{ end }}{% endblocktrans %}
@@ -49,8 +47,7 @@
                 {% blocktrans with start=registration_season.start_date|date:"Y" end=registration_season.end_date|date:"Y" %}Registering for Season {{ start }}-{{ end }}{% endblocktrans %}
             </div>
         {% endif %}
-        {# action is explicit, not left to resolve against the current URL -- PersonScopeMixin reads ?as= off request.GET even on this POST, so a hidden input alone wouldn't reach it. #}
-        <form method="post" action="{% url "mobile:reregister" %}{% if narrowed_to_person %}?as={{ narrowed_to_person.pk }}{% endif %}" class="flex flex-col gap-4" hx-boost="false">
+        <form method="post" class="flex flex-col gap-4" hx-boost="false">
             {% csrf_token %}
             <input type="hidden" name="season" value="{{ registration_season.pk }}">
             {{ entry_formset.management_form }}
@@ -64,39 +61,52 @@
 
             {{ variant_registration_kinds|json_script:"variant-registration-kinds" }}
             <div id="bulk-add-rows" class="flex flex-col gap-4">
-            {% for person, row in person_rows %}
-                <div class="bulk-add-row">
-                    <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{{ person.get_full_name }}</div>
-                    <div class="m-card overflow-hidden">
-                        {{ row.existing_member }}
-                        <div class="p-3.5">
-                            <label class="flex items-center gap-2.5 text-[15px] text-ink" for="{{ row.is_contact.id_for_label }}">
-                                {{ row.is_contact }}
-                                {% trans "Include this person" %}
-                            </label>
-                        </div>
-                        <div class="h-px bg-rule"></div>
-                        <div class="p-3.5">
-                            <label class="mb-1 block text-xs text-muted" for="{{ row.entry_kind.id_for_label }}">{{ row.entry_kind.label }}</label>
-                            {{ row.entry_kind }}
-                        </div>
-                        <div class="h-px bg-rule"></div>
-                        <div class="p-3.5">
-                            <label class="mb-1 block text-xs text-muted" for="{{ row.product_variant.id_for_label }}">{{ row.product_variant.label }}</label>
-                            {{ row.product_variant }}
-                            {% for error in row.product_variant.errors %}<p class="mt-1 text-xs text-club">{{ error }}</p>{% endfor %}
-                        </div>
-                        <div class="h-px bg-rule"></div>
-                        <div class="p-3.5">
-                            <label class="mb-1 block text-xs text-muted" for="{{ row.requested_team.id_for_label }}">{{ row.requested_team.label }}</label>
-                            {{ row.requested_team }}
-                            {% for error in row.requested_team.errors %}<p class="mt-1 text-xs text-club">{{ error }}</p>{% endfor %}
-                        </div>
+            {% for person, rows in person_rows %}
+                <div>
+                    <div class="mb-2 flex items-center justify-between">
+                        <span class="font-display text-xs font-extrabold tracking-wide text-muted uppercase">{{ person.get_full_name }}</span>
+                        <button type="button" class="add-subrow flex items-center gap-1 text-xs font-semibold text-club" data-person="{{ person.pk }}">
+                            {% lucide "circle-plus" size=14 stroke_width=2.4 %} {% trans "Add another registration" %}
+                        </button>
+                    </div>
+                    <div id="person-rows-{{ person.pk }}" class="flex flex-col gap-3">
+                        {% for row in rows %}
+                            {% if forloop.first %}
+                                <div class="bulk-add-row m-card overflow-hidden">
+                                    {{ row.existing_member }}
+                                    <div class="p-3.5">
+                                        <label class="flex items-center gap-2.5 text-[15px] text-ink" for="{{ row.is_contact.id_for_label }}">
+                                            {{ row.is_contact }}
+                                            {% trans "Include this person" %}
+                                        </label>
+                                    </div>
+                                    <div class="h-px bg-rule"></div>
+                                    <div class="p-3.5">
+                                        <label class="mb-1 block text-xs text-muted" for="{{ row.entry_kind.id_for_label }}">{{ row.entry_kind.label }}</label>
+                                        {{ row.entry_kind }}
+                                    </div>
+                                    <div class="h-px bg-rule"></div>
+                                    <div class="p-3.5">
+                                        <label class="mb-1 block text-xs text-muted" for="{{ row.product_variant.id_for_label }}">{{ row.product_variant.label }}</label>
+                                        {{ row.product_variant }}
+                                        {% for error in row.product_variant.errors %}<p class="mt-1 text-xs text-club">{{ error }}</p>{% endfor %}
+                                    </div>
+                                    <div class="h-px bg-rule"></div>
+                                    <div class="p-3.5">
+                                        <label class="mb-1 block text-xs text-muted" for="{{ row.requested_team.id_for_label }}">{{ row.requested_team.label }}</label>
+                                        {{ row.requested_team }}
+                                        {% for error in row.requested_team.errors %}<p class="mt-1 text-xs text-club">{{ error }}</p>{% endfor %}
+                                    </div>
+                                </div>
+                            {% else %}
+                                {% include "mobile/_reregister_subrow.html" %}
+                            {% endif %}
+                        {% endfor %}
                     </div>
                 </div>
             {% endfor %}
 
-            {% if extra_row %}
+            {% for extra_row in extra_rows %}
                 <div class="bulk-add-row">
                     <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Someone new" %}</div>
                     <div class="m-card overflow-hidden">
@@ -134,8 +144,12 @@
                         </div>
                     </div>
                 </div>
-            {% endif %}
+            {% endfor %}
             </div>
+
+            <template id="subrow-template">
+                {% include "mobile/_reregister_subrow.html" with row=entry_formset.empty_form %}
+            </template>
 
             {% if priced_entries %}
                 <div>
@@ -165,4 +179,5 @@
 {% block extra_body %}
     <script src="{% static 'js/searchable-select.js' %}"></script>
     <script src="{% static 'js/registration-entry-rows.js' %}"></script>
+    <script src="{% static 'js/mobile-reregister-rows.js' %}"></script>
 {% endblock extra_body %}
