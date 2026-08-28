@@ -9,7 +9,12 @@
     role (player *and* referee), plus one free-text row for someone not yet
     known to the club. Same two-step "calculate price, then confirm" flow as
     the public registration page (registration/templates/registration/register.html),
-    no client-side pricing logic.
+    no client-side pricing logic -- but "Calculate price" swaps the form for
+    a receipt screen entirely (one <form>, the choices just hidden rather
+    than removed, so they post right back) rather than showing both at once
+    the way the public page's wider layout can afford to. "Back" (action=edit)
+    returns to the form with every choice exactly as left -- entry_formset is
+    still bound to that same POST, so nothing needs re-entering.
 {% endcomment %}
 
 {% block content %}
@@ -17,7 +22,7 @@
         <a class="-ml-2.5 flex h-11 w-11 shrink-0 items-center justify-center" href="{% url "mobile:me" %}" aria-label="{% trans "Back" %}">
             {% lucide "chevron-left" size=20 stroke_width=2.4 class="text-ink" %}
         </a>
-        <span class="min-w-0 flex-1 truncate font-display text-xl leading-none font-extrabold text-ink uppercase">{% trans "Register" %}</span>
+        <span class="min-w-0 flex-1 truncate font-display text-xl leading-none font-extrabold text-ink uppercase">{% if priced_entries %}{% trans "Confirm" %}{% else %}{% trans "Register" %}{% endif %}</span>
     </div>
 
     {% if not registration_open %}
@@ -60,6 +65,8 @@
             {% endfor %}
 
             {{ variant_registration_kinds|json_script:"variant-registration-kinds" }}
+            {# Hidden, not removed, once priced -- every field posts right back on "Back" (action=edit), so nothing needs re-entering. #}
+            <div class="{% if priced_entries %}hidden{% endif %} flex flex-col gap-4">
             <div id="bulk-add-rows" class="flex flex-col gap-4">
             {% for person, rows in person_rows %}
                 <div>
@@ -146,6 +153,7 @@
                 </div>
             {% endfor %}
             </div>
+            </div>
 
             <template id="subrow-template">
                 {% include "mobile/_reregister_subrow.html" with row=subrow_template_form %}
@@ -159,16 +167,30 @@
                             {% if not forloop.first %}<div class="h-px bg-rule"></div>{% endif %}
                             <div class="flex items-center justify-between p-3.5">
                                 <span class="text-[15px] text-ink">{{ entry.first_name }} {{ entry.last_name }}</span>
-                                <span class="font-mono text-sm tabular-nums text-ink">&euro; {{ price.price }}</span>
+                                <span class="font-mono text-sm tabular-nums text-ink">&euro; {{ price.price|floatformat:2 }}</span>
                             </div>
+                            {% if price.min_registrants_discount > 0 %}
+                                <div class="flex items-center justify-between px-3.5 pb-3">
+                                    <span class="text-xs text-muted">{% trans "Multi-registrant discount" %}</span>
+                                    <span class="font-mono text-xs tabular-nums text-muted">&minus;&euro; {{ price.min_registrants_discount|floatformat:2 }}</span>
+                                </div>
+                            {% endif %}
                             {% if price.deadline %}
-                                <div class="px-3.5 pb-3 text-xs text-muted">{% blocktrans with amount=price.deadline_discount date=price.deadline %}€{{ amount }} off if paid by {{ date }}{% endblocktrans %}</div>
+                                <div class="px-3.5 pb-3 text-xs text-muted">{% blocktrans with amount=price.deadline_discount|floatformat:2 date=price.deadline %}€{{ amount }} off if paid by {{ date }}{% endblocktrans %}</div>
                             {% endif %}
                         {% endfor %}
+                        <div class="h-px bg-rule"></div>
+                        <div class="flex items-center justify-between p-3.5">
+                            <span class="text-[15px] font-bold text-ink">{% trans "Total" %}</span>
+                            <span class="font-mono text-base font-bold tabular-nums text-ink">&euro; {{ priced_total|floatformat:2 }}</span>
+                        </div>
                     </div>
                     <p class="mt-2 text-xs text-muted">{% trans "This is what's owed once the club confirms this -- payment happens separately, not on this page." %}</p>
                 </div>
-                <button type="submit" name="action" value="submit" class="btn btn-primary h-11">{% trans "Confirm & submit" %}</button>
+                <div class="flex gap-2">
+                    <button type="submit" name="action" value="edit" class="btn btn-outline h-11">{% trans "Back" %}</button>
+                    <button type="submit" name="action" value="submit" class="btn btn-primary h-11 flex-1">{% trans "Confirm & submit" %}</button>
+                </div>
             {% else %}
                 <button type="submit" name="action" value="preview" class="btn btn-primary h-11">{% trans "Calculate price" %}</button>
             {% endif %}

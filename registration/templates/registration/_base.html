@@ -53,7 +53,8 @@
         </header>
 
         <main class="flex flex-1 justify-center px-5 py-8 sm:px-7">
-            <div class="w-full max-w-2xl">
+            {# register.html widens this for its 2-column layout (form + a sticky price panel) -- status.html and everything else stay the single-column default. #}
+            <div class="w-full {% block content_width %}max-w-2xl{% endblock content_width %}">
                 {% if messages %}
                     <div class="mb-4 flex flex-col gap-2">
                         {% for message in messages %}

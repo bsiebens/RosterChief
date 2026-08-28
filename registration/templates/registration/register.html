@@ -12,6 +12,9 @@
 
 {% block page_title %}{% trans "Register" %}{% endblock page_title %}
 
+{# Wide enough for the entry form (left) plus a fixed-width sticky price panel (right) once there's something worth 2 columns for -- see the {% else %} branch below. #}
+{% block content_width %}max-w-2xl{% if registration_open and not needs_season_choice %} lg:max-w-5xl{% endif %}{% endblock content_width %}
+
 {% block content %}
     <div class="mb-5">
         <h1 class="font-display text-3xl font-extrabold text-ink uppercase">{% blocktrans with club=club.name %}Register at {{ club }}{% endblocktrans %}</h1>
@@ -61,90 +64,99 @@
                 <div class="alert alert-error" role="alert">{% lucide "circle-x" size=18 %} <span>{{ error }}</span></div>
             {% endfor %}
 
-            <div class="card card-body">
-                <h2 class="card-title">{% trans "About you" %}</h2>
-                {% if locked_member %}
-                    <p class="rounded-box border border-line bg-paper px-3 py-2.5 text-sm text-ink">
-                        {% blocktrans with name=locked_member.get_full_name email=locked_member.contact_email %}Submitting as: {{ name }} ({{ email }}){% endblocktrans %}
-                    </p>
-                {% else %}
-                    <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
-                        {% form_field form.contact_first_name %}
-                        {% form_field form.contact_last_name %}
+            {# The price panel (right, lg+) stays put while the form (left) scrolls -- calculating it no longer means scrolling past the whole form to see it. Below lg it just stacks, form first. #}
+            <div class="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_22rem] lg:items-start">
+                <div class="flex flex-col gap-4">
+                    <div class="card card-body">
+                        <h2 class="card-title">{% trans "About you" %}</h2>
+                        {% if locked_member %}
+                            <p class="rounded-box border border-line bg-paper px-3 py-2.5 text-sm text-ink">
+                                {% blocktrans with name=locked_member.get_full_name email=locked_member.contact_email %}Submitting as: {{ name }} ({{ email }}){% endblocktrans %}
+                            </p>
+                        {% else %}
+                            <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+                                {% form_field form.contact_first_name %}
+                                {% form_field form.contact_last_name %}
+                            </div>
+                            <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+                                {% form_field form.contact_email %}
+                                {% form_field form.contact_phone %}
+                            </div>
+                        {% endif %}
                     </div>
-                    <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
-                        {% form_field form.contact_email %}
-                        {% form_field form.contact_phone %}
-                    </div>
-                {% endif %}
-            </div>
 
-            <div class="card card-body">
-                <div class="flex flex-wrap items-center justify-between gap-2">
-                    <h2 class="card-title">{% trans "Who's registering" %}</h2>
-                    <button class="btn btn-outline btn-sm gap-2" type="button" id="add-row">{% lucide "plus" size=14 %} {% trans "Add another person" %}</button>
-                </div>
-                {{ entry_formset.management_form }}
-                <div
-                    id="bulk-add-rows"
-                    data-prefix="{{ entry_formset.prefix }}"
-                    {% if locked_member %}
-                        {# Signed in -- fill "This is me" from the real Member record, date of birth included when the club has it on file. #}
-                        data-known-first-name="{{ locked_member.first_name }}"
-                        data-known-last-name="{{ locked_member.last_name }}"
-                        {% if locked_member.date_of_birth %}data-known-date-of-birth="{{ locked_member.date_of_birth|date:'Y-m-d' }}"{% endif %}
-                    {% else %}
-                        {# Anonymous -- nothing known yet, so fall back to whatever's currently typed into the contact fields above (entries.js reads these live, not a snapshot at page load). #}
-                        data-contact-first-name-id="{{ form.contact_first_name.id_for_label }}"
-                        data-contact-last-name-id="{{ form.contact_last_name.id_for_label }}"
-                    {% endif %}
-                    class="flex flex-col gap-3"
-                >
-                    {% for entry_form in entry_formset %}
-                        {% include "registration/_entry_row.html" with form=entry_form %}
-                    {% endfor %}
-                </div>
-                <template id="bulk-add-row-template">
-                    {% include "registration/_entry_row.html" with form=entry_formset.empty_form %}
-                </template>
-            </div>
-
-            {% if priced_entries %}
-                <div class="card card-body">
-                    <h2 class="card-title">{% lucide "receipt" size=18 %} {% trans "Price" %}</h2>
-                    <div class="overflow-hidden rounded-box border border-line">
-                        <table class="table">
-                            <tbody>
-                                {% for entry, price in priced_entries %}
-                                    <tr>
-                                        <td class="font-semibold text-ink">{{ entry.first_name }} {{ entry.last_name }}</td>
-                                        <td class="text-right font-mono text-sm tabular-nums text-ink">&euro; {{ price.price }}</td>
-                                    </tr>
-                                    {% if price.min_registrants_discount > 0 %}
-                                        <tr>
-                                            <td class="text-sm text-muted">{% trans "Multi-registrant discount" %}</td>
-                                            <td class="text-right font-mono text-sm tabular-nums text-muted">&minus;&euro; {{ price.min_registrants_discount }}</td>
-                                        </tr>
-                                    {% endif %}
-                                    {% if price.deadline %}
-                                        <tr>
-                                            <td colspan="2" class="text-xs text-muted">{% blocktrans with amount=price.deadline_discount date=price.deadline %}€{{ amount }} off if paid by {{ date }}{% endblocktrans %}</td>
-                                        </tr>
-                                    {% endif %}
-                                {% endfor %}
-                            </tbody>
-                        </table>
+                    <div class="card card-body">
+                        <div class="flex flex-wrap items-center justify-between gap-2">
+                            <h2 class="card-title">{% trans "Who's registering" %}</h2>
+                            <button class="btn btn-outline btn-sm gap-2" type="button" id="add-row">{% lucide "plus" size=14 %} {% trans "Add another person" %}</button>
+                        </div>
+                        {{ entry_formset.management_form }}
+                        <div
+                            id="bulk-add-rows"
+                            data-prefix="{{ entry_formset.prefix }}"
+                            {% if locked_member %}
+                                {# Signed in -- fill "This is me" from the real Member record, date of birth included when the club has it on file. #}
+                                data-known-first-name="{{ locked_member.first_name }}"
+                                data-known-last-name="{{ locked_member.last_name }}"
+                                {% if locked_member.date_of_birth %}data-known-date-of-birth="{{ locked_member.date_of_birth|date:'Y-m-d' }}"{% endif %}
+                            {% else %}
+                                {# Anonymous -- nothing known yet, so fall back to whatever's currently typed into the contact fields above (entries.js reads these live, not a snapshot at page load). #}
+                                data-contact-first-name-id="{{ form.contact_first_name.id_for_label }}"
+                                data-contact-last-name-id="{{ form.contact_last_name.id_for_label }}"
+                            {% endif %}
+                            class="flex flex-col gap-3"
+                        >
+                            {% for entry_form in entry_formset %}
+                                {% include "registration/_entry_row.html" with form=entry_form %}
+                            {% endfor %}
+                        </div>
+                        <template id="bulk-add-row-template">
+                            {% include "registration/_entry_row.html" with form=entry_formset.empty_form %}
+                        </template>
                     </div>
-                    <p class="text-xs text-muted">{% trans "This is what's owed once the club confirms your registration -- payment happens separately, not on this page." %}</p>
                 </div>
-                <div>
-                    <button class="btn btn-primary gap-2" type="submit" name="action" value="submit">{% lucide "send" size=16 %} {% trans "Confirm & submit" %}</button>
+
+                {# Always rendered, even before "Calculate price" -- an empty panel that later fills in reads clearer than one that appears out of nowhere below the fold. #}
+                <div class="lg:sticky lg:top-8">
+                    <div class="card card-body">
+                        <h2 class="card-title">{% lucide "receipt" size=18 %} {% trans "Price" %}</h2>
+                        {% if priced_entries %}
+                            <div class="overflow-hidden rounded-box border border-line">
+                                <table class="table">
+                                    <tbody>
+                                        {% for entry, price in priced_entries %}
+                                            <tr>
+                                                <td class="font-semibold text-ink">{{ entry.first_name }} {{ entry.last_name }}</td>
+                                                <td class="text-right font-mono text-sm tabular-nums text-ink">&euro; {{ price.price|floatformat:2 }}</td>
+                                            </tr>
+                                            {% if price.min_registrants_discount > 0 %}
+                                                <tr>
+                                                    <td class="text-sm text-muted">{% trans "Multi-registrant discount" %}</td>
+                                                    <td class="text-right font-mono text-sm tabular-nums text-muted">&minus;&euro; {{ price.min_registrants_discount|floatformat:2 }}</td>
+                                                </tr>
+                                            {% endif %}
+                                            {% if price.deadline %}
+                                                <tr>
+                                                    <td colspan="2" class="text-xs text-muted">{% blocktrans with amount=price.deadline_discount|floatformat:2 date=price.deadline %}€{{ amount }} off if paid by {{ date }}{% endblocktrans %}</td>
+                                                </tr>
+                                            {% endif %}
+                                        {% endfor %}
+                                        <tr class="border-t border-line">
+                                            <td class="font-display text-sm font-extrabold text-ink uppercase">{% trans "Total" %}</td>
+                                            <td class="text-right font-mono text-base font-extrabold tabular-nums text-ink">&euro; {{ priced_total|floatformat:2 }}</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <p class="text-xs text-muted">{% trans "This is what's owed once the club confirms your registration -- payment happens separately, not on this page." %}</p>
+                            <button class="btn btn-primary gap-2" type="submit" name="action" value="submit">{% lucide "send" size=16 %} {% trans "Confirm & submit" %}</button>
+                        {% else %}
+                            <p class="text-sm text-muted">{% trans "Fill in who's registering, then calculate the price to see it here." %}</p>
+                            <button class="btn btn-primary gap-2" type="submit" name="action" value="preview">{% lucide "calculator" size=16 %} {% trans "Calculate price" %}</button>
+                        {% endif %}
+                    </div>
                 </div>
-            {% else %}
-                <div>
-                    <button class="btn btn-primary gap-2" type="submit" name="action" value="preview">{% lucide "calculator" size=16 %} {% trans "Calculate price" %}</button>
-                </div>
-            {% endif %}
+            </div>
         </form>
     {% endif %}
 {% endblock content %}

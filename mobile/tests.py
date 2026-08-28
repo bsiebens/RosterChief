@@ -2552,6 +2552,42 @@ class ReRegisterViewTests(TestCase):
         self.assertContains(response, "80.00")
         self.assertFalse(RegistrationBatch.objects.exists())
 
+    def test_the_receipt_shows_a_total_and_hides_the_form(self):
+        self.client.force_login(self.user)
+        data = self.formset_management(3)
+        data["entries-0-existing_member"] = str(self.member.pk)
+        data["entries-0-is_contact"] = "on"
+        data["entries-0-product_variant"] = str(self.u10.pk)
+        data["action"] = "preview"
+
+        response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, "Total")
+        self.assertEqual(response.context["priced_total"], Decimal("80.00"))
+        # The form's own fields are still in the response (so "Back" can post
+        # them straight back), just wrapped in a hidden container -- not gone.
+        self.assertContains(response, 'name="entries-0-existing_member"')
+        self.assertContains(response, "hidden")
+
+    def test_back_restores_the_form_pre_populated_not_blank(self):
+        self.client.force_login(self.user)
+        data = self.formset_management(3)
+        data["entries-0-existing_member"] = str(self.member.pk)
+        data["entries-0-is_contact"] = "on"
+        data["entries-0-product_variant"] = str(self.u10.pk)
+        data["entries-0-requested_team"] = str(self.team.pk)
+        data["action"] = "preview"
+        priced_response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
+        self.assertContains(priced_response, "Total")  # sanity: really did price it
+
+        data["action"] = "edit"
+        response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.context["priced_entries"])
+        self.assertEqual(response.context["entry_formset"].forms[0]["product_variant"].value(), str(self.u10.pk))
+        self.assertFalse(RegistrationBatch.objects.exists())
+
     def test_including_both_self_and_a_child_does_not_trip_the_single_contact_rule(self):
         # The public page's is_contact means "this is me" (at most one row);
         # mobile reuses the same field for "Include this person" per managed

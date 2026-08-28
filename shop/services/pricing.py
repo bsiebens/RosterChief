@@ -3,11 +3,17 @@ future "preview my total before I commit" screen compute from, so the two can
 never disagree about what a discount is actually worth.
 """
 
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
 from django.db.models import Sum
 
 from shop.models import DiscountType
+
+#: Every currency amount in this app is 2 decimal places (every DecimalField
+#: storing one is decimal_places=2) -- a percentage discount is the one place
+#: that math can produce more (33.33% of €80.00 is €26.6640), so this is the
+#: one place that needs rounding back down to what a euro amount actually is.
+_CENTS = Decimal("0.01")
 
 
 def cart_subtotal(cart) -> Decimal:
@@ -28,9 +34,11 @@ def order_total(order) -> Decimal:
 def discount_amount_for(subtotal: Decimal, discount) -> Decimal:
     """The actual currency amount ``discount`` is worth against ``subtotal`` --
     never more than the subtotal itself, so a fixed-amount discount larger
-    than the cart can't push the total negative."""
+    than the cart can't push the total negative. Rounded to the nearest cent
+    (half up) -- a percentage of an odd subtotal otherwise carries however
+    many decimal places Decimal division happens to produce."""
     if discount.discount_type == DiscountType.PERCENTAGE:
-        amount = subtotal * discount.discount_amount / Decimal("100")
+        amount = (subtotal * discount.discount_amount / Decimal("100")).quantize(_CENTS, rounding=ROUND_HALF_UP)
     else:
         amount = discount.discount_amount
     return min(amount, subtotal)

@@ -826,6 +826,17 @@ class CartTotalsTests(TestCase):
         self.assertEqual(totals["discount_amount"], Decimal("5.00"))
         self.assertEqual(totals["total"], Decimal("45.00"))
 
+    def test_a_percentage_discount_is_rounded_to_the_nearest_cent(self):
+        cart = self.make_cart(1)  # 25.00
+        discount = Discount.objects.create(club=self.club, name="A third off", code="THIRD", discount_type=DiscountType.PERCENTAGE, discount_amount=Decimal("33.33"))
+
+        totals = cart_totals(cart, discount)
+
+        # 25.00 * 33.33 / 100 = 8.3325 unrounded -- half up to 8.33, not left
+        # carrying a third decimal place.
+        self.assertEqual(totals["discount_amount"], Decimal("8.33"))
+        self.assertEqual(str(totals["discount_amount"]), "8.33")
+
     def test_fixed_amount_discount(self):
         cart = self.make_cart(2)  # 50.00
         discount = Discount.objects.create(club=self.club, name="Fiver off", code="FIVER", discount_type=DiscountType.FIXED_AMOUNT, discount_amount=Decimal("5.00"))

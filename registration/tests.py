@@ -492,6 +492,21 @@ class RegistrationViewTests(TestCase):
         self.assertFalse(RegistrationBatch.objects.exists())
         self.assertFalse(Member.objects.filter(first_name="Timmy").exists())
 
+    def test_the_price_panel_shows_a_total(self):
+        data = self.contact_data() | self.formset_management() | self.entry_data()
+        data["action"] = "preview"
+
+        response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, "Total")
+        self.assertEqual(response.context["priced_total"], Decimal("80.00"))
+
+    def test_the_price_panel_is_an_empty_state_before_calculating(self):
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, "Fill in who")
+        self.assertIsNone(response.context["priced_total"])
+
     def test_submitting_creates_the_registration(self):
         data = self.contact_data() | self.formset_management() | self.entry_data()
         data["action"] = "submit"

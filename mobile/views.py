@@ -1115,6 +1115,11 @@ class ReRegisterView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
                 person_rows=person_rows,
                 extra_rows=extra_rows,
                 priced_entries=priced_entries,
+                # Same amount submit_registration actually charges per entry,
+                # summed once -- see registration.views.RegistrationView.
+                # render_page's own comment for why min_registrants_discount
+                # specifically (not the conditional early-payment one).
+                priced_total=sum((row["price"] - row["min_registrants_discount"] for _entry, row in priced_entries), Decimal("0")) if priced_entries else None,
                 season_error=season_error,
                 registration_open=True,
                 registration_season=season,
@@ -1142,6 +1147,13 @@ class ReRegisterView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
 
         entry_formset = self.get_formset(season, request.POST)
         if not entry_formset.is_valid():
+            return self.render_page(season, entry_formset)
+
+        if request.POST.get("action") == "edit":
+            # "Back" from the receipt screen -- same submitted choices
+            # (entry_formset is bound to this same POST, so every field
+            # redisplays exactly as chosen), just the form again instead of
+            # re-pricing straight back into the receipt.
             return self.render_page(season, entry_formset)
 
         entries = entries_from_formset(entry_formset)

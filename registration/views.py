@@ -8,6 +8,8 @@ docstring for what happens from there -- straight into the existing Sign-up
 queue, no separate review gate of this app's own.
 """
 
+from decimal import Decimal
+
 from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.translation import gettext_lazy as _
@@ -64,6 +66,13 @@ class RegistrationView(ClubScopedPublicMixin, View):
                 "form": contact_form,
                 "entry_formset": entry_formset,
                 "priced_entries": priced_entries,
+                # Same per-entry amount submit_registration actually charges
+                # (price minus its own min-registrants discount -- the
+                # early-payment one is conditional, never baked into what's
+                # shown as owed now, see registration.services.pricing's own
+                # module docstring), summed once so the receipt can show a
+                # total instead of only itemised lines.
+                "priced_total": sum((row["price"] - row["min_registrants_discount"] for _entry, row in priced_entries), Decimal("0")) if priced_entries else None,
                 "registration_open": True,
                 "season": season,
                 "locked_member": self.get_contact_member(request),
