@@ -40,6 +40,17 @@
         // position and size are computed in JS instead of via CSS, see positionList().
         const list = document.createElement("ul");
         list.className = "menu fixed z-50 rounded-box bg-base-100 shadow max-h-60 overflow-y-auto flex-nowrap hidden";
+        // Belt and braces on the background specifically: .bg-base-100 is a
+        // hand-rolled class (see assets/management.css's own comment above
+        // its copy of this block) each consuming stylesheet defines for
+        // itself, and a page whose CSS bundle hasn't picked up that class
+        // yet (or any future stylesheet that simply forgets it) would
+        // otherwise show every option in this dropdown floating over
+        // whatever's underneath, with no opaque backing of its own -- an
+        // inline style can't lose that fight to a stale/missing class.
+        list.style.backgroundColor = "#fff";
+
+
 
         const positionList = () => {
             const rect = input.getBoundingClientRect();
