@@ -1044,6 +1044,7 @@ class ProductForm(forms.ModelForm):
             "early_bird_discount_deadline",
             "early_bird_discount_type",
             "early_bird_discount_amount",
+            "registrant_discount_scope",
         ]
         widgets = {
             "image": forms.ClearableFileInput(attrs={"accept": "image/png,image/jpeg,image/gif,image/webp"}),

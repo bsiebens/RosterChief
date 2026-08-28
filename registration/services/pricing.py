@@ -15,7 +15,10 @@ schedules:
   variant of this same product is known immediately at submission time, so
   the *best* tier a batch qualifies for (the highest min_registrants still
   at or below the count) is applied straight onto the resulting
-  ClubMembership.fee_amount.
+  ClubMembership.fee_amount. Product.registrant_discount_scope decides
+  *how*: PER_PERSON (the default) applies the tier to every qualifying
+  entry; PER_ORDER subtracts it once for the whole batch, from whichever
+  qualifying entry price_entries reaches first.
 - Product.early_bird_discount_* -- whether the fee is paid by a deadline.
   NOT known at registration time (payment happens later, see club.services.
   fees) -- never baked into fee_amount. Stored instead as ClubMembership.
@@ -25,7 +28,9 @@ schedules:
 
 Each entry prices independently against its own chosen Product -- there is
 no cross-entry splitting of a single discount the way a whole-cart Discount
-would need, since both conditions here are evaluated per (product, entry).
+would need, since both conditions here are evaluated per (product, entry)
+(registrant_discount_scope's PER_ORDER case is the one exception, and it's
+handled entirely inside price_entries).
 """
 
 from collections import Counter, defaultdict
@@ -160,6 +165,12 @@ def price_entries(variants):
     for tier in ProductRegistrantDiscountTier.objects.filter(product_id__in=counts.keys()).order_by("min_registrants"):
         tiers_by_product[tier.product_id].append(tier)
 
+    # PER_ORDER: the best qualifying tier is subtracted once for the whole
+    # batch, not once per entry -- tracks which products' one-time discount
+    # hasn't been handed out yet as entries are walked below. PER_PERSON
+    # (the default) needs no such tracking; every qualifying entry gets it.
+    per_order_pending = {product_id for product_id, tiers in tiers_by_product.items() if tiers and tiers[0].product.registrant_discount_scope == Product.RegistrantDiscountScope.PER_ORDER}
+
     rows = []
     for variant in variants:
         if variant is None:
@@ -172,7 +183,11 @@ def price_entries(variants):
         min_registrants_discount = Decimal("0")
         tier = _best_tier(tiers_by_product.get(product.pk, []), counts[product.pk])
         if tier is not None:
-            min_registrants_discount = discount_amount_for(price, tier)
+            if product.pk in per_order_pending:
+                min_registrants_discount = discount_amount_for(price, tier)
+                per_order_pending.discard(product.pk)
+            elif product.registrant_discount_scope == Product.RegistrantDiscountScope.PER_PERSON:
+                min_registrants_discount = discount_amount_for(price, tier)
 
         deadline = None
         deadline_discount = Decimal("0")

@@ -139,6 +139,25 @@ class Product(ClubScopedModel):
     early_bird_discount_type = models.CharField(_("early bird discount type"), max_length=255, choices=DiscountType.choices, default=DiscountType.PERCENTAGE, blank=True)
     early_bird_discount_amount = models.DecimalField(_("early bird discount amount"), max_digits=10, decimal_places=2, default=0, blank=True)
 
+    class RegistrantDiscountScope(models.TextChoices):
+        #: The best qualifying tier applies to every entry registered through
+        #: this product in the batch -- the original, still-default behaviour.
+        PER_PERSON = "per_person", _("Per person (applies to every qualifying registration)")
+        #: The best qualifying tier is subtracted once from the batch, not
+        #: once per entry -- registration.services.pricing.price_entries
+        #: applies it to whichever qualifying entry it reaches first, the
+        #: rest get none.
+        PER_ORDER = "per_order", _("Per order (subtracted once)")
+
+    registrant_discount_scope = models.CharField(
+        _("multi-registrant discount scope"),
+        max_length=20,
+        choices=RegistrantDiscountScope.choices,
+        default=RegistrantDiscountScope.PER_PERSON,
+        blank=True,
+        help_text=_("Whether a registrant-discount-tier threshold below applies to every qualifying registration, or is subtracted once from the whole batch."),
+    )
+
     slug_source = "name"
 
     class Meta:

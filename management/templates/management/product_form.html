@@ -69,7 +69,9 @@
                 set (ProductUpdateView).
             {% endcomment %}
             <h2 class="card-title">{% trans "Multi-registrant discount" %}</h2>
-            <p class="text-sm text-muted">{% trans "Register several people through this product in one go and everyone gets the best tier the group qualifies for -- e.g. 3+ people get 10% off, 5+ get 15% off. Leave every row blank for no discount." %}</p>
+            <p class="text-sm text-muted">{% trans "Register several people through this product in one go and the group qualifies for the best tier below -- e.g. 3+ people get 10% off, 5+ get 15% off. Leave every row blank for no discount." %}</p>
+
+            {% form_field form.registrant_discount_scope %}
 
             {% for error in tier_formset.non_form_errors %}
                 <div class="alert alert-error"><span>{{ error }}</span></div>

@@ -108,6 +108,46 @@ class PricingTests(TestCase):
 
         self.assertEqual(rows[0]["min_registrants_discount"], Decimal("0"))
 
+    def test_per_person_scope_applies_the_tier_to_every_qualifying_entry(self):
+        # Product.registrant_discount_scope defaults to PER_PERSON.
+        ProductRegistrantDiscountTier.objects.create(product=self.product, min_registrants=2, discount_type="percentage", discount_amount=Decimal("10"))
+        u10_c = ProductVariant.objects.create(product=self.product, name="U10-C", price=Decimal("80.00"))
+
+        rows = price_entries([self.u10, u10_c])
+
+        self.assertEqual(rows[0]["min_registrants_discount"], Decimal("8.00"))
+        self.assertEqual(rows[1]["min_registrants_discount"], Decimal("8.00"))
+
+    def test_per_order_scope_applies_the_tier_once_not_per_entry(self):
+        self.product.registrant_discount_scope = Product.RegistrantDiscountScope.PER_ORDER
+        self.product.save()
+        ProductRegistrantDiscountTier.objects.create(product=self.product, min_registrants=2, discount_type="percentage", discount_amount=Decimal("10"))
+        u10_c = ProductVariant.objects.create(product=self.product, name="U10-C", price=Decimal("80.00"))
+
+        rows = price_entries([self.u10, u10_c])
+
+        self.assertEqual(rows[0]["min_registrants_discount"], Decimal("8.00"))
+        self.assertEqual(rows[1]["min_registrants_discount"], Decimal("0"))
+
+    def test_per_order_scope_is_independent_per_product(self):
+        self.product.registrant_discount_scope = Product.RegistrantDiscountScope.PER_ORDER
+        self.product.save()
+        ProductRegistrantDiscountTier.objects.create(product=self.product, min_registrants=2, discount_type="percentage", discount_amount=Decimal("10"))
+        other_product = Product.objects.create(
+            club=self.club, name="Volunteer Registration", product_type=Product.ProductType.MEMBERSHIP, season=self.season, price=Decimal("60.00"), registrant_discount_scope=Product.RegistrantDiscountScope.PER_PERSON
+        )
+        ProductRegistrantDiscountTier.objects.create(product=other_product, min_registrants=2, discount_type="percentage", discount_amount=Decimal("10"))
+        other_variant_1 = ProductVariant.objects.create(product=other_product, name="Coach A", price=Decimal("60.00"))
+        other_variant_2 = ProductVariant.objects.create(product=other_product, name="Coach B", price=Decimal("60.00"))
+        u10_c = ProductVariant.objects.create(product=self.product, name="U10-C", price=Decimal("80.00"))
+
+        rows = price_entries([self.u10, u10_c, other_variant_1, other_variant_2])
+
+        self.assertEqual(rows[0]["min_registrants_discount"], Decimal("8.00"))  # per-order: once
+        self.assertEqual(rows[1]["min_registrants_discount"], Decimal("0"))
+        self.assertEqual(rows[2]["min_registrants_discount"], Decimal("6.00"))  # per-person: every time
+        self.assertEqual(rows[3]["min_registrants_discount"], Decimal("6.00"))
+
     def test_early_bird_discount_is_reported_but_not_applied_to_price(self):
         deadline = datetime.date(2026, 8, 15)
         self.product.early_bird_discount_enabled = True

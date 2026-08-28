@@ -8707,6 +8707,26 @@ class ProductRegistrantDiscountTierManagementTests(ShopTestBase):
         self.assertEqual(product.registrant_discount_tiers.count(), 2)
         self.assertEqual(product.registrant_discount_tiers.get(min_registrants=4).discount_amount, Decimal("10.00"))
 
+    def test_registrant_discount_scope_defaults_to_per_person(self):
+        self.client.force_login(self.make_shop_manager())
+        data = self.base_data()
+        data.update(self.tier_formset_data({"min_registrants": "2", "discount_type": "percentage", "discount_amount": "5"}))
+
+        self.club_post("product_create", data)
+
+        product = Product.objects.get(club=self.club, name="Player Registration")
+        self.assertEqual(product.registrant_discount_scope, Product.RegistrantDiscountScope.PER_PERSON)
+
+    def test_registrant_discount_scope_can_be_set_to_per_order(self):
+        self.client.force_login(self.make_shop_manager())
+        data = self.base_data(registrant_discount_scope=Product.RegistrantDiscountScope.PER_ORDER)
+        data.update(self.tier_formset_data({"min_registrants": "2", "discount_type": "percentage", "discount_amount": "5"}))
+
+        self.club_post("product_create", data)
+
+        product = Product.objects.get(club=self.club, name="Player Registration")
+        self.assertEqual(product.registrant_discount_scope, Product.RegistrantDiscountScope.PER_ORDER)
+
     def test_a_blank_row_is_simply_skipped(self):
         self.client.force_login(self.make_shop_manager())
         data = self.base_data()
