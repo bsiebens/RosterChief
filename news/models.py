@@ -10,7 +10,16 @@ from teams.models import Team
 
 
 def news_photo_path(instance, filename):
-    return f"clubs/{instance.news_item.club.slug}/news/{instance.news_item.slug}/{filename}"
+    # news_item_id, not news_item.slug: a slug is built from the title and can
+    # run long (a real one hit 70+ characters), which combined with the rest
+    # of this path and the original filename routinely blew past ImageField's
+    # default max_length=100 -- Storage.get_available_name() then couldn't
+    # even append its own collision-avoiding suffix, raising
+    # SuspiciousFileOperation (a 400, not 500 -- it's a SuspiciousOperation
+    # subclass). Every other upload_to in this codebase (sponsor_logo_path,
+    # onboarding_document_path, team_photo_path, ...) already keys off a
+    # stable id for exactly this reason -- this one was the outlier.
+    return f"clubs/{instance.news_item.club.slug}/news/{instance.news_item_id}/{filename}"
 
 
 class News(ClubScopedModel):
@@ -114,7 +123,7 @@ class News(ClubScopedModel):
 
 class NewsPhoto(UUIDModel):
     news_item = models.ForeignKey(News, on_delete=models.CASCADE, related_name="photos", verbose_name=_("news item"))
-    image = models.ImageField(_("image"), upload_to=news_photo_path)
+    image = models.ImageField(_("image"), upload_to=news_photo_path, max_length=255)
     is_main = models.BooleanField(_("main picture"), default=False)
     ordering = models.PositiveSmallIntegerField(_("ordering"), default=0)
 

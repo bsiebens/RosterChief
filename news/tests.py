@@ -158,6 +158,20 @@ class NewsPhotoModelTests(TestCase):
 
         self.assertEqual(photo.object_position, "20% 80%")
 
+    def test_the_upload_path_is_keyed_by_id_not_by_the_potentially_long_slug(self):
+        # A long, real-world title (Storage.get_available_name() couldn't find
+        # a free name under ImageField's default max_length=100 once the slug
+        # -- not a stable id -- was part of the path, a 400 SuspiciousFileOperation
+        # in production). Every other upload_to in this codebase already keys
+        # off an id (sponsor_logo_path, onboarding_document_path, ...) --
+        # this is that same fix for news.
+        long_title_item = News.objects.create(club=self.club, title="Drie Sharks bij het U15 National Team op het 5 Nations toernooi in Mechelen", body="Body.")
+
+        photo = make_photo(long_title_item)
+
+        self.assertIn(str(long_title_item.pk), photo.image.name)
+        self.assertNotIn(long_title_item.slug, photo.image.name)
+
 
 class SendPublishNotificationTests(TestCase):
     """news.services.send_publish_notification -- the audience is this item's
