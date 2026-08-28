@@ -58,7 +58,7 @@ from members.models import Family, FamilyMembership, Group, GroupMembership, Mem
 from members.services.claims import ClaimError, approve_claim, children_awaiting_a_parent, reject_claim, send_claim_approved_email, suggested_children
 from members.services.family import add_child_to_family, add_parent_to_family, attach_to_family, detach_from_family, get_or_create_login_user, grant_login, register_family
 from news.models import News, NewsPhoto
-from news.services import dispatch_send_publish_notification, notify_editors_of_pending_review
+from news.services import dispatch_send_publish_notification, notify_editors_of_pending_review, render_body_html
 from notifications.models import Notification
 from registration.models import RegistrationDetails
 from shop.models import Discount, Invoice, Order, OrderLine, Payment, Product, ProductCategory, ProductionStatus, ProductRegistrantDiscountTier, ProductVariant, Voucher, VoucherConsumption
@@ -2250,6 +2250,12 @@ class NewsListView(ClubStaffRequiredMixin, ListView):
             can_publish=can_publish_news(user, club),
             publish_form=NewsPublishForm(),
             photo_upload_form=NewsPhotoUploadForm(),
+            # Markdown source -> sanitised HTML, same renderer the public API/
+            # mobile's own article page use (news.services.render_body_html)
+            # -- see _news_preview.html's own comment for why this can't just
+            # render news_item.body directly.
+            article_body_nl=render_body_html(selected_item.body) if selected_item else "",
+            article_body_en=render_body_html(selected_item.effective_body_en) if selected_item else "",
             **kwargs,
         )
 
@@ -2287,6 +2293,8 @@ class NewsDetailView(ClubStaffRequiredMixin, DetailView):
             can_publish=can_publish_news(self.request.user, self.request.club),
             publish_form=NewsPublishForm(),
             photo_upload_form=NewsPhotoUploadForm(),
+            article_body_nl=render_body_html(self.object.body),
+            article_body_en=render_body_html(self.object.effective_body_en),
             **kwargs,
         )
 

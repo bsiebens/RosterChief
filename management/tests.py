@@ -4166,6 +4166,24 @@ class NewsManagementTests(ManagementTestBase):
         self.assertContains(response, "Second body.")
         self.assertNotContains(response, "First body.")
 
+    def test_the_preview_renders_markdown_as_html_not_raw_source(self):
+        News.objects.create(club=self.club, title="Formatted post", body="**Bold** and a [link](https://example.com).")
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("news_list")
+
+        self.assertContains(response, "<strong>Bold</strong>")
+        self.assertContains(response, 'href="https://example.com"')
+        self.assertNotContains(response, "**Bold**")
+
+    def test_the_detail_page_also_renders_markdown_as_html(self):
+        item = News.objects.create(club=self.club, title="Formatted post", body="**Bold** text.")
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("news_detail", item.pk)
+
+        self.assertContains(response, "<strong>Bold</strong>")
+
     def test_the_first_item_previews_by_default_when_none_is_selected(self):
         # News.Meta.ordering is "-created", so the most recently created row
         # (second) sorts first and is what should preview with no ?selected=.
@@ -4214,7 +4232,9 @@ class NewsManagementTests(ManagementTestBase):
         response = self.club_get("news_detail", item.pk)
 
         self.assertContains(response, "Season kickoff")
-        self.assertContains(response, "We&#x27;re starting the season.")
+        # Rendered through news.services.render_body_html (Markdown -> sanitised
+        # HTML), not Django's own auto-escaping -- a plain apostrophe, not &#x27;.
+        self.assertContains(response, "We're starting the season.")
 
     def test_detail_page_notes_a_missing_english_translation(self):
         # The NL/EN toggle is always present now (not conditional on a

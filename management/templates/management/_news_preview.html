@@ -75,12 +75,13 @@
             <div class="news-lang-content" data-lang-content="nl">
                 <h1 class="font-display text-3xl leading-[1.05] font-extrabold text-ink uppercase md:text-4xl">{{ news_item.title }}</h1>
                 <div class="my-3 h-[3px] w-14 bg-club"></div>
-                <p class="whitespace-pre-line text-[15px] leading-relaxed text-ink">{{ news_item.body }}</p>
+                {# article_body_nl/en: Markdown source -> sanitised HTML (news.services.render_body_html, same renderer the public API/mobile's own article page use) -- news_item.body/effective_body_en is the raw Markdown source, not something to render directly. #}
+                <div class="article-body">{{ article_body_nl|safe }}</div>
             </div>
             <div class="news-lang-content hidden" data-lang-content="en">
                 <h1 class="font-display text-3xl leading-[1.05] font-extrabold text-ink uppercase md:text-4xl">{{ news_item.effective_title_en }}</h1>
                 <div class="my-3 h-[3px] w-14 bg-club"></div>
-                <p class="whitespace-pre-line text-[15px] leading-relaxed text-ink">{{ news_item.effective_body_en }}</p>
+                <div class="article-body">{{ article_body_en|safe }}</div>
             </div>
 
             {% if news_item.created_by %}

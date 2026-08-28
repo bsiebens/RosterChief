@@ -2052,3 +2052,113 @@
         background: var(--color-dim);
     }
 }
+
+@layer components {
+    /* --- News article body (management/templates/management/_news_preview.html) ---------
+       News.body is Markdown, rendered to sanitised HTML server-side (news.services.
+       render_body_html) -- this styles the fixed tag set that renderer's own allow-list
+       actually emits (p, strong/em, a, ul/ol/li, blockquote, code/pre, h2-h4, img, hr).
+       Same rules as mobile.css's own copy of this block (mobile/templates/mobile/
+       news_detail.html) -- both stylesheets share --color-ink/-club-dark/-line/-muted/
+       -rule and --font-display/-mono under the same names, so this is a straight copy. */
+    .article-body {
+        font-size: 15px;
+        line-height: 1.6;
+        color: var(--color-ink);
+    }
+
+    .article-body p {
+        margin: 0 0 0.85em;
+    }
+
+    .article-body p:last-child {
+        margin-bottom: 0;
+    }
+
+    .article-body a {
+        color: var(--color-club-dark);
+        text-decoration: underline;
+    }
+
+    .article-body ul,
+    .article-body ol {
+        margin: 0 0 0.85em;
+        padding-left: 1.25em;
+    }
+
+    .article-body ul {
+        list-style: disc;
+    }
+
+    .article-body ol {
+        list-style: decimal;
+    }
+
+    .article-body li {
+        margin-bottom: 0.3em;
+    }
+
+    .article-body blockquote {
+        margin: 0 0 0.85em;
+        padding-left: 0.85em;
+        border-left: 3px solid var(--color-line);
+        color: var(--color-muted);
+    }
+
+    .article-body h2,
+    .article-body h3,
+    .article-body h4 {
+        font-family: var(--font-display);
+        font-weight: 800;
+        text-transform: uppercase;
+        color: var(--color-ink);
+        margin: 1.1em 0 0.5em;
+    }
+
+    .article-body h2 {
+        font-size: 1.25rem;
+    }
+
+    .article-body h3 {
+        font-size: 1.1rem;
+    }
+
+    .article-body h4 {
+        font-size: 1rem;
+    }
+
+    .article-body img {
+        max-width: 100%;
+        border-radius: 0.5rem;
+        margin: 0.5em 0;
+    }
+
+    .article-body code {
+        font-family: var(--font-mono);
+        font-size: 0.85em;
+        background: var(--color-rule);
+        padding: 0.1em 0.35em;
+        border-radius: 0.25rem;
+    }
+
+    .article-body pre {
+        font-family: var(--font-mono);
+        font-size: 0.85em;
+        background: var(--color-rule);
+        padding: 0.75em;
+        border-radius: 0.5rem;
+        overflow-x: auto;
+        margin: 0 0 0.85em;
+    }
+
+    .article-body pre code {
+        background: none;
+        padding: 0;
+    }
+
+    .article-body hr {
+        border: none;
+        border-top: 1px solid var(--color-line);
+        margin: 1.1em 0;
+    }
+}

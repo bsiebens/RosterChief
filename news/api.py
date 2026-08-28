@@ -34,6 +34,15 @@ class NewsPhotoOut(Schema):
     url: str
     is_main: bool
     ordering: int
+    #: Where the subject is, as a percent from the left/top of the *original*
+    #: image (NewsPhoto.focal_x/focal_y) -- 50/50 (dead centre) unless staff
+    #: set one via the "Focal point" picker. object_position is the same
+    #: point already formatted as a CSS object-position/background-position
+    #: value ("{x}% {y}%"), for a consumer that just wants to drop it
+    #: straight into a style attribute without doing that itself.
+    focal_x: int
+    focal_y: int
+    object_position: str
 
 
 class NewsItemOut(Schema):
@@ -85,7 +94,10 @@ def _to_news_item_out(item, request) -> NewsItemOut:
         body_en=render_body_html(item.effective_body_en),
         published_at=item.published_at,
         teams=[team.name for team in item.teams.all()],
-        photos=[NewsPhotoOut(url=request.build_absolute_uri(photo.image.url), is_main=photo.is_main, ordering=photo.ordering) for photo in item.photos.all()],
+        photos=[
+            NewsPhotoOut(url=request.build_absolute_uri(photo.image.url), is_main=photo.is_main, ordering=photo.ordering, focal_x=photo.focal_x, focal_y=photo.focal_y, object_position=photo.object_position)
+            for photo in item.photos.all()
+        ],
     )
 
 

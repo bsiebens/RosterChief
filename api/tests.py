@@ -87,6 +87,24 @@ class NewsApiTests(ApiTestBase):
         self.assertTrue(photo["url"].startswith("http://ajax-united.rosterchief.app/media/"))
         self.assertTrue(photo["is_main"])
 
+    def test_photos_carry_their_focal_point(self):
+        item = self.make_news()
+        NewsPhoto.objects.create(news_item=item, image="clubs/ajax-united/news/x/pic.jpg", is_main=True, focal_x=30, focal_y=70)
+
+        photo = self.api_get("/news/").json()["results"][0]["photos"][0]
+
+        self.assertEqual(photo["focal_x"], 30)
+        self.assertEqual(photo["focal_y"], 70)
+        self.assertEqual(photo["object_position"], "30% 70%")
+
+    def test_a_photos_focal_point_defaults_to_dead_centre(self):
+        item = self.make_news()
+        NewsPhoto.objects.create(news_item=item, image="clubs/ajax-united/news/x/pic.jpg", is_main=True)
+
+        photo = self.api_get("/news/").json()["results"][0]["photos"][0]
+
+        self.assertEqual(photo["object_position"], "50% 50%")
+
     def test_pagination_limit_and_offset(self):
         for i in range(3):
             self.make_news(title=f"Item {i}", published_at=timezone.now() - datetime.timedelta(hours=1, minutes=i))

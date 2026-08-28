@@ -1,8 +1,11 @@
 """Markdown rendering for News.body.
 
-Club staff author `body` as Markdown (see NewsForm's help text) -- the public
-API (news/api.py) renders it to HTML on the way out; the control panel's own
-preview shows the raw source as-authored, unrendered.
+Club staff author `body` as Markdown (see NewsForm's help text) -- rendered
+to HTML by render_body_html below everywhere it's actually shown: the
+public API (news/api.py), mobile's own article page, and the control
+panel's own preview (management/templates/management/_news_preview.html),
+so staff see the same result a reader would rather than raw Markdown
+source with its `**`/`#`/`[text](url)` syntax still showing.
 
 `nh3` (Rust/ammonia bindings) sanitizes the result: markdown.markdown() will
 happily pass through raw HTML embedded in the source, and body is authored by
