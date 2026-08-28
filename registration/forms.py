@@ -11,6 +11,15 @@ from .services.pricing import available_registration_products
 from .services.submission import EntryInput
 
 
+class RegistrationStatusDocumentForm(forms.Form):
+    """One upload on the status page (registration.views.RegistrationStatusView)
+    against one open, document-requiring OnboardingRequirement -- same bare
+    "just the file" shape as management.forms.RequirementCompletionForm's own
+    document field, just required here since the whole POST is the upload."""
+
+    document = forms.FileField(label=_("Document"), required=True)
+
+
 class RegistrationContactForm(forms.Form):
     """The "about you" half of the public registration page -- same
     ``lock_*_fields`` idea as members.forms.ParentClaimForm: a signed-in

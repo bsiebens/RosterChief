@@ -8,16 +8,22 @@ docstring for what happens from there -- straight into the existing Sign-up
 queue, no separate review gate of this app's own.
 """
 
-from django.shortcuts import redirect, render
+from django.http import Http404
+from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.translation import gettext_lazy as _
 from django.views import View
 
+from club.models import OnboardingRequirement
+from club.services.fees import remaining_balance
+from club.services.onboarding import checklist_for, mark_complete
 from controlpanel.messages import notify
 from members.models import Member
 from members.views import ClubScopedPublicMixin
 
-from .forms import RegistrationContactForm, RegistrationEntryFormSet, entries_from_formset
+from .forms import RegistrationContactForm, RegistrationEntryFormSet, RegistrationStatusDocumentForm, entries_from_formset
+from .models import RegistrationBatch, RegistrationDetails
 from .services import PricingError, RegistrationError, price_entries, resolve_chosen_season, resolve_registration_season, submit_registration, variant_registration_kinds
+from .services.notifications import send_registration_confirmation_email
 
 
 class RegistrationView(ClubScopedPublicMixin, View):
@@ -104,10 +110,74 @@ class RegistrationView(ClubScopedPublicMixin, View):
             contact = {"contact_first_name": member.first_name, "contact_last_name": member.last_name, "contact_email": member.contact_email, "contact_phone": contact.get("contact_phone", "")}
 
         try:
-            submit_registration(request.club, submitted_by_user=request.user if request.user.is_authenticated else None, entries=entries, **contact)
+            batch = submit_registration(request.club, submitted_by_user=request.user if request.user.is_authenticated else None, entries=entries, **contact)
         except RegistrationError as error:
             contact_form.add_error(None, str(error))
             return self.render_page(request, season, contact_form, entry_formset)
 
-        notify(request, f"s|{_('Registration received')}|{_('Thanks -- the club will review this and be in touch.')}")
-        return redirect("registration:register")
+        send_registration_confirmation_email(batch, request=request)
+        notify(request, f"s|{_('Registration received')}|{_('Thanks -- the club will review this and be in touch. A confirmation email is on its way with a link to check status.')}")
+        return redirect("registration:status", token=batch.status_token)
+
+
+class RegistrationStatusView(ClubScopedPublicMixin, View):
+    """The link registration.services.notifications.send_registration_confirmation_email
+    hands out -- unguessable-token access (RegistrationBatch.status_token,
+    same idea as mobile.models.CalendarFeedToken) rather than a login, since
+    whoever submitted the batch may have no account at all.
+
+    Shows where every entry in the batch stands (ClubMembership.status, fee
+    balance) and its onboarding checklist (club.services.onboarding.
+    checklist_for), with an upload form for any open, document-requiring
+    requirement -- feeding straight into the same checklist staff already
+    works from (management's own Documents tab), rather than a parallel
+    inbox somewhere. ``user=None`` on mark_complete below (its ``completed_by``
+    is nullable) is how staff can tell an item was self-uploaded rather than
+    verified by them -- still needs the deliberate Sign-up "Approve" step
+    club.services.onboarding.approve_one/approve_all_clean gate on to
+    actually activate a membership, so a self-upload alone can't skip that."""
+
+    template_name = "registration/status.html"
+
+    def get_batch(self, request, token):
+        return get_object_or_404(RegistrationBatch.objects.select_related("season"), club=request.club, status_token=token)
+
+    def get_membership_rows(self, batch):
+        memberships = list({details.membership for details in RegistrationDetails.objects.filter(batch=batch).select_related("membership__member")})
+        memberships.sort(key=lambda membership: membership.member.get_full_name())
+        rows = []
+        for membership in memberships:
+            rows.append(
+                {
+                    "membership": membership,
+                    "balance": remaining_balance(membership),
+                    "checklist": checklist_for(membership),
+                    "upload_form": RegistrationStatusDocumentForm(),
+                }
+            )
+        return rows
+
+    def get(self, request, *args, **kwargs):
+        batch = self.get_batch(request, kwargs["token"])
+        return render(request, self.template_name, {"batch": batch, "membership_rows": self.get_membership_rows(batch)})
+
+    def post(self, request, *args, **kwargs):
+        batch = self.get_batch(request, kwargs["token"])
+        membership_id = request.POST.get("membership")
+        requirement_id = request.POST.get("requirement")
+        # Both must belong to this batch/club -- a tampered POST can't reach
+        # another family's membership or another club's requirement through
+        # this token.
+        details = RegistrationDetails.objects.filter(batch=batch, membership_id=membership_id).select_related("membership").first()
+        requirement = OnboardingRequirement.objects.filter(club=request.club, pk=requirement_id, is_active=True, requires_document=True).first()
+        if details is None or requirement is None:
+            raise Http404
+
+        form = RegistrationStatusDocumentForm(request.POST, request.FILES)
+        if form.is_valid():
+            mark_complete(details.membership, requirement, user=None, document=form.cleaned_data["document"], note=_("Uploaded by the registrant via the status page."))
+            notify(request, f"s|{_('Document received')}|{_('“%(requirement)s” has been received.') % {'requirement': requirement.name}}")
+        else:
+            notify(request, f"e|{_('Upload failed')}|{_('Choose a file to upload.')}")
+
+        return redirect("registration:status", token=batch.status_token)

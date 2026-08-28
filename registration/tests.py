@@ -1,11 +1,13 @@
 import datetime
 from decimal import Decimal
 
+from django.core import mail
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
 from authentication.models import User
-from club.models import Club, ClubMembership, Season
+from club.models import Club, ClubMembership, MemberRequirementStatus, OnboardingRequirement, Season
 from club.services.fees import effective_fee_amount, record_payment, remaining_balance
 from members.models import Family, FamilyMembership, Member
 from shop.models import Product, ProductCategory, ProductRegistrantDiscountTier, ProductVariant
@@ -461,7 +463,8 @@ class RegistrationViewTests(TestCase):
 
         response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
 
-        self.assertRedirects(response, self._url())
+        batch = RegistrationBatch.objects.get()
+        self.assertRedirects(response, reverse("registration:status", kwargs={"token": batch.status_token}))
         child = Member.objects.get(first_name="Timmy", last_name="Tester")
         self.assertTrue(ClubMembership.objects.filter(club=self.club, member=child, season=self.season).exists())
 
@@ -482,8 +485,9 @@ class RegistrationViewTests(TestCase):
 
         response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
 
-        self.assertRedirects(response, self._url())
         self.assertEqual(RegistrationBatch.objects.count(), 1)
+        batch = RegistrationBatch.objects.get()
+        self.assertRedirects(response, reverse("registration:status", kwargs={"token": batch.status_token}))
         child = Member.objects.get(first_name="Timmy", last_name="Tester")
         membership = ClubMembership.objects.get(club=self.club, member=child, season=self.season)
         self.assertEqual(membership.status, ClubMembership.StatusChoices.PENDING)
@@ -504,7 +508,8 @@ class RegistrationViewTests(TestCase):
 
         response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
 
-        self.assertRedirects(response, self._url())
+        batch = RegistrationBatch.objects.get()
+        self.assertRedirects(response, reverse("registration:status", kwargs={"token": batch.status_token}))
         child = Member.objects.get(first_name="Timmy", last_name="Tester")
         details = RegistrationDetails.objects.get(membership__member=child)
         self.assertIsNone(details.requested_team)
@@ -547,3 +552,69 @@ class RegistrationViewTests(TestCase):
         batch = RegistrationBatch.objects.get()
         self.assertEqual(batch.submitted_by_user, user)
         self.assertEqual(Member.objects.filter(first_name="Pat", last_name="Parent").count(), 1)
+
+    def test_submitting_sends_a_confirmation_email_with_the_status_link(self):
+        data = self.contact_data() | self.formset_management() | self.entry_data()
+        data["action"] = "submit"
+
+        self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+        batch = RegistrationBatch.objects.get()
+        self.assertEqual(len(mail.outbox), 1)
+        sent = mail.outbox[0]
+        self.assertEqual(sent.to, ["pat@example.com"])
+        status_path = reverse("registration:status", kwargs={"token": batch.status_token})
+        self.assertIn(status_path, sent.body)
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class RegistrationStatusViewTests(TestCase):
+    """registration:status -- the unauthenticated, token-gated link the
+    confirmation email hands out (RegistrationStatusView)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        cls.season = make_season(cls.club)
+        cls.child = Member.objects.create(first_name="Timmy", last_name="Tester", date_of_birth=datetime.date(2016, 5, 1))
+        cls.membership = ClubMembership.objects.create(club=cls.club, member=cls.child, season=cls.season, status=ClubMembership.StatusChoices.PENDING, fee_amount=Decimal("80.00"))
+        cls.batch = RegistrationBatch.objects.create(club=cls.club, season=cls.season, contact_first_name="Pat", contact_last_name="Parent", contact_email="pat@example.com")
+        RegistrationDetails.objects.create(membership=cls.membership, batch=cls.batch, entry_kind=RegistrationDetails.EntryKind.PLAYER, product_variant=None, price=Decimal("80.00"))
+        cls.requirement = OnboardingRequirement.objects.create(club=cls.club, name="Medical certificate", requires_document=True)
+
+    def _url(self, token=None):
+        return reverse("registration:status", kwargs={"token": token or self.batch.status_token})
+
+    def test_an_unknown_token_404s(self):
+        response = self.client.get(self._url(token="not-a-real-token"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_shows_the_members_status_and_open_checklist(self):
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Timmy Tester")
+        self.assertContains(response, "Medical certificate")
+        self.assertContains(response, "80.00")
+
+    def test_uploading_a_document_marks_the_requirement_complete(self):
+        upload = SimpleUploadedFile("cert.pdf", b"file-bytes", content_type="application/pdf")
+
+        response = self.client.post(self._url(), {"membership": str(self.membership.pk), "requirement": str(self.requirement.pk), "document": upload}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertRedirects(response, self._url())
+        status = MemberRequirementStatus.objects.get(membership=self.membership, requirement=self.requirement)
+        self.assertTrue(status.is_complete)
+        self.assertIsNone(status.completed_by)
+        self.assertTrue(status.document.name)
+
+    def test_a_membership_outside_this_batch_cannot_be_targeted(self):
+        other_child = Member.objects.create(first_name="Alex", last_name="Outsider")
+        other_membership = ClubMembership.objects.create(club=self.club, member=other_child, season=self.season, status=ClubMembership.StatusChoices.PENDING)
+        upload = SimpleUploadedFile("cert.pdf", b"file-bytes", content_type="application/pdf")
+
+        response = self.client.post(self._url(), {"membership": str(other_membership.pk), "requirement": str(self.requirement.pk), "document": upload}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(MemberRequirementStatus.objects.filter(membership=other_membership).exists())

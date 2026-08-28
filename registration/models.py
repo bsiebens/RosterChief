@@ -1,3 +1,5 @@
+import secrets
+
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
@@ -9,6 +11,10 @@ from shop.models import ProductVariant
 from teams.models import Position, StaffAssignment, Team
 
 
+def _generate_status_token() -> str:
+    return secrets.token_urlsafe(32)
+
+
 class RegistrationBatch(ClubScopedModel):
     """One registration session -- a parent registering several kids at once,
     a single self-registration, or a re-registration for a new season.
@@ -18,10 +24,18 @@ class RegistrationBatch(ClubScopedModel):
     each entry becomes a real Member + ClubMembership(status=PENDING)
     immediately (registration.services.submission.submit_registration), and
     review from there on is the *existing* Sign-up queue
-    (club.services.onboarding), not a second gate this model would add."""
+    (club.services.onboarding), not a second gate this model would add.
+
+    ``status_token`` is the unguessable key behind the public status page
+    (registration.views.RegistrationStatusView) -- same secrets.token_urlsafe(32)
+    "possession of the link is the credential" idea as mobile.models.
+    CalendarFeedToken, since whoever submitted this may have no account at
+    all. The confirmation email (registration.services.notifications.
+    send_registration_confirmation_email) is what hands that link out."""
 
     season = models.ForeignKey(Season, on_delete=models.PROTECT, related_name="registration_batches", verbose_name=_("season"))
     submitted_by_user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, related_name="registration_batches", verbose_name=_("submitted by"), blank=True, null=True)
+    status_token = models.CharField(_("status token"), max_length=64, unique=True, editable=False, default=_generate_status_token)
 
     contact_first_name = models.CharField(_("contact first name"), max_length=150)
     contact_last_name = models.CharField(_("contact last name"), max_length=150)

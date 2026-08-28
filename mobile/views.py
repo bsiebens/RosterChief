@@ -41,6 +41,7 @@ from news.services import render_body_html
 from notifications.models import Notification
 from registration.forms import RegistrationEntryFormSet, entries_from_formset
 from registration.services import PricingError, RegistrationError, available_registration_products, price_entries, resolve_chosen_season, resolve_registration_season, submit_registration, variant_registration_kinds
+from registration.services.notifications import send_registration_confirmation_email
 from shop.models import Cart, CartItem, Order, Product, ProductCategory, Voucher
 from shop.services.checkout import CheckoutError, find_discount, place_order
 from shop.services.invoices import ShopInvoicePDFError, render_invoice_pdf
@@ -1152,11 +1153,12 @@ class ReRegisterView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         }
 
         try:
-            submit_registration(request.club, submitted_by_user=request.user, entries=entries, **contact)
+            batch = submit_registration(request.club, submitted_by_user=request.user, entries=entries, **contact)
         except RegistrationError as error:
             return self.render_page(season, entry_formset, season_error=str(error))
 
-        notify(request, f"s|{_('Registration received')}|{_('Thanks -- the club will review this and be in touch.')}")
+        send_registration_confirmation_email(batch, request=request)
+        notify(request, f"s|{_('Registration received')}|{_('Thanks -- the club will review this and be in touch. A confirmation email is on its way with a link to check status.')}")
         return HttpResponseRedirect(reverse("mobile:me"))
 
 
