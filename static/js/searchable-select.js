@@ -118,7 +118,11 @@
 
         const render = (query) => {
             const needle = query.trim().toLowerCase();
-            const candidates = isMultiple ? options.filter((option) => !option.selected) : options;
+            // option.hidden: a plain DOM property, not read once at enhance()
+            // time -- something else (registration-entry-rows.js's "Registering
+            // as" filtering) can toggle it on the live <option> elements after
+            // the fact, and this re-checks it on every render() call.
+            const candidates = (isMultiple ? options.filter((option) => !option.selected) : options).filter((option) => !option.hidden);
             const matches = needle ? candidates.filter((option) => option.text.toLowerCase().includes(needle)) : candidates;
 
             list.innerHTML = "";

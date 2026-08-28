@@ -17,7 +17,7 @@ from members.models import Member
 from members.views import ClubScopedPublicMixin
 
 from .forms import RegistrationContactForm, RegistrationEntryFormSet, entries_from_formset
-from .services import PricingError, RegistrationError, price_entries, resolve_chosen_season, resolve_registration_season, submit_registration
+from .services import PricingError, RegistrationError, price_entries, resolve_chosen_season, resolve_registration_season, submit_registration, variant_registration_kinds
 
 
 class RegistrationView(ClubScopedPublicMixin, View):
@@ -61,6 +61,7 @@ class RegistrationView(ClubScopedPublicMixin, View):
                 "registration_open": True,
                 "season": season,
                 "locked_member": self.get_contact_member(request),
+                "variant_registration_kinds": variant_registration_kinds(request.club, season),
             },
         )
 

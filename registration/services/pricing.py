@@ -35,7 +35,7 @@ from types import SimpleNamespace
 from django.utils import timezone
 
 from club.models import Season
-from shop.models import Product, ProductRegistrantDiscountTier
+from shop.models import Product, ProductRegistrantDiscountTier, ProductVariant
 from shop.services.pricing import discount_amount_for
 
 #: Registration -- and the discounts that go with it (ProductRegistrantDiscountTier,
@@ -64,6 +64,23 @@ def available_registration_products(club, season=None):
     if season is not None:
         qs = qs.filter(season=season)
     return qs.prefetch_related("variants").order_by("name")
+
+
+def variant_registration_kinds(club, season=None):
+    """``{str(variant_id): registration_kind}`` for every variant a
+    registration entry could currently choose (same scope as
+    RegistrationEntryRowForm's own product_variant queryset) --
+    registration_kind is "" for a variant whose product isn't tagged with
+    one of the two system categories (shop.models.ProductCategory.
+    RegistrationKind), meaning it's offered regardless of "Registering as".
+
+    Consumed as a json_script blob by register.html/reregister.html's own
+    extra_body script, which hides a row's non-matching product_variant
+    options once "Registering as" is chosen -- a UX narrowing only,
+    RegistrationEntryRowForm.clean is what actually enforces the match
+    server-side."""
+    variants = ProductVariant.objects.filter(product__in=available_registration_products(club, season=season), is_active=True).select_related("product__category")
+    return {str(variant.pk): (variant.product.category.registration_kind if variant.product.category_id else "") for variant in variants}
 
 
 def available_registration_seasons(club):

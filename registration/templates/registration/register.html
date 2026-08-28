@@ -49,6 +49,7 @@
             </form>
         </div>
     {% else %}
+        {{ variant_registration_kinds|json_script:"variant-registration-kinds" }}
         <form method="post" class="flex flex-col gap-4">
             {% csrf_token %}
             <input type="hidden" name="season" value="{{ season.pk }}">
@@ -98,6 +99,7 @@
                         data-contact-last-name-id="{{ form.contact_last_name.id_for_label }}"
                     {% endif %}
                     class="flex flex-col gap-3"
+                >
                     {% for entry_form in entry_formset %}
                         {% include "registration/_entry_row.html" with form=entry_form %}
                     {% endfor %}
@@ -150,42 +152,5 @@
 {% block extra_body %}
     <script src="{% static 'js/searchable-select.js' %}"></script>
     <script src="{% static 'js/bulk-add-rows.js' %}"></script>
-    <script>
-        // Checking "This is me" on a row fills its name/date-of-birth from
-        // whoever is actually filling in the form -- the real Member record
-        // when signed in (data-known-* on #bulk-add-rows), otherwise
-        // whatever's currently typed into the contact fields above (read
-        // live, not a page-load snapshot, since a name typed after the row
-        // was added must still count). Date of birth only fills in when
-        // it's actually known -- an anonymous visitor's contact section has
-        // no such field, so it's left for the registrant to type themselves.
-        // A change-event listener on the container (not per-row) so a row
-        // cloned later by bulk-add-rows.js is covered without needing its
-        // own wiring.
-        (() => {
-            const container = document.getElementById("bulk-add-rows");
-            if (!container) return;
-
-            const knownFirstName = container.dataset.knownFirstName;
-            const knownLastName = container.dataset.knownLastName;
-            const knownDateOfBirth = container.dataset.knownDateOfBirth || "";
-            const contactFirstNameField = container.dataset.contactFirstNameId ? document.getElementById(container.dataset.contactFirstNameId) : null;
-            const contactLastNameField = container.dataset.contactLastNameId ? document.getElementById(container.dataset.contactLastNameId) : null;
-
-            const populate = (row) => {
-                const firstName = knownFirstName || contactFirstNameField?.value || "";
-                const lastName = knownLastName || contactLastNameField?.value || "";
-                const firstNameField = row.querySelector('input[name$="-first_name"]');
-                const lastNameField = row.querySelector('input[name$="-last_name"]');
-                const dateOfBirthField = row.querySelector('input[name$="-date_of_birth"]');
-                if (firstNameField && firstName) firstNameField.value = firstName;
-                if (lastNameField && lastName) lastNameField.value = lastName;
-                if (dateOfBirthField && knownDateOfBirth) dateOfBirthField.value = knownDateOfBirth;
-            };
-
-            container.addEventListener("change", (event) => {
-                if (event.target.matches('input[name$="-is_contact"]') && event.target.checked) populate(event.target.closest(".bulk-add-row"));
-            });
-        })();
-    </script>
+    <script src="{% static 'js/registration-entry-rows.js' %}"></script>
 {% endblock extra_body %}

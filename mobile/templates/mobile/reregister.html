@@ -58,8 +58,10 @@
                 <div class="rounded-box border border-warn-border bg-warn-bg p-3.5 text-sm text-warn-deep">{{ error }}</div>
             {% endfor %}
 
+            {{ variant_registration_kinds|json_script:"variant-registration-kinds" }}
+            <div id="bulk-add-rows" class="flex flex-col gap-4">
             {% for person, row in person_rows %}
-                <div>
+                <div class="bulk-add-row">
                     <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{{ person.get_full_name }}</div>
                     <div class="m-card overflow-hidden">
                         {{ row.existing_member }}
@@ -91,7 +93,7 @@
             {% endfor %}
 
             {% if extra_row %}
-                <div>
+                <div class="bulk-add-row">
                     <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Someone new" %}</div>
                     <div class="m-card overflow-hidden">
                         <div class="p-3.5">
@@ -129,6 +131,7 @@
                     </div>
                 </div>
             {% endif %}
+            </div>
 
             {% if priced_entries %}
                 <div>
@@ -157,4 +160,5 @@
 
 {% block extra_body %}
     <script src="{% static 'js/searchable-select.js' %}"></script>
+    <script src="{% static 'js/registration-entry-rows.js' %}"></script>
 {% endblock extra_body %}
