@@ -145,6 +145,12 @@
                                             <td class="font-display text-sm font-extrabold text-ink uppercase">{% trans "Total" %}</td>
                                             <td class="text-right font-mono text-base font-extrabold tabular-nums text-ink">&euro; {{ priced_total|floatformat:2 }}</td>
                                         </tr>
+                                        {% if priced_early_total != priced_total %}
+                                            <tr>
+                                                <td class="text-sm text-muted">{% trans "If paid before the deadline(s) above" %}</td>
+                                                <td class="text-right font-mono text-sm tabular-nums text-muted">&euro; {{ priced_early_total|floatformat:2 }}</td>
+                                            </tr>
+                                        {% endif %}
                                     </tbody>
                                 </table>
                             </div>

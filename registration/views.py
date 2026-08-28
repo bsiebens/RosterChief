@@ -73,6 +73,12 @@ class RegistrationView(ClubScopedPublicMixin, View):
                 # module docstring), summed once so the receipt can show a
                 # total instead of only itemised lines.
                 "priced_total": sum((row["price"] - row["min_registrants_discount"] for _entry, row in priced_entries), Decimal("0")) if priced_entries else None,
+                # What the same total comes to if every entry with an early-
+                # payment deadline (Product.early_bird_discount_*) is paid by
+                # its own date -- 0 when nothing in the batch has one, so the
+                # template only shows this line (priced_total != priced_early_total)
+                # when it's actually worth showing.
+                "priced_early_total": sum((row["price"] - row["min_registrants_discount"] - row["deadline_discount"] for _entry, row in priced_entries), Decimal("0")) if priced_entries else None,
                 "registration_open": True,
                 "season": season,
                 "locked_member": self.get_contact_member(request),

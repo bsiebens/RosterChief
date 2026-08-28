@@ -1120,6 +1120,10 @@ class ReRegisterView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
                 # render_page's own comment for why min_registrants_discount
                 # specifically (not the conditional early-payment one).
                 priced_total=sum((row["price"] - row["min_registrants_discount"] for _entry, row in priced_entries), Decimal("0")) if priced_entries else None,
+                # See registration.views.RegistrationView.render_page's own
+                # comment -- what the total comes to if every entry with an
+                # early-payment deadline is paid by its own date.
+                priced_early_total=sum((row["price"] - row["min_registrants_discount"] - row["deadline_discount"] for _entry, row in priced_entries), Decimal("0")) if priced_entries else None,
                 season_error=season_error,
                 registration_open=True,
                 registration_season=season,

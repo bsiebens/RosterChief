@@ -184,11 +184,17 @@
                             <span class="text-[15px] font-bold text-ink">{% trans "Total" %}</span>
                             <span class="font-mono text-base font-bold tabular-nums text-ink">&euro; {{ priced_total|floatformat:2 }}</span>
                         </div>
+                        {% if priced_early_total != priced_total %}
+                            <div class="flex items-center justify-between px-3.5 pb-3">
+                                <span class="text-xs text-muted">{% trans "If paid before the deadline(s) above" %}</span>
+                                <span class="font-mono text-xs tabular-nums text-muted">&euro; {{ priced_early_total|floatformat:2 }}</span>
+                            </div>
+                        {% endif %}
                     </div>
                     <p class="mt-2 text-xs text-muted">{% trans "This is what's owed once the club confirms this -- payment happens separately, not on this page." %}</p>
                 </div>
                 <div class="flex gap-2">
-                    <button type="submit" name="action" value="edit" class="btn btn-outline h-11">{% trans "Back" %}</button>
+                    <button type="submit" name="action" value="edit" class="btn btn-secondary h-11">{% trans "Back" %}</button>
                     <button type="submit" name="action" value="submit" class="btn btn-primary h-11 flex-1">{% trans "Confirm & submit" %}</button>
                 </div>
             {% else %}

@@ -2569,6 +2569,25 @@ class ReRegisterViewTests(TestCase):
         self.assertContains(response, 'name="entries-0-existing_member"')
         self.assertContains(response, "hidden")
 
+    def test_the_receipt_shows_an_early_payment_total_when_a_deadline_applies(self):
+        self.product.early_bird_discount_enabled = True
+        self.product.early_bird_discount_deadline = datetime.date(2099, 1, 1)
+        self.product.early_bird_discount_type = "fixed_amount"
+        self.product.early_bird_discount_amount = Decimal("10.00")
+        self.product.save()
+        self.client.force_login(self.user)
+        data = self.formset_management(3)
+        data["entries-0-existing_member"] = str(self.member.pk)
+        data["entries-0-is_contact"] = "on"
+        data["entries-0-product_variant"] = str(self.u10.pk)
+        data["action"] = "preview"
+
+        response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, "If paid before the deadline")
+        self.assertEqual(response.context["priced_total"], Decimal("80.00"))
+        self.assertEqual(response.context["priced_early_total"], Decimal("70.00"))
+
     def test_back_restores_the_form_pre_populated_not_blank(self):
         self.client.force_login(self.user)
         data = self.formset_management(3)

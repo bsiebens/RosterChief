@@ -507,6 +507,30 @@ class RegistrationViewTests(TestCase):
         self.assertContains(response, "Fill in who")
         self.assertIsNone(response.context["priced_total"])
 
+    def test_the_price_panel_shows_an_early_payment_total_when_a_deadline_applies(self):
+        self.product.early_bird_discount_enabled = True
+        self.product.early_bird_discount_deadline = datetime.date(2099, 1, 1)
+        self.product.early_bird_discount_type = "fixed_amount"
+        self.product.early_bird_discount_amount = Decimal("10.00")
+        self.product.save()
+        data = self.contact_data() | self.formset_management() | self.entry_data()
+        data["action"] = "preview"
+
+        response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, "If paid before the deadline")
+        self.assertEqual(response.context["priced_total"], Decimal("80.00"))
+        self.assertEqual(response.context["priced_early_total"], Decimal("70.00"))
+
+    def test_no_early_payment_total_line_without_a_deadline(self):
+        data = self.contact_data() | self.formset_management() | self.entry_data()
+        data["action"] = "preview"
+
+        response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertNotContains(response, "If paid before the deadline")
+        self.assertEqual(response.context["priced_early_total"], response.context["priced_total"])
+
     def test_submitting_creates_the_registration(self):
         data = self.contact_data() | self.formset_management() | self.entry_data()
         data["action"] = "submit"
