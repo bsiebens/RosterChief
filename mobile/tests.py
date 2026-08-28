@@ -2564,6 +2564,21 @@ class ReRegisterViewTests(TestCase):
         self.assertContains(response, f'data-person="{self.member.pk}"')
         self.assertContains(response, f'data-person="{self.child.pk}"')
 
+    def test_the_add_another_registration_template_row_is_styled_the_same_as_the_default_row(self):
+        # entry_formset.empty_form is a fresh, unstyled Form instance on every
+        # access (BaseFormSet's own plain @property, not cached) -- the
+        # #subrow-template clone source must be a separately-styled instance
+        # or its "Registering as" select renders bare next to an
+        # already-styled default row.
+        self.client.force_login(self.user)
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, 'id="subrow-template"')
+        template_start = response.content.decode().index('id="subrow-template"')
+        template_html = response.content.decode()[template_start : template_start + 2000]
+        self.assertIn('name="entries-__prefix__-entry_kind" class="h-11', template_html)
+
     def test_an_additional_registration_row_for_an_already_registered_person_adds_to_the_fee(self):
         # Submitted via the "Add another registration" row under Noor's own
         # card (mobile-reregister-rows.js), not their default row -- proof

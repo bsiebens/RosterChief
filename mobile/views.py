@@ -1115,6 +1115,13 @@ class ReRegisterView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
                 registration_open=True,
                 registration_season=season,
                 variant_registration_kinds=variant_registration_kinds(self.request.club, season),
+                # entry_formset.empty_form is a plain @property (BaseFormSet's
+                # own, not cached) -- a fresh, unstyled Form instance every
+                # access, so #subrow-template (reregister.html) must be built
+                # from this one styled instance rather than the template
+                # calling .empty_form itself, or style_dynamic_form's work
+                # here would just be thrown away.
+                subrow_template_form=style_dynamic_form(entry_formset.empty_form),
             )
         )
 

@@ -148,7 +148,7 @@
             </div>
 
             <template id="subrow-template">
-                {% include "mobile/_reregister_subrow.html" with row=entry_formset.empty_form %}
+                {% include "mobile/_reregister_subrow.html" with row=subrow_template_form %}
             </template>
 
             {% if priced_entries %}

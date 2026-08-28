@@ -987,6 +987,41 @@
         background: #fff;
     }
 
+    /* static/js/searchable-select.js's dropdown -- the script is shared with
+       management.css/controlpanel.css (see either file's own copy of this
+       block) and hardcodes these daisyUI-era class names as its public API
+       rather than importing a stylesheet, so each app supplies its own
+       visual treatment under the same selectors instead of the script
+       picking a look. Without this, the list itself (.bg-base-100 above,
+       rounded-box/shadow from Tailwind's own generated utilities) looked
+       fine, but each option inside it rendered as a bare, unpadded <a> --
+       registration/templates/registration/_entry_row.html's "Registering
+       for" field, reused as-is on mobile/templates/mobile/reregister.html. */
+    .menu {
+        list-style: none;
+        margin: 0;
+        padding: 0.375rem;
+    }
+
+    .menu li a {
+        display: block;
+        padding: 0.5rem 0.75rem;
+        border-radius: 0.375rem;
+        font-family: var(--font-sans);
+        font-size: 0.875rem;
+        color: var(--color-ink);
+        cursor: pointer;
+    }
+
+    .menu li a:hover {
+        background: var(--color-rule);
+    }
+
+    .menu li a.menu-active {
+        background: var(--color-club);
+        color: #fff;
+    }
+
     /* Taller variant for a code-entry input that has fallen back out of the boxed
        .otp layout below (a recovery code is longer than the boxes fit). Same pair as
        management.css's own copy -- see that file's .otp comment for why the real

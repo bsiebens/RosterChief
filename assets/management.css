@@ -1046,9 +1046,9 @@
     }
 
     /* static/js/searchable-select.js's dropdown -- the script is shared with controlpanel.css
-       (see that file's own copy of this block) and hardcodes these daisyUI-era class names as
-       its public API rather than importing a stylesheet, so each app supplies its own visual
-       treatment under the same selectors instead of the script picking a look. */
+       and mobile.css (see either file's own copy of this block) and hardcodes these daisyUI-era
+       class names as its public API rather than importing a stylesheet, so each app supplies its
+       own visual treatment under the same selectors instead of the script picking a look. */
     .bg-base-100 {
         background: #fff;
     }
