@@ -16,7 +16,8 @@
     </div>
     <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
         {% form_field form.date_of_birth %}
-        {% form_field form.is_contact %}
+        {# Inline checkbox + label (not a header label above an orphaned box) -- help_text is what field.html renders beside a checkbox, so the label swaps in as that instead of its own row. #}
+        <div class="flex items-center">{% form_field form.is_contact show_label=False help_text=form.is_contact.label %}</div>
     </div>
     <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
         {% form_field form.entry_kind %}
@@ -24,6 +25,7 @@
     </div>
     <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
         {% form_field form.requested_team %}
-        {% form_field form.requested_position %}
+        {# Volunteer-only -- entries.js (register.html) hides this whenever "Registering as" isn't "volunteer", so a player's row doesn't show an irrelevant field. #}
+        <div data-role="position-field">{% form_field form.requested_position %}</div>
     </div>
 </div>

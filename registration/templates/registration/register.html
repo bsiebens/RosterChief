@@ -15,7 +15,14 @@
 {% block content %}
     <div class="mb-5">
         <h1 class="font-display text-3xl font-extrabold text-ink uppercase">{% blocktrans with club=club.name %}Register at {{ club }}{% endblocktrans %}</h1>
-        {% if registration_open %}
+        {% if season %}
+            {# The clear "which season am I registering for" marker the rest of the page's field choices (product_variant, teams) are scoped to -- registration.services.pricing.resolve_chosen_season. #}
+            <p class="mt-1 flex items-center gap-1.5 text-sm text-muted">
+                {% lucide "calendar" size=15 class="shrink-0 text-club" %}
+                {% blocktrans with season=season.name %}Registering for the {{ season }} season{% endblocktrans %}
+            </p>
+        {% endif %}
+        {% if registration_open and not needs_season_choice %}
             <p class="mt-1 text-sm text-muted">{% trans "Register yourself, or one or more children, as a player or a volunteer (coach, team manager, referee, ...). The club will review this before it's final." %}</p>
         {% endif %}
     </div>
@@ -24,9 +31,26 @@
         <div class="card card-body">
             <p class="text-sm text-muted">{% trans "Registration isn't open right now -- check back soon, or get in touch with the club." %}</p>
         </div>
+    {% elif needs_season_choice %}
+        {# More than one registration window is open at once (e.g. late sign-ups for the outgoing season alongside the new one) -- pick one before anything else can be shown, so a batch can never mix products from two different seasons. #}
+        <div class="card card-body">
+            <h2 class="card-title">{% trans "Which season?" %}</h2>
+            <p class="text-sm text-muted">{% trans "Registration is currently open for more than one season -- pick which one this is for." %}</p>
+            <form method="get" class="flex flex-wrap items-end gap-3">
+                <div class="w-56">
+                    <select name="season" class="select w-full">
+                        {% for choice in available_seasons %}
+                            <option value="{{ choice.pk }}">{{ choice.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <button class="btn btn-primary gap-2" type="submit">{% trans "Continue" %}</button>
+            </form>
+        </div>
     {% else %}
         <form method="post" class="flex flex-col gap-4">
             {% csrf_token %}
+            <input type="hidden" name="season" value="{{ season.pk }}">
 
             {% for error in form.non_field_errors %}
                 <div class="alert alert-error" role="alert">{% lucide "circle-x" size=18 %} <span>{{ error }}</span></div>
@@ -112,4 +136,30 @@
 {% block extra_body %}
     <script src="{% static 'js/searchable-select.js' %}"></script>
     <script src="{% static 'js/bulk-add-rows.js' %}"></script>
+    <script>
+        // "Role" only ever means anything for a volunteer entry -- hidden
+        // for a player row rather than shown-but-irrelevant, same "hide,
+        // don't disable" idiom as management/product_form.html's own
+        // product-type-driven toggles. A change-event listener on the
+        // container (not per-row) so a row cloned later by bulk-add-rows.js
+        // is covered without needing its own wiring -- its entry_kind
+        // starts on "player" by default, matching the already-hidden state
+        // a fresh row renders with.
+        (() => {
+            const container = document.getElementById("bulk-add-rows");
+            if (!container) return;
+
+            const sync = (row) => {
+                const kindSelect = row.querySelector('select[name$="-entry_kind"]');
+                const positionField = row.querySelector('[data-role="position-field"]');
+                if (!kindSelect || !positionField) return;
+                positionField.classList.toggle("hidden", kindSelect.value !== "volunteer");
+            };
+
+            container.querySelectorAll(".bulk-add-row").forEach(sync);
+            container.addEventListener("change", (event) => {
+                if (event.target.matches('select[name$="-entry_kind"]')) sync(event.target.closest(".bulk-add-row"));
+            });
+        })();
+    </script>
 {% endblock extra_body %}

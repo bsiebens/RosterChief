@@ -24,9 +24,30 @@
             <p class="font-display text-lg font-extrabold text-ink uppercase">{% trans "Not open yet" %}</p>
             <p class="mt-1 text-sm text-muted">{% trans "Registration isn't open right now -- check back soon." %}</p>
         </div>
+    {% elif needs_season_choice %}
+        {# More than one registration window is open at once -- pick one before anything else shows, so a batch can never mix products from two different seasons. #}
+        <div class="m-card p-4">
+            <p class="text-[15px] font-semibold text-ink">{% trans "Which season?" %}</p>
+            <p class="mt-1 text-sm text-muted">{% trans "Registration is currently open for more than one season -- pick which one this is for." %}</p>
+            <form method="get" class="mt-3 flex flex-col gap-3">
+                <select name="season" class="h-11 w-full rounded-lg border border-stroke bg-paper px-3 text-[15px] text-ink focus:border-ink focus:outline-none">
+                    {% for choice in available_seasons %}
+                        <option value="{{ choice.pk }}">{{ choice.name }}</option>
+                    {% endfor %}
+                </select>
+                <button type="submit" class="btn btn-primary h-11">{% trans "Continue" %}</button>
+            </form>
+        </div>
     {% else %}
+        {% if registration_season %}
+            <div class="flex items-center gap-1.5 text-sm text-muted">
+                {% lucide "calendar" size=15 class="shrink-0 text-club" %}
+                {% blocktrans with season=registration_season.name %}Registering for the {{ season }} season{% endblocktrans %}
+            </div>
+        {% endif %}
         <form method="post" class="flex flex-col gap-4" hx-boost="false">
             {% csrf_token %}
+            <input type="hidden" name="season" value="{{ registration_season.pk }}">
             {{ entry_formset.management_form }}
 
             {% if season_error %}
@@ -42,8 +63,10 @@
                     <div class="m-card overflow-hidden">
                         {{ row.existing_member }}
                         <div class="p-3.5">
-                            <label class="mb-1 block text-xs text-muted" for="{{ row.is_contact.id_for_label }}">{% trans "Include this person" %}</label>
-                            {{ row.is_contact }}
+                            <label class="flex items-center gap-2.5 text-[15px] text-ink" for="{{ row.is_contact.id_for_label }}">
+                                {{ row.is_contact }}
+                                {% trans "Include this person" %}
+                            </label>
                         </div>
                         <div class="h-px bg-rule"></div>
                         <div class="p-3.5">

@@ -2493,6 +2493,28 @@ class ReRegisterViewTests(TestCase):
 
         self.assertContains(response, "isn't open right now")
 
+    def test_the_single_available_season_shows_clearly_and_is_auto_chosen(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, self.season.name)
+        self.assertNotContains(response, "Which season?")
+        self.assertEqual(response.context["registration_season"], self.season)
+
+    def test_two_open_seasons_shows_a_picker_instead_of_the_form(self):
+        today = timezone.localdate()
+        other_season = Season.objects.create(club=self.club, start_date=today + datetime.timedelta(days=301), end_date=today + datetime.timedelta(days=600))
+        other_product = Product.objects.create(club=self.club, name="Player Registration 27-28", product_type=Product.ProductType.MEMBERSHIP, season=other_season, price=Decimal("100.00"))
+        ProductVariant.objects.create(product=other_product, name="U10", price=Decimal("85.00"))
+        self.client.force_login(self.user)
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, "Which season?")
+        self.assertNotContains(response, 'name="entries-TOTAL_FORMS"')
+
     def test_calculating_the_price_does_not_create_any_records(self):
         self.client.force_login(self.user)
         data = self.formset_management(3)

@@ -56,8 +56,8 @@ class RegistrationDetails(UUIDModel):
     club.models.FeePayment."""
 
     class EntryKind(models.TextChoices):
-        PLAYER = "player", _("player")
-        VOLUNTEER = "volunteer", _("volunteer")
+        PLAYER = "player", _("Player")
+        VOLUNTEER = "volunteer", _("Volunteer")
 
     membership = models.OneToOneField(ClubMembership, on_delete=models.CASCADE, related_name="registration_details", verbose_name=_("membership"))
     batch = models.ForeignKey(RegistrationBatch, on_delete=models.CASCADE, related_name="entries", verbose_name=_("batch"))

@@ -39,7 +39,7 @@ from news.models import News
 from news.services import render_body_html
 from notifications.models import Notification
 from registration.forms import RegistrationEntryFormSet, entries_from_formset
-from registration.services import PricingError, RegistrationError, available_registration_products, price_entries, resolve_registration_season, submit_registration
+from registration.services import PricingError, RegistrationError, available_registration_products, price_entries, resolve_chosen_season, resolve_registration_season, submit_registration
 from shop.models import Cart, CartItem, Order, Product, ProductCategory, Voucher
 from shop.services.checkout import CheckoutError, find_discount, place_order
 from shop.services.invoices import ShopInvoicePDFError, render_invoice_pdf
@@ -1050,14 +1050,18 @@ class ReRegisterView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
     screen_title = _("Register")
     active_tab = "me"
 
+    def get_season(self, request, data=None):
+        source = data if data is not None else request.GET
+        return resolve_chosen_season(request.club, source.get("season"))
+
     def get_initial_entries(self):
         return [
             {"existing_member": person.pk, "first_name": person.first_name, "last_name": person.last_name, "date_of_birth": person.date_of_birth, "is_contact": self.me is not None and person.pk == self.me.pk}
             for person in self.managed_people
         ]
 
-    def get_formset(self, data=None):
-        kwargs = {"club": self.request.club, "people": self.managed_people, "prefix": "entries"}
+    def get_formset(self, season, data=None):
+        kwargs = {"club": self.request.club, "people": self.managed_people, "season": season, "prefix": "entries"}
         if data is None:
             kwargs["initial"] = self.get_initial_entries()
         formset = RegistrationEntryFormSet(data, **kwargs)
@@ -1065,8 +1069,10 @@ class ReRegisterView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
             style_dynamic_form(row)
         return formset
 
-    def render_page(self, entry_formset, priced_entries=None, season_error=None):
-        registration_open = available_registration_products(self.request.club).exists()
+    def render_season_picker(self, available_seasons):
+        return self.render_to_response(self.get_context_data(registration_open=bool(available_seasons), needs_season_choice=True, available_seasons=available_seasons))
+
+    def render_page(self, season, entry_formset, priced_entries=None, season_error=None):
         # The formset's first len(managed_people) rows are pre-seeded with an
         # existing_member each (get_initial_entries) -- shown as a fixed,
         # read-only-identity row per person; the one trailing "extra" row
@@ -1076,28 +1082,46 @@ class ReRegisterView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         extra_row = entry_formset.forms[len(self.managed_people)] if len(entry_formset.forms) > len(self.managed_people) else None
         return self.render_to_response(
             self.get_context_data(
-                entry_formset=entry_formset, person_rows=person_rows, extra_row=extra_row, priced_entries=priced_entries, season_error=season_error, registration_open=registration_open
+                # registration_season, not season -- PersonScopeMixin.get_context_data
+                # already injects season=current_season(club) itself, a
+                # different thing (today's season, not necessarily the one
+                # this registration targets) that a same-named kwarg here
+                # would collide with.
+                entry_formset=entry_formset,
+                person_rows=person_rows,
+                extra_row=extra_row,
+                priced_entries=priced_entries,
+                season_error=season_error,
+                registration_open=True,
+                registration_season=season,
             )
         )
 
     def get(self, request, *args, **kwargs):
-        return self.render_page(self.get_formset())
+        season, available_seasons = self.get_season(request)
+        if season is None:
+            return self.render_season_picker(available_seasons)
+        return self.render_page(season, self.get_formset(season))
 
     def post(self, request, *args, **kwargs):
-        entry_formset = self.get_formset(request.POST)
+        season, available_seasons = self.get_season(request, data=request.POST)
+        if season is None:
+            return self.render_season_picker(available_seasons)
+
+        entry_formset = self.get_formset(season, request.POST)
         if not entry_formset.is_valid():
-            return self.render_page(entry_formset)
+            return self.render_page(season, entry_formset)
 
         entries = entries_from_formset(entry_formset)
         try:
             resolve_registration_season([entry.product_variant for entry in entries])
         except PricingError as error:
-            return self.render_page(entry_formset, season_error=str(error))
+            return self.render_page(season, entry_formset, season_error=str(error))
 
         priced_rows = list(zip(entries, price_entries([entry.product_variant for entry in entries]), strict=True))
 
         if request.POST.get("action") != "submit":
-            return self.render_page(entry_formset, priced_entries=priced_rows)
+            return self.render_page(season, entry_formset, priced_entries=priced_rows)
 
         contact_member = self.me or (entries[0].existing_member if entries and entries[0].existing_member else None)
         contact = {
@@ -1110,7 +1134,7 @@ class ReRegisterView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         try:
             submit_registration(request.club, submitted_by_user=request.user, entries=entries, **contact)
         except RegistrationError as error:
-            return self.render_page(entry_formset, season_error=str(error))
+            return self.render_page(season, entry_formset, season_error=str(error))
 
         notify(request, f"s|{_('Registration received')}|{_('Thanks -- the club will review this and be in touch.')}")
         return HttpResponseRedirect(reverse("mobile:me"))

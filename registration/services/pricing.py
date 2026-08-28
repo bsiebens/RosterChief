@@ -34,6 +34,7 @@ from types import SimpleNamespace
 
 from django.utils import timezone
 
+from club.models import Season
 from shop.models import Product, ProductRegistrantDiscountTier
 from shop.services.pricing import discount_amount_for
 
@@ -44,7 +45,7 @@ from shop.services.pricing import discount_amount_for
 REGISTRATION_PRODUCT_TYPES = (Product.ProductType.MEMBERSHIP, Product.ProductType.EVENT_FEE)
 
 
-def available_registration_products(club):
+def available_registration_products(club, season=None):
     """Active MEMBERSHIP/EVENT_FEE products a registration can be priced
     against -- what staff configures via the ordinary product management UI
     (ProductForm). A product whose own season has already ended is excluded
@@ -52,9 +53,45 @@ def available_registration_products(club):
     against it (management.forms.ProductForm's own season queryset applies
     the same "current + upcoming only" rule when staff picks it in the
     first place). A season-less product is left alone -- resolve_registration_season
-    already rejects it for a different reason (nothing to resolve)."""
+    already rejects it for a different reason (nothing to resolve).
+
+    ``season``, when given, narrows this to just that season's own products
+    -- what a registration entry's own product_variant choices are scoped
+    to once resolve_chosen_season has settled on one, so a batch spanning
+    two overlapping registration windows can't be built by accident."""
     today = timezone.localdate()
-    return Product.objects.filter(club=club, product_type__in=REGISTRATION_PRODUCT_TYPES, is_active=True).exclude(season__end_date__lt=today).prefetch_related("variants").order_by("name")
+    qs = Product.objects.filter(club=club, product_type__in=REGISTRATION_PRODUCT_TYPES, is_active=True).exclude(season__end_date__lt=today)
+    if season is not None:
+        qs = qs.filter(season=season)
+    return qs.prefetch_related("variants").order_by("name")
+
+
+def available_registration_seasons(club):
+    """Every distinct season available_registration_products(club) currently
+    spans, soonest first -- usually exactly one. More than one means two
+    registration windows are open at once (e.g. late sign-ups for the
+    outgoing season alongside the new one already open); resolve_chosen_season
+    is what makes the registrant pick between them rather than letting a
+    batch silently mix products from two different seasons."""
+    season_ids = available_registration_products(club).values_list("season_id", flat=True)
+    return Season.objects.filter(pk__in=season_ids).order_by("start_date")
+
+
+def resolve_chosen_season(club, requested_season_id=None):
+    """``(season, available_seasons)`` for a registration in progress.
+    ``season`` is the one actually in effect: ``requested_season_id`` if
+    it's a genuine choice, else the sole option if there's only one, else
+    ``None`` -- the caller (registration.views.RegistrationView/mobile.
+    views.ReRegisterView) must then ask the registrant to pick one before
+    showing the rest of the form, rather than silently guessing."""
+    available = list(available_registration_seasons(club))
+    if requested_season_id:
+        season = next((season for season in available if str(season.pk) == str(requested_season_id)), None)
+        if season is not None:
+            return season, available
+    if len(available) == 1:
+        return available[0], available
+    return None, available
 
 
 class PricingError(Exception):

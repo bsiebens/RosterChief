@@ -389,6 +389,50 @@ class RegistrationViewTests(TestCase):
 
         self.assertContains(response, "isn't open right now")
 
+    def test_the_single_available_season_shows_clearly_and_is_auto_chosen(self):
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, self.season.name)
+        self.assertNotContains(response, "Which season?")
+        self.assertEqual(response.context["season"], self.season)
+
+    def test_two_open_seasons_shows_a_picker_instead_of_the_form(self):
+        other_season = make_season(self.club, start=datetime.date(2027, 8, 1), end=datetime.date(2028, 6, 30))
+        other_product = Product.objects.create(club=self.club, name="Player Registration 27-28", product_type=Product.ProductType.MEMBERSHIP, season=other_season, price=Decimal("100.00"))
+        ProductVariant.objects.create(product=other_product, name="U10", price=Decimal("85.00"))
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, "Which season?")
+        self.assertNotContains(response, 'name="entries-TOTAL_FORMS"')
+        self.assertEqual(set(response.context["available_seasons"]), {self.season, other_season})
+
+    def test_picking_a_season_scopes_the_variant_choices(self):
+        other_season = make_season(self.club, start=datetime.date(2027, 8, 1), end=datetime.date(2028, 6, 30))
+        other_product = Product.objects.create(club=self.club, name="Player Registration 27-28", product_type=Product.ProductType.MEMBERSHIP, season=other_season, price=Decimal("100.00"))
+        other_variant = ProductVariant.objects.create(product=other_product, name="U10", price=Decimal("85.00"))
+
+        response = self.client.get(self._url(), {"season": str(self.season.pk)}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["season"], self.season)
+        variant_field = response.context["entry_formset"].forms[0].fields["product_variant"]
+        self.assertIn(self.u10, variant_field.queryset)
+        self.assertNotIn(other_variant, variant_field.queryset)
+
+    def test_submitting_with_two_open_seasons_uses_the_hidden_season_field(self):
+        other_season = make_season(self.club, start=datetime.date(2027, 8, 1), end=datetime.date(2028, 6, 30))
+        other_product = Product.objects.create(club=self.club, name="Player Registration 27-28", product_type=Product.ProductType.MEMBERSHIP, season=other_season, price=Decimal("100.00"))
+        ProductVariant.objects.create(product=other_product, name="U10", price=Decimal("85.00"))
+        data = self.contact_data() | self.formset_management() | self.entry_data() | {"season": str(self.season.pk), "action": "submit"}
+
+        response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertRedirects(response, self._url())
+        child = Member.objects.get(first_name="Timmy", last_name="Tester")
+        self.assertTrue(ClubMembership.objects.filter(club=self.club, member=child, season=self.season).exists())
+
     def test_calculating_the_price_does_not_create_any_records(self):
         data = self.contact_data() | self.formset_management() | self.entry_data()
         data["action"] = "preview"

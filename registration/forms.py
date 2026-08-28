@@ -57,12 +57,16 @@ class RegistrationEntryRowForm(forms.Form):
     requested_position = forms.ModelChoiceField(label=_("Role (optional, volunteers only)"), queryset=Position.objects.none(), required=False, widget=forms.Select(attrs={"data-searchable": "true"}))
     product_variant = forms.ModelChoiceField(label=_("Registering for"), queryset=ProductVariant.objects.none(), required=False, widget=forms.Select(attrs={"data-searchable": "true", "data-search-placeholder": _("Type to search...")}))
 
-    def __init__(self, *args, club=None, people=None, **kwargs):
+    def __init__(self, *args, club=None, people=None, season=None, **kwargs):
         super().__init__(*args, **kwargs)
         if club is not None:
             self.fields["requested_team"].queryset = Team.objects.filter(club=club).order_by("name")
             self.fields["requested_position"].queryset = Position.objects.filter(club=club, staff_position=True).order_by("name")
-            variants = ProductVariant.objects.filter(product__in=available_registration_products(club), is_active=True).select_related("product").order_by("product__name", "name")
+            # Scoped to the one season this whole registration targets (once
+            # known -- see registration.services.pricing.resolve_chosen_season)
+            # so a batch can't be built mixing products from two different,
+            # simultaneously-open registration windows.
+            variants = ProductVariant.objects.filter(product__in=available_registration_products(club, season=season), is_active=True).select_related("product").order_by("product__name", "name")
             self.fields["product_variant"].queryset = variants
             self.fields["product_variant"].label_from_instance = lambda variant: f"{variant.product.name} — {variant.name} (€{variant.effective_price})"
         if people is not None:
@@ -85,15 +89,17 @@ class RegistrationEntryRowForm(forms.Form):
 
 
 class BaseRegistrationEntryFormSet(forms.BaseFormSet):
-    def __init__(self, *args, club=None, people=None, **kwargs):
+    def __init__(self, *args, club=None, people=None, season=None, **kwargs):
         self.club = club
         self.people = people
+        self.season = season
         super().__init__(*args, **kwargs)
 
     def get_form_kwargs(self, index):
         kwargs = super().get_form_kwargs(index)
         kwargs["club"] = self.club
         kwargs["people"] = self.people
+        kwargs["season"] = self.season
         return kwargs
 
     def non_blank_forms(self):
