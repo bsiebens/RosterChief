@@ -8707,6 +8707,13 @@ class ProductRegistrantDiscountTierManagementTests(ShopTestBase):
         self.assertEqual(product.registrant_discount_tiers.count(), 2)
         self.assertEqual(product.registrant_discount_tiers.get(min_registrants=4).discount_amount, Decimal("10.00"))
 
+    def test_the_registrant_discount_scope_dropdown_has_no_blank_option(self):
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_get("product_create")
+
+        self.assertEqual(response.context["form"].fields["registrant_discount_scope"].choices, Product.RegistrantDiscountScope.choices)
+
     def test_registrant_discount_scope_defaults_to_per_person(self):
         self.client.force_login(self.make_shop_manager())
         data = self.base_data()

@@ -1064,6 +1064,13 @@ class ProductForm(forms.ModelForm):
         # "Season 2026-2027", not Season.name's short "26-27" -- same full-year
         # wording as the registration pages' own season labels.
         self.fields["season"].label_from_instance = lambda season: _("Season %(start)s-%(end)s") % {"start": season.start_date.year, "end": season.end_date.year}
+        # blank=True (Product.registrant_discount_scope) is only there so a
+        # POST that omits this field entirely still validates -- not so the
+        # dropdown itself should offer a meaningless blank choice alongside
+        # two real, mutually exclusive options. Overriding .choices drops
+        # the blank entry ModelForm's field-building otherwise prepends;
+        # PER_PERSON (the model's own default) is what a fresh form shows.
+        self.fields["registrant_discount_scope"].choices = Product.RegistrantDiscountScope.choices
 
 
 class ProductVariantForm(forms.ModelForm):
