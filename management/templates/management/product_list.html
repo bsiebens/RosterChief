@@ -112,6 +112,7 @@
                     <th>{% trans "Name" %}</th>
                     <th>{% trans "Category" %}</th>
                     <th>{% trans "Type" %}</th>
+                    <th>{% trans "Season" %}</th>
                     <th>{% trans "Price" %}</th>
                     <th>{% trans "Sold" %}</th>
                     <th>{% trans "Status" %}</th>
@@ -129,6 +130,9 @@
                         <td><a class="link link-hover font-semibold" href="{% url 'management:product_update' product.pk %}">{{ product.name }}</a></td>
                         <td class="text-muted">{{ product.category.name|default:"—" }}</td>
                         <td class="text-muted">{{ product.get_product_type_display }}</td>
+                        <td class="font-mono text-xs text-muted">
+                            {% if product.product_type == "membership" %}{{ product.season.name|default:"—" }}{% else %}—{% endif %}
+                        </td>
                         <td class="font-mono text-xs tabular-nums">&euro; {{ product.price }}</td>
                         <td class="font-mono text-xs tabular-nums text-muted">{{ product.sold_count }}</td>
                         <td>
@@ -152,7 +156,7 @@
                     </tr>
                 {% empty %}
                     <tr>
-                        <td colspan="8" class="text-center text-dim">{% trans "No products yet." %}</td>
+                        <td colspan="9" class="text-center text-dim">{% trans "No products yet." %}</td>
                     </tr>
                 {% endfor %}
             </tbody>

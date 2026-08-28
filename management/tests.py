@@ -8459,6 +8459,28 @@ class ProductManagementTests(ShopTestBase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Home Jersey")
 
+    def test_a_membership_products_season_shows_on_the_list(self):
+        self.product.product_type = Product.ProductType.MEMBERSHIP
+        self.product.season = self.season
+        self.product.save(update_fields=["product_type", "season"])
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_get("product_list")
+
+        self.assertContains(response, self.season.name)
+
+    def test_a_non_membership_products_season_is_not_shown(self):
+        # Product.season can technically still be set on a non-membership
+        # row (e.g. leftover from before the type was changed) -- the list
+        # should still read as "not applicable" for it, not show stale data.
+        self.product.season = self.season
+        self.product.save(update_fields=["season"])
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_get("product_list")
+
+        self.assertNotContains(response, self.season.name)
+
     def test_plain_staff_cannot_view_the_product_list(self):
         self.client.force_login(self.make_plain_staff())
 

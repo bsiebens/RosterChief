@@ -3563,7 +3563,7 @@ class ProductListView(ShopManagerRequiredMixin, ListView):
     context_object_name = "products"
 
     def get_queryset(self):
-        return Product.objects.filter(club=self.request.club).select_related("category")
+        return Product.objects.filter(club=self.request.club).select_related("category", "season")
 
     def get_context_data(self, **kwargs):
         categories = list(ProductCategory.objects.filter(club=self.request.club))
