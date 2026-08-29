@@ -27,7 +27,12 @@
         {% for row in membership_rows %}
             <div class="card card-body">
                 <div class="flex flex-wrap items-center justify-between gap-2">
-                    <h2 class="card-title">{{ row.membership.member.get_full_name }}</h2>
+                    <div class="flex flex-wrap items-center gap-2.5">
+                        <h2 class="card-title">{{ row.membership.member.get_full_name }}</h2>
+                        {% if row.membership.status != "cancelled" %}
+                            <button type="button" class="btn btn-ghost btn-xs gap-1 text-club" onclick="document.getElementById('{{ row.membership.pk|dom_id:"cancel_modal" }}').showModal()">{% lucide "x-circle" size=13 %} {% trans "Cancel registration" %}</button>
+                        {% endif %}
+                    </div>
                     {% if row.membership.status == "active" %}
                         <span class="badge badge-success">{% trans "Active" %}</span>
                     {% elif row.membership.status == "pending" %}
@@ -82,4 +87,13 @@
             </div>
         {% endfor %}
     </div>
+
+    {% trans "Cancel registration" as confirm_cancel_label %}
+    {% for row in membership_rows %}
+        {% if row.membership.status != "cancelled" %}
+            {% blocktrans asvar cancel_body with name=row.membership.member %}Cancel the registration for {{ name }}? This cannot be undone.{% endblocktrans %}
+            {% url 'registration:cancel' batch.status_token row.membership.pk as cancel_url %}
+            {% include "controlpanel/_confirm_modal.html" with modal_id=row.membership.pk|dom_id:"cancel_modal" title=confirm_cancel_label body=cancel_body action_url=cancel_url submit_label=confirm_cancel_label submit_icon="x-circle" %}
+        {% endif %}
+    {% endfor %}
 {% endblock content %}

@@ -830,6 +830,53 @@ class RegistrationStatusViewTests(TestCase):
 
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class RegistrationCancelViewTests(TestCase):
+    """registration:cancel -- withdrawing a registration from the status
+    page, the family-facing half of club.services.cancellation."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        cls.season = make_season(cls.club)
+        cls.child = Member.objects.create(first_name="Timmy", last_name="Tester")
+        cls.membership = ClubMembership.objects.create(club=cls.club, member=cls.child, season=cls.season, status=ClubMembership.StatusChoices.PENDING)
+        cls.batch = RegistrationBatch.objects.create(club=cls.club, season=cls.season, contact_first_name="Pat", contact_last_name="Parent", contact_email="pat@example.com")
+        RegistrationDetails.objects.create(membership=cls.membership, batch=cls.batch, entry_kind=RegistrationDetails.EntryKind.PLAYER)
+
+    def _url(self, membership=None):
+        return reverse("registration:cancel", kwargs={"token": self.batch.status_token, "membership_pk": (membership or self.membership).pk})
+
+    def test_cancelling_a_brand_new_member_deletes_them(self):
+        response = self.client.post(self._url(), {}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertRedirects(response, reverse("registration:status", kwargs={"token": self.batch.status_token}))
+        self.assertFalse(Member.objects.filter(pk=self.child.pk).exists())
+
+    def test_cancelling_a_returning_member_soft_cancels(self):
+        previous_season = make_season(self.club, start=datetime.date(2020, 1, 1), end=datetime.date(2020, 12, 31))
+        ClubMembership.objects.create(club=self.club, member=self.child, season=previous_season, status=ClubMembership.StatusChoices.LAPSED)
+
+        self.client.post(self._url(), {}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.membership.refresh_from_db()
+        self.assertEqual(self.membership.status, ClubMembership.StatusChoices.CANCELLED)
+
+    def test_a_membership_outside_this_batch_cannot_be_cancelled(self):
+        other_child = Member.objects.create(first_name="Alex", last_name="Outsider")
+        other_membership = ClubMembership.objects.create(club=self.club, member=other_child, season=self.season, status=ClubMembership.StatusChoices.PENDING)
+
+        response = self.client.post(self._url(membership=other_membership), {}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 404)
+        self.assertTrue(Member.objects.filter(pk=other_child.pk).exists())
+
+    def test_an_unknown_token_404s(self):
+        response = self.client.post(reverse("registration:cancel", kwargs={"token": "not-a-real-token", "membership_pk": self.membership.pk}), {}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 404)
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
 class RegistrationInvoiceViewTests(TestCase):
     """registration:invoice -- one PDF covering every person in the batch,
     not one per membership (RegistrationInvoiceView)."""

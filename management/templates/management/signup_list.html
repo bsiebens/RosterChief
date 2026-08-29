@@ -97,6 +97,7 @@
     {% trans "Confirm" as confirm_label %}
     {% trans "Bypass" as bypass_label %}
     {% trans "Reopen" as reopen_label %}
+    {% trans "Cancel registration" as confirm_cancel_label %}
     {% url 'management:signup_list' as signup_url %}
     {% for membership in memberships %}
         <div id="{{ membership.pk|dom_id:"signup_drawer" }}" class="drawer-backdrop">
@@ -202,6 +203,20 @@
                             <a class="link link-hover text-sm" href="{% url 'management:membership_list' %}">{% trans "Manage in Finance" %} →</a>
                         </div>
                     </div>
+
+                    {% if membership.status != "cancelled" %}
+                        <div>
+                            <div class="mb-2.5 font-display text-xs font-bold tracking-[.14em] text-muted uppercase">{% trans "Duplicate?" %}</div>
+                            <form method="post" action="{% url 'management:signup_link_to_member' membership.member.pk %}" class="flex items-end gap-2">
+                                {% csrf_token %}
+                                <div class="flex-1">
+                                    {% form_field membership.link_form.member show_label=False %}
+                                </div>
+                                <button class="btn btn-outline btn-sm gap-2 shrink-0" type="submit">{% lucide "merge" size=14 %} {% trans "Link" %}</button>
+                            </form>
+                            <p class="mt-2 text-xs text-muted">{% trans "If this person already has a member record, link this sign-up to it instead -- the duplicate created here is removed once it has nothing else of its own." %}</p>
+                        </div>
+                    {% endif %}
                 </div>
 
                 <div class="flex gap-2.5 border-t border-line p-4">
@@ -209,10 +224,19 @@
                         {% csrf_token %}
                         <button class="btn btn-success w-full gap-2" type="submit" {% if not membership.is_clean or membership.status != "pending" %}disabled{% endif %}>{% lucide "check" size=16 %} {% trans "Approve" %}</button>
                     </form>
+                    {% if membership.status != "cancelled" %}
+                        <button type="button" class="btn btn-outline btn-error gap-2" onclick="document.getElementById('{{ membership.pk|dom_id:"cancel_modal" }}').showModal()">{% lucide "x-circle" size=16 %} {% trans "Cancel" %}</button>
+                    {% endif %}
                     <button type="button" class="btn btn-outline gap-2" onclick="closeDrawer('{{ membership.pk|dom_id:"signup_drawer" }}')">{% trans "Close" %}</button>
                 </div>
             </div>
         </div>
+
+        {% if membership.status != "cancelled" %}
+            {% blocktrans asvar cancel_body with name=membership.member %}Cancel the registration for “{{ name }}”? A returning member's record stays, just marked cancelled; someone brand new to the club this season is removed entirely, since there'd be nothing left behind it. This cannot be undone.{% endblocktrans %}
+            {% url 'management:signup_cancel' membership.member.pk as cancel_url %}
+            {% include "controlpanel/_confirm_modal.html" with modal_id=membership.pk|dom_id:"cancel_modal" title=confirm_cancel_label body=cancel_body action_url=cancel_url submit_label=confirm_cancel_label submit_icon="x-circle" %}
+        {% endif %}
     {% endfor %}
 
     <script>

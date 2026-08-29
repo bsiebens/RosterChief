@@ -21,6 +21,7 @@ from django.utils import timezone
 from events.models import Event, Location
 from features.models import JobRun
 from members.models import Family, FamilyMembership, Member
+from registration.models import RegistrationBatch, RegistrationDetails
 from teams.models import Position, StaffAssignment, Team, TeamMembership
 from teams.services import eligible_roster_members
 
@@ -41,6 +42,7 @@ from .services.access import (
     teams_managed_by,
     teams_staffed_by,
 )
+from .services.cancellation import cancel_membership, is_new_member
 from .services.fees import mark_as_paid, open_dues_rows, record_payment, remaining_balance
 from .services.invoicing import create_or_resend_invoice, invalidate_cached_invoice_pdf, invoice_pdf, invoices_due_for_reminder, recipient_for, resolve_document_address
 from .services.onboarding import (
@@ -56,6 +58,7 @@ from .services.onboarding import (
     open_requirements_blocking,
 )
 from .services.seasons import _initial_season_start, _season_end, generate_seasons, resync_seasons
+from .services.signup_linking import link_to_existing_member
 from .tenancy import (
     ClubTenantMiddleware,
     get_current_club,
@@ -2520,3 +2523,117 @@ class OnboardingRequirementTests(TestCase):
         self.assertFalse(activated)
         self.assertEqual(pending.status, ClubMembership.StatusChoices.PENDING)
         self.assertIsNone(pending.activated_at)
+
+
+class CancellationTests(TestCase):
+    """club.services.cancellation -- soft-cancel for a returning member,
+    hard-delete for someone who only exists because of this one sign-up."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        cls.season = make_season(cls.club)
+        cls.previous_season = make_season(cls.club, start_year=2025)
+
+    def test_is_new_member_true_with_no_club_membership_at_all(self):
+        member = Member.objects.create(first_name="New", last_name="Kid")
+
+        self.assertTrue(is_new_member(member, self.club))
+
+    def test_is_new_member_false_with_a_prior_season(self):
+        member = Member.objects.create(first_name="Returning", last_name="Kid")
+        ClubMembership.objects.create(club=self.club, member=member, season=self.previous_season, status=ClubMembership.StatusChoices.LAPSED)
+
+        self.assertFalse(is_new_member(member, self.club))
+
+    def test_cancelling_a_returning_member_soft_cancels(self):
+        member = Member.objects.create(first_name="Returning", last_name="Kid")
+        ClubMembership.objects.create(club=self.club, member=member, season=self.previous_season, status=ClubMembership.StatusChoices.LAPSED)
+        membership = ClubMembership.objects.create(club=self.club, member=member, season=self.season, status=ClubMembership.StatusChoices.PENDING)
+
+        deleted = cancel_membership(membership)
+
+        self.assertFalse(deleted)
+        membership.refresh_from_db()
+        self.assertEqual(membership.status, ClubMembership.StatusChoices.CANCELLED)
+        self.assertTrue(Member.objects.filter(pk=member.pk).exists())
+
+    def test_cancelling_a_brand_new_member_deletes_them(self):
+        member = Member.objects.create(first_name="New", last_name="Kid")
+        membership = ClubMembership.objects.create(club=self.club, member=member, season=self.season, status=ClubMembership.StatusChoices.PENDING)
+
+        deleted = cancel_membership(membership)
+
+        self.assertTrue(deleted)
+        self.assertFalse(Member.objects.filter(pk=member.pk).exists())
+        self.assertFalse(ClubMembership.objects.filter(pk=membership.pk).exists())
+
+    def test_cancelling_a_brand_new_member_cascades_their_registration_details(self):
+        member = Member.objects.create(first_name="New", last_name="Kid")
+        membership = ClubMembership.objects.create(club=self.club, member=member, season=self.season, status=ClubMembership.StatusChoices.PENDING)
+        batch = RegistrationBatch.objects.create(club=self.club, season=self.season, contact_first_name="Pat", contact_last_name="Parent", contact_email="pat@example.com")
+        details = RegistrationDetails.objects.create(membership=membership, batch=batch)
+
+        cancel_membership(membership)
+
+        self.assertFalse(RegistrationDetails.objects.filter(pk=details.pk).exists())
+
+
+class SignupLinkingTests(TestCase):
+    """club.services.signup_linking.link_to_existing_member."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        cls.season = make_season(cls.club)
+
+    def test_links_a_duplicate_onto_the_real_member(self):
+        real = Member.objects.create(first_name="Timmy", last_name="Tester")
+        duplicate = Member.objects.create(first_name="Timmy", last_name="Tester")
+        membership = ClubMembership.objects.create(club=self.club, member=duplicate, season=self.season, status=ClubMembership.StatusChoices.PENDING)
+
+        link_to_existing_member(membership, real)
+
+        membership.refresh_from_db()
+        self.assertEqual(membership.member, real)
+
+    def test_deletes_the_duplicate_once_its_membership_has_moved(self):
+        real = Member.objects.create(first_name="Timmy", last_name="Tester")
+        duplicate = Member.objects.create(first_name="Timmy", last_name="Tester")
+        membership = ClubMembership.objects.create(club=self.club, member=duplicate, season=self.season, status=ClubMembership.StatusChoices.PENDING)
+
+        link_to_existing_member(membership, real)
+
+        self.assertFalse(Member.objects.filter(pk=duplicate.pk).exists())
+
+    def test_a_duplicate_with_other_history_is_kept(self):
+        real = Member.objects.create(first_name="Timmy", last_name="Tester")
+        duplicate = Member.objects.create(first_name="Timmy", last_name="Tester")
+        other_season = make_season(self.club, start_year=2025)
+        ClubMembership.objects.create(club=self.club, member=duplicate, season=other_season, status=ClubMembership.StatusChoices.LAPSED)
+        membership = ClubMembership.objects.create(club=self.club, member=duplicate, season=self.season, status=ClubMembership.StatusChoices.PENDING)
+
+        link_to_existing_member(membership, real)
+
+        self.assertTrue(Member.objects.filter(pk=duplicate.pk).exists())
+
+    def test_refuses_when_the_target_already_has_a_registration_this_season(self):
+        real = Member.objects.create(first_name="Timmy", last_name="Tester")
+        ClubMembership.objects.create(club=self.club, member=real, season=self.season, status=ClubMembership.StatusChoices.PENDING)
+        duplicate = Member.objects.create(first_name="Timmy", last_name="Tester")
+        membership = ClubMembership.objects.create(club=self.club, member=duplicate, season=self.season, status=ClubMembership.StatusChoices.PENDING)
+
+        with self.assertRaises(ValidationError):
+            link_to_existing_member(membership, real)
+
+    def test_moves_a_roster_placement_already_made_for_the_duplicate(self):
+        real = Member.objects.create(first_name="Timmy", last_name="Tester")
+        duplicate = Member.objects.create(first_name="Timmy", last_name="Tester")
+        membership = ClubMembership.objects.create(club=self.club, member=duplicate, season=self.season, status=ClubMembership.StatusChoices.PENDING)
+        team = Team.objects.create(club=self.club, name="U10", short_name="U10")
+        roster_entry = TeamMembership.objects.create(team=team, member=duplicate, season=self.season)
+
+        link_to_existing_member(membership, real)
+
+        roster_entry.refresh_from_db()
+        self.assertEqual(roster_entry.member, real)

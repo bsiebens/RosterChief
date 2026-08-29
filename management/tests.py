@@ -8448,6 +8448,76 @@ class SignupDashboardTests(ManagementTestBase):
         self.assertRedirects(response, reverse("management:signup_list"))
         self.assertEqual(TeamMembership.objects.filter(team=team, member=member, season=self.season).count(), 1)
 
+    def test_cancel_soft_cancels_a_returning_member(self):
+        member, membership = self.make_pending_member()
+        previous_season = Season.objects.create(club=self.club, start_date=datetime.date(2020, 1, 1), end_date=datetime.date(2020, 12, 31))
+        ClubMembership.objects.create(club=self.club, member=member, season=previous_season, status=ClubMembership.StatusChoices.LAPSED)
+
+        response = self.club_post("signup_cancel", {}, member.pk)
+
+        self.assertRedirects(response, reverse("management:signup_list"))
+        membership.refresh_from_db()
+        self.assertEqual(membership.status, ClubMembership.StatusChoices.CANCELLED)
+
+    def test_cancel_deletes_a_brand_new_member(self):
+        member, _membership = self.make_pending_member()
+
+        response = self.club_post("signup_cancel", {}, member.pk)
+
+        self.assertRedirects(response, reverse("management:signup_list"))
+        self.assertFalse(Member.objects.filter(pk=member.pk).exists())
+
+    def test_cancel_is_admin_only(self):
+        member, _membership = self.make_pending_member()
+        coach = User.objects.create_user(email="coach-cancel@example.com", password="pw-secret-123")
+        coach_member = Member.objects.create(user=coach, first_name="Cara", last_name="Coach")
+        team = Team.objects.create(club=self.club, name="U9", short_name="U9")
+        position = Position.objects.create(club=self.club, name="Coach-cancel", short_name="CC", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=team, member=coach_member, season=self.season, position=position)
+        self.client.force_login(coach)
+
+        response = self.club_post("signup_cancel", {}, member.pk)
+
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(Member.objects.filter(pk=member.pk).exists())
+
+    def test_link_to_member_repoints_the_membership(self):
+        member, membership = self.make_pending_member()
+        real = Member.objects.create(first_name="Real", last_name="Person")
+        previous_season = Season.objects.create(club=self.club, start_date=datetime.date(2020, 1, 1), end_date=datetime.date(2020, 12, 31))
+        ClubMembership.objects.create(club=self.club, member=real, season=previous_season, status=ClubMembership.StatusChoices.LAPSED)
+
+        response = self.club_post("signup_link_to_member", {"member": str(real.pk)}, member.pk)
+
+        self.assertRedirects(response, reverse("management:signup_list"))
+        membership.refresh_from_db()
+        self.assertEqual(membership.member, real)
+        self.assertFalse(Member.objects.filter(pk=member.pk).exists())
+
+    def test_link_to_member_shows_an_error_when_the_target_already_has_one_this_season(self):
+        member, _membership = self.make_pending_member()
+        real = Member.objects.create(first_name="Real", last_name="Person")
+        ClubMembership.objects.create(club=self.club, member=real, season=self.season, status=ClubMembership.StatusChoices.PENDING)
+
+        response = self.club_post("signup_link_to_member", {"member": str(real.pk)}, member.pk)
+
+        self.assertRedirects(response, reverse("management:signup_list"))
+        self.assertTrue(Member.objects.filter(pk=member.pk).exists())
+
+    def test_link_to_member_is_admin_only(self):
+        member, _membership = self.make_pending_member()
+        real = Member.objects.create(first_name="Real", last_name="Person")
+        coach = User.objects.create_user(email="coach-link@example.com", password="pw-secret-123")
+        coach_member = Member.objects.create(user=coach, first_name="Cara", last_name="Coach")
+        team = Team.objects.create(club=self.club, name="U9", short_name="U9")
+        position = Position.objects.create(club=self.club, name="Coach-link", short_name="CL", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=team, member=coach_member, season=self.season, position=position)
+        self.client.force_login(coach)
+
+        response = self.club_post("signup_link_to_member", {"member": str(real.pk)}, member.pk)
+
+        self.assertEqual(response.status_code, 403)
+
 
 class MemberAdminAccessTests(ManagementTestBase):
     """MEMBER_ADMIN: full read/write on people, teams, referee setup, and onboarding

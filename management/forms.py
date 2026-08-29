@@ -1020,6 +1020,29 @@ class SignupTeamPlacementForm(forms.ModelForm):
         self.fields["team"].queryset = Team.objects.filter(club=club)
 
 
+class SignupLinkMemberForm(forms.Form):
+    """Fixes an accidental duplicate sign-up from the Sign-up page -- picks
+    the real, already-known Member this registration actually belongs to.
+    club.services.signup_linking.link_to_existing_member does the actual
+    re-pointing; this is just the picker."""
+
+    member = forms.ModelChoiceField(
+        queryset=Member.objects.none(), label=_("Existing member"), widget=forms.Select(attrs={"data-searchable": "true", "data-search-placeholder": _("Type a name to search...")})
+    )
+
+    def __init__(self, *args, club=None, exclude_member=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        # member_of, kind=MEMBER: every actual member this club has ever had
+        # (any season, not just the current one -- the real person being
+        # linked to might be lapsed rather than active right now), excluding
+        # guardians -- a guardian holds no ClubMembership of their own for a
+        # sign-up to be linked to in the first place.
+        queryset = Member.objects.filter(member_of__club=club, member_of__kind=ClubMembership.Kind.MEMBER).distinct().order_by("last_name", "first_name")
+        if exclude_member is not None:
+            queryset = queryset.exclude(pk=exclude_member.pk)
+        self.fields["member"].queryset = queryset
+
+
 class VolunteerPlacementForm(forms.ModelForm):
     """Places one already-known volunteer (fixed by the view, not a form
     field -- same reasoning as SignupTeamPlacementForm) into a real

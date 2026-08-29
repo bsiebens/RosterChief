@@ -2,6 +2,7 @@ import csv
 from datetime import date, timedelta
 from decimal import Decimal
 
+from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
 from django.db import IntegrityError, transaction
 from django.db.models import Count, ProtectedError, Q, Sum
@@ -33,9 +34,11 @@ from club.mixins import (
 )
 from club.models import ClubMembership, ClubRole, DuesInvoice, MemberRequirementStatus, OnboardingRequirement, Season, ShopManager, Sponsor
 from club.services.access import _guardians_only, can_edit_news, can_publish_news, current_season, groups_manageable_by, is_club_admin, members_visible_to, teams_managed_by, teams_staffed_by
+from club.services.cancellation import cancel_membership
 from club.services.fees import mark_as_paid, record_payment, remaining_balance
 from club.services.invoicing import DuesInvoicePDFError, create_or_resend_invoice, invoice_pdf, invoices_due_for_reminder, recipient_for, resolve_document_address, send_invoice_email, send_reminders
 from club.services.onboarding import annotate_onboarding_status, approve_all_clean, approve_one, blocking_event_kinds, checklist_for, is_signup_clean, mark_bypassed, mark_complete, mark_incomplete, members_with_open_requirements
+from club.services.signup_linking import link_to_existing_member
 from controlpanel.messages import notify
 from controlpanel.mixins import RedirectOnInvalidMixin
 from controlpanel.services.statistics import club_attention, club_charts, club_statistics, unrostered_members
@@ -124,6 +127,7 @@ from .forms import (
     RequirementBypassForm,
     RequirementCompletionForm,
     SendDuesInvoicesForm,
+    SignupLinkMemberForm,
     SignupTeamPlacementForm,
     SponsorForm,
     StaffAssignmentForm,
@@ -5391,6 +5395,7 @@ class SignupDashboardView(ClubAdminRequiredMixin, TemplateView):
                 membership.blocked_kinds = blocking_event_kinds(membership)
                 membership.teams_registered = teams.filter(roster__member_id=membership.member_id, roster__season=season).distinct()
                 membership.placement_form = SignupTeamPlacementForm(club=club, season=season, member=membership.member)
+                membership.link_form = SignupLinkMemberForm(club=club, exclude_member=membership.member)
                 membership.is_clean = is_signup_clean(membership)
                 membership.is_oldest_pending = membership.pk == oldest_pending_id
             # Already-ACTIVE *and* clean (paid, checklist fully resolved) memberships
@@ -5487,6 +5492,52 @@ class SignupPlaceInTeamView(ClubAdminRequiredMixin, View):
         if is_ajax:
             return JsonResponse({"ok": ok, "title": str(title), "body": str(body)})
         notify(request, f"{level}|{title}|{body}")
+        return redirect("management:signup_list")
+
+
+class SignupCancelView(ClubAdminRequiredMixin, View):
+    """Withdraws one person's sign-up -- see club.services.cancellation.
+    cancel_membership for the soft-cancel-vs-delete-the-member split."""
+
+    def post(self, request, pk):
+        club = request.club
+        season = current_season(club)
+        if season is None:
+            raise Http404("No active season.")
+        membership = get_object_or_404(ClubMembership.objects.filter(club=club, season=season, kind=ClubMembership.Kind.MEMBER), member_id=pk)
+        member_name = str(membership.member)
+
+        cancel_membership(membership)
+
+        notify(request, f"w|{_('Sign-up cancelled')}|{_('The registration for “%(member)s” has been cancelled.') % {'member': member_name}}")
+        return redirect("management:signup_list")
+
+
+class SignupLinkToMemberView(ClubAdminRequiredMixin, View):
+    """Fixes an accidental duplicate -- see club.services.signup_linking.
+    link_to_existing_member."""
+
+    def post(self, request, pk):
+        club = request.club
+        season = current_season(club)
+        if season is None:
+            raise Http404("No active season.")
+        membership = get_object_or_404(ClubMembership.objects.filter(club=club, season=season, kind=ClubMembership.Kind.MEMBER), member_id=pk)
+
+        form = SignupLinkMemberForm(request.POST, club=club, exclude_member=membership.member)
+        if not form.is_valid():
+            body = " ".join(str(error) for errors in form.errors.values() for error in errors)
+            notify(request, f"e|{_('Could not link')}|{body}")
+            return redirect("management:signup_list")
+
+        target = form.cleaned_data["member"]
+        try:
+            link_to_existing_member(membership, target)
+        except ValidationError as error:
+            notify(request, f"e|{_('Could not link')}|{'; '.join(error.messages)}")
+            return redirect("management:signup_list")
+
+        notify(request, f"s|{_('Linked')}|{_('This registration is now linked to “%(member)s”.') % {'member': target}}")
         return redirect("management:signup_list")
 
 

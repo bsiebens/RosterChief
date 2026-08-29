@@ -188,6 +188,8 @@ _NAV_SECTIONS = {
     "signup_approve_all_clean": "signup_list",
     "signup_approve_one": "signup_list",
     "signup_place_in_team": "signup_list",
+    "signup_cancel": "signup_list",
+    "signup_link_to_member": "signup_list",
 }
 
 

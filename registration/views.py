@@ -16,6 +16,7 @@ from django.utils.translation import gettext_lazy as _
 from django.views import View
 
 from club.models import OnboardingRequirement
+from club.services.cancellation import cancel_membership
 from club.services.fees import remaining_balance
 from club.services.onboarding import checklist_for, mark_complete
 from controlpanel.messages import notify
@@ -217,3 +218,22 @@ class RegistrationInvoiceView(ClubScopedPublicMixin, View):
         response = HttpResponse(pdf, content_type="application/pdf")
         response["Content-Disposition"] = f'attachment; filename="{batch.club.slug}-registration-{batch.pk}.pdf"'
         return response
+
+
+class RegistrationCancelView(ClubScopedPublicMixin, View):
+    """Withdraws one person's registration from the status page -- same
+    token-gated access as everything else there, and the same club.services.
+    cancellation.cancel_membership every cancel path (this one, and the
+    Sign-up page's own) goes through."""
+
+    def post(self, request, *args, **kwargs):
+        batch = get_object_or_404(RegistrationBatch, club=request.club, status_token=kwargs["token"])
+        details = RegistrationDetails.objects.filter(batch=batch, membership_id=kwargs["membership_pk"]).select_related("membership").first()
+        if details is None:
+            raise Http404
+
+        member_name = str(details.membership.member)
+        cancel_membership(details.membership)
+
+        notify(request, f"w|{_('Registration cancelled')}|{_('The registration for “%(member)s” has been cancelled.') % {'member': member_name}}")
+        return redirect("registration:status", token=batch.status_token)
