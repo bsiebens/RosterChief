@@ -48,6 +48,7 @@ class EntryInput:
     entry_kind: str = RegistrationDetails.EntryKind.PLAYER
     requested_team: Team | None = None
     requested_position: Position | None = None
+    requested_jersey_number: int | None = None
     product_variant: ProductVariant | None = None
     existing_member: Member | None = None
     is_contact: bool = False
@@ -160,6 +161,7 @@ def submit_registration(club, *, contact_first_name, contact_last_name, contact_
             entry_kind=entry.entry_kind,
             requested_team=entry.requested_team,
             requested_position=entry.requested_position if entry.entry_kind == RegistrationDetails.EntryKind.VOLUNTEER else None,
+            requested_jersey_number=entry.requested_jersey_number if entry.entry_kind == RegistrationDetails.EntryKind.PLAYER else None,
             product_variant=row["variant"],
             price=row["price"],
             discount_amount=row["min_registrants_discount"],

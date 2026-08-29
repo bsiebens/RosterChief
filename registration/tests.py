@@ -12,7 +12,7 @@ from club.models import Club, ClubMembership, MemberRequirementStatus, Onboardin
 from club.services.fees import effective_fee_amount, record_payment, remaining_balance
 from members.models import Family, FamilyMembership, Member
 from shop.models import Product, ProductCategory, ProductRegistrantDiscountTier, ProductVariant
-from teams.models import Position, Team
+from teams.models import NumberPool, Position, Team, TeamMembership
 
 from .models import RegistrationBatch, RegistrationDetails
 from .services import EntryInput, PricingError, RegistrationError, available_registration_products, price_entries, resolve_registration_season, submit_registration
@@ -659,6 +659,116 @@ class RegistrationViewTests(TestCase):
         self.assertEqual(sent.to, ["pat@example.com"])
         status_path = reverse("registration:status", kwargs={"token": batch.status_token})
         self.assertIn(status_path, sent.body)
+
+
+class RegistrationJerseyNumberTests(RegistrationViewTests):
+    """The optional jersey-number step (RegistrationEntryRowForm.
+    requested_jersey_number) -- players only, and only once a pool-scoped
+    team is chosen. See teams.services.numbers for the availability rules
+    themselves; this is just the registration-form integration."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.pool = NumberPool.objects.create(club=cls.club, name="Youth", min_number=1, max_number=20)
+        cls.team.pool = cls.pool
+        cls.team.save()
+
+    def test_requesting_an_available_number_is_saved(self):
+        data = self.contact_data() | self.formset_management() | self.entry_data(requested_jersey_number="7")
+        data["action"] = "submit"
+
+        response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+        batch = RegistrationBatch.objects.get()
+        self.assertRedirects(response, reverse("registration:status", kwargs={"token": batch.status_token}))
+        details = RegistrationDetails.objects.get(batch=batch)
+        self.assertEqual(details.requested_jersey_number, 7)
+
+    def test_requesting_an_already_taken_number_is_rejected(self):
+        other_member = Member.objects.create(first_name="Other", last_name="Kid")
+        TeamMembership.objects.create(team=self.team, member=other_member, season=self.season, jersey_number=7)
+        data = self.contact_data() | self.formset_management() | self.entry_data(requested_jersey_number="7")
+        data["action"] = "preview"
+
+        response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "just taken")
+        self.assertFalse(RegistrationBatch.objects.exists())
+
+    def test_a_volunteer_entry_ignores_a_submitted_number(self):
+        volunteer_category = ProductCategory.objects.get(club=self.club, registration_kind=ProductCategory.RegistrationKind.VOLUNTEER)
+        volunteer_product = Product.objects.create(club=self.club, name="Volunteer", product_type=Product.ProductType.MEMBERSHIP, season=self.season, price=Decimal("0"), category=volunteer_category)
+        volunteer_variant = ProductVariant.objects.create(product=volunteer_product, name="Coach", price=Decimal("0"))
+        data = self.contact_data() | self.formset_management() | self.entry_data(entry_kind=RegistrationDetails.EntryKind.VOLUNTEER, product_variant=str(volunteer_variant.pk), requested_jersey_number="7")
+        data["action"] = "submit"
+
+        response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+        batch = RegistrationBatch.objects.get()
+        self.assertRedirects(response, reverse("registration:status", kwargs={"token": batch.status_token}))
+        details = RegistrationDetails.objects.get(batch=batch)
+        self.assertIsNone(details.requested_jersey_number)
+
+    def test_no_team_chosen_ignores_a_submitted_number(self):
+        data = self.contact_data() | self.formset_management() | self.entry_data(requested_team="", requested_jersey_number="7")
+        data["action"] = "submit"
+
+        response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+        batch = RegistrationBatch.objects.get()
+        self.assertRedirects(response, reverse("registration:status", kwargs={"token": batch.status_token}))
+        details = RegistrationDetails.objects.get(batch=batch)
+        self.assertIsNone(details.requested_jersey_number)
+
+    def test_a_team_with_no_pool_ignores_a_submitted_number(self):
+        poolless_team = Team.objects.create(club=self.club, name="U8 Boys", short_name="U8B")
+        data = self.contact_data() | self.formset_management() | self.entry_data(requested_team=str(poolless_team.pk), requested_jersey_number="7")
+        data["action"] = "submit"
+
+        response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+        batch = RegistrationBatch.objects.get()
+        self.assertRedirects(response, reverse("registration:status", kwargs={"token": batch.status_token}))
+        details = RegistrationDetails.objects.get(batch=batch)
+        self.assertIsNone(details.requested_jersey_number)
+
+    def test_a_second_pending_request_for_the_same_number_is_rejected(self):
+        # Blocked the moment someone registers, before staff has even looked
+        # at the first one -- see teams.services.numbers.numbers_taken's own
+        # docstring on why a pending request counts too.
+        data = self.contact_data() | self.formset_management() | self.entry_data(requested_jersey_number="7")
+        data["action"] = "submit"
+        self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+        second = self.contact_data(contact_email="other@example.com") | self.formset_management() | self.entry_data(first_name="Jamie", requested_jersey_number="7")
+        second["action"] = "preview"
+        response = self.client.post(self._url(), second, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "just taken")
+
+    def test_two_rows_in_the_same_submission_requesting_the_same_number_are_rejected(self):
+        # Neither is on record yet, so only a formset-wide check (not either
+        # row's own clean()) can catch this -- see BaseRegistrationEntryFormSet.
+        data = self.contact_data() | self.formset_management(2) | self.entry_data(0, requested_jersey_number="7") | self.entry_data(1, first_name="Jamie", requested_jersey_number="7")
+        data["action"] = "preview"
+
+        response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "already requested this number")
+        self.assertFalse(RegistrationBatch.objects.exists())
+
+    def test_team_number_pools_context_lists_available_numbers(self):
+        TeamMembership.objects.create(team=self.team, member=Member.objects.create(first_name="Taken", last_name="One"), season=self.season, jersey_number=1)
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        pools = response.context["team_number_pools"]
+        self.assertNotIn(1, pools[str(self.team.pk)])
+        self.assertIn(2, pools[str(self.team.pk)])
 
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])

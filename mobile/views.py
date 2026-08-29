@@ -40,13 +40,14 @@ from news.models import News
 from news.services import render_body_html
 from notifications.models import Notification
 from registration.forms import RegistrationEntryFormSet, entries_from_formset
-from registration.services import PricingError, RegistrationError, available_registration_products, price_entries, resolve_chosen_season, resolve_registration_season, submit_registration, variant_registration_kinds
+from registration.services import PricingError, RegistrationError, available_registration_products, price_entries, resolve_chosen_season, resolve_registration_season, submit_registration, team_number_pools, variant_registration_kinds
 from registration.services.notifications import send_registration_confirmation_email
 from shop.models import Cart, CartItem, Order, Product, ProductCategory, Voucher
 from shop.services.checkout import CheckoutError, find_discount, place_order
 from shop.services.invoices import ShopInvoicePDFError, render_invoice_pdf
 from shop.services.pricing import cart_totals
-from teams.models import StaffAssignment, TeamMembership
+from teams.models import StaffAssignment, Team, TeamMembership
+from teams.services.numbers import member_current_number
 
 from .forms import MemberProfileForm, style_dynamic_form
 from .mixins import PersonScopeMixin, ShopScopeMixin
@@ -1080,13 +1081,41 @@ class ReRegisterView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         # person" per managed person (reregister.html), not "this is me, the
         # submitter" the way it is on the public page. Registering yourself
         # and a child in the same batch is the ordinary case, not a conflict.
-        kwargs = {"club": self.request.club, "people": self.managed_people, "season": season, "prefix": "entries", "enforce_single_contact": False}
+        kwargs = {
+            "club": self.request.club,
+            "people": self.managed_people,
+            "season": season,
+            "team_number_pools": team_number_pools(self.request.club, season),
+            "member_current_numbers": self.get_member_current_numbers(season),
+            "prefix": "entries",
+            "enforce_single_contact": False,
+        }
         if data is None:
             kwargs["initial"] = self.get_initial_entries()
         formset = RegistrationEntryFormSet(data, **kwargs)
         for row in formset.forms:
             style_dynamic_form(row)
         return formset
+
+    def get_member_current_numbers(self, season):
+        """``{str(member_id): {str(team_id): number}}`` -- every managed
+        person's own current number in every pool-scoped team, so
+        reregister.html's script can offer "Keep #N" instead of silently
+        pre-filling it (the person may pick a different team than the one
+        that number came from). Only pool-scoped teams are considered --
+        a poolless team has no number step at all, see registration.
+        services.pricing.team_number_pools."""
+        pools_by_team = {team.pk: team.pool for team in Team.objects.filter(club=self.request.club, pool__isnull=False).select_related("pool")}
+        result = {}
+        for person in self.managed_people:
+            person_numbers = {}
+            for team_id, pool in pools_by_team.items():
+                current = member_current_number(person, pool, season)
+                if current is not None:
+                    person_numbers[str(team_id)] = current
+            if person_numbers:
+                result[str(person.pk)] = person_numbers
+        return result
 
     def render_season_picker(self, available_seasons):
         return self.render_to_response(self.get_context_data(registration_open=bool(available_seasons), needs_season_choice=True, available_seasons=available_seasons))
@@ -1128,6 +1157,8 @@ class ReRegisterView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
                 registration_open=True,
                 registration_season=season,
                 variant_registration_kinds=variant_registration_kinds(self.request.club, season),
+                team_number_pools=team_number_pools(self.request.club, season),
+                member_current_numbers=self.get_member_current_numbers(season),
                 # entry_formset.empty_form is a plain @property (BaseFormSet's
                 # own, not cached) -- a fresh, unstyled Form instance every
                 # access, so #subrow-template (reregister.html) must be built

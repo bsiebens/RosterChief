@@ -175,6 +175,9 @@
                             {% if details.requested_team %}
                                 <p class="mb-2 text-xs text-muted">{% blocktrans with team=details.requested_team.short_name %}Requested {{ team }} at registration.{% endblocktrans %}</p>
                             {% endif %}
+                            {% if details.requested_jersey_number %}
+                                <p class="mb-2 text-xs text-muted">{% blocktrans with number=details.requested_jersey_number %}Requested #{{ number }}.{% endblocktrans %}</p>
+                            {% endif %}
                         {% endfor %}
                         <div class="flex flex-wrap gap-2">
                             {% for team in teams %}

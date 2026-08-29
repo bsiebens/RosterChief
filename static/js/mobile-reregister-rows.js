@@ -26,6 +26,7 @@
         // narrow yet, but keeps every row (cloned or not) in the same
         // filtered state once a choice is made.
         if (window.syncRegistrationVariantOptions) window.syncRegistrationVariantOptions(row);
+        if (window.syncRegistrationJerseyOptions) window.syncRegistrationJerseyOptions(row);
 
         const remove = row.querySelector(".remove-row");
         if (remove) remove.addEventListener("click", () => row.remove());

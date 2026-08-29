@@ -740,6 +740,32 @@ class TeamRosterStaffTests(ManagementTestBase):
         self.assertEqual(response.status_code, 302)
         self.assertFalse(TeamMembership.objects.filter(team=self.team, season=self.season, member=other_player).exists())
 
+    def test_the_roster_edit_form_is_prefilled_from_a_pending_requested_number(self):
+        batch = RegistrationBatch.objects.create(club=self.club, season=self.season, contact_first_name="Pat", contact_last_name="Parent", contact_email="pat@example.com")
+        membership = ClubMembership.objects.get(club=self.club, member=self.player, season=self.season)
+        RegistrationDetails.objects.create(membership=membership, batch=batch, requested_team=self.team, requested_jersey_number=9)
+        roster_entry = TeamMembership.objects.create(team=self.team, season=self.season, member=self.player, position=self.player_position)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("team_detail", self.team.pk)
+
+        self.assertEqual(response.context["roster"][0].pk, roster_entry.pk)
+        self.assertEqual(response.context["roster"][0].edit_form.initial.get("jersey_number"), 9)
+
+    def test_the_roster_edit_form_does_not_override_an_already_set_number(self):
+        batch = RegistrationBatch.objects.create(club=self.club, season=self.season, contact_first_name="Pat", contact_last_name="Parent", contact_email="pat@example.com")
+        membership = ClubMembership.objects.get(club=self.club, member=self.player, season=self.season)
+        RegistrationDetails.objects.create(membership=membership, batch=batch, requested_team=self.team, requested_jersey_number=9)
+        TeamMembership.objects.create(team=self.team, season=self.season, member=self.player, position=self.player_position, jersey_number=3)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("team_detail", self.team.pk)
+
+        # initial=None here (jersey_number was already set), so this is
+        # ModelForm's own model_to_dict(instance) -- the already-saved 3,
+        # never overwritten by the requested 9.
+        self.assertEqual(response.context["roster"][0].edit_form.initial.get("jersey_number"), 3)
+
     def test_a_pool_scoped_team_still_lets_a_member_keep_their_own_number_on_edit(self):
         pool = NumberPool.objects.create(club=self.club, name="Youth", min_number=1, max_number=99)
         self.team.pool = pool
@@ -8204,6 +8230,16 @@ class SignupDashboardTests(ManagementTestBase):
         response = self.club_get("signup_list")
 
         self.assertContains(response, "U9")
+
+    def test_shows_the_requested_jersey_number(self):
+        _member, membership = self.make_pending_member()
+        team = Team.objects.create(club=self.club, name="U9", short_name="U9")
+        batch = RegistrationBatch.objects.create(club=self.club, season=self.season, contact_first_name="Pat", contact_last_name="Parent", contact_email="pat@example.com")
+        RegistrationDetails.objects.create(membership=membership, batch=batch, requested_team=team, requested_jersey_number=7)
+
+        response = self.club_get("signup_list")
+
+        self.assertContains(response, "Requested #7.")
 
     def test_approve_all_clean_activates_a_paid_and_fully_checked_member(self):
         _member, membership = self.make_pending_member(fee_status=ClubMembership.FeeStatus.PAID)

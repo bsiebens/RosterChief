@@ -65,9 +65,11 @@
             {% endfor %}
 
             {{ variant_registration_kinds|json_script:"variant-registration-kinds" }}
+            {{ team_number_pools|json_script:"team-number-pools" }}
+            {{ member_current_numbers|json_script:"member-current-numbers" }}
             {# Hidden, not removed, once priced -- every field posts right back on "Back" (action=edit), so nothing needs re-entering. #}
             <div class="{% if priced_entries %}hidden{% endif %} flex flex-col gap-4">
-            <div id="bulk-add-rows" class="flex flex-col gap-4">
+            <div id="bulk-add-rows" data-yours-label="{% trans 'yours' %}" class="flex flex-col gap-4">
             {% for person, rows in person_rows %}
                 <div>
                     <div class="mb-2 flex items-center justify-between">
@@ -103,6 +105,14 @@
                                         <label class="mb-1 block text-xs text-muted" for="{{ row.requested_team.id_for_label }}">{{ row.requested_team.label }}</label>
                                         {{ row.requested_team }}
                                         {% for error in row.requested_team.errors %}<p class="mt-1 text-xs text-club">{{ error }}</p>{% endfor %}
+                                    </div>
+                                    <div class="jersey-number-field hidden">
+                                        <div class="h-px bg-rule"></div>
+                                        <div class="p-3.5">
+                                            <label class="mb-1 block text-xs text-muted" for="{{ row.requested_jersey_number.id_for_label }}">{{ row.requested_jersey_number.label }}</label>
+                                            {{ row.requested_jersey_number }}
+                                            {% for error in row.requested_jersey_number.errors %}<p class="mt-1 text-xs text-club">{{ error }}</p>{% endfor %}
+                                        </div>
                                     </div>
                                 </div>
                             {% else %}
@@ -148,6 +158,14 @@
                             <label class="mb-1 block text-xs text-muted" for="{{ extra_row.requested_team.id_for_label }}">{{ extra_row.requested_team.label }}</label>
                             {{ extra_row.requested_team }}
                             {% for error in extra_row.requested_team.errors %}<p class="mt-1 text-xs text-club">{{ error }}</p>{% endfor %}
+                        </div>
+                        <div class="jersey-number-field hidden">
+                            <div class="h-px bg-rule"></div>
+                            <div class="p-3.5">
+                                <label class="mb-1 block text-xs text-muted" for="{{ extra_row.requested_jersey_number.id_for_label }}">{{ extra_row.requested_jersey_number.label }}</label>
+                                {{ extra_row.requested_jersey_number }}
+                                {% for error in extra_row.requested_jersey_number.errors %}<p class="mt-1 text-xs text-club">{{ error }}</p>{% endfor %}
+                            </div>
                         </div>
                     </div>
                 </div>

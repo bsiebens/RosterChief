@@ -24,7 +24,7 @@ from members.views import ClubScopedPublicMixin
 
 from .forms import RegistrationContactForm, RegistrationEntryFormSet, RegistrationStatusDocumentForm, entries_from_formset
 from .models import RegistrationBatch, RegistrationDetails
-from .services import PricingError, RegistrationError, price_entries, resolve_chosen_season, resolve_registration_season, submit_registration, variant_registration_kinds
+from .services import PricingError, RegistrationError, price_entries, resolve_chosen_season, resolve_registration_season, submit_registration, team_number_pools, variant_registration_kinds
 from .services.invoicing import RegistrationInvoicePDFError, batch_invoice_pdf
 from .services.notifications import send_registration_confirmation_email
 
@@ -53,7 +53,7 @@ class RegistrationView(ClubScopedPublicMixin, View):
     def get_forms(self, request, season, data=None):
         member = self.get_contact_member(request)
         contact_form = RegistrationContactForm(data, lock_contact_fields=member is not None)
-        entry_formset = RegistrationEntryFormSet(data, club=request.club, season=season, prefix="entries")
+        entry_formset = RegistrationEntryFormSet(data, club=request.club, season=season, team_number_pools=team_number_pools(request.club, season), prefix="entries")
         return contact_form, entry_formset
 
     def render_season_picker(self, request, available_seasons):
@@ -84,6 +84,7 @@ class RegistrationView(ClubScopedPublicMixin, View):
                 "season": season,
                 "locked_member": self.get_contact_member(request),
                 "variant_registration_kinds": variant_registration_kinds(request.club, season),
+                "team_number_pools": team_number_pools(request.club, season),
             },
         )
 

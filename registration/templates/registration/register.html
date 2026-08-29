@@ -53,6 +53,7 @@
         </div>
     {% else %}
         {{ variant_registration_kinds|json_script:"variant-registration-kinds" }}
+        {{ team_number_pools|json_script:"team-number-pools" }}
         <form method="post" class="flex flex-col gap-4">
             {% csrf_token %}
             <input type="hidden" name="season" value="{{ season.pk }}">

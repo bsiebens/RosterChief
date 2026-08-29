@@ -1190,8 +1190,18 @@ class TeamDetailView(ClubStaffRequiredMixin, DetailView):
             roster = list(TeamMembership.objects.filter(team=team, season=season).select_related("member", "position").order_by("position__ordering", "member__last_name"))
             staff = list(StaffAssignment.objects.filter(team=team, season=season).select_related("member", "position").order_by("position__ordering", "member__last_name"))
             if can_manage:
+                # A number picked at registration is only ever a request
+                # (RegistrationDetails.requested_jersey_number) until staff
+                # actually places it here -- pre-filled (still fully
+                # editable) only while nothing's been typed in yet, so
+                # editing the field afterwards can't be silently overwritten
+                # by revisiting this page.
+                requested_numbers = dict(
+                    RegistrationDetails.objects.filter(membership__club=club, membership__season=season, requested_team=team).exclude(requested_jersey_number=None).values_list("membership__member_id", "requested_jersey_number")
+                )
                 for membership in roster:
-                    membership.edit_form = TeamMembershipForm(instance=membership, club=club, team=team, season=season)
+                    initial = {"jersey_number": requested_numbers[membership.member_id]} if membership.jersey_number is None and membership.member_id in requested_numbers else None
+                    membership.edit_form = TeamMembershipForm(instance=membership, club=club, team=team, season=season, initial=initial)
                 for assignment in staff:
                     assignment.edit_form = StaffAssignmentForm(instance=assignment, club=club, team=team, season=season)
 

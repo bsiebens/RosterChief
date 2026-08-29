@@ -42,6 +42,8 @@ from django.utils import timezone
 from club.models import Season
 from shop.models import Product, ProductRegistrantDiscountTier, ProductVariant
 from shop.services.pricing import discount_amount_for
+from teams.models import Team
+from teams.services.numbers import available_numbers
 
 #: Registration -- and the discounts that go with it (ProductRegistrantDiscountTier,
 #: Product.early_bird_discount_*) -- applies to a membership fee or an event
@@ -86,6 +88,25 @@ def variant_registration_kinds(club, season=None):
     server-side."""
     variants = ProductVariant.objects.filter(product__in=available_registration_products(club, season=season), is_active=True).select_related("product__category")
     return {str(variant.pk): (variant.product.category.registration_kind if variant.product.category_id else "") for variant in variants}
+
+
+def team_number_pools(club, season=None):
+    """``{str(team_id): [available number, ...]}`` for every team that has a
+    jersey-number pool assigned (RegistrationEntryRowForm's own
+    requested_team queryset) -- a team with no pool simply has no entry,
+    which the client-side script reads as "no number step for this team".
+
+    Ignores age-gap exemptions (teams.services.numbers.is_number_available's
+    ``for_member``): at this point in the flow the entry might be a
+    brand-new person with no Member row yet, so there's no real identity to
+    check an age gap against -- same "UX narrowing only" caveat as
+    variant_registration_kinds above; RegistrationEntryRowForm.clean is what
+    actually enforces the pick server-side, against the submitted date of
+    birth."""
+    if season is None:
+        return {}
+    teams = Team.objects.filter(club=club, pool__isnull=False).select_related("pool")
+    return {str(team.pk): available_numbers(team.pool, season) for team in teams}
 
 
 def available_registration_seasons(club):

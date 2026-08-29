@@ -2726,6 +2726,82 @@ class ReRegisterViewTests(TestCase):
         self.assertEqual(new_member.family_memberships.get().family, self.family)
 
 
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class ReRegisterJerseyNumberTests(TestCase):
+    """The jersey-number step on mobile re-registration -- see
+    mobile.views.ReRegisterView.get_member_current_numbers and
+    registration-entry-rows.js's own "keep #N" handling (client-side only,
+    not exercised here)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        today = timezone.localdate()
+        cls.season = Season.objects.create(club=cls.club, start_date=today - datetime.timedelta(days=30), end_date=today + datetime.timedelta(days=300))
+        cls.last_season = Season.objects.create(club=cls.club, start_date=today - datetime.timedelta(days=395), end_date=today - datetime.timedelta(days=31))
+        cls.user = User.objects.create_user(email="parent-jersey@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", email="lars@example.com", user=cls.user)
+        ClubMembership.objects.create(club=cls.club, member=cls.member, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
+        ClubMembership.objects.create(club=cls.club, member=cls.member, season=cls.last_season, status=ClubMembership.StatusChoices.LAPSED)
+
+        cls.pool = NumberPool.objects.create(club=cls.club, name="Youth", min_number=1, max_number=20)
+        cls.team = Team.objects.create(club=cls.club, name="U10 Boys", short_name="U10B", pool=cls.pool)
+        TeamMembership.objects.create(team=cls.team, member=cls.member, season=cls.last_season, jersey_number=7)
+
+        cls.product = Product.objects.create(club=cls.club, name="Player Registration", product_type=Product.ProductType.MEMBERSHIP, season=cls.season, price=Decimal("100.00"))
+        cls.u10 = ProductVariant.objects.create(product=cls.product, name="U10", price=Decimal("80.00"))
+
+    def _url(self):
+        return reverse("mobile:reregister")
+
+    def formset_management(self, total, prefix="entries"):
+        return {f"{prefix}-TOTAL_FORMS": str(total), f"{prefix}-INITIAL_FORMS": "0", f"{prefix}-MIN_NUM_FORMS": "0", f"{prefix}-MAX_NUM_FORMS": "1000"}
+
+    def test_member_current_numbers_context_carries_last_seasons_number(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.context["member_current_numbers"], {str(self.member.pk): {str(self.team.pk): 7}})
+
+    def test_re_requesting_the_same_number_succeeds(self):
+        # The member's own number, still "taken" by them from last season --
+        # is_number_available exempts a holder from their own number.
+        self.client.force_login(self.user)
+        data = self.formset_management(2)
+        data["entries-0-existing_member"] = str(self.member.pk)
+        data["entries-0-is_contact"] = "on"
+        data["entries-0-product_variant"] = str(self.u10.pk)
+        data["entries-0-requested_team"] = str(self.team.pk)
+        data["entries-0-requested_jersey_number"] = "7"
+        data["action"] = "submit"
+
+        response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertRedirects(response, reverse("mobile:me"))
+        membership = ClubMembership.objects.get(club=self.club, member=self.member, season=self.season)
+        details = membership.registration_details.get()
+        self.assertEqual(details.requested_jersey_number, 7)
+
+    def test_requesting_a_number_someone_else_holds_is_rejected(self):
+        other_member = Member.objects.create(first_name="Other", last_name="Kid")
+        TeamMembership.objects.create(team=self.team, member=other_member, season=self.season, jersey_number=9)
+        self.client.force_login(self.user)
+        data = self.formset_management(2)
+        data["entries-0-existing_member"] = str(self.member.pk)
+        data["entries-0-is_contact"] = "on"
+        data["entries-0-product_variant"] = str(self.u10.pk)
+        data["entries-0-requested_team"] = str(self.team.pk)
+        data["entries-0-requested_jersey_number"] = "9"
+        data["action"] = "preview"
+
+        response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "just taken")
+        self.assertFalse(RegistrationBatch.objects.exists())
+
+
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "other-club.rosterchief.app", "testserver"])
 class CalendarFeedViewTests(TestCase):
     """The .ics subscription feed -- URL-token authenticated, combined across

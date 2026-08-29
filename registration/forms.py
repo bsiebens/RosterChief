@@ -72,9 +72,21 @@ class RegistrationEntryRowForm(forms.Form):
     entry_kind = forms.ChoiceField(label=_("Registering as"), choices=RegistrationDetails.EntryKind.choices, required=False, initial=RegistrationDetails.EntryKind.PLAYER)
     product_variant = forms.ModelChoiceField(label=_("Registering for"), queryset=ProductVariant.objects.none(), required=False, widget=forms.Select(attrs={"data-searchable": "true", "data-search-placeholder": _("Type to search...")}))
     requested_team = forms.ModelChoiceField(label=_("Team (optional)"), queryset=Team.objects.none(), required=False, widget=forms.Select(attrs={"data-searchable": "true", "data-search-placeholder": _("Type a team name...")}))
+    #: Choices set in __init__ from every pool-scoped team's own
+    #: available_numbers, unioned -- registration-entry-rows.js narrows the
+    #: visible <option>s to just the currently-picked team's own list (same
+    #: split as product_variant/entry_kind above: a UX narrowing only). Since
+    #: the choices themselves are rebuilt fresh from the database on every
+    #: request (not cached/stale), a number taken since the page was loaded
+    #: is already gone from them by the time this validates -- no separate
+    #: availability re-check needed, just this field's own (friendlier)
+    #: invalid_choice message.
+    requested_jersey_number = forms.ChoiceField(label=_("Jersey number"), required=False, widget=forms.Select(attrs={"data-searchable": "true", "data-search-placeholder": _("Type a number...")}))
 
-    def __init__(self, *args, club=None, people=None, season=None, **kwargs):
+    def __init__(self, *args, club=None, people=None, season=None, team_number_pools=None, member_current_numbers=None, **kwargs):
         super().__init__(*args, **kwargs)
+        self.season = season
+        self.team_number_pools = team_number_pools or {}
         if club is not None:
             self.fields["requested_team"].queryset = Team.objects.filter(club=club).order_by("name")
             # Scoped to the one season this whole registration targets (once
@@ -84,6 +96,21 @@ class RegistrationEntryRowForm(forms.Form):
             variants = ProductVariant.objects.filter(product__in=available_registration_products(club, season=season), is_active=True).select_related("product__category").order_by("product__name", "name")
             self.fields["product_variant"].queryset = variants
             self.fields["product_variant"].label_from_instance = lambda variant: f"{variant.product.name} — {variant.name} (€{variant.effective_price})"
+
+        all_numbers = {number for numbers in self.team_number_pools.values() for number in numbers}
+        # team_number_pools is computed with no specific member in mind, so a
+        # member's own already-held number (mobile re-registration's "keep
+        # #N") is otherwise missing from it -- team_number_pools's own
+        # docstring covers why. Added back in here, per this row's own
+        # existing_member (bound POST data first, else the unbound row's own
+        # initial), so re-submitting it validates.
+        member_current_numbers = member_current_numbers or {}
+        row_member_id = self.data.get(self.add_prefix("existing_member")) if self.is_bound else (self.initial or {}).get("existing_member")
+        if row_member_id:
+            all_numbers |= set(member_current_numbers.get(str(row_member_id), {}).values())
+
+        self.fields["requested_jersey_number"].choices = [("", "---------")] + [(str(number), str(number)) for number in sorted(all_numbers)]
+        self.fields["requested_jersey_number"].error_messages["invalid_choice"] = _("That number was just taken -- pick a different one.")
         if people is not None:
             self.fields["existing_member"].queryset = Member.objects.filter(pk__in=[person.pk for person in people])
 
@@ -112,14 +139,28 @@ class RegistrationEntryRowForm(forms.Form):
                 expected = dict(RegistrationDetails.EntryKind.choices).get(registration_kind, registration_kind)
                 self.add_error("product_variant", _("This option is for %(kind)s registrations.") % {"kind": expected})
 
+        team = cleaned.get("requested_team")
+        # Same "blank means player" default entries_from_formset itself
+        # falls back to -- entry_kind is required=False, so an unsubmitted
+        # value cleans to "", not the field's own initial.
+        entry_kind = cleaned.get("entry_kind") or RegistrationDetails.EntryKind.PLAYER
+        # Players only, and only once a pool-scoped team is actually chosen --
+        # anything else (a volunteer row, no team, or a team with no pool) has
+        # no number step at all, so a leftover value is simply dropped rather
+        # than validated against nothing.
+        if entry_kind != RegistrationDetails.EntryKind.PLAYER or team is None or team.pool_id is None:
+            cleaned["requested_jersey_number"] = ""
+
         return cleaned
 
 
 class BaseRegistrationEntryFormSet(forms.BaseFormSet):
-    def __init__(self, *args, club=None, people=None, season=None, enforce_single_contact=True, **kwargs):
+    def __init__(self, *args, club=None, people=None, season=None, team_number_pools=None, member_current_numbers=None, enforce_single_contact=True, **kwargs):
         self.club = club
         self.people = people
         self.season = season
+        self.team_number_pools = team_number_pools
+        self.member_current_numbers = member_current_numbers
         # The public page's is_contact genuinely means "this is me, the person
         # filling in the form" -- at most one row can claim that. Mobile
         # reuses the same field for its "Include this person" toggle per
@@ -134,6 +175,8 @@ class BaseRegistrationEntryFormSet(forms.BaseFormSet):
         kwargs["club"] = self.club
         kwargs["people"] = self.people
         kwargs["season"] = self.season
+        kwargs["team_number_pools"] = self.team_number_pools
+        kwargs["member_current_numbers"] = self.member_current_numbers
         return kwargs
 
     def non_blank_forms(self):
@@ -147,6 +190,20 @@ class BaseRegistrationEntryFormSet(forms.BaseFormSet):
             raise ValidationError(_("Register at least one person."))
         if self.enforce_single_contact and sum(1 for form in self.non_blank_forms() if form.cleaned_data.get("is_contact")) > 1:
             raise ValidationError(_("Only one entry can be “this is me”."))
+
+        # Two rows in the *same* submission both requesting a still-available
+        # (per the database) number would each individually pass -- neither
+        # has been saved yet, so there's nothing on record for either to
+        # clash against. Only catchable here, across the whole formset.
+        seen_numbers = set()
+        for form in self.non_blank_forms():
+            team, number = form.cleaned_data.get("requested_team"), form.cleaned_data.get("requested_jersey_number")
+            if not number or team is None:
+                continue
+            key = (team.pk, number)
+            if key in seen_numbers:
+                form.add_error("requested_jersey_number", _("Someone else in this registration already requested this number."))
+            seen_numbers.add(key)
 
 
 RegistrationEntryFormSet = forms.formset_factory(RegistrationEntryRowForm, formset=BaseRegistrationEntryFormSet, extra=1)
@@ -168,6 +225,7 @@ def entries_from_formset(entry_formset):
         # doesn't show a blank line for it.
         first_name = data.get("first_name") or (existing_member.first_name if existing_member else "")
         last_name = data.get("last_name") or (existing_member.last_name if existing_member else "")
+        requested_jersey_number = data.get("requested_jersey_number")
         entries.append(
             EntryInput(
                 first_name=first_name,
@@ -175,6 +233,7 @@ def entries_from_formset(entry_formset):
                 date_of_birth=data.get("date_of_birth"),
                 entry_kind=data.get("entry_kind") or RegistrationDetails.EntryKind.PLAYER,
                 requested_team=data.get("requested_team"),
+                requested_jersey_number=int(requested_jersey_number) if requested_jersey_number else None,
                 product_variant=data.get("product_variant"),
                 existing_member=data.get("existing_member"),
                 is_contact=bool(data.get("is_contact")),
