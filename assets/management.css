@@ -1419,6 +1419,74 @@
         text-decoration: none;
     }
 
+    /* --- Numbers page (management/number_list.html): a grid of jersey-number tiles,
+       colour-coded by state -- same plain-grid-of-cells shape as .cal-month-grid above,
+       reusing the same tokens (+ --color-violet, already used for .cal-chip-social) so a
+       5th state doesn't need a brand-new hue invented just for this page. --- */
+
+    .number-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(2.75rem, 1fr));
+        gap: 0.5rem;
+    }
+
+    .number-tile {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 2.75rem;
+        border: 1px solid var(--color-line);
+        border-radius: 0.5rem;
+        background: #fff;
+        font-family: var(--font-display);
+        font-size: 0.9375rem;
+        font-weight: 800;
+        color: var(--color-ink);
+        cursor: pointer;
+        transition: transform 0.1s ease;
+    }
+
+    .number-tile:hover {
+        transform: translateY(-1px);
+    }
+
+    .number-tile-taken {
+        background: var(--color-danger-bg);
+        border-color: var(--color-danger-border);
+        color: var(--color-club-dark);
+    }
+
+    .number-tile-pending {
+        background: var(--color-info-bg);
+        border-color: var(--color-info-border);
+        color: var(--color-info-text);
+    }
+
+    .number-tile-previous {
+        background: var(--color-warn-bg);
+        border-color: var(--color-warn-border);
+        color: var(--color-warn-text);
+    }
+
+    .number-tile-reserved {
+        background: color-mix(in srgb, var(--color-violet) 12%, white);
+        border-color: var(--color-violet);
+        color: var(--color-violet);
+    }
+
+    /* Comes after .number-tile-* above so its fixed small size wins the
+       equal-specificity tie against .number-tile-taken/-pending/-previous/
+       -reserved's own height -- letting the legend reuse those same classes
+       for colour without inheriting the full tile size. */
+    .number-tile-swatch {
+        display: inline-block;
+        width: 0.75rem;
+        height: 0.75rem;
+        border-radius: 0.25rem;
+        border: 1px solid var(--color-line);
+        background: #fff;
+    }
+
     .cal-chip-more:hover {
         color: var(--color-ink);
         text-decoration: underline;

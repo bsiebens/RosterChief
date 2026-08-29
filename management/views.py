@@ -70,7 +70,7 @@ from shop.services.pricing import order_total
 from shop.services.production import in_production_lines, mark_line_received, mark_lines_in_production, pending_production_lines, sync_production_status
 from shop.services.stats import order_kpis, quantity_sold_by_product, quantity_sold_by_variant
 from shop.services.vouchers import delete_manual_consumption, record_manual_consumption, voucher_history
-from teams.models import Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
+from teams.models import NumberPool, NumberReservation, Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
 from teams.services import eligible_roster_members
 
 from .bulk_import import build_member_import_template, parse_member_import_rows, read_member_import_workbook
@@ -103,6 +103,7 @@ from .forms import (
     NewsForm,
     NewsPhotoUploadForm,
     NewsPublishForm,
+    NumberReservationForm,
     OnboardingRequirementForm,
     OpponentForm,
     OrderBulkMarkPaidForm,
@@ -1110,6 +1111,9 @@ class TeamCreateView(MemberAdminRequiredMixin, CreateView):
     form_class = TeamForm
     template_name = "management/team_form.html"
 
+    def get_form_kwargs(self):
+        return super().get_form_kwargs() | {"club": self.request.club}
+
     def form_valid(self, form):
         response = super().form_valid(form)
         body = _("“%(team)s” created.") % {"team": self.object}
@@ -1127,6 +1131,9 @@ class TeamUpdateView(MemberAdminRequiredMixin, UpdateView):
 
     def get_queryset(self):
         return Team.objects.filter(club=self.request.club)
+
+    def get_form_kwargs(self):
+        return super().get_form_kwargs() | {"club": self.request.club}
 
     def form_valid(self, form):
         response = super().form_valid(form)
@@ -2053,6 +2060,108 @@ class RefereeListView(ClubStaffRequiredMixin, ListView):
         # single prefetch_related path can't cover anyway.
         members = members_visible_to(self.request.user, self.request.club, include_guardians=True).filter(referee_profile__isnull=False)
         return members.select_related("referee_profile", "referee_profile__level").order_by("last_name", "first_name")
+
+
+class NumberListView(ClubStaffRequiredMixin, TemplateView):
+    """One pool's full number range at a glance -- five states (see
+    ``_tile_state`` below), building on top of what teams.services.numbers
+    already knows how to check, but broken down per-tile rather than the
+    single true/false is_number_available answers that service gives.
+    Viewing (like the rest of Teams) is open to any staff; reserving/
+    releasing a number posts to NumberReservationCreateView/
+    NumberReservationReleaseView, gated the same way."""
+
+    template_name = "management/number_list.html"
+
+    def get_pool(self, club, pools):
+        pool_id = self.request.GET.get("pool")
+        if pool_id:
+            pool = pools.filter(pk=pool_id).first()
+            if pool is not None:
+                return pool
+        return pools.first()
+
+    def get_context_data(self, **kwargs):
+        club = self.request.club
+        pools = NumberPool.objects.filter(club=club).order_by("name")
+        pool = self.get_pool(club, pools)
+        season = selected_season_from_request(self.request, club)
+
+        return super().get_context_data(
+            pools=pools,
+            pool=pool,
+            seasons=Season.objects.filter(club=club).order_by("-start_date"),
+            season=season,
+            tiles=self.build_tiles(pool, season) if pool is not None and season is not None else [],
+            reservation_form=NumberReservationForm(),
+            **kwargs,
+        )
+
+    def build_tiles(self, pool, season):
+        previous = Season.objects.filter(club=pool.club, start_date__lt=season.start_date).order_by("-start_date").first()
+
+        reservations = {reservation.number: reservation for reservation in NumberReservation.objects.filter(pool=pool)}
+        placed_this_season = {}
+        for membership in TeamMembership.objects.filter(team__pool=pool, season=season).exclude(jersey_number=None).select_related("member"):
+            placed_this_season.setdefault(membership.jersey_number, []).append(membership.member)
+        placed_previous_season = {}
+        if previous is not None:
+            for membership in TeamMembership.objects.filter(team__pool=pool, season=previous).exclude(jersey_number=None).select_related("member"):
+                placed_previous_season.setdefault(membership.jersey_number, []).append(membership.member)
+        pending_this_season = {}
+        for details in RegistrationDetails.objects.filter(requested_team__pool=pool, membership__season=season).exclude(requested_jersey_number=None).select_related("membership__member"):
+            pending_this_season.setdefault(details.requested_jersey_number, []).append(details.membership.member)
+
+        tiles = []
+        for number in range(pool.min_number, pool.max_number + 1):
+            reservation = reservations.get(number)
+            if reservation is not None:
+                tiles.append({"number": number, "state": "reserved", "holders": [], "note": reservation.note, "reservation": reservation})
+            elif number in placed_this_season:
+                tiles.append({"number": number, "state": "taken", "holders": placed_this_season[number], "note": "", "reservation": None})
+            elif number in pending_this_season:
+                tiles.append({"number": number, "state": "pending", "holders": pending_this_season[number], "note": "", "reservation": None})
+            elif number in placed_previous_season:
+                tiles.append({"number": number, "state": "previous", "holders": placed_previous_season[number], "note": "", "reservation": None})
+            else:
+                tiles.append({"number": number, "state": "available", "holders": [], "note": "", "reservation": None})
+        return tiles
+
+
+class NumberReservationCreateView(ClubStaffRequiredMixin, View):
+    def post(self, request, *args, **kwargs):
+        pool = get_object_or_404(NumberPool.objects.filter(club=request.club), pk=request.POST.get("pool"))
+        number = request.POST.get("number")
+
+        form = NumberReservationForm(request.POST)
+        if not form.is_valid() or not number or not number.isdigit() or not (pool.min_number <= int(number) <= pool.max_number):
+            notify(request, f"e|{_('Could not reserve')}|{_('That number is not valid for this pool.')}")
+            return redirect(f"{reverse('management:number_list')}?pool={pool.pk}")
+
+        if NumberReservation.objects.filter(pool=pool, number=int(number)).exists():
+            notify(request, f"e|{_('Could not reserve')}|{_('#%(number)s is already reserved.') % {'number': number}}")
+            return redirect(f"{reverse('management:number_list')}?pool={pool.pk}")
+
+        reservation = form.save(commit=False)
+        reservation.club = request.club
+        reservation.pool = pool
+        reservation.number = int(number)
+        reservation.reserved_by = request.user
+        reservation.save()
+
+        notify(request, f"s|{_('Number reserved')}|{_('#%(number)s in “%(pool)s” has been reserved.') % {'number': number, 'pool': pool.name}}")
+        return redirect(f"{reverse('management:number_list')}?pool={pool.pk}")
+
+
+class NumberReservationReleaseView(ClubStaffRequiredMixin, View):
+    def post(self, request, pk):
+        reservation = get_object_or_404(NumberReservation.objects.filter(club=request.club), pk=pk)
+        pool = reservation.pool
+        number = reservation.number
+        reservation.delete()
+
+        notify(request, f"s|{_('Reservation released')}|{_('#%(number)s in “%(pool)s” is available again.') % {'number': number, 'pool': pool.name}}")
+        return redirect(f"{reverse('management:number_list')}?pool={pool.pk}")
 
 
 # --- Groups: a generic named collection of members (all coaches, all team managers,

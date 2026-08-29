@@ -48,7 +48,7 @@ from notifications.models import Notification
 from registration.models import RegistrationBatch, RegistrationDetails
 from shop.models import Discount, DiscountType, Invoice, Order, OrderLine, Payment, Product, ProductCategory, ProductionStatus, ProductRegistrantDiscountTier, ProductVariant, Voucher, VoucherConsumption
 from shop.services.invoices import ShopInvoicePDFError, create_invoice_for_order
-from teams.models import Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
+from teams.models import NumberPool, NumberReservation, Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
 from teams.services import eligible_roster_members
 
 User = get_user_model()
@@ -508,6 +508,23 @@ class TeamManagementTests(ManagementTestBase):
 
         team = Team.objects.get(club=self.club, name="U15")
         self.assertEqual(team.referee_management, Team.RefereeManagement.FEDERATION)
+
+    def test_creating_a_team_with_a_pool(self):
+        pool = NumberPool.objects.create(club=self.club, name="Youth", min_number=1, max_number=99)
+
+        response = self.club_post("team_create", {"name": "U15", "short_name": "U15", "referee_management": "club", "pool": str(pool.pk)})
+
+        team = Team.objects.get(club=self.club, name="U15")
+        self.assertRedirects(response, reverse("management:team_detail", args=[team.pk]))
+        self.assertEqual(team.pool, pool)
+
+    def test_the_pool_dropdown_only_offers_this_clubs_pools(self):
+        other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
+        NumberPool.objects.create(club=other_club, name="Rival Pool", min_number=1, max_number=99)
+
+        response = self.club_get("team_create")
+
+        self.assertNotContains(response, "Rival Pool")
 
     def test_deleting_a_team(self):
         team = Team.objects.create(club=self.club, name="U16", short_name="U16")
@@ -1561,7 +1578,130 @@ class RefereeListViewTests(ManagementTestBase):
         response = self.club_get("referee_list")
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Ref Eree")
+
+
+class NumberListViewTests(ManagementTestBase):
+    """The Numbers overview page -- see management.views.NumberListView and
+    teams.services.numbers, which the tile states are built on top of."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.pool = NumberPool.objects.create(club=cls.club, name="Youth", min_number=1, max_number=5)
+        cls.team = Team.objects.create(club=cls.club, name="First Team", short_name="1st", pool=cls.pool)
+        cls.member = Member.objects.create(first_name="Jane", last_name="Doe")
+
+    def setUp(self):
+        super().setUp()
+        self.client.force_login(self.admin_user)
+
+    def test_visible_to_any_staff(self):
+        coach_user = User.objects.create_user(email="coach-numlist@example.com", password="pw-secret-123")
+        coach_member = Member.objects.create(user=coach_user, first_name="Cara", last_name="Coach")
+        coach_position = Position.objects.create(club=self.club, name="Head Coach", short_name="HC", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=self.team, member=coach_member, season=self.season, position=coach_position)
+        self.client.force_login(coach_user)
+
+        self.assertEqual(self.club_get("number_list").status_code, 200)
+
+    def test_not_visible_without_any_management_access(self):
+        plain_user = User.objects.create_user(email="plain-numlist@example.com", password="pw-secret-123")
+        ClubMembership.objects.create(club=self.club, member=Member.objects.create(user=plain_user, first_name="Pat", last_name="Plain"), season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        self.client.force_login(plain_user)
+
+        self.assertEqual(self.club_get("number_list").status_code, 403)
+
+    def test_no_pools_shows_a_message(self):
+        self.pool.delete()
+
+        response = self.club_get("number_list")
+
+        self.assertContains(response, "No number pools yet")
+
+    def test_defaults_to_the_first_pool(self):
+        response = self.club_get("number_list")
+
+        self.assertEqual(response.context["pool"], self.pool)
+
+    def test_can_switch_pools_via_query_param(self):
+        other_pool = NumberPool.objects.create(club=self.club, name="Senior", min_number=1, max_number=5)
+
+        response = self.club_get("number_list", params={"pool": str(other_pool.pk)})
+
+        self.assertEqual(response.context["pool"], other_pool)
+
+    def test_an_unclaimed_number_is_available(self):
+        response = self.club_get("number_list")
+
+        tiles = {tile["number"]: tile for tile in response.context["tiles"]}
+        self.assertEqual(tiles[1]["state"], "available")
+
+    def test_a_number_placed_this_season_is_taken(self):
+        TeamMembership.objects.create(team=self.team, member=self.member, season=self.season, jersey_number=3)
+
+        response = self.club_get("number_list")
+
+        tiles = {tile["number"]: tile for tile in response.context["tiles"]}
+        self.assertEqual(tiles[3]["state"], "taken")
+        self.assertEqual(tiles[3]["holders"], [self.member])
+
+    def test_a_number_placed_last_season_only_is_previous(self):
+        previous_season = Season.objects.create(club=self.club, start_date=self.season.start_date - datetime.timedelta(days=365), end_date=self.season.start_date - datetime.timedelta(days=1))
+        TeamMembership.objects.create(team=self.team, member=self.member, season=previous_season, jersey_number=4)
+
+        response = self.club_get("number_list")
+
+        tiles = {tile["number"]: tile for tile in response.context["tiles"]}
+        self.assertEqual(tiles[4]["state"], "previous")
+
+    def test_a_pending_registration_request_is_pending(self):
+        membership = ClubMembership.objects.create(club=self.club, member=self.member, season=self.season)
+        batch = RegistrationBatch.objects.create(club=self.club, season=self.season, contact_first_name="Jane", contact_last_name="Doe", contact_email="jane@example.com")
+        RegistrationDetails.objects.create(membership=membership, batch=batch, requested_team=self.team, requested_jersey_number=5)
+
+        response = self.club_get("number_list")
+
+        tiles = {tile["number"]: tile for tile in response.context["tiles"]}
+        self.assertEqual(tiles[5]["state"], "pending")
+        self.assertEqual(tiles[5]["holders"], [self.member])
+
+    def test_a_manually_reserved_number_is_reserved(self):
+        reservation = NumberReservation.objects.create(club=self.club, pool=self.pool, number=2, note="Retired -- #2")
+
+        response = self.club_get("number_list")
+
+        tiles = {tile["number"]: tile for tile in response.context["tiles"]}
+        self.assertEqual(tiles[2]["state"], "reserved")
+        self.assertEqual(tiles[2]["reservation"], reservation)
+        self.assertContains(response, "Retired -- #2")
+
+    def test_reserving_an_available_number(self):
+        response = self.club_post("number_reservation_create", {"pool": str(self.pool.pk), "number": "1", "note": "Keep aside"})
+
+        self.assertRedirects(response, f"{reverse('management:number_list')}?pool={self.pool.pk}")
+        reservation = NumberReservation.objects.get(pool=self.pool, number=1)
+        self.assertEqual(reservation.note, "Keep aside")
+        self.assertEqual(reservation.reserved_by, self.admin_user)
+
+    def test_reserving_a_number_outside_the_pool_range_is_rejected(self):
+        self.club_post("number_reservation_create", {"pool": str(self.pool.pk), "number": "99", "note": ""})
+
+        self.assertFalse(NumberReservation.objects.filter(pool=self.pool, number=99).exists())
+
+    def test_reserving_an_already_reserved_number_is_rejected(self):
+        NumberReservation.objects.create(club=self.club, pool=self.pool, number=1)
+
+        self.club_post("number_reservation_create", {"pool": str(self.pool.pk), "number": "1", "note": "duplicate"})
+
+        self.assertEqual(NumberReservation.objects.filter(pool=self.pool, number=1).count(), 1)
+
+    def test_releasing_a_reservation(self):
+        reservation = NumberReservation.objects.create(club=self.club, pool=self.pool, number=1)
+
+        response = self.club_post("number_reservation_release", {}, reservation.pk)
+
+        self.assertRedirects(response, f"{reverse('management:number_list')}?pool={self.pool.pk}")
+        self.assertFalse(NumberReservation.objects.filter(pk=reservation.pk).exists())
 
 
 class ClubRoleManagementTests(ManagementTestBase):

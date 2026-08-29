@@ -19,7 +19,7 @@ from members.services.family import find_member_by_email
 from news.models import News
 from shop.models import Discount, DiscountType, OrderLine, Payment, Product, ProductCategory, ProductVariant, Voucher
 from shop.services.payments import amount_due
-from teams.models import Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
+from teams.models import NumberPool, NumberReservation, Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
 from teams.services import eligible_roster_members
 
 from .recurrence_ui import FREQUENCY_CHOICES, WEEKDAY_CHOICES, build_rrule, parse_rrule
@@ -37,7 +37,22 @@ class MemberForm(forms.ModelForm):
 class TeamForm(forms.ModelForm):
     class Meta:
         model = Team
-        fields = ["name", "short_name", "referee_management"]
+        fields = ["name", "short_name", "referee_management", "pool"]
+
+    def __init__(self, *args, club=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["pool"].queryset = NumberPool.objects.filter(club=club)
+        self.fields["pool"].empty_label = _("— none —")
+
+
+class NumberReservationForm(forms.ModelForm):
+    """A manual block on a number, e.g. a retired shirt -- pool/number/club
+    are set by the view (NumberReservationCreateView) from the Numbers
+    page's own shared dialog, not by this form."""
+
+    class Meta:
+        model = NumberReservation
+        fields = ["note"]
 
 
 class TeamPhotoForm(forms.ModelForm):

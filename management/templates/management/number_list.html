@@ -1,0 +1,155 @@
+{% extends "management/base.html" %}
+{% load i18n lucide %}
+
+{% comment %}
+    One pool's full number range as a grid of tiles, colour-coded by state --
+    same plain-grid-of-cells shape as event_list.html's .cal-month-grid, not a
+    <table>. A single shared dialog (opened via openNumberModal(button), same
+    "one modal for N tiles" idea as _news_preview.html's focal point picker)
+    shows detail and, depending on state, a reserve or release action.
+{% endcomment %}
+
+{% block heading %}{% trans "Numbers" %}{% endblock heading %}
+{% block topbar_context %}<span class="text-sm text-muted">{% trans "Jersey numbers across every team sharing a pool." %}</span>{% endblock topbar_context %}
+
+{% block filter_strip %}
+    {% if pools %}
+        <div class="border-b border-line bg-white px-7 py-3">
+            <form method="get" class="flex flex-row flex-wrap items-center gap-2">
+                <select name="pool" class="select w-48">
+                    {% for candidate in pools %}
+                        <option value="{{ candidate.pk }}" {% if candidate.pk == pool.pk %}selected{% endif %}>{{ candidate.name }}</option>
+                    {% endfor %}
+                </select>
+                {% if seasons %}
+                    <select name="season" class="select w-48">
+                        {% for candidate in seasons %}
+                            <option value="{{ candidate.pk }}" {% if candidate.pk == season.pk %}selected{% endif %}>{% trans "Season" %} {{ candidate.start_date|date:"Y" }} - {{ candidate.end_date|date:"Y" }}</option>
+                        {% endfor %}
+                    </select>
+                {% endif %}
+                <button class="btn btn-outline gap-2" type="submit">{% lucide "filter" size=16 %} {% trans "View" %}</button>
+            </form>
+        </div>
+    {% endif %}
+{% endblock filter_strip %}
+
+{% block panel %}
+    {% if not pools %}
+        <div class="alert alert-warning">
+            {% lucide "shirt" size=20 %}
+            <span>{% trans "No number pools yet -- create one, then assign it to a team from the team's edit page." %}</span>
+        </div>
+    {% elif not season %}
+        <div class="alert alert-warning">
+            {% lucide "calendar-x" size=20 %}
+            <span>{% trans "This club has no seasons yet." %}</span>
+        </div>
+    {% else %}
+        <div class="mb-4 flex flex-wrap items-center gap-4 text-xs text-muted">
+            <span class="inline-flex items-center gap-1.5"><span class="number-tile-swatch number-tile-available"></span>{% trans "Available" %}</span>
+            <span class="inline-flex items-center gap-1.5"><span class="number-tile-swatch number-tile-taken"></span>{% trans "Taken this season" %}</span>
+            <span class="inline-flex items-center gap-1.5"><span class="number-tile-swatch number-tile-pending"></span>{% trans "Pending (requested, not placed)" %}</span>
+            <span class="inline-flex items-center gap-1.5"><span class="number-tile-swatch number-tile-previous"></span>{% trans "Taken last season only" %}</span>
+            <span class="inline-flex items-center gap-1.5"><span class="number-tile-swatch number-tile-reserved"></span>{% trans "Reserved" %}</span>
+        </div>
+
+        <div class="number-grid">
+            {% for tile in tiles %}
+                <button
+                    type="button"
+                    class="number-tile number-tile-{{ tile.state }}"
+                    onclick="openNumberModal(this)"
+                    data-number="{{ tile.number }}"
+                    data-state="{{ tile.state }}"
+                    data-holders="{% for holder in tile.holders %}{{ holder }}{% if not forloop.last %}, {% endif %}{% endfor %}"
+                    data-note="{{ tile.note }}"
+                    {% if tile.reservation %}data-release-url="{% url 'management:number_reservation_release' tile.reservation.pk %}"{% endif %}
+                >{{ tile.number }}</button>
+            {% endfor %}
+        </div>
+
+        <dialog id="number_modal" class="modal">
+            <div class="modal-box max-w-sm">
+                <h3 class="text-lg font-bold">{% trans "Number" %} #<span id="number-modal-number"></span></h3>
+
+                <div id="number-modal-available" class="hidden">
+                    <p class="py-2 text-sm opacity-70">{% trans "Nobody currently holds this number. Reserve it to block it (e.g. a retired shirt)." %}</p>
+                    <form method="post" id="number-modal-reserve-form" action="{% url 'management:number_reservation_create' %}">
+                        {% csrf_token %}
+                        <input type="hidden" name="pool" value="{{ pool.pk }}">
+                        <input type="hidden" name="number" id="number-modal-reserve-number">
+                        {% include "controlpanel/_form_fields.html" with form=reservation_form %}
+                    </form>
+                </div>
+
+                <div id="number-modal-held" class="hidden">
+                    <p class="py-2 text-sm opacity-70">{% trans "Held by:" %} <span id="number-modal-holders" class="font-semibold text-ink"></span></p>
+                </div>
+
+                <div id="number-modal-reserved" class="hidden">
+                    <p class="py-2 text-sm opacity-70" id="number-modal-note"></p>
+                    <form method="post" id="number-modal-release-form" action="">
+                        {% csrf_token %}
+                    </form>
+                </div>
+
+                <div class="modal-action">
+                    <form method="dialog">
+                        <button class="btn btn-outline gap-2">{% lucide "x" size=16 %} {% trans "Close" %}</button>
+                    </form>
+                    <button id="number-modal-reserve-submit" class="btn btn-primary gap-2 hidden" type="submit" form="number-modal-reserve-form">{% lucide "lock" size=16 %} {% trans "Reserve" %}</button>
+                    <button id="number-modal-release-submit" class="btn btn-error gap-2 hidden" type="submit" form="number-modal-release-form">{% lucide "unlock" size=16 %} {% trans "Release" %}</button>
+                </div>
+            </div>
+            <form method="dialog" class="modal-backdrop">
+                <button>close</button>
+            </form>
+        </dialog>
+    {% endif %}
+{% endblock panel %}
+
+{% block extra_body %}
+    <script>
+        (() => {
+            const modal = document.getElementById("number_modal");
+            const numberLabel = document.getElementById("number-modal-number");
+            const sections = {
+                available: document.getElementById("number-modal-available"),
+                held: document.getElementById("number-modal-held"),
+                reserved: document.getElementById("number-modal-reserved"),
+            };
+            const reserveNumberInput = document.getElementById("number-modal-reserve-number");
+            const reserveSubmit = document.getElementById("number-modal-reserve-submit");
+            const holdersLabel = document.getElementById("number-modal-holders");
+            const noteLabel = document.getElementById("number-modal-note");
+            const releaseForm = document.getElementById("number-modal-release-form");
+            const releaseSubmit = document.getElementById("number-modal-release-submit");
+
+            window.openNumberModal = (button) => {
+                const state = button.dataset.state;
+                numberLabel.textContent = button.dataset.number;
+
+                Object.values(sections).forEach((section) => section.classList.add("hidden"));
+                reserveSubmit.classList.add("hidden");
+                releaseSubmit.classList.add("hidden");
+
+                if (state === "available") {
+                    sections.available.classList.remove("hidden");
+                    reserveSubmit.classList.remove("hidden");
+                    reserveNumberInput.value = button.dataset.number;
+                } else if (state === "reserved") {
+                    sections.reserved.classList.remove("hidden");
+                    releaseSubmit.classList.remove("hidden");
+                    noteLabel.textContent = button.dataset.note || "{% trans 'No note.' %}";
+                    releaseForm.action = button.dataset.releaseUrl;
+                } else {
+                    sections.held.classList.remove("hidden");
+                    holdersLabel.textContent = button.dataset.holders;
+                }
+
+                modal.showModal();
+            };
+        })();
+    </script>
+{% endblock extra_body %}

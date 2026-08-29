@@ -52,6 +52,7 @@
     {% if nav_section == 'teams' %}
         <div class="flex flex-col">
             <a class="nav-subitem {% if nav == 'team_list' %}active{% endif %}" href="{% url 'management:team_list' %}">{% trans "All teams" %}</a>
+            <a class="nav-subitem {% if nav == 'number_list' %}active{% endif %}" href="{% url 'management:number_list' %}">{% trans "Numbers" %}</a>
             <a class="nav-subitem {% if nav == 'referee_list' %}active{% endif %}" href="{% url 'management:referee_list' %}">{% trans "Referees" %}</a>
         </div>
     {% endif %}
