@@ -93,6 +93,12 @@ class RegistrationDetails(UUIDModel):
     #: covers "volunteer, no team preference yet".
     requested_team = models.ForeignKey(Team, on_delete=models.SET_NULL, related_name="registration_requests", verbose_name=_("requested team"), blank=True, null=True)
     requested_position = models.ForeignKey(Position, on_delete=models.SET_NULL, related_name="registration_requests", verbose_name=_("requested position"), blank=True, null=True, limit_choices_to={"staff_position": True})
+    #: A request, not a placement -- same as requested_team/requested_position
+    #: above. Only meaningful for a player entry with a requested_team whose
+    #: pool is set; see teams.services.numbers for the availability rules and
+    #: SignupPlaceInTeamView/the team roster forms for where this becomes a
+    #: real TeamMembership.jersey_number.
+    requested_jersey_number = models.PositiveSmallIntegerField(_("requested jersey number"), blank=True, null=True)
 
     product_variant = models.ForeignKey(ProductVariant, on_delete=models.SET_NULL, related_name="registration_requests", verbose_name=_("product variant"), blank=True, null=True)
     price = models.DecimalField(_("price"), max_digits=10, decimal_places=2, default=0, help_text=_("This entry's own share of the batch subtotal, before any discount."))

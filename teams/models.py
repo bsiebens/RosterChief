@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import Q
@@ -7,6 +8,34 @@ from django.utils.translation import gettext_lazy as _
 from club.models import Season
 from members.models import Member
 from rosterchief.base import ClubScopedModel, UUIDModel, validate_club_scope
+
+
+class NumberPool(ClubScopedModel):
+    """A club-defined jersey-number pool, e.g. "Youth", "Senior",
+    "Goalkeepers". Several teams can share one pool (Team.pool below) --
+    within a pool a number belongs to at most one holder at a time, checked
+    across every team in the pool, not just one. See teams/services/numbers.py
+    for the availability rules themselves; this model only owns the pool's
+    identity and its valid number range."""
+
+    name = models.CharField(_("name"), max_length=255)
+    min_number = models.PositiveSmallIntegerField(_("minimum number"))
+    max_number = models.PositiveSmallIntegerField(_("maximum number"))
+
+    class Meta:
+        verbose_name = _("number pool")
+        verbose_name_plural = _("number pools")
+        constraints = [
+            models.UniqueConstraint(fields=["club", "name"], name="unique_number_pool_name_per_club"),
+        ]
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+    def clean(self):
+        if self.min_number is not None and self.max_number is not None and self.min_number > self.max_number:
+            raise ValidationError({"max_number": _("Must be greater than or equal to the minimum number.")})
 
 
 class Team(ClubScopedModel):
@@ -23,6 +52,15 @@ class Team(ClubScopedModel):
         default=RefereeManagement.CLUB,
         help_text=_("Who arranges referees for this team's home games. Federation-managed teams are left out of the referee tools entirely -- no eligibility, no assignment, nothing to configure."),
     )
+    pool = models.ForeignKey(
+        NumberPool,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="teams",
+        verbose_name=_("number pool"),
+        help_text=_("Jersey numbers are checked for clashes against every other team sharing this pool, not just this one. Left blank, this team's numbers are only checked against itself, as before."),
+    )
 
     class Meta:
         verbose_name = _("team")
@@ -34,6 +72,11 @@ class Team(ClubScopedModel):
 
     def __str__(self):
         return self.name
+
+    def clean(self):
+        club_id = self.club_id
+        if club_id is not None:
+            validate_club_scope(self, club_id, same_club_fields=("pool",))
 
 
 def team_photo_path(instance, filename):
@@ -265,3 +308,32 @@ class StaffAssignment(UUIDModel):
     def clean(self):
         club_id = self.team.club_id if self.team_id else None
         validate_club_scope(self, club_id, same_club_fields=("season", "position"))
+
+
+class NumberReservation(ClubScopedModel):
+    """A manual block on a number within a pool, not tied to any member --
+    e.g. a retired shirt. Permanent until released by staff: unlike organic
+    usage (see teams/services/numbers.py's season window), a reservation
+    doesn't expire on its own after a season or two."""
+
+    pool = models.ForeignKey(NumberPool, on_delete=models.CASCADE, related_name="reservations", verbose_name=_("pool"))
+    number = models.PositiveSmallIntegerField(_("number"))
+    note = models.CharField(_("note"), max_length=255, blank=True, help_text=_("e.g. \"Retired -- Jane Doe, #23\"."))
+    reserved_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="number_reservations", verbose_name=_("reserved by"))
+
+    class Meta:
+        verbose_name = _("number reservation")
+        verbose_name_plural = _("number reservations")
+        ordering = ["pool", "number"]
+        constraints = [
+            models.UniqueConstraint(fields=["pool", "number"], name="unique_number_per_pool_reservation"),
+        ]
+
+    def __str__(self):
+        return f"{self.pool} #{self.number}"
+
+    def clean(self):
+        if self.club_id is not None:
+            validate_club_scope(self, self.club_id, same_club_fields=("pool",))
+        if self.pool_id and self.number is not None and not (self.pool.min_number <= self.number <= self.pool.max_number):
+            raise ValidationError({"number": _("Must be within the pool's number range.")})

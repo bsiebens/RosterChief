@@ -6,11 +6,13 @@ from django.db.models import ProtectedError
 from django.test import RequestFactory, TestCase
 from django.utils import timezone
 
-from club.models import Club, Season
+from club.models import Club, ClubMembership, Season
 from members.models import Member
+from registration.models import RegistrationBatch, RegistrationDetails
 
 from .api import build_roster
-from .models import Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
+from .models import NumberPool, NumberReservation, Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
+from .services.numbers import available_numbers, is_number_available, member_current_number, numbers_taken
 
 
 class TeamsTestCase(TestCase):
@@ -417,3 +419,213 @@ class RosterApiTests(TeamsTestCase):
         roster = build_roster(self.team, self.make_request())
 
         self.assertEqual([group.position for group in roster.players], ["Forward", ""])
+
+
+class NumberPoolModelTests(TeamsTestCase):
+    def test_str_returns_name(self):
+        pool = NumberPool.objects.create(club=self.club, name="Youth", min_number=1, max_number=99)
+        self.assertEqual(str(pool), "Youth")
+
+    def test_name_is_unique_per_club(self):
+        NumberPool.objects.create(club=self.club, name="Youth", min_number=1, max_number=99)
+
+        with self.assertRaises(IntegrityError):
+            NumberPool.objects.create(club=self.club, name="Youth", min_number=1, max_number=50)
+
+    def test_same_name_allowed_in_another_club(self):
+        other = Club.objects.create(name="Rival FC", slug="rival-fc")
+        NumberPool.objects.create(club=self.club, name="Youth", min_number=1, max_number=99)
+
+        NumberPool.objects.create(club=other, name="Youth", min_number=1, max_number=99)
+
+        self.assertEqual(NumberPool.objects.filter(name="Youth").count(), 2)
+
+    def test_min_must_not_exceed_max(self):
+        pool = NumberPool(club=self.club, name="Youth", min_number=50, max_number=1)
+
+        with self.assertRaises(ValidationError):
+            pool.clean()
+
+    def test_min_equal_to_max_is_allowed(self):
+        pool = NumberPool(club=self.club, name="Youth", min_number=1, max_number=1)
+        pool.clean()
+
+
+class TeamPoolTests(TeamsTestCase):
+    def test_team_pool_defaults_to_none(self):
+        self.assertIsNone(self.team.pool)
+
+    def test_can_assign_a_pool(self):
+        pool = NumberPool.objects.create(club=self.club, name="Youth", min_number=1, max_number=99)
+        self.team.pool = pool
+        self.team.save()
+
+        self.assertEqual(self.team.pool, pool)
+
+    def test_several_teams_can_share_a_pool(self):
+        pool = NumberPool.objects.create(club=self.club, name="Youth", min_number=1, max_number=99)
+        other_team = Team.objects.create(club=self.club, name="Second Team", short_name="2nd", pool=pool)
+        self.team.pool = pool
+        self.team.save()
+
+        self.assertEqual(set(pool.teams.all()), {self.team, other_team})
+
+    def test_deleting_a_pool_clears_it_on_its_teams(self):
+        pool = NumberPool.objects.create(club=self.club, name="Youth", min_number=1, max_number=99)
+        self.team.pool = pool
+        self.team.save()
+
+        pool.delete()
+        self.team.refresh_from_db()
+
+        self.assertIsNone(self.team.pool)
+
+    def test_rejects_a_pool_from_another_club(self):
+        other = Club.objects.create(name="Rival FC", slug="rival-fc")
+        other_pool = NumberPool.objects.create(club=other, name="Youth", min_number=1, max_number=99)
+        self.team.pool = other_pool
+
+        with self.assertRaises(ValidationError) as ctx:
+            self.team.full_clean()
+        self.assertIn("pool", ctx.exception.error_dict)
+
+
+class NumberReservationModelTests(TeamsTestCase):
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.pool = NumberPool.objects.create(club=cls.club, name="Youth", min_number=1, max_number=99)
+
+    def test_str(self):
+        reservation = NumberReservation.objects.create(club=self.club, pool=self.pool, number=23, note="Retired")
+        self.assertEqual(str(reservation), "Youth #23")
+
+    def test_number_is_unique_per_pool(self):
+        NumberReservation.objects.create(club=self.club, pool=self.pool, number=23)
+
+        with self.assertRaises(IntegrityError):
+            NumberReservation.objects.create(club=self.club, pool=self.pool, number=23)
+
+    def test_same_number_allowed_in_a_different_pool(self):
+        other_pool = NumberPool.objects.create(club=self.club, name="Senior", min_number=1, max_number=99)
+        NumberReservation.objects.create(club=self.club, pool=self.pool, number=23)
+
+        NumberReservation.objects.create(club=self.club, pool=other_pool, number=23)
+
+        self.assertEqual(NumberReservation.objects.filter(number=23).count(), 2)
+
+    def test_rejects_a_pool_from_another_club(self):
+        other = Club.objects.create(name="Rival FC", slug="rival-fc")
+        other_pool = NumberPool.objects.create(club=other, name="Youth", min_number=1, max_number=99)
+        reservation = NumberReservation(club=self.club, pool=other_pool, number=1)
+
+        with self.assertRaises(ValidationError) as ctx:
+            reservation.full_clean()
+        self.assertIn("pool", ctx.exception.error_dict)
+
+    def test_rejects_a_number_outside_the_pools_range(self):
+        reservation = NumberReservation(club=self.club, pool=self.pool, number=100)
+
+        with self.assertRaises(ValidationError) as ctx:
+            reservation.full_clean()
+        self.assertIn("number", ctx.exception.error_dict)
+
+
+class NumbersServiceTests(TeamsTestCase):
+    """teams/services/numbers.py -- the actual availability rules a jersey
+    number is judged by, both for the registration picker and the Numbers
+    management page."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.pool = NumberPool.objects.create(club=cls.club, name="Youth", min_number=1, max_number=10)
+        cls.team.pool = cls.pool
+        cls.team.save()
+        cls.other_team = Team.objects.create(club=cls.club, name="Second Team", short_name="2nd", pool=cls.pool)
+        cls.previous_season = Season.objects.create(club=cls.club, start_date=datetime.date(2025, 8, 1), end_date=datetime.date(2026, 5, 31))
+
+    def test_a_number_taken_on_one_team_blocks_it_on_a_teammate_team_in_the_same_pool(self):
+        TeamMembership.objects.create(team=self.team, member=self.member, season=self.season, jersey_number=7)
+
+        self.assertFalse(is_number_available(self.pool, self.season, 7))
+
+    def test_a_number_taken_in_a_different_pool_stays_available(self):
+        other_pool = NumberPool.objects.create(club=self.club, name="Senior", min_number=1, max_number=10)
+        unpooled_team = Team.objects.create(club=self.club, name="Third Team", short_name="3rd", pool=other_pool)
+        TeamMembership.objects.create(team=unpooled_team, member=self.member, season=self.season, jersey_number=7)
+
+        self.assertTrue(is_number_available(self.pool, self.season, 7))
+
+    def test_a_number_taken_last_season_still_blocks_this_season(self):
+        TeamMembership.objects.create(team=self.team, member=self.member, season=self.previous_season, jersey_number=7)
+
+        self.assertFalse(is_number_available(self.pool, self.season, 7))
+
+    def test_a_number_taken_two_seasons_ago_no_longer_blocks(self):
+        two_seasons_ago = Season.objects.create(club=self.club, start_date=datetime.date(2024, 8, 1), end_date=datetime.date(2025, 5, 31))
+        TeamMembership.objects.create(team=self.team, member=self.member, season=two_seasons_ago, jersey_number=7)
+
+        self.assertTrue(is_number_available(self.pool, self.season, 7))
+
+    def test_a_pending_registration_request_blocks_the_number_before_payment(self):
+        membership = ClubMembership.objects.create(club=self.club, member=self.member, season=self.season)
+        batch = RegistrationBatch.objects.create(club=self.club, season=self.season, contact_first_name="Jane", contact_last_name="Doe", contact_email="jane@example.com")
+        RegistrationDetails.objects.create(membership=membership, batch=batch, requested_team=self.team, requested_jersey_number=7)
+
+        self.assertFalse(is_number_available(self.pool, self.season, 7))
+
+    def test_a_member_can_keep_their_own_number(self):
+        TeamMembership.objects.create(team=self.team, member=self.member, season=self.season, jersey_number=7)
+
+        self.assertTrue(is_number_available(self.pool, self.season, 7, for_member=self.member))
+
+    def test_a_five_year_age_gap_allows_sharing_a_number(self):
+        self.member.date_of_birth = datetime.date(2010, 1, 1)
+        self.member.save()
+        holder = TeamMembership.objects.create(team=self.team, member=self.member, season=self.season, jersey_number=7)
+        younger = Member.objects.create(first_name="Kid", last_name="Rookie", date_of_birth=datetime.date(2016, 6, 1))
+
+        self.assertTrue(is_number_available(self.pool, self.season, 7, for_member=younger))
+        self.assertIn(holder.member, numbers_taken(self.pool, self.season)[7])
+
+    def test_less_than_a_five_year_age_gap_does_not_exempt(self):
+        self.member.date_of_birth = datetime.date(2010, 1, 1)
+        self.member.save()
+        TeamMembership.objects.create(team=self.team, member=self.member, season=self.season, jersey_number=7)
+        close_in_age = Member.objects.create(first_name="Close", last_name="Peer", date_of_birth=datetime.date(2012, 1, 1))
+
+        self.assertFalse(is_number_available(self.pool, self.season, 7, for_member=close_in_age))
+
+    def test_a_missing_date_of_birth_is_conservatively_unavailable(self):
+        # self.member has no date_of_birth set by default (TeamsTestCase).
+        TeamMembership.objects.create(team=self.team, member=self.member, season=self.season, jersey_number=7)
+        other = Member.objects.create(first_name="No", last_name="Birthday", date_of_birth=datetime.date(1990, 1, 1))
+
+        self.assertFalse(is_number_available(self.pool, self.season, 7, for_member=other))
+
+    def test_a_manual_reservation_blocks_a_number_nobody_holds(self):
+        NumberReservation.objects.create(club=self.club, pool=self.pool, number=7)
+
+        self.assertFalse(is_number_available(self.pool, self.season, 7))
+
+    def test_available_numbers_excludes_only_whats_actually_taken(self):
+        TeamMembership.objects.create(team=self.team, member=self.member, season=self.season, jersey_number=1)
+        NumberReservation.objects.create(club=self.club, pool=self.pool, number=2)
+
+        self.assertEqual(available_numbers(self.pool, self.season), list(range(3, 11)))
+
+    def test_member_current_number_returns_the_lowest_held(self):
+        TeamMembership.objects.create(team=self.team, member=self.member, season=self.season, jersey_number=9)
+        TeamMembership.objects.create(team=self.other_team, member=self.member, season=self.previous_season, jersey_number=3)
+
+        self.assertEqual(member_current_number(self.member, self.pool, self.season), 3)
+
+    def test_member_current_number_is_none_when_the_member_holds_nothing(self):
+        self.assertIsNone(member_current_number(self.member, self.pool, self.season))
+
+    def test_member_current_number_ignores_seasons_further_back_than_the_previous_one(self):
+        two_seasons_ago = Season.objects.create(club=self.club, start_date=datetime.date(2024, 8, 1), end_date=datetime.date(2025, 5, 31))
+        TeamMembership.objects.create(team=self.team, member=self.member, season=two_seasons_ago, jersey_number=5)
+
+        self.assertIsNone(member_current_number(self.member, self.pool, self.season))
