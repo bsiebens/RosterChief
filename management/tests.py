@@ -724,6 +724,40 @@ class TeamRosterStaffTests(ManagementTestBase):
         other_membership.refresh_from_db()
         self.assertEqual(other_membership.jersey_number, 8)
 
+    def test_a_jersey_number_taken_on_a_teammate_team_in_the_same_pool_is_rejected(self):
+        pool = NumberPool.objects.create(club=self.club, name="Youth", min_number=1, max_number=99)
+        self.team.pool = pool
+        self.team.save()
+        self.other_team.pool = pool
+        self.other_team.save()
+        other_player = Member.objects.create(first_name="Olly", last_name="Other")
+        ClubMembership.objects.create(club=self.club, member=other_player, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        TeamMembership.objects.create(team=self.other_team, season=self.season, member=self.player, position=self.player_position, jersey_number=7)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("team_roster_add", {"member": str(other_player.pk), "position": str(self.player_position.pk), "jersey_number": "7"}, self.team.pk, self.season.pk)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(TeamMembership.objects.filter(team=self.team, season=self.season, member=other_player).exists())
+
+    def test_a_pool_scoped_team_still_lets_a_member_keep_their_own_number_on_edit(self):
+        pool = NumberPool.objects.create(club=self.club, name="Youth", min_number=1, max_number=99)
+        self.team.pool = pool
+        self.team.save()
+        membership = TeamMembership.objects.create(team=self.team, season=self.season, member=self.player, position=self.player_position, jersey_number=7)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post(
+            "team_roster_update",
+            {"member": str(self.player.pk), "position": str(self.player_position.pk), "jersey_number": "7", "is_captain": "on"},
+            self.team.pk,
+            membership.pk,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        membership.refresh_from_db()
+        self.assertTrue(membership.is_captain)
+
     def test_editing_a_roster_entry_updates_it(self):
         membership = TeamMembership.objects.create(team=self.team, season=self.season, member=self.player, position=self.player_position, jersey_number=9)
         self.client.force_login(self.admin_user)
@@ -909,6 +943,20 @@ class TeamBulkAddTests(ManagementTestBase):
         # All-or-nothing: nothing was saved, so the roster is untouched apart from
         # the entry that was already there before the submit.
         self.assertEqual(TeamMembership.objects.filter(team=self.team, season=self.season).count(), 1)
+
+    def test_a_jersey_clashing_across_teams_in_the_same_pool_rejects_the_submit(self):
+        pool = NumberPool.objects.create(club=self.club, name="Youth", min_number=1, max_number=99)
+        self.team.pool = pool
+        self.team.save()
+        self.other_team.pool = pool
+        self.other_team.save()
+        TeamMembership.objects.create(team=self.other_team, season=self.season, member=self.player, position=self.player_position, jersey_number=7)
+        self.client.force_login(self.admin_user)
+
+        response = self.bulk_add(self.row(self.other_player, self.player_position, 7))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(TeamMembership.objects.filter(team=self.team, season=self.season, member=self.other_player).exists())
 
     def test_a_good_row_alongside_a_bad_one_is_not_saved_either(self):
         # The all-or-nothing guarantee proper: the other tests here submit rows that

@@ -21,6 +21,7 @@ from shop.models import Discount, DiscountType, OrderLine, Payment, Product, Pro
 from shop.services.payments import amount_due
 from teams.models import NumberPool, NumberReservation, Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
 from teams.services import eligible_roster_members
+from teams.services.numbers import is_number_available
 
 from .recurrence_ui import FREQUENCY_CHOICES, WEEKDAY_CHOICES, build_rrule, parse_rrule
 
@@ -178,8 +179,11 @@ class TeamMembershipForm(forms.ModelForm):
         # and surfaces as a raw IntegrityError instead of a form error.
         jersey_number = cleaned.get("jersey_number")
         if jersey_number is not None and self.team is not None and self.season is not None:
-            clash = TeamMembership.objects.filter(team=self.team, season=self.season, jersey_number=jersey_number).exclude(pk=self.instance.pk).exists()
-            if clash:
+            if self.team.pool_id is not None:
+                member = cleaned.get("member") or getattr(self.instance, "member", None)
+                if not is_number_available(self.team.pool, self.season, jersey_number, for_member=member):
+                    self.add_error("jersey_number", _("This number is already taken in this team's number pool this season."))
+            elif TeamMembership.objects.filter(team=self.team, season=self.season, jersey_number=jersey_number).exclude(pk=self.instance.pk).exists():
                 self.add_error("jersey_number", _("Another player on this team already has this jersey number this season."))
         return cleaned
 
@@ -349,7 +353,10 @@ class TeamBulkAddRowForm(forms.Form):
 
         jersey_number = cleaned.get("jersey_number")
         if jersey_number is not None and self.team is not None and self.season is not None:
-            if TeamMembership.objects.filter(team=self.team, season=self.season, jersey_number=jersey_number).exists():
+            if self.team.pool_id is not None:
+                if not is_number_available(self.team.pool, self.season, jersey_number, for_member=member):
+                    self.add_error("jersey_number", _("Jersey #%(number)s is already taken in this team's number pool this season.") % {"number": jersey_number})
+            elif TeamMembership.objects.filter(team=self.team, season=self.season, jersey_number=jersey_number).exists():
                 self.add_error("jersey_number", _("Jersey #%(number)s is already taken on this team this season.") % {"number": jersey_number})
         return cleaned
 

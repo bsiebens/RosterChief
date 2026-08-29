@@ -3,6 +3,7 @@ from django.utils.translation import gettext_lazy as _
 
 from members.models import Member
 from teams.models import Position, TeamMembership
+from teams.services.numbers import is_number_available
 
 #: Shared by every text-ish field below -- mobile has no equivalent of
 #: management/controlpanel's templatetags/field.html (which builds widget
@@ -75,8 +76,10 @@ class CoachRosterEditForm(forms.ModelForm):
         cleaned = super().clean()
         jersey_number = cleaned.get("jersey_number")
         if jersey_number is not None and self.team is not None and self.season is not None:
-            clash = TeamMembership.objects.filter(team=self.team, season=self.season, jersey_number=jersey_number).exclude(pk=self.instance.pk).exists()
-            if clash:
+            if self.team.pool_id is not None:
+                if not is_number_available(self.team.pool, self.season, jersey_number, for_member=self.instance.member):
+                    self.add_error("jersey_number", _("This number is already taken in this team's number pool this season."))
+            elif TeamMembership.objects.filter(team=self.team, season=self.season, jersey_number=jersey_number).exclude(pk=self.instance.pk).exists():
                 self.add_error("jersey_number", _("Another player on this team already has this jersey number this season."))
         return cleaned
 

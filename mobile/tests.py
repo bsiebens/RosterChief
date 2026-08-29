@@ -29,7 +29,7 @@ from registration.models import RegistrationBatch, RegistrationDetails
 from shop.models import Cart, CartItem, Discount, Order, OrderLine, Product, ProductCategory, ProductionStatus, ProductVariant, Voucher
 from shop.services.checkout import place_order
 from shop.services.invoices import create_invoice_for_order
-from teams.models import Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership
+from teams.models import NumberPool, Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership
 
 from .coach_views import CoachTodayView
 from .models import CalendarFeedToken, PushSubscription
@@ -3392,6 +3392,40 @@ class CoachRosterMemberViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.membership.refresh_from_db()
         self.assertEqual(self.membership.jersey_number, 9)
+
+    def test_post_rejects_a_jersey_number_taken_on_a_teammate_team_in_the_same_pool(self):
+        pool = NumberPool.objects.create(club=self.club, name="Youth", min_number=1, max_number=99)
+        self.team.pool = pool
+        self.team.save()
+        other_team = Team.objects.create(club=self.club, name="U14", short_name="U14", pool=pool)
+        TeamMembership.objects.create(team=other_team, member=Member.objects.create(first_name="Other", last_name="Player"), season=self.season, jersey_number=7)
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse("mobile:coach_roster_member", kwargs={"membership_pk": self.membership.pk}),
+            {"position": self.player_position.pk, "jersey_number": "7"},
+            HTTP_HOST="ajax-united.rosterchief.app",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.membership.refresh_from_db()
+        self.assertEqual(self.membership.jersey_number, 9)
+
+    def test_post_lets_a_pool_scoped_player_keep_their_own_number(self):
+        pool = NumberPool.objects.create(club=self.club, name="Youth", min_number=1, max_number=99)
+        self.team.pool = pool
+        self.team.save()
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse("mobile:coach_roster_member", kwargs={"membership_pk": self.membership.pk}),
+            {"position": self.player_position.pk, "jersey_number": "9", "is_captain": "on"},
+            HTTP_HOST="ajax-united.rosterchief.app",
+        )
+
+        self.assertRedirects(response, reverse("mobile:coach_roster_member", kwargs={"membership_pk": self.membership.pk}), fetch_redirect_response=False)
+        self.membership.refresh_from_db()
+        self.assertTrue(self.membership.is_captain)
 
     def test_non_managing_staff_cannot_post(self):
         physio_position = Position.objects.create(club=self.club, name="Physio", short_name="PHY", staff_position=True, management_position=False)
