@@ -110,6 +110,7 @@
                 {% if is_club_admin %}
                     <a class="nav-subitem {% if nav == 'role_list' %}active{% endif %}" href="{% url 'management:role_list' %}">{% trans "Roles" %}</a>
                     <a class="nav-subitem {% if nav == 'position_list' %}active{% endif %}" href="{% url 'management:position_list' %}">{% trans "Positions" %}</a>
+                    <a class="nav-subitem {% if nav == 'number_pool_list' %}active{% endif %}" href="{% url 'management:number_pool_list' %}">{% trans "Number pools" %}</a>
                 {% endif %}
                 <a class="nav-subitem {% if nav == 'referee_level_list' %}active{% endif %}" href="{% url 'management:referee_level_list' %}">{% trans "Referee levels" %}</a>
                 {% if is_club_admin %}

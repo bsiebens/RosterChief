@@ -46,6 +46,10 @@ _NAV_SECTIONS = {
     "position_list": "position_list",
     "position_create": "position_list",
     "position_update": "position_list",
+    "number_pool_list": "number_pool_list",
+    "number_pool_create": "number_pool_list",
+    "number_pool_update": "number_pool_list",
+    "number_pool_delete": "number_pool_list",
     "role_list": "role_list",
     "role_create": "role_list",
     "role_revoke": "role_list",
@@ -230,6 +234,7 @@ _TOP_SECTION = {
     "onboarding_requirement_list": "settings",
     "role_list": "settings",
     "position_list": "settings",
+    "number_pool_list": "settings",
     "referee_level_list": "settings",
     "referee_management": "calendar",
 }

@@ -450,6 +450,12 @@ class PositionForm(forms.ModelForm):
         return cleaned
 
 
+class NumberPoolForm(forms.ModelForm):
+    class Meta:
+        model = NumberPool
+        fields = ["name", "min_number", "max_number"]
+
+
 class LocationForm(forms.ModelForm):
     class Meta:
         model = Location

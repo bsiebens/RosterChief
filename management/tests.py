@@ -1441,6 +1441,110 @@ class PositionManagementTests(ManagementTestBase):
         self.assertTrue(Position.objects.filter(pk=position.pk).exists())
 
 
+class NumberPoolManagementTests(ManagementTestBase):
+    """Admin-managed jersey-number pools -- see management.views.NumberPool*
+    and teams.NumberPool. Assigning a pool to a team happens on the team's
+    own edit form (TeamManagementTests), not here."""
+
+    def setUp(self):
+        super().setUp()
+        self.client.force_login(self.admin_user)
+
+    def test_number_pool_list_is_scoped_to_the_club(self):
+        other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
+        NumberPool.objects.create(club=other_club, name="Rival Pool", min_number=1, max_number=99)
+
+        response = self.club_get("number_pool_list")
+
+        self.assertNotContains(response, "Rival Pool")
+
+    def test_creating_a_number_pool(self):
+        response = self.club_post("number_pool_create", {"name": "Youth", "min_number": "1", "max_number": "99"})
+
+        pool = NumberPool.objects.get(club=self.club, name="Youth")
+        self.assertRedirects(response, reverse("management:number_pool_list"))
+        self.assertEqual(pool.min_number, 1)
+        self.assertEqual(pool.max_number, 99)
+
+    def test_min_number_must_not_exceed_max_number(self):
+        response = self.club_post("number_pool_create", {"name": "Bad", "min_number": "99", "max_number": "1"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(NumberPool.objects.filter(club=self.club, name="Bad").exists())
+        self.assertFormError(response.context["form"], "max_number", "Must be greater than or equal to the minimum number.")
+
+    def test_updating_a_number_pool(self):
+        pool = NumberPool.objects.create(club=self.club, name="Old name", min_number=1, max_number=50)
+
+        self.club_post("number_pool_update", {"name": "New name", "min_number": "1", "max_number": "60"}, pool.pk)
+
+        pool.refresh_from_db()
+        self.assertEqual(pool.name, "New name")
+        self.assertEqual(pool.max_number, 60)
+
+    def test_the_list_page_shows_assigned_teams(self):
+        pool = NumberPool.objects.create(club=self.club, name="Youth", min_number=1, max_number=99)
+        Team.objects.create(club=self.club, name="U10 Boys", short_name="U10B", pool=pool)
+
+        response = self.club_get("number_pool_list")
+
+        self.assertContains(response, "U10B")
+
+    def test_deleting_a_number_pool(self):
+        pool = NumberPool.objects.create(club=self.club, name="Youth", min_number=1, max_number=99)
+
+        response = self.club_post("number_pool_delete", {}, pool.pk)
+
+        self.assertRedirects(response, reverse("management:number_pool_list"))
+        self.assertFalse(NumberPool.objects.filter(pk=pool.pk).exists())
+
+    def test_deleting_a_pool_clears_it_on_assigned_teams(self):
+        pool = NumberPool.objects.create(club=self.club, name="Youth", min_number=1, max_number=99)
+        team = Team.objects.create(club=self.club, name="U10 Boys", short_name="U10B", pool=pool)
+
+        self.club_post("number_pool_delete", {}, pool.pk)
+
+        team.refresh_from_db()
+        self.assertIsNone(team.pool)
+
+    def test_deleting_a_pool_is_admin_only(self):
+        pool = NumberPool.objects.create(club=self.club, name="Youth", min_number=1, max_number=99)
+        coach_user = User.objects.create_user(email="coach-pool-delete@example.com", password="pw-secret-123")
+        coach_member = Member.objects.create(user=coach_user, first_name="Cara", last_name="Coach")
+        team = Team.objects.create(club=self.club, name="Delete Test Team", short_name="DTT")
+        coach_position = Position.objects.create(club=self.club, name="Coach-pool", short_name="CP", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=team, member=coach_member, season=self.season, position=coach_position)
+        self.client.force_login(coach_user)
+
+        response = self.club_post("number_pool_delete", {}, pool.pk)
+
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(NumberPool.objects.filter(pk=pool.pk).exists())
+
+    def test_creating_a_pool_is_admin_only(self):
+        coach_user = User.objects.create_user(email="coach-pool-create@example.com", password="pw-secret-123")
+        coach_member = Member.objects.create(user=coach_user, first_name="Cara", last_name="Coach")
+        team = Team.objects.create(club=self.club, name="Create Test Team", short_name="CTT")
+        coach_position = Position.objects.create(club=self.club, name="Coach-pool-create", short_name="CPC", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=team, member=coach_member, season=self.season, position=coach_position)
+        self.client.force_login(coach_user)
+
+        response = self.club_post("number_pool_create", {"name": "Youth", "min_number": "1", "max_number": "99"})
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(NumberPool.objects.filter(club=self.club, name="Youth").exists())
+
+    def test_the_list_page_is_visible_to_any_staff(self):
+        coach_user = User.objects.create_user(email="coach-pool-view@example.com", password="pw-secret-123")
+        coach_member = Member.objects.create(user=coach_user, first_name="Cara", last_name="Coach")
+        team = Team.objects.create(club=self.club, name="View Test Team", short_name="VTT")
+        coach_position = Position.objects.create(club=self.club, name="Coach-pool-view", short_name="CPV", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=team, member=coach_member, season=self.season, position=coach_position)
+        self.client.force_login(coach_user)
+
+        self.assertEqual(self.club_get("number_pool_list").status_code, 200)
+
+
 class RefereeLevelManagementTests(ManagementTestBase):
     """Admin-managed referee qualification tiers -- see
     management.views.RefereeLevel* and teams.RefereeLevel."""

@@ -106,6 +106,7 @@ from .forms import (
     NewsForm,
     NewsPhotoUploadForm,
     NewsPublishForm,
+    NumberPoolForm,
     NumberReservationForm,
     OnboardingRequirementForm,
     OpponentForm,
@@ -1987,6 +1988,71 @@ class PositionDeleteView(ClubAdminRequiredMixin, View):
         body = _("“%(position)s” has been deleted.") % {"position": name}
         notify(request, f"w|{_('Position deleted')}|{body}")
         return redirect("management:position_list")
+
+
+class NumberPoolListView(ClubStaffRequiredMixin, ListView):
+    """Visible to any staff, same reasoning as PositionListView; creating/
+    editing a pool is admin-only. See teams.models.NumberPool -- assigned to
+    a team from that team's own edit page (management.forms.TeamForm), used
+    by the Numbers page (management.views.NumberListView)."""
+
+    template_name = "management/number_pool_list.html"
+    context_object_name = "pools"
+
+    def get_queryset(self):
+        return NumberPool.objects.filter(club=self.request.club)
+
+
+class NumberPoolCreateView(ClubAdminRequiredMixin, CreateView):
+    model = NumberPool
+    form_class = NumberPoolForm
+    template_name = "management/number_pool_form.html"
+
+    def form_valid(self, form):
+        form.instance.club = self.request.club
+        response = super().form_valid(form)
+        body = _("“%(pool)s” created.") % {"pool": self.object}
+        notify(self.request, f"s|{_('Number pool created')}|{body}")
+        return response
+
+    def get_success_url(self):
+        return reverse("management:number_pool_list")
+
+
+class NumberPoolUpdateView(ClubAdminRequiredMixin, UpdateView):
+    model = NumberPool
+    form_class = NumberPoolForm
+    template_name = "management/number_pool_form.html"
+
+    def get_queryset(self):
+        return NumberPool.objects.filter(club=self.request.club)
+
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        body = _("“%(pool)s” updated.") % {"pool": self.object}
+        notify(self.request, f"s|{_('Number pool updated')}|{body}")
+        return response
+
+    def get_success_url(self):
+        return reverse("management:number_pool_list")
+
+    def get_context_data(self, **kwargs):
+        return super().get_context_data(update_view=True, **kwargs)
+
+
+class NumberPoolDeleteView(ClubAdminRequiredMixin, View):
+    def post(self, request, pk):
+        pool = get_object_or_404(NumberPool.objects.filter(club=request.club), pk=pk)
+        name = str(pool)
+        # No ProtectedError to catch: Team.pool is SET_NULL (a team just loses
+        # its pool) and NumberReservation.pool is CASCADE (its reservations go
+        # with it) -- both a deliberate consequence of deleting the pool
+        # itself, not something to block on.
+        pool.delete()
+
+        body = _("“%(pool)s” has been deleted. Any team assigned to it now has no pool, and its reservations are gone too.") % {"pool": name}
+        notify(request, f"w|{_('Number pool deleted')}|{body}")
+        return redirect("management:number_pool_list")
 
 
 class RefereeLevelListView(ClubStaffRequiredMixin, ListView):

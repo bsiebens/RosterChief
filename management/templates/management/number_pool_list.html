@@ -1,0 +1,66 @@
+{% extends "management/base.html" %}
+{% load i18n lucide ui %}
+
+{% comment %}
+    Create/edit teams.models.NumberPool -- assigning a pool to a team happens
+    on that team's own edit page (management.forms.TeamForm), and the actual
+    number grid/reservations live on the Numbers page (management.views.
+    NumberListView, under Teams) -- this is just the pool setup itself, same
+    "list here, use elsewhere" split as Positions/Referee levels.
+{% endcomment %}
+
+{% block heading %}{% trans "Number pools" %}{% endblock heading %}
+
+{% block actions %}
+    {% if is_club_admin %}
+        <a class="btn btn-primary gap-2" href="{% url 'management:number_pool_create' %}">{% lucide "plus" size=16 %} {% trans "New pool" %}</a>
+    {% endif %}
+{% endblock actions %}
+
+{% block panel %}
+    <div class="card overflow-hidden">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>{% trans "Name" %}</th>
+                    <th>{% trans "Range" %}</th>
+                    <th>{% trans "Teams" %}</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for pool in pools %}
+                    <tr>
+                        <td class="font-semibold text-ink">{{ pool.name }}</td>
+                        <td class="font-mono text-muted">{{ pool.min_number }}&ndash;{{ pool.max_number }}</td>
+                        <td class="text-sm text-ink">
+                            {% for team in pool.teams.all %}{{ team.short_name }}{% if not forloop.last %}, {% endif %}{% empty %}<span class="text-dim">{% trans "None yet" %}</span>{% endfor %}
+                        </td>
+                        <td class="text-right">
+                            {% if is_club_admin %}
+                                <div class="flex justify-end gap-1">
+                                    <a class="btn btn-outline btn-sm gap-2" href="{% url 'management:number_pool_update' pool.pk %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</a>
+                                    <button class="btn btn-sm btn-outline btn-error" type="button" onclick="document.getElementById('{{ pool.pk|dom_id:"number_pool_delete_modal" }}').showModal()" aria-label="{% trans 'Delete' %}">{% lucide "trash-2" size=14 %}</button>
+                                </div>
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="4" class="text-center text-muted">{% trans "No number pools yet." %}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    {% if is_club_admin %}
+        {% trans "Delete number pool" as delete_pool_title %}
+        {% trans "Delete" as delete_label %}
+        {% for pool in pools %}
+            {% url 'management:number_pool_delete' pool.pk as pool_delete_url %}
+            {% blocktrans with name=pool.name asvar delete_pool_body %}Delete “{{ name }}”? Any team assigned to it loses its pool, and its reservations are deleted too. This cannot be undone.{% endblocktrans %}
+            {% include "controlpanel/_confirm_modal.html" with modal_id=pool.pk|dom_id:"number_pool_delete_modal" title=delete_pool_title body=delete_pool_body action_url=pool_delete_url submit_label=delete_label %}
+        {% endfor %}
+    {% endif %}
+{% endblock panel %}
