@@ -17,7 +17,7 @@ from django.views import View
 
 from club.models import OnboardingRequirement
 from club.services.cancellation import cancel_membership
-from club.services.fees import remaining_balance
+from club.services.fees import early_payment_offer, remaining_balance
 from club.services.onboarding import checklist_for, mark_complete
 from controlpanel.messages import notify
 from members.models import Member
@@ -169,6 +169,7 @@ class RegistrationStatusView(ClubScopedPublicMixin, View):
                 {
                     "membership": membership,
                     "balance": remaining_balance(membership),
+                    "early_payment": early_payment_offer(membership),
                     "checklist": checklist_for(membership),
                     "upload_form": RegistrationStatusDocumentForm(),
                 }
@@ -177,7 +178,7 @@ class RegistrationStatusView(ClubScopedPublicMixin, View):
 
     def get(self, request, *args, **kwargs):
         batch = self.get_batch(request, kwargs["token"])
-        return render(request, self.template_name, {"batch": batch, "membership_rows": self.get_membership_rows(batch)})
+        return render(request, self.template_name, {"batch": batch, "membership_rows": self.get_membership_rows(batch), "payment_instructions": batch.club.payment_instructions})
 
     def post(self, request, *args, **kwargs):
         batch = self.get_batch(request, kwargs["token"])

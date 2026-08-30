@@ -18,6 +18,9 @@
                 {% blocktrans with amount=row.balance|floatformat:2 %}&euro; {{ amount }}{% endblocktrans %}
             {% endif %}
         </div>
+        {% if row.early_payment %}
+            <div class="mt-0.5 text-xs font-medium text-ok-text">{% blocktrans with amount=row.early_payment.discount|floatformat:2 date=row.early_payment.deadline|date:"d M" %}Save &euro;{{ amount }} if paid by {{ date }}{% endblocktrans %}</div>
+        {% endif %}
     </div>
     <span class="btn btn-dark shrink-0">{% trans "Pay" %}</span>
 </div>

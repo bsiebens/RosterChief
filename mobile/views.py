@@ -943,7 +943,13 @@ class PaymentsView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
     def get_context_data(self, **kwargs):
         season = current_season(self.request.club)
         dues_rows = open_dues_rows(self.request.club, self.managed_people, season)
-        return super().get_context_data(dues_rows=dues_rows, **kwargs)
+        # The receipt breakdown this screen shows (unlike Home's own compact
+        # dues card, which stays as a bare balance) -- one membership can
+        # carry more than one entry (a second team, or player and referee
+        # both), see RegistrationDetails' own docstring.
+        for row in dues_rows:
+            row["entries"] = row["membership"].registration_details.select_related("product_variant__product", "requested_team")
+        return super().get_context_data(dues_rows=dues_rows, payment_instructions=self.request.club.payment_instructions, **kwargs)
 
 
 class EditProfileView(PersonScopeMixin, LoginRequiredMixin, TemplateView):

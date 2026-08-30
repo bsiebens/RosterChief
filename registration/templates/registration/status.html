@@ -47,6 +47,9 @@
                 {% else %}
                     <p class="text-sm text-muted">{% trans "No balance owed." %}</p>
                 {% endif %}
+                {% if row.early_payment %}
+                    <p class="mt-1 text-sm font-medium text-ok-text">{% blocktrans with total=row.early_payment.discounted_total date=row.early_payment.deadline amount=row.early_payment.discount %}Pay €{{ total }} by {{ date }} to save €{{ amount }}.{% endblocktrans %}</p>
+                {% endif %}
 
                 {% if row.checklist %}
                     <div class="mt-2 overflow-hidden rounded-box border border-line">
@@ -87,6 +90,13 @@
             </div>
         {% endfor %}
     </div>
+
+    {% if payment_instructions %}
+        <div class="card card-body mt-4">
+            <h2 class="card-title">{% trans "How to pay" %}</h2>
+            <p class="text-sm whitespace-pre-line text-ink">{{ payment_instructions }}</p>
+        </div>
+    {% endif %}
 
     {% trans "Cancel registration" as confirm_cancel_label %}
     {% for row in membership_rows %}

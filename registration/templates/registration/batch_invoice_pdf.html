@@ -36,6 +36,9 @@
             .discount td { color: #b91c1c; }
             .total td { font-weight: bold; border-bottom: 2px solid #111; border-top: 1px solid #111; }
             .balance { font-size: 12pt; font-weight: bold; }
+            .payment-instructions { margin-top: 8mm; padding-top: 4mm; border-top: 1px solid #ccc; }
+            .payment-instructions h2 { font-size: 9pt; text-transform: uppercase; letter-spacing: 0.5pt; color: #666; margin: 0 0 2mm; }
+            .payment-instructions p { margin: 0; }
         </style>
     </head>
     <body>
@@ -105,5 +108,12 @@
         </table>
 
         <p class="muted">{% trans "This is what was owed once the club confirmed this registration -- payment happens separately from this document." %}</p>
+
+        {% if club.payment_instructions %}
+            <div class="payment-instructions">
+                <h2>{% trans "How to pay" %}</h2>
+                <p>{{ club.payment_instructions|linebreaksbr }}</p>
+            </div>
+        {% endif %}
     </body>
 </html>

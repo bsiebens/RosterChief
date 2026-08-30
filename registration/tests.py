@@ -828,6 +828,38 @@ class RegistrationStatusViewTests(TestCase):
 
         self.assertContains(response, reverse("registration:invoice", kwargs={"token": self.batch.status_token}))
 
+    def test_shows_the_early_payment_offer_while_still_open(self):
+        self.membership.early_payment_deadline = datetime.date.today() + datetime.timedelta(days=5)
+        self.membership.early_payment_discount = Decimal("10.00")
+        self.membership.save()
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, "70.00")
+
+    def test_hides_the_early_payment_offer_once_the_deadline_has_passed(self):
+        self.membership.early_payment_deadline = datetime.date.today() - datetime.timedelta(days=1)
+        self.membership.early_payment_discount = Decimal("10.00")
+        self.membership.save()
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.context["membership_rows"][0]["early_payment"], None)
+
+    def test_shows_payment_instructions_when_set(self):
+        self.club.payment_instructions = "Bank transfer to BE00 0000 0000 0000"
+        self.club.save()
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, "How to pay")
+        self.assertContains(response, "BE00 0000 0000 0000")
+
+    def test_no_payment_instructions_block_when_blank(self):
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertNotContains(response, "How to pay")
+
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
 class RegistrationCancelViewTests(TestCase):
@@ -928,3 +960,19 @@ class RegistrationInvoiceViewTests(TestCase):
         response = self.client.get(response.url, HTTP_HOST="ajax-united.rosterchief.app")
 
         self.assertContains(response, "pango")
+
+    def test_includes_payment_instructions_when_set(self):
+        # A fresh batch/membership (not cls.batch) -- batch_invoice_pdf caches
+        # to disk keyed by batch.pk, and other tests in this class already
+        # render+cache cls.batch's own PDF without any instructions set.
+        outsider = Member.objects.create(first_name="Alex", last_name="Outsider")
+        membership = ClubMembership.objects.create(club=self.club, member=outsider, season=self.season, fee_amount=Decimal("80.00"))
+        batch = RegistrationBatch.objects.create(club=self.club, season=self.season, contact_first_name="Pat", contact_last_name="Parent", contact_email="pat@example.com", total=Decimal("80.00"))
+        RegistrationDetails.objects.create(membership=membership, batch=batch, price=Decimal("80.00"))
+        self.club.payment_instructions = "Bank transfer to BE00 0000 0000 0000"
+        self.club.save()
+
+        with mock.patch("registration.services.invoicing.render_pdf", side_effect=lambda html: html.encode()):
+            response = self.client.get(reverse("registration:invoice", kwargs={"token": batch.status_token}), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertIn("BE00 0000 0000 0000", response.content.decode())

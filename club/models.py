@@ -63,6 +63,12 @@ class Club(UUIDModel):
     legal_zip_code = models.CharField(_("legal zip code"), max_length=255, blank=True)
     legal_city = models.CharField(_("legal city"), max_length=255, blank=True)
 
+    payment_instructions = models.TextField(
+        _("payment instructions"),
+        blank=True,
+        help_text=_("How to pay a fee (e.g. bank account/IBAN, or a preferred method) -- shown on the mobile Payments & dues page and the registration status page, and included on registration invoices. Falls back to nothing shown when left blank."),
+    )
+
     logo = models.FileField(
         _("logo"),
         upload_to=club_logo_path,

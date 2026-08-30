@@ -3,10 +3,12 @@
 
 {% comment %}
     M5's "Payments & dues" row -- every open season-dues balance across every
-    managed person, one card per open row via mobile/_dues_row.html (the same
-    partial Home's dues card uses, so the two never drift apart visually).
-    White sticky back-header, same pattern as calendar_feed_settings.html --
-    not a tab of its own, active_tab stays "me" (PaymentsView's own docstring).
+    managed person, one receipt card per open row (mobile/_dues_receipt.html
+    -- what it covers, any discount, and the early-payment offer while it's
+    still live). Home's own dues card stays on the plainer _dues_row.html;
+    this is the one screen that shows the full breakdown. White sticky
+    back-header, same pattern as calendar_feed_settings.html -- not a tab of
+    its own, active_tab stays "me" (PaymentsView's own docstring).
 {% endcomment %}
 
 {% block content %}
@@ -20,9 +22,16 @@
     {% if dues_rows %}
         <div class="flex flex-col gap-2.5">
             {% for row in dues_rows %}
-                {% include "mobile/_dues_row.html" %}
+                {% include "mobile/_dues_receipt.html" %}
             {% endfor %}
         </div>
+
+        {% if payment_instructions %}
+            <div class="m-card mt-2.5 p-4">
+                <div class="mb-1.5 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "How to pay" %}</div>
+                <p class="text-sm whitespace-pre-line text-ink">{{ payment_instructions }}</p>
+            </div>
+        {% endif %}
     {% else %}
         <div class="m-card p-6 text-center">
             <p class="font-display text-lg font-extrabold text-ink uppercase">{% trans "All settled up" %}</p>

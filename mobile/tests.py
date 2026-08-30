@@ -2323,6 +2323,77 @@ class PaymentsViewTests(TestCase):
 
         self.assertEqual(response.context["dues_rows"], [])
 
+    def test_shows_a_receipt_line_per_registration_entry(self):
+        self.membership.fee_amount = Decimal("150.00")
+        self.membership.save()
+        product = Product.objects.create(club=self.club, name="Player Registration", product_type=Product.ProductType.MEMBERSHIP, season=self.season, price=Decimal("150.00"))
+        variant = ProductVariant.objects.create(product=product, name="U10", price=Decimal("150.00"))
+        batch = RegistrationBatch.objects.create(club=self.club, season=self.season, contact_first_name="Lars", contact_last_name="Bakker", contact_email="parent@example.com")
+        RegistrationDetails.objects.create(membership=self.membership, batch=batch, product_variant=variant, price=Decimal("150.00"))
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, "Player Registration")
+        self.assertContains(response, "U10")
+
+    def test_shows_a_multi_registrant_discount_line(self):
+        self.membership.fee_amount = Decimal("150.00")
+        self.membership.save()
+        product = Product.objects.create(club=self.club, name="Player Registration", product_type=Product.ProductType.MEMBERSHIP, season=self.season, price=Decimal("150.00"))
+        variant = ProductVariant.objects.create(product=product, name="U10", price=Decimal("150.00"))
+        batch = RegistrationBatch.objects.create(club=self.club, season=self.season, contact_first_name="Lars", contact_last_name="Bakker", contact_email="parent@example.com")
+        RegistrationDetails.objects.create(membership=self.membership, batch=batch, product_variant=variant, price=Decimal("150.00"), discount_amount=Decimal("15.00"))
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, "Multi-registrant discount")
+        self.assertContains(response, "15.00")
+
+    def test_shows_the_early_payment_offer_while_still_open(self):
+        self.membership.fee_amount = Decimal("150.00")
+        self.membership.early_payment_deadline = timezone.localdate() + datetime.timedelta(days=5)
+        self.membership.early_payment_discount = Decimal("20.00")
+        self.membership.save()
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, "130.00")
+
+    def test_hides_the_early_payment_offer_once_the_deadline_has_passed(self):
+        self.membership.fee_amount = Decimal("150.00")
+        self.membership.early_payment_deadline = timezone.localdate() - datetime.timedelta(days=1)
+        self.membership.early_payment_discount = Decimal("20.00")
+        self.membership.save()
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertIsNone(response.context["dues_rows"][0]["early_payment"])
+
+    def test_shows_payment_instructions_when_set(self):
+        self.membership.fee_amount = Decimal("150.00")
+        self.membership.save()
+        self.club.payment_instructions = "Bank transfer to BE00 0000 0000 0000"
+        self.club.save()
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, "How to pay")
+        self.assertContains(response, "BE00 0000 0000 0000")
+
+    def test_no_payment_instructions_block_when_blank(self):
+        self.membership.fee_amount = Decimal("150.00")
+        self.membership.save()
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertNotContains(response, "How to pay")
+
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
 class EditProfileViewTests(TestCase):

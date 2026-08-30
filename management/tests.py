@@ -5287,6 +5287,29 @@ class ClubSettingsPreviewTests(ManagementTestBase):
         self.assertEqual(self.club.legal_zip_code, "9000")
         self.assertEqual(self.club.legal_city, "Ghent")
 
+    def test_the_payment_instructions_can_be_set(self):
+        response = self.club_post(
+            "club_settings",
+            {
+                "name": "Ajax United",
+                "legal_name": "",
+                "contact_email": "",
+                "website": "",
+                "primary_color": "",
+                "secondary_color": "",
+                "payment_instructions": "Bank transfer to BE00 0000 0000 0000",
+            },
+        )
+
+        self.assertRedirects(response, reverse("management:club_settings"))
+        self.club.refresh_from_db()
+        self.assertEqual(self.club.payment_instructions, "Bank transfer to BE00 0000 0000 0000")
+
+    def test_the_payment_instructions_field_is_editable(self):
+        response = self.club_get("club_settings")
+
+        self.assertContains(response, 'name="payment_instructions"')
+
     def test_the_event_background_can_be_uploaded(self):
         response = self.club_post(
             "club_settings",
@@ -8203,6 +8226,14 @@ class SignupDashboardTests(ManagementTestBase):
 
         self.assertContains(response, "Somers")
         self.assertContains(response, member.first_name)
+
+    def test_loads_searchable_select_js_for_the_link_to_member_picker(self):
+        # Without this, the "Existing member" dropdown falls back to a plain
+        # native <select> -- fine for a handful of members, unusable for a
+        # club with hundreds.
+        response = self.club_get("signup_list")
+
+        self.assertContains(response, "searchable-select.js")
 
     def test_the_table_shows_each_members_fee_status(self):
         # FeeStatus labels are stored lowercase ("paid") -- .badge's own CSS

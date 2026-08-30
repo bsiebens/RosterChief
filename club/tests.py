@@ -43,7 +43,7 @@ from .services.access import (
     teams_staffed_by,
 )
 from .services.cancellation import cancel_membership, is_new_member
-from .services.fees import mark_as_paid, open_dues_rows, record_payment, remaining_balance
+from .services.fees import early_payment_offer, mark_as_paid, open_dues_rows, record_payment, remaining_balance
 from .services.invoicing import create_or_resend_invoice, invalidate_cached_invoice_pdf, invoice_pdf, invoices_due_for_reminder, recipient_for, resolve_document_address
 from .services.onboarding import (
     annotate_onboarding_status,
@@ -1560,6 +1560,39 @@ class FeeServiceTests(TestCase):
         self.assertEqual(self.membership.fee_status, ClubMembership.FeeStatus.PARTIALLY_PAID)
         self.assertEqual(FeePayment.objects.filter(membership=self.membership).count(), 2)
 
+    def test_early_payment_offer_is_none_without_a_deadline(self):
+        self.assertIsNone(early_payment_offer(self.membership))
+
+    def test_early_payment_offer_is_none_once_the_deadline_has_passed(self):
+        self.membership.early_payment_deadline = timezone.localdate() - datetime.timedelta(days=1)
+        self.membership.early_payment_discount = Decimal("10.00")
+
+        self.assertIsNone(early_payment_offer(self.membership))
+
+    def test_early_payment_offer_while_the_deadline_is_still_open(self):
+        self.membership.early_payment_deadline = timezone.localdate() + datetime.timedelta(days=1)
+        self.membership.early_payment_discount = Decimal("10.00")
+
+        offer = early_payment_offer(self.membership)
+
+        self.assertEqual(offer["deadline"], self.membership.early_payment_deadline)
+        self.assertEqual(offer["discount"], Decimal("10.00"))
+        self.assertEqual(offer["discounted_total"], Decimal("140.00"))
+
+    def test_early_payment_offer_on_the_deadline_itself_is_still_open(self):
+        self.membership.early_payment_deadline = timezone.localdate()
+        self.membership.early_payment_discount = Decimal("10.00")
+
+        self.assertIsNotNone(early_payment_offer(self.membership))
+
+    def test_early_payment_offer_discounted_total_never_goes_negative(self):
+        self.membership.early_payment_deadline = timezone.localdate() + datetime.timedelta(days=1)
+        self.membership.early_payment_discount = Decimal("999.00")
+
+        offer = early_payment_offer(self.membership)
+
+        self.assertEqual(offer["discounted_total"], Decimal("0.00"))
+
     def test_reaching_the_full_amount_settles_the_fee_but_leaves_status_pending(self):
         # Paying in full only ever settles fee_status now -- activation is
         # exclusively club.services.onboarding.approve_one/approve_all_clean's call
@@ -1684,6 +1717,28 @@ class OpenDuesRowsTests(TestCase):
         rows = open_dues_rows(self.club, [self.member], self.season)
 
         self.assertEqual([row["membership"].member for row in rows], [self.member])
+
+    def test_a_row_carries_its_own_early_payment_offer(self):
+        ClubMembership.objects.create(
+            club=self.club,
+            member=self.member,
+            season=self.season,
+            fee_amount=Decimal("150.00"),
+            early_payment_deadline=timezone.localdate() + datetime.timedelta(days=1),
+            early_payment_discount=Decimal("10.00"),
+        )
+
+        rows = open_dues_rows(self.club, [self.member], self.season)
+
+        self.assertIsNotNone(rows[0]["early_payment"])
+        self.assertEqual(rows[0]["early_payment"]["discount"], Decimal("10.00"))
+
+    def test_a_row_with_no_deadline_has_no_early_payment_offer(self):
+        ClubMembership.objects.create(club=self.club, member=self.member, season=self.season, fee_amount=Decimal("150.00"))
+
+        rows = open_dues_rows(self.club, [self.member], self.season)
+
+        self.assertIsNone(rows[0]["early_payment"])
 
 
 class RecipientForTests(TestCase):

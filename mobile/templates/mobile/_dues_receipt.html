@@ -1,0 +1,55 @@
+{% load i18n %}
+{% comment %}
+    Payments & dues' own richer version of _dues_row.html -- the same header
+    (badge/name/balance/due-date/Pay), plus a receipt breakdown of what this
+    season's ClubMembership actually covers (RegistrationDetails.entries,
+    attached by mobile.views.PaymentsView) and, while it's still live, the
+    early-payment offer (club.services.fees.early_payment_offer). Home's own
+    dues card stays on the plain _dues_row.html -- this level of detail
+    belongs on the dedicated screen, not the overview.
+{% endcomment %}
+<div class="m-card overflow-hidden">
+    <div class="flex items-center gap-3 p-4">
+        <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-danger-bg">
+            <span class="font-display text-lg font-extrabold text-club">&euro;</span>
+        </div>
+        <div class="min-w-0 flex-1">
+            <div class="text-sm font-semibold text-ink">{% blocktrans with name=row.membership.member.first_name %}Season dues &mdash; {{ name }}{% endblocktrans %}</div>
+            <div class="text-xs text-muted">
+                {% if row.invoice %}
+                    {% blocktrans with amount=row.balance|floatformat:2 due=row.invoice.due_date|date:"d M" %}&euro; {{ amount }} &middot; due {{ due }}{% endblocktrans %}
+                {% else %}
+                    {% blocktrans with amount=row.balance|floatformat:2 %}&euro; {{ amount }}{% endblocktrans %}
+                {% endif %}
+            </div>
+        </div>
+        <span class="btn btn-dark shrink-0">{% trans "Pay" %}</span>
+    </div>
+
+    {% if row.entries %}
+        <div class="h-px bg-rule"></div>
+        {% for entry in row.entries %}
+            <div class="flex items-center justify-between p-3.5">
+                <span class="min-w-0 text-sm text-ink">
+                    {% if entry.product_variant %}{{ entry.product_variant.product.name }} &mdash; {{ entry.product_variant.name }}{% else %}{{ entry.get_entry_kind_display }}{% endif %}
+                    {% if entry.requested_team %}<span class="block text-xs text-muted">{{ entry.requested_team }}</span>{% endif %}
+                </span>
+                <span class="shrink-0 font-mono text-sm tabular-nums text-ink">&euro; {{ entry.price|floatformat:2 }}</span>
+            </div>
+            {% if entry.discount_amount > 0 %}
+                <div class="flex items-center justify-between px-3.5 pb-3">
+                    <span class="text-xs text-muted">{% trans "Multi-registrant discount" %}</span>
+                    <span class="shrink-0 font-mono text-xs tabular-nums text-muted">&minus;&euro; {{ entry.discount_amount|floatformat:2 }}</span>
+                </div>
+            {% endif %}
+            {% if not forloop.last %}<div class="h-px bg-rule"></div>{% endif %}
+        {% endfor %}
+    {% endif %}
+
+    {% if row.early_payment %}
+        <div class="h-px bg-rule"></div>
+        <div class="bg-ok-bg p-3.5 text-xs text-ok-text">
+            {% blocktrans with total=row.early_payment.discounted_total|floatformat:2 date=row.early_payment.deadline|date:"d M" amount=row.early_payment.discount|floatformat:2 %}Pay &euro;{{ total }} by {{ date }} to save &euro;{{ amount }}.{% endblocktrans %}
+        </div>
+    {% endif %}
+</div>

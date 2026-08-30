@@ -31,6 +31,24 @@ def remaining_balance(membership, when=None):
     return max(effective_fee_amount(membership, when) - membership.amount_paid, Decimal("0.00"))
 
 
+def early_payment_offer(membership, when=None):
+    """Whether an early-payment discount is still live for ``membership`` --
+    ``None`` once its deadline has passed (or none was ever set), otherwise a
+    dict with ``deadline``, ``discount`` and ``discounted_total`` (fee_amount
+    minus the discount, floored at 0, same arithmetic as effective_fee_amount
+    -- this is the single place both read that condition from, so the mobile
+    Payments & dues page and the registration status page can never disagree
+    about whether the offer is still on)."""
+    when = when or timezone.localdate()
+    if membership.early_payment_deadline is None or when > membership.early_payment_deadline:
+        return None
+    return {
+        "deadline": membership.early_payment_deadline,
+        "discount": membership.early_payment_discount,
+        "discounted_total": max(membership.fee_amount - membership.early_payment_discount, Decimal("0.00")),
+    }
+
+
 def open_dues_rows(club, people, season):
     """Every season-dues row still owed by ``people`` in ``season`` -- shared by
     mobile's Home dues card and its Payments & dues screen so the two never
@@ -44,7 +62,7 @@ def open_dues_rows(club, people, season):
     for membership in memberships:
         balance = remaining_balance(membership)
         if balance > 0:
-            rows.append({"membership": membership, "balance": balance, "invoice": getattr(membership, "dues_invoice", None)})
+            rows.append({"membership": membership, "balance": balance, "invoice": getattr(membership, "dues_invoice", None), "early_payment": early_payment_offer(membership)})
     return rows
 
 

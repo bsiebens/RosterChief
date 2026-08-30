@@ -1,5 +1,5 @@
 {% extends "management/base.html" %}
-{% load i18n lucide ui %}
+{% load i18n lucide static ui %}
 
 {% block heading %}{% trans "Sign-up" %}{% endblock heading %}
 {% block topbar_context %}
@@ -212,7 +212,8 @@
                                 <div class="flex-1">
                                     {% form_field membership.link_form.member show_label=False %}
                                 </div>
-                                <button class="btn btn-outline btn-sm gap-2 shrink-0" type="submit">{% lucide "merge" size=14 %} {% trans "Link" %}</button>
+                                {# No btn-sm: .select is height:2.25rem, matching plain .btn -- btn-sm would sit 6px shorter and misalign in the row. #}
+                                <button class="btn btn-outline gap-2 shrink-0" type="submit">{% lucide "merge" size=16 %} {% trans "Link" %}</button>
                             </form>
                             <p class="mt-2 text-xs text-muted">{% trans "If this person already has a member record, link this sign-up to it instead -- the duplicate created here is removed once it has nothing else of its own." %}</p>
                         </div>
@@ -299,4 +300,5 @@
             });
         });
     </script>
+    <script src="{% static 'js/searchable-select.js' %}"></script>
 {% endblock extra_body %}
