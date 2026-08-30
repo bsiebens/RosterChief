@@ -52,9 +52,17 @@ class RegistrationEntryRowForm(forms.Form):
     page (nothing there is a known Member yet) -- mobile.views.
     ReRegisterView sets it (scoped to the signed-in member's own
     managed_people via the ``people`` kwarg) so re-registering an existing
-    child reuses their Member row instead of creating a duplicate. Its
-    presence alone counts as "a person" for has_a_person()/clean(), same as
-    a typed first/last name.
+    child reuses their Member row instead of creating a duplicate. Its mere
+    presence isn't enough on its own to count as "a person" for
+    has_a_person()/clean() though -- every managed person's row carries it
+    whether or not that person is actually being registered this time
+    (mobile's own "Include this person" toggle, reusing is_contact -- see
+    BaseRegistrationEntryFormSet's own docstring), so it only counts
+    alongside some other sign of real intent: is_contact checked, or
+    product_variant/requested_team already picked (the latter covers a
+    person's own *additional* registration rows, which have no is_contact
+    checkbox of their own at all -- see mobile/templates/mobile/
+    _reregister_subrow.html).
 
     No ``requested_position`` field -- a role isn't something registration
     asks for directly any more; it's implied by which product_variant was
@@ -116,11 +124,16 @@ class RegistrationEntryRowForm(forms.Form):
 
     def has_a_person(self):
         data = self.cleaned_data
-        return bool(data.get("first_name") or data.get("last_name") or data.get("existing_member"))
+        if data.get("first_name") or data.get("last_name"):
+            return True
+        # existing_member alone isn't enough -- see the class docstring.
+        if data.get("existing_member"):
+            return bool(data.get("is_contact") or data.get("product_variant") or data.get("requested_team"))
+        return False
 
     def clean(self):
         cleaned = super().clean()
-        if not (cleaned.get("first_name") or cleaned.get("last_name") or cleaned.get("existing_member")):
+        if not self.has_a_person():
             return cleaned  # a genuinely blank row -- the formset skips it entirely
 
         if not cleaned.get("existing_member") and not cleaned.get("last_name"):
