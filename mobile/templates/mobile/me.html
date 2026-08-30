@@ -124,7 +124,7 @@
             <a class="flex items-center gap-3 p-3.5" href="{% url "mobile:forms_list" %}">
                 <span class="flex-1 text-[15px] font-semibold text-ink">{% trans "Forms" %}</span>
                 {% if open_forms_count %}
-                    <span class="pill pill-warn shrink-0">
+                    <span class="pill pill-sm pill-warn shrink-0">
                         {% blocktrans count counter=open_forms_count %}{{ counter }} OPEN{% plural %}{{ counter }} OPEN{% endblocktrans %}
                     </span>
                 {% endif %}
@@ -134,7 +134,7 @@
             <a class="flex items-center gap-3 p-3.5" href="{% url "mobile:payments" %}">
                 <span class="flex-1 text-[15px] font-semibold text-ink">{% trans "Payments & dues" %}</span>
                 {% if open_dues_count %}
-                    <span class="pill pill-danger shrink-0">
+                    <span class="pill pill-sm pill-danger shrink-0">
                         {% blocktrans count counter=open_dues_count %}{{ counter }} OPEN{% plural %}{{ counter }} OPEN{% endblocktrans %}
                     </span>
                 {% endif %}

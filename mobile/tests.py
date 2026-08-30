@@ -469,6 +469,42 @@ class HomeViewTests(TestCase):
 
         self.assertEqual(response.context["dues_rows"], [])
 
+    def test_dues_card_holds_back_an_unconfirmed_registrations_balance(self):
+        # Same filter mobile.views.PaymentsView applies to this same
+        # open_dues_rows result -- Home and Payments & dues must never
+        # disagree about what's actually owed.
+        membership = ClubMembership.objects.get(club=self.club, member=self.member, season=self.season)
+        membership.fee_amount = Decimal("150.00")
+        membership.save(update_fields=["fee_amount"])
+        batch = RegistrationBatch.objects.create(club=self.club, season=self.season, contact_first_name="Lars", contact_last_name="Bakker", contact_email="parent@example.com")
+        RegistrationDetails.objects.create(membership=membership, batch=batch, price=Decimal("150.00"))
+        self.client.force_login(self.user)
+
+        response = self._get("home")
+
+        self.assertEqual(response.context["dues_rows"], [])
+
+    def test_dues_card_shows_a_confirmed_registrations_balance(self):
+        membership = ClubMembership.objects.get(club=self.club, member=self.member, season=self.season)
+        membership.fee_amount = Decimal("150.00")
+        membership.save(update_fields=["fee_amount"])
+        batch = RegistrationBatch.objects.create(
+            club=self.club,
+            season=self.season,
+            contact_first_name="Lars",
+            contact_last_name="Bakker",
+            contact_email="parent@example.com",
+            invoice_number="REG-9999-00001",
+            invoice_sent_at=timezone.now(),
+            invoice_due_date=timezone.localdate() + datetime.timedelta(days=14),
+        )
+        RegistrationDetails.objects.create(membership=membership, batch=batch, price=Decimal("150.00"))
+        self.client.force_login(self.user)
+
+        response = self._get("home")
+
+        self.assertEqual(len(response.context["dues_rows"]), 1)
+
     def test_news_teaser_shows_the_latest_published_items_newest_first(self):
         oldest = News.objects.create(club=self.club, title="Old news", body="Body.", status=News.Status.PUBLISHED, published_at=timezone.now() - datetime.timedelta(days=5))
         latest = News.objects.create(club=self.club, title="Signed: New Player", body="Body.", status=News.Status.PUBLISHED, published_at=timezone.now() - datetime.timedelta(days=1))
@@ -2069,6 +2105,41 @@ class MeViewTests(TestCase):
 
         self.assertNotContains(response, reverse("mobile:reregister"))
 
+    def test_payments_pill_holds_back_an_unconfirmed_registrations_balance(self):
+        # Same filter PaymentsView/HomeView apply to open_dues_rows -- this
+        # badge must not claim more is owed than Payments & dues itself shows.
+        membership = ClubMembership.objects.get(club=self.club, member=self.member, season=self.season)
+        membership.fee_amount = Decimal("150.00")
+        membership.save(update_fields=["fee_amount"])
+        batch = RegistrationBatch.objects.create(club=self.club, season=self.season, contact_first_name="Lars", contact_last_name="Bakker", contact_email="parent@example.com")
+        RegistrationDetails.objects.create(membership=membership, batch=batch, price=Decimal("150.00"))
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertNotContains(response, "OPEN")
+
+    def test_payments_pill_shows_a_confirmed_registrations_balance(self):
+        membership = ClubMembership.objects.get(club=self.club, member=self.member, season=self.season)
+        membership.fee_amount = Decimal("150.00")
+        membership.save(update_fields=["fee_amount"])
+        batch = RegistrationBatch.objects.create(
+            club=self.club,
+            season=self.season,
+            contact_first_name="Lars",
+            contact_last_name="Bakker",
+            contact_email="parent@example.com",
+            invoice_number="REG-9999-00001",
+            invoice_sent_at=timezone.now(),
+            invoice_due_date=timezone.localdate() + datetime.timedelta(days=14),
+        )
+        RegistrationDetails.objects.create(membership=membership, batch=batch, price=Decimal("150.00"))
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, "OPEN")
+
     def test_register_link_shows_once_a_registration_product_is_active(self):
         Product.objects.create(club=self.club, name="Player Registration", product_type=Product.ProductType.MEMBERSHIP, season=self.season, price=Decimal("100.00"))
         self.client.force_login(self.user)
@@ -2272,6 +2343,13 @@ class PaymentsViewTests(TestCase):
     def _get(self):
         return self.client.get(reverse("mobile:payments"), HTTP_HOST="ajax-united.rosterchief.app")
 
+    def _confirm(self, batch):
+        batch.invoice_number = "REG-9999-00001"
+        batch.invoice_sent_at = timezone.now()
+        batch.invoice_due_date = timezone.localdate() + datetime.timedelta(days=14)
+        batch.save()
+        return batch
+
     def test_requires_login(self):
         response = self._get()
 
@@ -2336,7 +2414,7 @@ class PaymentsViewTests(TestCase):
         self.membership.save()
         product = Product.objects.create(club=self.club, name="Player Registration", product_type=Product.ProductType.MEMBERSHIP, season=self.season, price=Decimal("150.00"))
         variant = ProductVariant.objects.create(product=product, name="U10", price=Decimal("150.00"))
-        batch = RegistrationBatch.objects.create(club=self.club, season=self.season, contact_first_name="Lars", contact_last_name="Bakker", contact_email="parent@example.com")
+        batch = self._confirm(RegistrationBatch.objects.create(club=self.club, season=self.season, contact_first_name="Lars", contact_last_name="Bakker", contact_email="parent@example.com"))
         RegistrationDetails.objects.create(membership=self.membership, batch=batch, product_variant=variant, price=Decimal("150.00"))
         self.client.force_login(self.user)
 
@@ -2350,7 +2428,7 @@ class PaymentsViewTests(TestCase):
         self.membership.save()
         product = Product.objects.create(club=self.club, name="Player Registration", product_type=Product.ProductType.MEMBERSHIP, season=self.season, price=Decimal("150.00"))
         variant = ProductVariant.objects.create(product=product, name="U10", price=Decimal("150.00"))
-        batch = RegistrationBatch.objects.create(club=self.club, season=self.season, contact_first_name="Lars", contact_last_name="Bakker", contact_email="parent@example.com")
+        batch = self._confirm(RegistrationBatch.objects.create(club=self.club, season=self.season, contact_first_name="Lars", contact_last_name="Bakker", contact_email="parent@example.com"))
         RegistrationDetails.objects.create(membership=self.membership, batch=batch, product_variant=variant, price=Decimal("150.00"), discount_amount=Decimal("15.00"))
         self.client.force_login(self.user)
 
@@ -2401,6 +2479,122 @@ class PaymentsViewTests(TestCase):
         response = self._get()
 
         self.assertNotContains(response, "How to pay")
+
+    def test_shows_a_download_invoice_link_for_a_registration(self):
+        self.membership.fee_amount = Decimal("150.00")
+        self.membership.save()
+        product = Product.objects.create(club=self.club, name="Player Registration", product_type=Product.ProductType.MEMBERSHIP, season=self.season, price=Decimal("150.00"))
+        variant = ProductVariant.objects.create(product=product, name="U10", price=Decimal("150.00"))
+        batch = self._confirm(RegistrationBatch.objects.create(club=self.club, season=self.season, contact_first_name="Lars", contact_last_name="Bakker", contact_email="parent@example.com"))
+        RegistrationDetails.objects.create(membership=self.membership, batch=batch, product_variant=variant, price=Decimal("150.00"))
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, "Download invoice")
+        self.assertContains(response, reverse("mobile:registration_invoice_pdf", kwargs={"pk": batch.pk}))
+
+    def test_no_download_invoice_link_without_a_registration(self):
+        self.membership.fee_amount = Decimal("150.00")
+        self.membership.save()
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertNotContains(response, "Download invoice")
+
+    def test_an_unconfirmed_registrations_balance_is_held_back(self):
+        # fee_amount/fee_status are already set the moment someone registers
+        # (registration.services.submission.submit_registration) -- staff
+        # hasn't reviewed/confirmed the invoice yet, so nothing about it
+        # should reach the family here.
+        self.membership.fee_amount = Decimal("150.00")
+        self.membership.fee_status = ClubMembership.FeeStatus.UNPAID
+        self.membership.save()
+        batch = RegistrationBatch.objects.create(club=self.club, season=self.season, contact_first_name="Lars", contact_last_name="Bakker", contact_email="parent@example.com")
+        RegistrationDetails.objects.create(membership=self.membership, batch=batch, price=Decimal("150.00"))
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertEqual(response.context["dues_rows"], [])
+        self.assertContains(response, "All settled up")
+
+    def test_the_balance_appears_once_the_registration_is_confirmed(self):
+        self.membership.fee_amount = Decimal("150.00")
+        self.membership.fee_status = ClubMembership.FeeStatus.UNPAID
+        self.membership.save()
+        batch = self._confirm(RegistrationBatch.objects.create(club=self.club, season=self.season, contact_first_name="Lars", contact_last_name="Bakker", contact_email="parent@example.com"))
+        RegistrationDetails.objects.create(membership=self.membership, batch=batch, price=Decimal("150.00"))
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertEqual(len(response.context["dues_rows"]), 1)
+        self.assertContains(response, "150.00")
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class RegistrationInvoicePdfViewTests(TestCase):
+    """mobile:registration_invoice_pdf -- Payments & dues' own "Download
+    invoice" link. render_pdf itself is mocked, same technique as
+    ShopInvoiceViewTests, so this exercises the view's own scoping, not
+    WeasyPrint."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        today = timezone.localdate()
+        cls.season = Season.objects.create(club=cls.club, start_date=today - datetime.timedelta(days=30), end_date=today + datetime.timedelta(days=300))
+        cls.user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", email="parent@example.com", user=cls.user)
+        cls.membership = ClubMembership.objects.create(club=cls.club, member=cls.member, season=cls.season, fee_amount=Decimal("150.00"))
+        cls.batch = RegistrationBatch.objects.create(
+            club=cls.club,
+            season=cls.season,
+            contact_first_name="Lars",
+            contact_last_name="Bakker",
+            contact_email="parent@example.com",
+            # Confirmed by default -- this class is about the view's own
+            # download/scoping behaviour once an invoice exists to hand out;
+            # see test_404s_before_the_invoice_is_confirmed for the gate itself.
+            invoice_number="REG-9999-00001",
+            invoice_sent_at=timezone.now(),
+            invoice_due_date=today + datetime.timedelta(days=14),
+        )
+        RegistrationDetails.objects.create(membership=cls.membership, batch=cls.batch, price=Decimal("150.00"))
+
+    def test_downloads_the_pdf(self):
+        self.client.force_login(self.user)
+
+        with patch("registration.services.invoicing.render_pdf", side_effect=lambda html: b"%PDF-fake"):
+            response = self.client.get(reverse("mobile:registration_invoice_pdf", kwargs={"pk": self.batch.pk}), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/pdf")
+
+    def test_404s_before_the_invoice_is_confirmed(self):
+        self.batch.invoice_sent_at = None
+        self.batch.save()
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mobile:registration_invoice_pdf", kwargs={"pk": self.batch.pk}), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_another_familys_registration_404s(self):
+        other_user = User.objects.create_user(email="other-reg@example.com", password="pw-secret-123")
+        Member.objects.create(first_name="Tom", last_name="Roe", email="other-reg@example.com", user=other_user)
+        self.client.force_login(other_user)
+
+        response = self.client.get(reverse("mobile:registration_invoice_pdf", kwargs={"pk": self.batch.pk}), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_requires_login(self):
+        response = self.client.get(reverse("mobile:registration_invoice_pdf", kwargs={"pk": self.batch.pk}), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 302)
 
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])

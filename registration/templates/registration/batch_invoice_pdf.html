@@ -114,19 +114,28 @@
 
         <div class="totals">
             <div class="totals-box">
-                {% if batch.discount_amount > 0 %}
+                {% trans "Discount" as generic_discount_label %}
+                {% if discount_amount > 0 or manual_discount_amount > 0 %}
                     <div class="totals-row">
                         <span>{% trans "Subtotal" %}</span>
-                        <span>€{{ batch.subtotal }}</span>
+                        <span>€{{ subtotal }}</span>
                     </div>
-                    <div class="totals-row discount">
-                        <span>{% trans "Multi-registrant discount" %}</span>
-                        <span>&minus;€{{ batch.discount_amount }}</span>
-                    </div>
+                    {% if discount_amount > 0 %}
+                        <div class="totals-row discount">
+                            <span>{% trans "Multi-registrant discount" %}</span>
+                            <span>&minus;€{{ discount_amount }}</span>
+                        </div>
+                    {% endif %}
+                    {% if manual_discount_amount > 0 %}
+                        <div class="totals-row discount">
+                            <span>{{ manual_discount_note|default:generic_discount_label }}</span>
+                            <span>&minus;€{{ manual_discount_amount }}</span>
+                        </div>
+                    {% endif %}
                 {% endif %}
                 <div class="totals-row total">
                     <span>{% trans "Total" %}</span>
-                    <span>€{{ batch.total }}</span>
+                    <span>€{{ total }}</span>
                 </div>
             </div>
         </div>

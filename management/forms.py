@@ -17,6 +17,7 @@ from formbuilder.models import FormSend
 from members.models import Family, FamilyMembership, Group, Member
 from members.services.family import find_member_by_email
 from news.models import News
+from registration.models import RegistrationDetails
 from shop.models import Discount, DiscountType, OrderLine, Payment, Product, ProductCategory, ProductVariant, Voucher
 from shop.services.payments import amount_due
 from teams.models import NumberPool, NumberReservation, Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
@@ -944,6 +945,39 @@ class SendDuesInvoicesForm(forms.Form):
     send_invoices_modal."""
 
     due_in_days = forms.IntegerField(label=_("Due in"), min_value=1, max_value=365, initial=14, help_text=_("Days from today."), widget=forms.NumberInput(attrs={"form": "membership-form"}))
+
+
+class RegistrationInvoiceLineForm(forms.ModelForm):
+    """One row of the Registrations review screen's own formset -- one per
+    still-billable entry in a not-yet-confirmed RegistrationBatch. Staff can
+    edit the price submit_registration originally charged, or exclude the
+    line from the invoice entirely (RegistrationDetails.excluded_from_invoice)
+    without deleting it, since the roster/onboarding data it carries has to
+    survive regardless of the billing decision -- see that field's own
+    docstring."""
+
+    price = forms.DecimalField(label=_("Price"), min_value=0, max_digits=10, decimal_places=2, widget=forms.NumberInput(attrs={"class": "input w-full", "min": "0", "step": "0.01"}))
+
+    class Meta:
+        model = RegistrationDetails
+        fields = ["price", "excluded_from_invoice"]
+        widgets = {"excluded_from_invoice": forms.CheckboxInput(attrs={"class": "checkbox"})}
+
+
+RegistrationInvoiceLineFormSet = forms.modelformset_factory(RegistrationDetails, form=RegistrationInvoiceLineForm, extra=0)
+
+
+class RegistrationInvoiceConfirmForm(forms.Form):
+    """The Registrations review screen's own confirm step -- an optional
+    overall discount on top of whatever the line formset above works out to,
+    and the same due_in_days setting SendDuesInvoicesForm already uses."""
+
+    manual_discount_amount = forms.DecimalField(label=_("Extra discount"), min_value=0, max_digits=10, decimal_places=2, required=False, initial=0, help_text=_("An amount off the total, on top of any multi-registrant discount already applied."))
+    manual_discount_note = forms.CharField(label=_("Discount label"), max_length=255, required=False, help_text=_("Shown on the invoice as this discount's own label, e.g. “Loyalty discount”. Falls back to a generic label when left blank."))
+    due_in_days = forms.IntegerField(label=_("Due in"), min_value=1, max_value=365, initial=14, help_text=_("Days from today."))
+
+    def clean_manual_discount_amount(self):
+        return self.cleaned_data["manual_discount_amount"] or Decimal("0")
 
 
 class ClubSettingsForm(forms.ModelForm):

@@ -52,12 +52,19 @@ def early_payment_offer(membership, when=None):
 def open_dues_rows(club, people, season):
     """Every season-dues row still owed by ``people`` in ``season`` -- shared by
     mobile's Home dues card and its Payments & dues screen so the two never
-    drift out of sync on what counts as "still open". WAIVED memberships and
-    fully-paid balances are excluded."""
+    drift out of sync on what counts as "still open". WAIVED and CANCELLED
+    memberships and fully-paid balances are excluded -- a cancelled
+    membership has no active claim on the family any more, whatever balance
+    it was left carrying."""
     if season is None or not people:
         return []
 
-    memberships = ClubMembership.objects.filter(club=club, member__in=people, season=season).exclude(fee_status=ClubMembership.FeeStatus.WAIVED).select_related("dues_invoice", "member")
+    memberships = (
+        ClubMembership.objects.filter(club=club, member__in=people, season=season)
+        .exclude(fee_status=ClubMembership.FeeStatus.WAIVED)
+        .exclude(status=ClubMembership.StatusChoices.CANCELLED)
+        .select_related("dues_invoice", "member")
+    )
     rows = []
     for membership in memberships:
         balance = remaining_balance(membership)

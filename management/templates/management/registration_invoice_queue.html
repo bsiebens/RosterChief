@@ -1,0 +1,65 @@
+{% extends "management/base.html" %}
+{% load i18n lucide %}
+
+{% comment %}
+    Every registration whose invoice hasn't been confirmed/sent yet
+    (management.views.RegistrationInvoiceQueueView, registration.services.
+    invoicing.registrations_awaiting_confirmation) -- read-only besides the
+    per-row "Review" link, which is where amounts actually get adjusted and
+    confirmed (registration_invoice_review.html). Once confirmed, a
+    registration moves off this list entirely and onto management:invoice_list
+    instead, alongside order/dues invoices.
+{% endcomment %}
+
+{% block panel_title %}{% trans "Registrations" %}{% endblock panel_title %}
+{% block heading %}{% trans "Registrations" %}{% endblock heading %}
+{% block topbar_context %}<span class="text-sm text-muted">{% trans "Registrations awaiting invoice confirmation." %}</span>{% endblock topbar_context %}
+
+{% block filter_strip %}
+    <div class="flex flex-wrap items-center gap-2 border-b border-line bg-white px-7 py-2.5">
+        <form method="get" class="flex flex-wrap items-center gap-2">
+            <div class="relative">
+                <span class="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-dim">{% lucide "search" size=14 %}</span>
+                <input type="search" name="q" value="{{ search }}" placeholder="{% trans 'Name or family ...' %}" class="input w-64 pl-9" data-autosubmit>
+            </div>
+            {% if search %}
+                <a class="btn btn-outline gap-2" href="{% url "management:registration_invoice_queue" %}">{% lucide "x" size=14 %} {% trans "Clear" %}</a>
+            {% endif %}
+        </form>
+    </div>
+{% endblock filter_strip %}
+
+{% block panel %}
+    <div class="card overflow-hidden">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>{% trans "Contact" %}</th>
+                    <th>{% trans "Registered" %}</th>
+                    <th>{% trans "Amount" %}</th>
+                    <th>{% trans "Submitted" %}</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in rows %}
+                    <tr>
+                        <td class="font-semibold">{{ row.batch.contact_first_name }} {{ row.batch.contact_last_name }}</td>
+                        <td>
+                            {% for entry in row.entries %}{{ entry.membership.member }}{% if not forloop.last %}, {% endif %}{% endfor %}
+                        </td>
+                        <td class="font-mono text-xs tabular-nums">&euro; {{ row.total }}</td>
+                        <td class="font-mono text-xs">{{ row.batch.created|date:"Y-m-d" }}</td>
+                        <td class="text-right">
+                            <a class="btn btn-outline btn-xs gap-1" href="{% url 'management:registration_invoice_review' row.batch.pk %}">{% lucide "receipt" size=12 %} {% trans "Review" %}</a>
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="5" class="text-center text-dim">{% trans "Nothing awaiting confirmation." %}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+{% endblock panel %}

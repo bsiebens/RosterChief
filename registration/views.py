@@ -154,7 +154,14 @@ class RegistrationStatusView(ClubScopedPublicMixin, View):
     is nullable) is how staff can tell an item was self-uploaded rather than
     verified by them -- still needs the deliberate Sign-up "Approve" step
     club.services.onboarding.approve_one/approve_all_clean gate on to
-    actually activate a membership, so a self-upload alone can't skip that."""
+    actually activate a membership, so a self-upload alone can't skip that.
+
+    Onboarding (the above) is unconditional -- billing isn't: balance/
+    early-payment/"how to pay"/invoice-download only show once staff has
+    reviewed and confirmed this registration's own invoice on the management
+    Registrations screen (RegistrationBatch.invoice_sent_at), see
+    registration.services.invoicing's own module docstring. Nothing
+    financial reaches a family before that, however long onboarding takes."""
 
     template_name = "registration/status.html"
 
@@ -162,6 +169,7 @@ class RegistrationStatusView(ClubScopedPublicMixin, View):
         return get_object_or_404(RegistrationBatch.objects.select_related("season"), club=request.club, status_token=token)
 
     def get_membership_rows(self, batch):
+        invoice_ready = batch.invoice_sent_at is not None
         memberships = list({details.membership for details in RegistrationDetails.objects.filter(batch=batch).select_related("membership__member")})
         memberships.sort(key=lambda membership: membership.member.get_full_name())
         rows = []
@@ -169,8 +177,8 @@ class RegistrationStatusView(ClubScopedPublicMixin, View):
             rows.append(
                 {
                     "membership": membership,
-                    "balance": remaining_balance(membership),
-                    "early_payment": early_payment_offer(membership),
+                    "balance": remaining_balance(membership) if invoice_ready else None,
+                    "early_payment": early_payment_offer(membership) if invoice_ready else None,
                     "checklist": checklist_for(membership),
                     "upload_form": RegistrationStatusDocumentForm(),
                 }
@@ -179,7 +187,12 @@ class RegistrationStatusView(ClubScopedPublicMixin, View):
 
     def get(self, request, *args, **kwargs):
         batch = self.get_batch(request, kwargs["token"])
-        return render(request, self.template_name, {"batch": batch, "membership_rows": self.get_membership_rows(batch), "payment_instructions": batch.club.payment_instructions})
+        invoice_ready = batch.invoice_sent_at is not None
+        return render(
+            request,
+            self.template_name,
+            {"batch": batch, "membership_rows": self.get_membership_rows(batch), "payment_instructions": batch.club.payment_instructions, "invoice_ready": invoice_ready},
+        )
 
     def post(self, request, *args, **kwargs):
         batch = self.get_batch(request, kwargs["token"])
@@ -206,10 +219,15 @@ class RegistrationStatusView(ClubScopedPublicMixin, View):
 class RegistrationInvoiceView(ClubScopedPublicMixin, View):
     """One PDF covering every entry in the batch (registration.services.
     invoicing.batch_invoice_pdf), not one per membership -- reached from the
-    status page the same token-gated way as everything else there."""
+    status page the same token-gated way as everything else there. 404s
+    until staff has confirmed the invoice (RegistrationBatch.invoice_sent_at)
+    -- there's no document to hand out before then, see RegistrationStatusView's
+    own docstring."""
 
     def get(self, request, *args, **kwargs):
         batch = get_object_or_404(RegistrationBatch, club=request.club, status_token=kwargs["token"])
+        if batch.invoice_sent_at is None:
+            raise Http404("This registration's invoice hasn't been confirmed yet.")
 
         try:
             pdf = batch_invoice_pdf(batch)

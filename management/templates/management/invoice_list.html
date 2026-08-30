@@ -2,17 +2,21 @@
 {% load i18n lucide ui %}
 
 {% comment %}
-    Every invoice this club has sent -- shop order invoices and membership
-    dues invoices together (InvoiceListView merges/sorts/paginates the two
-    in Python, they're different tables). Dues rows are only ever present
-    for an admin (can_see_dues) -- a ShopManager who isn't also an admin
-    still gets this page for their own order invoices, the type filter just
-    never offers "Dues" for them, same financial-data boundary
+    Every invoice this club has sent, plus every registration that's charged
+    something and hasn't otherwise been invoiced -- shop order invoices,
+    membership dues invoices, and registration invoices together
+    (InvoiceListView merges/sorts/paginates the three in Python, they're
+    different tables). Dues/registration rows are only ever present for an
+    admin (can_see_dues) -- a ShopManager who isn't also an admin still gets
+    this page for their own order invoices, the type filter just never
+    offers "Dues"/"Registrations" for them, same financial-data boundary
     MembershipListView already draws.
 
-    No detail page of its own -- "View" on either kind of row lands on the
+    No detail page of its own -- "View" on an order/dues row lands on the
     order/membership page that already shows everything about it, same as
-    this page's own shop-only predecessor.
+    this page's own shop-only predecessor; a registration row's own "View"
+    lands on its contact's member page instead, there being no page for a
+    whole registration.
 {% endcomment %}
 
 {% block panel_title %}{% trans "Invoices" %}{% endblock panel_title %}
@@ -35,6 +39,7 @@
                 <option value="order" {% if selected_type == "order" %}selected{% endif %}>{% trans "Orders" %}</option>
                 {% if can_see_dues %}
                     <option value="dues" {% if selected_type == "dues" %}selected{% endif %}>{% trans "Dues" %}</option>
+                    <option value="registration" {% if selected_type == "registration" %}selected{% endif %}>{% trans "Registrations" %}</option>
                 {% endif %}
             </select>
             {% if search %}
@@ -64,7 +69,7 @@
                         <td><a class="link link-hover font-mono text-xs" href="{{ invoice.detail_url }}">{{ invoice.number }}</a></td>
                         <td>
                             <span class="inline-flex items-center gap-1.5 text-sm text-muted">
-                                {% if invoice.kind == "order" %}{% lucide "shopping-bag" size=13 %}{% else %}{% lucide "wallet" size=13 %}{% endif %}
+                                {% if invoice.kind == "order" %}{% lucide "shopping-bag" size=13 %}{% elif invoice.kind == "registration" %}{% lucide "clipboard-list" size=13 %}{% else %}{% lucide "wallet" size=13 %}{% endif %}
                                 {{ invoice.kind_label }}
                             </span>
                         </td>

@@ -1,0 +1,78 @@
+{% extends "management/base.html" %}
+{% load i18n lucide ui %}
+
+{% comment %}
+    One registration's own review-and-confirm screen (management.views.
+    RegistrationInvoiceReviewView) -- edit or exclude each line, apply an
+    overall discount, pick how many days until due, then "Confirm & send
+    invoice" in one action (registration.services.notifications.
+    confirm_and_send_invoice). Not a bulk-select page like membership_list.
+    html's own Send invoice modal -- one registration is reviewed at a time.
+{% endcomment %}
+
+{% block panel_title %}{% trans "Review registration" %}{% endblock panel_title %}
+{% block heading %}{{ batch.contact_first_name }} {{ batch.contact_last_name }}{% endblock heading %}
+{% block topbar_context %}<span class="text-sm text-muted">{{ batch.season }}</span>{% endblock topbar_context %}
+
+{% block actions %}
+    <a class="btn btn-outline gap-2" href="{% url 'management:registration_invoice_queue' %}">{% lucide "arrow-left" size=16 %} {% trans "Registrations" %}</a>
+{% endblock actions %}
+
+{% block panel %}
+    <form method="post">
+        {% csrf_token %}
+        {{ formset.management_form }}
+
+        {% for error in formset.non_form_errors %}
+            <div class="alert alert-error mb-4"><span>{{ error }}</span></div>
+        {% endfor %}
+
+        <div class="card mb-4 overflow-hidden">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>{% trans "Person" %}</th>
+                        <th>{% trans "Registered for" %}</th>
+                        <th class="w-40">{% trans "Price" %}</th>
+                        <th class="w-32 text-center">
+                            <span class="inline-flex items-center gap-1">
+                                {% trans "Exclude" %}
+                                <span class="text-dim" title="{% trans 'Drops this person from the invoice entirely -- their team/role request stays on record, they simply are not charged.' %}" aria-label="{% trans 'What does Exclude do?' %}">{% lucide "circle-help" size=13 %}</span>
+                            </span>
+                        </th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for form in formset %}
+                        <tr>
+                            {{ form.id }}
+                            <td class="font-semibold">{{ form.instance.membership.member }}</td>
+                            <td>
+                                {% if form.instance.product_variant %}{{ form.instance.product_variant.product.name }} &mdash; {{ form.instance.product_variant.name }}{% else %}{{ form.instance.get_entry_kind_display }}{% endif %}
+                                {% if form.instance.requested_team %}<div class="text-xs text-muted">{{ form.instance.requested_team }}</div>{% endif %}
+                            </td>
+                            <td>
+                                {% form_field form.price show_label=False show_help_text=False %}
+                            </td>
+                            <td class="text-center">
+                                {{ form.excluded_from_invoice }}
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <div class="card">
+            <div class="card-body grid grid-cols-1 gap-4 md:grid-cols-3">
+                <div>{% form_field confirm_form.manual_discount_amount %}</div>
+                <div>{% form_field confirm_form.manual_discount_note %}</div>
+                <div>{% form_field confirm_form.due_in_days %}</div>
+            </div>
+        </div>
+
+        <div class="mt-4 flex justify-end">
+            <button class="btn btn-primary gap-2" type="submit">{% lucide "send" size=16 %} {% trans "Confirm & send invoice" %}</button>
+        </div>
+    </form>
+{% endblock panel %}

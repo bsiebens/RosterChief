@@ -1696,6 +1696,11 @@ class OpenDuesRowsTests(TestCase):
 
         self.assertEqual(open_dues_rows(self.club, [self.member], self.season), [])
 
+    def test_a_cancelled_membership_is_excluded_even_with_an_unpaid_balance(self):
+        ClubMembership.objects.create(club=self.club, member=self.member, season=self.season, fee_amount=Decimal("150.00"), status=ClubMembership.StatusChoices.CANCELLED)
+
+        self.assertEqual(open_dues_rows(self.club, [self.member], self.season), [])
+
     def test_a_membership_with_no_fee_priced_is_excluded(self):
         ClubMembership.objects.create(club=self.club, member=self.member, season=self.season)
 

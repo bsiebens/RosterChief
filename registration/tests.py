@@ -6,6 +6,7 @@ from django.core import mail
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.urls import reverse
+from django.utils import timezone
 
 from authentication.models import User
 from club.models import Club, ClubMembership, MemberRequirementStatus, OnboardingRequirement, Season
@@ -886,18 +887,30 @@ class RegistrationStatusViewTests(TestCase):
     def _url(self, token=None):
         return reverse("registration:status", kwargs={"token": token or self.batch.status_token})
 
+    def _confirm(self, batch=None):
+        # Sets the confirmation state directly rather than going through the
+        # real management review-and-confirm flow (a different screen this
+        # test class isn't about) -- invoice_sent_at is the one flag every
+        # money-related block on this page actually reads.
+        batch = batch or self.batch
+        batch.invoice_number = "REG-9999-00001"
+        batch.invoice_sent_at = timezone.now()
+        batch.invoice_due_date = datetime.date.today() + datetime.timedelta(days=14)
+        batch.save()
+        return batch
+
     def test_an_unknown_token_404s(self):
         response = self.client.get(self._url(token="not-a-real-token"), HTTP_HOST="ajax-united.rosterchief.app")
 
         self.assertEqual(response.status_code, 404)
 
     def test_shows_the_members_status_and_open_checklist(self):
+        # Onboarding -- unaffected by whether the invoice has been confirmed.
         response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Timmy Tester")
         self.assertContains(response, "Medical certificate")
-        self.assertContains(response, "80.00")
 
     def test_uploading_a_document_marks_the_requirement_complete(self):
         upload = SimpleUploadedFile("cert.pdf", b"file-bytes", content_type="application/pdf")
@@ -921,11 +934,14 @@ class RegistrationStatusViewTests(TestCase):
         self.assertFalse(MemberRequirementStatus.objects.filter(membership=other_membership).exists())
 
     def test_the_download_invoice_link_points_at_the_batch_not_a_membership(self):
+        self._confirm()
+
         response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
 
         self.assertContains(response, reverse("registration:invoice", kwargs={"token": self.batch.status_token}))
 
     def test_shows_the_early_payment_offer_while_still_open(self):
+        self._confirm()
         self.membership.early_payment_deadline = datetime.date.today() + datetime.timedelta(days=5)
         self.membership.early_payment_discount = Decimal("10.00")
         self.membership.save()
@@ -935,6 +951,7 @@ class RegistrationStatusViewTests(TestCase):
         self.assertContains(response, "70.00")
 
     def test_hides_the_early_payment_offer_once_the_deadline_has_passed(self):
+        self._confirm()
         self.membership.early_payment_deadline = datetime.date.today() - datetime.timedelta(days=1)
         self.membership.early_payment_discount = Decimal("10.00")
         self.membership.save()
@@ -944,6 +961,7 @@ class RegistrationStatusViewTests(TestCase):
         self.assertEqual(response.context["membership_rows"][0]["early_payment"], None)
 
     def test_shows_payment_instructions_when_set(self):
+        self._confirm()
         self.club.payment_instructions = "Bank transfer to BE00 0000 0000 0000"
         self.club.save()
 
@@ -953,9 +971,41 @@ class RegistrationStatusViewTests(TestCase):
         self.assertContains(response, "BE00 0000 0000 0000")
 
     def test_no_payment_instructions_block_when_blank(self):
+        self._confirm()
+
         response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
 
         self.assertNotContains(response, "How to pay")
+
+    def test_before_confirmation_nothing_financial_is_shown(self):
+        # Not confirmed -- no balance line, no early-payment offer, no
+        # Download invoice button, no How to pay card, even though the fee/
+        # payment_instructions data all already exists underneath.
+        self.club.payment_instructions = "Bank transfer to BE00 0000 0000 0000"
+        self.club.save()
+        self.membership.early_payment_deadline = datetime.date.today() + datetime.timedelta(days=5)
+        self.membership.early_payment_discount = Decimal("10.00")
+        self.membership.save()
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertFalse(response.context["invoice_ready"])
+        self.assertIsNone(response.context["membership_rows"][0]["balance"])
+        self.assertIsNone(response.context["membership_rows"][0]["early_payment"])
+        self.assertNotContains(response, "still owed")
+        self.assertNotContains(response, "No balance owed")
+        self.assertNotContains(response, "Download invoice")
+        self.assertNotContains(response, "How to pay")
+        self.assertNotContains(response, "BE00 0000 0000 0000")
+
+    def test_after_confirmation_the_balance_is_shown(self):
+        self._confirm()
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertTrue(response.context["invoice_ready"])
+        self.assertContains(response, "80.00")
+        self.assertContains(response, "still owed")
 
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
@@ -1018,7 +1068,22 @@ class RegistrationInvoiceViewTests(TestCase):
         cls.sibling = Member.objects.create(first_name="Jamie", last_name="Tester", date_of_birth=datetime.date(2018, 3, 1))
         cls.membership = ClubMembership.objects.create(club=cls.club, member=cls.child, season=cls.season, status=ClubMembership.StatusChoices.PENDING, fee_amount=Decimal("80.00"))
         cls.sibling_membership = ClubMembership.objects.create(club=cls.club, member=cls.sibling, season=cls.season, status=ClubMembership.StatusChoices.PENDING, fee_amount=Decimal("80.00"))
-        cls.batch = RegistrationBatch.objects.create(club=cls.club, season=cls.season, contact_first_name="Pat", contact_last_name="Parent", contact_email="pat@example.com", subtotal=Decimal("160.00"), total=Decimal("160.00"))
+        cls.batch = RegistrationBatch.objects.create(
+            club=cls.club,
+            season=cls.season,
+            contact_first_name="Pat",
+            contact_last_name="Parent",
+            contact_email="pat@example.com",
+            subtotal=Decimal("160.00"),
+            total=Decimal("160.00"),
+            # Confirmed by default -- every test in this class is about the
+            # PDF-rendering behaviour once staff has already reviewed and
+            # sent it, not the confirmation gate itself (see the dedicated
+            # tests for that below).
+            invoice_number="REG-9999-00001",
+            invoice_sent_at=timezone.now(),
+            invoice_due_date=datetime.date.today() + datetime.timedelta(days=14),
+        )
         RegistrationDetails.objects.create(membership=cls.membership, batch=cls.batch, entry_kind=RegistrationDetails.EntryKind.PLAYER, price=Decimal("80.00"))
         RegistrationDetails.objects.create(membership=cls.sibling_membership, batch=cls.batch, entry_kind=RegistrationDetails.EntryKind.PLAYER, price=Decimal("80.00"))
 
@@ -1027,6 +1092,14 @@ class RegistrationInvoiceViewTests(TestCase):
 
     def test_an_unknown_token_404s(self):
         response = self.client.get(self._url(token="not-a-real-token"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_404s_before_the_invoice_is_confirmed(self):
+        self.batch.invoice_sent_at = None
+        self.batch.save()
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
 
         self.assertEqual(response.status_code, 404)
 
@@ -1050,6 +1123,22 @@ class RegistrationInvoiceViewTests(TestCase):
         self.assertIn("Timmy Tester", html)
         self.assertIn("Jamie Tester", html)
         self.assertIn("160.00", html)
+
+    def test_a_cancelled_entrys_membership_is_left_off_the_invoice(self):
+        self.sibling_membership.status = ClubMembership.StatusChoices.CANCELLED
+        self.sibling_membership.save()
+
+        with mock.patch("registration.services.invoicing.render_pdf", side_effect=lambda html: html.encode()):
+            response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        html = response.content.decode()
+        self.assertIn("Timmy Tester", html)
+        self.assertNotIn("Jamie Tester", html)
+        # Recomputed from what's left, not the batch's own stored total (set
+        # once, at submission, over both entries) -- only Timmy's 80.00 is
+        # still actually owed.
+        self.assertNotIn("160.00", html)
+        self.assertIn("80.00", html)
 
     def test_a_missing_pdf_library_is_reported_rather_than_a_500(self):
         with mock.patch("registration.views.batch_invoice_pdf", side_effect=RegistrationInvoicePDFError("PDF rendering needs the native pango/cairo libraries.")):

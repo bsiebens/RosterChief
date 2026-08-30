@@ -144,7 +144,12 @@
                             <tr>
                                 <td><input type="checkbox" class="checkbox membership-row-checkbox" name="membership_ids" value="{{ membership.pk }}"></td>
                                 <td><a class="link link-hover font-semibold" href="{% url 'management:member_detail' membership.member.pk %}">{{ membership.member.last_name }}, {{ membership.member.first_name }}</a></td>
-                                <td>{{ membership.member.contact_email|default:"-" }}</td>
+                                <td>
+                                    {{ membership.contact_email_display|default:"-" }}
+                                    {% if membership.contact_email_display and membership.contact_email_is_guardian %}
+                                        <span class="text-xs text-muted" title="{% trans 'This member has no email of their own -- a parent/guardian’s is shown instead.' %}">{% trans "(guardian)" %}</span>
+                                    {% endif %}
+                                </td>
                                 <td>
                                     {% if membership.member.family_memberships_display %}
                                         {% for fm in membership.member.family_memberships_display %}

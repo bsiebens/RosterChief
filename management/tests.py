@@ -46,6 +46,9 @@ from news.models import News, NewsPhoto
 from news.services import _send_and_mark_notified
 from notifications.models import Notification
 from registration.models import RegistrationBatch, RegistrationDetails
+from registration.services import EntryInput, submit_registration
+from registration.services.invoicing import active_batch_entries, batch_totals
+from registration.services.notifications import confirm_and_send_invoice
 from shop.models import Discount, DiscountType, Invoice, Order, OrderLine, Payment, Product, ProductCategory, ProductionStatus, ProductRegistrantDiscountTier, ProductVariant, Voucher, VoucherConsumption
 from shop.services.invoices import ShopInvoicePDFError, create_invoice_for_order
 from teams.models import NumberPool, NumberReservation, Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
@@ -256,7 +259,7 @@ class ActiveNavHighlightTests(ManagementTestBase):
         # Sponsors sit under Finance, underneath Dues & billing.
         response = self.club_get("sponsor_list")
 
-        self.assertContains(response, f'class="nav-item active" href="{reverse("management:membership_list")}"')
+        self.assertContains(response, f'class="nav-item active" href="{reverse("management:registration_invoice_queue")}"')
 
     def test_adding_or_editing_a_product_still_highlights_finance(self):
         # product_create/product_update had no entry in _NAV_SECTIONS at all,
@@ -271,7 +274,7 @@ class ActiveNavHighlightTests(ManagementTestBase):
             with self.subTest(name=name):
                 response = self.club_get(name, *args)
 
-                self.assertContains(response, f'class="nav-item active" href="{reverse("management:membership_list")}"')
+                self.assertContains(response, f'class="nav-item active" href="{reverse("management:registration_invoice_queue")}"')
                 self.assertContains(response, f'class="nav-subitem active" href="{reverse("management:product_list")}"')
 
     def test_adding_or_editing_a_discount_still_highlights_finance(self):
@@ -283,7 +286,7 @@ class ActiveNavHighlightTests(ManagementTestBase):
             with self.subTest(name=name):
                 response = self.club_get(name, *args)
 
-                self.assertContains(response, f'class="nav-item active" href="{reverse("management:membership_list")}"')
+                self.assertContains(response, f'class="nav-item active" href="{reverse("management:registration_invoice_queue")}"')
                 self.assertContains(response, f'class="nav-subitem active" href="{reverse("management:discount_list")}"')
 
 
@@ -1821,7 +1824,7 @@ class NumberListViewTests(ManagementTestBase):
 
         tiles = {tile["number"]: tile for tile in response.context["tiles"]}
         self.assertEqual(tiles[3]["state"], "taken")
-        self.assertEqual(tiles[3]["holders"], [self.member])
+        self.assertEqual(tiles[3]["holders"], [f"{self.member} ({self.team.short_name})"])
 
     def test_a_number_placed_last_season_only_is_previous(self):
         previous_season = Season.objects.create(club=self.club, start_date=self.season.start_date - datetime.timedelta(days=365), end_date=self.season.start_date - datetime.timedelta(days=1))
@@ -1841,7 +1844,14 @@ class NumberListViewTests(ManagementTestBase):
 
         tiles = {tile["number"]: tile for tile in response.context["tiles"]}
         self.assertEqual(tiles[5]["state"], "pending")
-        self.assertEqual(tiles[5]["holders"], [self.member])
+        self.assertEqual(tiles[5]["holders"], [f"{self.member} ({self.team.short_name})"])
+
+    def test_held_by_shows_the_holders_team(self):
+        TeamMembership.objects.create(team=self.team, member=self.member, season=self.season, jersey_number=3)
+
+        response = self.club_get("number_list")
+
+        self.assertContains(response, f'data-holders="{self.member} ({self.team.short_name})"')
 
     def test_a_manually_reserved_number_is_reserved(self):
         reservation = NumberReservation.objects.create(club=self.club, pool=self.pool, number=2, note="Retired -- #2")
@@ -1852,6 +1862,13 @@ class NumberListViewTests(ManagementTestBase):
         self.assertEqual(tiles[2]["state"], "reserved")
         self.assertEqual(tiles[2]["reservation"], reservation)
         self.assertContains(response, "Retired -- #2")
+
+    def test_the_reserving_user_is_shown_on_the_tile(self):
+        NumberReservation.objects.create(club=self.club, pool=self.pool, number=2, note="Retired -- #2", reserved_by=self.admin_user)
+
+        response = self.club_get("number_list")
+
+        self.assertContains(response, f'data-reserved-by="{self.admin_user}"')
 
     def test_reserving_an_available_number(self):
         response = self.club_post("number_reservation_create", {"pool": str(self.pool.pk), "number": "1", "note": "Keep aside"})
@@ -1880,6 +1897,69 @@ class NumberListViewTests(ManagementTestBase):
 
         self.assertRedirects(response, f"{reverse('management:number_list')}?pool={self.pool.pk}")
         self.assertFalse(NumberReservation.objects.filter(pk=reservation.pk).exists())
+
+    def _make_coach(self, email):
+        coach_user = User.objects.create_user(email=email, password="pw-secret-123")
+        coach_member = Member.objects.create(user=coach_user, first_name="Cara", last_name="Coach")
+        position = Position.objects.create(club=self.club, name=f"Coach {email}", short_name="C", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=self.team, member=coach_member, season=self.season, position=position)
+        return coach_user
+
+    def test_the_reserving_staff_member_can_release_their_own_reservation(self):
+        coach_user = self._make_coach("coach-release-own@example.com")
+        reservation = NumberReservation.objects.create(club=self.club, pool=self.pool, number=1, reserved_by=coach_user)
+        self.client.force_login(coach_user)
+
+        response = self.club_post("number_reservation_release", {}, reservation.pk)
+
+        self.assertRedirects(response, f"{reverse('management:number_list')}?pool={self.pool.pk}")
+        self.assertFalse(NumberReservation.objects.filter(pk=reservation.pk).exists())
+
+    def test_another_staff_member_cannot_release_someone_elses_reservation(self):
+        reserving_user = self._make_coach("coach-release-a@example.com")
+        other_coach = self._make_coach("coach-release-b@example.com")
+        reservation = NumberReservation.objects.create(club=self.club, pool=self.pool, number=1, reserved_by=reserving_user)
+        self.client.force_login(other_coach)
+
+        response = self.club_post("number_reservation_release", {}, reservation.pk)
+
+        self.assertRedirects(response, f"{reverse('management:number_list')}?pool={self.pool.pk}")
+        self.assertTrue(NumberReservation.objects.filter(pk=reservation.pk).exists())
+
+    def test_an_admin_can_release_someone_elses_reservation(self):
+        coach_user = self._make_coach("coach-release-c@example.com")
+        reservation = NumberReservation.objects.create(club=self.club, pool=self.pool, number=1, reserved_by=coach_user)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("number_reservation_release", {}, reservation.pk)
+
+        self.assertRedirects(response, f"{reverse('management:number_list')}?pool={self.pool.pk}")
+        self.assertFalse(NumberReservation.objects.filter(pk=reservation.pk).exists())
+
+    def test_a_member_admin_can_release_someone_elses_reservation(self):
+        coach_user = self._make_coach("coach-release-d@example.com")
+        reservation = NumberReservation.objects.create(club=self.club, pool=self.pool, number=1, reserved_by=coach_user)
+        member_admin_user = User.objects.create_user(email="member-admin-release@example.com", password="pw-secret-123")
+        member_admin_member = Member.objects.create(user=member_admin_user, first_name="Mia", last_name="MemberAdmin")
+        ClubMembership.objects.create(club=self.club, member=member_admin_member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        ClubRole.objects.filter(club=self.club, member=member_admin_member).update(role=ClubRole.Roles.MEMBER_ADMIN)
+        enrol_mfa(member_admin_user)
+        self.client.force_login(member_admin_user)
+
+        response = self.club_post("number_reservation_release", {}, reservation.pk)
+
+        self.assertRedirects(response, f"{reverse('management:number_list')}?pool={self.pool.pk}")
+        self.assertFalse(NumberReservation.objects.filter(pk=reservation.pk).exists())
+
+    def test_a_reservation_with_no_reserving_user_cannot_be_released_by_a_plain_staff_member(self):
+        coach_user = self._make_coach("coach-release-e@example.com")
+        reservation = NumberReservation.objects.create(club=self.club, pool=self.pool, number=1, reserved_by=None)
+        self.client.force_login(coach_user)
+
+        response = self.club_post("number_reservation_release", {}, reservation.pk)
+
+        self.assertRedirects(response, f"{reverse('management:number_list')}?pool={self.pool.pk}")
+        self.assertTrue(NumberReservation.objects.filter(pk=reservation.pk).exists())
 
 
 class ClubRoleManagementTests(ManagementTestBase):
@@ -3461,7 +3541,37 @@ class MembershipListViewTests(ManagementTestBase):
 
     def test_nav_entry_is_admin_only(self):
         admin_response = self.club_get("home")
-        self.assertContains(admin_response, reverse("management:membership_list"))
+        self.assertContains(admin_response, reverse("management:registration_invoice_queue"))
+
+    def test_a_members_own_email_is_shown_when_they_have_one(self):
+        member = Member.objects.create(first_name="Ella", last_name="Emailed", email="ella@example.com")
+        ClubMembership.objects.create(club=self.club, member=member, season=self.season)
+
+        response = self.club_get("membership_list")
+
+        self.assertContains(response, "ella@example.com")
+        self.assertNotContains(response, "(guardian)")
+
+    def test_a_guardians_email_is_shown_when_the_member_has_none(self):
+        child = Member.objects.create(first_name="Cam", last_name="Childless")
+        guardian = Member.objects.create(first_name="Gia", last_name="Guardian", email="gia@example.com")
+        family = Family.objects.create()
+        FamilyMembership.objects.create(family=family, member=child, role=FamilyMembership.FamilyRole.CHILD)
+        FamilyMembership.objects.create(family=family, member=guardian, role=FamilyMembership.FamilyRole.PARENT)
+        ClubMembership.objects.create(club=self.club, member=child, season=self.season)
+
+        response = self.club_get("membership_list")
+
+        self.assertContains(response, "gia@example.com")
+        self.assertContains(response, "(guardian)")
+
+    def test_shows_a_dash_when_nobody_has_an_email(self):
+        member = Member.objects.create(first_name="No", last_name="Email")
+        ClubMembership.objects.create(club=self.club, member=member, season=self.season)
+
+        response = self.club_get("membership_list")
+
+        self.assertContains(response, ">-<")
 
 
 class MembershipMarkPaidTests(ManagementTestBase):
@@ -7247,7 +7357,11 @@ class FeatureGatedSectionsTests(ManagementTestBase):
     def test_shop_views_404_when_the_flag_is_not_active(self):
         self.client.force_login(self.admin_user)
 
-        for name in ["product_list", "order_list", "discount_list", "invoice_list"]:
+        # invoice_list is deliberately absent here -- it also covers dues/
+        # registration invoices, which have nothing to do with shop, so it
+        # must stay reachable (200, not 404) regardless of this flag. See
+        # InvoiceListViewTests.test_an_admin_can_view_the_invoice_list_with_shop_disabled.
+        for name in ["product_list", "order_list", "discount_list"]:
             with self.subTest(name=name):
                 self.assertEqual(self.club_get(name).status_code, 404)
 
@@ -8555,11 +8669,14 @@ class SignupDashboardTests(ManagementTestBase):
         self.assertEqual(membership.status, ClubMembership.StatusChoices.PENDING)
 
     def test_place_in_team_is_position_free_and_leaves_it_blank(self):
-        # No dropdown, no jersey number -- just the team. Position stays blank
-        # (TeamMembership.position is nullable) rather than guessed at: it's
-        # the team manager's own call to get right later (team_roster_update),
-        # and a blank position is also what groups every just-placed member
-        # together (e.g. via the API) until it's set.
+        # No dropdown -- just the team. Position stays blank (TeamMembership.
+        # position is nullable) rather than guessed at: it's the team
+        # manager's own call to get right later (team_roster_update), and a
+        # blank position is also what groups every just-placed member
+        # together (e.g. via the API) until it's set. Jersey number is
+        # different -- see test_place_in_team_honours_a_requested_jersey_number
+        # below -- since it's never guessed, only ever a pool-checked replay
+        # of what was already explicitly requested at registration.
         member, _membership = self.make_pending_member()
         team = Team.objects.create(club=self.club, name="U9", short_name="U9")
         Position.objects.create(club=self.club, name="Forward", staff_position=False)
@@ -8568,6 +8685,44 @@ class SignupDashboardTests(ManagementTestBase):
 
         roster_spot = TeamMembership.objects.get(team=team, member=member, season=self.season)
         self.assertIsNone(roster_spot.position)
+        self.assertIsNone(roster_spot.jersey_number)
+
+    def test_place_in_team_honours_a_requested_jersey_number(self):
+        member, membership = self.make_pending_member()
+        pool = NumberPool.objects.create(club=self.club, name="Youth", min_number=1, max_number=20)
+        team = Team.objects.create(club=self.club, name="U9", short_name="U9", pool=pool)
+        batch = RegistrationBatch.objects.create(club=self.club, season=self.season, contact_first_name="Pat", contact_last_name="Parent", contact_email="pat@example.com")
+        RegistrationDetails.objects.create(membership=membership, batch=batch, requested_team=team, requested_jersey_number=9)
+
+        self.club_post("signup_place_in_team", {"team": team.pk}, member.pk)
+
+        roster_spot = TeamMembership.objects.get(team=team, member=member, season=self.season)
+        self.assertEqual(roster_spot.jersey_number, 9)
+
+    def test_place_in_team_drops_a_requested_jersey_number_someone_else_already_holds(self):
+        member, membership = self.make_pending_member()
+        pool = NumberPool.objects.create(club=self.club, name="Youth", min_number=1, max_number=20)
+        team = Team.objects.create(club=self.club, name="U9", short_name="U9", pool=pool)
+        other_member = Member.objects.create(first_name="Otto", last_name="Other", date_of_birth=datetime.date(2015, 1, 1))
+        TeamMembership.objects.create(team=team, member=other_member, season=self.season, jersey_number=9)
+        batch = RegistrationBatch.objects.create(club=self.club, season=self.season, contact_first_name="Pat", contact_last_name="Parent", contact_email="pat@example.com")
+        RegistrationDetails.objects.create(membership=membership, batch=batch, requested_team=team, requested_jersey_number=9)
+
+        self.club_post("signup_place_in_team", {"team": team.pk}, member.pk)
+
+        roster_spot = TeamMembership.objects.get(team=team, member=member, season=self.season)
+        self.assertIsNone(roster_spot.jersey_number)
+
+    def test_place_in_team_with_no_pool_leaves_a_requested_jersey_number_unset(self):
+        member, membership = self.make_pending_member()
+        team = Team.objects.create(club=self.club, name="U9", short_name="U9")
+        batch = RegistrationBatch.objects.create(club=self.club, season=self.season, contact_first_name="Pat", contact_last_name="Parent", contact_email="pat@example.com")
+        RegistrationDetails.objects.create(membership=membership, batch=batch, requested_team=team, requested_jersey_number=9)
+
+        self.club_post("signup_place_in_team", {"team": team.pk}, member.pk)
+
+        roster_spot = TeamMembership.objects.get(team=team, member=member, season=self.season)
+        self.assertIsNone(roster_spot.jersey_number)
 
     def test_place_in_team_disabled_button_for_an_already_placed_team_is_a_no_op(self):
         # The button for a team the member is already on renders disabled (see
@@ -10762,6 +10917,22 @@ class InvoiceListViewTests(ShopTestBase):
 
         self.assertEqual(self.club_get("invoice_list").status_code, 403)
 
+    def test_an_admin_can_view_the_invoice_list_with_shop_disabled(self):
+        # Dues/registration invoices have nothing to do with the shop --
+        # an admin must still reach this page at a club that's never turned
+        # shop on at all.
+        get_waffle_flag_model().objects.filter(name="shop").first().clubs.remove(self.club)
+        self.client.force_login(self.admin_user)
+
+        self.assertEqual(self.club_get("invoice_list").status_code, 200)
+
+    def test_a_non_admin_shop_manager_cannot_view_the_invoice_list_with_shop_disabled(self):
+        shop_manager = self.make_shop_manager()
+        get_waffle_flag_model().objects.filter(name="shop").first().clubs.remove(self.club)
+        self.client.force_login(shop_manager)
+
+        self.assertEqual(self.club_get("invoice_list").status_code, 403)
+
     def test_every_invoice_created_gets_its_own_number(self):
         purchaser = Member.objects.create(first_name="Olly", last_name="Orderer")
         first = create_invoice_for_order(Order.objects.create(club=self.club, purchaser=purchaser, total=Decimal("1")))
@@ -10785,6 +10956,17 @@ class InvoiceListViewTests(ShopTestBase):
 
         self.assertContains(response, invoice.number)
         self.assertContains(response, "Dana")
+
+    def test_a_dues_invoice_for_a_cancelled_membership_is_excluded(self):
+        member = Member.objects.create(first_name="Dana", last_name="Duesworth", email="dana-cancelled@example.com")
+        invoice = self.make_dues_invoice(member)
+        invoice.membership.status = ClubMembership.StatusChoices.CANCELLED
+        invoice.membership.save()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("invoice_list")
+
+        self.assertNotContains(response, invoice.number)
 
     def test_dues_invoices_are_hidden_from_a_non_admin_shop_manager(self):
         member = Member.objects.create(first_name="Dana", last_name="Duesworth", email="dana@example.com")
@@ -10891,6 +11073,362 @@ class InvoiceListViewTests(ShopTestBase):
 
         self.assertEqual(len(first_page.context["invoices"]), 25)
         self.assertEqual(len(second_page.context["invoices"]), 1)
+
+    def make_registration_batch(self, contact_email="reg-parent@example.com", price=Decimal("80.00")):
+        product = Product.objects.create(club=self.club, name="Player Registration", product_type=Product.ProductType.MEMBERSHIP, season=self.season, price=price)
+        variant = ProductVariant.objects.create(product=product, name="Standard", price=price)
+        entries = [EntryInput(first_name="Kid", last_name="Testerson", date_of_birth=datetime.date(2016, 5, 1), product_variant=variant)]
+        return submit_registration(self.club, contact_first_name="Reg", contact_last_name="Parent", contact_email=contact_email, entries=entries)
+
+    def test_an_unconfirmed_registration_does_not_appear(self):
+        # Nothing financial reaches the Invoices list until staff has
+        # reviewed and confirmed it on the Registrations queue -- see
+        # RegistrationInvoiceQueueViewTests for where an unconfirmed one
+        # actually shows up instead.
+        batch = self.make_registration_batch()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("invoice_list")
+
+        self.assertNotContains(response, batch.contact_email)
+        self.assertEqual(len(response.context["invoices"]), 0)
+
+    def test_a_confirmed_registration_appears(self):
+        batch = self.make_registration_batch()
+        confirm_and_send_invoice(batch, due_in_days=14)
+        batch.refresh_from_db()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("invoice_list")
+
+        self.assertContains(response, batch.invoice_number)
+        self.assertContains(response, "Reg Parent")
+        self.assertContains(response, "80.00")
+
+    def test_registrations_are_grouped_one_row_per_batch_not_per_person(self):
+        product = Product.objects.create(club=self.club, name="Sibling Registration", product_type=Product.ProductType.MEMBERSHIP, season=self.season, price=Decimal("50.00"))
+        variant = ProductVariant.objects.create(product=product, name="Standard", price=Decimal("50.00"))
+        entries = [
+            EntryInput(first_name="Kid", last_name="One", date_of_birth=datetime.date(2015, 5, 1), product_variant=variant),
+            EntryInput(first_name="Kid", last_name="Two", date_of_birth=datetime.date(2017, 5, 1), product_variant=variant),
+        ]
+        batch = submit_registration(self.club, contact_first_name="Reg", contact_last_name="Parent", contact_email="reg-siblings@example.com", entries=entries)
+        confirm_and_send_invoice(batch, due_in_days=14)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("invoice_list")
+
+        self.assertContains(response, "100.00")
+        self.assertEqual(len(response.context["invoices"]), 1)
+
+    def test_registration_rows_are_hidden_from_a_non_admin_shop_manager(self):
+        batch = self.make_registration_batch()
+        confirm_and_send_invoice(batch, due_in_days=14)
+        batch.refresh_from_db()
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_get("invoice_list")
+
+        self.assertNotContains(response, batch.invoice_number)
+        self.assertNotContains(response, '<option value="registration"')
+
+    def test_type_filter_registration_excludes_order_and_dues(self):
+        purchaser = Member.objects.create(first_name="Olly", last_name="Orderer")
+        order_invoice = create_invoice_for_order(Order.objects.create(club=self.club, purchaser=purchaser, total=Decimal("10.00")))
+        batch = self.make_registration_batch()
+        confirm_and_send_invoice(batch, due_in_days=14)
+        batch.refresh_from_db()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("invoice_list", params={"type": "registration"})
+
+        self.assertContains(response, batch.invoice_number)
+        self.assertNotContains(response, order_invoice.number)
+
+    def test_a_registration_still_appears_once_a_dues_invoice_is_also_sent_for_it(self):
+        # The old "already covered by a DuesInvoice" exclusion is gone --
+        # a registration invoice and a DuesInvoice are two independent ways
+        # a membership can end up billed, and this list only ever shows
+        # confirmed registration invoices now, so there's no draft-vs-
+        # DuesInvoice ambiguity left to resolve.
+        batch = self.make_registration_batch()
+        confirm_and_send_invoice(batch, due_in_days=14)
+        batch.refresh_from_db()
+        membership = batch.entries.get().membership
+        create_or_resend_invoice(membership, due_in_days=14, recipient_email="reg-parent@example.com", sent_to_guardian=False)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("invoice_list")
+
+        self.assertContains(response, batch.invoice_number)
+
+    def test_a_fully_cancelled_registration_is_excluded(self):
+        batch = self.make_registration_batch()
+        confirm_and_send_invoice(batch, due_in_days=14)
+        batch.refresh_from_db()
+        membership = batch.entries.get().membership
+        membership.status = ClubMembership.StatusChoices.CANCELLED
+        membership.save()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("invoice_list")
+
+        self.assertNotContains(response, batch.invoice_number)
+
+    def test_registration_row_links_to_the_contacts_member_page_and_pdf(self):
+        batch = self.make_registration_batch()
+        confirm_and_send_invoice(batch, due_in_days=14)
+        batch.refresh_from_db()
+        contact = Member.objects.get(user__email="reg-parent@example.com")
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("invoice_list")
+
+        self.assertContains(response, reverse("management:member_detail", args=[contact.pk]))
+        self.assertContains(response, reverse("management:registration_invoice_pdf", args=[batch.pk]))
+
+    def test_downloading_a_registration_invoice_pdf(self):
+        batch = self.make_registration_batch()
+        self.client.force_login(self.admin_user)
+
+        with mock.patch("management.views.batch_invoice_pdf", return_value=b"%PDF-fake"):
+            response = self.club_get("registration_invoice_pdf", batch.pk)
+
+        self.assertEqual(response["Content-Type"], "application/pdf")
+        self.assertEqual(response.content, b"%PDF-fake")
+
+    def test_downloading_a_registration_invoice_pdf_is_admin_only(self):
+        batch = self.make_registration_batch()
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_get("registration_invoice_pdf", batch.pk)
+
+        self.assertEqual(response.status_code, 403)
+
+
+class RegistrationInvoiceQueueViewTests(ManagementTestBase):
+    """management:registration_invoice_queue -- the review queue of
+    registrations whose invoice hasn't been confirmed/sent yet."""
+
+    def setUp(self):
+        self.client.force_login(self.admin_user)
+
+    def make_batch(self, contact_email="reg-parent@example.com", price=Decimal("80.00")):
+        product = Product.objects.create(club=self.club, name="Player Registration", product_type=Product.ProductType.MEMBERSHIP, season=self.season, price=price)
+        variant = ProductVariant.objects.create(product=product, name="Standard", price=price)
+        entries = [EntryInput(first_name="Kid", last_name="Testerson", date_of_birth=datetime.date(2016, 5, 1), product_variant=variant)]
+        return submit_registration(self.club, contact_first_name="Reg", contact_last_name="Parent", contact_email=contact_email, entries=entries)
+
+    def test_is_admin_only(self):
+        self.make_batch()
+        coach_user = User.objects.create_user(email="coach-reginv@example.com", password="pw-secret-123")
+        coach_member = Member.objects.create(user=coach_user, first_name="Cara", last_name="Coach")
+        team = Team.objects.create(club=self.club, name="U9", short_name="U9")
+        position = Position.objects.create(club=self.club, name="Coach-reginv", short_name="CR", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=team, member=coach_member, season=self.season, position=position)
+        self.client.force_login(coach_user)
+
+        self.assertEqual(self.club_get("registration_invoice_queue").status_code, 403)
+
+    def test_lists_an_unconfirmed_registration(self):
+        self.make_batch()
+
+        response = self.club_get("registration_invoice_queue")
+
+        self.assertContains(response, "Reg Parent")
+        self.assertContains(response, "Kid Testerson")
+        self.assertContains(response, "80.00")
+
+    def test_a_confirmed_registration_is_not_listed(self):
+        batch = self.make_batch()
+        confirm_and_send_invoice(batch, due_in_days=14)
+
+        response = self.club_get("registration_invoice_queue")
+
+        self.assertNotContains(response, "Reg Parent")
+
+    def test_a_fully_cancelled_registration_is_not_listed(self):
+        batch = self.make_batch()
+        membership = batch.entries.get().membership
+        membership.status = ClubMembership.StatusChoices.CANCELLED
+        membership.save()
+
+        response = self.club_get("registration_invoice_queue")
+
+        self.assertNotContains(response, "Reg Parent")
+
+    def test_search_matches_the_entrys_own_name(self):
+        self.make_batch()
+
+        hit = self.club_get("registration_invoice_queue", params={"q": "Testerson"})
+        miss = self.club_get("registration_invoice_queue", params={"q": "Zzzznotfound"})
+
+        self.assertContains(hit, "Reg Parent")
+        self.assertNotContains(miss, "Reg Parent")
+
+    def test_review_link_points_at_the_review_view(self):
+        batch = self.make_batch()
+
+        response = self.club_get("registration_invoice_queue")
+
+        self.assertContains(response, reverse("management:registration_invoice_review", args=[batch.pk]))
+
+
+class RegistrationInvoiceReviewViewTests(ManagementTestBase):
+    """management:registration_invoice_review -- edit/exclude lines, apply
+    an overall discount, then confirm & send in one action."""
+
+    def setUp(self):
+        self.client.force_login(self.admin_user)
+
+    def make_batch(self, contact_email="reg-parent@example.com", price=Decimal("80.00")):
+        product = Product.objects.create(club=self.club, name="Player Registration", product_type=Product.ProductType.MEMBERSHIP, season=self.season, price=price)
+        variant = ProductVariant.objects.create(product=product, name="Standard", price=price)
+        entries = [EntryInput(first_name="Kid", last_name="Testerson", date_of_birth=datetime.date(2016, 5, 1), product_variant=variant)]
+        return submit_registration(self.club, contact_first_name="Reg", contact_last_name="Parent", contact_email=contact_email, entries=entries)
+
+    def _post_data(self, entries, price_overrides=None, excluded_ids=None, **confirm_overrides):
+        price_overrides = price_overrides or {}
+        excluded_ids = excluded_ids or set()
+        data = {
+            "lines-TOTAL_FORMS": str(len(entries)),
+            "lines-INITIAL_FORMS": str(len(entries)),
+            "lines-MIN_NUM_FORMS": "0",
+            "lines-MAX_NUM_FORMS": "1000",
+            "manual_discount_amount": str(confirm_overrides.get("manual_discount_amount", "0")),
+            "manual_discount_note": confirm_overrides.get("manual_discount_note", ""),
+            "due_in_days": str(confirm_overrides.get("due_in_days", 14)),
+        }
+        for i, entry in enumerate(entries):
+            data[f"lines-{i}-id"] = str(entry.pk)
+            data[f"lines-{i}-price"] = str(price_overrides.get(entry.pk, entry.price))
+            if entry.pk in excluded_ids:
+                data[f"lines-{i}-excluded_from_invoice"] = "on"
+        return data
+
+    def test_is_admin_only(self):
+        batch = self.make_batch()
+        plain_user = User.objects.create_user(email="plain-reginv@example.com", password="pw-secret-123")
+        ClubMembership.objects.create(club=self.club, member=Member.objects.create(user=plain_user, first_name="Pat", last_name="Plain"), season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        self.client.force_login(plain_user)
+
+        self.assertEqual(self.club_get("registration_invoice_review", batch.pk).status_code, 403)
+
+    def test_get_renders_the_line_formset(self):
+        batch = self.make_batch()
+
+        response = self.club_get("registration_invoice_review", batch.pk)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Kid Testerson")
+
+    def test_an_already_confirmed_batch_404s(self):
+        batch = self.make_batch()
+        confirm_and_send_invoice(batch, due_in_days=14)
+
+        self.assertEqual(self.club_get("registration_invoice_review", batch.pk).status_code, 404)
+
+    def test_editing_a_price_persists_it(self):
+        batch = self.make_batch()
+        entries = list(batch.entries.all())
+        data = self._post_data(entries, price_overrides={entries[0].pk: Decimal("60.00")})
+
+        self.club_post("registration_invoice_review", data, batch.pk)
+
+        entries[0].refresh_from_db()
+        self.assertEqual(entries[0].price, Decimal("60.00"))
+
+    def test_excluding_a_line_drops_it_from_the_confirmed_total(self):
+        product = Product.objects.create(club=self.club, name="Sibling Registration", product_type=Product.ProductType.MEMBERSHIP, season=self.season, price=Decimal("50.00"))
+        variant = ProductVariant.objects.create(product=product, name="Standard", price=Decimal("50.00"))
+        entries_input = [
+            EntryInput(first_name="Kid", last_name="One", date_of_birth=datetime.date(2015, 5, 1), product_variant=variant),
+            EntryInput(first_name="Kid", last_name="Two", date_of_birth=datetime.date(2017, 5, 1), product_variant=variant),
+        ]
+        batch = submit_registration(self.club, contact_first_name="Reg", contact_last_name="Parent", contact_email="reg-sib@example.com", entries=entries_input)
+        entries = list(batch.entries.all())
+        data = self._post_data(entries, excluded_ids={entries[0].pk})
+
+        self.club_post("registration_invoice_review", data, batch.pk)
+
+        entries[0].refresh_from_db()
+        self.assertTrue(entries[0].excluded_from_invoice)
+        batch.refresh_from_db()
+        _subtotal, _discount_amount, total = batch_totals(active_batch_entries(batch), batch.manual_discount_amount)
+        self.assertEqual(total, Decimal("50.00"))
+
+    def test_a_manual_discount_reduces_the_total_and_keeps_its_note(self):
+        batch = self.make_batch()
+        entries = list(batch.entries.all())
+        data = self._post_data(entries, manual_discount_amount="10.00", manual_discount_note="Loyalty discount")
+
+        self.club_post("registration_invoice_review", data, batch.pk)
+
+        batch.refresh_from_db()
+        self.assertEqual(batch.manual_discount_amount, Decimal("10.00"))
+        self.assertEqual(batch.manual_discount_note, "Loyalty discount")
+        _subtotal, _discount_amount, total = batch_totals(active_batch_entries(batch), batch.manual_discount_amount)
+        self.assertEqual(total, Decimal("70.00"))
+
+    def test_confirming_allocates_a_number_and_sends_the_email(self):
+        batch = self.make_batch()
+        entries = list(batch.entries.all())
+        data = self._post_data(entries)
+
+        response = self.club_post("registration_invoice_review", data, batch.pk)
+
+        self.assertRedirects(response, reverse("management:registration_invoice_queue"))
+        batch.refresh_from_db()
+        self.assertTrue(batch.invoice_number.startswith("REG-"))
+        self.assertIsNotNone(batch.invoice_sent_at)
+        self.assertEqual(batch.invoice_due_date, timezone.localdate() + datetime.timedelta(days=14))
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ["reg-parent@example.com"])
+
+    def test_excluding_every_line_does_not_confirm(self):
+        batch = self.make_batch()
+        entries = list(batch.entries.all())
+        data = self._post_data(entries, excluded_ids={entries[0].pk})
+
+        self.club_post("registration_invoice_review", data, batch.pk)
+
+        batch.refresh_from_db()
+        self.assertIsNone(batch.invoice_sent_at)
+
+
+class RegistrationInvoiceReminderTests(ManagementTestBase):
+    """The Dues & billing "Send reminders" button and its overdue KPI now
+    cover confirmed registration invoices too, not just DuesInvoice."""
+
+    def setUp(self):
+        self.client.force_login(self.admin_user)
+
+    def make_confirmed_overdue_batch(self):
+        product = Product.objects.create(club=self.club, name="Player Registration", product_type=Product.ProductType.MEMBERSHIP, season=self.season, price=Decimal("80.00"))
+        variant = ProductVariant.objects.create(product=product, name="Standard", price=Decimal("80.00"))
+        entries = [EntryInput(first_name="Kid", last_name="Testerson", date_of_birth=datetime.date(2016, 5, 1), product_variant=variant)]
+        batch = submit_registration(self.club, contact_first_name="Reg", contact_last_name="Parent", contact_email="reg-overdue@example.com", entries=entries)
+        confirm_and_send_invoice(batch, due_in_days=1)
+        batch.invoice_due_date = timezone.localdate() - datetime.timedelta(days=5)
+        batch.save(update_fields=["invoice_due_date"])
+        return batch
+
+    def test_overdue_registration_counts_toward_the_kpi(self):
+        self.make_confirmed_overdue_batch()
+
+        response = self.club_get("membership_list")
+
+        self.assertEqual(response.context["kpi_overdue_invoices"], 1)
+
+    def test_send_reminders_emails_an_overdue_registration(self):
+        batch = self.make_confirmed_overdue_batch()
+        mail.outbox.clear()
+
+        self.club_post("membership_send_invoice_reminders", {})
+
+        self.assertEqual(len(mail.outbox), 1)
+        batch.refresh_from_db()
+        self.assertEqual(batch.invoice_reminder_count, 1)
 
 
 class ShopToggleViewTests(ShopTestBase):

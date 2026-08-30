@@ -95,15 +95,26 @@
         window.addEventListener("resize", () => { if (!list.classList.contains("hidden")) positionList(); });
 
         select.parentNode.insertBefore(wrapper, select);
+        // list is appended to <body>, not into wrapper, even though it's only ever
+        // positioned via positionList()'s own inline top/left/bottom -- a `fixed`
+        // element's containing block becomes its nearest ancestor with a `transform`
+        // (or filter/perspective/will-change) rather than the viewport, and
+        // signup_list.html's own slide-in .drawer panel animates with exactly that
+        // (transform: translateX(...), see assets/management.css), which silently
+        // repositioned the whole dropdown relative to the drawer instead of the
+        // screen -- rect math from getBoundingClientRect() (always viewport-relative)
+        // then pointed nowhere useful. Living directly under <body> keeps it immune
+        // to any such ancestor, present or future, anywhere this widget is used.
+        document.body.appendChild(list);
         if (isMultiple) {
             // Chips render below the input, not above it: above meant every pick grew
             // the block ahead of the input and shoved it (and your cursor) down --
             // disorienting mid-search. Below, the input stays put; only the space
             // beneath it grows, and the open dropdown (absolutely positioned right
             // under the input) simply overlaps the chips while it's open.
-            wrapper.append(input, list, chips, select);
+            wrapper.append(input, chips, select);
         } else {
-            wrapper.append(input, list, select);
+            wrapper.append(input, select);
         }
         select.classList.add("hidden");
 

@@ -1,4 +1,4 @@
-{% load i18n %}
+{% load i18n lucide %}
 {% comment %}
     Payments & dues' own richer version of _dues_row.html -- the same header
     (badge/name/balance/due-date), plus a receipt breakdown of what this
@@ -9,6 +9,11 @@
     belongs on the dedicated screen, not the overview. No "Pay" action --
     there's no online payment gateway; the amount itself is the prominent
     element instead.
+
+    row.invoice_batches (also attached by PaymentsView) is almost always one
+    registration -- more than one only if this person was registered twice
+    in the same season, see PaymentsView's own comment -- so one "Download
+    invoice" link per batch, not per membership.
 {% endcomment %}
 <div class="m-card overflow-hidden">
     <div class="flex items-center gap-3 p-4">
@@ -46,6 +51,17 @@
         <div class="h-px bg-rule"></div>
         <div class="bg-ok-bg p-3.5 text-xs text-ok-text">
             {% blocktrans with total=row.early_payment.discounted_total|floatformat:2 date=row.early_payment.deadline|date:"d M" amount=row.early_payment.discount|floatformat:2 %}Pay &euro;{{ total }} by {{ date }} to save &euro;{{ amount }}.{% endblocktrans %}
+        </div>
+    {% endif %}
+
+    {% if row.invoice_batches %}
+        <div class="h-px bg-rule"></div>
+        <div class="flex flex-col gap-2 p-3.5">
+            {% for batch in row.invoice_batches %}
+                <a class="btn btn-outline btn-sm gap-2" href="{% url 'mobile:registration_invoice_pdf' batch.pk %}" hx-boost="false">
+                    {% lucide "file-down" size=14 %} {% trans "Download invoice" %}
+                </a>
+            {% endfor %}
         </div>
     {% endif %}
 </div>

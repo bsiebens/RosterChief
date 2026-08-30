@@ -16,6 +16,7 @@ from django.utils.translation import gettext_lazy as _
 from django.utils.translation import ngettext
 from django.views.decorators.clickjacking import xframe_options_sameorigin
 from django.views.generic import CreateView, DetailView, FormView, ListView, TemplateView, UpdateView, View
+from waffle import flag_is_active
 
 from billing.models import Due
 from club.mixins import (
@@ -33,7 +34,7 @@ from club.mixins import (
     TeamManagerRequiredMixin,
 )
 from club.models import ClubMembership, ClubRole, DuesInvoice, MemberRequirementStatus, OnboardingRequirement, Season, ShopManager, Sponsor
-from club.services.access import _guardians_only, can_edit_news, can_publish_news, current_season, groups_manageable_by, is_club_admin, members_visible_to, teams_managed_by, teams_staffed_by
+from club.services.access import _guardians_only, can_edit_news, can_manage_members, can_manage_shop, can_publish_news, current_season, groups_manageable_by, is_club_admin, members_visible_to, teams_managed_by, teams_staffed_by
 from club.services.cancellation import cancel_membership
 from club.services.fees import mark_as_paid, record_payment, remaining_balance
 from club.services.invoicing import DuesInvoicePDFError, create_or_resend_invoice, invoice_pdf, invoices_due_for_reminder, recipient_for, resolve_document_address, send_invoice_email, send_reminders
@@ -59,11 +60,20 @@ from formbuilder.services.reporting import form_report
 from members.forms import ClaimRejectForm, ClaimReviewForm
 from members.models import Family, FamilyMembership, Group, GroupMembership, Member, ParentClaim
 from members.services.claims import ClaimError, approve_claim, children_awaiting_a_parent, reject_claim, send_claim_approved_email, suggested_children
-from members.services.family import add_child_to_family, add_parent_to_family, attach_to_family, detach_from_family, get_or_create_login_user, grant_login, register_family
+from members.services.family import add_child_to_family, add_parent_to_family, attach_to_family, detach_from_family, find_member_by_email, get_or_create_login_user, grant_login, register_family
 from news.models import News, NewsPhoto
 from news.services import dispatch_send_publish_notification, notify_editors_of_pending_review, render_body_html
 from notifications.models import Notification
-from registration.models import RegistrationDetails
+from registration.models import RegistrationBatch, RegistrationDetails
+from registration.services.invoicing import (
+    RegistrationInvoicePDFError,
+    active_batch_entries,
+    batch_invoice_pdf,
+    batch_totals,
+    registration_invoices_due_for_reminder,
+    registrations_awaiting_confirmation,
+)
+from registration.services.notifications import confirm_and_send_invoice, send_registration_reminders
 from shop.models import Discount, Invoice, Order, OrderLine, Payment, Product, ProductCategory, ProductionStatus, ProductRegistrantDiscountTier, ProductVariant, Voucher, VoucherConsumption
 from shop.services.invoices import ShopInvoicePDFError, render_invoice_pdf
 from shop.services.notifications import dispatch_order_ready_for_pickup_notification
@@ -75,6 +85,7 @@ from shop.services.stats import order_kpis, quantity_sold_by_product, quantity_s
 from shop.services.vouchers import delete_manual_consumption, record_manual_consumption, voucher_history
 from teams.models import NumberPool, NumberReservation, Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
 from teams.services import eligible_roster_members
+from teams.services.numbers import is_number_available
 
 from .bulk_import import build_member_import_template, parse_member_import_rows, read_member_import_workbook
 from .email_previews import EMAIL_PREVIEWS, EMAIL_PREVIEWS_BY_KEY, render_preview
@@ -125,6 +136,8 @@ from .forms import (
     RBIHFImportForm,
     RecordFeePaymentForm,
     RefereeLevelForm,
+    RegistrationInvoiceConfirmForm,
+    RegistrationInvoiceLineFormSet,
     RequirementBypassForm,
     RequirementCompletionForm,
     SendDuesInvoicesForm,
@@ -473,7 +486,12 @@ class MembershipListView(ClubAdminRequiredMixin, ListView):
         waived = counts.get(ClubMembership.FeeStatus.WAIVED, 0)
         total = paid + partial + unpaid + waived
 
-        overdue_count = invoices_due_for_reminder(club).count() if current is not None else 0
+        # Combines both origins a "Send reminders" click actually covers --
+        # club.services.invoicing.invoices_due_for_reminder (DuesInvoice) and
+        # registration.services.invoicing.registration_invoices_due_for_reminder
+        # (a confirmed registration's own invoice) -- so this badge never
+        # undercounts what that button is about to send.
+        overdue_count = (invoices_due_for_reminder(club).count() + len(registration_invoices_due_for_reminder(club))) if current is not None else 0
 
         context = super().get_context_data(
             current_season=current,
@@ -511,6 +529,14 @@ class MembershipListView(ClubAdminRequiredMixin, ListView):
             membership.member.family_memberships_display = family_memberships_by_member_id.get(membership.member_id, [])
             membership.remaining_balance_display = remaining_balance(membership)
             membership.dues_invoice = invoices_by_membership_id.get(membership.pk)
+            # Same resolution "Send invoice" itself already uses (recipient_for)
+            # -- a member with no email of their own (the common case for a
+            # child with no login) falls back to a parent/guardian's, rather
+            # than the table just reading "-" for someone staff can, in fact,
+            # already reach.
+            contact_email, is_guardian_email = recipient_for(membership.member)
+            membership.contact_email_display = contact_email
+            membership.contact_email_is_guardian = is_guardian_email
             # Nothing to collect on an already-settled or deliberately-exempted row.
             if membership.fee_status in (ClubMembership.FeeStatus.PAID, ClubMembership.FeeStatus.WAIVED):
                 membership.record_payment_form = None
@@ -665,13 +691,19 @@ class MembershipSendInvoicesView(ClubAdminRequiredMixin, View):
 class MembershipSendInvoiceRemindersView(ClubAdminRequiredMixin, View):
     """The push-button "remind everyone past due" action -- every sent, unpaid
     invoice whose due date has passed, club-wide, regardless of the current list's
-    filters or page. See club.services.invoicing.invoices_due_for_reminder."""
+    filters or page. Covers both club.services.invoicing.invoices_due_for_reminder
+    (DuesInvoice) and registration.services.invoicing.
+    registration_invoices_due_for_reminder (a confirmed registration's own
+    invoice) -- one button, one combined tally, regardless of a membership's
+    origin."""
 
     def post(self, request):
         next_url = request.POST.get("next")
         redirect_url = next_url if next_url and url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}, require_https=request.is_secure()) else reverse("management:membership_list")
 
-        sent, failed = send_reminders(request.club, request=request)
+        dues_sent, dues_failed = send_reminders(request.club, request=request)
+        registration_sent, registration_failed = send_registration_reminders(request.club, request=request)
+        sent, failed = dues_sent + registration_sent, dues_failed + registration_failed
         if not sent and not failed:
             notify(request, f"s|{_('Nothing to remind')}|{_('No overdue, unpaid invoices right now.')}")
         else:
@@ -2180,17 +2212,17 @@ class NumberListView(ClubStaffRequiredMixin, TemplateView):
     def build_tiles(self, pool, season):
         previous = Season.objects.filter(club=pool.club, start_date__lt=season.start_date).order_by("-start_date").first()
 
-        reservations = {reservation.number: reservation for reservation in NumberReservation.objects.filter(pool=pool)}
+        reservations = {reservation.number: reservation for reservation in NumberReservation.objects.filter(pool=pool).select_related("reserved_by")}
         placed_this_season = {}
-        for membership in TeamMembership.objects.filter(team__pool=pool, season=season).exclude(jersey_number=None).select_related("member"):
-            placed_this_season.setdefault(membership.jersey_number, []).append(membership.member)
+        for membership in TeamMembership.objects.filter(team__pool=pool, season=season).exclude(jersey_number=None).select_related("member", "team"):
+            placed_this_season.setdefault(membership.jersey_number, []).append(f"{membership.member} ({membership.team.short_name or membership.team.name})")
         placed_previous_season = {}
         if previous is not None:
-            for membership in TeamMembership.objects.filter(team__pool=pool, season=previous).exclude(jersey_number=None).select_related("member"):
-                placed_previous_season.setdefault(membership.jersey_number, []).append(membership.member)
+            for membership in TeamMembership.objects.filter(team__pool=pool, season=previous).exclude(jersey_number=None).select_related("member", "team"):
+                placed_previous_season.setdefault(membership.jersey_number, []).append(f"{membership.member} ({membership.team.short_name or membership.team.name})")
         pending_this_season = {}
-        for details in RegistrationDetails.objects.filter(requested_team__pool=pool, membership__season=season).exclude(requested_jersey_number=None).select_related("membership__member"):
-            pending_this_season.setdefault(details.requested_jersey_number, []).append(details.membership.member)
+        for details in RegistrationDetails.objects.filter(requested_team__pool=pool, membership__season=season).exclude(requested_jersey_number=None).select_related("membership__member", "requested_team"):
+            pending_this_season.setdefault(details.requested_jersey_number, []).append(f"{details.membership.member} ({details.requested_team.short_name or details.requested_team.name})")
 
         tiles = []
         for number in range(pool.min_number, pool.max_number + 1):
@@ -2234,10 +2266,24 @@ class NumberReservationCreateView(ClubStaffRequiredMixin, View):
 
 
 class NumberReservationReleaseView(ClubStaffRequiredMixin, View):
+    """Whoever reserved this specific number themselves, or an ADMIN/
+    MEMBER_ADMIN releasing someone else's -- any other staff (a coach, say)
+    can see who holds it but shouldn't be able to release a reservation they
+    didn't make. Checked in post(), not test_func: staff without permission
+    for this *one* reservation still belongs on this page (they can view and
+    release their own), so they land back on it with a clear message, same
+    as NumberReservationCreateView's own error handling, rather than a
+    generic full-page 403."""
+
     def post(self, request, pk):
         reservation = get_object_or_404(NumberReservation.objects.filter(club=request.club), pk=pk)
         pool = reservation.pool
         number = reservation.number
+
+        if reservation.reserved_by_id != request.user.id and not can_manage_members(request.user, request.club):
+            notify(request, f"e|{_('Could not release')}|{_('Only whoever reserved #%(number)s, or an admin, can release it.') % {'number': number}}")
+            return redirect(f"{reverse('management:number_list')}?pool={pool.pk}")
+
         reservation.delete()
 
         notify(request, f"s|{_('Reservation released')}|{_('#%(number)s in “%(pool)s” is available again.') % {'number': number, 'pool': pool.name}}")
@@ -4731,6 +4777,105 @@ class InvoicePdfView(ShopManagerRequiredMixin, View):
         return response
 
 
+class RegistrationInvoicePdfView(ClubAdminRequiredMixin, View):
+    """The staff-facing download for a registration row on Invoices --
+    ClubAdminRequiredMixin, not ShopManagerRequiredMixin like InvoicePdfView
+    above, since a registration row is only ever shown to an admin in the
+    first place (see InvoiceListView's own docstring). Same document
+    registration.views.RegistrationInvoiceView hands the family themselves
+    (registration.services.invoicing.batch_invoice_pdf) -- no separate staff
+    version of it."""
+
+    def get(self, request, pk):
+        batch = get_object_or_404(RegistrationBatch.objects.filter(club=request.club), pk=pk)
+
+        try:
+            pdf = batch_invoice_pdf(batch)
+        except RegistrationInvoicePDFError as error:
+            notify(request, f"e|{_('PDF unavailable')}|{error}")
+            return redirect("management:invoice_list")
+
+        response = HttpResponse(pdf, content_type="application/pdf")
+        response["Content-Disposition"] = f'attachment; filename="{request.club.slug}-registration-{batch.pk}.pdf"'
+        return response
+
+
+class RegistrationInvoiceQueueView(ClubAdminRequiredMixin, TemplateView):
+    """The Registrations review queue -- every registration whose invoice
+    hasn't been confirmed/sent yet (registration.services.invoicing.
+    registrations_awaiting_confirmation), one row per batch, with a "Review"
+    link to RegistrationInvoiceReviewView below. Nothing on this list can be
+    actioned in bulk -- one registration is reviewed (and its amounts
+    adjusted) at a time, unlike Dues & billing's own multi-select "Send
+    invoice"."""
+
+    template_name = "management/registration_invoice_queue.html"
+
+    def get_context_data(self, **kwargs):
+        search = self.request.GET.get("q", "").strip()
+        return super().get_context_data(rows=registrations_awaiting_confirmation(self.request.club, search), search=search, **kwargs)
+
+
+class RegistrationInvoiceReviewView(ClubAdminRequiredMixin, View):
+    """One registration's own review-and-confirm screen -- edit/exclude
+    lines, apply an overall discount, then "Confirm & send invoice"
+    (registration.services.notifications.confirm_and_send_invoice) in one
+    action. Excluded-but-still-cancelled entries stay visible here (unlike
+    active_batch_entries' own exclusion) so staff can re-include a line they
+    (or someone else) excluded earlier -- only a cancelled membership's own
+    entries are hidden, since there's genuinely nothing to bill there any
+    more."""
+
+    template_name = "management/registration_invoice_review.html"
+
+    def get_batch(self, request, pk):
+        return get_object_or_404(RegistrationBatch.objects.filter(club=request.club, invoice_sent_at__isnull=True), pk=pk)
+
+    def get_queryset(self, batch):
+        return (
+            RegistrationDetails.objects.filter(batch=batch)
+            .exclude(membership__status=ClubMembership.StatusChoices.CANCELLED)
+            .select_related("membership__member", "product_variant__product", "requested_team")
+            .order_by("membership__member__last_name", "membership__member__first_name")
+        )
+
+    def get(self, request, pk):
+        batch = self.get_batch(request, pk)
+        queryset = self.get_queryset(batch)
+        if not queryset.exists():
+            notify(request, f"w|{_('Nothing to invoice')}|{_('Every entry in this registration is cancelled -- there is nothing left to confirm.')}")
+            return redirect("management:registration_invoice_queue")
+
+        formset = RegistrationInvoiceLineFormSet(queryset=queryset, prefix="lines")
+        confirm_form = RegistrationInvoiceConfirmForm(initial={"manual_discount_amount": batch.manual_discount_amount, "manual_discount_note": batch.manual_discount_note})
+        return render(request, self.template_name, {"batch": batch, "formset": formset, "confirm_form": confirm_form})
+
+    def post(self, request, pk):
+        batch = self.get_batch(request, pk)
+        queryset = self.get_queryset(batch)
+        formset = RegistrationInvoiceLineFormSet(request.POST, queryset=queryset, prefix="lines")
+        confirm_form = RegistrationInvoiceConfirmForm(request.POST)
+
+        if not formset.is_valid() or not confirm_form.is_valid():
+            return render(request, self.template_name, {"batch": batch, "formset": formset, "confirm_form": confirm_form})
+
+        formset.save()
+        batch.manual_discount_amount = confirm_form.cleaned_data["manual_discount_amount"]
+        batch.manual_discount_note = confirm_form.cleaned_data["manual_discount_note"]
+        batch.save(update_fields=["manual_discount_amount", "manual_discount_note"])
+
+        if not active_batch_entries(batch):
+            notify(request, f"e|{_('Nothing to invoice')}|{_('Every entry in this registration is now cancelled or excluded -- there is nothing left to confirm.')}")
+            return redirect("management:registration_invoice_review", pk=batch.pk)
+
+        sent = confirm_and_send_invoice(batch, due_in_days=confirm_form.cleaned_data["due_in_days"], request=request)
+        if sent:
+            notify(request, f"s|{_('Invoice sent')}|{_('Invoice %(number)s has been confirmed and emailed.') % {'number': batch.invoice_number}}")
+        else:
+            notify(request, f"w|{_('Invoice confirmed, email not sent')}|{_('Invoice %(number)s has been confirmed, but the email could not be sent.') % {'number': batch.invoice_number}}")
+        return redirect("management:registration_invoice_queue")
+
+
 def _order_invoice_status(order):
     # An invoice is fundamentally about money -- payment_status, not
     # fulfillment_status, same reasoning _dues_invoice_status (below) already
@@ -4753,32 +4898,60 @@ def _dues_invoice_status(invoice):
     return _("Sent"), "badge-neutral"
 
 
-class InvoiceListView(ShopManagerRequiredMixin, TemplateView):
-    """Every invoice this club has ever sent -- shop order invoices and
-    membership dues invoices together, newest first, with a type filter and
-    a name/family search. Different models with no shared table to query in
-    one go, so each is fetched (search/type-filtered at the DB level, one
-    query per kind) and normalised into the same row shape, then merged,
-    sorted, and paginated in Python -- fine at a single club's scale
-    (invoices in the dozens/hundreds), and far simpler than a raw SQL UNION
-    across two differently-shaped tables. There's nothing on either invoice
-    worth its own detail page beyond what the order/membership page already
-    shows, so every row's "View" link lands there, same reasoning the old
-    shop-only version of this page already had.
+def _registration_invoice_status(memberships):
+    statuses = {membership.fee_status for membership in memberships}
+    if statuses <= {ClubMembership.FeeStatus.PAID, ClubMembership.FeeStatus.WAIVED}:
+        return _("Paid"), "badge-success"
+    if len(statuses) > 1 or ClubMembership.FeeStatus.PARTIALLY_PAID in statuses:
+        return _("Partially paid"), "badge-warning"
+    return _("Unpaid"), "badge-error"
 
-    Dues invoices are financial member data -- ClubAdminRequiredMixin-only
-    everywhere else in the app (see MembershipListView's own docstring), so
-    a ShopManager who isn't also an admin gets this page (they already see
-    order invoices) but never sees a dues row, regardless of ?type=."""
+
+class InvoiceListView(ClubStaffRequiredMixin, TemplateView):
+    """Every invoice this club has ever sent -- shop order invoices,
+    membership dues invoices, and registration invoices together, newest
+    first, with a type filter and a name/family search. Different models
+    with no shared table to query in one go, so each is fetched (search/
+    type-filtered at the DB level, one query per kind) and normalised into
+    the same row shape, then merged, sorted, and paginated in Python -- fine
+    at a single club's scale (invoices in the dozens/hundreds), and far
+    simpler than a raw SQL UNION across three differently-shaped tables.
+    There's nothing on an order or dues invoice worth its own detail page
+    beyond what the order/membership page already shows, so every row's
+    "View" link lands there, same reasoning the old shop-only version of
+    this page already had -- a registration row's own "View" lands on its
+    contact's member page for the same reason, there being no other detail
+    page for a whole registration to have.
+
+    NOT gated behind the "shop" feature flag (unlike every other view in
+    this file's own Shop section, ShopManagerRequiredMixin) -- dues and
+    registration invoices have nothing to do with the shop, and an admin at
+    a club that's never turned it on must still be able to reach them here.
+    test_func below is ShopManagerRequiredMixin's own test_func, minus the
+    feature-flag 404 that mixin's dispatch() would otherwise add: an admin
+    always gets in; a ShopManager grant only counts while the flag is
+    actually on (there's nothing shop-related to manage otherwise).
+
+    Dues/registration rows are financial member data -- ClubAdminRequiredMixin-
+    only everywhere else in the app (see MembershipListView's own docstring),
+    so a ShopManager who isn't also an admin gets this page (they already
+    see order invoices, when shop is on) but never sees either row,
+    regardless of ?type=."""
 
     template_name = "management/invoice_list.html"
     paginate_by = 25
+
+    def test_func(self):
+        user, club = self.request.user, self.request.club
+        if is_club_admin(user, club):
+            return True
+        return flag_is_active(self.request, "shop") and can_manage_shop(user, club)
 
     def get_context_data(self, **kwargs):
         club = self.request.club
         is_admin = is_club_admin(self.request.user, club)
         selected_type = self.request.GET.get("type", "all")
-        if selected_type not in ("order", "dues"):
+        if selected_type not in ("order", "dues", "registration"):
             selected_type = "all"
         search = self.request.GET.get("q", "").strip()
 
@@ -4787,6 +4960,8 @@ class InvoiceListView(ShopManagerRequiredMixin, TemplateView):
             rows.extend(self._order_rows(club, search))
         if is_admin and selected_type in ("all", "dues"):
             rows.extend(self._dues_rows(club, search))
+        if is_admin and selected_type in ("all", "registration"):
+            rows.extend(self._registration_rows(club, search))
         rows.sort(key=lambda row: row["date"] or date.min, reverse=True)
 
         page_obj = Paginator(rows, self.paginate_by).get_page(self.request.GET.get("page"))
@@ -4841,7 +5016,12 @@ class InvoiceListView(ShopManagerRequiredMixin, TemplateView):
         return rows
 
     def _dues_rows(self, club, search):
-        invoices = DuesInvoice.objects.filter(club=club, sent_at__isnull=False).select_related("membership__member")
+        # Excludes a since-cancelled membership's own invoice -- club.services.
+        # cancellation.cancel_membership never touches the DuesInvoice already
+        # sent for it, but nothing is owed for a cancelled registration any
+        # more, so it has no place in a list of what the club is still owed
+        # (or has been paid) for.
+        invoices = DuesInvoice.objects.filter(club=club, sent_at__isnull=False).exclude(membership__status=ClubMembership.StatusChoices.CANCELLED).select_related("membership__member")
         if search:
             invoices = self._search_by_member_or_family(invoices, "membership__member", search)
 
@@ -4860,6 +5040,60 @@ class InvoiceListView(ShopManagerRequiredMixin, TemplateView):
                     "status_css": status_css,
                     "detail_url": reverse("management:membership_invoice_detail", kwargs={"pk": invoice.membership.pk}),
                     "download_url": reverse("management:membership_invoice_pdf", kwargs={"pk": invoice.membership.pk}),
+                }
+            )
+        return rows
+
+    def _registration_rows(self, club, search):
+        """One row per *confirmed* registration invoice (RegistrationBatch.
+        invoice_sent_at set by registration.services.notifications.
+        confirm_and_send_invoice, from the Registrations review screen --
+        management:registration_invoice_queue) -- not per membership, same
+        grouping batch_invoice_pdf's own document uses. A still-unconfirmed
+        registration has no place here at all; it's on the review queue
+        instead, until staff has actually reviewed and sent it."""
+        batches = RegistrationBatch.objects.filter(club=club, invoice_sent_at__isnull=False).order_by("-invoice_sent_at")
+        if search:
+            batches = (
+                batches.filter(contact_first_name__icontains=search)
+                | batches.filter(contact_last_name__icontains=search)
+                | batches.filter(entries__membership__member__first_name__icontains=search)
+                | batches.filter(entries__membership__member__last_name__icontains=search)
+            ).distinct()
+
+        rows = []
+        for batch in batches:
+            contact = find_member_by_email(batch.contact_email)
+            if contact is None:
+                # The login account behind the contact email has since gone
+                # missing (changed/removed) -- billed_to has to be a real
+                # Member (the template links straight to its own detail
+                # page), so this row can't be shown rather than 500ing.
+                continue
+            entries = active_batch_entries(batch)
+            if not entries:
+                # Everyone in it has since been cancelled -- nothing left
+                # owed, so nothing left to list (same reasoning
+                # registrations_awaiting_confirmation already applies to the
+                # still-unconfirmed queue).
+                continue
+            memberships = {}
+            for entry in entries:
+                memberships.setdefault(entry.membership_id, entry.membership)
+            _subtotal, _discount_amount, total = batch_totals(entries, batch.manual_discount_amount)
+            status_label, status_css = _registration_invoice_status(memberships.values())
+            rows.append(
+                {
+                    "kind": "registration",
+                    "kind_label": _("Registration"),
+                    "number": batch.invoice_number,
+                    "billed_to": contact,
+                    "amount": total,
+                    "date": batch.invoice_sent_at.date(),
+                    "status_label": status_label,
+                    "status_css": status_css,
+                    "detail_url": reverse("management:member_detail", kwargs={"pk": contact.pk}),
+                    "download_url": reverse("management:registration_invoice_pdf", kwargs={"pk": batch.pk}),
                 }
             )
         return rows
@@ -5551,6 +5785,20 @@ class SignupPlaceInTeamView(ClubAdminRequiredMixin, View):
             ok = False
             level, title, body = "w", _("Already placed"), _("%(member)s is already on %(team)s.") % {"member": membership.member, "team": form.cleaned_data["team"]}
         else:
+            team = form.cleaned_data["team"]
+            # Honours what was already requested (and pool-checked) at registration
+            # time, rather than leaving it for staff to notice and retype on the
+            # roster page -- team_bulk_add.html/TeamMembershipForm's own initial=
+            # already show it as a *hint* once staff opens edit, but nothing wrote
+            # it onto the real roster row until now, so it read as unset ("-") in
+            # the meantime. Re-checked, not blindly trusted: something else may
+            # have claimed the number since the request was made.
+            if team.pool is not None:
+                requested_number = (
+                    RegistrationDetails.objects.filter(membership=membership, requested_team=team).exclude(requested_jersey_number=None).values_list("requested_jersey_number", flat=True).first()
+                )
+                if requested_number is not None and is_number_available(team.pool, season, requested_number, for_member=membership.member):
+                    form.instance.jersey_number = requested_number
             form.save()
             ok = True
             level, title, body = "s", _("Placed on team"), _("%(member)s added to %(team)s.") % {"member": membership.member, "team": form.cleaned_data["team"]}

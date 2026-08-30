@@ -183,6 +183,9 @@ urlpatterns = [
     path("shop/vouchers/<uuid:pk>/consumptions/new/", views.VoucherConsumptionCreateView.as_view(), name="voucher_consumption_create"),
     path("shop/vouchers/<uuid:pk>/consumptions/<uuid:consumption_pk>/delete/", views.VoucherConsumptionDeleteView.as_view(), name="voucher_consumption_delete"),
     path("shop/invoices/", views.InvoiceListView.as_view(), name="invoice_list"),
+    path("registrations/<uuid:pk>/invoice/pdf/", views.RegistrationInvoicePdfView.as_view(), name="registration_invoice_pdf"),
+    path("registrations/", views.RegistrationInvoiceQueueView.as_view(), name="registration_invoice_queue"),
+    path("registrations/<uuid:pk>/review/", views.RegistrationInvoiceReviewView.as_view(), name="registration_invoice_review"),
     # Forms
     path("forms/", views.FormListView.as_view(), name="form_list"),
     path("forms/new/", views.FormCreateView.as_view(), name="form_create"),

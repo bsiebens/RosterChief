@@ -19,8 +19,10 @@
                 {% blocktrans with start=batch.season.start_date|date:"Y" end=batch.season.end_date|date:"Y" %}Season {{ start }}-{{ end }}{% endblocktrans %}
             </p>
         </div>
-        {# One invoice for the whole batch (every person registered together in this session), not one per person. #}
-        <a class="btn btn-outline gap-2" href="{% url 'registration:invoice' batch.status_token %}">{% lucide "download" size=16 %} {% trans "Download invoice" %}</a>
+        {# One invoice for the whole batch (every person registered together in this session), not one per person -- hidden until staff has confirmed it (RegistrationBatch.invoice_sent_at), see RegistrationStatusView's own docstring. #}
+        {% if invoice_ready %}
+            <a class="btn btn-outline gap-2" href="{% url 'registration:invoice' batch.status_token %}">{% lucide "download" size=16 %} {% trans "Download invoice" %}</a>
+        {% endif %}
     </div>
 
     <div class="flex flex-col gap-4">
@@ -42,13 +44,15 @@
                     {% endif %}
                 </div>
 
-                {% if row.balance > 0 %}
-                    <p class="text-sm text-muted">{% blocktrans with amount=row.balance %}€{{ amount }} still owed -- the club will follow up on payment separately.{% endblocktrans %}</p>
-                {% else %}
-                    <p class="text-sm text-muted">{% trans "No balance owed." %}</p>
-                {% endif %}
-                {% if row.early_payment %}
-                    <p class="mt-1 text-sm font-medium text-ok-text">{% blocktrans with total=row.early_payment.discounted_total date=row.early_payment.deadline amount=row.early_payment.discount %}Pay €{{ total }} by {{ date }} to save €{{ amount }}.{% endblocktrans %}</p>
+                {% if invoice_ready %}
+                    {% if row.balance > 0 %}
+                        <p class="text-sm text-muted">{% blocktrans with amount=row.balance %}€{{ amount }} still owed -- the club will follow up on payment separately.{% endblocktrans %}</p>
+                    {% else %}
+                        <p class="text-sm text-muted">{% trans "No balance owed." %}</p>
+                    {% endif %}
+                    {% if row.early_payment %}
+                        <p class="mt-1 text-sm font-medium text-ok-text">{% blocktrans with total=row.early_payment.discounted_total date=row.early_payment.deadline amount=row.early_payment.discount %}Pay €{{ total }} by {{ date }} to save €{{ amount }}.{% endblocktrans %}</p>
+                    {% endif %}
                 {% endif %}
 
                 {% if row.checklist %}
@@ -91,7 +95,7 @@
         {% endfor %}
     </div>
 
-    {% if payment_instructions %}
+    {% if invoice_ready and payment_instructions %}
         <div class="card card-body mt-4">
             <h2 class="card-title">{% trans "How to pay" %}</h2>
             <p class="text-sm whitespace-pre-line text-ink">{{ payment_instructions }}</p>

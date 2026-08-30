@@ -40,6 +40,7 @@ from news.models import News
 from news.services import render_body_html
 from notifications.models import Notification
 from registration.forms import RegistrationEntryFormSet, entries_from_formset
+from registration.models import RegistrationBatch
 from registration.services import (
     PricingError,
     RegistrationError,
@@ -52,6 +53,7 @@ from registration.services import (
     team_number_pools,
     variant_registration_kinds,
 )
+from registration.services.invoicing import RegistrationInvoicePDFError, batch_invoice_pdf, membership_ids_awaiting_confirmation
 from registration.services.notifications import send_registration_confirmation_email
 from shop.models import Cart, CartItem, Order, Product, ProductCategory, Voucher
 from shop.services.checkout import CheckoutError, find_discount, place_order
@@ -274,7 +276,12 @@ class HomeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
 
             season = current_season(self.request.club)
             if season is not None:
-                dues_rows = open_dues_rows(self.request.club, people, season)
+                # Holds back a balance nobody's reviewed yet -- same filter
+                # PaymentsView applies to the exact same open_dues_rows
+                # result, so Home and Payments & dues never disagree (see
+                # that function's own docstring).
+                awaiting_confirmation = membership_ids_awaiting_confirmation(self.request.club)
+                dues_rows = [row for row in open_dues_rows(self.request.club, people, season) if row["membership"].pk not in awaiting_confirmation]
 
             # Every published item, club-wide or team-tagged -- not narrowed to
             # this account's own teams. News is "things this club wants members
@@ -778,7 +785,11 @@ class MeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
                 }
             people_rows = [{"person": person, "membership": memberships_by_member.get(person.pk)} for person in self.managed_people]
 
-        open_dues_count = len(open_dues_rows(club, self.managed_people, season))
+        # Same "not reviewed yet" filter PaymentsView/HomeView apply to this
+        # same open_dues_rows result -- this badge count must not claim more
+        # is owed than the Payments & dues screen it links to actually shows.
+        awaiting_confirmation = membership_ids_awaiting_confirmation(club)
+        open_dues_count = len([row for row in open_dues_rows(club, self.managed_people, season) if row["membership"].pk not in awaiting_confirmation])
 
         staff_assignments = []
         if self.me is not None and season is not None:
@@ -953,14 +964,56 @@ class PaymentsView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
 
     def get_context_data(self, **kwargs):
         season = current_season(self.request.club)
-        dues_rows = open_dues_rows(self.request.club, self.managed_people, season)
+        # Holds back a balance nobody's reviewed yet -- see
+        # registration.services.invoicing.membership_ids_awaiting_confirmation's
+        # own docstring. Filtered before the receipt breakdown below is
+        # built, so nothing's wasted decorating a row about to be dropped.
+        awaiting_confirmation = membership_ids_awaiting_confirmation(self.request.club)
+        dues_rows = [row for row in open_dues_rows(self.request.club, self.managed_people, season) if row["membership"].pk not in awaiting_confirmation]
         # The receipt breakdown this screen shows (unlike Home's own compact
         # dues card, which stays as a bare balance) -- one membership can
         # carry more than one entry (a second team, or player and referee
         # both), see RegistrationDetails' own docstring.
         for row in dues_rows:
-            row["entries"] = row["membership"].registration_details.select_related("product_variant__product", "requested_team")
+            entries = list(row["membership"].registration_details.select_related("product_variant__product", "requested_team", "batch"))
+            row["entries"] = entries
+            # Almost always one -- a membership only ever spans more than one
+            # registration batch if this person was registered twice in the
+            # same season (e.g. a second team added on afterwards), see
+            # registration.services.submission's own docstring.
+            seen_batches = {}
+            for entry in entries:
+                seen_batches.setdefault(entry.batch_id, entry.batch)
+            row["invoice_batches"] = list(seen_batches.values())
         return super().get_context_data(dues_rows=dues_rows, payment_instructions=self.request.club.payment_instructions, **kwargs)
+
+
+class RegistrationInvoicePdfView(PersonScopeMixin, LoginRequiredMixin, View):
+    """Payments & dues' own "Download invoice" link -- same PDF as
+    registration.views.RegistrationInvoiceView hands the family via the
+    public, token-gated status page, and management.views.
+    RegistrationInvoicePdfView hands staff; scoped here to
+    self.managed_people instead, since a signed-in mobile session already is
+    the credential. Mirrors ShopInvoiceView's own try/except pattern. 404s
+    until staff has confirmed the invoice (RegistrationBatch.invoice_sent_at)
+    -- in practice this is moot for a membership PaymentsView itself would
+    show (it's filtered out until then), but a guessed/stale pk shouldn't
+    hand out a document that doesn't exist yet either."""
+
+    def get(self, request, *args, **kwargs):
+        batch = get_object_or_404(RegistrationBatch.objects.filter(club=request.club, entries__membership__member__in=self.managed_people).distinct(), pk=kwargs["pk"])
+        if batch.invoice_sent_at is None:
+            raise Http404("This registration's invoice hasn't been confirmed yet.")
+
+        try:
+            pdf = batch_invoice_pdf(batch)
+        except RegistrationInvoicePDFError as error:
+            notify(request, f"e|{_('PDF unavailable')}|{error}")
+            return HttpResponseRedirect(reverse("mobile:payments"))
+
+        response = HttpResponse(pdf, content_type="application/pdf")
+        response["Content-Disposition"] = f'attachment; filename="{request.club.slug}-registration-{batch.pk}.pdf"'
+        return response
 
 
 class EditProfileView(PersonScopeMixin, LoginRequiredMixin, TemplateView):

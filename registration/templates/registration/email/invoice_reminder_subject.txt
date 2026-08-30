@@ -1,0 +1,1 @@
+{% load i18n %}{% blocktrans with club=club.name number=batch.invoice_number %}Reminder: {{ club }} invoice {{ number }} is overdue{% endblocktrans %}

@@ -43,6 +43,8 @@ _NAV_SECTIONS = {
     "membership_export_pdf": "membership_list",
     "membership_mark_fully_paid": "membership_list",
     "membership_record_payment": "membership_list",
+    "registration_invoice_queue": "registration_invoice_queue",
+    "registration_invoice_review": "registration_invoice_queue",
     "position_list": "position_list",
     "position_create": "position_list",
     "position_update": "position_list",
@@ -216,6 +218,7 @@ _TOP_SECTION = {
     "volunteer_list": "members",
     "evaluations": "members",
     "membership_list": "finance",
+    "registration_invoice_queue": "finance",
     "team_list": "teams",
     "number_list": "teams",
     "referee_list": "teams",
@@ -333,31 +336,42 @@ def news_permissions(request):
 
 
 def sidebar_counters(request):
-    """Small always-visible counts next to two nav links that flag a queue
-    waiting on an admin: pending parent claims, and upcoming club-managed games
+    """Small always-visible counts next to nav links that flag a queue
+    waiting on an admin: pending parent claims, upcoming club-managed games
     nobody's down to referee yet (management.views.games_missing_referees_count,
     the same shape RefereeManagementDashboardView's own kpi_no_referee uses for
-    its default "next 10" range).
+    its default "next 10" range), and registrations awaiting invoice
+    confirmation (registration.services.invoicing.
+    registrations_awaiting_confirmation).
 
-    Gated on can_manage_members (real ADMIN or MEMBER_ADMIN), matching how
-    _nav_items.html itself gates both links -- a coach never sees either link, so
-    there's no reason to run either query for them. Always an int when shown,
-    never hidden at 0: "the queue is empty" and "nobody checked" have to read
-    differently.
+    The first two are gated on can_manage_members (real ADMIN or MEMBER_ADMIN),
+    matching how _nav_items.html itself gates both links -- a coach never sees
+    either link, so there's no reason to run either query for them.
+    Registrations is gated tighter, on is_club_admin alone: it lives under
+    Finance, which the nav itself only ever shows to a real ADMIN, not a
+    MEMBER_ADMIN. Always an int when shown, never hidden at 0: "the queue is
+    empty" and "nobody checked" have to read differently.
     """
+    counters = {"pending_parent_claims_count": None, "games_missing_referees_count": None, "registrations_awaiting_count": None}
     club = getattr(request, "club", None)
-    if club is None or not request.user.is_authenticated or not can_manage_members(request.user, club):
-        return {"pending_parent_claims_count": None, "games_missing_referees_count": None}
+    if club is None or not request.user.is_authenticated:
+        return counters
 
-    # Imported here rather than at module level to keep this module's own import
-    # graph small -- management.views pulls in most of the app's models/services,
-    # none of which any other context processor here needs.
-    from management.views import RefereeManagementDashboardView, games_missing_referees_count
+    if can_manage_members(request.user, club):
+        # Imported here rather than at module level to keep this module's own
+        # import graph small -- management.views pulls in most of the app's
+        # models/services, none of which any other context processor here needs.
+        from management.views import RefereeManagementDashboardView, games_missing_referees_count
 
-    return {
-        "pending_parent_claims_count": ParentClaim.objects.filter(club=club, status=ParentClaim.Status.PENDING).count(),
-        "games_missing_referees_count": games_missing_referees_count(club, limit=int(RefereeManagementDashboardView.DEFAULT_RANGE)),
-    }
+        counters["pending_parent_claims_count"] = ParentClaim.objects.filter(club=club, status=ParentClaim.Status.PENDING).count()
+        counters["games_missing_referees_count"] = games_missing_referees_count(club, limit=int(RefereeManagementDashboardView.DEFAULT_RANGE))
+
+    if is_club_admin(request.user, club):
+        from registration.services.invoicing import registrations_awaiting_confirmation
+
+        counters["registrations_awaiting_count"] = len(registrations_awaiting_confirmation(club))
+
+    return counters
 
 
 def notification_bell(request):

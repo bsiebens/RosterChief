@@ -21,6 +21,7 @@ urlpatterns = [
     path("me/", views.MeView.as_view(), name="me"),
     path("me/forms/", views.FormsListView.as_view(), name="forms_list"),
     path("me/payments/", views.PaymentsView.as_view(), name="payments"),
+    path("me/registrations/<uuid:pk>/invoice/pdf/", views.RegistrationInvoicePdfView.as_view(), name="registration_invoice_pdf"),
     path("me/calendar-sync/", views.CalendarFeedSettingsView.as_view(), name="calendar_feed_settings"),
     path("me/<uuid:member_id>/edit/", views.EditProfileView.as_view(), name="edit_profile"),
     path("me/register/", views.ReRegisterView.as_view(), name="reregister"),

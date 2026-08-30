@@ -64,7 +64,10 @@
                     data-state="{{ tile.state }}"
                     data-holders="{% for holder in tile.holders %}{{ holder }}{% if not forloop.last %}, {% endif %}{% endfor %}"
                     data-note="{{ tile.note }}"
-                    {% if tile.reservation %}data-release-url="{% url 'management:number_reservation_release' tile.reservation.pk %}"{% endif %}
+                    {% if tile.reservation %}
+                        data-release-url="{% url 'management:number_reservation_release' tile.reservation.pk %}"
+                        data-reserved-by="{% if tile.reservation.reserved_by %}{{ tile.reservation.reserved_by }}{% endif %}"
+                    {% endif %}
                 >{{ tile.number }}</button>
             {% endfor %}
         </div>
@@ -89,6 +92,7 @@
 
                 <div id="number-modal-reserved" class="hidden">
                     <p class="py-2 text-sm opacity-70" id="number-modal-note"></p>
+                    <p class="text-sm opacity-70" id="number-modal-reserved-by"></p>
                     <form method="post" id="number-modal-release-form" action="">
                         {% csrf_token %}
                     </form>
@@ -123,6 +127,7 @@
             const reserveSubmit = document.getElementById("number-modal-reserve-submit");
             const holdersLabel = document.getElementById("number-modal-holders");
             const noteLabel = document.getElementById("number-modal-note");
+            const reservedByLabel = document.getElementById("number-modal-reserved-by");
             const releaseForm = document.getElementById("number-modal-release-form");
             const releaseSubmit = document.getElementById("number-modal-release-submit");
 
@@ -142,6 +147,7 @@
                     sections.reserved.classList.remove("hidden");
                     releaseSubmit.classList.remove("hidden");
                     noteLabel.textContent = button.dataset.note || "{% trans 'No note.' %}";
+                    reservedByLabel.textContent = button.dataset.reservedBy ? "{% trans 'Reserved by:' %} " + button.dataset.reservedBy : "";
                     releaseForm.action = button.dataset.releaseUrl;
                 } else {
                     sections.held.classList.remove("hidden");

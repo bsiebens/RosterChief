@@ -1467,29 +1467,31 @@
         background: #fff;
     }
 
+    /* Solid, saturated fills rather than the pastel -bg/-border/-text tokens used
+       for badges elsewhere -- a grid this dense reads as noise at badge-level
+       contrast, so each state is its own strong colour with white text instead. */
     .number-tile-taken {
-        background: var(--color-danger-bg);
-        border-color: var(--color-danger-border);
-        color: var(--color-club-dark);
+        background: var(--color-club-dark);
+        border-color: var(--color-club-dark);
+        color: #fff;
     }
 
     .number-tile-pending {
-        background: var(--color-info-bg);
-        border-color: var(--color-info-border);
-        color: var(--color-info-text);
+        background: var(--color-info);
+        border-color: var(--color-info);
+        color: #fff;
     }
 
     .number-tile-previous {
-        background: var(--color-warn-bg);
-        border-color: var(--color-warn-border);
-        color: var(--color-warn-text);
+        background: var(--color-warn);
+        border-color: var(--color-warn);
+        color: #fff;
     }
 
     .number-tile-reserved {
-        background: color-mix(in srgb, var(--color-violet) 12%, white);
+        background: var(--color-violet);
         border-color: var(--color-violet);
-        color: var(--color-violet);
-        background: #fff;
+        color: #fff;
     }
 
     .cal-chip-more:hover {

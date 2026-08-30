@@ -1,0 +1,76 @@
+{% extends "email/_base.html" %}
+{% load i18n club_email %}
+
+{% comment %}
+    HTML sibling of invoice_reminder.txt -- same content, same context (club,
+    batch, contact_first_name, total, status_url, request). Same shell/
+    branding as invoice.html, just a different message and no
+    "PDF attached" line of its own text (the reminder still re-attaches the
+    same PDF, see _attach_invoice_pdf, but leads with the overdue note
+    instead of restating that it's attached).
+{% endcomment %}
+
+{% block title %}{% blocktrans with club=club.name number=batch.invoice_number %}Reminder: {{ club }} invoice {{ number }} is overdue{% endblocktrans %}{% endblock title %}
+
+{% block preheader %}{% blocktrans with club=club.name %}A registration invoice from {{ club }} is still unpaid.{% endblocktrans %}{% endblock preheader %}
+
+{% block header %}
+    {% absolute_media_url club.logo as logo_url %}
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+        <tr>
+            <td valign="middle">
+                {% if club.logo %}
+                    <img src="{{ logo_url }}" alt="{{ club.name }}" width="48" height="48" style="display:block; width:48px; height:48px; border-radius:24px; object-fit:contain; background-color:#f3f4f6;">
+                {% else %}
+                    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="48" style="width:48px;">
+                        <tr>
+                            <td align="center" valign="middle" width="48" height="48" bgcolor="{{ club.secondary_color|default:"#ec4899" }}" style="width:48px; height:48px; border-radius:24px; background-color:{{ club.secondary_color|default:"#ec4899" }}; color:{{ club.secondary_color|default:"#ec4899"|contrast_color }}; font-family: Arial, Helvetica, sans-serif; font-size:16px; font-weight:bold;">
+                                {{ club.initials }}
+                            </td>
+                        </tr>
+                    </table>
+                {% endif %}
+            </td>
+            <td style="padding-left:14px;" valign="middle">
+                <span style="font-family: Arial, Helvetica, sans-serif; font-size:18px; font-weight:bold; color:#111827;">{{ club.name }}</span>
+            </td>
+        </tr>
+    </table>
+{% endblock header %}
+
+{% block content %}
+    <p style="margin:0 0 16px 0;">{% blocktrans with name=contact_first_name %}Hello {{ name }},{% endblocktrans %}</p>
+
+    <p style="margin:0 0 20px 0;">{% blocktrans with club=club.name date=batch.invoice_due_date|date:"j F Y" %}This is a reminder that {{ club }}'s invoice for your registration was due on {{ date }} and is still unpaid.{% endblocktrans %}</p>
+
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:0 0 24px 0; border:1px solid #fca5a5; background-color:#fef2f2; border-radius:8px;">
+        <tr>
+            <td style="padding:16px 20px;">
+                <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
+                    <tr>
+                        <td style="font-size:13px; color:#991b1b;">{% trans "Amount due" %}</td>
+                        <td align="right" style="font-size:18px; font-weight:bold; color:#991b1b;">€{{ total }}</td>
+                    </tr>
+                    <tr>
+                        <td style="font-size:13px; color:#991b1b; padding-top:6px;">{% trans "Was due" %}</td>
+                        <td align="right" style="font-size:13px; color:#991b1b; padding-top:6px;">{{ batch.invoice_due_date|date:"j F Y" }}</td>
+                    </tr>
+                    <tr>
+                        <td style="font-size:13px; color:#991b1b; padding-top:6px;">{% trans "Invoice number" %}</td>
+                        <td align="right" style="font-size:13px; color:#991b1b; padding-top:6px;">{{ batch.invoice_number }}</td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+
+    {% trans "Check status & documents" as status_label %}
+    {% include "email/_button.html" with href=status_url label=status_label bg=club.primary_color|default:"#4f46e5" fg=club.primary_color|default:"#4f46e5"|contrast_color %}
+{% endblock content %}
+
+{% block footer %}
+    {% if club.contact_email %}
+        <p style="margin:0 0 8px 0;">{% blocktrans with email=club.contact_email %}Already paid? Let us know at {{ email }} so we can update our records.{% endblocktrans %}</p>
+    {% endif %}
+    <p style="margin:0;">{% blocktrans with club=club.name %}— {{ club }}{% endblocktrans %}</p>
+{% endblock footer %}

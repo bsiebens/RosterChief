@@ -1,0 +1,16 @@
+{% load i18n %}{% blocktrans with name=contact_first_name %}Hello {{ name }},{% endblocktrans %}
+
+{% blocktrans with club=club.name %}{{ club }} has confirmed your registration and sent you an invoice.{% endblocktrans %}
+
+{% trans "Amount due:" %} €{{ total }}
+{% trans "Due date:" %} {{ batch.invoice_due_date|date:"j F Y" }}
+{% trans "Invoice number:" %} {{ batch.invoice_number }}
+
+{% trans "Check its status, and upload any document the club still needs, here:" %}
+{{ status_url }}
+{% blocktrans %}That link is for you alone — please don't forward it.{% endblocktrans %}
+
+{% if club.contact_email %}
+{% blocktrans with email=club.contact_email %}Questions about this invoice? Reply to this note or write to {{ email }}.{% endblocktrans %}
+{% endif %}
+{% blocktrans with club=club.name %}— {{ club }}{% endblocktrans %}
