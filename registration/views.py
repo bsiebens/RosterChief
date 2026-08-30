@@ -25,7 +25,7 @@ from members.views import ClubScopedPublicMixin
 
 from .forms import RegistrationContactForm, RegistrationEntryFormSet, RegistrationStatusDocumentForm, entries_from_formset
 from .models import RegistrationBatch, RegistrationDetails
-from .services import PricingError, RegistrationError, price_entries, resolve_chosen_season, resolve_registration_season, submit_registration, team_number_pools, variant_registration_kinds
+from .services import PricingError, RegistrationError, price_entries, priced_rows_with_jersey_fields, resolve_chosen_season, resolve_registration_season, submit_registration, team_number_pools, variant_registration_kinds
 from .services.invoicing import RegistrationInvoicePDFError, batch_invoice_pdf
 from .services.notifications import send_registration_confirmation_email
 
@@ -74,13 +74,13 @@ class RegistrationView(ClubScopedPublicMixin, View):
                 # shown as owed now, see registration.services.pricing's own
                 # module docstring), summed once so the receipt can show a
                 # total instead of only itemised lines.
-                "priced_total": sum((row["price"] - row["min_registrants_discount"] for _entry, row in priced_entries), Decimal("0")) if priced_entries else None,
+                "priced_total": sum((row["price"] - row["min_registrants_discount"] for _form, _entry, row in priced_entries), Decimal("0")) if priced_entries else None,
                 # What the same total comes to if every entry with an early-
                 # payment deadline (Product.early_bird_discount_*) is paid by
                 # its own date -- 0 when nothing in the batch has one, so the
                 # template only shows this line (priced_total != priced_early_total)
                 # when it's actually worth showing.
-                "priced_early_total": sum((row["price"] - row["min_registrants_discount"] - row["deadline_discount"] for _entry, row in priced_entries), Decimal("0")) if priced_entries else None,
+                "priced_early_total": sum((row["price"] - row["min_registrants_discount"] - row["deadline_discount"] for _form, _entry, row in priced_entries), Decimal("0")) if priced_entries else None,
                 "registration_open": True,
                 "season": season,
                 "locked_member": self.get_contact_member(request),
@@ -117,7 +117,8 @@ class RegistrationView(ClubScopedPublicMixin, View):
             contact_form.add_error(None, str(error))
             return self.render_page(request, season, contact_form, entry_formset)
 
-        priced_rows = list(zip(entries, price_entries([entry.product_variant for entry in entries]), strict=True))
+        priced = price_entries([entry.product_variant for entry in entries])
+        priced_rows = priced_rows_with_jersey_fields(entry_formset, entries, priced, team_number_pools(request.club, season))
 
         if request.POST.get("action") != "submit":
             return self.render_page(request, season, contact_form, entry_formset, priced_entries=priced_rows)

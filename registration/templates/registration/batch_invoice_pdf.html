@@ -6,6 +6,13 @@
     app.css), extended to a per-entry table since one of these covers every
     person in the batch, not a single membership. See registration.services.
     invoicing.batch_invoice_pdf.
+
+    Reads top to bottom as: who/what this is for -> what was charged -> what
+    it comes to -> how to pay less (if a time-based offer is still live) ->
+    how to actually pay -> fine print. Charges and discounts are no longer
+    interleaved row-by-row -- the itemised table is just the charges, with a
+    single totals block (subtotal/discount/total) below it, same shape as an
+    ordinary invoice's own summary.
 {% endcomment %}
 <!DOCTYPE html>
 <html lang="en">
@@ -24,21 +31,35 @@
             }
             body { font-family: sans-serif; font-size: 10pt; color: #111; }
             h1 { font-size: 20pt; margin: 0 0 2mm; }
+            h2 { font-size: 9pt; text-transform: uppercase; letter-spacing: 0.5pt; color: #666; margin: 0 0 2mm; }
             .muted { color: #666; }
-            .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12mm; }
-            .accent { color: {{ club.primary_color|default:"#4f46e5" }}; }
-            .parties { display: flex; justify-content: space-between; margin-bottom: 10mm; }
-            .parties h2 { font-size: 9pt; text-transform: uppercase; letter-spacing: 0.5pt; color: #666; margin: 0 0 2mm; }
-            table { width: 100%; border-collapse: collapse; margin-bottom: 6mm; }
-            th { text-align: left; font-size: 9pt; text-transform: uppercase; letter-spacing: 0.5pt; color: #666; border-bottom: 1px solid #ccc; padding: 2mm 0; }
-            td { padding: 2mm 0; border-bottom: 1px solid #eee; }
             .right { text-align: right; }
-            .discount td { color: #b91c1c; }
-            .total td { font-weight: bold; border-bottom: 2px solid #111; border-top: 1px solid #111; }
-            .balance { font-size: 12pt; font-weight: bold; }
-            .payment-instructions { margin-top: 8mm; padding-top: 4mm; border-top: 1px solid #ccc; }
-            .payment-instructions h2 { font-size: 9pt; text-transform: uppercase; letter-spacing: 0.5pt; color: #666; margin: 0 0 2mm; }
-            .payment-instructions p { margin: 0; }
+
+            .header { display: flex; justify-content: space-between; align-items: flex-start; padding-bottom: 8mm; border-bottom: 2px solid #111; margin-bottom: 10mm; }
+            .accent { color: {{ club.primary_color|default:"#4f46e5" }}; }
+
+            .parties { display: flex; justify-content: space-between; margin-bottom: 10mm; }
+
+            table { width: 100%; border-collapse: collapse; }
+            th { text-align: left; font-size: 9pt; text-transform: uppercase; letter-spacing: 0.5pt; color: #666; border-bottom: 1px solid #111; padding: 0 0 2mm; }
+            td { padding: 3mm 0; border-bottom: 1px solid #eee; vertical-align: top; }
+            tbody tr:last-child td { border-bottom: none; }
+
+            .totals { display: flex; justify-content: flex-end; margin-top: 6mm; }
+            .totals-box { width: 70mm; }
+            .totals-row { display: flex; justify-content: space-between; padding: 1.5mm 0; }
+            .totals-row.discount { color: #b91c1c; }
+            .totals-row.total { margin-top: 1.5mm; padding-top: 3mm; border-top: 2px solid #111; font-weight: bold; font-size: 18pt; align-items: baseline; }
+
+            .panel { margin-top: 8mm; padding: 4mm 5mm; border-radius: 2mm; }
+            .panel h2 { margin-bottom: 1.5mm; }
+            .panel p { margin: 0; }
+            .early-payment { background: #ecfdf3; }
+            .early-payment .row { display: flex; justify-content: space-between; padding: 1mm 0; }
+            .early-payment .row:not(:last-child) { border-bottom: 1px solid #d3f0dd; }
+            .payment-instructions { background: #f6f6f6; }
+
+            .footnote { margin-top: 8mm; font-size: 9pt; }
         </style>
     </head>
     <body>
@@ -87,33 +108,48 @@
                         <td>{% if entry.product_variant %}{{ entry.product_variant.product.name }} — {{ entry.product_variant.name }}{% else %}—{% endif %}</td>
                         <td class="right">€{{ entry.price }}</td>
                     </tr>
-                    {% if entry.discount_amount > 0 %}
-                        <tr class="discount">
-                            <td colspan="2">{% trans "Multi-registrant discount" %}</td>
-                            <td class="right">−€{{ entry.discount_amount }}</td>
-                        </tr>
-                    {% endif %}
                 {% endfor %}
-                {% if batch.discount_amount > 0 %}
-                    <tr>
-                        <td colspan="2">{% trans "Subtotal" %}</td>
-                        <td class="right">€{{ batch.subtotal }}</td>
-                    </tr>
-                {% endif %}
-                <tr class="total">
-                    <td colspan="2">{% trans "Total" %}</td>
-                    <td class="right balance">€{{ batch.total }}</td>
-                </tr>
             </tbody>
         </table>
 
-        <p class="muted">{% trans "This is what was owed once the club confirmed this registration -- payment happens separately from this document." %}</p>
+        <div class="totals">
+            <div class="totals-box">
+                {% if batch.discount_amount > 0 %}
+                    <div class="totals-row">
+                        <span>{% trans "Subtotal" %}</span>
+                        <span>€{{ batch.subtotal }}</span>
+                    </div>
+                    <div class="totals-row discount">
+                        <span>{% trans "Multi-registrant discount" %}</span>
+                        <span>&minus;€{{ batch.discount_amount }}</span>
+                    </div>
+                {% endif %}
+                <div class="totals-row total">
+                    <span>{% trans "Total" %}</span>
+                    <span>€{{ batch.total }}</span>
+                </div>
+            </div>
+        </div>
+
+        {% if early_payment_rows %}
+            <div class="panel early-payment">
+                <h2>{% trans "Pay early and save" %}</h2>
+                {% for row in early_payment_rows %}
+                    <div class="row">
+                        <span>{% blocktrans with name=row.membership.member date=row.offer.deadline %}{{ name }} — pay by {{ date }}{% endblocktrans %}</span>
+                        <span><strong>€{{ row.offer.discounted_total }}</strong> {% blocktrans with amount=row.offer.discount %}(save €{{ amount }}){% endblocktrans %}</span>
+                    </div>
+                {% endfor %}
+            </div>
+        {% endif %}
 
         {% if club.payment_instructions %}
-            <div class="payment-instructions">
+            <div class="panel payment-instructions">
                 <h2>{% trans "How to pay" %}</h2>
                 <p>{{ club.payment_instructions|linebreaksbr }}</p>
             </div>
         {% endif %}
+
+        <p class="muted footnote">{% trans "This is what was owed once the club confirmed this registration -- payment happens separately from this document." %}</p>
     </body>
 </html>

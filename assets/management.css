@@ -1450,6 +1450,23 @@
         transform: translateY(-1px);
     }
 
+    /* Comes *before* .number-tile-taken/-pending/-previous/-reserved below,
+       on purpose: the legend swatches carry both this class and one of
+       those (two independent single-class selectors, not a combined one),
+       so on the equal-specificity tie it's source order that decides --
+       this only ever sets size/shape, never colour, so it can lose that
+       tie for every property that matters without masking the state
+       colour it's paired with. (An earlier version had this the other way
+       round and every swatch quietly rendered white.) */
+    .number-tile-swatch {
+        display: inline-block;
+        width: 0.75rem;
+        height: 0.75rem;
+        border-radius: 0.25rem;
+        border: 1px solid var(--color-line);
+        background: #fff;
+    }
+
     .number-tile-taken {
         background: var(--color-danger-bg);
         border-color: var(--color-danger-border);
@@ -1472,18 +1489,6 @@
         background: color-mix(in srgb, var(--color-violet) 12%, white);
         border-color: var(--color-violet);
         color: var(--color-violet);
-    }
-
-    /* Comes after .number-tile-* above so its fixed small size wins the
-       equal-specificity tie against .number-tile-taken/-pending/-previous/
-       -reserved's own height -- letting the legend reuse those same classes
-       for colour without inheriting the full tile size. */
-    .number-tile-swatch {
-        display: inline-block;
-        width: 0.75rem;
-        height: 0.75rem;
-        border-radius: 0.25rem;
-        border: 1px solid var(--color-line);
         background: #fff;
     }
 

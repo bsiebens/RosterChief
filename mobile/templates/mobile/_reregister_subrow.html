@@ -29,12 +29,13 @@
         {{ row.requested_team }}
         {% for error in row.requested_team.errors %}<p class="mt-1 text-xs text-club">{{ error }}</p>{% endfor %}
     </div>
-    <div class="jersey-number-field hidden">
+    {# Jersey number itself isn't picked here -- it moves to the Price/confirm screen, once the team is already submitted. Recovery fallback only, see _entry_row.html's own comment. #}
+    {% if row.requested_jersey_number.errors %}
         <div class="h-px bg-rule"></div>
         <div class="p-3.5">
             <label class="mb-1 block text-xs text-muted" for="{{ row.requested_jersey_number.id_for_label }}">{{ row.requested_jersey_number.label }}</label>
             {{ row.requested_jersey_number }}
             {% for error in row.requested_jersey_number.errors %}<p class="mt-1 text-xs text-club">{{ error }}</p>{% endfor %}
         </div>
-    </div>
+    {% endif %}
 </div>

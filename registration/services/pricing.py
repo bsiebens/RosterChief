@@ -109,6 +109,56 @@ def team_number_pools(club, season=None):
     return {str(team.pk): available_numbers(team.pool, season) for team in teams}
 
 
+def jersey_choices_for_entry(entry, team_number_pools, member_current_numbers=None):
+    """The exact jersey-number choices to offer one already-priced entry --
+    narrowed to just its own requested_team, unlike RegistrationEntryRowForm's
+    own __init__ (a broad union across every pool-scoped team, client-side
+    JS-narrowed -- see team_number_pools's own docstring for why that's still
+    right for the *live*, not-yet-priced form). Once an entry has been priced,
+    its team is already settled server-side, so there's nothing left for JS
+    to narrow -- registration.views.RegistrationView/mobile.views.
+    ReRegisterView use this to replace a priced row's own field choices
+    before rendering the receipt, where the jersey-number step actually
+    lives now.
+
+    ``member_current_numbers`` (mobile re-registration only) adds back the
+    entry's own existing_member's current number for this team, if it has
+    one and it isn't already in the pool's general list (team_number_pools
+    itself excludes it -- see that function's own docstring on why).
+
+    None when the field doesn't apply at all (not a player, or no
+    pool-scoped team chosen) -- the caller leaves the field alone/hidden."""
+    if entry.entry_kind != "player" or entry.requested_team is None:
+        return None
+    numbers = set(team_number_pools.get(str(entry.requested_team.pk), []))
+    if member_current_numbers and entry.existing_member is not None:
+        current = member_current_numbers.get(str(entry.existing_member.pk), {}).get(str(entry.requested_team.pk))
+        if current is not None:
+            numbers.add(current)
+    if not numbers:
+        return None
+    return sorted(numbers)
+
+
+def priced_rows_with_jersey_fields(entry_formset, entries, priced, team_number_pools, member_current_numbers=None):
+    """``[(form, entry, price), ...]``, one triple per non-blank row, in the
+    same order entries_from_formset/price_entries already produced ``entries``/
+    ``priced`` in -- the register.html/reregister.html price panel renders
+    the jersey-number field straight off ``form`` (a real, POST-able widget),
+    since a bare EntryInput/price dict has none of its own. Also narrows
+    each relevant form's own requested_jersey_number choices to just its
+    resolved team (see jersey_choices_for_entry) -- this is the first point
+    in the flow where every row's team is already settled server-side, so
+    there's nothing left for client-side JS to narrow the way the live,
+    not-yet-priced form still needs."""
+    forms = entry_formset.non_blank_forms()
+    rows = list(zip(forms, entries, priced, strict=True))
+    for form, entry, _price in rows:
+        choices = jersey_choices_for_entry(entry, team_number_pools, member_current_numbers) or []
+        form.fields["requested_jersey_number"].choices = [("", "---------")] + [(str(number), str(number)) for number in choices]
+    return rows
+
+
 def available_registration_seasons(club):
     """Every distinct season available_registration_products(club) currently
     spans, soonest first -- usually exactly one. More than one means two

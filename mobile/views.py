@@ -40,7 +40,18 @@ from news.models import News
 from news.services import render_body_html
 from notifications.models import Notification
 from registration.forms import RegistrationEntryFormSet, entries_from_formset
-from registration.services import PricingError, RegistrationError, available_registration_products, price_entries, resolve_chosen_season, resolve_registration_season, submit_registration, team_number_pools, variant_registration_kinds
+from registration.services import (
+    PricingError,
+    RegistrationError,
+    available_registration_products,
+    price_entries,
+    priced_rows_with_jersey_fields,
+    resolve_chosen_season,
+    resolve_registration_season,
+    submit_registration,
+    team_number_pools,
+    variant_registration_kinds,
+)
 from registration.services.notifications import send_registration_confirmation_email
 from shop.models import Cart, CartItem, Order, Product, ProductCategory, Voucher
 from shop.services.checkout import CheckoutError, find_discount, place_order
@@ -1154,11 +1165,11 @@ class ReRegisterView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
                 # summed once -- see registration.views.RegistrationView.
                 # render_page's own comment for why min_registrants_discount
                 # specifically (not the conditional early-payment one).
-                priced_total=sum((row["price"] - row["min_registrants_discount"] for _entry, row in priced_entries), Decimal("0")) if priced_entries else None,
+                priced_total=sum((row["price"] - row["min_registrants_discount"] for _form, _entry, row in priced_entries), Decimal("0")) if priced_entries else None,
                 # See registration.views.RegistrationView.render_page's own
                 # comment -- what the total comes to if every entry with an
                 # early-payment deadline is paid by its own date.
-                priced_early_total=sum((row["price"] - row["min_registrants_discount"] - row["deadline_discount"] for _entry, row in priced_entries), Decimal("0")) if priced_entries else None,
+                priced_early_total=sum((row["price"] - row["min_registrants_discount"] - row["deadline_discount"] for _form, _entry, row in priced_entries), Decimal("0")) if priced_entries else None,
                 season_error=season_error,
                 registration_open=True,
                 registration_season=season,
@@ -1203,7 +1214,8 @@ class ReRegisterView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         except PricingError as error:
             return self.render_page(season, entry_formset, season_error=str(error))
 
-        priced_rows = list(zip(entries, price_entries([entry.product_variant for entry in entries]), strict=True))
+        priced = price_entries([entry.product_variant for entry in entries])
+        priced_rows = priced_rows_with_jersey_fields(entry_formset, entries, priced, team_number_pools(request.club, season), self.get_member_current_numbers(season))
 
         if request.POST.get("action") != "submit":
             return self.render_page(season, entry_formset, priced_entries=priced_rows)

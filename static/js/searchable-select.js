@@ -18,7 +18,14 @@
         select.dataset.searchableReady = "1";
 
         const isMultiple = select.multiple;
-        const options = Array.from(select.options).filter((option) => option.value !== "");
+        // !option.disabled excludes field.html's own <option selected disabled>
+        // (inserted whenever a select is rendered with show_label=False, as a
+        // stand-in for the hidden <label>) -- lacking a value="" attribute of
+        // its own, an unbound select's .value naturally resolves to it (its
+        // text content, per plain HTML option semantics), which without this
+        // filter looked like a real "candidates" entry and got redisplayed as
+        // the overlay's own value -- the field's own label, not a placeholder.
+        const options = Array.from(select.options).filter((option) => option.value !== "" && !option.disabled);
 
         const wrapper = document.createElement("div");
         wrapper.className = "relative";

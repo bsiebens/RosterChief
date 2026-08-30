@@ -3,7 +3,9 @@
     One open season-dues card. Expects ``row`` ({membership, balance, invoice})
     in scope -- included from both home.html's dues card and payments.html so
     the two surfaces render identically (see club.services.fees.open_dues_rows,
-    their shared data source).
+    their shared data source). No "Pay" action -- there's no online payment
+    gateway, so a button that did nothing was worse than none at all; the
+    amount itself is the prominent element instead.
 {% endcomment %}
 <div class="m-card flex items-center gap-3 p-4">
     <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-danger-bg">
@@ -11,16 +13,10 @@
     </div>
     <div class="min-w-0 flex-1">
         <div class="text-sm font-semibold text-ink">{% blocktrans with name=row.membership.member.first_name %}Season dues &mdash; {{ name }}{% endblocktrans %}</div>
-        <div class="text-xs text-muted">
-            {% if row.invoice %}
-                {% blocktrans with amount=row.balance|floatformat:2 due=row.invoice.due_date|date:"d M" %}&euro; {{ amount }} &middot; due {{ due }}{% endblocktrans %}
-            {% else %}
-                {% blocktrans with amount=row.balance|floatformat:2 %}&euro; {{ amount }}{% endblocktrans %}
-            {% endif %}
-        </div>
+        {% if row.invoice %}<div class="text-xs text-muted">{% blocktrans with due=row.invoice.due_date|date:"d M" %}Due {{ due }}{% endblocktrans %}</div>{% endif %}
         {% if row.early_payment %}
             <div class="mt-0.5 text-xs font-medium text-ok-text">{% blocktrans with amount=row.early_payment.discount|floatformat:2 date=row.early_payment.deadline|date:"d M" %}Save &euro;{{ amount }} if paid by {{ date }}{% endblocktrans %}</div>
         {% endif %}
     </div>
-    <span class="btn btn-dark shrink-0">{% trans "Pay" %}</span>
+    <div class="shrink-0 text-right font-mono text-lg font-extrabold tabular-nums text-ink">&euro;{{ row.balance|floatformat:2 }}</div>
 </div>

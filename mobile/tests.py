@@ -2291,7 +2291,7 @@ class PaymentsViewTests(TestCase):
 
         self.assertContains(response, "All settled up")
 
-    def test_an_open_balance_shows_the_amount_and_a_pay_button(self):
+    def test_an_open_balance_shows_the_amount(self):
         self.membership.fee_amount = Decimal("150.00")
         self.membership.save()
         self.client.force_login(self.user)
@@ -2300,8 +2300,16 @@ class PaymentsViewTests(TestCase):
 
         self.assertEqual(len(response.context["dues_rows"]), 1)
         self.assertContains(response, "150.00")
-        self.assertContains(response, "Pay")
         self.assertNotContains(response, "All settled up")
+
+    def test_no_pay_button_since_there_is_no_online_payment_gateway(self):
+        self.membership.fee_amount = Decimal("150.00")
+        self.membership.save()
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertNotContains(response, ">Pay<")
 
     def test_a_fully_paid_balance_does_not_show(self):
         self.membership.fee_amount = Decimal("150.00")
@@ -2702,6 +2710,29 @@ class ReRegisterViewTests(TestCase):
         self.assertRedirects(response, reverse("mobile:me"))
         self.assertEqual(RegistrationBatch.objects.count(), 1)
 
+    def test_an_unchecked_managed_person_is_not_required_to_fill_anything_in(self):
+        # existing_member is set for every managed person's row regardless of
+        # whether "Include this person" is checked -- it must not, on its
+        # own, force the rest of that row's fields (product_variant) to be
+        # required. Left unchecked and untouched here, only self.member (row
+        # 0) is actually being registered.
+        self.client.force_login(self.user)
+        data = self.formset_management(3)
+        data["entries-0-existing_member"] = str(self.member.pk)
+        data["entries-0-is_contact"] = "on"
+        data["entries-0-product_variant"] = str(self.u10.pk)
+        data["entries-0-requested_team"] = str(self.team.pk)
+        data["entries-1-existing_member"] = str(self.child.pk)
+        # entries-1-is_contact deliberately omitted -- "Include this person" unchecked.
+        data["action"] = "submit"
+
+        response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertRedirects(response, reverse("mobile:me"))
+        batch = RegistrationBatch.objects.get()
+        self.assertEqual(batch.entries.count(), 1)
+        self.assertEqual(batch.entries.get().membership.member, self.member)
+
     def test_submitting_reuses_the_existing_members_no_duplicates(self):
         self.client.force_login(self.user)
         data = self.formset_management(3)
@@ -2871,6 +2902,30 @@ class ReRegisterJerseyNumberTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "just taken")
         self.assertFalse(RegistrationBatch.objects.exists())
+
+    def test_the_field_does_not_appear_before_calculating(self):
+        # It only lives in the Price/confirm screen now, once calculated.
+        self.client.force_login(self.user)
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertNotContains(response, "entries-0-requested_jersey_number")
+
+    def test_the_field_appears_once_calculated_with_the_members_own_number_offered(self):
+        self.client.force_login(self.user)
+        data = self.formset_management(2)
+        data["entries-0-existing_member"] = str(self.member.pk)
+        data["entries-0-is_contact"] = "on"
+        data["entries-0-product_variant"] = str(self.u10.pk)
+        data["entries-0-requested_team"] = str(self.team.pk)
+        data["action"] = "preview"
+
+        response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, "entries-0-requested_jersey_number")
+        form = response.context["priced_entries"][0][0]
+        choices = dict(form.fields["requested_jersey_number"].choices)
+        self.assertIn("7", choices)  # the member's own current number
 
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "other-club.rosterchief.app", "testserver"])

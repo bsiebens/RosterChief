@@ -27,7 +27,8 @@
     <div class="h-px bg-rule"></div>
 
     {% form_field form.requested_team %}
-    <div class="jersey-number-field hidden">
+    {# Jersey number itself isn't picked here -- it moves to the price panel once calculated, see register.html -- there's nothing to narrow it to (which team?) until then anyway. Recovery fallback only: a number can go from available to taken between page load and submit, and a formset with *any* invalid row never reaches pricing at all -- reappearing here with its error is the only way back for it, since the price panel it normally lives in wouldn't render at all in that case. #}
+    {% if form.requested_jersey_number.errors %}
         {% form_field form.requested_jersey_number %}
-    </div>
+    {% endif %}
 </div>

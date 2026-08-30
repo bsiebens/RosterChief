@@ -15,7 +15,7 @@ from shop.models import Product, ProductCategory, ProductRegistrantDiscountTier,
 from teams.models import NumberPool, Position, Team, TeamMembership
 
 from .models import RegistrationBatch, RegistrationDetails
-from .services import EntryInput, PricingError, RegistrationError, available_registration_products, price_entries, resolve_registration_season, submit_registration
+from .services import EntryInput, PricingError, RegistrationError, available_registration_products, jersey_choices_for_entry, price_entries, resolve_registration_season, submit_registration
 from .services.invoicing import RegistrationInvoicePDFError
 
 
@@ -176,6 +176,60 @@ class PricingTests(TestCase):
         season = resolve_registration_season([self.u10, self.u12])
 
         self.assertEqual(season, self.season)
+
+
+class JerseyChoicesForEntryTests(TestCase):
+    """registration.services.pricing.jersey_choices_for_entry -- the
+    team-scoped narrowing used once an entry is already priced (see
+    RegistrationJerseyNumberTests/ReRegisterJerseyNumberTests for the
+    view-level "field only appears in the price panel" behaviour this
+    feeds)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        cls.team = Team.objects.create(club=cls.club, name="U10 Boys", short_name="U10B")
+
+    def entry(self, **overrides):
+        defaults = {"entry_kind": "player", "requested_team": self.team, "existing_member": None}
+        defaults.update(overrides)
+        return EntryInput(**defaults)
+
+    def test_none_for_a_volunteer_entry(self):
+        result = jersey_choices_for_entry(self.entry(entry_kind="volunteer"), {str(self.team.pk): [1, 2, 3]})
+
+        self.assertIsNone(result)
+
+    def test_none_with_no_requested_team(self):
+        result = jersey_choices_for_entry(self.entry(requested_team=None), {str(self.team.pk): [1, 2, 3]})
+
+        self.assertIsNone(result)
+
+    def test_none_when_the_team_has_no_numbers_at_all(self):
+        result = jersey_choices_for_entry(self.entry(), {})
+
+        self.assertIsNone(result)
+
+    def test_scoped_to_just_this_entrys_own_team(self):
+        other_team = Team.objects.create(club=self.club, name="Senior A", short_name="SA")
+        result = jersey_choices_for_entry(self.entry(), {str(self.team.pk): [1, 2, 3], str(other_team.pk): [8, 9]})
+
+        self.assertEqual(result, [1, 2, 3])
+
+    def test_adds_back_the_members_own_current_number(self):
+        member = Member.objects.create(first_name="Lars", last_name="Bakker")
+        result = jersey_choices_for_entry(
+            self.entry(existing_member=member),
+            {str(self.team.pk): [1, 2, 3]},
+            member_current_numbers={str(member.pk): {str(self.team.pk): 7}},
+        )
+
+        self.assertEqual(result, [1, 2, 3, 7])
+
+    def test_no_member_current_numbers_is_fine(self):
+        result = jersey_choices_for_entry(self.entry(), {str(self.team.pk): [1, 2, 3]}, member_current_numbers=None)
+
+        self.assertEqual(result, [1, 2, 3])
 
 
 class SubmitRegistrationTests(TestCase):
@@ -770,6 +824,49 @@ class RegistrationJerseyNumberTests(RegistrationViewTests):
         self.assertNotIn(1, pools[str(self.team.pk)])
         self.assertIn(2, pools[str(self.team.pk)])
 
+    def test_the_field_does_not_appear_on_the_form_itself(self):
+        # It only lives in the price panel now, once calculated -- see
+        # register.html's own comment on why.
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertNotContains(response, "entries-0-requested_jersey_number")
+
+    def test_the_field_appears_in_the_price_panel_once_calculated(self):
+        data = self.contact_data() | self.formset_management() | self.entry_data()
+        data["action"] = "preview"
+
+        response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, "entries-0-requested_jersey_number")
+        self.assertContains(response, "Jersey number (U10B)")
+
+    def test_the_price_panel_field_is_narrowed_to_the_chosen_team(self):
+        other_pool = NumberPool.objects.create(club=self.club, name="Senior", min_number=1, max_number=5)
+        other_team = Team.objects.create(club=self.club, name="Senior A", short_name="SA", pool=other_pool)
+        TeamMembership.objects.create(team=self.team, member=Member.objects.create(first_name="Taken", last_name="One"), season=self.season, jersey_number=1)
+        data = self.contact_data() | self.formset_management() | self.entry_data()
+        data["action"] = "preview"
+
+        response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+        form = response.context["priced_entries"][0][0]
+        choices = dict(form.fields["requested_jersey_number"].choices)
+        self.assertNotIn("1", choices)  # taken on self.team
+        self.assertIn("2", choices)
+        # other_team's own pool has numbers 1-5 too, but this entry didn't
+        # request that team -- its own choices must stay scoped to self.team.
+        self.assertEqual(len(choices), len(range(2, 21)) + 1)  # +1 for the blank option
+        self.assertIsNotNone(other_team)
+
+    def test_no_field_at_all_for_a_team_with_no_pool(self):
+        poolless_team = Team.objects.create(club=self.club, name="U8 Boys", short_name="U8B")
+        data = self.contact_data() | self.formset_management() | self.entry_data(requested_team=str(poolless_team.pk))
+        data["action"] = "preview"
+
+        response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertNotContains(response, "entries-0-requested_jersey_number")
+
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
 class RegistrationStatusViewTests(TestCase):
@@ -962,17 +1059,60 @@ class RegistrationInvoiceViewTests(TestCase):
         self.assertContains(response, "pango")
 
     def test_includes_payment_instructions_when_set(self):
-        # A fresh batch/membership (not cls.batch) -- batch_invoice_pdf caches
-        # to disk keyed by batch.pk, and other tests in this class already
-        # render+cache cls.batch's own PDF without any instructions set.
-        outsider = Member.objects.create(first_name="Alex", last_name="Outsider")
-        membership = ClubMembership.objects.create(club=self.club, member=outsider, season=self.season, fee_amount=Decimal("80.00"))
-        batch = RegistrationBatch.objects.create(club=self.club, season=self.season, contact_first_name="Pat", contact_last_name="Parent", contact_email="pat@example.com", total=Decimal("80.00"))
-        RegistrationDetails.objects.create(membership=membership, batch=batch, price=Decimal("80.00"))
         self.club.payment_instructions = "Bank transfer to BE00 0000 0000 0000"
         self.club.save()
 
         with mock.patch("registration.services.invoicing.render_pdf", side_effect=lambda html: html.encode()):
-            response = self.client.get(reverse("registration:invoice", kwargs={"token": batch.status_token}), HTTP_HOST="ajax-united.rosterchief.app")
+            response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
 
         self.assertIn("BE00 0000 0000 0000", response.content.decode())
+
+    def test_no_payment_instructions_section_when_blank(self):
+        with mock.patch("registration.services.invoicing.render_pdf", side_effect=lambda html: html.encode()):
+            response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertNotIn("How to pay", response.content.decode())
+
+    def test_shows_the_early_payment_offer_while_still_open(self):
+        self.membership.early_payment_deadline = datetime.date.today() + datetime.timedelta(days=5)
+        self.membership.early_payment_discount = Decimal("10.00")
+        self.membership.save()
+
+        with mock.patch("registration.services.invoicing.render_pdf", side_effect=lambda html: html.encode()):
+            response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        html = response.content.decode()
+        self.assertIn("Pay early and save", html)
+        self.assertIn("70.00", html)
+
+    def test_no_early_payment_section_once_the_deadline_has_passed(self):
+        self.membership.early_payment_deadline = datetime.date.today() - datetime.timedelta(days=1)
+        self.membership.early_payment_discount = Decimal("10.00")
+        self.membership.save()
+
+        with mock.patch("registration.services.invoicing.render_pdf", side_effect=lambda html: html.encode()):
+            response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertNotIn("Pay early and save", response.content.decode())
+
+    def test_no_early_payment_section_when_nobody_has_an_offer(self):
+        with mock.patch("registration.services.invoicing.render_pdf", side_effect=lambda html: html.encode()):
+            response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertNotIn("Pay early and save", response.content.decode())
+
+    def test_regenerates_on_every_request_not_cached(self):
+        # batch_invoice_pdf is no longer disk-cached (see its own module
+        # docstring) -- early_payment's own liveness is time-based, so a
+        # second render after the club's payment_instructions changed must
+        # reflect that change, not a stale first render.
+        with mock.patch("registration.services.invoicing.render_pdf", side_effect=lambda html: html.encode()):
+            first = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+        self.assertNotIn("How to pay", first.content.decode())
+
+        self.club.payment_instructions = "Bank transfer to BE00 0000 0000 0000"
+        self.club.save()
+
+        with mock.patch("registration.services.invoicing.render_pdf", side_effect=lambda html: html.encode()):
+            second = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+        self.assertIn("BE00 0000 0000 0000", second.content.decode())

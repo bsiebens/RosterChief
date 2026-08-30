@@ -1,12 +1,14 @@
 {% load i18n %}
 {% comment %}
     Payments & dues' own richer version of _dues_row.html -- the same header
-    (badge/name/balance/due-date/Pay), plus a receipt breakdown of what this
+    (badge/name/balance/due-date), plus a receipt breakdown of what this
     season's ClubMembership actually covers (RegistrationDetails.entries,
     attached by mobile.views.PaymentsView) and, while it's still live, the
     early-payment offer (club.services.fees.early_payment_offer). Home's own
     dues card stays on the plain _dues_row.html -- this level of detail
-    belongs on the dedicated screen, not the overview.
+    belongs on the dedicated screen, not the overview. No "Pay" action --
+    there's no online payment gateway; the amount itself is the prominent
+    element instead.
 {% endcomment %}
 <div class="m-card overflow-hidden">
     <div class="flex items-center gap-3 p-4">
@@ -15,15 +17,9 @@
         </div>
         <div class="min-w-0 flex-1">
             <div class="text-sm font-semibold text-ink">{% blocktrans with name=row.membership.member.first_name %}Season dues &mdash; {{ name }}{% endblocktrans %}</div>
-            <div class="text-xs text-muted">
-                {% if row.invoice %}
-                    {% blocktrans with amount=row.balance|floatformat:2 due=row.invoice.due_date|date:"d M" %}&euro; {{ amount }} &middot; due {{ due }}{% endblocktrans %}
-                {% else %}
-                    {% blocktrans with amount=row.balance|floatformat:2 %}&euro; {{ amount }}{% endblocktrans %}
-                {% endif %}
-            </div>
+            {% if row.invoice %}<div class="text-xs text-muted">{% blocktrans with due=row.invoice.due_date|date:"d M" %}Due {{ due }}{% endblocktrans %}</div>{% endif %}
         </div>
-        <span class="btn btn-dark shrink-0">{% trans "Pay" %}</span>
+        <div class="shrink-0 text-right font-mono text-xl font-extrabold tabular-nums text-ink">&euro;{{ row.balance|floatformat:2 }}</div>
     </div>
 
     {% if row.entries %}

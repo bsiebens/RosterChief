@@ -125,11 +125,20 @@
                             <div class="overflow-hidden rounded-box border border-line">
                                 <table class="table">
                                     <tbody>
-                                        {% for entry, price in priced_entries %}
+                                        {% for form, entry, price in priced_entries %}
                                             <tr>
                                                 <td class="font-semibold text-ink">{{ entry.first_name }} {{ entry.last_name }}</td>
                                                 <td class="text-right font-mono text-sm tabular-nums text-ink">&euro; {{ price.price|floatformat:2 }}</td>
                                             </tr>
+                                            {# Jersey number lives here now, not on the form on the left -- there was nothing to narrow it to (which team?) until the team was already submitted, which this receipt is proof of. #}
+                                            {% if form.requested_jersey_number.field.choices|length > 1 %}
+                                                {% blocktrans asvar jersey_label with team=entry.requested_team.short_name %}Jersey number ({{ team }}){% endblocktrans %}
+                                                <tr>
+                                                    <td colspan="2" class="pb-2">
+                                                        {% form_field form.requested_jersey_number label=jersey_label %}
+                                                    </td>
+                                                </tr>
+                                            {% endif %}
                                             {% if price.min_registrants_discount > 0 %}
                                                 <tr>
                                                     <td class="text-sm text-muted">{% trans "Multi-registrant discount" %}</td>

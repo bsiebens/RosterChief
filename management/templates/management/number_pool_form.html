@@ -4,30 +4,27 @@
 {% block heading %}{% if update_view %}{% blocktrans %}Edit {{ object }}{% endblocktrans %}{% else %}{% trans "New number pool" %}{% endif %}{% endblock heading %}
 
 {% block panel %}
-    <div class="card max-w-3xl">
-        <div class="card-body">
-            <form method="post">
-                {% csrf_token %}
+    <div class="card card-body">
+        <form method="post">
+            {% csrf_token %}
 
-                {% for error in form.non_field_errors %}
-                    <div class="alert alert-error">
-                        <span>{{ error }}</span>
-                    </div>
-                {% endfor %}
-
-                {% form_field form.name %}
-
-                <div class="grid grid-cols-2 gap-4">
-                    {% form_field form.min_number %}
-                    {% form_field form.max_number %}
+            {% for error in form.non_field_errors %}
+                <div class="alert alert-error">
+                    <span>{{ error }}</span>
                 </div>
-                <p class="mt-1 text-xs text-dim">{% trans "Jersey numbers are unique within this range, across every team assigned to this pool -- not just per team." %}</p>
+            {% endfor %}
 
-                <div class="mt-4 flex gap-2">
-                    <a class="btn btn-outline gap-2" href="{% url "management:number_pool_list" %}">{% lucide "arrow-left" size=16 %} {% trans "Cancel" %}</a>
-                    <button class="btn btn-primary gap-2" type="submit">{% lucide "save" size=16 %} {% trans "Save" %}</button>
-                </div>
-            </form>
-        </div>
+            <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <div class="md:col-span-2">{% form_field form.name %}</div>
+                {% form_field form.min_number %}
+                {% form_field form.max_number %}
+            </div>
+            <p class="mt-1 text-xs text-dim">{% trans "Jersey numbers are unique within this range, across every team assigned to this pool -- not just per team." %}</p>
+
+            <div class="mt-4 flex gap-2">
+                <a class="btn btn-outline gap-2" href="{% url "management:number_pool_list" %}">{% lucide "arrow-left" size=16 %} {% trans "Cancel" %}</a>
+                <button class="btn btn-primary gap-2" type="submit">{% lucide "save" size=16 %} {% trans "Save" %}</button>
+            </div>
+        </form>
     </div>
 {% endblock panel %}

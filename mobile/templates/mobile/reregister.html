@@ -106,14 +106,15 @@
                                         {{ row.requested_team }}
                                         {% for error in row.requested_team.errors %}<p class="mt-1 text-xs text-club">{{ error }}</p>{% endfor %}
                                     </div>
-                                    <div class="jersey-number-field hidden">
+                                    {# Jersey number itself isn't picked here -- it moves to the Price/confirm screen below, once the team is already submitted. Recovery fallback only, see _entry_row.html's own comment: a formset with any invalid row never reaches pricing at all. #}
+                                    {% if row.requested_jersey_number.errors %}
                                         <div class="h-px bg-rule"></div>
                                         <div class="p-3.5">
                                             <label class="mb-1 block text-xs text-muted" for="{{ row.requested_jersey_number.id_for_label }}">{{ row.requested_jersey_number.label }}</label>
                                             {{ row.requested_jersey_number }}
                                             {% for error in row.requested_jersey_number.errors %}<p class="mt-1 text-xs text-club">{{ error }}</p>{% endfor %}
                                         </div>
-                                    </div>
+                                    {% endif %}
                                 </div>
                             {% else %}
                                 {% include "mobile/_reregister_subrow.html" %}
@@ -159,14 +160,14 @@
                             {{ extra_row.requested_team }}
                             {% for error in extra_row.requested_team.errors %}<p class="mt-1 text-xs text-club">{{ error }}</p>{% endfor %}
                         </div>
-                        <div class="jersey-number-field hidden">
+                        {% if extra_row.requested_jersey_number.errors %}
                             <div class="h-px bg-rule"></div>
                             <div class="p-3.5">
                                 <label class="mb-1 block text-xs text-muted" for="{{ extra_row.requested_jersey_number.id_for_label }}">{{ extra_row.requested_jersey_number.label }}</label>
                                 {{ extra_row.requested_jersey_number }}
                                 {% for error in extra_row.requested_jersey_number.errors %}<p class="mt-1 text-xs text-club">{{ error }}</p>{% endfor %}
                             </div>
-                        </div>
+                        {% endif %}
                     </div>
                 </div>
             {% endfor %}
@@ -181,12 +182,21 @@
                 <div>
                     <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Price" %}</div>
                     <div class="m-card overflow-hidden">
-                        {% for entry, price in priced_entries %}
+                        {% for form, entry, price in priced_entries %}
                             {% if not forloop.first %}<div class="h-px bg-rule"></div>{% endif %}
                             <div class="flex items-center justify-between p-3.5">
                                 <span class="text-[15px] text-ink">{{ entry.first_name }} {{ entry.last_name }}</span>
                                 <span class="font-mono text-sm tabular-nums text-ink">&euro; {{ price.price|floatformat:2 }}</span>
                             </div>
+                            {# Jersey number lives here now, not on the form above -- there was nothing to narrow it to (which team?) until the team was already submitted, which this receipt is proof of. #}
+                            {% if form.requested_jersey_number.field.choices|length > 1 %}
+                                {% blocktrans asvar jersey_label with team=entry.requested_team.short_name %}Jersey number ({{ team }}){% endblocktrans %}
+                                <div class="px-3.5 pb-3.5">
+                                    <label class="mb-1 block text-xs text-muted" for="{{ form.requested_jersey_number.id_for_label }}">{{ jersey_label }}</label>
+                                    {{ form.requested_jersey_number }}
+                                    {% for error in form.requested_jersey_number.errors %}<p class="mt-1 text-xs text-club">{{ error }}</p>{% endfor %}
+                                </div>
+                            {% endif %}
                             {% if price.min_registrants_discount > 0 %}
                                 <div class="flex items-center justify-between px-3.5 pb-3">
                                     <span class="text-xs text-muted">{% trans "Multi-registrant discount" %}</span>
