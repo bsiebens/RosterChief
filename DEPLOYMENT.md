@@ -171,20 +171,22 @@ docker compose up -d --no-deps web
 
 ## Scheduled jobs
 
-Ten jobs run on a schedule via **host cron** calling `manage.py <job>` directly — there is no
-`worker`/`beat` process (see "Sizing the server" for why: on a small box, two more persistent
-Django processes was real, measured memory pressure for a job volume light enough that a plain
-`docker compose run` one-off pays that cost for a few seconds instead of 24/7). Each job is a
-`features.commands.ScheduledJobCommand` subclass — see `features/jobs.py` for what each one is
-and `features/commands.py` for the shared Maintenance/JobToggle-aware, JobRun-recording base
-class every one of them runs through.
+Nine of the ten platform jobs run on a schedule via **host cron** calling `manage.py <job>`
+directly — there is no `worker`/`beat` process (see "Sizing the server" for why: on a small box,
+two more persistent Django processes was real, measured memory pressure for a job volume light
+enough that a plain `docker compose run` one-off pays that cost for a few seconds instead of
+24/7). The tenth, `poll_live_game_results`, runs as its own persistent process instead — see
+"Long-running processes" below for why that one job crossed the line cron makes sense for. Each
+job is a `features.commands.ScheduledJobCommand` subclass — see `features/jobs.py` for what each
+one is and `features/commands.py` for the shared Maintenance/JobToggle-aware, JobRun-recording
+base class every one of them runs through, `poll_live_game_results` included.
 
 | Job (management command) | Cadence | What it does |
 |---|---|---|
 | `extend_event_series` | daily 03:00 | materialises recurring event occurrences so the calendar never runs dry |
 | `send_deadline_reminders` | daily 07:00 | nudges whoever hasn't answered an event, a week before its deadline (or start) |
 | `publish_scheduled_lineups` | every 15 min | publishes any coach-scheduled line-up whose publish time has arrived |
-| `poll_live_game_results` | every minute | refreshes score/live status from each game's competition data source, from 20 min before kickoff through 1h after its planned end (or until it's seen finishing) |
+| `poll_live_game_results` | every minute, via `run_live_score_poller` (see below) | refreshes score/live status from each game's competition data source, from 20 min before kickoff through 1h after its planned end (or until it's seen finishing) |
 | `renew_subscriptions` | daily 04:00 | opens the next billing period for clubs whose current one is running out |
 | `send_billing_reminders --commit` | daily 05:00 | emails club admins about outstanding platform fees, once per escalation level |
 | `archive_overdue_clubs --commit` | daily 06:00 | archives clubs unpaid past their grace period |
@@ -204,7 +206,6 @@ REMOTE_DIR=/home/bernard/RosterChief
 COMPOSE_FILE=compose.yaml
 
 0  3 * * *  flock -n /tmp/rosterchief-extend_event_series.lock -c "cd $REMOTE_DIR && docker compose -f $COMPOSE_FILE run --rm web python manage.py extend_event_series"
-*  *  *  *  *  flock -n /tmp/rosterchief-poll_live_game_results.lock -c "cd $REMOTE_DIR && docker compose -f $COMPOSE_FILE run --rm web python manage.py poll_live_game_results"
 0  7 * * *  flock -n /tmp/rosterchief-send_deadline_reminders.lock -c "cd $REMOTE_DIR && docker compose -f $COMPOSE_FILE run --rm web python manage.py send_deadline_reminders"
 0  4 * * *  flock -n /tmp/rosterchief-renew_subscriptions.lock -c "cd $REMOTE_DIR && docker compose -f $COMPOSE_FILE run --rm web python manage.py renew_subscriptions"
 0  5 * * *  flock -n /tmp/rosterchief-send_billing_reminders.lock -c "cd $REMOTE_DIR && docker compose -f $COMPOSE_FILE run --rm web python manage.py send_billing_reminders --commit"
@@ -215,6 +216,10 @@ COMPOSE_FILE=compose.yaml
 */15 * * * * flock -n /tmp/rosterchief-publish_scheduled_lineups.lock -c "cd $REMOTE_DIR && docker compose -f $COMPOSE_FILE run --rm web python manage.py publish_scheduled_lineups"
 */15 * * * * flock -n /tmp/rosterchief-notify_published_news.lock -c "cd $REMOTE_DIR && docker compose -f $COMPOSE_FILE run --rm web python manage.py notify_published_news"
 ```
+
+`poll_live_game_results` is deliberately **not** in this crontab — it runs continuously via the
+`live_score_poller` compose service instead (`docker compose up -d` starts it alongside `web`
+with no separate cron entry needed). See "Long-running processes" below.
 
 **`flock -n` is load-bearing, not decoration** — plain cron has no idea whether the *previous*
 invocation of a job is still running, and fires the next one anyway regardless. For the two
@@ -246,6 +251,44 @@ write) or hung somewhere inside the command's own work.
 Each command still has its own `--help` for manual/dry-run use from a shell (`generate_seasons
 --resync`, for one, is still CLI-only: it can delete rows, so it isn't something a schedule
 should ever run unattended, Run now button included).
+
+## Long-running processes
+
+`poll_live_game_results` is the one scheduled job that doesn't run via cron. Every other job's
+cadence (15 minutes or slower) makes a fresh `docker compose run` one-off cheap relative to how
+rarely it fires — see "Sizing the server" for why that beat a persistent Celery `worker`/`beat`
+pair for this whole app. Once-a-minute crossed that line: 1,440 container starts a day, each
+paying its own Django import, for a job whose actual work (checking a handful of games due to
+start soon or still in their post-game window) takes a fraction of a second. `run_live_score_poller`
+(`events/management/commands/run_live_score_poller.py`) replaces that with one persistent process
+that calls `poll_live_game_results` in a loop, roughly once every 60 seconds, and the
+`live_score_poller` compose service runs it with `restart: unless-stopped` — the same policy
+`web`/`db`/`redis`/`caddy` already use.
+
+That `restart: unless-stopped` is what "resilient to a crash" actually means here, at two levels:
+
+- **A single tick's failure never reaches Docker.** `poll_live_game_results` is still a
+  `ScheduledJobCommand` — every tick gets its own `JobRun` row and the same Maintenance/JobToggle
+  checks a cron invocation would get, cache TTL well under the 60s interval so a control-panel
+  toggle takes effect on the next tick either way. The loop wraps that call in a `try/except`
+  and logs-and-continues on any exception, so one bad tick (a competition API timeout, a
+  transient DB error) costs one `JobRun(FAILURE)` row, not the process. `connections.close_all()`
+  runs after every tick (the same thing `controlpanel.views.JobRunNowView` already does after its
+  own off-cycle background-thread run) so a connection Postgres drops between ticks — an idle
+  timeout, a restart — doesn't fail every tick after it, just gets reconnected on the next one.
+- **If the process dies anyway** — OOM, an unhandled signal, a bug the try/except doesn't
+  catch — Docker's `restart: unless-stopped` brings the container back. `SIGTERM` (what
+  `docker compose stop`/`down`/a redeploy sends first) is caught to finish the in-flight tick and
+  exit the loop cleanly instead of leaving a `JobRun` stuck at `STARTED`; only a harder kill
+  bypasses that.
+
+This is one lightweight process, not a queue: no forking, no worker pool, a single Django import
+paid once instead of 1,440 times a day. Expect it to cost roughly what one gunicorn worker
+costs (~50-100 MB — see "Sizing the server"'s own per-worker figure) on top of the existing
+steady state, nowhere near the ~740 MB the old Celery `worker` measured. Don't reach for this
+pattern for any of the other nine jobs without redoing this math first — the win here comes
+specifically from the gap between "once a minute" and "everything else," not from long-running
+processes being free.
 
 ## Maintenance mode
 

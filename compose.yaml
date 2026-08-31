@@ -15,6 +15,11 @@
 # <job>` directly instead of a persistent Celery worker/beat pair. See DEPLOYMENT.md's
 # "Scheduled jobs" for the crontab and features/commands.py's ScheduledJobCommand for the
 # JobRun/JobToggle bookkeeping those processes used to provide.
+#
+# `live_score_poller` is the one exception: a single persistent process for the once-a-minute
+# poll_live_game_results job instead of cron, so that job doesn't pay a fresh container start
+# every 60 seconds. restart: unless-stopped is what makes it resilient to a crash -- see
+# DEPLOYMENT.md's "Long-running processes" for why this job specifically and not the other nine.
 
 name: rosterchief
 
@@ -69,6 +74,18 @@ services:
       timeout: 5s
       retries: 3
       start_period: 20s
+
+  live_score_poller:
+    image: ghcr.io/bsiebens/rosterchief:${IMAGE_TAG:-main}
+    build: .
+    restart: unless-stopped
+    env_file: .env.production
+    command: ["python", "manage.py", "run_live_score_poller"]
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
 
   db:
     image: postgres:17-alpine

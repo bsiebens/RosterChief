@@ -45,7 +45,7 @@ JOB_REGISTRY = {
     "events.tasks.poll_live_game_results": {
         "label": _("Poll live game results"),
         "description": _("Checks each game due to start soon or still within its post-game window for a fresh score/live status from its competition's data source."),
-        "schedule": _("Every minute"),
+        "schedule": _("Every minute, via the live_score_poller process"),
         "command": "poll_live_game_results",
         "args": [],
     },
