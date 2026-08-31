@@ -1,0 +1,70 @@
+{% load i18n lucide %}
+{% comment %}
+    One combined receipt card per CONFIRMED registration batch, covering
+    every managed person that registration billed -- not one card per
+    person (mobile/_dues_receipt.html's own shape, still used for a
+    membership with no registration behind it at all). "Pay early and save"
+    and the invoice download are properties of the registration as a
+    whole -- one invoice was sent, covering everyone in it -- so this shows
+    one of each instead of a separate, and once a manual discount is
+    involved individually inaccurate, figure per person. See mobile.views.
+    PaymentsView's own grouping and registration.services.invoicing.
+    batch_early_payment_offer's own docstring on why the total this is
+    computed against has to be the registration's own net total.
+
+    ``group`` (built by PaymentsView): {"batch", "rows" (the per-membership
+    dues rows this registration covers), "total_balance", "early_payment",
+    "member_names"}.
+{% endcomment %}
+<div class="m-card overflow-hidden">
+    <div class="flex items-center gap-3 p-4">
+        <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-danger-bg">
+            <span class="font-display text-lg font-extrabold text-club">&euro;</span>
+        </div>
+        <div class="min-w-0 flex-1">
+            <div class="text-sm font-semibold text-ink">{% blocktrans with names=group.member_names %}Registration &mdash; {{ names }}{% endblocktrans %}</div>
+            {% if group.batch.invoice_due_date %}<div class="text-xs text-muted">{% blocktrans with due=group.batch.invoice_due_date|date:"d M" %}Due {{ due }}{% endblocktrans %}</div>{% endif %}
+        </div>
+        <div class="shrink-0 text-right font-mono text-xl font-extrabold tabular-nums text-ink">&euro;{{ group.total_balance|floatformat:2 }}</div>
+    </div>
+
+    <div class="h-px bg-rule"></div>
+    {% for row in group.rows %}
+        {% for entry in row.entries %}
+            <div class="flex items-center justify-between p-3.5">
+                <span class="min-w-0 text-sm text-ink">
+                    {{ row.membership.member.first_name }} &mdash; {% if entry.product_variant %}{{ entry.product_variant.product.name }} &mdash; {{ entry.product_variant.name }}{% else %}{{ entry.get_entry_kind_display }}{% endif %}
+                    {% if entry.requested_team %}<span class="block text-xs text-muted">{{ entry.requested_team }}</span>{% endif %}
+                </span>
+                <span class="shrink-0 font-mono text-sm tabular-nums text-ink">&euro; {{ entry.price|floatformat:2 }}</span>
+            </div>
+            {% if entry.discount_amount > 0 %}
+                <div class="flex items-center justify-between px-3.5 pb-3">
+                    <span class="text-xs text-muted">{% trans "Multi-registrant discount" %}</span>
+                    <span class="shrink-0 font-mono text-xs tabular-nums text-muted">&minus;&euro; {{ entry.discount_amount|floatformat:2 }}</span>
+                </div>
+            {% endif %}
+            {% if not forloop.last or not forloop.parentloop.last %}<div class="h-px bg-rule"></div>{% endif %}
+        {% endfor %}
+    {% endfor %}
+    {% if group.batch.manual_discount_amount > 0 %}
+        <div class="flex items-center justify-between p-3.5">
+            <span class="text-xs text-muted">{{ group.batch.manual_discount_note|default:_("Discount") }}</span>
+            <span class="shrink-0 font-mono text-xs tabular-nums text-muted">&minus;&euro; {{ group.batch.manual_discount_amount|floatformat:2 }}</span>
+        </div>
+    {% endif %}
+
+    {% if group.early_payment %}
+        <div class="h-px bg-rule"></div>
+        <div class="bg-ok-bg p-3.5 text-xs text-ok-text">
+            {% blocktrans with total=group.early_payment.discounted_total|floatformat:2 date=group.early_payment.deadline|date:"d M" amount=group.early_payment.discount|floatformat:2 %}Pay &euro;{{ total }} by {{ date }} to save &euro;{{ amount }}.{% endblocktrans %}
+        </div>
+    {% endif %}
+
+    <div class="h-px bg-rule"></div>
+    <div class="p-3.5">
+        <a class="btn btn-secondary gap-2 w-full" href="{% url 'mobile:registration_invoice_pdf' group.batch.pk %}" hx-boost="false">
+            {% lucide "file-down" size=14 %} {% trans "Download invoice" %}
+        </a>
+    </div>
+</div>

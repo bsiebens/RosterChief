@@ -11,6 +11,7 @@ from django.contrib import admin as django_admin
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import AnonymousUser
 from django.core.exceptions import ValidationError
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.db import IntegrityError
 from django.db.models import ProtectedError
@@ -43,7 +44,7 @@ from .services.access import (
     teams_staffed_by,
 )
 from .services.cancellation import cancel_membership, is_new_member
-from .services.fees import early_payment_offer, mark_as_paid, open_dues_rows, record_payment, remaining_balance
+from .services.fees import early_payment_offer, mark_as_paid, net_balance, open_dues_rows, record_payment, remaining_balance
 from .services.invoicing import create_or_resend_invoice, invalidate_cached_invoice_pdf, invoice_pdf, invoices_due_for_reminder, recipient_for, resolve_document_address
 from .services.onboarding import (
     annotate_onboarding_status,
@@ -1540,6 +1541,15 @@ class FeeServiceTests(TestCase):
 
         self.assertEqual(remaining_balance(self.membership), Decimal("0.00"))
 
+    def test_net_balance_is_negative_where_remaining_balance_floors_at_zero(self):
+        # registration.views.RegistrationStatusView reads this one instead --
+        # a credit has to show as a real number, not the same "nothing owed"
+        # remaining_balance already gives collection/reminder logic.
+        record_payment(self.membership, amount=Decimal("200.00"))
+
+        self.assertEqual(net_balance(self.membership), Decimal("-50.00"))
+        self.assertEqual(remaining_balance(self.membership), Decimal("0.00"))
+
     def test_a_partial_payment_creates_a_record_and_updates_the_running_total(self):
         payment = record_payment(self.membership, amount=Decimal("50.00"), method=FeePayment.Method.CASH, reference="R1", note="first installment")
 
@@ -1744,6 +1754,23 @@ class OpenDuesRowsTests(TestCase):
         rows = open_dues_rows(self.club, [self.member], self.season)
 
         self.assertIsNone(rows[0]["early_payment"])
+
+    def test_include_zero_keeps_a_fully_paid_membership(self):
+        # mobile.views.PaymentsView needs this -- a sibling already settled
+        # still has to show its own line items in a combined registration
+        # receipt, or the visible amounts stop summing to the real total.
+        membership = ClubMembership.objects.create(club=self.club, member=self.member, season=self.season, fee_amount=Decimal("150.00"))
+        record_payment(membership, amount=Decimal("150.00"))
+
+        rows = open_dues_rows(self.club, [self.member], self.season, include_zero=True)
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["balance"], Decimal("0.00"))
+
+    def test_include_zero_still_excludes_waived_and_cancelled(self):
+        ClubMembership.objects.create(club=self.club, member=self.member, season=self.season, fee_amount=Decimal("150.00"), fee_status=ClubMembership.FeeStatus.WAIVED)
+
+        self.assertEqual(open_dues_rows(self.club, [self.member], self.season, include_zero=True), [])
 
 
 class RecipientForTests(TestCase):
@@ -2333,9 +2360,31 @@ class OnboardingRequirementTests(TestCase):
         self.assertFalse(status.is_complete)
         self.assertIsNone(status.completed_at)
         self.assertIsNone(status.completed_by)
-        # The note (and any document) survive the toggle -- it's evidence something
-        # was received once, even if it needs redoing.
+        # The note survives the toggle -- it's staff's own record of what
+        # happened, even if the item needs redoing.
         self.assertEqual(status.note, "handed in at practice")
+
+    def test_mark_incomplete_deletes_an_uploaded_document(self):
+        # Reopening something that already has a document on file *is* how
+        # staff say "this was wrong, redo it" (e.g. the wrong photo) -- there's
+        # no reason to keep serving a file just flagged as not right.
+        upload = SimpleUploadedFile("wrong.jpg", b"fake-bytes", content_type="image/jpeg")
+        mark_complete(self.membership, self.photo, user=self.staff, document=upload)
+        stored = MemberRequirementStatus.objects.get(membership=self.membership, requirement=self.photo).document
+        storage, stored_name = stored.storage, stored.name
+        self.addCleanup(lambda: storage.delete(stored_name) if storage.exists(stored_name) else None)
+
+        status = mark_incomplete(self.membership, self.photo)
+
+        self.assertFalse(status.document)
+        self.assertFalse(storage.exists(stored_name))
+
+    def test_mark_incomplete_is_safe_with_no_document(self):
+        mark_complete(self.membership, self.photo, user=self.staff)
+
+        status = mark_incomplete(self.membership, self.photo)
+
+        self.assertFalse(status.document)
 
     def test_an_inactive_requirement_does_not_block_onboarding(self):
         self.medical.is_active = False
@@ -2637,6 +2686,47 @@ class CancellationTests(TestCase):
         cancel_membership(membership)
 
         self.assertFalse(RegistrationDetails.objects.filter(pk=details.pk).exists())
+
+    def test_soft_cancelling_removes_this_registrations_own_team_placement(self):
+        member = Member.objects.create(first_name="Returning", last_name="Kid")
+        ClubMembership.objects.create(club=self.club, member=member, season=self.previous_season, status=ClubMembership.StatusChoices.LAPSED)
+        membership = ClubMembership.objects.create(club=self.club, member=member, season=self.season, status=ClubMembership.StatusChoices.PENDING)
+        team = Team.objects.create(club=self.club, name="U9", short_name="U9")
+        team_membership = TeamMembership.objects.create(team=team, member=member, season=self.season)
+        batch = RegistrationBatch.objects.create(club=self.club, season=self.season, contact_first_name="Pat", contact_last_name="Parent", contact_email="pat@example.com")
+        RegistrationDetails.objects.create(membership=membership, batch=batch, resulting_team_membership=team_membership)
+
+        cancel_membership(membership)
+
+        self.assertFalse(TeamMembership.objects.filter(pk=team_membership.pk).exists())
+
+    def test_soft_cancelling_removes_this_registrations_own_staff_assignment(self):
+        member = Member.objects.create(first_name="Returning", last_name="Coach")
+        ClubMembership.objects.create(club=self.club, member=member, season=self.previous_season, status=ClubMembership.StatusChoices.LAPSED)
+        membership = ClubMembership.objects.create(club=self.club, member=member, season=self.season, status=ClubMembership.StatusChoices.PENDING)
+        team = Team.objects.create(club=self.club, name="U9", short_name="U9")
+        position = Position.objects.create(club=self.club, name="Coach", short_name="CO", staff_position=True)
+        assignment = StaffAssignment.objects.create(team=team, member=member, season=self.season, position=position)
+        batch = RegistrationBatch.objects.create(club=self.club, season=self.season, contact_first_name="Pat", contact_last_name="Parent", contact_email="pat@example.com")
+        RegistrationDetails.objects.create(membership=membership, batch=batch, entry_kind=RegistrationDetails.EntryKind.VOLUNTEER, resulting_staff_assignment=assignment)
+
+        cancel_membership(membership)
+
+        self.assertFalse(StaffAssignment.objects.filter(pk=assignment.pk).exists())
+
+    def test_soft_cancelling_leaves_an_unrelated_team_placement_alone(self):
+        # Only a spot *this membership's own registration* auto-placed is
+        # removed -- one placed some other way (directly from the roster
+        # page, no registration involved at all) survives.
+        member = Member.objects.create(first_name="Returning", last_name="Kid")
+        ClubMembership.objects.create(club=self.club, member=member, season=self.previous_season, status=ClubMembership.StatusChoices.LAPSED)
+        membership = ClubMembership.objects.create(club=self.club, member=member, season=self.season, status=ClubMembership.StatusChoices.PENDING)
+        team = Team.objects.create(club=self.club, name="U9", short_name="U9")
+        team_membership = TeamMembership.objects.create(team=team, member=member, season=self.season)
+
+        cancel_membership(membership)
+
+        self.assertTrue(TeamMembership.objects.filter(pk=team_membership.pk).exists())
 
 
 class SignupLinkingTests(TestCase):

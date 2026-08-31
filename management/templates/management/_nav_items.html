@@ -13,13 +13,19 @@
 <a class="nav-item {% if nav_section == 'overview' %}active{% endif %}" href="{% url 'management:home' %}">{% lucide "layout-dashboard" size=17 %} {% trans "Overview" %}</a>
 
 <div>
-    <a class="nav-item {% if nav_section == 'members' %}active{% endif %}" href="{% url 'management:member_list' %}">{% lucide "users" size=17 %} {% trans "Members" %}</a>
+    <a class="nav-item {% if nav_section == 'members' %}active{% endif %}" href="{% url 'management:member_list' %}">
+        {% lucide "users" size=17 %} {% trans "Members" %}
+        {% if is_club_admin and signup_pending_count %}<span class="badge badge-error badge-xs ml-auto">{{ signup_pending_count }}</span>{% endif %}
+    </a>
     {% if nav_section == 'members' %}
         <div class="flex flex-col">
             <a class="nav-subitem {% if nav == 'member_list' %}active{% endif %}" href="{% url 'management:member_list' %}">{% trans "All members" %}</a>
             {% if is_club_admin %}
                 {# Sign-up is admin only (finance-adjacent -- fee status feeds it) even though parent claims/households/groups below open up to MEMBER_ADMIN too. #}
-                <a class="nav-subitem {% if nav == 'signup_list' %}active{% endif %}" href="{% url 'management:signup_list' %}">{% trans "Sign-up" %}</a>
+                <a class="nav-subitem {% if nav == 'signup_list' %}active{% endif %}" href="{% url 'management:signup_list' %}">
+                    {% trans "Sign-up" %}
+                    {% if signup_pending_count %}<span class="badge badge-error badge-xs ml-auto">{{ signup_pending_count }}</span>{% endif %}
+                </a>
             {% endif %}
             {% if can_manage_members %}
                 {# Membership dues/fee tracking (management:membership_list) lives under Finance, not here -- see that section below. #}
@@ -54,12 +60,18 @@
             <a class="nav-subitem {% if nav == 'team_list' %}active{% endif %}" href="{% url 'management:team_list' %}">{% trans "All teams" %}</a>
             <a class="nav-subitem {% if nav == 'number_list' %}active{% endif %}" href="{% url 'management:number_list' %}">{% trans "Numbers" %}</a>
             <a class="nav-subitem {% if nav == 'referee_list' %}active{% endif %}" href="{% url 'management:referee_list' %}">{% trans "Referees" %}</a>
+            {% if officials_enabled %}
+                <a class="nav-subitem {% if nav == 'official_list' %}active{% endif %}" href="{% url 'management:official_list' %}">{% trans "Officials" %}</a>
+            {% endif %}
         </div>
     {% endif %}
 </div>
 
 <div>
-    <a class="nav-item {% if nav_section == 'calendar' %}active{% endif %}" href="{% url 'management:event_list' %}">{% lucide "calendar" size=17 %} {% trans "Calendar" %}</a>
+    <a class="nav-item {% if nav_section == 'calendar' %}active{% endif %}" href="{% url 'management:event_list' %}">
+        {% lucide "calendar" size=17 %} {% trans "Calendar" %}
+        {% if is_club_admin or can_manage_members %}{% if games_missing_referees_count %}<span class="badge badge-error badge-xs ml-auto">{{ games_missing_referees_count }}</span>{% endif %}{% endif %}
+    </a>
     {% if nav_section == 'calendar' %}
         <div class="flex flex-col">
             <a class="nav-subitem {% if nav == 'event_list' %}active{% endif %}" href="{% url 'management:event_list' %}">{% trans "Events" %}</a>
@@ -68,8 +80,9 @@
                 <a class="nav-subitem {% if nav == 'opponent_list' %}active{% endif %}" href="{% url 'management:opponent_list' %}">{% trans "Opponents" %}</a>
             {% endif %}
             {% if is_club_admin or can_manage_members %}
-                <a class="nav-subitem flex items-center gap-2 {% if nav == 'referee_management' %}active{% endif %}" href="{% url 'management:referee_management' %}">{% trans "Referee management" %}
-                    {% if games_missing_referees_count %}<span class="badge badge-error badge-xs">{{ games_missing_referees_count }}</span>{% endif %}
+                <a class="nav-subitem {% if nav == 'referee_management' %}active{% endif %}" href="{% url 'management:referee_management' %}">
+                    {% trans "Referee management" %}
+                    {% if games_missing_referees_count %}<span class="badge badge-error badge-xs ml-auto">{{ games_missing_referees_count }}</span>{% endif %}
                 </a>
             {% endif %}
         </div>
@@ -80,11 +93,15 @@
 
 {% if is_club_admin %}
     <div>
-        <a class="nav-item {% if nav_section == 'finance' %}active{% endif %}" href="{% url 'management:registration_invoice_queue' %}">{% lucide "wallet" size=17 %} {% trans "Finance" %}</a>
+        <a class="nav-item {% if nav_section == 'finance' %}active{% endif %}" href="{% url 'management:registration_invoice_queue' %}">
+            {% lucide "wallet" size=17 %} {% trans "Finance" %}
+            {% if registrations_awaiting_count %}<span class="badge badge-error badge-xs ml-auto">{{ registrations_awaiting_count }}</span>{% endif %}
+        </a>
         {% if nav_section == 'finance' %}
             <div class="flex flex-col">
-                <a class="nav-subitem flex items-center gap-2 {% if nav == 'registration_invoice_queue' %}active{% endif %}" href="{% url 'management:registration_invoice_queue' %}">{% trans "Registrations" %}
-                    {% if registrations_awaiting_count %}<span class="badge badge-error badge-xs">{{ registrations_awaiting_count }}</span>{% endif %}
+                <a class="nav-subitem {% if nav == 'registration_invoice_queue' %}active{% endif %}" href="{% url 'management:registration_invoice_queue' %}">
+                    {% trans "Registrations" %}
+                    {% if registrations_awaiting_count %}<span class="badge badge-error badge-xs ml-auto">{{ registrations_awaiting_count }}</span>{% endif %}
                 </a>
                 <a class="nav-subitem {% if nav == 'membership_list' %}active{% endif %}" href="{% url 'management:membership_list' %}">{% trans "Dues & billing" %}</a>
                 <a class="nav-subitem {% if nav == 'sponsor_list' %}active{% endif %}" href="{% url 'management:sponsor_list' %}">{% trans "Sponsors" %}</a>
@@ -117,6 +134,9 @@
                     <a class="nav-subitem {% if nav == 'number_pool_list' %}active{% endif %}" href="{% url 'management:number_pool_list' %}">{% trans "Number pools" %}</a>
                 {% endif %}
                 <a class="nav-subitem {% if nav == 'referee_level_list' %}active{% endif %}" href="{% url 'management:referee_level_list' %}">{% trans "Referee levels" %}</a>
+                {% if officials_enabled %}
+                    <a class="nav-subitem {% if nav == 'official_level_list' %}active{% endif %}" href="{% url 'management:official_level_list' %}">{% trans "Official levels" %}</a>
+                {% endif %}
                 {% if is_club_admin %}
                     {% if forms_enabled %}
                         <a class="nav-subitem {% if nav == 'form_list' %}active{% endif %}" href="{% url 'management:form_list' %}">{% trans "Forms" %}</a>

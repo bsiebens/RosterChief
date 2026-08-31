@@ -193,6 +193,7 @@
                                 {{ membership.member }}
                                 {% if membership.is_captain %}<span class="ml-1 font-display text-xs font-extrabold tracking-[.08em] text-club-dark" title="{% trans 'Captain' %}">C</span>{% endif %}
                                 {% if membership.is_alternate_captain %}<span class="ml-1 font-display text-xs font-extrabold tracking-[.08em] text-club-dark" title="{% trans 'Alternate captain' %}">A</span>{% endif %}
+                                {% if membership.club_status_pending %}<span class="badge badge-sm badge-warning ml-1" title="{% trans 'Not yet approved on Sign-up' %}">{% trans "Pending" %}</span>{% endif %}
                             </td>
                             <td class="text-slate">{{ membership.position|default:"—" }}</td>
                             <td class="text-right">

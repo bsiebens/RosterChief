@@ -10,7 +10,7 @@ from django.utils.translation import gettext_lazy as _
 from club.models import ClubMembership, Season
 from rosterchief.base import ClubScopedModel, UUIDModel, validate_club_scope
 from shop.models import ProductVariant
-from teams.models import Position, StaffAssignment, Team
+from teams.models import Position, StaffAssignment, Team, TeamMembership
 
 
 def _generate_status_token() -> str:
@@ -24,15 +24,15 @@ class RegistrationBatch(ClubScopedModel):
     Product-level min_registrants discount, see registration.services.pricing)
     and who filled the form in. Deliberately carries no *onboarding* status of
     its own -- each entry becomes a real Member + ClubMembership(status=PENDING)
-    immediately (registration.services.submission.submit_registration), and
-    review from there on is the *existing* Sign-up queue
-    (club.services.onboarding), not a second gate this model would add.
-
-    It does carry its own *billing* status, though (invoice_sent_at and
-    friends, below) -- onboarding and billing are two deliberately independent
-    tracks a registration moves through in either order (see registration.
-    services.invoicing's own module docstring for why this needs staff review
-    before a family ever sees a number).
+    immediately (registration.services.submission.submit_registration), but
+    review from there on is gated behind this batch's own *billing* status
+    (invoice_sent_at and friends, below): a fresh registration is invisible
+    to the Sign-up queue (club.services.onboarding, management.views.
+    SignupDashboardView) until staff has reviewed and confirmed its invoice
+    on the Registrations screen -- see registration.services.invoicing's own
+    module docstring for why. Billing review always comes first; once
+    confirmed, onboarding review (documents, team placement, approval) and
+    payment can each proceed independently of the other from there.
 
     ``status_token`` is the unguessable key behind the public status page
     (registration.views.RegistrationStatusView) -- same secrets.token_urlsafe(32)
@@ -156,6 +156,14 @@ class RegistrationDetails(UUIDModel):
     #: billing decision.
     excluded_from_invoice = models.BooleanField(_("excluded from invoice"), default=False)
 
+    #: What requested_team/requested_jersey_number actually became once staff
+    #: confirmed them on the Registrations review screen (management.views.
+    #: RegistrationInvoiceReviewView) -- players' own counterpart to
+    #: resulting_staff_assignment below. club.services.cancellation.
+    #: cancel_membership deletes this specific TeamMembership (only this
+    #: one, not every placement the member happens to have that season) when
+    #: this membership is later cancelled.
+    resulting_team_membership = models.OneToOneField(TeamMembership, on_delete=models.SET_NULL, related_name="registration_details", verbose_name=_("resulting team membership"), blank=True, null=True)
     resulting_staff_assignment = models.OneToOneField(StaffAssignment, on_delete=models.SET_NULL, related_name="registration_details", verbose_name=_("resulting staff assignment"), blank=True, null=True)
 
     class Meta:

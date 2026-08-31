@@ -1,8 +1,8 @@
 {% extends "management/base.html" %}
 {% load i18n lucide static ui %}
 
-{% block heading %}{% trans "Referee management" %}{% endblock heading %}
-{% block topbar_context %}<span class="text-sm text-muted">{% trans "Every upcoming home game that needs a club-arranged referee." %}</span>{% endblock topbar_context %}
+{% block heading %}{% if officials_enabled %}{% trans "Officiating" %}{% else %}{% trans "Referee management" %}{% endif %}{% endblock heading %}
+{% block topbar_context %}<span class="text-sm text-muted">{% if officials_enabled %}{% trans "Every upcoming home game that needs a club-arranged referee or official." %}{% else %}{% trans "Every upcoming home game that needs a club-arranged referee." %}{% endif %}</span>{% endblock topbar_context %}
 
 {% block filter_strip %}
     <div class="flex flex-wrap items-center gap-3 border-b border-line bg-white px-7 py-3">
@@ -45,6 +45,31 @@
             <div class="mt-1 text-[13px] text-muted">{% trans "Referee fee missing" %}</div>
         </div>
     </div>
+
+    {% if officials_enabled %}
+        <div class="flex flex-wrap gap-3.5">
+            <div class="card min-w-0 flex-1 p-4">
+                <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Without an official" %}</div>
+                <div class="mt-1 font-display text-[34px] leading-none font-extrabold tabular-nums {% if kpi_no_official %}text-club{% else %}text-ink{% endif %}">{{ kpi_no_official }}</div>
+                <div class="mt-1 text-[13px] text-muted">{% trans "Nobody assigned yet" %}</div>
+            </div>
+            <div class="card min-w-0 flex-1 p-4">
+                <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Officials partially staffed" %}</div>
+                <div class="mt-1 font-display text-[34px] leading-none font-extrabold tabular-nums {% if kpi_officials_understaffed %}text-warn{% else %}text-ink{% endif %}">{{ kpi_officials_understaffed }}</div>
+                <div class="mt-1 text-[13px] text-muted">{% trans "Still short an official" %}</div>
+            </div>
+            <div class="card min-w-0 flex-1 p-4">
+                <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Officials fully staffed" %}</div>
+                <div class="mt-1 font-display text-[34px] leading-none font-extrabold text-ok tabular-nums">{{ kpi_officials_fully_staffed }}</div>
+                <div class="mt-1 text-[13px] text-muted">{% trans "Nothing left to do" %}</div>
+            </div>
+            <div class="card min-w-0 flex-1 p-4">
+                <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Official fees not set" %}</div>
+                <div class="mt-1 font-display text-[34px] leading-none font-extrabold tabular-nums {% if kpi_official_fees_pending %}text-warn{% else %}text-ink{% endif %}">{{ kpi_official_fees_pending }}</div>
+                <div class="mt-1 text-[13px] text-muted">{% trans "Official fee missing" %}</div>
+            </div>
+        </div>
+    {% endif %}
 
     {% comment %}
         Season workload -- separate from the "games in view" KPIs above
@@ -89,32 +114,64 @@
         <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{{ day.grouper|date:"l j F" }}</div>
         <div class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
             {% for game in day.list %}
-                <div class="card card-body gap-2 border-l-[3px] {% if not game.referee_rows %}border-l-club{% elif not game.referees_full %}border-l-warn{% else %}border-l-transparent{% endif %}">
+                {# Whichever of referees/officials this game still needs and doesn't have at all wins the red accent; understaffed (some, not enough) wins yellow over a fully-staffed/not-needed one; transparent once everything this game actually needs is fully covered. #}
+                <div class="card card-body gap-2 border-l-[3px]
+                    {% if game.needs_referees and not game.referee_rows or game.needs_officials and not game.official_rows %}border-l-club
+                    {% elif game.needs_referees and not game.referees_full or game.needs_officials and not game.officials_full %}border-l-warn
+                    {% else %}border-l-transparent{% endif %}">
                     <a class="link link-hover font-semibold text-ink" href="{% url 'management:event_detail' game.pk %}">
                         {% for team in game.teams.all %}{{ team.short_name }}{% if not forloop.last %}, {% endif %}{% endfor %}
                         {% if game.opponent %}{% trans "vs" %} {{ game.opponent }}{% endif %}
                     </a>
                     <div class="font-mono text-xs text-muted">{{ game.start|date:"H:i" }}{% if game.location %} — {{ game.location }}{% endif %}</div>
-                    <div class="flex flex-wrap gap-1">
-                        {% for referee in game.referee_rows %}
-                            <span class="badge badge-neutral badge-sm">{{ referee.display_name }}{% if referee.is_external %} ({% trans "ext." %}){% endif %}</span>
-                        {% empty %}
-                            <span class="text-xs text-muted">{% trans "No referees assigned yet." %}</span>
-                        {% endfor %}
-                    </div>
+
+                    {% if game.needs_referees %}
+                        <div class="flex flex-wrap gap-1">
+                            {% for referee in game.referee_rows %}
+                                <span class="badge badge-neutral badge-sm">{{ referee.display_name }}{% if referee.is_external %} ({% trans "ext." %}){% endif %}</span>
+                            {% empty %}
+                                <span class="text-xs text-muted">{% trans "No referees assigned yet." %}</span>
+                            {% endfor %}
+                        </div>
+                    {% endif %}
+                    {% if game.needs_officials %}
+                        <div class="flex flex-wrap gap-1">
+                            {% for official in game.official_rows %}
+                                <span class="badge badge-outline badge-sm">{{ official.display_name }}{% if official.is_external %} ({% trans "ext." %}){% endif %}</span>
+                            {% empty %}
+                                <span class="text-xs text-muted">{% trans "No officials assigned yet." %}</span>
+                            {% endfor %}
+                        </div>
+                    {% endif %}
+
                     <div class="flex flex-wrap items-center justify-between gap-2">
-                        <div class="flex items-center gap-1.5">
-                            <span class="badge badge-sm {% if not game.referee_rows %}badge-error{% elif not game.referees_full %}badge-warning{% else %}badge-success{% endif %}">
-                                {{ game.referee_rows|length }} / {{ game.max_referees }}
-                            </span>
-                            {% if game.fees_pending %}<span class="badge badge-warning badge-sm">{% trans "Fee not set" %}</span>{% endif %}
+                        <div class="flex flex-wrap items-center gap-1.5">
+                            {% if game.needs_referees %}
+                                <span class="badge badge-sm {% if not game.referee_rows %}badge-error{% elif not game.referees_full %}badge-warning{% else %}badge-success{% endif %}">
+                                    {% lucide "flag" size=11 %} {{ game.referee_rows|length }} / {{ game.max_referees }}
+                                </span>
+                                {% if game.fees_pending %}<span class="badge badge-warning badge-sm">{% trans "Fee not set" %}</span>{% endif %}
+                            {% endif %}
+                            {% if game.needs_officials %}
+                                <span class="badge badge-sm {% if not game.official_rows %}badge-error{% elif not game.officials_full %}badge-warning{% else %}badge-success{% endif %}">
+                                    {% lucide "shield" size=11 %} {{ game.official_rows|length }} / {{ game.max_officials }}
+                                </span>
+                                {% if game.official_fees_pending %}<span class="badge badge-warning badge-sm">{% trans "Fee not set" %}</span>{% endif %}
+                            {% endif %}
                         </div>
                         <div class="flex gap-1">
-                            <a class="btn btn-xs btn-outline" href="{% url 'management:event_referee_form_pdf' game.pk %}">
-                                {% lucide "file-down" size=12 %} {% trans "Referee form" %}
-                            </a>
+                            {% if game.needs_referees %}
+                                <a class="btn btn-xs btn-outline" href="{% url 'management:event_referee_form_pdf' game.pk %}">
+                                    {% lucide "file-down" size=12 %} {% trans "Referee form" %}
+                                </a>
+                            {% endif %}
+                            {% if game.needs_officials %}
+                                <a class="btn btn-xs btn-outline" href="{% url 'management:event_official_form_pdf' game.pk %}">
+                                    {% lucide "file-down" size=12 %} {% trans "Official form" %}
+                                </a>
+                            {% endif %}
                             <button class="btn btn-xs btn-outline" type="button" onclick="document.getElementById('{{ game.pk|dom_id:"referee_game_modal" }}').showModal()">
-                                {% lucide "flag" size=12 %} {% trans "Manage" %}
+                                {% lucide "settings" size=12 %} {% trans "Manage" %}
                             </button>
                         </div>
                     </div>
@@ -128,7 +185,15 @@
                             {% if game.opponent %}{% trans "vs" %} {{ game.opponent }}{% endif %}
                         </h3>
                         <div class="mb-4 font-mono text-sm text-muted">{{ game.start|date:"j M Y H:i" }}</div>
-                        {% include "management/_referee_assignment_panel.html" with event=game referees=game.referee_rows referee_candidates=game.referee_candidates referees_full=game.referees_full pending_signups=game.pending_signups can_manage_referees=True next_url=request.get_full_path %}
+                        {% if game.needs_referees %}
+                            {% include "management/_referee_assignment_panel.html" with event=game referees=game.referee_rows referee_candidates=game.referee_candidates referees_full=game.referees_full pending_signups=game.pending_signups can_manage_referees=True next_url=request.get_full_path %}
+                        {% endif %}
+                        {% if game.needs_referees and game.needs_officials %}
+                            <div class="my-4 h-px bg-rule"></div>
+                        {% endif %}
+                        {% if game.needs_officials %}
+                            {% include "management/_official_assignment_panel.html" with event=game officials=game.official_rows official_candidates=game.official_candidates officials_full=game.officials_full pending_official_signups=game.pending_official_signups can_manage_referees=True next_url=request.get_full_path %}
+                        {% endif %}
                     </div>
                     <form method="dialog" class="modal-backdrop"><button>close</button></form>
                 </dialog>
@@ -137,7 +202,7 @@
     {% empty %}
         <div class="card">
             <div class="card-body">
-                <p class="text-center text-muted">{% trans "No upcoming home games need a club-arranged referee." %}</p>
+                <p class="text-center text-muted">{% if officials_enabled %}{% trans "No upcoming home games need a club-arranged referee or official." %}{% else %}{% trans "No upcoming home games need a club-arranged referee." %}{% endif %}</p>
             </div>
         </div>
     {% endfor %}

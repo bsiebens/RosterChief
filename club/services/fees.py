@@ -27,8 +27,21 @@ def effective_fee_amount(membership, when=None):
     return membership.fee_amount
 
 
+def net_balance(membership, when=None):
+    """The real, unfloored difference between what's owed and what's been
+    paid -- negative once a credit (e.g. a negative per-line price on the
+    Registrations review screen, or simply overpayment) outweighs the fee.
+    remaining_balance below is the "how much is still owed" figure used
+    everywhere collection/reminder logic cares about (never negative -- a
+    family is never chased for negative money); this is for a display that
+    needs the real signed number instead, e.g. the registration status
+    page's own per-person balance line, so a credit doesn't just silently
+    read the same as "fully settled"."""
+    return effective_fee_amount(membership, when) - membership.amount_paid
+
+
 def remaining_balance(membership, when=None):
-    return max(effective_fee_amount(membership, when) - membership.amount_paid, Decimal("0.00"))
+    return max(net_balance(membership, when), Decimal("0.00"))
 
 
 def early_payment_offer(membership, when=None):
@@ -49,13 +62,24 @@ def early_payment_offer(membership, when=None):
     }
 
 
-def open_dues_rows(club, people, season):
+def open_dues_rows(club, people, season, *, include_zero=False):
     """Every season-dues row still owed by ``people`` in ``season`` -- shared by
     mobile's Home dues card and its Payments & dues screen so the two never
     drift out of sync on what counts as "still open". WAIVED and CANCELLED
-    memberships and fully-paid balances are excluded -- a cancelled
-    membership has no active claim on the family any more, whatever balance
-    it was left carrying."""
+    memberships are excluded regardless -- a cancelled membership has no
+    active claim on the family any more, whatever balance it was left
+    carrying.
+
+    A fully-settled (zero) balance is also excluded by default -- Home's own
+    dues card and the "Payments & dues" nav badge both want "still owed",
+    not a parade of already-paid people. ``include_zero=True`` keeps them
+    instead: mobile.views.PaymentsView passes it when building a combined
+    registration receipt, where every sibling that registration covers has
+    to show its own line items regardless of whether *that one person's* own
+    balance happens to already be zero (already paid, or priced at 0/net
+    negative after a credit) -- dropping them silently broke the "do these
+    numbers add up to the total" check a family naturally tries against a
+    receipt."""
     if season is None or not people:
         return []
 
@@ -68,7 +92,7 @@ def open_dues_rows(club, people, season):
     rows = []
     for membership in memberships:
         balance = remaining_balance(membership)
-        if balance > 0:
+        if balance > 0 or include_zero:
             rows.append({"membership": membership, "balance": balance, "invoice": getattr(membership, "dues_invoice", None), "early_payment": early_payment_offer(membership)})
     return rows
 

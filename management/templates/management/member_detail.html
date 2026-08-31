@@ -312,6 +312,57 @@
                 {% endif %}
             </div>
         {% endif %}
+
+        {% if officials_enabled and official_profile or officials_enabled and is_club_admin %}
+            <div class="card card-body h-full">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                    <h2 class="card-title">{% lucide "shield" size=18 %} {% trans "Official eligibility" %}</h2>
+                    {% if is_club_admin %}
+                        <button class="btn btn-outline btn-sm gap-2" type="button" onclick="document.getElementById('official_eligibility_modal').showModal()">{% lucide "pencil" size=14 %} {% trans "Edit" %}</button>
+                    {% endif %}
+                </div>
+
+                {% if official_profile and official_profile.level %}
+                    <dl>
+                        <div class="flex items-center justify-between gap-4 py-2">
+                            <dt class="text-sm text-muted">{% trans "Level" %}</dt>
+                            <dd class="text-sm font-semibold text-ink">{{ official_profile.level }}</dd>
+                        </div>
+                        <div class="flex items-center justify-between gap-4 py-2">
+                            <dt class="text-sm text-muted">{% trans "Valid until" %}</dt>
+                            <dd class="flex items-center gap-2">
+                                <span class="font-mono text-sm font-semibold text-ink">{{ official_profile.valid_until|default:"—" }}</span>
+                                {% if official_profile.is_currently_valid %}
+                                    <span class="badge badge-sm badge-success">{% trans "Valid" %}</span>
+                                {% elif official_profile.valid_until %}
+                                    <span class="badge badge-sm badge-error">{% trans "Expired" %}</span>
+                                {% else %}
+                                    <span class="badge badge-sm badge-warning">{% trans "No validity set" %}</span>
+                                {% endif %}
+                            </dd>
+                        </div>
+                    </dl>
+
+                    {% if official_profile.is_eligible %}
+                        <div class="mt-2 mb-1 font-display text-xs font-bold tracking-[.1em] text-muted uppercase">{% trans "Can officiate for" %}</div>
+                        <div class="flex flex-wrap gap-2">
+                            {% for team in official_profile.eligible_teams %}
+                                <span class="badge badge-outline">{{ team.name }}</span>
+                            {% empty %}
+                                <span class="text-sm text-muted">{% trans "This level has no teams linked yet." %}</span>
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        <div class="alert alert-warning mt-2">
+                            {% lucide "triangle-alert" size=16 %}
+                            <span>{% trans "Not currently eligible to officiate -- set or extend the validity date above to reinstate them." %}</span>
+                        </div>
+                    {% endif %}
+                {% else %}
+                    <p class="text-sm text-muted">{% trans "Not eligible to officiate for any team." %}</p>
+                {% endif %}
+            </div>
+        {% endif %}
     </div>
 
     {% if is_club_admin %}
@@ -319,6 +370,12 @@
         {% trans "Referee eligibility" as referee_eligibility_title %}
         {% trans "Save" as save_label %}
         {% include "controlpanel/_modal_form.html" with modal_id="referee_eligibility_modal" title=referee_eligibility_title form=referee_eligibility_form action_url=referee_eligibility_url submit_label=save_label submit_icon="save" %}
+    {% endif %}
+
+    {% if is_club_admin and officials_enabled %}
+        {% url 'management:member_official_eligibility_update' member.pk as official_eligibility_url %}
+        {% trans "Official eligibility" as official_eligibility_title %}
+        {% include "controlpanel/_modal_form.html" with modal_id="official_eligibility_modal" title=official_eligibility_title form=official_eligibility_form action_url=official_eligibility_url submit_label=save_label submit_icon="save" %}
     {% endif %}
 
     {% trans "Add parent" as add_parent_label %}

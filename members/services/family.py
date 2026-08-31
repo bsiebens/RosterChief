@@ -6,6 +6,7 @@ existing one.
 from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.utils import timezone
+from django.utils.translation import gettext_lazy as _
 
 from club.models import ClubMembership, Season
 from members.models import Family, FamilyMembership, Member
@@ -16,6 +17,50 @@ User = get_user_model()
 def find_member_by_email(email):
     """The Member behind a login email, if that account exists at all."""
     return Member.objects.filter(user__email__iexact=email).first()
+
+
+def family_contacts(member):
+    """Every parent/guardian on record in any family ``member`` belongs to
+    (almost always exactly one) -- each as {"member", "email", "role_label"},
+    deduplicated by email address (case-insensitively) and sorted by it for
+    a stable display order. A contact with no email of their own is skipped
+    entirely -- there's nothing to show or send to.
+
+    Used wherever a message meant for "the family" (a registration invoice
+    and its reminders) needs to reach everyone responsible for a child, not
+    just whoever happened to submit the online form that one time -- and
+    wherever staff needs to see who that actually is (management's own Dues
+    & billing page)."""
+    contacts = (
+        FamilyMembership.objects.filter(family__memberships__member=member, role__in=[FamilyMembership.FamilyRole.PARENT, FamilyMembership.FamilyRole.GUARDIAN])
+        .exclude(member=member)
+        .select_related("member")
+        .distinct()
+    )
+
+    seen_emails = set()
+    results = []
+    for contact in contacts:
+        email = contact.member.contact_email
+        if not email or email.lower() in seen_emails:
+            continue
+        seen_emails.add(email.lower())
+        results.append({"member": contact.member, "email": email, "role_label": FamilyMembership.FamilyRole(contact.role).label})
+    results.sort(key=lambda contact: contact["email"].lower())
+    return results
+
+
+def claim_label_for(member):
+    """How ``member`` reads when they've claimed something the rest of a
+    team can see (currently: EventTaskClaim) -- "<Family> family" when they
+    belong to one (leaning on Family.__str__'s own name-or-surnames-or-id
+    fallback), else their own name. Keeps the claim from broadcasting
+    exactly which parent or child in a family is covering it -- the team
+    only needs to know it's handled."""
+    family_membership = member.family_memberships.select_related("family").first()
+    if family_membership is not None:
+        return _("%(family)s family") % {"family": family_membership.family}
+    return member.get_full_name()
 
 
 def get_or_create_login_user(email):

@@ -20,7 +20,7 @@ from django.utils.translation import gettext_lazy as _
 from django.utils.translation import ngettext
 from django.views.generic import TemplateView, View
 
-from club.models import Season
+from club.models import ClubMembership, Season
 from club.services.access import can_add_news, current_season
 from controlpanel.messages import notify
 from events.models import Attendance, Event, EventSeries, Lineup, LineupSelection, Location, Opponent
@@ -1054,6 +1054,15 @@ class CoachSquadView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
         if self.active_team is not None and season is not None:
             roster = list(TeamMembership.objects.filter(team=self.active_team, season=season).select_related("member", "position").order_by("position__ordering", "member__last_name"))
             staff = list(StaffAssignment.objects.filter(team=self.active_team, season=season).select_related("member", "position").order_by("position__ordering", "member__last_name"))
+            # Same "not yet approved on Sign-up" warning management's own
+            # TeamDetailView shows -- a coach needs to see it just as much.
+            pending_member_ids = set(
+                ClubMembership.objects.filter(club=self.request.club, season=season, member_id__in=[membership.member_id for membership in roster], status=ClubMembership.StatusChoices.PENDING).values_list(
+                    "member_id", flat=True
+                )
+            )
+            for membership in roster:
+                membership.club_status_pending = membership.member_id in pending_member_ids
 
         return super().get_context_data(roster=roster, staff=staff, **kwargs)
 

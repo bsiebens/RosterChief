@@ -171,7 +171,7 @@ docker compose up -d --no-deps web
 
 ## Scheduled jobs
 
-Nine jobs run on a schedule via **host cron** calling `manage.py <job>` directly — there is no
+Ten jobs run on a schedule via **host cron** calling `manage.py <job>` directly — there is no
 `worker`/`beat` process (see "Sizing the server" for why: on a small box, two more persistent
 Django processes was real, measured memory pressure for a job volume light enough that a plain
 `docker compose run` one-off pays that cost for a few seconds instead of 24/7). Each job is a
@@ -184,6 +184,7 @@ class every one of them runs through.
 | `extend_event_series` | daily 03:00 | materialises recurring event occurrences so the calendar never runs dry |
 | `send_deadline_reminders` | daily 07:00 | nudges whoever hasn't answered an event, a week before its deadline (or start) |
 | `publish_scheduled_lineups` | every 15 min | publishes any coach-scheduled line-up whose publish time has arrived |
+| `poll_live_game_results` | every minute | refreshes score/live status from each game's competition data source, from 20 min before kickoff through 1h after its planned end (or until it's seen finishing) |
 | `renew_subscriptions` | daily 04:00 | opens the next billing period for clubs whose current one is running out |
 | `send_billing_reminders --commit` | daily 05:00 | emails club admins about outstanding platform fees, once per escalation level |
 | `archive_overdue_clubs --commit` | daily 06:00 | archives clubs unpaid past their grace period |
@@ -203,6 +204,7 @@ REMOTE_DIR=/home/bernard/RosterChief
 COMPOSE_FILE=compose.yaml
 
 0  3 * * *  flock -n /tmp/rosterchief-extend_event_series.lock -c "cd $REMOTE_DIR && docker compose -f $COMPOSE_FILE run --rm web python manage.py extend_event_series"
+*  *  *  *  *  flock -n /tmp/rosterchief-poll_live_game_results.lock -c "cd $REMOTE_DIR && docker compose -f $COMPOSE_FILE run --rm web python manage.py poll_live_game_results"
 0  7 * * *  flock -n /tmp/rosterchief-send_deadline_reminders.lock -c "cd $REMOTE_DIR && docker compose -f $COMPOSE_FILE run --rm web python manage.py send_deadline_reminders"
 0  4 * * *  flock -n /tmp/rosterchief-renew_subscriptions.lock -c "cd $REMOTE_DIR && docker compose -f $COMPOSE_FILE run --rm web python manage.py renew_subscriptions"
 0  5 * * *  flock -n /tmp/rosterchief-send_billing_reminders.lock -c "cd $REMOTE_DIR && docker compose -f $COMPOSE_FILE run --rm web python manage.py send_billing_reminders --commit"

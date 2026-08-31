@@ -20,6 +20,7 @@ from members.admin import FamilyAdmin
 from members.models import Family, FamilyMembership, Group, GroupMembership, Member, ParentClaim
 from members.services import MemberImportResult
 from members.services.claims import ClaimError, approve_claim, children_awaiting_a_parent, reject_claim, submit_claim, suggested_children
+from members.services.family import claim_label_for, family_contacts
 
 
 class MemberModelTests(TestCase):
@@ -899,11 +900,112 @@ class ParentClaimTests(TestCase):
         # submitted_by_user is authoritative -- a stale or mistyped parent_email
         # must never fork off a second User/Member for someone already known.
         user = User.objects.create_user(email="real.taylor@example.com", password="x")
-        parent = Member.objects.create(user=user, first_name="Taylor", last_name="Doe")
+        Member.objects.create(user=user, first_name="Taylor", last_name="Doe")
         claim = self.make_claim(parent_email="typo.taylor@example.com", submitted_by_user=user)
 
         approve_claim(claim, child=self.child, season=self.season)
 
         self.assertEqual(Member.objects.filter(first_name="Taylor", last_name="Doe").count(), 1)
         self.assertFalse(User.objects.filter(email="typo.taylor@example.com").exists())
+
+
+class FamilyContactsTests(TestCase):
+    """members.services.family.family_contacts -- every parent/guardian on
+    record for a member's own family, used both by the registration invoice
+    email (who it actually reaches) and Dues & billing's own Email column
+    (what it shows)."""
+
+    def setUp(self):
+        self.family = Family.objects.create()
+        self.child = Member.objects.create(first_name="Cam", last_name="Childless")
+        FamilyMembership.objects.create(family=self.family, member=self.child, role=FamilyMembership.FamilyRole.CHILD)
+
+    def make_contact(self, first_name, role, email="contact@example.com"):
+        member = Member.objects.create(first_name=first_name, last_name="Contact", email=email)
+        FamilyMembership.objects.create(family=self.family, member=member, role=role)
+        return member
+
+    def test_a_parent_is_included_and_labelled_parent(self):
+        parent = self.make_contact("Pia", FamilyMembership.FamilyRole.PARENT, email="pia@example.com")
+
+        contacts = family_contacts(self.child)
+
+        self.assertEqual(contacts, [{"member": parent, "email": "pia@example.com", "role_label": "parent"}])
+
+    def test_a_guardian_is_included_and_labelled_guardian(self):
+        guardian = self.make_contact("Gia", FamilyMembership.FamilyRole.GUARDIAN, email="gia@example.com")
+
+        contacts = family_contacts(self.child)
+
+        self.assertEqual(contacts, [{"member": guardian, "email": "gia@example.com", "role_label": "guardian"}])
+
+    def test_another_child_in_the_family_is_excluded(self):
+        self.make_contact("Sib", FamilyMembership.FamilyRole.CHILD, email="sib@example.com")
+
+        self.assertEqual(family_contacts(self.child), [])
+
+    def test_a_contact_with_no_email_is_excluded(self):
+        Member.objects.create(first_name="Noe", last_name="Mail")
+        FamilyMembership.objects.create(family=self.family, member=Member.objects.get(first_name="Noe"), role=FamilyMembership.FamilyRole.PARENT)
+
+        self.assertEqual(family_contacts(self.child), [])
+
+    def test_both_parents_are_included(self):
+        self.make_contact("Bernard", FamilyMembership.FamilyRole.PARENT, email="bernard@example.com")
+        self.make_contact("Charlotte", FamilyMembership.FamilyRole.PARENT, email="charlotte@example.com")
+
+        emails = {contact["email"] for contact in family_contacts(self.child)}
+
+        self.assertEqual(emails, {"bernard@example.com", "charlotte@example.com"})
+
+    def test_duplicate_emails_across_contacts_are_not_repeated(self):
+        self.make_contact("Pia", FamilyMembership.FamilyRole.PARENT, email="shared@example.com")
+        self.make_contact("Gia", FamilyMembership.FamilyRole.GUARDIAN, email="SHARED@example.com")
+
+        self.assertEqual(len(family_contacts(self.child)), 1)
+
+    def test_a_member_asking_about_their_own_family_is_not_their_own_contact(self):
+        parent = self.make_contact("Pia", FamilyMembership.FamilyRole.PARENT, email="pia@example.com")
+
+        contacts = family_contacts(parent)
+
+        self.assertEqual(contacts, [])
         self.assertEqual(FamilyMembership.objects.get(member=parent).family, self.family)
+
+
+class ClaimLabelForTests(TestCase):
+    """members.services.family.claim_label_for -- how a member reads once
+    they've claimed an EventTask slot: "<Family> family" when they belong to
+    one, their own name otherwise. Doesn't broadcast which specific parent
+    or child in a family is covering it."""
+
+    def test_a_standalone_member_shows_their_own_name(self):
+        member = Member.objects.create(first_name="Sam", last_name="Solo")
+
+        self.assertEqual(claim_label_for(member), "Sam Solo")
+
+    def test_a_member_in_a_named_family_shows_the_family_name(self):
+        family = Family.objects.create(name="Siebens")
+        member = Member.objects.create(first_name="Bernard", last_name="Siebens")
+        FamilyMembership.objects.create(family=family, member=member, role=FamilyMembership.FamilyRole.PARENT)
+
+        self.assertEqual(claim_label_for(member), "Siebens family")
+
+    def test_a_child_in_the_family_shows_the_same_family_label(self):
+        # The label doesn't distinguish which family member claimed it --
+        # a child claiming reads identically to their parent claiming.
+        family = Family.objects.create(name="Siebens")
+        child = Member.objects.create(first_name="Charlotte", last_name="Siebens")
+        FamilyMembership.objects.create(family=family, member=child, role=FamilyMembership.FamilyRole.CHILD)
+
+        self.assertEqual(claim_label_for(child), "Siebens family")
+
+    def test_an_unnamed_family_falls_back_to_the_surname_join(self):
+        # Family.__str__'s own fallback (no explicit name -- shared surnames
+        # instead) is what claim_label_for leans on, so this stays correct
+        # without duplicating that logic.
+        family = Family.objects.create()
+        member = Member.objects.create(first_name="Bernard", last_name="Siebens")
+        FamilyMembership.objects.create(family=family, member=member, role=FamilyMembership.FamilyRole.PARENT)
+
+        self.assertEqual(claim_label_for(member), "Siebens family")

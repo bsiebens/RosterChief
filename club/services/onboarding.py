@@ -74,13 +74,22 @@ def mark_bypassed(membership, requirement, *, user, note=""):
 
 def mark_incomplete(membership, requirement):
     """Undo a mark_complete/mark_bypassed -- kept as a row (not deleted) so the
-    document/note a club already collected isn't thrown away by an accidental
-    toggle."""
+    note a club already collected isn't thrown away by an accidental toggle.
+
+    Any uploaded document is deleted, though (not just detached) -- reopening
+    an item that already has one on file *is* how staff say "this was wrong,
+    it needs redoing" (e.g. the wrong photo got attached), on both the
+    member's own Documents tab and the Sign-up page's own checklist -- there's
+    no reason to go on serving a file staff just said isn't right, and the
+    family/member sees the item open again either way, prompting a fresh
+    upload."""
     status, _created = MemberRequirementStatus.objects.get_or_create(membership=membership, requirement=requirement)
     status.is_complete = False
     status.is_bypassed = False
     status.completed_at = None
     status.completed_by = None
+    if status.document:
+        status.document.delete(save=False)
     status.save()
 
     return status

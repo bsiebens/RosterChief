@@ -10,6 +10,8 @@ building the UI around it.
 
 import importlib
 
+from django.utils.translation import gettext_lazy as _
+
 from events.models import Competition
 
 
@@ -29,6 +31,18 @@ def fetch_game_info(event) -> bool:
     than erroring: missing access isn't a failure to report.
 
     Returns whether a fetch was actually attempted.
+
+    Two distinct failure modes, deliberately not folded into one generic
+    message any more (see events/competition/hockey.py's own real
+    implementations -- this stopped being "nothing's wired up yet" a while
+    ago): resolving `competition.module`/`competition.name` to an actual
+    class is a *configuration* problem (a typo in either field, or a class
+    that was renamed/removed) -- that's the only case that's genuinely "not
+    configured". Once that class is found, whatever update_game_information
+    itself raises (a network error, an unexpected response shape, a blank
+    event.external_game_id, ...) is a *fetch* problem and gets reported with
+    its own real message instead, so staff looking at a competition that's
+    demonstrably linked correctly aren't told it isn't.
     """
     competition = Competition.objects.filter(name=event.competition).select_related("flag").first()
     if competition is None or competition.flag is None or not competition.flag.is_active_for_club(event.club):
@@ -36,11 +50,13 @@ def fetch_game_info(event) -> bool:
 
     try:
         module = importlib.import_module(competition.module)
-        competition = getattr(module, competition.name)
+        competition_class = getattr(module, competition.name)
+    except (ImportError, AttributeError) as error:
+        raise CompetitionFetchError(_("“%(name)s” isn't wired up to a real data source yet.") % {"name": competition.name}) from error
 
-        competition().update_game_information(event=event)
-
-        return True
-
+    try:
+        competition_class().update_game_information(event=event)
     except Exception as error:
-        raise CompetitionFetchError("No competition data source is configured yet -- there's nothing to fetch from.") from error
+        raise CompetitionFetchError(_("Could not fetch game info from “%(name)s”: %(error)s") % {"name": competition.name, "error": error}) from error
+
+    return True

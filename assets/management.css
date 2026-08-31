@@ -1004,6 +1004,19 @@
         cursor: default;
     }
 
+    /* The team requested at registration (signup_list.html passes
+       membership.requested_team_ids) -- highlighted so it's the obvious
+       click among several teams, without looking already-placed (.placed
+       above, solid dark, means "already on this team" -- a different
+       fact). Loses to .placed when both are true (a chip that's both
+       requested and already placed reads as placed, the more important of
+       the two facts once acted on). */
+    .team-chip.requested:not(.placed):not(:disabled) {
+        border-color: var(--color-club);
+        color: var(--color-club-dark);
+        background: color-mix(in srgb, var(--color-club) 10%, var(--color-paper));
+    }
+
     /* Sidebar nav (management/templates/management/_nav_items.html). */
     .nav-item {
         display: flex;
@@ -1035,6 +1048,12 @@
         gap: 0.5rem;
         height: 1.875rem;
         padding-left: 1.375rem;
+        /* Matches .nav-item's own padding-inline right value -- without this a
+           sub-item's badge (e.g. Sign-up's count) sat flush against the
+           sidebar's true right edge while its parent nav-item's own badge (and
+           every other nav-item's) sat inset by this same amount, so their
+           right edges never lined up in one column. */
+        padding-right: 0.75rem;
         font-size: 0.875rem;
         color: var(--color-sidebar-fg-faint);
     }

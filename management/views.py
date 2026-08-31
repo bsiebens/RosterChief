@@ -30,6 +30,9 @@ from club.mixins import (
     NewsAuthorRequiredMixin,
     NewsEditRequiredMixin,
     NewsPublisherRequiredMixin,
+    OfficialsAdminRequiredMixin,
+    OfficialsManagerRequiredMixin,
+    OfficialsStaffRequiredMixin,
     ShopManagerRequiredMixin,
     TeamManagerRequiredMixin,
 )
@@ -43,11 +46,12 @@ from club.services.signup_linking import link_to_existing_member
 from controlpanel.messages import notify
 from controlpanel.mixins import RedirectOnInvalidMixin
 from controlpanel.services.statistics import club_attention, club_charts, club_statistics, unrostered_members
-from events.models import Attendance, Event, EventReferee, EventSeries, Location, Opponent, RefereeSignup
+from events.models import Attendance, Event, EventOfficial, EventReferee, EventSeries, EventTask, Location, OfficialSignup, Opponent, RefereeSignup
 from events.services.attendance import member_attendance_counts, member_attendance_sparkline, player_attendance_rankings, players_who_missed_recent_practices, team_attendance_rate, team_no_shows
 from events.services.calendar import add_months, agenda_groups, month_bounds, month_grid, season_grid, week_bounds, week_grid
 from events.services.competitions import CompetitionFetchError, fetch_game_info
 from events.services.notifications import dispatch_notify_new_event
+from events.services.officials import OfficialAssignmentError, add_external_official, assign_official, eligible_officials, needs_official_management, officials_enabled_for, remove_official, set_official_fee
 from events.services.rbihf_import import RBIHFImportError, apply_plan, build_plan, extract_team_id, fetch_html
 from events.services.recurrence import cancel_occurrence, detach_occurrence, generate_occurrences, propagate_series
 from events.services.referees import RefereeAssignmentError, add_external_referee, assign_referee, conflicting_events, eligible_referees, needs_referee_management, remove_referee, set_referee_fee
@@ -60,7 +64,7 @@ from formbuilder.services.reporting import form_report
 from members.forms import ClaimRejectForm, ClaimReviewForm
 from members.models import Family, FamilyMembership, Group, GroupMembership, Member, ParentClaim
 from members.services.claims import ClaimError, approve_claim, children_awaiting_a_parent, reject_claim, send_claim_approved_email, suggested_children
-from members.services.family import add_child_to_family, add_parent_to_family, attach_to_family, detach_from_family, find_member_by_email, get_or_create_login_user, grant_login, register_family
+from members.services.family import add_child_to_family, add_parent_to_family, attach_to_family, claim_label_for, detach_from_family, family_contacts, find_member_by_email, get_or_create_login_user, grant_login, register_family
 from news.models import News, NewsPhoto
 from news.services import dispatch_send_publish_notification, notify_editors_of_pending_review, render_body_html
 from notifications.models import Notification
@@ -70,10 +74,13 @@ from registration.services.invoicing import (
     active_batch_entries,
     batch_invoice_pdf,
     batch_totals,
+    membership_ids_awaiting_confirmation,
+    reconcile_membership_fees,
     registration_invoices_due_for_reminder,
     registrations_awaiting_confirmation,
 )
 from registration.services.notifications import confirm_and_send_invoice, send_registration_reminders
+from registration.services.pricing import team_number_pools, variant_prices
 from shop.models import Discount, Invoice, Order, OrderLine, Payment, Product, ProductCategory, ProductionStatus, ProductRegistrantDiscountTier, ProductVariant, Voucher, VoucherConsumption
 from shop.services.invoices import ShopInvoicePDFError, render_invoice_pdf
 from shop.services.notifications import dispatch_order_ready_for_pickup_notification
@@ -83,9 +90,8 @@ from shop.services.pricing import order_total
 from shop.services.production import in_production_lines, mark_line_received, mark_lines_in_production, pending_production_lines, sync_production_status
 from shop.services.stats import order_kpis, quantity_sold_by_product, quantity_sold_by_variant
 from shop.services.vouchers import delete_manual_consumption, record_manual_consumption, voucher_history
-from teams.models import NumberPool, NumberReservation, Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
-from teams.services import eligible_roster_members
-from teams.services.numbers import is_number_available
+from teams.models import NumberPool, NumberReservation, OfficialLevel, OfficialProfile, Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
+from teams.services import eligible_roster_members, place_member_on_team
 
 from .bulk_import import build_member_import_template, parse_member_import_rows, read_member_import_workbook
 from .email_previews import EMAIL_PREVIEWS, EMAIL_PREVIEWS_BY_KEY, render_preview
@@ -99,8 +105,11 @@ from .forms import (
     ClubSettingsForm,
     DiscountForm,
     EventForm,
+    EventOfficialFeeForm,
     EventRefereeFeeForm,
     EventSeriesForm,
+    EventTaskForm,
+    ExternalOfficialForm,
     ExternalRefereeForm,
     FamilyCreateForm,
     FieldFormSet,
@@ -113,12 +122,14 @@ from .forms import (
     LocationForm,
     MemberForm,
     MemberImportUploadForm,
+    MemberOfficialEligibilityForm,
     MemberRefereeEligibilityForm,
     NewsForm,
     NewsPhotoUploadForm,
     NewsPublishForm,
     NumberPoolForm,
     NumberReservationForm,
+    OfficialLevelForm,
     OnboardingRequirementForm,
     OpponentForm,
     OrderBulkMarkPaidForm,
@@ -154,7 +165,7 @@ from .forms import (
     VoucherForm,
     bulk_add_member_label,
 )
-from .pdf import PDFExportError, event_referee_form_pdf, membership_list_pdf, referee_form_colors
+from .pdf import PDFExportError, event_official_form_pdf, event_referee_form_pdf, membership_list_pdf, referee_form_colors
 from .pdf_previews import PDF_PREVIEWS, PDF_PREVIEWS_BY_KEY, render_pdf_preview
 from .recurrence_ui import describe_rrule
 from .shop_export import build_production_export, pop_production_export, stash_production_export
@@ -445,7 +456,13 @@ class MembershipListView(ClubAdminRequiredMixin, ListView):
         if fee_status == "not_paid":
             # Literally "does not have a paid status" -- unpaid, partially paid, and
             # waived all qualify; the dropdown can narrow to any single one of those.
-            memberships = memberships.exclude(fee_status__in=[ClubMembership.FeeStatus.PAID, ClubMembership.FeeStatus.PARTIALLY_PAID])
+            # A cancelled membership is excluded regardless of its own stale
+            # fee_status (cancel_membership never touches it, since nothing is
+            # genuinely owed on it any more) -- otherwise it kept reading as
+            # "still needs attention" here forever. Someone who explicitly
+            # wants to see it anyway can still pick Cancelled from the Status
+            # filter below, together with fee_status=all.
+            memberships = memberships.exclude(fee_status__in=[ClubMembership.FeeStatus.PAID, ClubMembership.FeeStatus.PARTIALLY_PAID]).exclude(status=ClubMembership.StatusChoices.CANCELLED)
         elif fee_status and fee_status != "all":
             memberships = memberships.filter(fee_status=fee_status)
 
@@ -461,7 +478,11 @@ class MembershipListView(ClubAdminRequiredMixin, ListView):
         if search:
             # Also matches by family -- searching "Smith" finds every member of a
             # family that has an explicit name of "Smith" or that includes anyone
-            # surnamed Smith, not just a member literally named Smith themself.
+            # surnamed Smith, not just a member literally named Smith themself --
+            # and by registration (invoice number or the contact who submitted
+            # it), so "REG-2026-00001" or the parent's own name finds every kid
+            # billed through that one registration, none of whom are individually
+            # named that.
             memberships = (
                 memberships.filter(member__first_name__icontains=search)
                 | memberships.filter(member__last_name__icontains=search)
@@ -469,6 +490,10 @@ class MembershipListView(ClubAdminRequiredMixin, ListView):
                 | memberships.filter(member__user__email__icontains=search)
                 | memberships.filter(member__family_memberships__family__name__icontains=search)
                 | memberships.filter(member__family_memberships__family__memberships__member__last_name__icontains=search)
+                | memberships.filter(registration_details__batch__invoice_number__icontains=search)
+                | memberships.filter(registration_details__batch__contact_first_name__icontains=search)
+                | memberships.filter(registration_details__batch__contact_last_name__icontains=search)
+                | memberships.filter(registration_details__batch__contact_email__icontains=search)
             )
 
         return memberships.distinct()
@@ -479,7 +504,14 @@ class MembershipListView(ClubAdminRequiredMixin, ListView):
 
         counts = {}
         if current is not None:
-            counts = {row["fee_status"]: row["count"] for row in ClubMembership.objects.filter(club=club, season=current, kind=ClubMembership.Kind.MEMBER).values("fee_status").annotate(count=Count("id"))}
+            # Excludes cancelled memberships -- nothing is genuinely owed (or
+            # settled) on one any more, so it shouldn't inflate Unpaid/
+            # Registered/Paid rate here, same reasoning the "not_paid" queryset
+            # filter above now applies.
+            counts = {
+                row["fee_status"]: row["count"]
+                for row in ClubMembership.objects.filter(club=club, season=current, kind=ClubMembership.Kind.MEMBER).exclude(status=ClubMembership.StatusChoices.CANCELLED).values("fee_status").annotate(count=Count("id"))
+            }
         paid = counts.get(ClubMembership.FeeStatus.PAID, 0)
         partial = counts.get(ClubMembership.FeeStatus.PARTIALLY_PAID, 0)
         unpaid = counts.get(ClubMembership.FeeStatus.UNPAID, 0)
@@ -525,25 +557,78 @@ class MembershipListView(ClubAdminRequiredMixin, ListView):
         for fm in family_memberships:
             family_memberships_by_member_id.setdefault(fm.member_id, []).append(fm)
         invoices_by_membership_id = {invoice.membership_id: invoice for invoice in DuesInvoice.objects.filter(membership__in=memberships)}
+        # Every membership's own registration batch, regardless of whether a
+        # separate DuesInvoice was also sent later -- used for grouping/the
+        # per-row registration link below. The Invoice column itself only
+        # shows this when there's no DuesInvoice (see registration_invoice_batch
+        # just below): a confirmed registration's own invoice is the "sent"
+        # record for a membership that has no DuesInvoice at all, but a
+        # membership with both (rare -- someone later sent a formal
+        # DuesInvoice too) shows the DuesInvoice there, the more deliberate,
+        # explicit record of the two -- it still came from this registration
+        # either way, so grouping/search must not lose track of it.
+        registration_batches_by_membership_id = {}
+        for details in RegistrationDetails.objects.filter(membership__in=memberships, batch__invoice_sent_at__isnull=False).select_related("batch"):
+            registration_batches_by_membership_id.setdefault(details.membership_id, details.batch)
         for membership in memberships:
             membership.member.family_memberships_display = family_memberships_by_member_id.get(membership.member_id, [])
             membership.remaining_balance_display = remaining_balance(membership)
-            membership.dues_invoice = invoices_by_membership_id.get(membership.pk)
-            # Same resolution "Send invoice" itself already uses (recipient_for)
-            # -- a member with no email of their own (the common case for a
-            # child with no login) falls back to a parent/guardian's, rather
-            # than the table just reading "-" for someone staff can, in fact,
-            # already reach.
-            contact_email, is_guardian_email = recipient_for(membership.member)
-            membership.contact_email_display = contact_email
-            membership.contact_email_is_guardian = is_guardian_email
-            # Nothing to collect on an already-settled or deliberately-exempted row.
-            if membership.fee_status in (ClubMembership.FeeStatus.PAID, ClubMembership.FeeStatus.WAIVED):
+            # Reads the plain local dict lookups below, not membership.dues_invoice
+            # itself: assigning None to a reverse-OneToOne descriptor (the line
+            # right after) doesn't make a later *read* of that same attribute
+            # return None -- it's a data descriptor, so the read still hits the
+            # DB and raises RelatedObjectDoesNotExist for real (only a template's
+            # own silent-variable-failure handling hides that; plain Python
+            # doesn't get that protection).
+            dues_invoice = invoices_by_membership_id.get(membership.pk)
+            membership.dues_invoice = dues_invoice
+            registration_batch = registration_batches_by_membership_id.get(membership.pk)
+            membership.registration_batch = registration_batch
+            membership.registration_invoice_batch = None if dues_invoice else registration_batch
+            membership.registration_invoice_is_overdue = bool(
+                registration_batch and registration_batch.invoice_due_date and registration_batch.invoice_due_date < timezone.localdate() and membership.fee_status != ClubMembership.FeeStatus.PAID
+            )
+            # Every parent/guardian on record, not just whoever the member's
+            # own contact_email happens to be (own email first when they
+            # have one, each guardian's own labelled by their actual role in
+            # the family) -- replaces a bare "-" for a member reachable only
+            # through a parent, and a single guessed guardian when there's
+            # more than one who should actually see this.
+            own_email = membership.member.contact_email
+            email_rows = [{"email": own_email, "label": None}] if own_email else []
+            for contact in family_contacts(membership.member):
+                if contact["email"].lower() == (own_email or "").lower():
+                    continue
+                email_rows.append({"email": contact["email"], "label": contact["role_label"]})
+            membership.email_rows = email_rows
+            # Nothing to collect on an already-settled, deliberately-exempted,
+            # or cancelled row -- a cancelled membership's own fee_status is
+            # never touched by cancel_membership, so it can still read UNPAID/
+            # PARTIALLY_PAID here even though there's genuinely nothing left
+            # to record a payment against or mark paid any more.
+            if membership.fee_status in (ClubMembership.FeeStatus.PAID, ClubMembership.FeeStatus.WAIVED) or membership.status == ClubMembership.StatusChoices.CANCELLED:
                 membership.record_payment_form = None
             else:
                 membership.record_payment_form = RecordFeePaymentForm()
 
-        return context | {"memberships": memberships}
+        # On by default -- a bare page load (no query string at all) has
+        # nothing to distinguish "the toggle" from "the very first visit
+        # with everything else at its own default" the way the other
+        # filters below can (their own <select>s always submit a value).
+        # Once the filter form is actually submitted once (even leaving
+        # every other filter at its default), the whole form -- checkbox
+        # included -- always posts back, so an absent "group" from then on
+        # genuinely means "unchecked", not "never asked".
+        group_by_registration = self.request.GET.get("group", "registration" if not self.request.GET else "") == "registration"
+        if group_by_registration:
+            # {% regroup %} (membership_list.html) needs its own input already
+            # sorted by the grouping key -- registration_batch groups first
+            # (by invoice number, so REG-2026-00001's own people land before
+            # REG-2026-00002's), a manually-created membership last, name
+            # order within each cluster either way.
+            memberships.sort(key=lambda membership: (membership.registration_batch is None, membership.registration_batch.invoice_number if membership.registration_batch else "", membership.member.last_name, membership.member.first_name))
+
+        return context | {"memberships": memberships, "group_by_registration": group_by_registration}
 
 
 class MembershipMarkPaidView(ClubAdminRequiredMixin, View):
@@ -940,6 +1025,8 @@ class MemberDetailView(ClubStaffRequiredMixin, DetailView):
 
         is_admin = is_club_admin(self.request.user, self.request.club)
         referee_profile = RefereeProfile.objects.filter(member=self.object).select_related("level").first()
+        officials_enabled = flag_is_active(self.request, "officials")
+        official_profile = OfficialProfile.objects.filter(member=self.object).select_related("level").first() if officials_enabled else None
         season = current_season(self.request.club)
         current_membership = ClubMembership.objects.filter(club=self.request.club, member=self.object, season=season).first()
 
@@ -965,6 +1052,9 @@ class MemberDetailView(ClubStaffRequiredMixin, DetailView):
             guardians=self.object.guardians,
             referee_profile=referee_profile,
             referee_eligibility_form=MemberRefereeEligibilityForm(club=self.request.club, member=self.object) if is_admin else None,
+            officials_enabled=officials_enabled,
+            official_profile=official_profile,
+            official_eligibility_form=MemberOfficialEligibilityForm(club=self.request.club, member=self.object) if is_admin and officials_enabled else None,
             show_attendance=show_attendance,
             attendance_sparkline=attendance_sparkline,
             attendance_counts=attendance_counts,
@@ -1016,6 +1106,30 @@ class MemberRefereeEligibilityUpdateView(MemberAdminRequiredMixin, RedirectOnInv
         member = self.get_member()
         form.save()
         notify(self.request, f"s|{_('Referee eligibility updated')}|" + _("Updated which teams “%(member)s” can referee for.") % {"member": member})
+        return redirect("management:member_detail", pk=member.pk)
+
+
+class MemberOfficialEligibilityUpdateView(OfficialsManagerRequiredMixin, RedirectOnInvalidMixin, FormView):
+    """The officials counterpart to MemberRefereeEligibilityUpdateView --
+    same shape, gated additionally on the "officials" flag."""
+
+    form_class = MemberOfficialEligibilityForm
+    http_method_names = ["post"]
+    invalid_redirect_url_name = "management:member_detail"
+
+    def get_invalid_redirect_kwargs(self):
+        return {"pk": self.kwargs["pk"]}
+
+    def get_member(self):
+        return get_object_or_404(members_visible_to(self.request.user, self.request.club, include_guardians=True), pk=self.kwargs["pk"])
+
+    def get_form_kwargs(self):
+        return super().get_form_kwargs() | {"club": self.request.club, "member": self.get_member()}
+
+    def form_valid(self, form):
+        member = self.get_member()
+        form.save()
+        notify(self.request, f"s|{_('Official eligibility updated')}|" + _("Updated which teams “%(member)s” can officiate for.") % {"member": member})
         return redirect("management:member_detail", pk=member.pk)
 
 
@@ -1226,6 +1340,17 @@ class TeamDetailView(ClubStaffRequiredMixin, DetailView):
         if season is not None:
             roster = list(TeamMembership.objects.filter(team=team, season=season).select_related("member", "position").order_by("position__ordering", "member__last_name"))
             staff = list(StaffAssignment.objects.filter(team=team, season=season).select_related("member", "position").order_by("position__ordering", "member__last_name"))
+            # Visible to any staff (not gated on can_manage, unlike the edit
+            # forms below) -- a coach needs to see who's still PENDING
+            # (registered, possibly already placed here, but not yet
+            # approved on Sign-up) just as much as an admin does.
+            pending_member_ids = set(
+                ClubMembership.objects.filter(club=club, season=season, member_id__in=[membership.member_id for membership in roster], status=ClubMembership.StatusChoices.PENDING).values_list(
+                    "member_id", flat=True
+                )
+            )
+            for membership in roster:
+                membership.club_status_pending = membership.member_id in pending_member_ids
             if can_manage:
                 # A number picked at registration is only ever a request
                 # (RegistrationDetails.requested_jersey_number) until staff
@@ -2174,6 +2299,87 @@ class RefereeListView(ClubStaffRequiredMixin, ListView):
         return members.select_related("referee_profile", "referee_profile__level").order_by("last_name", "first_name")
 
 
+class OfficialLevelListView(OfficialsStaffRequiredMixin, ListView):
+    """The officials counterpart to RefereeLevelListView."""
+
+    template_name = "management/official_level_list.html"
+    context_object_name = "levels"
+
+    def get_queryset(self):
+        return OfficialLevel.objects.filter(club=self.request.club).select_related("inherits_from").prefetch_related("teams")
+
+
+class OfficialLevelCreateView(OfficialsManagerRequiredMixin, CreateView):
+    model = OfficialLevel
+    form_class = OfficialLevelForm
+    template_name = "management/official_level_form.html"
+
+    def get_form_kwargs(self):
+        return super().get_form_kwargs() | {"club": self.request.club}
+
+    def form_valid(self, form):
+        form.instance.club = self.request.club
+        response = super().form_valid(form)
+        body = _("“%(level)s” created.") % {"level": self.object}
+        notify(self.request, f"s|{_('Official level created')}|{body}")
+        return response
+
+    def get_success_url(self):
+        return reverse("management:official_level_list")
+
+
+class OfficialLevelUpdateView(OfficialsManagerRequiredMixin, UpdateView):
+    model = OfficialLevel
+    form_class = OfficialLevelForm
+    template_name = "management/official_level_form.html"
+
+    def get_queryset(self):
+        return OfficialLevel.objects.filter(club=self.request.club)
+
+    def get_form_kwargs(self):
+        return super().get_form_kwargs() | {"club": self.request.club}
+
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        body = _("“%(level)s” updated.") % {"level": self.object}
+        notify(self.request, f"s|{_('Official level updated')}|{body}")
+        return response
+
+    def get_success_url(self):
+        return reverse("management:official_level_list")
+
+    def get_context_data(self, **kwargs):
+        return super().get_context_data(update_view=True, **kwargs)
+
+
+class OfficialLevelDeleteView(OfficialsManagerRequiredMixin, View):
+    def post(self, request, pk):
+        level = get_object_or_404(OfficialLevel.objects.filter(club=request.club), pk=pk)
+        name = str(level)
+        try:
+            level.delete()
+        except ProtectedError:
+            title = _("Can't delete")
+            body = _("“%(level)s” is still held by an official or inherited by another level, and can't be deleted.") % {"level": name}
+            notify(request, f"e|{title}|{body}")
+            return redirect("management:official_level_list")
+
+        body = _("“%(level)s” has been deleted.") % {"level": name}
+        notify(request, f"w|{_('Official level deleted')}|{body}")
+        return redirect("management:official_level_list")
+
+
+class OfficialListView(OfficialsStaffRequiredMixin, ListView):
+    """The officials counterpart to RefereeListView."""
+
+    template_name = "management/official_list.html"
+    context_object_name = "officials"
+
+    def get_queryset(self):
+        members = members_visible_to(self.request.user, self.request.club, include_guardians=True).filter(official_profile__isnull=False)
+        return members.select_related("official_profile", "official_profile__level").order_by("last_name", "first_name")
+
+
 class NumberListView(ClubStaffRequiredMixin, TemplateView):
     """One pool's full number range at a glance -- five states (see
     ``_tile_state`` below), building on top of what teams.services.numbers
@@ -2939,6 +3145,36 @@ class EventDetailView(ClubStaffRequiredMixin, DetailView):
             if can_manage_referees:
                 pending_signups = list(event.referee_signups.filter(status=RefereeSignup.Status.INVITED).select_related("member"))
 
+        # Same shape as the referee block above, gated additionally on the
+        # "officials" flag -- a club that's never turned it on gets none of
+        # this computed at all, not just hidden in the template.
+        officials_enabled = flag_is_active(self.request, "officials")
+        official_management_needed = False
+        officials = []
+        official_candidates = []
+        officials_full = False
+        pending_official_signups = []
+        if officials_enabled:
+            official_management_needed = needs_official_management(event)
+            if official_management_needed:
+                officials = list(event.officials.select_related("member", "assigned_by").order_by("member__last_name", "member__first_name"))
+                officials_full = len(officials) >= event.max_officials
+                if can_manage_referees and not officials_full:
+                    for candidate in eligible_officials(event):
+                        conflicts = conflicting_events(candidate, event)
+                        candidate.has_conflict = bool(conflicts)
+                        candidate.conflict_titles = ", ".join(conflict.title for conflict in conflicts)
+                        official_candidates.append(candidate)
+                if can_manage_referees:
+                    pending_official_signups = list(event.official_signups.filter(status=OfficialSignup.Status.INVITED).select_related("member"))
+
+        tasks = list(event.tasks.prefetch_related("claims__member").order_by("created_at"))
+        for task in tasks:
+            task.claim_labels = [claim_label_for(claim.member) for claim in task.claims.all()]
+            task.is_full = len(task.claim_labels) >= task.needed_quantity
+            task.edit_form = EventTaskForm(instance=task)
+        task_form = EventTaskForm()
+
         return super().get_context_data(
             can_manage=can_manage,
             can_manage_referees=can_manage_referees,
@@ -2950,6 +3186,14 @@ class EventDetailView(ClubStaffRequiredMixin, DetailView):
             referee_candidates=referee_candidates,
             referees_full=referees_full,
             pending_signups=pending_signups,
+            officials_enabled=officials_enabled,
+            official_management_needed=official_management_needed,
+            officials=officials,
+            official_candidates=official_candidates,
+            officials_full=officials_full,
+            pending_official_signups=pending_official_signups,
+            tasks=tasks,
+            task_form=task_form,
             **kwargs,
         )
 
@@ -3095,6 +3339,198 @@ class EventRefereeFormPdfView(ClubAdminRequiredMixin, View):
         return response
 
 
+class EventOfficialAssignView(OfficialsAdminRequiredMixin, View):
+    """The officials counterpart to EventRefereeAssignView -- same shape,
+    same reasoning."""
+
+    def get_event(self):
+        return get_object_or_404(Event.objects.filter(club=self.request.club), pk=self.kwargs["pk"])
+
+    def post(self, request, pk):
+        event = self.get_event()
+        member = get_object_or_404(eligible_officials(event), pk=request.POST.get("member"))
+        assigned_by = Member.objects.filter(user=request.user).first()
+
+        try:
+            assign_official(event, member, assigned_by=assigned_by)
+        except OfficialAssignmentError as error:
+            notify(request, f"e|{_('Could not assign official')}|{error}")
+        else:
+            notify(request, f"s|{_('Official assigned')}|" + _("“%(member)s” will officiate this game.") % {"member": member})
+
+        return _redirect_next_or(request, reverse("management:event_detail", args=[event.pk]))
+
+
+class EventOfficialRemoveView(OfficialsAdminRequiredMixin, View):
+    def get_event(self):
+        return get_object_or_404(Event.objects.filter(club=self.request.club), pk=self.kwargs["pk"])
+
+    def post(self, request, pk, official_pk):
+        event = self.get_event()
+        official = get_object_or_404(EventOfficial.objects.filter(event=event), pk=official_pk)
+        name = official.display_name
+        remove_official(official)
+        notify(request, f"w|{_('Official removed')}|" + _("“%(name)s” is no longer officiating this game.") % {"name": name})
+        return _redirect_next_or(request, reverse("management:event_detail", args=[event.pk]))
+
+
+class EventOfficialAddExternalView(OfficialsAdminRequiredMixin, View):
+    """The officials counterpart to EventRefereeAddExternalView."""
+
+    def get_event(self):
+        return get_object_or_404(Event.objects.filter(club=self.request.club), pk=self.kwargs["pk"])
+
+    def post(self, request, pk):
+        event = self.get_event()
+        form = ExternalOfficialForm(request.POST)
+        fallback = _redirect_next_or(request, reverse("management:event_detail", args=[event.pk]))
+
+        if not form.is_valid():
+            notify(request, f"e|{_('Could not add official')}|{_('A name is required.')}")
+            return fallback
+
+        assigned_by = Member.objects.filter(user=request.user).first()
+        try:
+            add_external_official(event, form.cleaned_data["name"], assigned_by=assigned_by)
+        except OfficialAssignmentError as error:
+            notify(request, f"e|{_('Could not add official')}|{error}")
+        else:
+            notify(request, f"s|{_('Official added')}|" + _("“%(name)s” will officiate this game.") % {"name": form.cleaned_data["name"]})
+
+        return fallback
+
+
+class EventOfficialFeeUpdateView(OfficialsAdminRequiredMixin, FormView):
+    """The officials counterpart to EventRefereeFeeUpdateView."""
+
+    form_class = EventOfficialFeeForm
+    http_method_names = ["post"]
+
+    def get_event(self):
+        return get_object_or_404(Event.objects.filter(club=self.request.club), pk=self.kwargs["pk"])
+
+    def get_official(self):
+        return get_object_or_404(EventOfficial.objects.filter(event=self.get_event()), pk=self.kwargs["official_pk"])
+
+    def get_fallback(self):
+        return _redirect_next_or(self.request, reverse("management:event_detail", args=[self.kwargs["pk"]]))
+
+    def get_form_kwargs(self):
+        return super().get_form_kwargs() | {"instance": self.get_official()}
+
+    def form_invalid(self, form):
+        for error in form.errors.values():
+            notify(self.request, f"e|{_('Could not update fee')}|{' '.join(error)}")
+        return self.get_fallback()
+
+    def form_valid(self, form):
+        official = self.get_official()
+        set_official_fee(official, fee=form.cleaned_data["fee"], km=form.cleaned_data["km"], km_rate=form.cleaned_data["km_rate"])
+        notify(self.request, f"s|{_('Fee updated')}|" + _("Updated the fee for “%(name)s”.") % {"name": official.display_name})
+        return self.get_fallback()
+
+
+class EventOfficialFormPdfView(OfficialsAdminRequiredMixin, View):
+    """The officials counterpart to EventRefereeFormPdfView -- a separate PDF
+    (own heading, lists EventOfficial rows), reusing the same
+    render_pdf/resolve_document_address/referee_form_colors helpers."""
+
+    def get(self, request, pk):
+        event = get_object_or_404(Event.objects.filter(club=request.club).prefetch_related("teams", "officials__member"), pk=pk)
+        document_address = resolve_document_address(request.club)
+        officials = list(event.officials.all())
+        context = {"club": request.club, "event": event, "officials": officials, "document_address": document_address, "grand_total": sum((official.total_payable for official in officials), Decimal("0"))} | referee_form_colors(
+            request.club
+        )
+
+        try:
+            pdf = event_official_form_pdf(context)
+        except PDFExportError as error:
+            notify(request, f"e|{_('PDF unavailable')}|{error}")
+            return redirect(reverse("management:event_detail", args=[event.pk]))
+
+        response = HttpResponse(pdf, content_type="application/pdf")
+        response["Content-Disposition"] = f'attachment; filename="official-form-{event.pk}.pdf"'
+        return response
+
+
+class EventTaskCreateView(EventManagerRequiredMixin, View):
+    """Reachable via "Add task" on the event detail page's Tasks panel --
+    team managers of one of this event's own teams/groups, or admins. See
+    club.mixins.EventManagerRequiredMixin's own docstring for the exact
+    authority check."""
+
+    def get_event(self):
+        return get_object_or_404(Event.objects.filter(club=self.request.club), pk=self.kwargs["pk"])
+
+    def get_teams(self):
+        return self.get_event().teams.all()
+
+    def get_groups(self):
+        return self.get_event().groups.all()
+
+    def post(self, request, pk):
+        event = self.get_event()
+        form = EventTaskForm(request.POST)
+        if not form.is_valid():
+            for error in form.errors.values():
+                notify(request, f"e|{_('Could not add task')}|{' '.join(error)}")
+            return redirect(reverse("management:event_detail", args=[event.pk]))
+
+        task = form.save(commit=False)
+        task.event = event
+        task.created_by = Member.objects.filter(user=request.user).first()
+        task.save()
+        notify(request, f"s|{_('Task added')}|" + _("“%(title)s” was added to this event.") % {"title": task.title})
+        return redirect(reverse("management:event_detail", args=[event.pk]))
+
+
+class EventTaskUpdateView(EventManagerRequiredMixin, View):
+    def get_event(self):
+        return get_object_or_404(Event.objects.filter(club=self.request.club), pk=self.kwargs["pk"])
+
+    def get_task(self):
+        return get_object_or_404(EventTask.objects.filter(event=self.get_event()), pk=self.kwargs["task_pk"])
+
+    def get_teams(self):
+        return self.get_event().teams.all()
+
+    def get_groups(self):
+        return self.get_event().groups.all()
+
+    def post(self, request, pk, task_pk):
+        event = self.get_event()
+        task = self.get_task()
+        form = EventTaskForm(request.POST, instance=task)
+        if not form.is_valid():
+            for error in form.errors.values():
+                notify(request, f"e|{_('Could not update task')}|{' '.join(error)}")
+            return redirect(reverse("management:event_detail", args=[event.pk]))
+
+        form.save()
+        notify(request, f"s|{_('Task updated')}|" + _("“%(title)s” was updated.") % {"title": task.title})
+        return redirect(reverse("management:event_detail", args=[event.pk]))
+
+
+class EventTaskDeleteView(EventManagerRequiredMixin, View):
+    def get_event(self):
+        return get_object_or_404(Event.objects.filter(club=self.request.club), pk=self.kwargs["pk"])
+
+    def get_teams(self):
+        return self.get_event().teams.all()
+
+    def get_groups(self):
+        return self.get_event().groups.all()
+
+    def post(self, request, pk, task_pk):
+        event = self.get_event()
+        task = get_object_or_404(EventTask.objects.filter(event=event), pk=task_pk)
+        title = task.title
+        task.delete()
+        notify(request, f"w|{_('Task deleted')}|" + _("“%(title)s” was removed from this event.") % {"title": title})
+        return redirect(reverse("management:event_detail", args=[event.pk]))
+
+
 def upcoming_games_needing_referee_management(club):
     """Upcoming home games a club-arranged referee is needed for -- federation-
     managed teams never appear here, see events.services.referees.needs_referee_management.
@@ -3150,6 +3586,48 @@ def games_missing_referees_count(club, limit=10):
     return sum(1 for game in games if game.referee_count == 0)
 
 
+def upcoming_games_needing_official_management(club):
+    """The officials counterpart to upcoming_games_needing_referee_management
+    -- same shape, same reasoning, keyed off Team.official_management
+    instead."""
+    return (
+        Event.objects.filter(
+            club=club,
+            kind=Event.EventKind.GAME,
+            cancelled=False,
+            location__is_home=True,
+            start__gte=timezone.now(),
+            teams__official_management=Team.OfficialManagement.CLUB,
+        )
+        .distinct()
+        .order_by("start")
+    )
+
+
+def official_workload_stats(club):
+    """The officials counterpart to referee_workload_stats."""
+    season = current_season(club)
+    queryset = EventOfficial.objects.filter(event__club=club, member__isnull=False)
+    if season is not None:
+        queryset = queryset.filter(event__start__date__gte=season.start_date, event__start__date__lte=season.end_date)
+    return list(
+        queryset.values("member__id", "member__first_name", "member__last_name")
+        .annotate(games=Count("id"), total_fees=Sum("fee"))
+        .order_by("-games", "member__last_name")
+    )
+
+
+def games_missing_officials_count(club, limit=10):
+    """The officials counterpart to games_missing_referees_count -- 0 when
+    the "officials" flag is off for this club, same as every other officials
+    entry point (checked here, not just at the view layer, since this feeds
+    the nav badge directly)."""
+    if not officials_enabled_for(club):
+        return 0
+    games = upcoming_games_needing_official_management(club).annotate(official_count=Count("officials", distinct=True))[:limit]
+    return sum(1 for game in games if game.official_count == 0)
+
+
 class RefereeManagementDashboardView(MemberAdminRequiredMixin, TemplateView):
     """One-stop admin view of every upcoming home game that needs a
     club-arranged referee (federation-managed teams never appear here, see
@@ -3175,8 +3653,17 @@ class RefereeManagementDashboardView(MemberAdminRequiredMixin, TemplateView):
     def get_context_data(self, **kwargs):
         club = self.request.club
         range_choice = self.get_range()
+        officials_enabled = officials_enabled_for(club)
 
-        queryset = upcoming_games_needing_referee_management(club).select_related("location", "opponent").prefetch_related("teams", "referees__member", "referees__assigned_by")
+        # Combined per game (confirmed via AskUserQuestion) -- a game that
+        # needs either referees or officials belongs in this one list, not
+        # two separate pages. A club with the flag off never runs the
+        # official-management query at all, so the referee-only case costs
+        # nothing extra.
+        queryset = upcoming_games_needing_referee_management(club)
+        if officials_enabled:
+            queryset = (queryset | upcoming_games_needing_official_management(club)).distinct().order_by("start")
+        queryset = queryset.select_related("location", "opponent").prefetch_related("teams", "referees__member", "referees__assigned_by", "officials__member", "officials__assigned_by")
 
         if range_choice in ("week", "two_weeks"):
             today = timezone.localdate()
@@ -3190,27 +3677,55 @@ class RefereeManagementDashboardView(MemberAdminRequiredMixin, TemplateView):
         kpi_understaffed = 0
         kpi_fully_staffed = 0
         kpi_fees_pending = 0
+        kpi_no_official = 0
+        kpi_officials_understaffed = 0
+        kpi_officials_fully_staffed = 0
+        kpi_official_fees_pending = 0
 
         for game in games:
+            game.needs_referees = needs_referee_management(game)
             game.referee_rows = list(game.referees.all())
             game.referees_full = len(game.referee_rows) >= game.max_referees
             game.referee_candidates = []
             game.fees_pending = any(not referee.fee for referee in game.referee_rows)
             game.pending_signups = list(game.referee_signups.filter(status=RefereeSignup.Status.INVITED).select_related("member")) if not game.referees_full else []
-            if not game.referee_rows:
-                kpi_no_referee += 1
-            elif not game.referees_full:
-                kpi_understaffed += 1
-            else:
-                kpi_fully_staffed += 1
-            if game.fees_pending:
-                kpi_fees_pending += 1
-            if not game.referees_full:
-                for candidate in eligible_referees(game):
-                    conflicts = conflicting_events(candidate, game)
-                    candidate.has_conflict = bool(conflicts)
-                    candidate.conflict_titles = ", ".join(conflict.title for conflict in conflicts)
-                    game.referee_candidates.append(candidate)
+            if game.needs_referees:
+                if not game.referee_rows:
+                    kpi_no_referee += 1
+                elif not game.referees_full:
+                    kpi_understaffed += 1
+                else:
+                    kpi_fully_staffed += 1
+                if game.fees_pending:
+                    kpi_fees_pending += 1
+                if not game.referees_full:
+                    for candidate in eligible_referees(game):
+                        conflicts = conflicting_events(candidate, game)
+                        candidate.has_conflict = bool(conflicts)
+                        candidate.conflict_titles = ", ".join(conflict.title for conflict in conflicts)
+                        game.referee_candidates.append(candidate)
+
+            game.needs_officials = officials_enabled and needs_official_management(game)
+            game.official_rows = list(game.officials.all())
+            game.officials_full = len(game.official_rows) >= game.max_officials
+            game.official_candidates = []
+            game.official_fees_pending = any(not official.fee for official in game.official_rows)
+            game.pending_official_signups = list(game.official_signups.filter(status=OfficialSignup.Status.INVITED).select_related("member")) if not game.officials_full else []
+            if game.needs_officials:
+                if not game.official_rows:
+                    kpi_no_official += 1
+                elif not game.officials_full:
+                    kpi_officials_understaffed += 1
+                else:
+                    kpi_officials_fully_staffed += 1
+                if game.official_fees_pending:
+                    kpi_official_fees_pending += 1
+                if not game.officials_full:
+                    for candidate in eligible_officials(game):
+                        conflicts = conflicting_events(candidate, game)
+                        candidate.has_conflict = bool(conflicts)
+                        candidate.conflict_titles = ", ".join(conflict.title for conflict in conflicts)
+                        game.official_candidates.append(candidate)
 
         stats = referee_workload_stats(club)
         kpi_active_referees = len(stats)
@@ -3229,6 +3744,8 @@ class RefereeManagementDashboardView(MemberAdminRequiredMixin, TemplateView):
             }
         }
 
+        official_stats = official_workload_stats(club) if officials_enabled else []
+
         return super().get_context_data(
             games=games,
             range_choice=range_choice,
@@ -3242,6 +3759,12 @@ class RefereeManagementDashboardView(MemberAdminRequiredMixin, TemplateView):
             kpi_total_assignments=kpi_total_assignments,
             kpi_avg_games_per_referee=kpi_avg_games_per_referee,
             charts=charts,
+            officials_enabled=officials_enabled,
+            kpi_no_official=kpi_no_official,
+            kpi_officials_understaffed=kpi_officials_understaffed,
+            kpi_officials_fully_staffed=kpi_officials_fully_staffed,
+            kpi_official_fees_pending=kpi_official_fees_pending,
+            official_stats=official_stats,
             **kwargs,
         )
 
@@ -3363,9 +3886,10 @@ class EventFetchGameInfoView(EventManagerRequiredMixin, View):
     """Refresh a game's score/status from its competition -- see
     events.services.competitions.fetch_game_info, which gates on the
     competition's feature flag being active for this club and otherwise
-    no-ops. No data source is wired up yet either way, so an actual fetch
-    attempt always reports the same honest "not configured" error; the
-    button/view exist so a real integration only has to replace that function."""
+    no-ops. RBIHF/CEHL (events/competition/hockey.py) are real, wired-up
+    data sources; CompetitionFetchError's own message distinguishes a
+    genuine configuration problem from a fetch that failed for some other
+    reason (network, unexpected response shape, ...)."""
 
     def get_event(self):
         return get_object_or_404(Event.objects.filter(club=self.request.club), pk=self.kwargs["pk"])
@@ -4835,7 +5359,7 @@ class RegistrationInvoiceReviewView(ClubAdminRequiredMixin, View):
         return (
             RegistrationDetails.objects.filter(batch=batch)
             .exclude(membership__status=ClubMembership.StatusChoices.CANCELLED)
-            .select_related("membership__member", "product_variant__product", "requested_team")
+            .select_related("membership__member", "product_variant__product", "requested_team", "requested_position")
             .order_by("membership__member__last_name", "membership__member__first_name")
         )
 
@@ -4846,33 +5370,105 @@ class RegistrationInvoiceReviewView(ClubAdminRequiredMixin, View):
             notify(request, f"w|{_('Nothing to invoice')}|{_('Every entry in this registration is cancelled -- there is nothing left to confirm.')}")
             return redirect("management:registration_invoice_queue")
 
-        formset = RegistrationInvoiceLineFormSet(queryset=queryset, prefix="lines")
+        pools = team_number_pools(request.club, batch.season)
+        prices = variant_prices(request.club, batch.season)
+        formset = RegistrationInvoiceLineFormSet(queryset=queryset, prefix="lines", form_kwargs={"club": request.club, "season": batch.season, "team_number_pools": pools})
         confirm_form = RegistrationInvoiceConfirmForm(initial={"manual_discount_amount": batch.manual_discount_amount, "manual_discount_note": batch.manual_discount_note})
-        return render(request, self.template_name, {"batch": batch, "formset": formset, "confirm_form": confirm_form})
+        return render(request, self.template_name, {"batch": batch, "formset": formset, "confirm_form": confirm_form, "team_number_pools": pools, "variant_prices": prices})
+
+    def place_confirmed_entries(self, batch):
+        """Auto-places every active entry that got a team confirmed on this
+        same screen -- a player onto the team (teams.services.
+        place_member_on_team, the same idempotent path a manual Sign-up
+        "Place in" click uses), a volunteer as staff. An entry with no team
+        chosen is simply skipped, never blocking confirmation (a player can
+        still be placed later from Sign-up's own "Place in" chips, same as
+        today). Stamps the result back onto resulting_team_membership/
+        resulting_staff_assignment so a later cancellation can clean up
+        exactly this placement -- see club.services.cancellation.
+        cancel_membership's own docstring."""
+        for entry in active_batch_entries(batch):
+            if entry.requested_team_id is None:
+                continue
+            member = entry.membership.member
+            if entry.entry_kind == RegistrationDetails.EntryKind.PLAYER:
+                team_membership = place_member_on_team(member, entry.requested_team, batch.season, jersey_number=entry.requested_jersey_number)
+                entry.resulting_team_membership = team_membership
+                entry.save(update_fields=["resulting_team_membership"])
+            else:
+                staff_assignment, _created = StaffAssignment.objects.get_or_create(team=entry.requested_team, member=member, season=batch.season, defaults={"position": entry.requested_position})
+                entry.resulting_staff_assignment = staff_assignment
+                entry.save(update_fields=["resulting_staff_assignment"])
 
     def post(self, request, pk):
         batch = self.get_batch(request, pk)
         queryset = self.get_queryset(batch)
-        formset = RegistrationInvoiceLineFormSet(request.POST, queryset=queryset, prefix="lines")
+        # Snapshotted *before* the formset below binds to request.POST and
+        # overwrites each instance with the submitted values -- reconcile_
+        # membership_fees needs to know what each line contributed before
+        # this save to work out the delta, and by the time formset.is_valid()
+        # has run, form.instance already holds the new values instead.
+        before_by_entry_id = {entry.pk: (Decimal("0") if entry.excluded_from_invoice else entry.price) for entry in queryset}
+
+        pools = team_number_pools(request.club, batch.season)
+        formset = RegistrationInvoiceLineFormSet(request.POST, queryset=queryset, prefix="lines", form_kwargs={"club": request.club, "season": batch.season, "team_number_pools": pools})
         confirm_form = RegistrationInvoiceConfirmForm(request.POST)
 
         if not formset.is_valid() or not confirm_form.is_valid():
-            return render(request, self.template_name, {"batch": batch, "formset": formset, "confirm_form": confirm_form})
+            return render(request, self.template_name, {"batch": batch, "formset": formset, "confirm_form": confirm_form, "team_number_pools": pools, "variant_prices": variant_prices(request.club, batch.season)})
 
         formset.save()
-        batch.manual_discount_amount = confirm_form.cleaned_data["manual_discount_amount"]
+        batch.manual_discount_amount = confirm_form.cleaned_data["manual_discount_amount"] or Decimal("0")
         batch.manual_discount_note = confirm_form.cleaned_data["manual_discount_note"]
         batch.save(update_fields=["manual_discount_amount", "manual_discount_note"])
+        # Keeps ClubMembership.fee_amount (what Dues & billing/mobile/
+        # reminders actually read) in step with what was just edited here --
+        # see its own docstring for why this can't just re-derive fee_amount
+        # from scratch.
+        reconcile_membership_fees(batch, before_by_entry_id)
 
         if not active_batch_entries(batch):
             notify(request, f"e|{_('Nothing to invoice')}|{_('Every entry in this registration is now cancelled or excluded -- there is nothing left to confirm.')}")
             return redirect("management:registration_invoice_review", pk=batch.pk)
 
         sent = confirm_and_send_invoice(batch, due_in_days=confirm_form.cleaned_data["due_in_days"], request=request)
+        # After confirming, not before -- placement (and Sign-up visibility)
+        # is a consequence of confirmation, not a precondition of it. Runs
+        # regardless of whether the email above actually sent -- confirming
+        # and billing already succeed independently of mail delivery
+        # everywhere else in this flow, and a placed-but-unemailed
+        # registration is still a real one.
+        self.place_confirmed_entries(batch)
+
         if sent:
             notify(request, f"s|{_('Invoice sent')}|{_('Invoice %(number)s has been confirmed and emailed.') % {'number': batch.invoice_number}}")
         else:
             notify(request, f"w|{_('Invoice confirmed, email not sent')}|{_('Invoice %(number)s has been confirmed, but the email could not be sent.') % {'number': batch.invoice_number}}")
+        return redirect("management:registration_invoice_queue")
+
+
+class RegistrationBatchCancelView(ClubAdminRequiredMixin, View):
+    """Withdraws a whole registration from the Registrations review screen
+    -- cancels every membership it covers (club.services.cancellation.
+    cancel_membership per one, same as SignupCancelView/RegistrationCancelView
+    already use for a single person). Only reachable pre-confirmation, same
+    gate RegistrationInvoiceReviewView.get_batch already uses -- nothing's
+    been placed on a team yet at this stage (placement only happens at
+    confirm time), so there's no team-placement cleanup to do here
+    specifically; a confirmed registration is instead cancelled per-person,
+    from Sign-up or the family's own status page."""
+
+    def post(self, request, pk):
+        batch = get_object_or_404(RegistrationBatch.objects.filter(club=request.club, invoice_sent_at__isnull=True), pk=pk)
+        membership_ids = batch.entries.values_list("membership", flat=True).distinct()
+        cancelled = 0
+        for membership in ClubMembership.objects.filter(pk__in=membership_ids):
+            cancel_membership(membership)
+            cancelled += 1
+
+        title = _("Registration cancelled")
+        body = ngettext("%(count)d person's registration was cancelled.", "%(count)d people's registrations were cancelled.", cancelled) % {"count": cancelled}
+        notify(request, f"w|{title}|{body}")
         return redirect("management:registration_invoice_queue")
 
 
@@ -4907,6 +5503,70 @@ def _registration_invoice_status(memberships):
     return _("Unpaid"), "badge-error"
 
 
+class RegistrationInvoiceDetailView(ClubAdminRequiredMixin, View):
+    """Read-only "checkout screen" for one already-confirmed registration --
+    every person/membership/team/price line it actually billed, plus the
+    total. Reached from InvoiceListView's own registration rows, in place of
+    a plain link to the contact's member page -- there being a real page for
+    a whole registration's own line items now, same shape
+    RegistrationInvoiceReviewView shows while it's still pending, minus the
+    editing (once invoice_sent_at is set this is what was actually
+    confirmed, not a form to keep changing). 404s pre-confirmation -- that
+    one's still being worked from the review screen itself, not viewed
+    here."""
+
+    template_name = "management/registration_invoice_detail.html"
+
+    def get(self, request, pk):
+        batch = get_object_or_404(RegistrationBatch.objects.filter(club=request.club, invoice_sent_at__isnull=False).select_related("season"), pk=pk)
+        entries = active_batch_entries(batch)
+        subtotal, discount_amount, total = batch_totals(entries, batch.manual_discount_amount)
+        contact = find_member_by_email(batch.contact_email)
+        memberships = {}
+        for entry in entries:
+            memberships.setdefault(entry.membership_id, entry.membership)
+        status_label, status_css = _registration_invoice_status(memberships.values())
+        return render(
+            request,
+            self.template_name,
+            {
+                "batch": batch,
+                "entries": entries,
+                "subtotal": subtotal,
+                "discount_amount": discount_amount,
+                "total": total,
+                "contact": contact,
+                "status_label": status_label,
+                "status_css": status_css,
+                "all_paid": all(membership.fee_status in (ClubMembership.FeeStatus.PAID, ClubMembership.FeeStatus.WAIVED) for membership in memberships.values()),
+            },
+        )
+
+
+class RegistrationInvoiceMarkPaidView(ClubAdminRequiredMixin, View):
+    """Marks every membership this confirmed registration still covers as
+    paid, in one go -- club.services.fees.mark_as_paid per membership, the
+    same service Dues & billing's own per-row/bulk "Mark ... paid" actions
+    already use, so there's exactly one place that decides how a membership
+    becomes paid. A secondary path to that same action, reachable straight
+    from this registration's own checkout screen (RegistrationInvoiceDetailView)
+    without having to jump to Dues & billing and find the right rows there
+    first."""
+
+    def post(self, request, pk):
+        batch = get_object_or_404(RegistrationBatch.objects.filter(club=request.club, invoice_sent_at__isnull=False), pk=pk)
+        memberships = {}
+        for entry in active_batch_entries(batch):
+            memberships.setdefault(entry.membership_id, entry.membership)
+
+        with transaction.atomic():
+            for membership in memberships.values():
+                mark_as_paid(membership, recorded_by=request.user)
+
+        notify(request, f"s|{_('Marked as paid')}|{_('Every person in this registration is now marked as paid.')}")
+        return redirect("management:registration_invoice_detail", pk=batch.pk)
+
+
 class InvoiceListView(ClubStaffRequiredMixin, TemplateView):
     """Every invoice this club has ever sent -- shop order invoices,
     membership dues invoices, and registration invoices together, newest
@@ -4919,9 +5579,11 @@ class InvoiceListView(ClubStaffRequiredMixin, TemplateView):
     There's nothing on an order or dues invoice worth its own detail page
     beyond what the order/membership page already shows, so every row's
     "View" link lands there, same reasoning the old shop-only version of
-    this page already had -- a registration row's own "View" lands on its
-    contact's member page for the same reason, there being no other detail
-    page for a whole registration to have.
+    this page already had -- a registration row's own "View" instead lands
+    on RegistrationInvoiceDetailView's own read-only checkout screen (every
+    person/team/price line the batch actually billed), not any one person's
+    member page: a registration is about the whole group, not any single
+    contact.
 
     NOT gated behind the "shop" feature flag (unlike every other view in
     this file's own Shop section, ShopManagerRequiredMixin) -- dues and
@@ -5092,7 +5754,7 @@ class InvoiceListView(ClubStaffRequiredMixin, TemplateView):
                     "date": batch.invoice_sent_at.date(),
                     "status_label": status_label,
                     "status_css": status_css,
-                    "detail_url": reverse("management:member_detail", kwargs={"pk": contact.pk}),
+                    "detail_url": reverse("management:registration_invoice_detail", kwargs={"pk": batch.pk}),
                     "download_url": reverse("management:registration_invoice_pdf", kwargs={"pk": batch.pk}),
                 }
             )
@@ -5650,6 +6312,27 @@ class MemberRequirementDocumentView(ClubStaffRequiredMixin, View):
 # --- Sign-up (admin only) ----------------------------------------------------------
 
 
+def signup_queue_count(club, season):
+    """How many current-season MEMBER-kind memberships still have something
+    left for the Sign-up queue (SignupDashboardView below) to do -- the same
+    "billed and either PENDING or not yet clean" filter that view itself
+    applies, just a count rather than the full annotated/formed rows a nav
+    badge has no use for. Computed via annotate_onboarding_status's own
+    batched queries (not is_signup_clean's per-membership onboarding_complete
+    property, which would N+1) since this runs on every admin page load, not
+    just Sign-up's own."""
+    if season is None:
+        return 0
+    memberships = list(ClubMembership.objects.filter(club=club, season=season, kind=ClubMembership.Kind.MEMBER).exclude(pk__in=membership_ids_awaiting_confirmation(club)))
+    annotate_onboarding_status(memberships)
+    clean_fee_statuses = (ClubMembership.FeeStatus.PAID, ClubMembership.FeeStatus.WAIVED)
+    return sum(
+        1
+        for membership in memberships
+        if not (membership.status == ClubMembership.StatusChoices.ACTIVE and membership.onboarding_open == 0 and membership.fee_status in clean_fee_statuses)
+    )
+
+
 class SignupDashboardView(ClubAdminRequiredMixin, TemplateView):
     """Every current-season MEMBER-kind membership, checklist status and fee status
     side by side, plus which teams they've been placed on so far -- the D3-inspired
@@ -5659,7 +6342,15 @@ class SignupDashboardView(ClubAdminRequiredMixin, TemplateView):
     of that boundary, unlike the rest of the Members section which MEMBER_ADMIN can
     also reach.
 
-    Team placement (SignupPlaceInTeamView) creates the roster row immediately,
+    A registration-originated membership doesn't show up here at all until its
+    own invoice has been reviewed and confirmed on the Registrations screen
+    (registration.services.invoicing.membership_ids_awaiting_confirmation) --
+    billing review comes first now; this queue is the onboarding review step
+    that follows it. A manually-created membership (no registration behind it)
+    has nothing to wait on and shows immediately, same as always.
+
+    Team placement (SignupPlaceInTeamView, or already done automatically at
+    confirm time for anyone a team was chosen for) creates the roster row
     regardless of status -- see events.services.attendance.effective_members and
     club.services.onboarding.blocked_member_ids_for_event for how an event's
     invitations/selection still exclude a member per event kind until whatever
@@ -5683,7 +6374,12 @@ class SignupDashboardView(ClubAdminRequiredMixin, TemplateView):
             # more than one request -- a second team, or player and referee
             # both), so it's a to-many relation: prefetch_related, not
             # select_related.
-            memberships = list(ClubMembership.objects.filter(club=club, season=season, kind=ClubMembership.Kind.MEMBER).select_related("member").prefetch_related("registration_details__requested_team"))
+            memberships = list(
+                ClubMembership.objects.filter(club=club, season=season, kind=ClubMembership.Kind.MEMBER)
+                .exclude(pk__in=membership_ids_awaiting_confirmation(club))
+                .select_related("member")
+                .prefetch_related("registration_details__requested_team")
+            )
             # Sorted in Python, not via .order_by("-status", ...): StatusChoices'
             # string values only put PENDING first alphabetically by accident, and
             # that would silently break the moment a choice's value changes.
@@ -5693,7 +6389,15 @@ class SignupDashboardView(ClubAdminRequiredMixin, TemplateView):
             for membership in memberships:
                 membership.checklist = checklist_for(membership)
                 membership.blocked_kinds = blocking_event_kinds(membership)
-                membership.teams_registered = teams.filter(roster__member_id=membership.member_id, roster__season=season).distinct()
+                # Either kind of placement counts as "already placed" here -- a
+                # roster spot (TeamMembership, players) or a staff spot
+                # (StaffAssignment, volunteers auto-placed at confirm time by
+                # RegistrationInvoiceReviewView.place_confirmed_entries). Without
+                # the second half, a confirmed volunteer's own team read as "Not
+                # placed yet" here forever, even with a real StaffAssignment
+                # already on record.
+                membership.teams_registered = teams.filter(Q(roster__member_id=membership.member_id, roster__season=season) | Q(staff_assignments__member_id=membership.member_id, staff_assignments__season=season)).distinct()
+                membership.requested_team_ids = {details.requested_team_id for details in membership.registration_details.all() if details.requested_team_id}
                 membership.placement_form = SignupTeamPlacementForm(club=club, season=season, member=membership.member)
                 membership.link_form = SignupLinkMemberForm(club=club, exclude_member=membership.member)
                 membership.is_clean = is_signup_clean(membership)
@@ -5791,15 +6495,20 @@ class SignupPlaceInTeamView(ClubAdminRequiredMixin, View):
             # roster page -- team_bulk_add.html/TeamMembershipForm's own initial=
             # already show it as a *hint* once staff opens edit, but nothing wrote
             # it onto the real roster row until now, so it read as unset ("-") in
-            # the meantime. Re-checked, not blindly trusted: something else may
-            # have claimed the number since the request was made.
-            if team.pool is not None:
-                requested_number = (
-                    RegistrationDetails.objects.filter(membership=membership, requested_team=team).exclude(requested_jersey_number=None).values_list("requested_jersey_number", flat=True).first()
-                )
-                if requested_number is not None and is_number_available(team.pool, season, requested_number, for_member=membership.member):
-                    form.instance.jersey_number = requested_number
-            form.save()
+            # the meantime. teams.services.place_member_on_team re-checks it against
+            # the pool itself (not blindly trusted -- something else may have
+            # claimed it since the request was made), same shared path the
+            # Registrations review screen's own confirm-time auto-placement uses,
+            # so the two can never drift apart.
+            requested_number = RegistrationDetails.objects.filter(membership=membership, requested_team=team).exclude(requested_jersey_number=None).values_list("requested_jersey_number", flat=True).first()
+            team_membership = place_member_on_team(membership.member, team, season, jersey_number=requested_number)
+            # Drops this specific request out of the pending state (same idea as
+            # VolunteerPlaceView's own stamp-back for a StaffAssignment) -- without
+            # it, cancelling this membership later would have no way to know this
+            # placement came from a registration at all, and would leave it
+            # standing instead of cleaning it up (club.services.cancellation.
+            # cancel_membership).
+            RegistrationDetails.objects.filter(membership=membership, requested_team=team, resulting_team_membership__isnull=True).update(resulting_team_membership=team_membership)
             ok = True
             level, title, body = "s", _("Placed on team"), _("%(member)s added to %(team)s.") % {"member": membership.member, "team": form.cleaned_data["team"]}
 

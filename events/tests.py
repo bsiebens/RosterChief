@@ -3,6 +3,7 @@ from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from io import StringIO
 from types import SimpleNamespace
+from unittest import mock
 
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
@@ -20,10 +21,10 @@ from club.services.onboarding import mark_bypassed, mark_complete
 from features.models import JobRun, JobToggle, Maintenance
 from members.models import Group, GroupMembership, Member
 from notifications.models import Notification
-from teams.models import Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership
+from teams.models import OfficialLevel, OfficialProfile, Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership
 
 from .admin import EventAdminForm
-from .models import Attendance, Competition, Event, EventReferee, EventSeries, Lineup, LineupSelection, Location, Opponent, RefereeSignup
+from .models import Attendance, Competition, Event, EventOfficial, EventReferee, EventSeries, EventTask, EventTaskClaim, Lineup, LineupSelection, Location, OfficialSignup, Opponent, RefereeSignup
 from .services import (
     blocked_upcoming_events_for_member,
     cancel_occurrence,
@@ -41,6 +42,17 @@ from .services import (
 from .services.attendance import member_attendance_counts
 from .services.calendar import add_months, agenda_groups, month_bounds, month_grid, season_grid, week_bounds, week_grid
 from .services.lineup import cancel_scheduled_publish, notify_dropout, publish_lineup, schedule_lineup_publish, selected_members_by_position, toggle_selection
+from .services.officials import (
+    OfficialAssignmentError,
+    accept_official_signup,
+    add_external_official,
+    assign_official,
+    decline_official_signup,
+    eligible_officials,
+    needs_official_management,
+    set_official_fee,
+    sync_official_invites,
+)
 from .services.rbihf_import import RBIHFImportError, apply_plan, build_plan, extract_team_id, parse_fixtures, suggested_location, suggested_opponent
 from .services.referees import (
     RefereeAssignmentError,
@@ -55,6 +67,7 @@ from .services.referees import (
     set_referee_fee,
     sync_referee_invites,
 )
+from .services.tasks import TaskClaimError, claim_task, unclaim_task
 
 
 class EventsTestBase(TestCase):
@@ -1878,6 +1891,318 @@ class RefereeSignupServiceTests(EventsTestBase):
         self.assertTrue(EventReferee.objects.filter(event=game, member=self.referee, assigned_by=self.alice).exists())
 
 
+class OfficialsTestBase(EventsTestBase):
+    """Shared scaffolding for every officials test: the "officials" waffle
+    flag active for self.club (sync_official_invites -- the one code path
+    that runs with no request, off every event save/team-change signal --
+    checks this itself; every other officials function is flag-agnostic,
+    same as events.services.officials' own module docstring explains)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        flag = get_waffle_flag_model().objects.create(name="officials")
+        flag.clubs.add(cls.club)
+
+
+class EventOfficialModelTests(OfficialsTestBase):
+    def test_str(self):
+        event = self.make_event(title="Cup Final")
+        official = Member.objects.create(first_name="Off", last_name="Icial")
+        assignment = EventOfficial.objects.create(event=event, member=official, assigned_by=self.alice)
+
+        self.assertEqual(str(assignment), "Cup Final - Off Icial")
+
+    def test_member_unique_per_event(self):
+        event = self.make_event()
+        official = Member.objects.create(first_name="Off", last_name="Icial")
+        EventOfficial.objects.create(event=event, member=official, assigned_by=self.alice)
+
+        with self.assertRaises(IntegrityError):
+            EventOfficial.objects.create(event=event, member=official, assigned_by=self.alice)
+
+    def test_member_xor_external_name_is_enforced(self):
+        event = self.make_event()
+
+        with self.assertRaises(IntegrityError):
+            EventOfficial.objects.create(event=event, assigned_by=self.alice)
+
+    def test_max_officials_defaults_to_two(self):
+        event = self.make_event()
+        self.assertEqual(event.max_officials, 2)
+
+
+class OfficialServiceTests(OfficialsTestBase):
+    """events.services.officials -- mirrors RefereeServiceTests' own coverage
+    of the shared eligibility/capacity logic (see that class for the
+    exhaustive case-by-case breakdown); this class re-confirms it against
+    the separate official model/table/flag, not every edge case twice."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.home_ground = Location.objects.create(club=cls.club, name="Home Ground", address="1 St", city="Town", zip_code="1000", country="BE", is_home=True)
+        cls.away_ground = Location.objects.create(club=cls.club, name="Away Ground", address="2 St", city="Town", zip_code="1000", country="BE")
+
+        cls.level = OfficialLevel.objects.create(club=cls.club, name="Regional")
+        cls.level.teams.add(cls.team)
+
+        cls.official = Member.objects.create(first_name="Off", last_name="Icial")
+        cls.official_profile = OfficialProfile.objects.create(member=cls.official, level=cls.level, valid_until=timezone.localdate() + timedelta(days=30))
+
+    def make_home_game(self, **kwargs):
+        kwargs.setdefault("kind", Event.EventKind.GAME)
+        kwargs.setdefault("location", self.home_ground)
+        kwargs.setdefault("teams", None)
+        teams = kwargs.pop("teams")
+        event = self.make_event(**kwargs)
+        event.teams.add(teams or self.team)
+        return event
+
+    def test_eligible_officials_returns_qualified_members_for_a_home_game(self):
+        game = self.make_home_game()
+        self.assertEqual(set(eligible_officials(game)), {self.official})
+
+    def test_needs_official_management_false_for_a_federation_managed_team(self):
+        self.team.official_management = Team.OfficialManagement.FEDERATION
+        self.team.save(update_fields=["official_management"])
+        game = self.make_home_game()
+
+        self.assertFalse(needs_official_management(game))
+
+    def test_federation_managed_for_officials_does_not_affect_referees(self):
+        # official_management and referee_management are independent fields
+        # -- confirmed via AskUserQuestion during planning.
+        self.team.official_management = Team.OfficialManagement.FEDERATION
+        self.team.save(update_fields=["official_management"])
+        game = self.make_home_game()
+
+        self.assertFalse(needs_official_management(game))
+        self.assertTrue(needs_referee_management(game))
+
+    def test_eligible_officials_includes_a_higher_level_via_inheritance(self):
+        national = OfficialLevel.objects.create(club=self.club, name="National", inherits_from=self.level)
+        national_official = Member.objects.create(first_name="Nat", last_name="Ional")
+        OfficialProfile.objects.create(member=national_official, level=national, valid_until=timezone.localdate() + timedelta(days=30))
+
+        game = self.make_home_game()
+
+        self.assertIn(national_official, set(eligible_officials(game)))
+
+    def test_assign_official_creates_the_row(self):
+        game = self.make_home_game()
+
+        assignment = assign_official(game, self.official, assigned_by=self.alice)
+
+        self.assertEqual(assignment.event, game)
+        self.assertEqual(assignment.member, self.official)
+
+    def test_assign_official_rejects_once_at_capacity(self):
+        game = self.make_home_game(max_officials=1)
+        assign_official(game, self.official, assigned_by=self.alice)
+        second = Member.objects.create(first_name="Second", last_name="Off")
+        OfficialProfile.objects.create(member=second, level=self.level, valid_until=timezone.localdate() + timedelta(days=30))
+
+        with self.assertRaises(OfficialAssignmentError):
+            assign_official(game, second, assigned_by=self.alice)
+
+        self.assertEqual(game.officials.count(), 1)
+
+    def test_assign_official_rejects_the_same_member_twice(self):
+        game = self.make_home_game()
+        assign_official(game, self.official, assigned_by=self.alice)
+
+        with self.assertRaises(OfficialAssignmentError):
+            assign_official(game, self.official, assigned_by=self.alice)
+
+    def test_add_external_official_creates_a_memberless_row(self):
+        game = self.make_home_game()
+
+        assignment = add_external_official(game, "Guest Official", assigned_by=self.alice)
+
+        self.assertIsNone(assignment.member)
+        self.assertTrue(assignment.is_external)
+        self.assertEqual(assignment.display_name, "Guest Official")
+
+    def test_add_external_official_rejects_a_blank_name(self):
+        game = self.make_home_game()
+        with self.assertRaises(OfficialAssignmentError):
+            add_external_official(game, "   ", assigned_by=self.alice)
+
+    def test_set_official_fee_computes_totals(self):
+        game = self.make_home_game()
+        assignment = assign_official(game, self.official, assigned_by=self.alice)
+
+        set_official_fee(assignment, fee=Decimal("25.00"), km=Decimal("40"), km_rate=Decimal("0.35"))
+
+        assignment.refresh_from_db()
+        self.assertEqual(assignment.km_total, Decimal("14.00"))
+        self.assertEqual(assignment.total_payable, Decimal("39.00"))
+
+
+class OfficialSignupServiceTests(OfficialsTestBase):
+    """events.services.officials.sync_official_invites/accept_official_signup/
+    decline_official_signup -- mirrors RefereeSignupServiceTests, plus the
+    officials-specific "off unless the flag is on" behaviour."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.home_ground = Location.objects.create(club=cls.club, name="Home Ground", address="1 St", city="Town", zip_code="1000", country="BE", is_home=True)
+        cls.level = OfficialLevel.objects.create(club=cls.club, name="Regional")
+        cls.level.teams.add(cls.team)
+        cls.official = Member.objects.create(first_name="Off", last_name="Icial")
+        cls.official_profile = OfficialProfile.objects.create(member=cls.official, level=cls.level, valid_until=timezone.localdate() + timedelta(days=30))
+
+    def make_home_game(self, **kwargs):
+        kwargs.setdefault("kind", Event.EventKind.GAME)
+        kwargs.setdefault("location", self.home_ground)
+        event = self.make_event(**kwargs)
+        event.teams.add(self.team)
+        return event
+
+    def test_creating_a_home_game_invites_eligible_officials(self):
+        game = self.make_home_game()
+        self.assertTrue(OfficialSignup.objects.filter(event=game, member=self.official, status=OfficialSignup.Status.INVITED).exists())
+
+    def test_accept_creates_a_real_event_official_assignment(self):
+        game = self.make_home_game()
+        signup = OfficialSignup.objects.get(event=game, member=self.official)
+
+        accept_official_signup(signup)
+
+        assignment = EventOfficial.objects.get(event=game, member=self.official)
+        self.assertIsNone(assignment.assigned_by)
+        signup.refresh_from_db()
+        self.assertEqual(signup.status, OfficialSignup.Status.ACCEPTED)
+
+    def test_decline_after_accepting_removes_the_self_service_assignment(self):
+        game = self.make_home_game()
+        signup = OfficialSignup.objects.get(event=game, member=self.official)
+        accept_official_signup(signup)
+
+        decline_official_signup(signup)
+
+        self.assertFalse(EventOfficial.objects.filter(event=game, member=self.official).exists())
+
+    def test_sync_does_not_reinvite_someone_who_already_responded(self):
+        game = self.make_home_game()
+        signup = OfficialSignup.objects.get(event=game, member=self.official)
+        signup.status = OfficialSignup.Status.DECLINED
+        signup.responded_at = timezone.now()
+        signup.save()
+
+        sync_official_invites(game)
+
+        signup.refresh_from_db()
+        self.assertEqual(signup.status, OfficialSignup.Status.DECLINED)
+
+    def test_sync_does_nothing_when_the_flag_is_off_for_this_club(self):
+        get_waffle_flag_model().objects.filter(name="officials").first().clubs.remove(self.club)
+
+        game = self.make_home_game()
+
+        self.assertFalse(OfficialSignup.objects.filter(event=game).exists())
+
+    def test_sync_does_nothing_when_no_officials_flag_exists_at_all(self):
+        # A brand-new install/club with the Flag row never created at all --
+        # officials_enabled_for must not blow up on a missing Flag.
+        get_waffle_flag_model().objects.filter(name="officials").delete()
+
+        game = self.make_home_game()
+
+        self.assertFalse(OfficialSignup.objects.filter(event=game).exists())
+
+
+class EventTaskModelTests(EventsTestBase):
+    def test_str(self):
+        event = self.make_event(title="Home Opener")
+        task = EventTask.objects.create(event=event, title="Bring fruit")
+
+        self.assertEqual(str(task), "Home Opener - Bring fruit")
+
+    def test_needed_quantity_defaults_to_one(self):
+        event = self.make_event()
+        task = EventTask.objects.create(event=event, title="Bring fruit")
+
+        self.assertEqual(task.needed_quantity, 1)
+
+    def test_claim_unique_per_member_per_task(self):
+        event = self.make_event()
+        task = EventTask.objects.create(event=event, title="Bring fruit")
+        EventTaskClaim.objects.create(task=task, member=self.alice)
+
+        with self.assertRaises(IntegrityError):
+            EventTaskClaim.objects.create(task=task, member=self.alice)
+
+    def test_deleting_the_event_deletes_its_tasks(self):
+        event = self.make_event()
+        task = EventTask.objects.create(event=event, title="Bring fruit")
+
+        event.delete()
+
+        self.assertFalse(EventTask.objects.filter(pk=task.pk).exists())
+
+
+class ClaimTaskServiceTests(EventsTestBase):
+    """events.services.tasks.claim_task/unclaim_task -- the row-locked
+    capacity check against EventTask.needed_quantity, same shape as
+    events.services.referees/officials' own _lock_and_check_capacity."""
+
+    def make_task(self, needed_quantity=1):
+        event = self.make_event()
+        return EventTask.objects.create(event=event, title="Bring fruit", needed_quantity=needed_quantity)
+
+    def test_claim_creates_the_row(self):
+        task = self.make_task()
+
+        claim = claim_task(task, self.alice)
+
+        self.assertEqual(claim.task, task)
+        self.assertEqual(claim.member, self.alice)
+
+    def test_claim_rejects_the_same_member_twice(self):
+        task = self.make_task()
+        claim_task(task, self.alice)
+
+        with self.assertRaises(TaskClaimError):
+            claim_task(task, self.alice)
+
+    def test_claim_rejects_once_at_capacity(self):
+        task = self.make_task(needed_quantity=1)
+        claim_task(task, self.alice)
+
+        with self.assertRaises(TaskClaimError):
+            claim_task(task, self.bob)
+
+        self.assertEqual(task.claims.count(), 1)
+
+    def test_a_second_slot_can_be_claimed_when_quantity_allows_it(self):
+        task = self.make_task(needed_quantity=2)
+        claim_task(task, self.alice)
+
+        claim_task(task, self.bob)
+
+        self.assertEqual(task.claims.count(), 2)
+
+    def test_unclaim_deletes_the_row(self):
+        task = self.make_task()
+        claim = claim_task(task, self.alice)
+
+        unclaim_task(claim)
+
+        self.assertFalse(EventTaskClaim.objects.filter(pk=claim.pk).exists())
+
+    def test_unclaim_frees_the_slot_for_someone_else(self):
+        task = self.make_task(needed_quantity=1)
+        claim = claim_task(task, self.alice)
+        unclaim_task(claim)
+
+        claim_task(task, self.bob)
+
+        self.assertEqual(task.claims.count(), 1)
+
+
 class CalendarGridTests(EventsTestBase):
     """events.services.calendar -- date-range math and grid layout behind the
     Events page's Week/Month/Season views."""
@@ -2251,3 +2576,135 @@ class PublishScheduledLineupsTests(EventsTestBase):
         run = JobRun.objects.get(name="events.tasks.publish_scheduled_lineups")
         self.assertEqual(run.status, JobRun.Status.SUCCESS)
         self.assertIn("Published", run.detail)
+
+
+class PollLiveGameResultsTests(EventsTestBase):
+    """events.management.commands.poll_live_game_results -- the per-minute sweep
+    that keeps a game's score/live status fresh from its competition's data
+    source, from shortly before kickoff through a while after the final
+    whistle. See events.services.competitions.fetch_game_info for the actual
+    per-club gating and events.competition.hockey for what a real fetch does."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.competition = Competition.objects.get(name="RBIHF")
+        cls.competition.flag.clubs.add(cls.club)
+
+    def setUp(self):
+        # Same Maintenance-cache leak concern as the other job test classes above.
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def make_game(self, **kwargs):
+        kwargs.setdefault("kind", Event.EventKind.GAME)
+        kwargs.setdefault("competition", "RBIHF")
+        kwargs.setdefault("external_game_id", "1234")
+        return self.make_event(**kwargs)
+
+    def mock_response(self, *, live, score_a=0, score_b=0):
+        response = mock.Mock(status_code=200)
+        response.json.return_value = {"live": live, "scoreA": score_a, "scoreB": score_b}
+        return response
+
+    def test_a_game_starting_soon_is_polled_and_updated(self):
+        game = self.make_game(start=timezone.now() + timedelta(minutes=10))
+
+        # No location is set on these test games, so is_home_game is False and
+        # RBIHF.update_game_information takes the away branch (score_for comes
+        # from scoreB, not scoreA) -- see events/competition/hockey.py.
+        with mock.patch("events.competition.hockey.requests.get", return_value=self.mock_response(live=True, score_b=2)) as mock_get:
+            result = call_command("poll_live_game_results")
+
+        mock_get.assert_called_once()
+        game.refresh_from_db()
+        self.assertTrue(game.is_live)
+        self.assertIn("Checked 1 game(s); fetched 1, 0 failed", result)
+
+    def test_ignores_a_game_starting_too_far_ahead(self):
+        self.make_game(start=timezone.now() + timedelta(hours=2))
+
+        with mock.patch("events.competition.hockey.requests.get") as mock_get:
+            call_command("poll_live_game_results")
+
+        mock_get.assert_not_called()
+
+    def test_polls_a_game_still_within_the_trailing_hour(self):
+        game = self.make_game(start=timezone.now() - timedelta(hours=3), end=timezone.now() - timedelta(minutes=30))
+
+        with mock.patch("events.competition.hockey.requests.get", return_value=self.mock_response(live=False, score_b=3)):
+            call_command("poll_live_game_results")
+
+        game.refresh_from_db()
+        self.assertEqual(game.score_for, 3)
+
+    def test_ignores_a_game_past_its_trailing_hour(self):
+        self.make_game(start=timezone.now() - timedelta(hours=4), end=timezone.now() - timedelta(hours=2))
+
+        with mock.patch("events.competition.hockey.requests.get") as mock_get:
+            call_command("poll_live_game_results")
+
+        mock_get.assert_not_called()
+
+    def test_ignores_a_game_with_no_competition_configured(self):
+        self.make_game(start=timezone.now() + timedelta(minutes=5), competition="")
+
+        with mock.patch("events.competition.hockey.requests.get") as mock_get:
+            call_command("poll_live_game_results")
+
+        mock_get.assert_not_called()
+
+    def test_stops_polling_once_a_live_game_finishes(self):
+        game = self.make_game(start=timezone.now() - timedelta(minutes=5))
+
+        with mock.patch("events.competition.hockey.requests.get", return_value=self.mock_response(live=True)):
+            call_command("poll_live_game_results")
+        game.refresh_from_db()
+        self.assertTrue(game.is_live)
+        self.assertIsNone(game.live_score_polling_done_at)
+
+        with mock.patch("events.competition.hockey.requests.get", return_value=self.mock_response(live=False, score_a=1, score_b=4)):
+            call_command("poll_live_game_results")
+        game.refresh_from_db()
+        self.assertFalse(game.is_live)
+        self.assertEqual(game.score_for, 4)
+        self.assertIsNotNone(game.live_score_polling_done_at)
+
+        with mock.patch("events.competition.hockey.requests.get") as mock_get:
+            call_command("poll_live_game_results")
+        mock_get.assert_not_called()
+
+    def test_a_fetch_failure_does_not_stop_the_rest_of_the_sweep(self):
+        # Event's default ordering is -start, so the later-starting game is
+        # fetched first -- pin both starts explicitly so the side_effect list
+        # below lines up with a known call order rather than one that's only
+        # deterministic by accident.
+        now = timezone.now()
+        self.make_game(title="Boom", start=now + timedelta(minutes=6))
+        ok_game = self.make_game(title="Fine", external_game_id="5678", start=now + timedelta(minutes=5))
+
+        with mock.patch("events.competition.hockey.requests.get", side_effect=[ConnectionError("boom"), self.mock_response(live=True)]):
+            result = call_command("poll_live_game_results")
+
+        ok_game.refresh_from_db()
+        self.assertTrue(ok_game.is_live)
+        self.assertIn("Checked 2 game(s); fetched 1, 1 failed", result)
+
+    def test_raises_during_maintenance_instead_of_silently_skipping(self):
+        Maintenance.start(user=None)
+
+        with self.assertRaises(CommandError):
+            call_command("poll_live_game_results")
+
+    def test_raises_when_paused_from_the_control_panel(self):
+        JobToggle.set_enabled("events.tasks.poll_live_game_results", False)
+
+        with self.assertRaises(CommandError):
+            call_command("poll_live_game_results")
+
+    def test_writes_a_successful_job_run(self):
+        call_command("poll_live_game_results")
+
+        run = JobRun.objects.get(name="events.tasks.poll_live_game_results")
+        self.assertEqual(run.status, JobRun.Status.SUCCESS)
+        self.assertIn("Checked 0 game(s)", run.detail)

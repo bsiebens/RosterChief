@@ -1,0 +1,90 @@
+{% load i18n lucide ui %}
+{% comment %}
+    One row of membership_list.html's own table -- a separate include so it
+    can be looped both plainly and inside a {% regroup %} (see
+    group_by_registration there) without duplicating the markup.
+{% endcomment %}
+<tr>
+    <td><input type="checkbox" class="checkbox membership-row-checkbox" name="membership_ids" value="{{ membership.pk }}"></td>
+    <td><a class="link link-hover font-semibold" href="{% url 'management:member_detail' membership.member.pk %}">{{ membership.member.last_name }}, {{ membership.member.first_name }}</a></td>
+    <td>
+        {% if membership.email_rows %}
+            {% for contact in membership.email_rows %}
+                <div class="{% if not forloop.first %}text-xs text-muted{% endif %}">
+                    {{ contact.email }}
+                    {% if contact.label %}<span class="text-xs text-muted">({{ contact.label }})</span>{% endif %}
+                </div>
+            {% endfor %}
+        {% else %}
+            <span class="text-dim">-</span>
+        {% endif %}
+    </td>
+    <td>
+        {% if membership.member.family_memberships_display %}
+            {% for fm in membership.member.family_memberships_display %}
+                {{ fm.family }}{% if not forloop.last %}, {% endif %}
+            {% endfor %}
+        {% else %}
+            <span class="text-dim">-</span>
+        {% endif %}
+    </td>
+    <td>
+        <span class="badge badge-sm
+            {% if membership.status == "active" %}badge-success
+            {% elif membership.status == "pending" %}badge-warning
+            {% elif membership.status == "cancelled" %}badge-error
+            {% else %}badge-neutral{% endif %}">
+            {{ membership.get_status_display }}
+        </span>
+    </td>
+    <td>
+        <span class="badge badge-sm
+            {% if membership.fee_status == "paid" %}badge-success
+            {% elif membership.fee_status == "partially_paid" %}badge-warning
+            {% elif membership.fee_status == "unpaid" %}badge-error
+            {% else %}badge-neutral{% endif %}">
+            {{ membership.get_fee_status_display }}
+        </span>
+    </td>
+    <td class="font-mono tabular-nums">&euro; {{ membership.fee_amount }}</td>
+    <td class="font-mono tabular-nums">
+        &euro; {{ membership.amount_paid }}
+        {% if membership.record_payment_form and membership.fee_amount %}
+            <div class="font-sans text-xs text-muted">{% blocktrans with remaining=membership.remaining_balance_display %}{{ remaining }} left{% endblocktrans %}</div>
+        {% endif %}
+    </td>
+    <td>{{ membership.license|default:"-" }}</td>
+    <td class="text-center">
+        {% if membership.dues_invoice %}
+            <a class="link link-hover" href="{% url 'management:membership_invoice_detail' membership.pk %}">
+                <span class="badge badge-sm {% if membership.dues_invoice.is_paid %}badge-success{% elif membership.dues_invoice.is_overdue %}badge-error{% else %}badge-neutral{% endif %}">
+                    {% if membership.dues_invoice.is_paid %}{% trans "Paid" %}{% elif membership.dues_invoice.is_overdue %}{% trans "Overdue" %}{% else %}{% trans "Sent" %}{% endif %}
+                </span>
+            </a>
+            <div class="text-xs text-muted">{{ membership.dues_invoice.sent_at|date:"j M" }}{% if membership.dues_invoice.reminder_count %}, {% blocktrans count counter=membership.dues_invoice.reminder_count %}{{ counter }} reminder{% plural %}{{ counter }} reminders{% endblocktrans %}{% endif %}</div>
+        {% elif membership.registration_invoice_batch %}
+            {% with batch=membership.registration_invoice_batch %}
+                <a class="link link-hover" href="{% url 'management:registration_invoice_pdf' batch.pk %}">
+                    <span class="badge badge-sm {% if membership.fee_status == "paid" %}badge-success{% elif membership.registration_invoice_is_overdue %}badge-error{% else %}badge-neutral{% endif %}">
+                        {% if membership.fee_status == "paid" %}{% trans "Paid" %}{% elif membership.registration_invoice_is_overdue %}{% trans "Overdue" %}{% else %}{% trans "Sent" %}{% endif %}
+                    </span>
+                </a>
+                <div class="text-xs text-muted">{{ batch.invoice_sent_at|date:"j M" }}{% if batch.invoice_reminder_count %}, {% blocktrans count counter=batch.invoice_reminder_count %}{{ counter }} reminder{% plural %}{{ counter }} reminders{% endblocktrans %}{% endif %}</div>
+            {% endwith %}
+        {% else %}
+            <span class="text-xs text-dim">{% trans "Not sent" %}</span>
+        {% endif %}
+    </td>
+    <td class="text-right">
+        {% if membership.record_payment_form %}
+            <div class="flex flex-wrap justify-end gap-1">
+                <button class="btn btn-outline btn-sm" type="button" onclick="document.getElementById('{{ membership.pk|dom_id:"record_payment_modal" }}').showModal()">
+                    {% lucide "receipt" size=12 %} {% trans "Record payment" %}
+                </button>
+                <button class="btn btn-sm btn-outline btn-success" type="button" onclick="document.getElementById('{{ membership.pk|dom_id:"mark_fully_paid_modal" }}').showModal()">
+                    {% lucide "circle-check" size=12 %} {% trans "Mark fully paid" %}
+                </button>
+            </div>
+        {% endif %}
+    </td>
+</tr>

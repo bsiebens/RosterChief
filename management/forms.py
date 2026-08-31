@@ -9,7 +9,7 @@ from django.utils.translation import gettext_lazy as _
 
 from club.models import Club, ClubMembership, ClubRole, FeePayment, OnboardingRequirement, Season, Sponsor
 from club.services.access import groups_manageable_by, is_club_admin, teams_managed_by
-from events.models import Competition, Event, EventReferee, EventSeries, Location, Opponent
+from events.models import Competition, Event, EventOfficial, EventReferee, EventSeries, EventTask, Location, Opponent
 from events.services.rbihf_import import RBIHFImportError, extract_team_id
 from formbuilder.models import Field as FormBuilderField
 from formbuilder.models import Form as FormBuilderForm
@@ -18,9 +18,10 @@ from members.models import Family, FamilyMembership, Group, Member
 from members.services.family import find_member_by_email
 from news.models import News
 from registration.models import RegistrationDetails
+from registration.services.pricing import available_registration_products
 from shop.models import Discount, DiscountType, OrderLine, Payment, Product, ProductCategory, ProductVariant, Voucher
 from shop.services.payments import amount_due
-from teams.models import NumberPool, NumberReservation, Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
+from teams.models import NumberPool, NumberReservation, OfficialLevel, OfficialProfile, Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
 from teams.services import eligible_roster_members
 from teams.services.numbers import is_number_available
 
@@ -137,6 +138,75 @@ class EventRefereeFeeForm(forms.ModelForm):
             "fee": forms.NumberInput(attrs={"step": "0.01", "min": "0"}),
             "km": forms.NumberInput(attrs={"step": "0.1", "min": "0"}),
             "km_rate": forms.NumberInput(attrs={"step": "any", "min": "0"}),
+        }
+
+
+class OfficialLevelForm(forms.ModelForm):
+    class Meta:
+        model = OfficialLevel
+        fields = ["name", "teams", "inherits_from"]
+        widgets = {"teams": forms.SelectMultiple(attrs={"data-searchable": "true", "data-search-placeholder": _("Type a team to search...")})}
+
+    def __init__(self, *args, club=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["teams"].queryset = Team.objects.filter(club=club)
+        self.fields["inherits_from"].queryset = OfficialLevel.objects.filter(club=club).exclude(pk=self.instance.pk)
+        self.fields["inherits_from"].empty_label = _("— none —")
+
+
+class MemberOfficialEligibilityForm(forms.ModelForm):
+    """This member's official level and how long it's valid for -- edited
+    from the member's own page (teams.OfficialProfile), get-or-created on
+    save. Mirrors MemberRefereeEligibilityForm exactly."""
+
+    class Meta:
+        model = OfficialProfile
+        fields = ["level", "valid_until"]
+        widgets = {"valid_until": forms.DateInput(attrs={"type": "date"})}
+
+    def __init__(self, *args, club=None, member=None, **kwargs):
+        instance = OfficialProfile.objects.filter(member=member).first() if member is not None else None
+        super().__init__(*args, instance=instance, **kwargs)
+        if instance is None:
+            self.instance.member = member
+        self.fields["level"].queryset = OfficialLevel.objects.filter(club=club)
+        self.fields["level"].required = False
+        self.fields["level"].empty_label = _("— no level (not eligible) —")
+
+
+class ExternalOfficialForm(forms.Form):
+    """Log a non-member official (federation-appointed, most often) by name
+    only -- see events.services.officials.add_external_official."""
+
+    name = forms.CharField(label=_("Official name"))
+
+
+class EventOfficialFeeForm(forms.ModelForm):
+    """One official assignment's payment details -- see
+    events.services.officials.set_official_fee. Mirrors EventRefereeFeeForm
+    exactly."""
+
+    class Meta:
+        model = EventOfficial
+        fields = ["fee", "km", "km_rate"]
+        widgets = {
+            "fee": forms.NumberInput(attrs={"step": "0.01", "min": "0"}),
+            "km": forms.NumberInput(attrs={"step": "0.1", "min": "0"}),
+            "km_rate": forms.NumberInput(attrs={"step": "any", "min": "0"}),
+        }
+
+
+class EventTaskForm(forms.ModelForm):
+    """Create/edit a logistics ask on an event (e.g. "Bring fruit") -- see
+    events.services.tasks.claim_task for the capacity check needed_quantity
+    feeds. `event`/`created_by` come from the view, never the form."""
+
+    class Meta:
+        model = EventTask
+        fields = ["title", "description", "needed_quantity"]
+        widgets = {
+            "description": forms.Textarea(attrs={"rows": 2}),
+            "needed_quantity": forms.NumberInput(attrs={"min": "1"}),
         }
 
 
@@ -574,6 +644,7 @@ class EventForm(EventAudienceFormMixin, forms.ModelForm):
             "gathering",
             "deadline",
             "competition",
+            "is_friendly",
             "external_game_id",
             "score_for",
             "score_against",
@@ -954,14 +1025,108 @@ class RegistrationInvoiceLineForm(forms.ModelForm):
     line from the invoice entirely (RegistrationDetails.excluded_from_invoice)
     without deleting it, since the roster/onboarding data it carries has to
     survive regardless of the billing decision -- see that field's own
-    docstring."""
+    docstring.
 
-    price = forms.DecimalField(label=_("Price"), min_value=0, max_digits=10, decimal_places=2, widget=forms.NumberInput(attrs={"class": "input w-full", "min": "0", "step": "0.01"}))
+    Also where staff confirms team/number (a player) or team/position (a
+    volunteer) -- requested_team/requested_jersey_number/requested_position
+    already exist on the model as what was *requested* at registration; this
+    just makes them editable here, defaulting to whatever was requested,
+    same as ``price`` already defaults to what was charged.
+    RegistrationInvoiceReviewView.post reads the confirmed values straight
+    off these fields after formset.save() to actually place the person.
+
+    ``product_variant`` is editable too, scoped to every variant of the
+    club's registration products for this batch's own season (not narrowed
+    to this row's entry_kind -- staff can genuinely re-categorise someone
+    from a player membership onto a volunteer one here, or vice versa).
+    registration_invoice_review.html's own script re-fills ``price`` from
+    the newly picked variant's effective_price on change, but never locks
+    it -- an amount staff then types over it is left alone, same as a price
+    that was never touched keeps whatever submit_registration first priced
+    it at."""
+
+    # No min_value: a negative price is a real, deliberate line here (e.g. a
+    # manual credit/adjustment folded into one person's own line rather than
+    # the batch-wide manual_discount_amount below), not a mistake to block.
+    price = forms.DecimalField(label=_("Price"), max_digits=10, decimal_places=2, widget=forms.NumberInput(attrs={"class": "input w-full", "step": "0.01", "data-price-input": "true"}))
+    # A real <select> (not the model field's own bare number input) -- choices
+    # are rebuilt per-instance in __init__ below, scoped to whatever team this
+    # row currently has; requested_jersey_number's own value is always kept in
+    # the choice list even if it's since become unavailable, so an existing
+    # valid pick never silently vanishes from the widget -- same reasoning
+    # registration.services.pricing.jersey_choices_for_entry already documents
+    # for the public registration form's own price panel. Deliberately left a
+    # plain (non-searchable) select: its own options are rebuilt via innerHTML
+    # by this screen's team-change script, which searchable-select.js's
+    # combobox never sees -- see static/js/searchable-select.js's own
+    # `options` closure, captured once at enhance() time with no refresh hook.
+    requested_jersey_number = forms.ChoiceField(label=_("Number"), required=False, widget=forms.Select(attrs={"class": "select w-full", "data-number-select": "true"}))
 
     class Meta:
         model = RegistrationDetails
-        fields = ["price", "excluded_from_invoice"]
-        widgets = {"excluded_from_invoice": forms.CheckboxInput(attrs={"class": "checkbox"})}
+        fields = ["product_variant", "price", "excluded_from_invoice", "requested_team", "requested_jersey_number", "requested_position"]
+        widgets = {
+            "excluded_from_invoice": forms.CheckboxInput(attrs={"class": "checkbox"}),
+            # A plain <select>, not the searchable-select combobox the other
+            # fields on this row use -- there are only ever a handful of
+            # registration products/variants open for a season at once, not
+            # enough to be worth a search box for.
+            "product_variant": forms.Select(attrs={"class": "select w-full", "data-variant-select": "true"}),
+            "requested_team": forms.Select(attrs={"class": "select w-full", "data-team-select": "true", "data-searchable": "true", "data-search-placeholder": _("Type a team to search...")}),
+            "requested_position": forms.Select(attrs={"class": "select w-full", "data-searchable": "true", "data-search-placeholder": _("Type a position to search...")}),
+        }
+
+    def __init__(self, *args, club=None, season=None, team_number_pools=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.season = season
+        self.fields["product_variant"].queryset = ProductVariant.objects.filter(product__in=available_registration_products(club, season=season), is_active=True).select_related("product")
+        self.fields["product_variant"].required = False
+        self.fields["requested_team"].queryset = Team.objects.filter(club=club)
+        self.fields["requested_team"].required = False
+        self.fields["requested_position"].queryset = Position.objects.filter(club=club, staff_position=True)
+        self.fields["requested_position"].required = False
+
+        # Every pooled team's own numbers, not just whatever team this row
+        # currently has -- which team will actually be submitted isn't known
+        # until this row is bound, so the choice list can't be scoped to one
+        # team up front (the client-side cascade in registration_invoice_
+        # review.html narrows what's *shown* per team; clean() below is what
+        # actually enforces the pick against that specific team's own pool).
+        # Same reasoning registration.forms.RegistrationEntryRowForm's own
+        # __init__ already documents for the public registration form.
+        team_number_pools = team_number_pools or {}
+        numbers = {number for pool_numbers in team_number_pools.values() for number in pool_numbers}
+        if self.instance.requested_jersey_number is not None:
+            numbers.add(self.instance.requested_jersey_number)
+        self.fields["requested_jersey_number"].choices = [("", "---------")] + [(str(number), str(number)) for number in sorted(numbers)]
+        self.fields["requested_jersey_number"].error_messages["invalid_choice"] = _("That number was just taken -- pick a different one.")
+
+    def clean_requested_jersey_number(self):
+        value = self.cleaned_data.get("requested_jersey_number")
+        return int(value) if value else None
+
+    def clean(self):
+        cleaned = super().clean()
+        # A player never gets a position, a volunteer never gets a jersey
+        # number -- same split RegistrationDetails.clean() already enforces
+        # for requested_position; cleared here rather than raised, since the
+        # template only ever shows the field relevant to this row's own kind.
+        if self.instance.entry_kind == RegistrationDetails.EntryKind.PLAYER:
+            cleaned["requested_position"] = None
+
+        team, number = cleaned.get("requested_team"), cleaned.get("requested_jersey_number")
+        # Only once a pool-scoped team is actually chosen for a player row --
+        # anything else (a volunteer row, no team, or a poolless team) has no
+        # number step at all here, so a leftover value is simply dropped
+        # rather than validated against nothing -- same rule
+        # RegistrationEntryRowForm.clean() already applies.
+        if self.instance.entry_kind != RegistrationDetails.EntryKind.PLAYER or team is None or team.pool_id is None:
+            cleaned["requested_jersey_number"] = None
+        elif number is not None and self.season is not None:
+            member = self.instance.membership.member
+            if not is_number_available(team.pool, self.season, number, for_member=member):
+                self.add_error("requested_jersey_number", _("This number is already taken in this team's number pool this season."))
+        return cleaned
 
 
 RegistrationInvoiceLineFormSet = forms.modelformset_factory(RegistrationDetails, form=RegistrationInvoiceLineForm, extra=0)

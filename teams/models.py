@@ -43,6 +43,10 @@ class Team(ClubScopedModel):
         CLUB = "club", _("Club")
         FEDERATION = "federation", _("Federation")
 
+    class OfficialManagement(models.TextChoices):
+        CLUB = "club", _("Club")
+        FEDERATION = "federation", _("Federation")
+
     name = models.CharField(_("name"), max_length=255)
     short_name = models.CharField(_("short name"), max_length=255)
     referee_management = models.CharField(
@@ -51,6 +55,18 @@ class Team(ClubScopedModel):
         choices=RefereeManagement.choices,
         default=RefereeManagement.CLUB,
         help_text=_("Who arranges referees for this team's home games. Federation-managed teams are left out of the referee tools entirely -- no eligibility, no assignment, nothing to configure."),
+    )
+    #: Independent of referee_management -- a club can need referees arranged
+    #: without needing officials (table officials, scorekeepers, ...) or vice
+    #: versa, so this isn't just a second read of the same flag. Same
+    #: CLUB/FEDERATION shape and the same "federation-managed is entirely out
+    #: of scope" reasoning as referee_management, see events.services.officials.
+    official_management = models.CharField(
+        _("official management"),
+        max_length=20,
+        choices=OfficialManagement.choices,
+        default=OfficialManagement.CLUB,
+        help_text=_("Who arranges match officials for this team's home games. Federation-managed teams are left out of the officials tools entirely -- no eligibility, no assignment, nothing to configure."),
     )
     pool = models.ForeignKey(
         NumberPool,
@@ -283,6 +299,95 @@ class RefereeProfile(UUIDModel):
         isn't currently eligible, regardless of what level is set. Includes
         whatever the level inherits from, transitively -- see
         RefereeLevel.eligible_team_ids."""
+        if not self.is_eligible:
+            return Team.objects.none()
+        return Team.objects.filter(id__in=self.level.eligible_team_ids())
+
+
+class OfficialLevel(ClubScopedModel):
+    """The match-officials counterpart to RefereeLevel -- same shape, same
+    eligible_team_ids()/inherits_from chaining, same reasoning throughout
+    (see RefereeLevel's own docstring). Deliberately a separate model rather
+    than a "kind" flag on RefereeLevel: a club's official qualification
+    tiers ("Table official", "Scorekeeper") don't share a name/inheritance
+    chain with its referee tiers, and keeping them apart means turning
+    officials off (see the "officials" waffle flag) never has to filter a
+    shared table by kind everywhere it's read."""
+
+    name = models.CharField(_("name"), max_length=255)
+    teams = models.ManyToManyField(Team, related_name="official_levels", blank=True, verbose_name=_("qualifies for"), help_text=_("Members holding this level can be assigned as an official for these teams' home games."))
+    inherits_from = models.ForeignKey(
+        "self",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="inherited_by",
+        verbose_name=_("inherits from"),
+        help_text=_("An official holding this level is also eligible for everything the linked level covers (and, transitively, whatever that one inherits from)."),
+    )
+
+    class Meta:
+        verbose_name = _("official level")
+        verbose_name_plural = _("official levels")
+        ordering = ["name"]
+        constraints = [
+            models.UniqueConstraint(fields=["club", "name"], name="unique_official_level_name_per_club"),
+        ]
+
+    def __str__(self):
+        return self.name
+
+    def clean(self):
+        if self.club_id is not None:
+            validate_club_scope(self, self.club_id, same_club_fields=("inherits_from",))
+        current = self.inherits_from
+        seen = set()
+        while current is not None:
+            if current.pk == self.pk:
+                raise ValidationError({"inherits_from": _("This would create a loop -- a level can't inherit from itself, even indirectly.")})
+            if current.pk in seen:
+                break
+            seen.add(current.pk)
+            current = current.inherits_from
+
+    def eligible_team_ids(self):
+        team_ids = set(self.teams.values_list("id", flat=True))
+        seen = {self.pk}
+        current = self.inherits_from
+        while current is not None and current.pk not in seen:
+            team_ids.update(current.teams.values_list("id", flat=True))
+            seen.add(current.pk)
+            current = current.inherits_from
+        return team_ids
+
+
+class OfficialProfile(UUIDModel):
+    """The match-officials counterpart to RefereeProfile -- same shape, same
+    reasoning: a member-level fact (which level, how long it's valid), not a
+    group-level one, managed from the member's own page."""
+
+    member = models.OneToOneField(Member, on_delete=models.CASCADE, related_name="official_profile", verbose_name=_("member"))
+    level = models.ForeignKey(OfficialLevel, on_delete=models.PROTECT, null=True, blank=True, related_name="officials", verbose_name=_("level"))
+    valid_until = models.DateField(_("valid until"), null=True, blank=True, help_text=_("Once this date has passed, the official is not eligible for assignment until it's extended."))
+
+    class Meta:
+        verbose_name = _("official profile")
+        verbose_name_plural = _("official profiles")
+        ordering = ["member__last_name", "member__first_name"]
+
+    def __str__(self):
+        return f"{self.member} (official)"
+
+    @property
+    def is_currently_valid(self) -> bool:
+        return self.valid_until is not None and self.valid_until >= timezone.localdate()
+
+    @property
+    def is_eligible(self) -> bool:
+        return self.level_id is not None and self.is_currently_valid
+
+    @property
+    def eligible_teams(self):
         if not self.is_eligible:
             return Team.objects.none()
         return Team.objects.filter(id__in=self.level.eligible_team_ids())

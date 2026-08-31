@@ -47,7 +47,7 @@
                                         <div class="h-8 w-8 rounded-full text-xs">{{ membership.member.first_name|slice:":1" }}{{ membership.member.last_name|slice:":1" }}</div>
                                     </span>
                                     <div>
-                                        <div class="font-semibold text-ink">{{ membership.member.get_full_name }}</div>
+                                        <a class="link link-hover font-semibold text-ink" href="{% url 'management:member_detail' membership.member.pk %}" onclick="event.stopPropagation()">{{ membership.member.get_full_name }}</a>
                                         <div class="text-xs text-muted">
                                             {% if membership.status == "pending" %}{% trans "Awaiting processing" %}{% else %}{{ membership.get_status_display }}{% endif %}
                                         </div>
@@ -55,7 +55,7 @@
                                 </div>
                             </td>
                             <td class="font-mono text-sm text-muted">{{ membership.member.date_of_birth|date:"Y"|default:"—" }}</td>
-                            <td class="text-sm text-ink">
+                            <td class="text-sm text-ink" id="{{ membership.pk|dom_id:'team_cell' }}">
                                 {% if membership.teams_registered %}
                                     {% for team in membership.teams_registered %}{{ team.short_name }}{% if not forloop.last %}, {% endif %}{% endfor %}
                                 {% else %}
@@ -109,6 +109,8 @@
                     <div class="min-w-0 flex-1">
                         <div class="truncate font-display text-xl font-extrabold text-ink uppercase">{{ membership.member.get_full_name }}</div>
                         <div class="text-[13px] text-muted">{% blocktrans with date=membership.created|date:"j M" %}Applied {{ date }}{% endblocktrans %}{% if membership.teams_registered %} · {% for team in membership.teams_registered %}{{ team.short_name }}{% if not forloop.last %}, {% endif %}{% endfor %}{% endif %}</div>
+                        {# The member's own page is where documents actually get uploaded (this drawer is read-only, download-only) -- a straight jump there rather than having to leave Sign-up and search for them again. #}
+                        <a class="link link-hover text-xs" href="{% url 'management:member_detail' membership.member.pk %}">{% trans "View member" %} &rarr;</a>
                     </div>
                     <button type="button" class="btn btn-ghost btn-square btn-sm" aria-label="{% trans 'Close' %}" onclick="closeDrawer('{{ membership.pk|dom_id:"signup_drawer" }}')">{% lucide "x" size=16 %}</button>
                 </div>
@@ -128,6 +130,10 @@
                                         <span class="min-w-0 flex-1 text-ink">
                                             {{ requirement.name }}
                                             {% if status.is_bypassed %}<span class="text-xs text-muted">({% trans "bypassed" %})</span>{% endif %}
+                                            {% if status.document %}
+                                                {# So whoever's confirming/reopening this can actually look at what was uploaded first, not just trust it's there. #}
+                                                <a class="inline-flex items-center gap-1 text-xs link link-hover" href="{% url 'management:member_requirement_document' membership.member.pk requirement.pk %}">{% lucide "download" size=12 %} {% trans "View upload" %}</a>
+                                            {% endif %}
                                         </span>
                                         {% if not status.is_complete and not status.is_bypassed %}
                                             <form method="post" action="{% url 'management:member_requirement_complete' membership.member.pk requirement.pk %}" class="shrink-0">
@@ -182,10 +188,10 @@
                         {% endfor %}
                         <div class="flex flex-wrap gap-2">
                             {% for team in teams %}
-                                <form method="post" action="{% url 'management:signup_place_in_team' membership.member.pk %}" data-place-in-team>
+                                <form method="post" action="{% url 'management:signup_place_in_team' membership.member.pk %}" data-place-in-team data-team-cell="{{ membership.pk|dom_id:'team_cell' }}">
                                     {% csrf_token %}
                                     <input type="hidden" name="team" value="{{ team.pk }}">
-                                    <button type="submit" class="team-chip {% if team in membership.teams_registered %}placed{% endif %}" {% if team in membership.teams_registered %}disabled{% endif %}>
+                                    <button type="submit" class="team-chip {% if team in membership.teams_registered %}placed{% elif team.pk in membership.requested_team_ids %}requested{% endif %}" {% if team in membership.teams_registered %}disabled{% endif %}>
                                         {{ team.short_name }}
                                     </button>
                                 </form>
@@ -293,7 +299,23 @@
                     .then((data) => {
                         if (data.ok) {
                             button.classList.add("placed");
+                            button.classList.remove("requested");
                             button.disabled = true;
+
+                            // Mirrors the change into the table row behind the drawer
+                            // (its own "Team" cell was rendered server-side at page
+                            // load, so it doesn't otherwise know a placement just
+                            // happened) -- same team names, comma-joined, the "Not
+                            // placed yet" placeholder dropped the moment there's a
+                            // real one to show instead.
+                            const teamCell = document.getElementById(form.dataset.teamCell);
+                            if (teamCell) {
+                                const teamName = button.textContent.trim();
+                                const existing = teamCell.querySelector(".text-dim") ? [] : teamCell.textContent.split(",").map((name) => name.trim()).filter(Boolean);
+                                if (!existing.includes(teamName)) {
+                                    teamCell.textContent = existing.concat(teamName).join(", ");
+                                }
+                            }
                         }
                     })
                     .catch(() => form.submit());

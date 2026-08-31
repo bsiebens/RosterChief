@@ -125,6 +125,9 @@
                     {% form_field form.external_game_id %}
                     {% form_field form.max_referees %}
                 </div>
+                <div class="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
+                    {% form_field form.is_friendly show_as_toggle=True %}
+                </div>
                 {% if update_view %}
                     {% comment %}
                     Score/live status only exist to record once a game has

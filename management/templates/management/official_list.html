@@ -1,0 +1,56 @@
+{% extends "management/base.html" %}
+{% load i18n lucide %}
+
+{% block heading %}{% trans "Officials" %}{% endblock heading %}
+{% block topbar_context %}<span class="text-sm text-muted">{% trans "Every club official, their level, and whether their qualification is currently valid." %}</span>{% endblock topbar_context %}
+
+{% block panel %}
+    <div class="card overflow-hidden">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>{% trans "Official" %}</th>
+                    <th>{% trans "Level" %}</th>
+                    <th>{% trans "Can officiate for" %}</th>
+                    <th>{% trans "Valid until" %}</th>
+                    <th>{% trans "Status" %}</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for official in officials %}
+                    <tr>
+                        <td><a class="link link-hover font-semibold" href="{% url 'management:member_detail' official.pk %}">{{ official }}</a></td>
+                        <td class="text-slate">{{ official.official_profile.level|default:"—" }}</td>
+                        <td>
+                            {% if official.official_profile.is_eligible %}
+                                {% for team in official.official_profile.eligible_teams %}
+                                    <span class="badge badge-outline badge-sm">{{ team.name }}</span>
+                                {% empty %}
+                                    <span class="text-dim">—</span>
+                                {% endfor %}
+                            {% else %}
+                                <span class="text-dim">—</span>
+                            {% endif %}
+                        </td>
+                        <td class="font-mono text-xs text-muted">{{ official.official_profile.valid_until|default:"—" }}</td>
+                        <td>
+                            {% if official.official_profile.is_eligible %}
+                                <span class="badge badge-success badge-sm">{% trans "Valid" %}</span>
+                            {% elif not official.official_profile.level %}
+                                <span class="badge badge-warning badge-sm">{% trans "No level" %}</span>
+                            {% elif not official.official_profile.valid_until %}
+                                <span class="badge badge-warning badge-sm">{% trans "No validity set" %}</span>
+                            {% else %}
+                                <span class="badge badge-error badge-sm">{% trans "Expired" %}</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="5" class="text-center text-muted">{% trans "No officials yet -- set a level and validity from a member's own page." %}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+{% endblock panel %}

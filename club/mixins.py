@@ -60,14 +60,17 @@ class MemberAdminRequiredMixin(ClubStaffRequiredMixin):
         return can_manage_members(self.request.user, self.request.club)
 
 
-class FeatureRequiredMixin(ClubAdminRequiredMixin):
-    """Gate for a whole management section (shop, forms, ...) this club doesn't
-    have at all unless its waffle Flag (see the ``features`` app, set per-club
-    from the control panel's Features page) is active for it. Checked before
-    the admin-only test below and as a plain 404 rather than folded into
-    ``test_func``'s 403: a club with the feature off doesn't have a permissions
-    problem, the section just doesn't exist there, same reasoning as
-    ``ClubStaffRequiredMixin`` 404ing the whole app off the base domain.
+class FeatureFlagMixin:
+    """404s the whole view when ``self.feature_flag`` isn't active for this
+    club -- a club with the feature off doesn't have a permissions problem,
+    the section just doesn't exist there, same reasoning ``ClubStaffRequiredMixin``
+    gives for 404ing the whole app off the base domain. A plain mixin, not
+    itself a permission gate, so it layers onto whichever ``ClubStaffRequiredMixin``-
+    derived tier a given view actually needs -- see ``FeatureRequiredMixin``
+    just below for the admin-only-by-default combination every original
+    feature section (shop, forms) uses, and e.g. the "officials" section's
+    own three tiers (management/views.py) for a feature that -- unlike shop/
+    forms -- needs more than one.
 
     Subclasses set ``feature_flag`` to the Flag's name, e.g. ``"shop"``.
     """
@@ -79,6 +82,15 @@ class FeatureRequiredMixin(ClubAdminRequiredMixin):
         if club is not None and not flag_is_active(request, self.feature_flag):
             raise Http404(f"The “{self.feature_flag}” feature isn't enabled for this club.")
         return super().dispatch(request, *args, **kwargs)
+
+
+class FeatureRequiredMixin(FeatureFlagMixin, ClubAdminRequiredMixin):
+    """Gate for a whole management section (shop, forms, ...) this club doesn't
+    have at all unless its waffle Flag (see the ``features`` app, set per-club
+    from the control panel's Features page) is active for it. Admin-only by
+    default (via ``ClubAdminRequiredMixin``) -- subclasses like
+    ``ShopManagerRequiredMixin`` below override ``test_func`` to widen that.
+    """
 
 
 class ShopManagerRequiredMixin(FeatureRequiredMixin):
@@ -112,6 +124,40 @@ class FormManagerRequiredMixin(FeatureRequiredMixin):
 
     def test_func(self):
         return can_manage_forms(self.request.user, self.request.club)
+
+
+#: The "officials" section's own gate -- unlike shop/forms (one permission
+#: tier each), officials needs the same three-tier split the pre-existing
+#: referee system already has (RefereeListView/RefereeLevelListView are any
+#: staff; RefereeLevelCreateView/UpdateView/DeleteView are MEMBER_ADMIN;
+#: EventRefereeAssignView/RemoveView/FeeUpdateView/FormPdfView are ADMIN-only)
+#: -- each layers FeatureFlagMixin onto the matching existing permission
+#: tier rather than introducing a fourth, officials-specific one.
+OFFICIALS_FLAG = "officials"
+
+
+class OfficialsStaffRequiredMixin(FeatureFlagMixin, ClubStaffRequiredMixin):
+    """Officials list/read views -- any staff, once "officials" is on for
+    this club. Mirrors RefereeListView/RefereeLevelListView's own plain
+    ClubStaffRequiredMixin."""
+
+    feature_flag = OFFICIALS_FLAG
+
+
+class OfficialsManagerRequiredMixin(FeatureFlagMixin, MemberAdminRequiredMixin):
+    """Officials level CRUD -- MEMBER_ADMIN or ADMIN, once "officials" is on.
+    Mirrors RefereeLevelCreateView/UpdateView/DeleteView's own
+    MemberAdminRequiredMixin."""
+
+    feature_flag = OFFICIALS_FLAG
+
+
+class OfficialsAdminRequiredMixin(FeatureFlagMixin, ClubAdminRequiredMixin):
+    """Officials assignment/fee/PDF -- ADMIN only, once "officials" is on.
+    Mirrors EventRefereeAssignView/RemoveView/FeeUpdateView/FormPdfView's own
+    ClubAdminRequiredMixin."""
+
+    feature_flag = OFFICIALS_FLAG
 
 
 class TeamManagerRequiredMixin(ClubStaffRequiredMixin):

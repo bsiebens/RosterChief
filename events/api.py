@@ -54,6 +54,7 @@ class GameOut(Schema):
     home_team: TeamRefOut | None
     away_team: TeamRefOut | None
     competition: str
+    is_friendly: bool
     is_live: bool
     status: str  # "upcoming" | "live" | "finished"
     home_score: int | None
@@ -111,6 +112,7 @@ def _to_game_out(event, request, club, team=None) -> GameOut:
         home_team=home_team,
         away_team=away_team,
         competition=event.competition,
+        is_friendly=event.is_friendly,
         is_live=event.is_live,
         status=status,
         home_score=home_score,

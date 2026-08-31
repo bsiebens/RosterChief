@@ -1,0 +1,37 @@
+{% extends "management/base.html" %}
+{% load i18n lucide static ui %}
+
+{% block heading %}{% if update_view %}{% blocktrans %}Edit {{ object }}{% endblocktrans %}{% else %}{% trans "New official level" %}{% endif %}{% endblock heading %}
+
+{% block panel %}
+    <div class="card">
+        <div class="card-body">
+            <form method="post">
+                {% csrf_token %}
+
+                {% for error in form.non_field_errors %}
+                    <div class="alert alert-error">
+                        <span>{{ error }}</span>
+                    </div>
+                {% endfor %}
+
+                <div class="grid grid-cols-2 items-start gap-4">
+                    {% form_field form.name %}
+                    {% form_field form.teams %}
+                </div>
+                <div class="mt-4 grid grid-cols-2 items-start gap-4">
+                    {% form_field form.inherits_from %}
+                </div>
+
+                <div class="mt-4 flex gap-2">
+                    <a class="btn btn-outline gap-2" href="{% url "management:official_level_list" %}">{% lucide "arrow-left" size=16 %} {% trans "Cancel" %}</a>
+                    <button class="btn btn-primary gap-2" type="submit">{% lucide "save" size=16 %} {% trans "Save" %}</button>
+                </div>
+            </form>
+        </div>
+    </div>
+{% endblock panel %}
+
+{% block extra_body %}
+    <script src="{% static 'js/searchable-select.js' %}"></script>
+{% endblock extra_body %}

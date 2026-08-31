@@ -1,6 +1,7 @@
 {% extends "management/base.html" %}
 {% load i18n lucide %}
 
+{% block panel_title %}{% blocktrans with number=invoice.number %}Invoice {{ number }}{% endblocktrans %}{% endblock panel_title %}
 {% block heading %}{% blocktrans with number=invoice.number %}Invoice {{ number }}{% endblocktrans %}{% endblock heading %}
 {% block topbar_context %}<span class="text-sm text-muted">{{ member }}</span>{% endblock topbar_context %}
 

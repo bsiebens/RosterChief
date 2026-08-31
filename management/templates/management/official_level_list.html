@@ -1,0 +1,72 @@
+{% extends "management/base.html" %}
+{% load i18n lucide ui %}
+
+{% block heading %}{% trans "Official levels" %}{% endblock heading %}
+{% block topbar_context %}<span class="text-sm text-muted">{% trans "Which teams' home games each level qualifies an official for." %}</span>{% endblock topbar_context %}
+
+{% block actions %}
+    {% if is_club_admin %}
+        <a class="btn btn-primary gap-2" href="{% url 'management:official_level_create' %}">{% lucide "plus" size=16 %} {% trans "New level" %}</a>
+    {% endif %}
+{% endblock actions %}
+
+{% block panel %}
+    <div class="card overflow-hidden">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>{% trans "Name" %}</th>
+                    <th>{% trans "Inherits from" %}</th>
+                    <th>{% trans "Qualifies for" %}</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for level in levels %}
+                    <tr>
+                        <td class="font-semibold text-ink">{{ level.name }}</td>
+                        <td>
+                            {% if level.inherits_from %}
+                                <span class="badge badge-info badge-sm">{{ level.inherits_from.name }}</span>
+                            {% else %}
+                                <span class="text-dim">—</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% for team in level.teams.all %}
+                                <span class="badge badge-outline badge-sm">{{ team.name }}</span>
+                            {% empty %}
+                                {% if not level.inherits_from %}<span class="text-dim">—</span>{% endif %}
+                            {% endfor %}
+                            {% if level.inherits_from %}
+                                <div class="mt-1 text-xs text-muted">{% blocktrans with name=level.inherits_from.name %}+ everything “{{ name }}” covers{% endblocktrans %}</div>
+                            {% endif %}
+                        </td>
+                        <td class="text-right">
+                            {% if is_club_admin %}
+                                <div class="flex justify-end gap-1">
+                                    <a class="btn btn-outline btn-sm gap-2" href="{% url 'management:official_level_update' level.pk %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</a>
+                                    <button class="btn btn-sm btn-outline btn-error" type="button" onclick="document.getElementById('{{ level.pk|dom_id:"official_level_delete_modal" }}').showModal()" aria-label="{% trans 'Delete' %}">{% lucide "trash-2" size=14 %}</button>
+                                </div>
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="4" class="text-center text-muted">{% trans "No official levels yet." %}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    {% if is_club_admin %}
+        {% trans "Delete official level" as delete_level_title %}
+        {% trans "Delete" as delete_label %}
+        {% for level in levels %}
+            {% url 'management:official_level_delete' level.pk as level_delete_url %}
+            {% blocktrans with name=level.name asvar delete_level_body %}Delete “{{ name }}”? Levels still held by an official or inherited by another level can't be deleted. This cannot be undone.{% endblocktrans %}
+            {% include "controlpanel/_confirm_modal.html" with modal_id=level.pk|dom_id:"official_level_delete_modal" title=delete_level_title body=delete_level_body action_url=level_delete_url submit_label=delete_label %}
+        {% endfor %}
+    {% endif %}
+{% endblock panel %}

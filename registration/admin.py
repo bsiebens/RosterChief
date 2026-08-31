@@ -24,4 +24,4 @@ class RegistrationDetailsAdmin(admin.ModelAdmin):
     list_display = ["membership", "entry_kind", "requested_team", "requested_position", "batch"]
     list_filter = ["entry_kind"]
     search_fields = ["membership__member__first_name", "membership__member__last_name"]
-    raw_id_fields = ["membership", "batch", "requested_team", "requested_position", "product_variant", "resulting_staff_assignment"]
+    raw_id_fields = ["membership", "batch", "requested_team", "requested_position", "product_variant", "resulting_team_membership", "resulting_staff_assignment"]

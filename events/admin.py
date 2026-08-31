@@ -2,7 +2,7 @@ from django import forms
 from django.contrib import admin
 from django.utils.translation import gettext_lazy as _
 
-from .models import Attendance, Competition, Event, EventReferee, EventSeries, Lineup, LineupSelection, Location, Opponent, RefereeSignup
+from .models import Attendance, Competition, Event, EventOfficial, EventReferee, EventSeries, EventTask, EventTaskClaim, Lineup, LineupSelection, Location, OfficialSignup, Opponent, RefereeSignup
 
 
 @admin.register(Opponent)
@@ -29,6 +29,18 @@ class EventRefereeInline(admin.TabularInline):
     model = EventReferee
     extra = 0
     raw_id_fields = ["member", "assigned_by"]
+
+
+class EventOfficialInline(admin.TabularInline):
+    model = EventOfficial
+    extra = 0
+    raw_id_fields = ["member", "assigned_by"]
+
+
+class EventTaskInline(admin.TabularInline):
+    model = EventTask
+    extra = 0
+    raw_id_fields = ["created_by"]
 
 
 @admin.register(EventSeries)
@@ -58,7 +70,7 @@ class EventAdminForm(forms.ModelForm):
         fields = [
             "title", "kind", "season", "series", "detached", "cancelled", "teams", "groups", "club_wide", "invited_members", "excluded_members",
             "start", "end", "gathering", "deadline", "location", "opponent",
-            "competition", "external_game_id", "score_for", "score_against", "is_live", "max_referees",
+            "competition", "is_friendly", "external_game_id", "score_for", "score_against", "is_live", "max_referees", "max_officials",
         ]
 
     def __init__(self, *args, **kwargs):
@@ -83,14 +95,14 @@ class EventAdmin(admin.ModelAdmin):
     search_fields = ["title"]
     date_hierarchy = "start"
     autocomplete_fields = ["season", "series", "location", "opponent", "teams", "groups", "invited_members", "excluded_members"]
-    inlines = [AttendanceInline, EventRefereeInline]
+    inlines = [AttendanceInline, EventRefereeInline, EventOfficialInline, EventTaskInline]
     fieldsets = [
         [None, {"fields": ["title", "kind", "season"]}],
         [_("Series"), {"fields": ["series", "detached", "cancelled"]}],
         [_("Audience"), {"fields": ["teams", "groups", "club_wide", "invited_members", "excluded_members"]}],
         [_("When"), {"fields": ["start", "end", "gathering", "deadline"]}],
         [_("Where"), {"fields": ["location", "opponent"]}],
-        [_("Game"), {"fields": ["competition", "external_game_id", "score_for", "score_against", "is_live", "max_referees"]}],
+        [_("Game"), {"fields": ["competition", "is_friendly", "external_game_id", "score_for", "score_against", "is_live", "max_referees", "max_officials"]}],
     ]
 
 
@@ -146,3 +158,44 @@ class RefereeSignupAdmin(admin.ModelAdmin):
     list_filter = ["status"]
     search_fields = ["event__title", "member__first_name", "member__last_name"]
     raw_id_fields = ["event", "member"]
+
+
+@admin.register(EventOfficial)
+class EventOfficialAdmin(admin.ModelAdmin):
+    list_display = ["event", "display_name", "fee", "km", "total_payable", "assigned_by"]
+    search_fields = ["event__title", "member__first_name", "member__last_name", "external_name"]
+    raw_id_fields = ["event", "member", "assigned_by"]
+
+    @admin.display(description=_("official"))
+    def display_name(self, obj):
+        return obj.display_name
+
+    @admin.display(description=_("total payable"))
+    def total_payable(self, obj):
+        return obj.total_payable
+
+
+@admin.register(OfficialSignup)
+class OfficialSignupAdmin(admin.ModelAdmin):
+    list_display = ["event", "member", "status", "responded_at"]
+    list_filter = ["status"]
+    search_fields = ["event__title", "member__first_name", "member__last_name"]
+    raw_id_fields = ["event", "member"]
+
+
+@admin.register(EventTask)
+class EventTaskAdmin(admin.ModelAdmin):
+    list_display = ["event", "title", "needed_quantity", "claim_count", "created_by"]
+    search_fields = ["event__title", "title"]
+    raw_id_fields = ["event", "created_by"]
+
+    @admin.display(description=_("claims"))
+    def claim_count(self, obj):
+        return obj.claims.count()
+
+
+@admin.register(EventTaskClaim)
+class EventTaskClaimAdmin(admin.ModelAdmin):
+    list_display = ["task", "member", "claimed_at"]
+    search_fields = ["task__title", "member__first_name", "member__last_name"]
+    raw_id_fields = ["task", "member"]

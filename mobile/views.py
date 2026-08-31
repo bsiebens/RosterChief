@@ -20,6 +20,7 @@ from django.utils.translation import get_language
 from django.utils.translation import gettext_lazy as _
 from django.views import View
 from django.views.generic import TemplateView
+from waffle import flag_is_active
 
 from club.models import ClubMembership
 from club.services.access import current_season, has_management_access, teams_managed_by
@@ -27,14 +28,17 @@ from club.services.fees import open_dues_rows
 from club.services.onboarding import checklist_for, open_requirements_blocking
 from club.services.sponsors import active_sponsors
 from controlpanel.messages import notify
-from events.models import Attendance, Event, Lineup, RefereeSignup
+from events.models import Attendance, Event, EventTask, Lineup, OfficialSignup, RefereeSignup
 from events.services.attendance import blocked_upcoming_events_for_member
 from events.services.calendar import agenda_groups, week_bounds
 from events.services.lineup import notify_dropout, selected_members_by_position
+from events.services.officials import OfficialAssignmentError, accept_official_signup, decline_official_signup
 from events.services.referees import RefereeAssignmentError, accept_referee_signup, decline_referee_signup
+from events.services.tasks import TaskClaimError, claim_task, unclaim_task
 from formbuilder.models import FormSend, Submission
 from formbuilder.services import FormSubmissionError, build_form, form_status_rows_for, is_send_open, submit_form
 from members.models import FamilyMembership, Member
+from members.services.family import claim_label_for
 from members.views import ClubScopedPublicMixin
 from news.models import News
 from news.services import render_body_html
@@ -53,7 +57,7 @@ from registration.services import (
     team_number_pools,
     variant_registration_kinds,
 )
-from registration.services.invoicing import RegistrationInvoicePDFError, batch_invoice_pdf, membership_ids_awaiting_confirmation
+from registration.services.invoicing import RegistrationInvoicePDFError, active_batch_entries, batch_early_payment_offer, batch_invoice_pdf, batch_totals, membership_ids_awaiting_confirmation
 from registration.services.notifications import send_registration_confirmation_email
 from shop.models import Cart, CartItem, Order, Product, ProductCategory, Voucher
 from shop.services.checkout import CheckoutError, find_discount, place_order
@@ -471,6 +475,68 @@ class RefereeSignupRespondView(PersonScopeMixin, LoginRequiredMixin, View):
         return HttpResponseRedirect(reverse("mobile:calendar"))
 
 
+class OfficialSignupRespondView(PersonScopeMixin, LoginRequiredMixin, View):
+    """The officials counterpart to RefereeSignupRespondView -- same shape,
+    same reasoning (see that view's own docstring)."""
+
+    def post(self, request, *args, **kwargs):
+        signup = get_object_or_404(OfficialSignup, pk=kwargs["signup_id"], member__in=self.managed_people, event__club=request.club)
+        response = request.POST.get("response")
+
+        if response == "accept":
+            try:
+                accept_official_signup(signup)
+                body = _("%(name)s is confirmed as an official -- see you there.") % {"name": signup.member.get_full_name()}
+                notify(request, f"s|{_('Official sign-up confirmed')}|{body}")
+            except OfficialAssignmentError as exc:
+                notify(request, f"e|{_('Could not sign up')}|{exc}")
+        elif response == "decline":
+            decline_official_signup(signup)
+            body = _("%(name)s won't be an official for this one -- thanks for letting us know.") % {"name": signup.member.get_full_name()}
+            notify(request, f"s|{_('Declined')}|{body}")
+        else:
+            return HttpResponseBadRequest(_("Unknown response."))
+
+        if request.POST.get("next") == "event_detail":
+            return HttpResponseRedirect(reverse("mobile:event_detail", kwargs={"pk": signup.event_id}))
+        return HttpResponseRedirect(reverse("mobile:calendar"))
+
+
+class EventTaskRespondView(PersonScopeMixin, LoginRequiredMixin, View):
+    """Claim/unclaim one slot of an event task (management._event_task_panel.
+    html's own read-only counterpart) -- always as self.me, not a managed-
+    person picker like RSVP has: a logistics task ("bring fruit") belongs to
+    whichever parent/member is handling it, not a specific child on the
+    roster. Routes through events.services.tasks.claim_task/unclaim_task, so
+    capacity is enforced in the one place the panel's own read-only claim
+    list already reflects."""
+
+    def post(self, request, *args, **kwargs):
+        if self.me is None:
+            return HttpResponseBadRequest(_("No member record for this account."))
+
+        task = get_object_or_404(EventTask, pk=kwargs["task_id"], event__club=request.club)
+        response = request.POST.get("response")
+
+        if response == "claim":
+            try:
+                claim_task(task, self.me)
+                notify(request, f"s|{_('Claimed')}|" + _("You're down for “%(title)s”.") % {"title": task.title})
+            except TaskClaimError as exc:
+                notify(request, f"e|{_('Could not claim')}|{exc}")
+        elif response == "unclaim":
+            claim = task.claims.filter(member=self.me).first()
+            if claim is not None:
+                unclaim_task(claim)
+                notify(request, f"w|{_('Removed')}|" + _("You're no longer down for “%(title)s”.") % {"title": task.title})
+        else:
+            return HttpResponseBadRequest(_("Unknown response."))
+
+        if request.POST.get("next") == "event_detail":
+            return HttpResponseRedirect(reverse("mobile:event_detail", kwargs={"pk": task.event_id}))
+        return HttpResponseRedirect(reverse("mobile:calendar"))
+
+
 class EventDetailView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
     """M2 -- design_handoff_rosterchief_platform/README.md's M2 section:
     "answer for several". A hero header (no event photos in this codebase --
@@ -515,6 +581,19 @@ class EventDetailView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         referee_signups = []
         if self.managed_people:
             referee_signups = list(RefereeSignup.objects.filter(event=event, member__in=self.managed_people, status__in=[RefereeSignup.Status.INVITED, RefereeSignup.Status.ACCEPTED]).select_related("member"))
+
+        official_signups = []
+        if self.managed_people and flag_is_active(self.request, "officials"):
+            official_signups = list(OfficialSignup.objects.filter(event=event, member__in=self.managed_people, status__in=[OfficialSignup.Status.INVITED, OfficialSignup.Status.ACCEPTED]).select_related("member"))
+
+        # Every task on this event, each with its claim labels
+        # (members.services.family.claim_label_for -- never the claiming
+        # member's own name) and whether self.me has already claimed a slot.
+        tasks = list(event.tasks.prefetch_related("claims__member").order_by("created_at"))
+        for task in tasks:
+            task.claim_labels = [claim_label_for(claim.member) for claim in task.claims.all()]
+            task.is_full = len(task.claim_labels) >= task.needed_quantity
+            task.claimed_by_me = self.me is not None and any(claim.member_id == self.me.pk for claim in task.claims.all())
 
         your_answers = []
         blocked_signups = []
@@ -570,6 +649,8 @@ class EventDetailView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
             lineup=lineup,
             lineup_categories=lineup_categories,
             referee_signups=referee_signups,
+            official_signups=official_signups,
+            tasks=tasks,
             your_answers=your_answers,
             blocked_signups=blocked_signups,
             squad_summary=squad_summary,
@@ -951,12 +1032,21 @@ def _display_answer(value):
 
 class PaymentsView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
     """M5's "Payments & dues" row -- every open season-dues balance across
-    ``self.managed_people``, one card per person owed, in the same €-badge /
-    amount+due-date / Pay layout as Home's dues card (club.services.fees.
-    open_dues_rows is the shared source for both). No online payment gateway
+    ``self.managed_people`` (club.services.fees.open_dues_rows is the shared
+    source behind Home's own dues card too). No online payment gateway
     exists yet, so "Pay" is the same non-functional stub as Home's -- this
     screen's job is visibility ("what do I owe, and when"), not collection.
-    """
+
+    A membership billed through a *confirmed* registration is grouped with
+    every other managed person that same registration covers into one
+    combined card (mobile/_dues_registration_receipt.html) -- one balance,
+    one "pay early and save" figure, one invoice download, matching the one
+    invoice that was actually sent, rather than a separate card per person
+    with its own (and, once a manual discount is involved, inaccurate --
+    see registration.services.invoicing.batch_early_payment_offer's own
+    docstring) early-payment figure. A membership with no registration
+    behind it at all (manually created) still gets its own plain card
+    (mobile/_dues_receipt.html), unchanged."""
 
     template_name = "mobile/payments.html"
     screen_title = _("Payments & dues")
@@ -966,26 +1056,50 @@ class PaymentsView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         season = current_season(self.request.club)
         # Holds back a balance nobody's reviewed yet -- see
         # registration.services.invoicing.membership_ids_awaiting_confirmation's
-        # own docstring. Filtered before the receipt breakdown below is
-        # built, so nothing's wasted decorating a row about to be dropped.
+        # own docstring. Filtered before the grouping below, so nothing's
+        # wasted decorating a row about to be dropped.
         awaiting_confirmation = membership_ids_awaiting_confirmation(self.request.club)
-        dues_rows = [row for row in open_dues_rows(self.request.club, self.managed_people, season) if row["membership"].pk not in awaiting_confirmation]
-        # The receipt breakdown this screen shows (unlike Home's own compact
-        # dues card, which stays as a bare balance) -- one membership can
-        # carry more than one entry (a second team, or player and referee
-        # both), see RegistrationDetails' own docstring.
+        # include_zero=True: a sibling already settled (or priced at 0/net
+        # negative after a credit) still has to show its own line items in a
+        # combined registration receipt below -- see open_dues_rows' own
+        # docstring on why the usual "still owed" filter would otherwise
+        # silently drop them from both the member list and the itemised
+        # breakdown. A standalone (non-registration) membership has no group
+        # total to reconcile against, so it's filtered back down to
+        # balance > 0 below, same as before -- nothing gained by showing an
+        # already-settled person their own €0 card on its own.
+        dues_rows = [row for row in open_dues_rows(self.request.club, self.managed_people, season, include_zero=True) if row["membership"].pk not in awaiting_confirmation]
+
+        registration_groups = {}
+        standalone_rows = []
         for row in dues_rows:
             entries = list(row["membership"].registration_details.select_related("product_variant__product", "requested_team", "batch"))
             row["entries"] = entries
             # Almost always one -- a membership only ever spans more than one
             # registration batch if this person was registered twice in the
             # same season (e.g. a second team added on afterwards), see
-            # registration.services.submission's own docstring.
-            seen_batches = {}
-            for entry in entries:
-                seen_batches.setdefault(entry.batch_id, entry.batch)
-            row["invoice_batches"] = list(seen_batches.values())
-        return super().get_context_data(dues_rows=dues_rows, payment_instructions=self.request.club.payment_instructions, **kwargs)
+            # registration.services.submission's own docstring. Only a
+            # *confirmed* batch groups this row -- an unconfirmed one can't
+            # exist here at all (already filtered above via
+            # membership_ids_awaiting_confirmation).
+            batch = next((entry.batch for entry in entries if entry.batch.invoice_sent_at is not None), None)
+            if batch is None:
+                if row["balance"] > 0:
+                    standalone_rows.append(row)
+                continue
+            group = registration_groups.setdefault(batch.pk, {"batch": batch, "rows": [], "total_balance": Decimal("0")})
+            group["rows"].append(row)
+            group["total_balance"] += row["balance"]
+
+        display_rows = [{"kind": "standalone", "row": row} for row in standalone_rows]
+        for group in registration_groups.values():
+            entries = active_batch_entries(group["batch"])
+            _subtotal, _discount_amount, total = batch_totals(entries, group["batch"].manual_discount_amount)
+            group["early_payment"] = batch_early_payment_offer(group["batch"], entries, total)
+            group["member_names"] = ", ".join(row["membership"].member.first_name for row in group["rows"])
+            display_rows.append({"kind": "registration", "group": group})
+
+        return super().get_context_data(display_rows=display_rows, payment_instructions=self.request.club.payment_instructions, **kwargs)
 
 
 class RegistrationInvoicePdfView(PersonScopeMixin, LoginRequiredMixin, View):

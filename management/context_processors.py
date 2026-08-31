@@ -10,7 +10,7 @@ action rather than the whole section (``NewsAuthorRequiredMixin``/``can_add_news
 from waffle import flag_is_active
 
 from billing.services.notices import club_billing_notice
-from club.services.access import can_add_news, can_manage_members, has_management_access, is_club_admin, is_coach_manager
+from club.services.access import can_add_news, can_manage_members, current_season, has_management_access, is_club_admin, is_coach_manager
 from members.models import ParentClaim
 
 #: Every management URL name, mapped to the nav item it should light up --
@@ -31,6 +31,7 @@ _NAV_SECTIONS = {
     "member_attach_family": "member_list",
     "member_grant_login": "member_list",
     "member_referee_eligibility_update": "member_list",
+    "member_official_eligibility_update": "member_list",
     "member_detach_family": "member_list",
     "family_list": "family_list",
     "family_create": "member_list",
@@ -43,6 +44,10 @@ _NAV_SECTIONS = {
     "membership_export_pdf": "membership_list",
     "membership_mark_fully_paid": "membership_list",
     "membership_record_payment": "membership_list",
+    # Reached from Invoices (a registration row's own "View"), not from the
+    # Registrations review queue -- Invoices is where you'd naturally click
+    # "back" to from here.
+    "registration_invoice_detail": "invoice_list",
     "registration_invoice_queue": "registration_invoice_queue",
     "registration_invoice_review": "registration_invoice_queue",
     "position_list": "position_list",
@@ -89,6 +94,10 @@ _NAV_SECTIONS = {
     "referee_level_list": "referee_level_list",
     "referee_level_create": "referee_level_list",
     "referee_level_update": "referee_level_list",
+    "official_list": "official_list",
+    "official_level_list": "official_level_list",
+    "official_level_create": "official_level_list",
+    "official_level_update": "official_level_list",
     "news_list": "news_list",
     "news_create": "news_list",
     "news_detail": "news_list",
@@ -111,6 +120,14 @@ _NAV_SECTIONS = {
     "event_referee_remove": "event_list",
     "event_referee_fee_update": "event_list",
     "event_referee_form_pdf": "event_list",
+    "event_official_assign": "event_list",
+    "event_official_add_external": "event_list",
+    "event_official_remove": "event_list",
+    "event_official_fee_update": "event_list",
+    "event_official_form_pdf": "event_list",
+    "event_task_create": "event_list",
+    "event_task_update": "event_list",
+    "event_task_delete": "event_list",
     "rbihf_import": "event_list",
     "rbihf_import_confirm": "event_list",
     "event_series_create": "event_list",
@@ -222,6 +239,7 @@ _TOP_SECTION = {
     "team_list": "teams",
     "number_list": "teams",
     "referee_list": "teams",
+    "official_list": "teams",
     "news_list": "news",
     "event_list": "calendar",
     "location_list": "calendar",
@@ -240,6 +258,7 @@ _TOP_SECTION = {
     "number_pool_list": "settings",
     "referee_level_list": "settings",
     "referee_management": "calendar",
+    "official_level_list": "settings",
 }
 
 
@@ -316,12 +335,13 @@ def feature_sections(request):
     those all already require."""
     club = getattr(request, "club", None)
     if club is None or not request.user.is_authenticated:
-        return {"shop_enabled": False, "forms_enabled": False, "rbihf_enabled": False}
+        return {"shop_enabled": False, "forms_enabled": False, "rbihf_enabled": False, "officials_enabled": False}
 
     return {
         "shop_enabled": flag_is_active(request, "shop"),
         "forms_enabled": flag_is_active(request, "formbuilder"),
         "rbihf_enabled": flag_is_active(request, "RBIHF"),
+        "officials_enabled": flag_is_active(request, "officials"),
     }
 
 
@@ -347,12 +367,12 @@ def sidebar_counters(request):
     The first two are gated on can_manage_members (real ADMIN or MEMBER_ADMIN),
     matching how _nav_items.html itself gates both links -- a coach never sees
     either link, so there's no reason to run either query for them.
-    Registrations is gated tighter, on is_club_admin alone: it lives under
-    Finance, which the nav itself only ever shows to a real ADMIN, not a
+    Registrations/Sign-up are gated tighter, on is_club_admin alone: both live
+    behind links the nav itself only ever shows to a real ADMIN, not a
     MEMBER_ADMIN. Always an int when shown, never hidden at 0: "the queue is
     empty" and "nobody checked" have to read differently.
     """
-    counters = {"pending_parent_claims_count": None, "games_missing_referees_count": None, "registrations_awaiting_count": None}
+    counters = {"pending_parent_claims_count": None, "games_missing_referees_count": None, "registrations_awaiting_count": None, "signup_pending_count": None}
     club = getattr(request, "club", None)
     if club is None or not request.user.is_authenticated:
         return counters
@@ -361,15 +381,23 @@ def sidebar_counters(request):
         # Imported here rather than at module level to keep this module's own
         # import graph small -- management.views pulls in most of the app's
         # models/services, none of which any other context processor here needs.
-        from management.views import RefereeManagementDashboardView, games_missing_referees_count
+        from management.views import RefereeManagementDashboardView, games_missing_officials_count, games_missing_referees_count
 
         counters["pending_parent_claims_count"] = ParentClaim.objects.filter(club=club, status=ParentClaim.Status.PENDING).count()
-        counters["games_missing_referees_count"] = games_missing_referees_count(club, limit=int(RefereeManagementDashboardView.DEFAULT_RANGE))
+        # games_missing_officials_count is 0 whenever the "officials" flag is
+        # off for this club (checked inside that function itself) -- so this
+        # sum is just the referee count, unchanged, for every club that's
+        # never turned officials on.
+        counters["games_missing_referees_count"] = games_missing_referees_count(club, limit=int(RefereeManagementDashboardView.DEFAULT_RANGE)) + games_missing_officials_count(
+            club, limit=int(RefereeManagementDashboardView.DEFAULT_RANGE)
+        )
 
     if is_club_admin(request.user, club):
+        from management.views import signup_queue_count
         from registration.services.invoicing import registrations_awaiting_confirmation
 
         counters["registrations_awaiting_count"] = len(registrations_awaiting_confirmation(club))
+        counters["signup_pending_count"] = signup_queue_count(club, current_season(club))
 
     return counters
 

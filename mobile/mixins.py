@@ -9,6 +9,7 @@ from django.conf import settings
 from django.http import Http404
 from django.shortcuts import redirect
 from django.utils.translation import gettext_lazy as _
+from waffle import flag_is_active
 
 from club.services.access import current_season, has_management_access, teams_staffed_by
 from controlpanel.messages import notify
@@ -111,6 +112,13 @@ class PersonScopeMixin(ClubScopedPublicMixin):
             # Gates the Shop tab itself (base.html) -- same "just absent, not
             # disabled" treatment as the Coach/Member switcher above.
             shop_open=self.request.club.shop_open,
+            # Mirrors management.context_processors.feature_sections' own
+            # officials_enabled -- mobile has no shared context-processor for
+            # waffle flags, so every mobile screen that needs this reads it
+            # from here instead (EventDetailView's own Officiating card,
+            # CalendarView's official rows) rather than importing
+            # flag_is_active repeatedly.
+            officials_enabled=flag_is_active(self.request, "officials"),
             **kwargs,
         )
 

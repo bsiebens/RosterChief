@@ -186,7 +186,7 @@
                             {% if not forloop.first %}<div class="h-px bg-rule"></div>{% endif %}
                             <div class="flex items-center justify-between p-3.5">
                                 <span class="text-[15px] text-ink">{{ entry.first_name }} {{ entry.last_name }}</span>
-                                <span class="font-mono text-sm tabular-nums text-ink">&euro; {{ price.price|floatformat:2 }}</span>
+                                <span class="font-mono text-sm whitespace-nowrap tabular-nums text-ink">&euro; {{ price.price|floatformat:2 }}</span>
                             </div>
                             {# Jersey number lives here now, not on the form above -- there was nothing to narrow it to (which team?) until the team was already submitted, which this receipt is proof of. #}
                             {% if form.requested_jersey_number.field.choices|length > 1 %}

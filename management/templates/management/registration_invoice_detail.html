@@ -1,0 +1,129 @@
+{% extends "management/base.html" %}
+{% load i18n lucide %}
+
+{% comment %}
+    Read-only "checkout screen" for one already-confirmed registration --
+    management.views.RegistrationInvoiceDetailView. Same person/membership/
+    team/price shape as the Registrations review screen (registration_
+    invoice_review.html), minus the editing: this is what actually got
+    confirmed and billed, not a form to keep changing.
+{% endcomment %}
+
+{% block panel_title %}{% blocktrans with number=batch.invoice_number %}Registration {{ number }}{% endblocktrans %}{% endblock panel_title %}
+{% block heading %}{% blocktrans with number=batch.invoice_number %}Registration {{ number }}{% endblocktrans %}{% endblock heading %}
+{% block topbar_context %}<span class="text-sm text-muted">{{ batch.contact_first_name }} {{ batch.contact_last_name }}</span>{% endblock topbar_context %}
+
+{% block actions %}
+    <a class="btn btn-outline gap-2" href="{% url 'management:invoice_list' %}">{% lucide "arrow-left" size=16 %} {% trans "Invoices" %}</a>
+    <a class="btn btn-outline gap-2" href="{% url 'management:registration_invoice_pdf' batch.pk %}">{% lucide "file-down" size=16 %} {% trans "Download PDF" %}</a>
+    {% if not all_paid %}
+        {# A secondary path to what Dues & billing's own per-row/bulk "Mark ... paid" buttons already do. #}
+        <button class="btn btn-success gap-2" type="button" onclick="document.getElementById('mark_paid_modal').showModal()">{% lucide "circle-check" size=16 %} {% trans "Mark as paid" %}</button>
+    {% endif %}
+{% endblock actions %}
+
+{% block panel %}
+    <div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <div class="card p-4">
+            <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Total" %}</div>
+            <div class="mt-1 font-display text-[34px] leading-none font-extrabold tabular-nums text-ink">&euro;{{ total }}</div>
+            <div class="mt-1"><span class="badge badge-sm {{ status_css }}">{{ status_label }}</span></div>
+        </div>
+        <div class="card p-4">
+            <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Sent" %}</div>
+            <div class="mt-1 font-display text-[22px] leading-none font-extrabold text-ink">{{ batch.invoice_sent_at|date:"j M Y" }}</div>
+            <div class="mt-1 text-[13px] text-muted">{{ batch.season }}</div>
+        </div>
+        <div class="card p-4">
+            <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Contact" %}</div>
+            <div class="mt-1 font-display text-[22px] leading-none font-extrabold text-ink">{{ batch.contact_first_name }} {{ batch.contact_last_name }}</div>
+            <div class="mt-1 text-[13px] text-muted">
+                {% if contact %}<a class="link link-hover" href="{% url 'management:member_detail' contact.pk %}">{{ batch.contact_email }}</a>{% else %}{{ batch.contact_email }}{% endif %}
+            </div>
+        </div>
+    </div>
+
+    {% comment %}
+        min-w-0: without it, a flex/grid item defaults to min-width:auto -- it
+        refuses to shrink below the table's own intrinsic (unwrapped) width,
+        so the *whole page* grew wider and scrolled horizontally instead of
+        the overflow-x-auto div below actually becoming the scroll container
+        on its own, squeezing the stat cards above off-screen along with it.
+    {% endcomment %}
+    <div class="card min-w-0 overflow-hidden">
+        <div class="overflow-x-auto">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>{% trans "Person" %}</th>
+                    <th>{% trans "Membership" %}</th>
+                    <th>{% trans "Team" %}</th>
+                    <th class="text-right">{% trans "Price" %}</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for entry in entries %}
+                    <tr>
+                        <td class="font-semibold"><a class="link link-hover" href="{% url 'management:member_detail' entry.membership.member.pk %}">{{ entry.membership.member }}</a></td>
+                        <td>{% if entry.product_variant %}{{ entry.product_variant.product.name }} &mdash; {{ entry.product_variant.name }}{% else %}{{ entry.get_entry_kind_display }}{% endif %}</td>
+                        <td class="text-sm text-ink">
+                            {% if entry.entry_kind == "player" %}
+                                {% if entry.resulting_team_membership %}
+                                    {{ entry.resulting_team_membership.team.short_name }}{% if entry.resulting_team_membership.jersey_number %} &middot;  #{{ entry.resulting_team_membership.jersey_number }}{% endif %}
+                                {% elif entry.requested_team %}
+                                    <span class="text-dim">{% blocktrans with team=entry.requested_team.short_name %}{{ team }} (not placed yet){% endblocktrans %}</span>
+                                {% else %}
+                                    <span class="text-dim">&mdash;</span>
+                                {% endif %}
+                            {% else %}
+                                {% if entry.resulting_staff_assignment %}
+                                    {{ entry.resulting_staff_assignment.team.short_name }} &middot; {{ entry.resulting_staff_assignment.position.name }}
+                                {% elif entry.requested_team %}
+                                    <span class="text-dim">{% blocktrans with team=entry.requested_team.short_name %}{{ team }} (not placed yet){% endblocktrans %}</span>
+                                {% else %}
+                                    <span class="text-dim">&mdash;</span>
+                                {% endif %}
+                            {% endif %}
+                        </td>
+                        <td class="text-right font-mono text-sm whitespace-nowrap tabular-nums text-ink">&euro; {{ entry.price|floatformat:2 }}</td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="4" class="py-6 text-center text-muted">{% trans "Nothing left on this invoice -- every entry has since been cancelled or excluded." %}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        </div>
+        {% if entries %}
+            <div class="flex justify-end border-t border-line bg-paper p-4">
+                <div class="flex w-full max-w-72 flex-col gap-1.5">
+                    {% if discount_amount %}
+                        <div class="flex items-center justify-between text-sm text-muted">
+                            <span>{% trans "Multi-registrant discount" %}</span>
+                            <span class="font-mono whitespace-nowrap tabular-nums">&minus;&euro; {{ discount_amount|floatformat:2 }}</span>
+                        </div>
+                    {% endif %}
+                    {% if batch.manual_discount_amount %}
+                        <div class="flex items-center justify-between text-sm text-muted">
+                            <span>{{ batch.manual_discount_note|default:_("Discount") }}</span>
+                            <span class="font-mono whitespace-nowrap tabular-nums">&minus;&euro; {{ batch.manual_discount_amount|floatformat:2 }}</span>
+                        </div>
+                    {% endif %}
+                    <div class="flex items-center justify-between border-t border-line pt-1.5 font-display text-sm font-extrabold text-ink uppercase">
+                        <span>{% trans "Total" %}</span>
+                        <span class="font-mono text-base whitespace-nowrap tabular-nums">&euro; {{ total|floatformat:2 }}</span>
+                    </div>
+                </div>
+            </div>
+        {% endif %}
+    </div>
+
+    {% if not all_paid %}
+        {% trans "Mark as paid?" as mark_paid_title %}
+        {% trans "Mark as paid" as mark_paid_submit_label %}
+        {% blocktrans with name=batch.contact_first_name|add:" "|add:batch.contact_last_name asvar mark_paid_body %}Marks every membership in {{ name }}'s registration as fully paid.{% endblocktrans %}
+        {% url 'management:registration_invoice_mark_paid' batch.pk as mark_paid_url %}
+        {% include "controlpanel/_confirm_modal.html" with modal_id="mark_paid_modal" title=mark_paid_title body=mark_paid_body action_url=mark_paid_url submit_label=mark_paid_submit_label submit_icon="circle-check" submit_btn_class="btn-success" %}
+    {% endif %}
+{% endblock panel %}

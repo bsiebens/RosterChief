@@ -17,7 +17,7 @@ from django.views import View
 
 from club.models import OnboardingRequirement
 from club.services.cancellation import cancel_membership
-from club.services.fees import early_payment_offer, remaining_balance
+from club.services.fees import net_balance
 from club.services.onboarding import checklist_for, mark_complete
 from controlpanel.messages import notify
 from members.models import Member
@@ -26,7 +26,7 @@ from members.views import ClubScopedPublicMixin
 from .forms import RegistrationContactForm, RegistrationEntryFormSet, RegistrationStatusDocumentForm, entries_from_formset
 from .models import RegistrationBatch, RegistrationDetails
 from .services import PricingError, RegistrationError, price_entries, priced_rows_with_jersey_fields, resolve_chosen_season, resolve_registration_season, submit_registration, team_number_pools, variant_registration_kinds
-from .services.invoicing import RegistrationInvoicePDFError, batch_invoice_pdf
+from .services.invoicing import RegistrationInvoicePDFError, active_batch_entries, batch_early_payment_offer, batch_invoice_pdf, batch_totals
 from .services.notifications import send_registration_confirmation_email
 
 
@@ -168,17 +168,30 @@ class RegistrationStatusView(ClubScopedPublicMixin, View):
     def get_batch(self, request, token):
         return get_object_or_404(RegistrationBatch.objects.select_related("season"), club=request.club, status_token=token)
 
-    def get_membership_rows(self, batch):
-        invoice_ready = batch.invoice_sent_at is not None
+    def get_membership_rows(self, batch, invoice_ready):
         memberships = list({details.membership for details in RegistrationDetails.objects.filter(batch=batch).select_related("membership__member")})
         memberships.sort(key=lambda membership: membership.member.get_full_name())
         rows = []
         for membership in memberships:
+            # net_balance, not remaining_balance -- the latter floors at 0,
+            # which would fold a genuine credit (a negative per-line price on
+            # the Registrations review screen, or an overpayment) into the
+            # same "No balance owed" reading as someone who simply owes
+            # nothing, hiding a real number status.html's own template needs
+            # to show instead. ``credit`` is that same figure flipped
+            # positive, for the template to print without doing arithmetic
+            # of its own.
+            balance = net_balance(membership) if invoice_ready else None
             rows.append(
                 {
                     "membership": membership,
-                    "balance": remaining_balance(membership) if invoice_ready else None,
-                    "early_payment": early_payment_offer(membership) if invoice_ready else None,
+                    "balance": balance,
+                    "credit": -balance if balance is not None and balance < 0 else None,
+                    # Once nothing's still owed, "Cancel registration" no longer
+                    # makes sense here -- the fee's already settled, so this
+                    # stops the template offering it once it's too late for it
+                    # to mean anything.
+                    "paid": balance is not None and balance <= 0,
                     "checklist": checklist_for(membership),
                     "upload_form": RegistrationStatusDocumentForm(),
                 }
@@ -188,10 +201,26 @@ class RegistrationStatusView(ClubScopedPublicMixin, View):
     def get(self, request, *args, **kwargs):
         batch = self.get_batch(request, kwargs["token"])
         invoice_ready = batch.invoice_sent_at is not None
+        # One combined "pay early and save" figure for the whole registration,
+        # not one per person -- computed against the batch's own total (net
+        # of both the multi-registrant and any manual discount), so it can
+        # never silently ignore either. See registration.services.invoicing.
+        # batch_early_payment_offer's own docstring.
+        early_payment = None
+        if invoice_ready:
+            entries = active_batch_entries(batch)
+            _subtotal, _discount_amount, total = batch_totals(entries, batch.manual_discount_amount)
+            early_payment = batch_early_payment_offer(batch, entries, total)
         return render(
             request,
             self.template_name,
-            {"batch": batch, "membership_rows": self.get_membership_rows(batch), "payment_instructions": batch.club.payment_instructions, "invoice_ready": invoice_ready},
+            {
+                "batch": batch,
+                "membership_rows": self.get_membership_rows(batch, invoice_ready),
+                "payment_instructions": batch.club.payment_instructions,
+                "invoice_ready": invoice_ready,
+                "early_payment": early_payment,
+            },
         )
 
     def post(self, request, *args, **kwargs):

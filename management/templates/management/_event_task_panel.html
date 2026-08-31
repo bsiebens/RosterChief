@@ -1,0 +1,68 @@
+{% load i18n lucide ui %}
+{% comment %}
+    An event's own logistics asks ("Bring fruit for half-time") -- team
+    managers of this event's own teams/groups, or admins, can add/edit/
+    delete tasks here (EventTaskCreateView/UpdateView/DeleteView, gated via
+    club.mixins.EventManagerRequiredMixin same as editing the event itself).
+    Read-only claim list -- claiming a slot only happens on mobile
+    (mobile.views.EventTaskRespondView), each claim shown under
+    members.services.family.claim_label_for(claim.member) rather than the
+    claiming member's own name, so this never reveals which specific parent
+    or child in a family is covering it.
+
+    Context: event, tasks (each with .claim_labels and .is_full attached in
+    EventDetailView.get_context_data), task_form, can_manage.
+{% endcomment %}
+<div class="flex flex-wrap items-center justify-between gap-2">
+    <h2 class="card-title">{% lucide "clipboard-list" size=18 %} {% trans "Tasks" %}</h2>
+    {% if can_manage %}
+        <button class="btn btn-outline btn-sm gap-1" type="button" onclick="document.getElementById('{{ event.pk|dom_id:"task_create_modal" }}').showModal()">{% lucide "plus" size=14 %} {% trans "Add task" %}</button>
+    {% endif %}
+</div>
+<ul class="divide-y">
+    {% for task in tasks %}
+        <li class="flex flex-wrap items-start justify-between gap-3 py-2.5">
+            <div class="flex min-w-0 flex-col gap-0.5">
+                <div class="flex flex-wrap items-center gap-1.5">
+                    <span class="text-sm font-semibold text-ink">{{ task.title }}</span>
+                    <span class="badge badge-sm {% if task.is_full %}badge-success{% else %}badge-outline{% endif %}">
+                        {{ task.claim_labels|length }} / {{ task.needed_quantity }}
+                    </span>
+                </div>
+                {% if task.description %}<p class="text-sm text-muted">{{ task.description }}</p>{% endif %}
+                {% if task.claim_labels %}
+                    <p class="text-xs text-muted">{% trans "Covered by" %}: {{ task.claim_labels|join:", " }}</p>
+                {% else %}
+                    <p class="text-xs text-dim">{% trans "Nobody has claimed this yet." %}</p>
+                {% endif %}
+            </div>
+            {% if can_manage %}
+                <div class="flex shrink-0 items-center gap-1.5">
+                    <button class="btn btn-outline btn-xs" type="button" onclick="document.getElementById('{{ task.pk|dom_id:"task_update_modal" }}').showModal()">{% lucide "pencil" size=12 %} {% trans "Edit" %}</button>
+                    <button class="btn btn-outline btn-xs btn-error" type="button" onclick="document.getElementById('{{ task.pk|dom_id:"task_delete_modal" }}').showModal()">{% lucide "trash-2" size=12 %} {% trans "Delete" %}</button>
+                </div>
+            {% endif %}
+        </li>
+    {% empty %}
+        <li class="py-2.5 text-sm text-muted">{% trans "No tasks yet." %}</li>
+    {% endfor %}
+</ul>
+
+{% if can_manage %}
+    {% trans "Add task" as add_task_title %}
+    {% trans "Add" as add_task_submit_label %}
+    {% url 'management:event_task_create' event.pk as task_create_url %}
+    {% include "controlpanel/_modal_form.html" with modal_id=event.pk|dom_id:"task_create_modal" title=add_task_title form=task_form action_url=task_create_url submit_label=add_task_submit_label submit_icon="plus" %}
+
+    {% trans "Edit task" as edit_task_title %}
+    {% trans "Delete task" as delete_task_title %}
+    {% trans "Delete" as delete_task_label %}
+    {% for task in tasks %}
+        {% url 'management:event_task_update' event.pk task.pk as task_update_url %}
+        {% include "controlpanel/_modal_form.html" with modal_id=task.pk|dom_id:"task_update_modal" title=edit_task_title form=task.edit_form action_url=task_update_url submit_icon="check" %}
+
+        {% url 'management:event_task_delete' event.pk task.pk as task_delete_url %}
+        {% blocktrans with title=task.title asvar delete_task_body %}Delete “{{ title }}”? This cannot be undone.{% endblocktrans %}
+        {% include "controlpanel/_confirm_modal.html" with modal_id=task.pk|dom_id:"task_delete_modal" title=delete_task_title body=delete_task_body action_url=task_delete_url submit_label=delete_task_label %}
+    {% endfor %}
+{% endif %}

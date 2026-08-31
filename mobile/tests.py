@@ -2376,7 +2376,7 @@ class PaymentsViewTests(TestCase):
 
         response = self._get()
 
-        self.assertEqual(len(response.context["dues_rows"]), 1)
+        self.assertEqual(len(response.context["display_rows"]), 1)
         self.assertContains(response, "150.00")
         self.assertNotContains(response, "All settled up")
 
@@ -2398,7 +2398,7 @@ class PaymentsViewTests(TestCase):
 
         response = self._get()
 
-        self.assertEqual(response.context["dues_rows"], [])
+        self.assertEqual(response.context["display_rows"], [])
 
     def test_only_shows_balances_for_managed_people(self):
         other_member = Member.objects.create(first_name="Tom", last_name="Roe")
@@ -2407,7 +2407,7 @@ class PaymentsViewTests(TestCase):
 
         response = self._get()
 
-        self.assertEqual(response.context["dues_rows"], [])
+        self.assertEqual(response.context["display_rows"], [])
 
     def test_shows_a_receipt_line_per_registration_entry(self):
         self.membership.fee_amount = Decimal("150.00")
@@ -2422,6 +2422,34 @@ class PaymentsViewTests(TestCase):
 
         self.assertContains(response, "Player Registration")
         self.assertContains(response, "U10")
+
+    def test_a_settled_sibling_still_shows_in_the_combined_receipt(self):
+        # Without include_zero=True on open_dues_rows, a sibling whose own
+        # balance already reads 0 (paid off, or priced at 0/net negative
+        # after a credit) used to be dropped from the group entirely -- both
+        # from member_names and from the itemised line items -- even though
+        # the registration covered them too. That broke the "do these
+        # numbers add up" check a family naturally tries against the total.
+        self.membership.fee_amount = Decimal("150.00")
+        self.membership.save()
+        family = Family.objects.create()
+        child = Member.objects.create(first_name="Nora", last_name="Bakker")
+        FamilyMembership.objects.create(family=family, member=self.member, role=FamilyMembership.FamilyRole.PARENT)
+        FamilyMembership.objects.create(family=family, member=child, role=FamilyMembership.FamilyRole.CHILD)
+        child_membership = ClubMembership.objects.create(club=self.club, member=child, season=self.season, fee_amount=Decimal("0.00"))
+        product = Product.objects.create(club=self.club, name="Player Registration", product_type=Product.ProductType.MEMBERSHIP, season=self.season, price=Decimal("150.00"))
+        variant = ProductVariant.objects.create(product=product, name="U10", price=Decimal("150.00"))
+        batch = self._confirm(RegistrationBatch.objects.create(club=self.club, season=self.season, contact_first_name="Lars", contact_last_name="Bakker", contact_email="parent@example.com"))
+        RegistrationDetails.objects.create(membership=self.membership, batch=batch, product_variant=variant, price=Decimal("150.00"))
+        RegistrationDetails.objects.create(membership=child_membership, batch=batch, product_variant=variant, price=Decimal("0.00"))
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, "Nora")
+        group = next(row["group"] for row in response.context["display_rows"] if row["kind"] == "registration")
+        self.assertEqual({row["membership"].pk for row in group["rows"]}, {self.membership.pk, child_membership.pk})
+        self.assertEqual(group["total_balance"], Decimal("150.00"))
 
     def test_shows_a_multi_registrant_discount_line(self):
         self.membership.fee_amount = Decimal("150.00")
@@ -2457,7 +2485,8 @@ class PaymentsViewTests(TestCase):
 
         response = self._get()
 
-        self.assertIsNone(response.context["dues_rows"][0]["early_payment"])
+        standalone_row = response.context["display_rows"][0]["row"]
+        self.assertIsNone(standalone_row["early_payment"])
 
     def test_shows_payment_instructions_when_set(self):
         self.membership.fee_amount = Decimal("150.00")
@@ -2517,7 +2546,7 @@ class PaymentsViewTests(TestCase):
 
         response = self._get()
 
-        self.assertEqual(response.context["dues_rows"], [])
+        self.assertEqual(response.context["display_rows"], [])
         self.assertContains(response, "All settled up")
 
     def test_the_balance_appears_once_the_registration_is_confirmed(self):
@@ -2530,7 +2559,7 @@ class PaymentsViewTests(TestCase):
 
         response = self._get()
 
-        self.assertEqual(len(response.context["dues_rows"]), 1)
+        self.assertEqual(len(response.context["display_rows"]), 1)
         self.assertContains(response, "150.00")
 
 
@@ -3629,6 +3658,22 @@ class CoachSquadViewTests(TestCase):
         self.assertContains(response, "Sam Coach")
         self.assertContains(response, "Head coach")
         self.assertContains(response, reverse("mobile:coach_roster_member", kwargs={"membership_pk": membership.pk}))
+
+    def test_a_pending_members_roster_row_shows_a_pending_badge(self):
+        pending_player = Member.objects.create(first_name="Penny", last_name="Pending")
+        ClubMembership.objects.create(club=self.club, member=pending_player, season=self.season, status=ClubMembership.StatusChoices.PENDING)
+        TeamMembership.objects.create(team=self.team, member=pending_player, season=self.season)
+        active_player = Member.objects.create(first_name="Anna", last_name="Player")
+        ClubMembership.objects.create(club=self.club, member=active_player, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        TeamMembership.objects.create(team=self.team, member=active_player, season=self.season)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        rows = {membership.member_id: membership.club_status_pending for membership in response.context["roster"]}
+        self.assertTrue(rows[pending_player.pk])
+        self.assertFalse(rows[active_player.pk])
+        self.assertContains(response, "Pending")
 
     def test_add_links_hidden_for_non_managing_staff(self):
         physio_position = Position.objects.create(club=self.club, name="Physio", short_name="PHY", staff_position=True, management_position=False)

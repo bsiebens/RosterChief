@@ -1,10 +1,14 @@
 {% load i18n lucide %}
 
 {% comment %}
-    A daisyUI native <dialog> confirmation modal for a destructive POST action with no
-    fields of its own. Included with `modal_id`, `title`, `body`, `action_url`, and
-    optional `submit_label` (default "Confirm"), `submit_icon` (default "trash-2"). The
-    submit button sits outside the form tag (linked via the `form` attribute), same as
+    A daisyUI native <dialog> confirmation modal for a POST action with no fields of its
+    own beyond an optional `next` redirect. Included with `modal_id`, `title`, `body`,
+    `action_url`, and optional `submit_label` (default "Confirm"), `submit_icon` (default
+    "trash-2"), `submit_btn_class` (default "btn-error" -- every existing caller here is
+    destructive/cautionary; pass "btn-success" for a positive confirmation like "Mark as
+    paid" instead), `next_url` (posted as a hidden "next" field when the target view
+    supports the redirect-back convention, e.g. MembershipMarkFullyPaidView). The submit
+    button sits outside the form tag (linked via the `form` attribute), same as
     `_modal_form.html`, so it can share the `modal-action` row with the dialog-closing
     Cancel button without nesting one <form> inside another.
 {% endcomment %}
@@ -15,12 +19,13 @@
         <p class="py-2 text-sm opacity-70">{{ body }}</p>
         <form method="post" action="{{ action_url }}" id="{{ modal_id }}-form">
             {% csrf_token %}
+            {% if next_url %}<input type="hidden" name="next" value="{{ next_url }}">{% endif %}
         </form>
         <div class="modal-action">
             <form method="dialog">
                 <button class="btn btn-outline gap-2">{% lucide "x" size=16 %} {% trans "Cancel" %}</button>
             </form>
-            <button class="btn btn-error gap-2" type="submit" form="{{ modal_id }}-form">{% lucide submit_icon|default:"trash-2" size=16 %} {{ submit_label|default:default_submit_label }}</button>
+            <button class="btn {{ submit_btn_class|default:"btn-error" }} gap-2" type="submit" form="{{ modal_id }}-form">{% lucide submit_icon|default:"trash-2" size=16 %} {{ submit_label|default:default_submit_label }}</button>
         </div>
     </div>
     <form method="dialog" class="modal-backdrop">

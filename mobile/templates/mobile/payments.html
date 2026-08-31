@@ -3,12 +3,15 @@
 
 {% comment %}
     M5's "Payments & dues" row -- every open season-dues balance across every
-    managed person, one receipt card per open row (mobile/_dues_receipt.html
-    -- what it covers, any discount, and the early-payment offer while it's
-    still live). Home's own dues card stays on the plainer _dues_row.html;
-    this is the one screen that shows the full breakdown. White sticky
-    back-header, same pattern as calendar_feed_settings.html -- not a tab of
-    its own, active_tab stays "me" (PaymentsView's own docstring).
+    managed person. mobile.views.PaymentsView groups anyone billed through
+    the same confirmed registration into one combined card
+    (_dues_registration_receipt.html -- one balance, one early-payment
+    figure, one invoice download); a membership with no registration behind
+    it gets its own plain card instead (_dues_receipt.html). Home's own
+    dues card stays on the plainer _dues_row.html; this is the one screen
+    that shows the full breakdown. White sticky back-header, same pattern
+    as calendar_feed_settings.html -- not a tab of its own, active_tab
+    stays "me" (PaymentsView's own docstring).
 {% endcomment %}
 
 {% block content %}
@@ -19,10 +22,14 @@
         <span class="min-w-0 flex-1 truncate font-display text-xl leading-none font-extrabold text-ink uppercase">{% trans "Payments & dues" %}</span>
     </div>
 
-    {% if dues_rows %}
+    {% if display_rows %}
         <div class="flex flex-col gap-2.5">
-            {% for row in dues_rows %}
-                {% include "mobile/_dues_receipt.html" %}
+            {% for item in display_rows %}
+                {% if item.kind == "registration" %}
+                    {% include "mobile/_dues_registration_receipt.html" with group=item.group %}
+                {% else %}
+                    {% include "mobile/_dues_receipt.html" with row=item.row %}
+                {% endif %}
             {% endfor %}
         </div>
 

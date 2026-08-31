@@ -27,6 +27,7 @@ from django.utils.translation import gettext_lazy as _
 from club.models import ClubMembership
 from events.models import Attendance, Event, EventSeries
 from events.services import notify_newly_invited, sync_event_attendances
+from events.services.officials import sync_official_invites
 from events.services.referees import sync_referee_invites
 from members.models import Group, GroupMembership
 from teams.models import Team, TeamMembership
@@ -58,6 +59,7 @@ def validate_groups_same_club(sender, instance, action, reverse, pk_set, **kwarg
 def sync_on_event_save(sender, instance, **kwargs):
     sync_event_attendances(instance)
     sync_referee_invites(instance)
+    sync_official_invites(instance)
 
 
 @receiver(m2m_changed, sender=Event.teams.through)
@@ -86,6 +88,7 @@ def sync_referee_invites_on_teams_change(sender, instance, action, reverse, **kw
     if action not in M2M_SYNC_ACTIONS or reverse or not isinstance(instance, Event):
         return
     sync_referee_invites(instance)
+    sync_official_invites(instance)
 
 
 @receiver(post_save, sender=TeamMembership)

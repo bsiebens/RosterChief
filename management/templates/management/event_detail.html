@@ -8,6 +8,7 @@
         {{ event.get_kind_display }}
     </span>
     {% if event.is_live %}<span class="badge badge-error gap-1 animate-pulse">{% lucide "circle" size=10 %} {% trans "Live" %}</span>{% endif %}
+    {% if event.is_friendly %}<span class="badge badge-outline">{% trans "Friendly" %}</span>{% endif %}
 {% endblock topbar_context %}
 
 {% block actions %}
@@ -156,6 +157,27 @@
             </div>
         </div>
     {% endif %}
+
+    {% if officials_enabled and event.is_home_game and not official_management_needed %}
+        <div class="alert alert-info">
+            {% lucide "info" size=20 %}
+            <span>{% trans "Officials for this game are managed by the federation, not the club." %}</span>
+        </div>
+    {% endif %}
+
+    {% if official_management_needed %}
+        <div class="card">
+            <div class="card-body">
+                {% include "management/_official_assignment_panel.html" %}
+            </div>
+        </div>
+    {% endif %}
+
+    <div class="card">
+        <div class="card-body">
+            {% include "management/_event_task_panel.html" %}
+        </div>
+    </div>
 {% endblock panel %}
 
 {% block extra_body %}

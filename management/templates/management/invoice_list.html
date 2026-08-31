@@ -12,11 +12,11 @@
     offers "Dues"/"Registrations" for them, same financial-data boundary
     MembershipListView already draws.
 
-    No detail page of its own -- "View" on an order/dues row lands on the
-    order/membership page that already shows everything about it, same as
-    this page's own shop-only predecessor; a registration row's own "View"
-    lands on its contact's member page instead, there being no page for a
-    whole registration.
+    "View" on an order/dues row lands on the order/membership page that
+    already shows everything about it, same as this page's own shop-only
+    predecessor; a registration row's own "View" lands on its own read-only
+    checkout screen instead (management:registration_invoice_detail) -- a
+    registration covers a whole group, not any one person's page.
 {% endcomment %}
 
 {% block panel_title %}{% trans "Invoices" %}{% endblock panel_title %}

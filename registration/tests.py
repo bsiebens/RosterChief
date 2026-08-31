@@ -958,7 +958,7 @@ class RegistrationStatusViewTests(TestCase):
 
         response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
 
-        self.assertEqual(response.context["membership_rows"][0]["early_payment"], None)
+        self.assertIsNone(response.context["early_payment"])
 
     def test_shows_payment_instructions_when_set(self):
         self._confirm()
@@ -991,7 +991,7 @@ class RegistrationStatusViewTests(TestCase):
 
         self.assertFalse(response.context["invoice_ready"])
         self.assertIsNone(response.context["membership_rows"][0]["balance"])
-        self.assertIsNone(response.context["membership_rows"][0]["early_payment"])
+        self.assertIsNone(response.context["early_payment"])
         self.assertNotContains(response, "still owed")
         self.assertNotContains(response, "No balance owed")
         self.assertNotContains(response, "Download invoice")
@@ -1006,6 +1006,55 @@ class RegistrationStatusViewTests(TestCase):
         self.assertTrue(response.context["invoice_ready"])
         self.assertContains(response, "80.00")
         self.assertContains(response, "still owed")
+        self.assertContains(response, "Cancel registration")
+
+    def test_cancel_registration_disappears_once_the_fee_is_paid(self):
+        # Cancelling something already settled doesn't make sense any more.
+        self._confirm()
+        self.membership.amount_paid = Decimal("80.00")
+        self.membership.save()
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertTrue(response.context["membership_rows"][0]["paid"])
+        self.assertNotContains(response, "Cancel registration")
+
+    def test_cancel_registration_still_shows_before_confirmation(self):
+        # Nothing's been paid yet at this point -- row.paid is only ever
+        # meaningful once invoice_ready, see get_membership_rows.
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertFalse(response.context["membership_rows"][0]["paid"])
+        self.assertContains(response, "Cancel registration")
+
+    def test_a_credit_shows_as_its_own_real_number_not_no_balance_owed(self):
+        # remaining_balance floors at 0 -- net_balance (what this page reads
+        # instead) doesn't, so a credit (an overpayment here, or a negative
+        # per-line price set on the Registrations review screen) shows as an
+        # actual number rather than folding into the same "No balance owed"
+        # text a genuinely-settled member gets.
+        self._confirm()
+        self.membership.amount_paid = Decimal("100.00")
+        self.membership.save()
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.context["membership_rows"][0]["balance"], Decimal("-20.00"))
+        self.assertEqual(response.context["membership_rows"][0]["credit"], Decimal("20.00"))
+        self.assertContains(response, "20.00")
+        self.assertContains(response, "credit")
+        self.assertNotContains(response, "No balance owed")
+
+    def test_a_genuinely_settled_balance_still_reads_no_balance_owed(self):
+        self._confirm()
+        self.membership.amount_paid = Decimal("80.00")
+        self.membership.save()
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.context["membership_rows"][0]["balance"], Decimal("0.00"))
+        self.assertIsNone(response.context["membership_rows"][0]["credit"])
+        self.assertContains(response, "No balance owed")
 
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
@@ -1163,6 +1212,10 @@ class RegistrationInvoiceViewTests(TestCase):
         self.assertNotIn("How to pay", response.content.decode())
 
     def test_shows_the_early_payment_offer_while_still_open(self):
+        # One combined figure for the whole registration, not this one
+        # membership's own line -- batch.total (both this and the sibling
+        # membership's 80.00) minus this one's own 10.00 discount, since
+        # only this membership has a live offer.
         self.membership.early_payment_deadline = datetime.date.today() + datetime.timedelta(days=5)
         self.membership.early_payment_discount = Decimal("10.00")
         self.membership.save()
@@ -1172,7 +1225,8 @@ class RegistrationInvoiceViewTests(TestCase):
 
         html = response.content.decode()
         self.assertIn("Pay early and save", html)
-        self.assertIn("70.00", html)
+        self.assertIn("150.00", html)
+        self.assertIn("10.00", html)
 
     def test_no_early_payment_section_once_the_deadline_has_passed(self):
         self.membership.early_payment_deadline = datetime.date.today() - datetime.timedelta(days=1)

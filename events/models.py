@@ -91,12 +91,20 @@ class Event(ClubScopedModel):
     # is this game's id in an external competition/fixture data source, for a later
     # automatic score-fetcher to key off; nothing populates it yet.
     competition = models.CharField(_("competition"), max_length=255, blank=True, help_text=_("The league, cup or competition this game is part of."))
+    is_friendly = models.BooleanField(_("friendly"), default=False, help_text=_("A friendly game doesn't count towards the standings."))
     external_game_id = models.CharField(_("external game ID"), max_length=255, blank=True, help_text=_("This game's id in an external competition data source, for automatic score fetching later."))
     score_for = models.PositiveSmallIntegerField(_("score (us)"), null=True, blank=True)
     score_against = models.PositiveSmallIntegerField(_("score (opponent)"), null=True, blank=True)
     is_live = models.BooleanField(_("live"), default=False, help_text=_("The game is currently in progress."))
+    live_score_polling_done_at = models.DateTimeField(
+        _("live score polling done at"),
+        null=True,
+        blank=True,
+        help_text=_("Set once the per-minute score poller has seen this game go live and then come back off live -- i.e. it's finished, so there's no point calling the data source again for the rest of the polling window."),
+    )
 
     max_referees = models.PositiveSmallIntegerField(_("max referees"), default=2, help_text=_("How many referees can be assigned to this game. Only meaningful for home games -- ignored otherwise."))
+    max_officials = models.PositiveSmallIntegerField(_("max officials"), default=2, help_text=_("How many match officials can be assigned to this game. Only meaningful for home games -- ignored otherwise."))
 
     deadline_reminder_sent_at = models.DateTimeField(
         _("deadline reminder sent at"),
@@ -344,6 +352,131 @@ class RefereeSignup(UUIDModel):
 
     def __str__(self):
         return f"{self.event} - {self.member} ({self.status})"
+
+
+class EventOfficial(UUIDModel):
+    """The match-officials counterpart to EventReferee -- same shape, same
+    reasoning (see that model's own docstring): one official assigned to one
+    (home) game, either a club member or an external one logged by name
+    only, never both/neither. See events.services.officials for the
+    home-game gate, Event.max_officials, and the (non-blocking) schedule
+    conflict check."""
+
+    event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="officials", verbose_name=_("event"))
+    member = models.ForeignKey(Member, on_delete=models.CASCADE, null=True, blank=True, related_name="official_assignments", verbose_name=_("member"))
+    external_name = models.CharField(_("external official name"), max_length=255, blank=True, help_text=_("For an official who isn't a club member (e.g. federation-appointed) -- logged by name only."))
+    assigned_by = models.ForeignKey(Member, on_delete=models.SET_NULL, null=True, related_name="+", verbose_name=_("assigned by"))
+
+    fee = models.DecimalField(_("fee"), max_digits=8, decimal_places=2, default=Decimal("0.00"), blank=True)
+    km = models.DecimalField(_("kilometers"), max_digits=6, decimal_places=1, null=True, blank=True)
+    km_rate = models.DecimalField(_("rate per km"), max_digits=6, decimal_places=4, null=True, blank=True, help_text=_("Reimbursement rate per kilometer, e.g. 0.4230."))
+
+    class Meta:
+        verbose_name = _("event official")
+        verbose_name_plural = _("event officials")
+        ordering = ["event", "member__last_name", "member__first_name"]
+        constraints = [
+            models.UniqueConstraint(fields=["event", "member"], name="unique_official_per_event"),
+            models.CheckConstraint(
+                condition=(Q(member__isnull=False) & Q(external_name="")) | (Q(member__isnull=True) & ~Q(external_name="")),
+                name="event_official_member_xor_external_name",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.event} - {self.display_name}"
+
+    @property
+    def display_name(self) -> str:
+        return str(self.member) if self.member_id else self.external_name
+
+    @property
+    def is_external(self) -> bool:
+        return self.member_id is None
+
+    @property
+    def km_total(self) -> Decimal:
+        return (self.km or Decimal("0")) * (self.km_rate or Decimal("0"))
+
+    @property
+    def total_payable(self) -> Decimal:
+        return (self.fee or Decimal("0")) + self.km_total
+
+
+class OfficialSignup(UUIDModel):
+    """The match-officials counterpart to RefereeSignup -- same shape, same
+    reasoning: one eligible official's invite/response for one home game,
+    created automatically (events.services.officials.sync_official_invites)
+    the moment a home game needs a club-arranged official."""
+
+    class Status(models.TextChoices):
+        INVITED = "invited", _("invited")
+        ACCEPTED = "accepted", _("accepted")
+        DECLINED = "declined", _("declined")
+
+    event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="official_signups", verbose_name=_("event"))
+    member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="official_signups", verbose_name=_("member"))
+    status = models.CharField(_("status"), max_length=20, choices=Status.choices, default=Status.INVITED)
+    responded_at = models.DateTimeField(_("responded at"), null=True, blank=True)
+
+    class Meta:
+        verbose_name = _("official sign-up")
+        verbose_name_plural = _("official sign-ups")
+        ordering = ["event", "member__last_name", "member__first_name"]
+        constraints = [
+            models.UniqueConstraint(fields=["event", "member"], name="unique_official_signup_per_event_per_member"),
+        ]
+
+    def __str__(self):
+        return f"{self.event} - {self.member} ({self.status})"
+
+
+class EventTask(UUIDModel):
+    """A logistics ask a team manager/admin attaches to an event (e.g. "Bring
+    fruit for half-time") -- families/members confirm whether they can take
+    it, up to needed_quantity at once (see EventTaskClaim and
+    events.services.tasks.claim_task for the capacity-checked claim itself).
+    Not kind-restricted -- a training or social can need this just as much
+    as a game."""
+
+    event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="tasks", verbose_name=_("event"))
+    title = models.CharField(_("title"), max_length=255)
+    description = models.TextField(_("description"), blank=True)
+    needed_quantity = models.PositiveSmallIntegerField(_("needed quantity"), default=1, help_text=_("How many people/families need to take this on."))
+    created_by = models.ForeignKey(Member, on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("created by"))
+    created_at = models.DateTimeField(_("created at"), auto_now_add=True)
+
+    class Meta:
+        verbose_name = _("event task")
+        verbose_name_plural = _("event tasks")
+        ordering = ["event", "created_at"]
+
+    def __str__(self):
+        return f"{self.event} - {self.title}"
+
+
+class EventTaskClaim(UUIDModel):
+    """One person's claim on one slot of an EventTask -- see
+    events.services.tasks.claim_task for the capacity check against
+    EventTask.needed_quantity. Displayed under the claiming member's own
+    family (members.services.family.claim_label_for) rather than their own
+    name, when they have one -- the rest of the team only needs to know it's
+    covered, not by which specific parent or child."""
+
+    task = models.ForeignKey(EventTask, on_delete=models.CASCADE, related_name="claims", verbose_name=_("task"))
+    member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="event_task_claims", verbose_name=_("member"))
+    claimed_at = models.DateTimeField(_("claimed at"), auto_now_add=True)
+
+    class Meta:
+        verbose_name = _("event task claim")
+        verbose_name_plural = _("event task claims")
+        ordering = ["task", "claimed_at"]
+        constraints = [
+            models.UniqueConstraint(fields=["task", "member"], name="unique_claim_per_member_per_task"),
+        ]
+
+    def __str__(self):
+        return f"{self.task} - {self.member}"
 
 
 class Competition(models.Model):

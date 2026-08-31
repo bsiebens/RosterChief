@@ -18,6 +18,7 @@ from django.template.loader import render_to_string
 from django.urls import reverse
 from django.utils import timezone
 
+from members.services.family import family_contacts
 from rosterchief.mail import send_message
 
 from .invoicing import RegistrationInvoicePDFError, active_batch_entries, batch_invoice_pdf, batch_totals, confirm_invoice, registration_invoices_due_for_reminder
@@ -65,19 +66,33 @@ def _invoice_email_context(batch, *, request=None):
     return {"club": batch.club, "batch": batch, "contact_first_name": batch.contact_first_name, "total": total, "status_url": status_url, "request": request}
 
 
+def registration_invoice_recipients(batch) -> list[str]:
+    """Every parent/guardian on record for the family (or families) behind
+    this batch's own active entries -- not just whoever happened to fill in
+    the online form. Falls back to batch.contact_email alone if nobody
+    resolves (e.g. a family genuinely has no guardian with an email on
+    file, or every entry's been excluded/cancelled)."""
+    members = {entry.membership.member for entry in active_batch_entries(batch)}
+    emails = set()
+    for member in members:
+        emails.update(contact["email"] for contact in family_contacts(member))
+    return sorted(emails, key=str.lower) or [batch.contact_email]
+
+
 def send_registration_invoice_email(batch, *, request=None) -> bool:
     """The email confirm_and_send_invoice sends once staff has reviewed and
     finalised a registration's amounts -- same construction as club.services.
     invoicing.send_invoice_email (subject/text/html render, best-effort PDF
-    attach, never raises). Recipient is simply batch.contact_email -- no
-    guardian-resolution needed here (unlike DuesInvoice.recipient_for),
-    since the batch already carries the one email its own submitter gave."""
+    attach, never raises). Goes to every parent/guardian on record for the
+    family (registration_invoice_recipients), not just whoever submitted
+    the form -- unlike DuesInvoice.recipient_for, which only ever resolves
+    one address for one membership."""
     context = _invoice_email_context(batch, request=request)
     subject = " ".join(render_to_string("registration/email/invoice_subject.txt", context).split())
     text_body = render_to_string("registration/email/invoice.txt", context).strip() + "\n"
     html_body = render_to_string("registration/email/invoice.html", context)
 
-    message = EmailMultiAlternatives(subject, text_body, settings.DEFAULT_FROM_EMAIL, [batch.contact_email])
+    message = EmailMultiAlternatives(subject, text_body, settings.DEFAULT_FROM_EMAIL, registration_invoice_recipients(batch))
     message.attach_alternative(html_body, "text/html")
     _attach_invoice_pdf(message, batch)
 
@@ -93,7 +108,7 @@ def send_registration_reminder_email(batch, *, request=None) -> bool:
     text_body = render_to_string("registration/email/invoice_reminder.txt", context).strip() + "\n"
     html_body = render_to_string("registration/email/invoice_reminder.html", context)
 
-    message = EmailMultiAlternatives(subject, text_body, settings.DEFAULT_FROM_EMAIL, [batch.contact_email])
+    message = EmailMultiAlternatives(subject, text_body, settings.DEFAULT_FROM_EMAIL, registration_invoice_recipients(batch))
     message.attach_alternative(html_body, "text/html")
     _attach_invoice_pdf(message, batch)
 

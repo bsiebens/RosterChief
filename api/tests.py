@@ -371,6 +371,14 @@ class GamesApiTests(ApiTestBase):
         self.assertEqual(games[0]["location"]["name"], "Home Arena")
         self.assertEqual(games[0]["status"], "upcoming")
 
+    def test_upcoming_games_report_whether_theyre_friendly(self):
+        self.make_game(is_friendly=True)
+        self.make_game(title="League game")
+
+        games = self.api_get("/games/upcoming/").json()
+
+        self.assertEqual(sorted(game["is_friendly"] for game in games), [False, True])
+
     def test_upcoming_excludes_cancelled_games(self):
         self.make_game(cancelled=True)
 

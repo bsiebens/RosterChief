@@ -109,6 +109,19 @@ def team_number_pools(club, season=None):
     return {str(team.pk): available_numbers(team.pool, season) for team in teams}
 
 
+def variant_prices(club, season=None):
+    """``{str(variant_id): str(effective_price)}`` for every variant a
+    registration entry could currently be billed against (same scope as
+    RegistrationInvoiceLineForm's own product_variant queryset) -- the
+    Registrations review screen's own script reads this to re-fill a row's
+    price the moment staff picks a different membership there, without
+    locking it: a price then typed over that fill is left alone."""
+    if season is None:
+        return {}
+    variants = ProductVariant.objects.filter(product__in=available_registration_products(club, season=season), is_active=True).select_related("product")
+    return {str(variant.pk): str(variant.effective_price) for variant in variants}
+
+
 def jersey_choices_for_entry(entry, team_number_pools, member_current_numbers=None):
     """The exact jersey-number choices to offer one already-priced entry --
     narrowed to just its own requested_team, unlike RegistrationEntryRowForm's

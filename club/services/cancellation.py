@@ -6,8 +6,16 @@ seen this member before this season:
 
 - A returning member (has at least one other ClubMembership at this club,
   any season) gets a soft cancel -- ClubMembership.status flips to
-  CANCELLED, everything else (fee history, checklist, any roster
-  placement) stays exactly as it was, for the record.
+  CANCELLED, everything else (fee history, checklist) stays exactly as it
+  was, for the record. The one exception is a roster/staff spot this
+  membership's *own* registration(s) auto-placed at confirm time
+  (registration.models.RegistrationDetails.resulting_team_membership/
+  resulting_staff_assignment, set by management.views.
+  RegistrationInvoiceReviewView) -- those are removed, since a cancelled
+  registration has no business still holding a team spot it only got by
+  being confirmed. A spot placed some other way entirely (e.g. straight
+  from the roster page, no registration involved) is left untouched -- this
+  only ever touches what *this membership's own* registration(s) created.
 - Someone who only exists because of this one sign-up has nothing worth
   keeping once it's withdrawn -- their Member row is deleted outright
   (cascading the ClubMembership itself, its RegistrationDetails,
@@ -31,10 +39,15 @@ def is_new_member(member, club) -> bool:
 def cancel_membership(membership):
     """Cancel ``membership``. Deletes the Member outright if this was their
     only ClubMembership at this club; otherwise just marks this season's row
-    CANCELLED. Returns True if the Member was deleted, False if only
-    cancelled."""
+    CANCELLED (and removes any team/staff spot this membership's own
+    registration(s) auto-placed -- see this module's own docstring). Returns
+    True if the Member was deleted, False if only cancelled."""
     club, member = membership.club, membership.member
     if ClubMembership.objects.filter(club=club, member=member).exclude(pk=membership.pk).exists():
+        for details in membership.registration_details.exclude(resulting_team_membership=None):
+            details.resulting_team_membership.delete()
+        for details in membership.registration_details.exclude(resulting_staff_assignment=None):
+            details.resulting_staff_assignment.delete()
         membership.status = ClubMembership.StatusChoices.CANCELLED
         membership.save(update_fields=["status"])
         return False

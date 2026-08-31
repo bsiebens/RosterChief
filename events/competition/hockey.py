@@ -3,6 +3,7 @@ from urllib.parse import urljoin
 import requests
 
 from ..models import Event
+from ..services.attendance import resolve_season
 from .base import CompetitionBaseClass
 
 
@@ -12,7 +13,13 @@ class RBIHF(CompetitionBaseClass):
         self.url = "https://rbihf.be/modules/league/ajax/time.php"
 
     def update_game_information(self, event: Event) -> None:
-        season = "{start}{end}".format(start=event.season.start_date.strftime("%y"), end=event.season.end_date.strftime("%y"))
+        # event.season is blank whenever it was never set explicitly (see
+        # Event.season's own help_text) -- resolve_season falls back to
+        # whichever season actually covers the game's own start date, same
+        # as every other event-scoped lookup in this codebase (roster/
+        # attendance audience, referee/official eligibility).
+        game_season = resolve_season(event)
+        season = "{start}{end}".format(start=game_season.start_date.strftime("%y"), end=game_season.end_date.strftime("%y"))
 
         payload = {"gameNr": event.external_game_id, "season": season}
         headers = {
@@ -50,7 +57,8 @@ class CEHL(CompetitionBaseClass):
         self.url = "https://www.cehl.eu/ajax/"
 
     def update_game_information(self, event: Event) -> None:
-        season = "{start}{end}".format(start=event.season.start_date.strftime("%y"), end=event.season.end_date.strftime("%y"))
+        game_season = resolve_season(event)
+        season = "{start}{end}".format(start=game_season.start_date.strftime("%y"), end=game_season.end_date.strftime("%y"))
 
         referer_url = urljoin("https://www.cehl.eu", f"game/{season}/{event.external_game_id}")
         timeline_url = urljoin(self.url, "timeline.php")

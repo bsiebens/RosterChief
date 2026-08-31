@@ -11,8 +11,9 @@ from members.models import Member
 from registration.models import RegistrationBatch, RegistrationDetails
 
 from .api import build_roster
-from .models import NumberPool, NumberReservation, Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
+from .models import NumberPool, NumberReservation, OfficialLevel, OfficialProfile, Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
 from .services.numbers import available_numbers, is_number_available, member_current_number, numbers_taken
+from .services.roster import place_member_on_team
 
 
 class TeamsTestCase(TestCase):
@@ -374,6 +375,102 @@ class RefereeProfileModelTests(TeamsTestCase):
         self.assertFalse(RefereeProfile.objects.filter(pk=profile.pk).exists())
 
 
+class OfficialLevelModelTests(TeamsTestCase):
+    """teams.models.OfficialLevel -- the officials counterpart to
+    RefereeLevel, same shape/behaviour (see RefereeLevelModelTests above for
+    the full exhaustive case-by-case coverage of this same logic); this
+    class only re-confirms it against the separate model/table, not every
+    edge case twice."""
+
+    def test_str(self):
+        level = OfficialLevel.objects.create(club=self.club, name="Table official")
+        self.assertEqual(str(level), "Table official")
+
+    def test_name_is_unique_per_club(self):
+        OfficialLevel.objects.create(club=self.club, name="Table official")
+
+        with self.assertRaises(IntegrityError):
+            OfficialLevel.objects.create(club=self.club, name="Table official")
+
+    def test_inheritance_is_transitive(self):
+        other_team = Team.objects.create(club=self.club, name="Second Team", short_name="2nd")
+        local = OfficialLevel.objects.create(club=self.club, name="Local")
+        local.teams.add(self.team)
+        regional = OfficialLevel.objects.create(club=self.club, name="Regional", inherits_from=local)
+        regional.teams.add(other_team)
+
+        self.assertEqual(regional.eligible_team_ids(), {self.team.pk, other_team.pk})
+
+    def test_a_level_cannot_inherit_from_itself(self):
+        level = OfficialLevel.objects.create(club=self.club, name="Regional")
+        level.inherits_from = level
+
+        with self.assertRaises(ValidationError):
+            level.clean()
+
+    def test_deleting_an_inherited_from_level_is_protected(self):
+        regional = OfficialLevel.objects.create(club=self.club, name="Regional")
+        OfficialLevel.objects.create(club=self.club, name="National", inherits_from=regional)
+
+        with self.assertRaises(ProtectedError):
+            regional.delete()
+
+    def test_independent_from_referee_level_naming(self):
+        # Same name allowed in both tables for the same club -- they're
+        # entirely separate, not a shared namespace.
+        RefereeLevel.objects.create(club=self.club, name="Regional")
+
+        OfficialLevel.objects.create(club=self.club, name="Regional")
+
+        self.assertEqual(OfficialLevel.objects.filter(club=self.club, name="Regional").count(), 1)
+
+
+class OfficialProfileModelTests(TeamsTestCase):
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.level = OfficialLevel.objects.create(club=cls.club, name="Regional")
+        cls.level.teams.add(cls.team)
+
+    def test_str(self):
+        profile = OfficialProfile.objects.create(member=self.member)
+        self.assertEqual(str(profile), "Jane Doe (official)")
+
+    def test_member_is_one_to_one(self):
+        OfficialProfile.objects.create(member=self.member)
+
+        with self.assertRaises(IntegrityError):
+            OfficialProfile.objects.create(member=self.member)
+
+    def test_no_level_is_never_eligible(self):
+        profile = OfficialProfile.objects.create(member=self.member, valid_until=datetime.date(2099, 1, 1))
+        self.assertFalse(profile.is_eligible)
+        self.assertEqual(list(profile.eligible_teams), [])
+
+    def test_valid_until_in_the_past_is_not_eligible(self):
+        profile = OfficialProfile.objects.create(member=self.member, level=self.level, valid_until=timezone.localdate() - datetime.timedelta(days=1))
+        self.assertFalse(profile.is_eligible)
+
+    def test_eligible_teams_come_from_the_level_when_eligible(self):
+        profile = OfficialProfile.objects.create(member=self.member, level=self.level, valid_until=timezone.localdate() + datetime.timedelta(days=1))
+        self.assertEqual(list(profile.eligible_teams), [self.team])
+
+    def test_deleting_a_referenced_level_is_protected(self):
+        OfficialProfile.objects.create(member=self.member, level=self.level, valid_until=timezone.localdate())
+
+        with self.assertRaises(ProtectedError):
+            self.level.delete()
+
+    def test_a_member_can_hold_both_a_referee_and_an_official_profile(self):
+        referee_level = RefereeLevel.objects.create(club=self.club, name="Referee level")
+        RefereeProfile.objects.create(member=self.member, level=referee_level)
+
+        official_profile = OfficialProfile.objects.create(member=self.member, level=self.level)
+
+        self.assertEqual(self.member.referee_profile.level, referee_level)
+        self.assertEqual(self.member.official_profile, official_profile)
+
+
 class RosterApiTests(TeamsTestCase):
     """build_roster (teams/api.py) -- called directly, not through Ninja's routing,
     same reasoning the module's own docstring gives for splitting it out. A roster
@@ -629,3 +726,54 @@ class NumbersServiceTests(TeamsTestCase):
         TeamMembership.objects.create(team=self.team, member=self.member, season=two_seasons_ago, jersey_number=5)
 
         self.assertIsNone(member_current_number(self.member, self.pool, self.season))
+
+
+class PlaceMemberOnTeamTests(TeamsTestCase):
+    """teams.services.roster.place_member_on_team -- the one shared
+    placement path for both a manual Sign-up "Place in" click and the
+    Registrations review screen's own confirm-time auto-placement."""
+
+    def test_creates_a_team_membership_with_no_position(self):
+        result = place_member_on_team(self.member, self.team, self.season)
+
+        self.assertEqual(result.team, self.team)
+        self.assertEqual(result.member, self.member)
+        self.assertEqual(result.season, self.season)
+        self.assertIsNone(result.position)
+        self.assertIsNone(result.jersey_number)
+
+    def test_is_idempotent_for_someone_already_placed(self):
+        existing = TeamMembership.objects.create(team=self.team, member=self.member, season=self.season)
+
+        result = place_member_on_team(self.member, self.team, self.season, jersey_number=9)
+
+        self.assertEqual(result.pk, existing.pk)
+        self.assertIsNone(result.jersey_number)
+
+    def test_applies_an_available_number_from_the_teams_pool(self):
+        pool = NumberPool.objects.create(club=self.club, name="Youth", min_number=1, max_number=10)
+        self.team.pool = pool
+        self.team.save()
+
+        result = place_member_on_team(self.member, self.team, self.season, jersey_number=7)
+
+        self.assertEqual(result.jersey_number, 7)
+
+    def test_silently_drops_a_number_someone_else_already_holds(self):
+        pool = NumberPool.objects.create(club=self.club, name="Youth", min_number=1, max_number=10)
+        self.team.pool = pool
+        self.team.save()
+        other_member = Member.objects.create(first_name="Other", last_name="Kid")
+        TeamMembership.objects.create(team=self.team, member=other_member, season=self.season, jersey_number=7)
+
+        result = place_member_on_team(self.member, self.team, self.season, jersey_number=7)
+
+        self.assertIsNone(result.jersey_number)
+
+    def test_drops_a_number_on_a_poolless_team_even_when_free(self):
+        # A number is only ever auto-applied when there's a pool to check it
+        # against -- matches SignupPlaceInTeamView's own original behaviour,
+        # which this service replaced without widening it.
+        result = place_member_on_team(self.member, self.team, self.season, jersey_number=4)
+
+        self.assertIsNone(result.jersey_number)

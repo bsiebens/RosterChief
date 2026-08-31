@@ -55,8 +55,6 @@
             .panel h2 { margin-bottom: 1.5mm; }
             .panel p { margin: 0; }
             .early-payment { background: #ecfdf3; }
-            .early-payment .row { display: flex; justify-content: space-between; padding: 1mm 0; }
-            .early-payment .row:not(:last-child) { border-bottom: 1px solid #d3f0dd; }
             .payment-instructions { background: #f6f6f6; }
 
             .footnote { margin-top: 8mm; font-size: 9pt; }
@@ -140,15 +138,10 @@
             </div>
         </div>
 
-        {% if early_payment_rows %}
+        {% if early_payment %}
             <div class="panel early-payment">
                 <h2>{% trans "Pay early and save" %}</h2>
-                {% for row in early_payment_rows %}
-                    <div class="row">
-                        <span>{% blocktrans with name=row.membership.member date=row.offer.deadline %}{{ name }} — pay by {{ date }}{% endblocktrans %}</span>
-                        <span><strong>€{{ row.offer.discounted_total }}</strong> {% blocktrans with amount=row.offer.discount %}(save €{{ amount }}){% endblocktrans %}</span>
-                    </div>
-                {% endfor %}
+                <p>{% blocktrans with total=early_payment.discounted_total date=early_payment.deadline amount=early_payment.discount %}Pay €{{ total }} by {{ date }} to save €{{ amount }}.{% endblocktrans %}</p>
             </div>
         {% endif %}
 

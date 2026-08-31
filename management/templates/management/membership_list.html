@@ -26,7 +26,8 @@
         <form method="get" class="flex flex-row flex-wrap items-center gap-2">
             <div class="relative">
                 <span class="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-dim">{% lucide "search" size=15 %}</span>
-                <input type="search" name="q" value="{{ search }}" placeholder="{% trans 'Search members ...' %}" class="input w-56 pl-9">
+                {# Also matches a registration's own invoice number/contact name/email (MembershipListView.get_queryset) -- typing "REG-2026-00001" or the parent's own name finds every member billed through it, even though none of them are individually named that. #}
+                <input type="search" name="q" value="{{ search }}" placeholder="{% trans 'Search members or a registration ...' %}" class="input w-64 pl-9">
             </div>
 
             <select name="season" class="select w-48">
@@ -56,6 +57,11 @@
                     <option value="{{ team.pk }}" {% if team.pk|stringformat:"s" == selected_team %}selected{% endif %}>{{ team }}</option>
                 {% endfor %}
             </select>
+
+            <label class="flex cursor-pointer items-center gap-2 text-sm text-ink">
+                <input type="checkbox" name="group" value="registration" class="checkbox" {% if group_by_registration %}checked{% endif %} onchange="this.form.submit()">
+                {% trans "Group by registration" %}
+            </label>
 
             <button class="btn btn-outline gap-2" type="submit">{% lucide "filter" size=16 %} {% trans "Filter" %}</button>
             <a class="btn btn-ghost gap-2" href="{% url 'management:membership_list' %}">{% lucide "x" size=16 %} {% trans "Reset" %}</a>
@@ -118,7 +124,7 @@
                 </span>
                 <div class="flex gap-2">
                     <button class="btn btn-outline btn-sm gap-2" type="button" onclick="document.getElementById('send_invoices_modal').showModal()">{% lucide "send" size=14 %} {% trans "Send invoice" %}</button>
-                    <button class="btn btn-success btn-sm gap-2" type="submit">{% lucide "circle-check" size=14 %} {% trans "Mark selected as paid" %}</button>
+                    <button class="btn btn-success btn-sm gap-2" type="button" onclick="document.getElementById('bulk_mark_paid_modal').showModal()">{% lucide "circle-check" size=14 %} {% trans "Mark selected as paid" %}</button>
                 </div>
             </div>
 
@@ -135,86 +141,39 @@
                             <th>{% trans "Owed" %}</th>
                             <th>{% trans "Paid" %}</th>
                             <th>{% trans "License" %}</th>
-                            <th>{% trans "Invoice" %}</th>
+                            <th class="text-center">{% trans "Invoice" %}</th>
                             <th></th>
                         </tr>
                     </thead>
                     <tbody>
-                        {% for membership in memberships %}
-                            <tr>
-                                <td><input type="checkbox" class="checkbox membership-row-checkbox" name="membership_ids" value="{{ membership.pk }}"></td>
-                                <td><a class="link link-hover font-semibold" href="{% url 'management:member_detail' membership.member.pk %}">{{ membership.member.last_name }}, {{ membership.member.first_name }}</a></td>
-                                <td>
-                                    {{ membership.contact_email_display|default:"-" }}
-                                    {% if membership.contact_email_display and membership.contact_email_is_guardian %}
-                                        <span class="text-xs text-muted" title="{% trans 'This member has no email of their own -- a parent/guardian’s is shown instead.' %}">{% trans "(guardian)" %}</span>
-                                    {% endif %}
-                                </td>
-                                <td>
-                                    {% if membership.member.family_memberships_display %}
-                                        {% for fm in membership.member.family_memberships_display %}
-                                            {{ fm.family }}{% if not forloop.last %}, {% endif %}
-                                        {% endfor %}
-                                    {% else %}
-                                        <span class="text-dim">-</span>
-                                    {% endif %}
-                                </td>
-                                <td>
-                                    <span class="badge badge-sm
-                                        {% if membership.status == "active" %}badge-success
-                                        {% elif membership.status == "pending" %}badge-warning
-                                        {% elif membership.status == "cancelled" %}badge-error
-                                        {% else %}badge-neutral{% endif %}">
-                                        {{ membership.get_status_display }}
-                                    </span>
-                                </td>
-                                <td>
-                                    <span class="badge badge-sm
-                                        {% if membership.fee_status == "paid" %}badge-success
-                                        {% elif membership.fee_status == "partially_paid" %}badge-warning
-                                        {% elif membership.fee_status == "unpaid" %}badge-error
-                                        {% else %}badge-neutral{% endif %}">
-                                        {{ membership.get_fee_status_display }}
-                                    </span>
-                                </td>
-                                <td class="font-mono tabular-nums">&euro; {{ membership.fee_amount }}</td>
-                                <td class="font-mono tabular-nums">
-                                    &euro; {{ membership.amount_paid }}
-                                    {% if membership.record_payment_form and membership.fee_amount %}
-                                        <div class="font-sans text-xs text-muted">{% blocktrans with remaining=membership.remaining_balance_display %}{{ remaining }} left{% endblocktrans %}</div>
-                                    {% endif %}
-                                </td>
-                                <td>{{ membership.license|default:"-" }}</td>
-                                <td>
-                                    {% if membership.dues_invoice %}
-                                        <a class="link link-hover" href="{% url 'management:membership_invoice_detail' membership.pk %}">
-                                            <span class="badge badge-sm {% if membership.dues_invoice.is_paid %}badge-success{% elif membership.dues_invoice.is_overdue %}badge-error{% else %}badge-neutral{% endif %}">
-                                                {% if membership.dues_invoice.is_paid %}{% trans "Paid" %}{% elif membership.dues_invoice.is_overdue %}{% trans "Overdue" %}{% else %}{% trans "Sent" %}{% endif %}
-                                            </span>
-                                        </a>
-                                        <div class="text-xs text-muted">{{ membership.dues_invoice.sent_at|date:"j M" }}{% if membership.dues_invoice.reminder_count %}, {% blocktrans count counter=membership.dues_invoice.reminder_count %}{{ counter }} reminder{% plural %}{{ counter }} reminders{% endblocktrans %}{% endif %}</div>
-                                    {% else %}
-                                        <span class="text-xs text-dim">{% trans "Not sent" %}</span>
-                                    {% endif %}
-                                </td>
-                                <td class="text-right">
-                                    {% if membership.record_payment_form %}
-                                        <div class="flex flex-wrap justify-end gap-1">
-                                            <button class="btn btn-outline btn-sm" type="button" onclick="document.getElementById('{{ membership.pk|dom_id:"record_payment_modal" }}').showModal()">
-                                                {% lucide "receipt" size=12 %} {% trans "Record payment" %}
-                                            </button>
-                                            <button class="btn btn-sm btn-outline btn-success" type="submit" form="{{ membership.pk|dom_id:"mark_fully_paid_form" }}">
-                                                {% lucide "circle-check" size=12 %} {% trans "Mark fully paid" %}
-                                            </button>
-                                        </div>
-                                    {% endif %}
-                                </td>
-                            </tr>
-                        {% empty %}
+                        {% if group_by_registration %}
+                            {# Sorted server-side (MembershipListView.get_context_data) so every member of the same registration is already adjacent -- regroup just has to notice the boundaries. #}
+                            {% regroup memberships by registration_batch as registration_groups %}
+                            {% for group in registration_groups %}
+                                <tr class="bg-paper">
+                                    <td colspan="11" class="py-2 text-xs font-semibold text-muted">
+                                        {% if group.grouper %}
+                                            {% blocktrans with number=group.grouper.invoice_number contact=group.grouper.contact_first_name|add:" "|add:group.grouper.contact_last_name count counter=group.list|length %}Registration {{ number }} &middot; {{ contact }} ({{ counter }} person){% plural %}Registration {{ number }} &middot; {{ contact }} ({{ counter }} people){% endblocktrans %}
+                                            <a class="link link-hover ml-2" href="{% url 'management:registration_invoice_detail' group.grouper.pk %}">{% trans "View" %} &rarr;</a>
+                                        {% else %}
+                                            {% trans "Not from a registration" %}
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% for membership in group.list %}
+                                    {% include "management/_membership_row.html" %}
+                                {% endfor %}
+                            {% endfor %}
+                        {% else %}
+                            {% for membership in memberships %}
+                                {% include "management/_membership_row.html" %}
+                            {% endfor %}
+                        {% endif %}
+                        {% if not memberships %}
                             <tr>
                                 <td colspan="11" class="text-center text-muted">{% trans "Nobody matches these filters." %}</td>
                             </tr>
-                        {% endfor %}
+                        {% endif %}
                     </tbody>
                 </table>
             </div>
@@ -241,18 +200,33 @@
 
     {% trans "Record payment" as record_payment_title %}
     {% trans "Record" as record_payment_submit_label %}
+    {% trans "Mark as fully paid?" as mark_fully_paid_title %}
+    {% trans "Mark fully paid" as mark_fully_paid_submit_label %}
     {% for membership in memberships %}
         {% if membership.record_payment_form %}
-            {# A standalone form, not nested inside the bulk form above -- its submit button lives in the table row and links back here via the form="..." attribute. #}
-            <form method="post" action="{% url 'management:membership_mark_fully_paid' membership.pk %}" id="{{ membership.pk|dom_id:"mark_fully_paid_form" }}">
-                {% csrf_token %}
-                <input type="hidden" name="next" value="{{ request.get_full_path }}">
-            </form>
             {% url 'management:membership_record_payment' membership.pk as record_payment_url %}
             {% blocktrans with name=membership.member asvar record_payment_blurb %}For {{ name }}. Any amount is fine -- partial payments accumulate until the fee is settled.{% endblocktrans %}
             {% include "controlpanel/_modal_form.html" with modal_id=membership.pk|dom_id:"record_payment_modal" title=record_payment_title form=membership.record_payment_form action_url=record_payment_url submit_label=record_payment_submit_label submit_icon="receipt" blurb=record_payment_blurb %}
+
+            {% url 'management:membership_mark_fully_paid' membership.pk as mark_fully_paid_url %}
+            {% blocktrans with name=membership.member asvar mark_fully_paid_body %}Marks {{ name }}'s membership fee as fully paid.{% endblocktrans %}
+            {% include "controlpanel/_confirm_modal.html" with modal_id=membership.pk|dom_id:"mark_fully_paid_modal" title=mark_fully_paid_title body=mark_fully_paid_body action_url=mark_fully_paid_url submit_label=mark_fully_paid_submit_label submit_icon="circle-check" submit_btn_class="btn-success" next_url=request.get_full_path %}
         {% endif %}
     {% endfor %}
+
+    <dialog id="bulk_mark_paid_modal" class="modal">
+        <div class="modal-box">
+            <h3 class="text-lg font-bold">{% trans "Mark selected as paid?" %}</h3>
+            <p class="py-2 text-sm opacity-70">{% trans "Every selected membership will be marked as fully paid." %}</p>
+            <div class="modal-action">
+                <form method="dialog">
+                    <button class="btn btn-outline gap-2">{% lucide "x" size=16 %} {% trans "Cancel" %}</button>
+                </form>
+                <button class="btn btn-success gap-2" type="submit" form="membership-form">{% lucide "circle-check" size=16 %} {% trans "Mark as paid" %}</button>
+            </div>
+        </div>
+        <form method="dialog" class="modal-backdrop"><button>close</button></form>
+    </dialog>
 {% endblock panel %}
 
 {% block extra_body %}

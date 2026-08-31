@@ -32,6 +32,7 @@
                                 {{ membership.member.get_full_name }}
                                 {% if membership.is_captain %}<span class="ml-1 font-display text-xs font-extrabold text-club-dark">C</span>{% endif %}
                                 {% if membership.is_alternate_captain %}<span class="ml-1 font-display text-xs font-extrabold text-club-dark">A</span>{% endif %}
+                                {% if membership.club_status_pending %}<span class="pill pill-sm pill-warn ml-1">{% trans "Pending" %}</span>{% endif %}
                             </div>
                             <div class="text-xs text-muted">{{ membership.position|default:"—" }}</div>
                         </div>

@@ -1,5 +1,5 @@
 {% extends "management/base.html" %}
-{% load i18n lucide ui %}
+{% load i18n lucide ui static %}
 
 {% comment %}
     One registration's own review-and-confirm screen (management.views.
@@ -16,6 +16,7 @@
 
 {% block actions %}
     <a class="btn btn-outline gap-2" href="{% url 'management:registration_invoice_queue' %}">{% lucide "arrow-left" size=16 %} {% trans "Registrations" %}</a>
+    <button class="btn btn-outline btn-error gap-2" type="button" onclick="document.getElementById('{{ batch.pk|dom_id:"registration_cancel_modal" }}').showModal()">{% lucide "ban" size=16 %} {% trans "Cancel registration" %}</button>
 {% endblock actions %}
 
 {% block panel %}
@@ -32,7 +33,8 @@
                 <thead>
                     <tr>
                         <th>{% trans "Person" %}</th>
-                        <th>{% trans "Registered for" %}</th>
+                        <th class="w-52">{% trans "Membership" %}</th>
+                        <th>{% trans "Team" %}</th>
                         <th class="w-40">{% trans "Price" %}</th>
                         <th class="w-32 text-center">
                             <span class="inline-flex items-center gap-1">
@@ -48,8 +50,23 @@
                             {{ form.id }}
                             <td class="font-semibold">{{ form.instance.membership.member }}</td>
                             <td>
-                                {% if form.instance.product_variant %}{{ form.instance.product_variant.product.name }} &mdash; {{ form.instance.product_variant.name }}{% else %}{{ form.instance.get_entry_kind_display }}{% endif %}
-                                {% if form.instance.requested_team %}<div class="text-xs text-muted">{{ form.instance.requested_team }}</div>{% endif %}
+                                {% form_field form.product_variant show_label=False show_help_text=False %}
+                            </td>
+                            <td>
+                                <div class="flex gap-2">
+                                    <div class="min-w-0 flex-1">
+                                        {% form_field form.requested_team show_label=False show_help_text=False %}
+                                    </div>
+                                    {% if form.instance.entry_kind == "player" %}
+                                        <div class="w-24 shrink-0">
+                                            {% form_field form.requested_jersey_number show_label=False show_help_text=False %}
+                                        </div>
+                                    {% else %}
+                                        <div class="min-w-0 flex-1">
+                                            {% form_field form.requested_position show_label=False show_help_text=False %}
+                                        </div>
+                                    {% endif %}
+                                </div>
                             </td>
                             <td>
                                 {% form_field form.price show_label=False show_help_text=False %}
@@ -65,8 +82,8 @@
 
         <div class="card">
             <div class="card-body grid grid-cols-1 gap-4 md:grid-cols-3">
-                <div>{% form_field confirm_form.manual_discount_amount %}</div>
                 <div>{% form_field confirm_form.manual_discount_note %}</div>
+                <div>{% form_field confirm_form.manual_discount_amount %}</div>
                 <div>{% form_field confirm_form.due_in_days %}</div>
             </div>
         </div>
@@ -75,4 +92,65 @@
             <button class="btn btn-primary gap-2" type="submit">{% lucide "send" size=16 %} {% trans "Confirm & send invoice" %}</button>
         </div>
     </form>
+
+    {% trans "Cancel this registration?" as cancel_title %}
+    {% blocktrans with name=batch.contact_first_name|add:" "|add:batch.contact_last_name asvar cancel_body %}This withdraws {{ name }}'s whole registration -- every person's membership in it is cancelled. This cannot be undone.{% endblocktrans %}
+    {% trans "Cancel registration" as cancel_submit_label %}
+    {% url 'management:registration_invoice_cancel' batch.pk as cancel_url %}
+    {% include "controlpanel/_confirm_modal.html" with modal_id=batch.pk|dom_id:"registration_cancel_modal" title=cancel_title body=cancel_body action_url=cancel_url submit_label=cancel_submit_label submit_icon="ban" %}
 {% endblock panel %}
+
+{% block extra_body %}
+    <script src="{% static 'js/searchable-select.js' %}"></script>
+    {{ team_number_pools|json_script:"team-number-pools" }}
+    {{ variant_prices|json_script:"variant-prices" }}
+    <script>
+        (() => {
+            const pools = JSON.parse(document.getElementById("team-number-pools").textContent);
+            const prices = JSON.parse(document.getElementById("variant-prices").textContent);
+
+            const populateNumbers = (teamSelect) => {
+                const row = teamSelect.closest("tr");
+                const numberSelect = row ? row.querySelector("[data-number-select]") : null;
+                if (!numberSelect) {
+                    return;
+                }
+                const current = numberSelect.value;
+                const numbers = pools[teamSelect.value] || [];
+                numberSelect.innerHTML = "";
+                const blank = document.createElement("option");
+                blank.value = "";
+                blank.textContent = "---------";
+                numberSelect.appendChild(blank);
+                if (current && !numbers.includes(Number(current))) {
+                    numbers.unshift(Number(current));
+                }
+                numbers.forEach((number) => {
+                    const option = document.createElement("option");
+                    option.value = String(number);
+                    option.textContent = String(number);
+                    numberSelect.appendChild(option);
+                });
+                numberSelect.value = numbers.includes(Number(current)) ? current : "";
+            };
+
+            document.querySelectorAll("[data-team-select]").forEach((teamSelect) => {
+                teamSelect.addEventListener("change", () => populateNumbers(teamSelect));
+            });
+
+            // Re-fills the price field from the newly picked membership's own
+            // price the moment it's changed -- a starting point only, never a
+            // lock: nothing here runs again once staff types over it by hand.
+            document.querySelectorAll("[data-variant-select]").forEach((variantSelect) => {
+                variantSelect.addEventListener("change", () => {
+                    const row = variantSelect.closest("tr");
+                    const priceInput = row ? row.querySelector("[data-price-input]") : null;
+                    const price = prices[variantSelect.value];
+                    if (priceInput && price !== undefined) {
+                        priceInput.value = price;
+                    }
+                });
+            });
+        })();
+    </script>
+{% endblock extra_body %}
