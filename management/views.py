@@ -3555,8 +3555,11 @@ class EventTaskDeleteView(EventManagerRequiredMixin, View):
 
 
 def upcoming_games_needing_referee_management(club):
-    """Upcoming home games a club-arranged referee is needed for -- federation-
-    managed teams never appear here, see events.services.referees.needs_referee_management.
+    """Upcoming home games/tournaments a club-arranged referee is needed for --
+    federation-managed teams never appear here, see events.services.referees.
+    needs_referee_management (the kind/home-ground condition below mirrors
+    Event.is_home_fixture -- a home tournament needs officiating arranged
+    just as much as a home game).
 
     The base query behind RefereeManagementDashboardView's own list, factored out
     so the nav's Referee management badge (games_missing_referees_count below,
@@ -3566,7 +3569,7 @@ def upcoming_games_needing_referee_management(club):
     return (
         Event.objects.filter(
             club=club,
-            kind=Event.EventKind.GAME,
+            kind__in=[Event.EventKind.GAME, Event.EventKind.TOURNAMENT],
             cancelled=False,
             location__is_home=True,
             start__gte=timezone.now(),
@@ -3616,7 +3619,7 @@ def upcoming_games_needing_official_management(club):
     return (
         Event.objects.filter(
             club=club,
-            kind=Event.EventKind.GAME,
+            kind__in=[Event.EventKind.GAME, Event.EventKind.TOURNAMENT],
             cancelled=False,
             location__is_home=True,
             start__gte=timezone.now(),

@@ -458,6 +458,14 @@ class CoachCreateEventView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
         # count control this screen has no use for; construct_instance skips
         # a deleted field entirely, leaving the instance's own default.
         del form.fields["max_referees"]
+        # max_officials, unlike max_referees above, IS rendered here (see
+        # _officiating_only in the template) -- unlike referees, whether a
+        # club needs to arrange officials at all is a new, per-club opt-in
+        # most clubs don't have on, so its own default (1) is worth a coach
+        # actually seeing and being able to raise rather than a fixed
+        # assumption baked in silently. EventForm.__init__ already deletes
+        # this field entirely when the "officials" flag isn't on for this
+        # club, same as the desktop form -- nothing extra to gate here.
         # Narrowed to the four kinds the tile picker actually offers -- social/
         # other don't get their own tile, and this keeps a tampered request from
         # setting one anyway (the desktop form still offers the full list).
@@ -465,6 +473,8 @@ class CoachCreateEventView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
         self._scope_shared_fields(form)
         for field_name in ("start", "gathering", "deadline", "competition", "external_game_id"):
             form.fields[field_name].widget.attrs["class"] = _INPUT_CLASSES
+        if "max_officials" in form.fields:
+            form.fields["max_officials"].widget.attrs["class"] = _INPUT_CLASSES
         return form
 
     def build_series_form(self, data=None):

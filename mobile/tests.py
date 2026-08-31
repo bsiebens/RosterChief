@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 from django import forms
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.urls import reverse
@@ -13,6 +14,7 @@ from django.utils import timezone, translation
 from django.utils.translation import gettext_lazy as _
 from icalendar import Calendar as ICalCalendar
 from pywebpush import WebPushException
+from waffle import get_waffle_flag_model
 
 from club.models import Club, ClubMembership, DuesInvoice, MemberRequirementStatus, OnboardingRequirement, Season, Sponsor
 from events.models import Attendance, Competition, Event, EventReferee, EventSeries, EventTask, EventTaskClaim, Lineup, LineupSelection, Location, Opponent, RefereeSignup
@@ -4655,6 +4657,14 @@ class CoachCreateEventViewTests(TestCase):
     """C4 -- reuses management.forms.EventForm as-is; see CoachCreateEventView's
     own docstring for what's scoped down from the design mock."""
 
+    def setUp(self):
+        # A couple of tests below flip the "officials" flag on for self.club;
+        # waffle caches a flag's active-club ids (features/models.py's Flag.
+        # _get_club_ids), which isn't part of the per-test transaction --
+        # clear it so that doesn't leak into a later test.
+        cache.clear()
+        self.addCleanup(cache.clear)
+
     @classmethod
     def setUpTestData(cls):
         cls.club = make_club()
@@ -4729,6 +4739,39 @@ class CoachCreateEventViewTests(TestCase):
 
         kind_choices = {value for value, _label in response.context["form"].fields["kind"].choices}
         self.assertEqual(kind_choices, {"training", "game", "tournament", "meeting"})
+
+    def test_max_referees_is_not_offered(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mobile:coach_create_event"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertNotIn("max_referees", response.context["form"].fields)
+
+    def test_max_officials_is_not_offered_when_the_flag_is_off(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mobile:coach_create_event"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertNotIn("max_officials", response.context["form"].fields)
+        self.assertNotContains(response, "Officials needed")
+
+    def test_max_officials_is_offered_when_the_flag_is_on(self):
+        get_waffle_flag_model().objects.get_or_create(name="officials")[0].clubs.add(self.club)
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mobile:coach_create_event"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertIn("max_officials", response.context["form"].fields)
+        self.assertContains(response, "Officials needed")
+
+    def test_creating_a_game_records_max_officials_when_the_flag_is_on(self):
+        get_waffle_flag_model().objects.get_or_create(name="officials")[0].clubs.add(self.club)
+        self.client.force_login(self.user)
+
+        self._post(kind="game", title="Cup game", max_officials="3")
+
+        event = Event.objects.get(title="Cup game")
+        self.assertEqual(event.max_officials, 3)
 
     def test_can_create_a_tournament(self):
         self.client.force_login(self.user)

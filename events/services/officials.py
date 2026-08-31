@@ -44,9 +44,10 @@ def officials_enabled_for(club) -> bool:
 
 def needs_official_management(event) -> bool:
     """Whether this event is one the club should be arranging officials for
-    at all: a home game with at least one club-managed (for officials) team.
-    A federation-managed team's home games are entirely out of scope."""
-    return event.is_home_game and event.teams.filter(official_management=Team.OfficialManagement.CLUB).exists()
+    at all: a home game or tournament (Event.is_home_fixture) with at least
+    one club-managed (for officials) team. A federation-managed team's home
+    fixtures are entirely out of scope."""
+    return event.is_home_fixture and event.teams.filter(official_management=Team.OfficialManagement.CLUB).exists()
 
 
 def eligible_officials(event):

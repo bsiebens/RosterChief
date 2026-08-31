@@ -143,7 +143,7 @@
         </div>
     {% endif %}
 
-    {% if event.is_home_game and not referee_management_needed %}
+    {% if event.is_home_fixture and not referee_management_needed %}
         <div class="alert alert-info">
             {% lucide "info" size=20 %}
             <span>{% trans "Referees for this game are managed by the federation, not the club." %}</span>
@@ -158,7 +158,7 @@
         </div>
     {% endif %}
 
-    {% if officials_enabled and event.is_home_game and not official_management_needed %}
+    {% if officials_enabled and event.is_home_fixture and not official_management_needed %}
         <div class="alert alert-info">
             {% lucide "info" size=20 %}
             <span>{% trans "Officials for this game are managed by the federation, not the club." %}</span>

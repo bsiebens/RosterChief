@@ -116,14 +116,13 @@
                     <span class="event-section-icon event-section-icon-accent">{% lucide "swords" size=18 %}</span>
                     <div>
                         <div class="event-section-title">{% trans "Game details" %}</div>
-                        <div class="event-section-hint">{% trans "Only used for games -- competition, referees and, once played, the score." %}</div>
+                        <div class="event-section-hint">{% trans "Only used for games -- competition and, once played, the score." %}</div>
                     </div>
                 </div>
 
                 <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
                     {% form_field form.competition %}
                     {% form_field form.external_game_id %}
-                    {% form_field form.max_referees %}
                 </div>
                 <div class="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
                     {% form_field form.is_friendly show_as_toggle=True %}
@@ -143,6 +142,23 @@
             </div>
         </div>
 
+        <div id="officiating-section" class="card officiating-only">
+            <div class="card-body">
+                <div class="event-section-header">
+                    <span class="event-section-icon event-section-icon-accent">{% lucide "flag" size=18 %}</span>
+                    <div>
+                        <div class="event-section-title">{% trans "Officiating" %}</div>
+                        <div class="event-section-hint">{% trans "Only meaningful for a home game/tournament -- how many referees/officials to arrange." %}</div>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
+                    {% form_field form.max_referees %}
+                    {% if "max_officials" in form.fields %}{% form_field form.max_officials %}{% endif %}
+                </div>
+            </div>
+        </div>
+
         <div class="flex flex-wrap items-center gap-3">
             <a class="btn btn-outline gap-2" href="{% if update_view %}{% url "management:event_detail" object.pk %}{% else %}{% url "management:event_list" %}{% endif %}">{% lucide "arrow-left" size=16 %} {% trans "Cancel" %}</a>
             <button class="btn btn-primary gap-2" type="submit">{% lucide "save" size=16 %} {% trans "Save" %}</button>
@@ -158,13 +174,16 @@
             // either way. The kind cards are the real "kind" radios (see the
             // template) -- selecting one is what drives (a) the .game-only
             // show/hide (opponent, and the whole Game details card -- anything
-            // that only makes sense for a game carries this class) and (b) the
-            // live summary line up top. No JS is needed to keep a picker in sync
-            // with a hidden field, because there isn't one.
+            // that only makes sense for a game carries this class), (b) the
+            // .officiating-only show/hide (max_referees/max_officials -- a
+            // game OR a tournament can need these, see Event.is_home_fixture)
+            // and (c) the live summary line up top. No JS is needed to keep a
+            // picker in sync with a hidden field, because there isn't one.
             const kindInputs = document.querySelectorAll('input[name="kind"]');
             const titleField = document.getElementById("id_title");
             const startField = document.getElementById("id_start");
             const gameOnlyElements = document.querySelectorAll(".game-only");
+            const officiatingOnlyElements = document.querySelectorAll(".officiating-only");
             const summary = document.getElementById("event-summary-text");
             if (!kindInputs.length) return;
 
@@ -192,6 +211,7 @@
             const sync = () => {
                 const checked = checkedKind();
                 gameOnlyElements.forEach((element) => element.classList.toggle("hidden", !checked || checked.value !== "game"));
+                officiatingOnlyElements.forEach((element) => element.classList.toggle("hidden", !checked || (checked.value !== "game" && checked.value !== "tournament")));
                 updateSummary();
             };
 

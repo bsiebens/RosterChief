@@ -45,10 +45,11 @@ def event_window(event):
 
 def needs_referee_management(event) -> bool:
     """Whether this event is one the club should be arranging referees for at
-    all: a home game with at least one club-managed team. A federation-managed
-    team's home games are entirely out of scope for the referee tools -- the
-    federation appoints referees for those, not the club."""
-    return event.is_home_game and event.teams.filter(referee_management=Team.RefereeManagement.CLUB).exists()
+    all: a home game or tournament (Event.is_home_fixture) with at least one
+    club-managed team. A federation-managed team's home fixtures are entirely
+    out of scope for the referee tools -- the federation appoints referees
+    for those, not the club."""
+    return event.is_home_fixture and event.teams.filter(referee_management=Team.RefereeManagement.CLUB).exists()
 
 
 def eligible_referees(event):

@@ -6020,6 +6020,16 @@ class EventManagementTests(ManagementTestBase):
     club-wide, since an event's teams field is M2M: a manager of at least one
     of an event's current teams can edit it, see club.mixins.EventManagerRequiredMixin."""
 
+    def setUp(self):
+        # A couple of tests below flip the "officials" flag on for self.club;
+        # waffle caches a flag's active-club ids with cache.add (add-if-absent,
+        # see features/models.py's Flag._get_club_ids), which isn't part of the
+        # per-test transaction -- without clearing it, that stays cached (and
+        # officials_enabled_for(club) stays True) for every test that runs
+        # after, even once the DB association itself is rolled back.
+        cache.clear()
+        self.addCleanup(cache.clear)
+
     @classmethod
     def setUpTestData(cls):
         super().setUpTestData()
@@ -6525,6 +6535,30 @@ class EventManagementTests(ManagementTestBase):
         self.assertNotContains(response, 'name="score_for"')
         self.assertNotContains(response, 'name="is_live"')
         self.assertContains(response, 'name="competition"')
+
+    def test_the_add_form_has_no_max_officials_field_when_the_flag_is_off(self):
+        self.client.force_login(self.own_team_coach)
+
+        response = self.club_get("event_create")
+
+        self.assertNotContains(response, 'name="max_officials"')
+
+    def test_the_add_form_has_a_max_officials_field_when_the_flag_is_on(self):
+        get_waffle_flag_model().objects.get_or_create(name="officials")[0].clubs.add(self.club)
+        self.client.force_login(self.own_team_coach)
+
+        response = self.club_get("event_create")
+
+        self.assertContains(response, 'name="max_officials"')
+
+    def test_creating_a_game_records_max_officials_when_the_flag_is_on(self):
+        get_waffle_flag_model().objects.get_or_create(name="officials")[0].clubs.add(self.club)
+        self.client.force_login(self.own_team_coach)
+
+        self.club_post("event_create", self.event_data(kind="game", max_officials="3"))
+
+        game = Event.objects.get(title="Training")
+        self.assertEqual(game.max_officials, 3)
 
     def test_editing_a_game_can_record_its_score_and_live_status(self):
         Competition.objects.create(name="Regional Cup", module="events.competition.regional")
@@ -7378,6 +7412,17 @@ class RefereeManagementDashboardTests(ManagementTestBase):
         response = self.club_get("referee_management")
 
         self.assertContains(response, reverse("management:event_detail", args=[game.pk]))
+
+    def test_lists_an_upcoming_club_managed_home_tournament(self):
+        # A home tournament needs officiating arranged just as much as a home
+        # game -- Event.is_home_fixture, not the Game-only is_home_game, is
+        # what this dashboard's own queries key off.
+        tournament = self.make_game(title="Regional Cup", kind=Event.EventKind.TOURNAMENT)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("referee_management")
+
+        self.assertContains(response, reverse("management:event_detail", args=[tournament.pk]))
 
     def test_each_game_tile_links_straight_to_the_referee_form_pdf(self):
         game = self.make_game()

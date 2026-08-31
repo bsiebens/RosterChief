@@ -10,6 +10,7 @@ from django.utils.translation import gettext_lazy as _
 from club.models import Club, ClubMembership, ClubRole, FeePayment, OnboardingRequirement, Season, Sponsor
 from club.services.access import groups_manageable_by, is_club_admin, teams_managed_by
 from events.models import Competition, Event, EventOfficial, EventReferee, EventSeries, EventTask, Location, Opponent
+from events.services.officials import officials_enabled_for
 from events.services.rbihf_import import RBIHFImportError, extract_team_id
 from formbuilder.models import Field as FormBuilderField
 from formbuilder.models import Form as FormBuilderForm
@@ -650,6 +651,7 @@ class EventForm(EventAudienceFormMixin, forms.ModelForm):
             "score_against",
             "is_live",
             "max_referees",
+            "max_officials",
         ]
         widgets = {
             "start": forms.DateTimeInput(attrs={"type": "datetime-local"}),
@@ -659,6 +661,7 @@ class EventForm(EventAudienceFormMixin, forms.ModelForm):
             "score_for": forms.NumberInput(attrs={"min": 0}),
             "score_against": forms.NumberInput(attrs={"min": 0}),
             "max_referees": forms.NumberInput(attrs={"min": 1}),
+            "max_officials": forms.NumberInput(attrs={"min": 1}),
             **_AUDIENCE_WIDGETS,
         }
 
@@ -676,6 +679,13 @@ class EventForm(EventAudienceFormMixin, forms.ModelForm):
             label=self.fields["competition"].label,
             help_text=self.fields["competition"].help_text,
         )
+        # Same reasoning as management._official_assignment_panel.html only
+        # showing up when the flag's on for this club -- offering a count
+        # control for something the club hasn't turned on yet would just be
+        # confusing noise. club can be None (a form built with no club kwarg
+        # at all, e.g. some tests) -- officials_enabled_for needs a real one.
+        if club is None or not officials_enabled_for(club):
+            del self.fields["max_officials"]
         if not editing:
             # Score/live status don't exist yet for a game that's only just being
             # scheduled -- offering them on the add form is just noise. Editing an

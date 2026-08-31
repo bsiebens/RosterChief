@@ -137,6 +137,24 @@ class EventModelTests(EventsTestBase):
         self.assertFalse(game_with_no_location.is_home_game)
         self.assertFalse(training_at_home_ground.is_home_game)
 
+    def test_is_home_fixture(self):
+        # is_home_fixture is the broader, referee/official-tools-only check --
+        # unlike is_home_game, it also covers a home Tournament (which has no
+        # single opponent/score of its own, so is_home_game itself deliberately
+        # stays Game-only).
+        home_ground = Location.objects.create(club=self.club, name="Home Ground", address="1 St", city="Town", zip_code="1000", country="BE", is_home=True)
+        away_ground = Location.objects.create(club=self.club, name="Away Ground", address="2 St", city="Town", zip_code="1000", country="BE")
+
+        home_game = self.make_event(kind=Event.EventKind.GAME, location=home_ground)
+        home_tournament = self.make_event(kind=Event.EventKind.TOURNAMENT, location=home_ground)
+        away_tournament = self.make_event(kind=Event.EventKind.TOURNAMENT, location=away_ground)
+        home_training = self.make_event(kind=Event.EventKind.TRAINING, location=home_ground)
+
+        self.assertTrue(home_game.is_home_fixture)
+        self.assertTrue(home_tournament.is_home_fixture)
+        self.assertFalse(away_tournament.is_home_fixture)
+        self.assertFalse(home_training.is_home_fixture)
+
     def test_a_game_with_no_end_gets_a_two_hour_default_on_save(self):
         game = self.make_event(kind=Event.EventKind.GAME, start=self.future)
 
@@ -177,6 +195,16 @@ class CompetitionModelTests(EventsTestBase):
         for name in ["RBIHF", "CEHL"]:
             with self.subTest(name=name):
                 self.assertEqual(Competition.objects.get(name=name).sport_type, Club.SportType.ICE_HOCKEY)
+
+    def test_the_officials_flag_exists_but_is_not_enabled_for_anyone_yet(self):
+        # Migration 0031's data migration makes sure the "officials" flag row
+        # exists (so a club admin has something to turn on from the control
+        # panel's Features page) without switching it on for anyone -- see
+        # that migration's own docstring.
+        Flag = get_waffle_flag_model()
+        flag = Flag.objects.get(name="officials")
+        self.assertIsNone(flag.everyone)
+        self.assertFalse(flag.clubs.exists())
 
 
 class EventAdminFormCompetitionTests(EventsTestBase):
@@ -1584,6 +1612,10 @@ class RefereeServiceTests(EventsTestBase):
         game = self.make_home_game(location=self.away_ground)
         self.assertFalse(needs_referee_management(game))
 
+    def test_needs_referee_management_true_for_a_club_managed_home_tournament(self):
+        tournament = self.make_home_game(kind=Event.EventKind.TOURNAMENT)
+        self.assertTrue(needs_referee_management(tournament))
+
     def test_needs_referee_management_false_for_a_federation_managed_team(self):
         self.team.referee_management = Team.RefereeManagement.FEDERATION
         self.team.save(update_fields=["referee_management"])
@@ -1901,7 +1933,9 @@ class OfficialsTestBase(EventsTestBase):
     @classmethod
     def setUpTestData(cls):
         super().setUpTestData()
-        flag = get_waffle_flag_model().objects.create(name="officials")
+        # get_or_create, not create -- migration 0031 already seeds this flag
+        # (unenabled) into every database, this test DB included.
+        flag, _created = get_waffle_flag_model().objects.get_or_create(name="officials")
         flag.clubs.add(cls.club)
 
 
@@ -1927,9 +1961,9 @@ class EventOfficialModelTests(OfficialsTestBase):
         with self.assertRaises(IntegrityError):
             EventOfficial.objects.create(event=event, assigned_by=self.alice)
 
-    def test_max_officials_defaults_to_two(self):
+    def test_max_officials_defaults_to_one(self):
         event = self.make_event()
-        self.assertEqual(event.max_officials, 2)
+        self.assertEqual(event.max_officials, 1)
 
 
 class OfficialServiceTests(OfficialsTestBase):
@@ -1962,6 +1996,10 @@ class OfficialServiceTests(OfficialsTestBase):
     def test_eligible_officials_returns_qualified_members_for_a_home_game(self):
         game = self.make_home_game()
         self.assertEqual(set(eligible_officials(game)), {self.official})
+
+    def test_needs_official_management_true_for_a_club_managed_home_tournament(self):
+        tournament = self.make_home_game(kind=Event.EventKind.TOURNAMENT)
+        self.assertTrue(needs_official_management(tournament))
 
     def test_needs_official_management_false_for_a_federation_managed_team(self):
         self.team.official_management = Team.OfficialManagement.FEDERATION

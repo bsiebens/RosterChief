@@ -103,8 +103,8 @@ class Event(ClubScopedModel):
         help_text=_("Set once the per-minute score poller has seen this game go live and then come back off live -- i.e. it's finished, so there's no point calling the data source again for the rest of the polling window."),
     )
 
-    max_referees = models.PositiveSmallIntegerField(_("max referees"), default=2, help_text=_("How many referees can be assigned to this game. Only meaningful for home games -- ignored otherwise."))
-    max_officials = models.PositiveSmallIntegerField(_("max officials"), default=2, help_text=_("How many match officials can be assigned to this game. Only meaningful for home games -- ignored otherwise."))
+    max_referees = models.PositiveSmallIntegerField(_("max referees"), default=2, help_text=_("How many referees can be assigned to this game. Only meaningful for a home game/tournament -- ignored otherwise."))
+    max_officials = models.PositiveSmallIntegerField(_("max officials"), default=1, help_text=_("How many match officials can be assigned to this game. Only meaningful for a home game/tournament -- ignored otherwise."))
 
     deadline_reminder_sent_at = models.DateTimeField(
         _("deadline reminder sent at"),
@@ -133,8 +133,23 @@ class Event(ClubScopedModel):
     def is_home_game(self) -> bool:
         """Whether this game is being played at the club's own ground
         (Location.is_home) -- False for anything that isn't a game, or a game
-        with no location set, or one at an away/neutral location."""
+        with no location set, or one at an away/neutral location. Drives
+        score/opponent semantics (events/api.py, events/competition/hockey.py),
+        which only make sense for a Game -- see is_home_fixture below for the
+        broader "referees/officials might be needed here" check, which also
+        covers a home Tournament."""
         return self.kind == self.EventKind.GAME and self.location_id is not None and self.location.is_home
+
+    @property
+    def is_home_fixture(self) -> bool:
+        """Whether this is a Game or Tournament at the club's own ground --
+        the referee/official tools' own notion of "home", broader than
+        is_home_game above: a home tournament needs officiating arranged
+        just as much as a home game does, even though it has no single
+        opponent or score of its own. See events.services.referees.
+        needs_referee_management/events.services.officials.
+        needs_official_management, the only two callers."""
+        return self.kind in (self.EventKind.GAME, self.EventKind.TOURNAMENT) and self.location_id is not None and self.location.is_home
 
 
 class EventSeries(ClubScopedModel):
