@@ -1,0 +1,53 @@
+{% extends "mobile/coach/base.html" %}
+{% load i18n lucide %}
+
+{% comment %}
+    Fill in a new evaluation of one player against the club's current rubric
+    -- same generic one-.m-card-row-per-field shape as mobile/form_fill.html
+    (formbuilder.services.form_factory.build_form, styled by mobile.forms.
+    style_dynamic_form), just for Coach mode's dark shell and backed by
+    evaluations.services.submit_evaluation rather than formbuilder's own
+    submit_form. See mobile.coach_evaluation_views.CoachEvaluationCreateView.
+{% endcomment %}
+
+{% block header_extra %}
+    <div class="mt-3 flex items-center gap-3">
+        {% include "mobile/_avatar.html" with person=player size_class="h-12 w-12" text_class="text-base" %}
+        <div class="min-w-0 flex-1">
+            <span class="block truncate font-display text-lg leading-none font-extrabold text-white uppercase">{{ player.get_full_name }}</span>
+            <span class="block font-mono text-xs text-on-dark">{% trans "New evaluation" %}</span>
+        </div>
+    </div>
+{% endblock header_extra %}
+
+{% block content %}
+    {% if not rubric_configured %}
+        <div class="m-card p-6 text-center text-sm text-muted">
+            {% trans "This club hasn't set up an evaluation form yet." %}
+        </div>
+    {% else %}
+        <form method="post" enctype="multipart/form-data" class="flex flex-col gap-4" hx-boost="false">
+            {% csrf_token %}
+
+            {% for error in form.non_field_errors %}
+                <div class="rounded-box border border-warn-border bg-warn-bg p-3.5 text-sm text-warn-deep">{{ error }}</div>
+            {% endfor %}
+
+            <div class="m-card overflow-hidden">
+                {% for field in form %}
+                    {% if not forloop.first %}<div class="h-px bg-rule"></div>{% endif %}
+                    <div class="p-3.5">
+                        <label class="mb-1 block text-xs text-muted" for="{{ field.id_for_label }}">
+                            {{ field.label }}{% if field.field.required %} *{% endif %}
+                        </label>
+                        {{ field }}
+                        {% if field.help_text %}<p class="mt-1 text-xs text-muted">{{ field.help_text }}</p>{% endif %}
+                        {% for error in field.errors %}<p class="mt-1 text-xs text-club">{{ error }}</p>{% endfor %}
+                    </div>
+                {% endfor %}
+            </div>
+
+            <button class="btn btn-dark w-full" type="submit">{% trans "Submit evaluation" %}</button>
+        </form>
+    {% endif %}
+{% endblock content %}

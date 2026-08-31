@@ -1,6 +1,6 @@
 from django.urls import path
 
-from . import coach_views, views
+from . import coach_evaluation_views, coach_views, views
 
 app_name = "mobile"
 
@@ -56,4 +56,7 @@ urlpatterns = [
     path("coach/staff/<uuid:assignment_pk>/remove/", coach_views.CoachStaffRemoveView.as_view(), name="coach_staff_remove"),
     path("coach/lineup/<uuid:event_id>/", coach_views.CoachLineupView.as_view(), name="coach_lineup"),
     path("coach/lineup/<uuid:event_id>/publish/", coach_views.CoachLineupPublishView.as_view(), name="coach_lineup_publish"),
+    path("coach/evaluations/<uuid:player_pk>/", coach_evaluation_views.CoachEvaluationHistoryView.as_view(), name="coach_evaluation_history"),
+    path("coach/evaluations/<uuid:player_pk>/new/", coach_evaluation_views.CoachEvaluationCreateView.as_view(), name="coach_evaluation_create"),
+    path("coach/evaluations/<uuid:player_pk>/<uuid:evaluation_pk>/", coach_evaluation_views.CoachEvaluationDetailView.as_view(), name="coach_evaluation_detail"),
 ]

@@ -1,0 +1,33 @@
+{% extends "management/base.html" %}
+{% load i18n lucide %}
+
+{% comment %}
+    EvaluationCreateView's own "can't fill one in right now" screen -- never a
+    500 for either gap it covers: no rubric configured yet (only an admin can
+    fix that, via the rubric editor) or no season currently configured for
+    the club (nowhere to file the evaluation under at all).
+{% endcomment %}
+{% block panel_title %}{% trans "Evaluations" %}{% endblock panel_title %}
+{% block heading %}{% trans "Evaluations" %}{% endblock heading %}
+
+{% block actions %}
+    <a class="btn btn-outline gap-2" href="{% url 'management:member_detail' member.pk %}">{% lucide "arrow-left" size=16 %} {% trans "Back" %}</a>
+{% endblock actions %}
+
+{% block panel %}
+    <div class="alert alert-warning">
+        {% lucide "triangle-alert" size=18 %}
+        {% if reason == "no_season" %}
+            <span>{% trans "There's no current season configured for this club, so there's nowhere to file an evaluation yet." %}</span>
+        {% elif is_club_admin %}
+            <span>{% trans "This club hasn't set up an evaluation rubric yet." %}</span>
+        {% else %}
+            <span>{% trans "This club hasn't set up an evaluation rubric yet -- ask an admin to set one up." %}</span>
+        {% endif %}
+    </div>
+    {% if reason == "no_rubric" and is_club_admin %}
+        <div class="mt-4">
+            <a class="btn btn-primary gap-2" href="{% url 'management:evaluation_rubric' %}">{% lucide "list-checks" size=16 %} {% trans "Set up the rubric" %}</a>
+        </div>
+    {% endif %}
+{% endblock panel %}

@@ -1,0 +1,43 @@
+{% extends "management/base.html" %}
+{% load i18n lucide %}
+
+{% block panel_title %}{% blocktrans with name=evaluation.player.get_full_name %}Evaluation &middot; {{ name }}{% endblocktrans %}{% endblock panel_title %}
+{% block heading %}{% blocktrans with name=evaluation.player.get_full_name %}Evaluation &middot; {{ name }}{% endblocktrans %}{% endblock heading %}
+{% block topbar_context %}
+    <span class="badge badge-neutral">{{ evaluation.season }}</span>
+{% endblock topbar_context %}
+
+{% block actions %}
+    <a class="btn btn-outline gap-2" href="{% url 'management:member_detail' evaluation.player.pk %}">{% lucide "arrow-left" size=16 %} {% trans "Back" %}</a>
+{% endblock actions %}
+
+{% block panel %}
+    <div class="mb-4 grid grid-cols-1 gap-4 md:grid-cols-3">
+        <div class="card card-body">
+            <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Evaluator" %}</div>
+            <div class="mt-1 font-display text-[22px] leading-none font-extrabold text-ink">{{ evaluation.submission.member|default:"—" }}</div>
+        </div>
+        <div class="card card-body">
+            <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Season" %}</div>
+            <div class="mt-1 font-display text-[22px] leading-none font-extrabold text-ink">{{ evaluation.season }}</div>
+        </div>
+        <div class="card card-body">
+            <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Date" %}</div>
+            <div class="mt-1 font-display text-[22px] leading-none font-extrabold text-ink">{{ evaluation.created|date:"d M Y" }}</div>
+        </div>
+    </div>
+
+    <div class="card card-body">
+        <h2 class="card-title">{% lucide "clipboard-list" size=18 %} {% trans "Answers" %}</h2>
+        <dl class="flex flex-col gap-3">
+            {% for row in rows %}
+                <div class="flex flex-col gap-1 border-b border-rule pb-3 last:border-0 last:pb-0">
+                    <dt class="text-sm font-semibold text-ink">{{ row.field.label }}</dt>
+                    <dd class="text-sm text-muted">{{ row.value|default:"—" }}</dd>
+                </div>
+            {% empty %}
+                <p class="text-sm text-dim">{% trans "No answers." %}</p>
+            {% endfor %}
+        </dl>
+    </div>
+{% endblock panel %}

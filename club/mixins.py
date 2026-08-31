@@ -4,7 +4,7 @@ from waffle import flag_is_active
 
 from members.models import Group
 
-from .services.access import can_add_news, can_edit_news, can_manage_forms, can_manage_members, can_manage_shop, can_publish_news, groups_manageable_by, has_management_access, is_club_admin, is_coach_manager, teams_managed_by
+from .services.access import can_add_news, can_edit_news, can_manage_evaluations, can_manage_forms, can_manage_members, can_manage_shop, can_publish_news, groups_manageable_by, has_management_access, is_club_admin, is_coach_manager, teams_managed_by
 
 
 class ClubStaffRequiredMixin(LoginRequiredMixin, UserPassesTestMixin):
@@ -104,6 +104,22 @@ class ShopManagerRequiredMixin(FeatureRequiredMixin):
 
     def test_func(self):
         return can_manage_shop(self.request.user, self.request.club)
+
+
+class EvaluationManagerRequiredMixin(FeatureRequiredMixin):
+    """The evaluations section's own gate -- same "evaluations" waffle-flag 404
+    as FeatureRequiredMixin (the section doesn't exist at all for a club that
+    hasn't got it turned on), but ADMIN *or* an EvaluationManager grant, not
+    ADMIN-only. Mirrors ShopManagerRequiredMixin exactly -- see
+    can_manage_evaluations / club.models.EvaluationManager. Use plain
+    FeatureRequiredMixin itself (ADMIN-only) for the rubric-editing views --
+    who may *fill in or view* an evaluation is a wider group than who may
+    *redefine the rubric everyone fills in*."""
+
+    feature_flag = "evaluations"
+
+    def test_func(self):
+        return can_manage_evaluations(self.request.user, self.request.club)
 
 
 class FormManagerRequiredMixin(FeatureRequiredMixin):

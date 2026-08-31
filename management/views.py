@@ -22,6 +22,7 @@ from billing.models import Due
 from club.mixins import (
     ClubAdminRequiredMixin,
     ClubStaffRequiredMixin,
+    EvaluationManagerRequiredMixin,
     EventManagerRequiredMixin,
     FeatureRequiredMixin,
     FormManagerRequiredMixin,
@@ -36,8 +37,21 @@ from club.mixins import (
     ShopManagerRequiredMixin,
     TeamManagerRequiredMixin,
 )
-from club.models import ClubMembership, ClubRole, DuesInvoice, MemberRequirementStatus, OnboardingRequirement, Season, ShopManager, Sponsor
-from club.services.access import _guardians_only, can_edit_news, can_manage_members, can_manage_shop, can_publish_news, current_season, groups_manageable_by, is_club_admin, members_visible_to, teams_managed_by, teams_staffed_by
+from club.models import ClubMembership, ClubRole, DuesInvoice, EvaluationManager, MemberRequirementStatus, OnboardingRequirement, Season, ShopManager, Sponsor
+from club.services.access import (
+    _guardians_only,
+    can_edit_news,
+    can_manage_evaluations,
+    can_manage_members,
+    can_manage_shop,
+    can_publish_news,
+    current_season,
+    groups_manageable_by,
+    is_club_admin,
+    members_visible_to,
+    teams_managed_by,
+    teams_staffed_by,
+)
 from club.services.cancellation import cancel_membership
 from club.services.fees import mark_as_paid, record_payment, remaining_balance
 from club.services.invoicing import DuesInvoicePDFError, create_or_resend_invoice, invoice_pdf, invoices_due_for_reminder, recipient_for, resolve_document_address, send_invoice_email, send_reminders
@@ -46,6 +60,8 @@ from club.services.signup_linking import link_to_existing_member
 from controlpanel.messages import notify
 from controlpanel.mixins import RedirectOnInvalidMixin
 from controlpanel.services.statistics import club_attention, club_charts, club_statistics, unrostered_members
+from evaluations.models import PlayerEvaluation
+from evaluations.services import EvaluationRubricNotConfigured, EvaluationSubmissionError, current_rubric_form, start_new_rubric_version, submit_evaluation
 from events.models import Attendance, Event, EventOfficial, EventReferee, EventSeries, EventTask, Location, OfficialSignup, Opponent, RefereeSignup
 from events.services.attendance import member_attendance_counts, member_attendance_sparkline, player_attendance_rankings, players_who_missed_recent_practices, team_attendance_rate, team_no_shows
 from events.services.calendar import add_months, agenda_groups, month_bounds, month_grid, season_grid, week_bounds, week_grid
@@ -59,6 +75,7 @@ from formbuilder.models import Field as FormBuilderField
 from formbuilder.models import Form as FormBuilderForm
 from formbuilder.models import FormSend
 from formbuilder.services.audience import effective_members as form_effective_members
+from formbuilder.services.form_factory import build_form
 from formbuilder.services.notifications import dispatch_notify_form_send
 from formbuilder.services.reporting import form_report
 from members.forms import ClaimRejectForm, ClaimReviewForm
@@ -151,6 +168,7 @@ from .forms import (
     RegistrationInvoiceLineFormSet,
     RequirementBypassForm,
     RequirementCompletionForm,
+    RubricCriterionFormSet,
     SendDuesInvoicesForm,
     SignupLinkMemberForm,
     SignupTeamPlacementForm,
@@ -163,6 +181,7 @@ from .forms import (
     VolunteerPlacementForm,
     VoucherConsumptionForm,
     VoucherForm,
+    _text_from_options,
     bulk_add_member_label,
 )
 from .pdf import PDFExportError, event_official_form_pdf, event_referee_form_pdf, membership_list_pdf, referee_form_colors
@@ -1037,6 +1056,15 @@ class MemberDetailView(ClubStaffRequiredMixin, DetailView):
         attendance_sparkline = member_attendance_sparkline(self.object, season) if show_attendance else []
         attendance_counts = member_attendance_counts(self.object, season) if show_attendance else None
 
+        # Same "flag off or lacking the role -> the section doesn't exist,
+        # not just disabled" gate officials_enabled/official_profile above
+        # already uses -- see EvaluationManagerRequiredMixin's own docstring
+        # for why this is broader than is_admin (an EvaluationManager grant
+        # without ADMIN still sees this section, just not the rubric link).
+        evaluations_enabled = flag_is_active(self.request, "evaluations") and can_manage_evaluations(self.request.user, self.request.club)
+        player_evaluations = PlayerEvaluation.objects.filter(club=self.request.club, player=self.object).select_related("season", "submission__member") if evaluations_enabled else PlayerEvaluation.objects.none()
+        rubric_configured = evaluations_enabled and current_rubric_form(self.request.club) is not None
+
         return super().get_context_data(
             family_groups=family_groups,
             family_role_choices=FamilyMembership.FamilyRole.choices,
@@ -1058,6 +1086,9 @@ class MemberDetailView(ClubStaffRequiredMixin, DetailView):
             show_attendance=show_attendance,
             attendance_sparkline=attendance_sparkline,
             attendance_counts=attendance_counts,
+            evaluations_enabled=evaluations_enabled,
+            player_evaluations=player_evaluations,
+            rubric_configured=rubric_configured,
             **kwargs,
         )
 
@@ -1760,10 +1791,12 @@ class ClubRoleListView(ClubAdminRequiredMixin, ListView):
     def get_context_data(self, **kwargs):
         sections = [(value, label, ROLE_DESCRIPTIONS.get(value, ""), [role for role in self.object_list if role.role == value]) for value, label in ClubRole.Roles.choices if value != ClubRole.Roles.MEMBER]
         shop_admins = ShopManager.objects.filter(club=self.request.club).select_related("member")
+        evaluation_managers = EvaluationManager.objects.filter(club=self.request.club).select_related("member")
         return super().get_context_data(
             sections=sections,
             role_form=ClubRoleAssignForm(club=self.request.club),
             shop_admins=shop_admins,
+            evaluation_managers=evaluation_managers,
             **kwargs,
         )
 
@@ -1793,6 +1826,14 @@ class ClubRoleCreateView(ClubAdminRequiredMixin, RedirectOnInvalidMixin, FormVie
                 notify(self.request, f"s|{_('Shop admin granted')}|{_('“%(member)s” can now manage the shop.') % {'member': member}}")
             else:
                 notify(self.request, f"s|{_('Already a shop admin')}|{_('“%(member)s” already manages the shop.') % {'member': member}}")
+            return redirect("management:role_list")
+
+        if role == ClubRoleAssignForm.EVALUATION_MANAGER:
+            _grant, created = EvaluationManager.objects.get_or_create(club=self.request.club, member=member)
+            if created:
+                notify(self.request, f"s|{_('Evaluation manager granted')}|{_('“%(member)s” can now manage player evaluations.') % {'member': member}}")
+            else:
+                notify(self.request, f"s|{_('Already an evaluation manager')}|{_('“%(member)s” already manages player evaluations.') % {'member': member}}")
             return redirect("management:role_list")
 
         # A member holds at most one ClubRole per club (the membership-status sync in
@@ -1830,6 +1871,21 @@ class ShopManagerRevokeView(ClubAdminRequiredMixin, View):
         member = grant.member
         grant.delete()
         notify(request, f"w|{_('Shop admin revoked')}|{_('“%(member)s” no longer manages the shop.') % {'member': member}}")
+        return redirect("management:role_list")
+
+
+class EvaluationManagerRevokeView(ClubAdminRequiredMixin, View):
+    """Granting evaluation manager goes through ClubRoleCreateView (the roles
+    page's one "Grant role" flow) -- but revoking still needs its own view,
+    same reasoning as ShopManagerRevokeView: EvaluationManager isn't a
+    ClubRole row, so ClubRoleRevokeView's delete-this-pk-from-ClubRole logic
+    doesn't apply."""
+
+    def post(self, request, pk):
+        grant = get_object_or_404(EvaluationManager, pk=pk, club=request.club)
+        member = grant.member
+        grant.delete()
+        notify(request, f"w|{_('Evaluation manager revoked')}|{_('“%(member)s” no longer manages player evaluations.') % {'member': member}}")
         return redirect("management:role_list")
 
 
@@ -6070,20 +6126,170 @@ def _format_answer_value(value):
     return str(value)
 
 
-class EvaluationsComingSoonView(MemberAdminRequiredMixin, TemplateView):
-    """Placeholder nav entry for player evaluations (design: ARCHITECTURE.md
-    §5.8) -- nothing else is built yet. Deliberately *not* a FeatureRequiredMixin/
-    waffle-flagged stub like the shop/forms sections above: those hide their nav
-    item until a platform operator turns the flag on for a club, which is exactly
-    wrong for a standing "don't forget to build this" reminder -- this stays
-    visible to every MEMBER_ADMIN/ADMIN on every club unconditionally. Reuses
-    _generic_list.html (StubListMixin's own template) with an empty object_list
-    rather than a real queryset, since there's no model behind this yet at all."""
+class EvaluationRubricView(FeatureRequiredMixin, View):
+    """The club's evaluation rubric editor -- add/edit/remove/reorder criteria
+    in one page and one save, ADMIN-only (plain FeatureRequiredMixin, not
+    EvaluationManagerRequiredMixin -- redefining what everyone scores players
+    against is narrower than filling one in, see EvaluationManagerRequiredMixin's
+    own docstring). Never edits the current rubric's Fields in place: every
+    save calls evaluations.services.start_new_rubric_version to persist the
+    submitted set as a brand-new Form version, then replaces that fresh
+    copy's Fields with exactly what was submitted here -- safe only because
+    that Form was just created in this same request and nothing has answered
+    it yet (see start_new_rubric_version's own docstring for the versioning
+    design this preserves)."""
 
-    template_name = "management/_generic_list.html"
+    feature_flag = "evaluations"
+    template_name = "management/rubric_form.html"
+
+    def _initial_rows(self):
+        current = current_rubric_form(self.request.club)
+        if current is None:
+            return []
+        return [
+            {
+                "label": field.label,
+                "field_type": field.field_type,
+                "required": field.required,
+                "help_text": field.help_text,
+                "options": _text_from_options(field.options),
+                "order": field.order,
+            }
+            for field in current.fields.filter(is_active=True).order_by("order")
+        ]
+
+    def get_formset(self, data=None):
+        # initial only on the unbound (GET) render, never alongside posted
+        # data -- passing it on a bound formset too makes Django's
+        # empty_permitted/has_changed() bookkeeping treat any row whose
+        # submitted values happen to still match that initial (i.e. an
+        # existing criterion resubmitted unchanged) as an untouched "extra"
+        # form and silently drop it from cleaned_data.
+        initial = self._initial_rows() if data is None else None
+        return RubricCriterionFormSet(data, prefix="criteria", initial=initial)
+
+    def render_formset(self, formset):
+        return render(self.request, self.template_name, {"formset": formset})
+
+    def get(self, request, *args, **kwargs):
+        return self.render_formset(self.get_formset())
+
+    def post(self, request, *args, **kwargs):
+        formset = self.get_formset(request.POST)
+        if not formset.is_valid():
+            return self.render_formset(formset)
+
+        rows = [row for row in formset.cleaned_data if row.get("label")]
+        rows.sort(key=lambda row: row["order"] if row["order"] is not None else 0)
+
+        with transaction.atomic():
+            new_form = start_new_rubric_version(request.club)
+            # Safe to wipe rather than diff/patch: this Form was just created
+            # above, in this same transaction, so nothing has answered it yet
+            # -- there is no Answer anywhere pointing at these Fields for the
+            # PROTECT on Answer.field to object to.
+            new_form.fields.all().delete()
+            for index, row in enumerate(rows, start=1):
+                FormBuilderField.objects.create(
+                    form=new_form,
+                    label=row["label"],
+                    field_type=row["field_type"] or FormBuilderField.FieldType.NUMBER,
+                    required=row["required"],
+                    help_text=row.get("help_text", ""),
+                    options=row["options"],
+                    order=index,
+                )
+
+        notify(request, f"s|{_('Rubric updated')}|{_('The evaluation rubric has a new version -- evaluations already filled in keep showing exactly what they were scored against.')}")
+        return redirect("management:evaluation_rubric")
+
+
+class EvaluationCreateView(EvaluationManagerRequiredMixin, View):
+    """Score one player against the club's current rubric -- reachable only
+    from that player's own member page (management/member_detail.html's
+    Evaluations section), not a standalone list. Renders the rubric as a
+    plain dynamic Form (formbuilder.services.form_factory.build_form) and
+    hands the submitted data straight to evaluations.services.
+    submit_evaluation, which does the actual validating/persisting -- this
+    view's only job is wiring the request to that service and surfacing what
+    it reports back."""
+
+    template_name = "management/evaluation_form.html"
+    blocked_template_name = "management/evaluation_blocked.html"
+
+    def get_member(self):
+        # Not members_visible_to() -- for a non-admin that narrows to the
+        # requester's own teammates/roster, but EvaluationManager is a
+        # club-wide, season-independent grant (club.models.EvaluationManager's
+        # own docstring): an evaluation manager may score any player in the
+        # club, not just ones on a team they personally staff. Same club-wide
+        # attachment query members_visible_to itself uses for an ADMIN.
+        club_members = Member.objects.filter(Q(member_of__club=self.request.club) | Q(team_memberships__team__club=self.request.club) | Q(staff_assignments__team__club=self.request.club) | Q(roles__club=self.request.club)).distinct()
+        return get_object_or_404(club_members, pk=self.kwargs["pk"])
+
+    def render_blocked(self, member, reason):
+        # Never a 500 for either gap: no rubric yet (only an admin can fix
+        # that -- see EvaluationRubricView) or no season currently configured
+        # for the club (nothing to file the evaluation under at all).
+        return render(self.request, self.blocked_template_name, {"member": member, "reason": reason})
+
+    def get(self, request, *args, **kwargs):
+        member = self.get_member()
+        rubric = current_rubric_form(request.club)
+        if rubric is None:
+            return self.render_blocked(member, "no_rubric")
+        if current_season(request.club) is None:
+            return self.render_blocked(member, "no_season")
+        return render(request, self.template_name, {"member": member, "form": build_form(rubric)})
+
+    def post(self, request, *args, **kwargs):
+        member = self.get_member()
+        rubric = current_rubric_form(request.club)
+        if rubric is None:
+            return self.render_blocked(member, "no_rubric")
+        season = current_season(request.club)
+        if season is None:
+            return self.render_blocked(member, "no_season")
+
+        evaluator = Member.objects.filter(user=request.user).first()
+        try:
+            submit_evaluation(club=request.club, player=member, season=season, evaluator=evaluator, data=request.POST, files=request.FILES)
+        except EvaluationRubricNotConfigured:
+            return self.render_blocked(member, "no_rubric")
+        except EvaluationSubmissionError:
+            # Re-run the same validation submit_evaluation's own build_form
+            # already did once, rather than manually replaying its .errors
+            # onto a second bound_form via add_error() -- that lazily triggers
+            # full_clean() as a side effect (it reads self.errors internally),
+            # so a manually copied "this field is required" would land *on
+            # top of* Django's own identical one, twice. Calling is_valid()
+            # up front instead means there's only ever one real validation
+            # pass on this identical Form/data pair, so nothing to duplicate.
+            bound_form = build_form(rubric, data=request.POST, files=request.FILES)
+            bound_form.is_valid()
+            return render(request, self.template_name, {"member": member, "form": bound_form})
+
+        notify(request, f"s|{_('Evaluation saved')}|{_('Evaluation for “%(member)s” saved.') % {'member': member}}")
+        return redirect("management:member_detail", pk=member.pk)
+
+
+class EvaluationDetailView(EvaluationManagerRequiredMixin, DetailView):
+    """One player's evaluation, read-only -- reachable from that member's own
+    page (management/member_detail.html's Evaluations section)."""
+
+    model = PlayerEvaluation
+    template_name = "management/evaluation_detail.html"
+    context_object_name = "evaluation"
+
+    def get_queryset(self):
+        return PlayerEvaluation.objects.filter(club=self.request.club).select_related("player", "season", "submission", "submission__member", "submission__send__form")
 
     def get_context_data(self, **kwargs):
-        return super().get_context_data(page_title=_("Player evaluations"), object_list=[], **kwargs)
+        evaluation = self.object
+        answers_by_field = {answer.field_id: answer.value for answer in evaluation.submission.answers.select_related("field")}
+        fields = list(evaluation.submission.send.form.fields.order_by("order"))
+        rows = [{"field": field, "value": _format_answer_value(answers_by_field.get(field.id))} for field in fields]
+        return super().get_context_data(rows=rows, **kwargs)
 
 
 class ClubSettingsView(ClubAdminRequiredMixin, UpdateView):

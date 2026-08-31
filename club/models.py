@@ -640,3 +640,27 @@ class ShopManager(ClubScopedModel):
 
     def __str__(self):
         return f"{self.club} - {self.member}"
+
+
+class EvaluationManager(ClubScopedModel):
+    """An additive grant, not a ClubRole value -- same shape as ShopManager, and
+    for the same reason: evaluating players is its own trust boundary (a
+    technical director might get this without full people-management access;
+    a team's own coach doesn't get it just for coaching that team), so it
+    can't cost someone their existing ClubRole to hold it. Club-wide and
+    season-independent, layered on top of whatever ClubRole/StaffAssignment a
+    member already holds -- see club.services.access.can_manage_evaluations.
+    """
+
+    member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="evaluation_manager_grants", verbose_name=_("member"))
+
+    class Meta:
+        verbose_name = _("evaluation manager")
+        verbose_name_plural = _("evaluation managers")
+        ordering = ["club", "member__last_name", "member__first_name"]
+        constraints = [
+            models.UniqueConstraint(fields=["club", "member"], name="unique_evaluation_manager_per_club"),
+        ]
+
+    def __str__(self):
+        return f"{self.club} - {self.member}"

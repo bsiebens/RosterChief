@@ -39,15 +39,6 @@
             {% if can_manage_members %}
                 <a class="nav-subitem {% if nav == 'group_list' %}active{% endif %}" href="{% url 'management:group_list' %}">{% trans "Groups" %}</a>
                 <a class="nav-subitem {% if nav == 'volunteer_list' %}active{% endif %}" href="{% url 'management:volunteer_list' %}">{% trans "Volunteers" %}</a>
-                {% comment %}
-                    Placeholder -- nothing else is built yet (see ARCHITECTURE.md §5.8 and
-                    management.views.EvaluationsComingSoonView). Gated on forms_enabled,
-                    same as Forms below: the design (ARCHITECTURE.md §5.8) reuses formbuilder
-                    underneath, so a club without that flag shouldn't see it either.
-                {% endcomment %}
-                {% if forms_enabled %}
-                    <a class="nav-subitem flex items-center gap-1.5 {% if nav == 'evaluations' %}active{% endif %}" href="{% url 'management:evaluations' %}">{% trans "Evaluations" %} <span class="badge badge-neutral badge-xs">{% trans "Soon" %}</span></a>
-                {% endif %}
             {% endif %}
         </div>
     {% endif %}
@@ -140,6 +131,9 @@
                 {% if is_club_admin %}
                     {% if forms_enabled %}
                         <a class="nav-subitem {% if nav == 'form_list' %}active{% endif %}" href="{% url 'management:form_list' %}">{% trans "Forms" %}</a>
+                    {% endif %}
+                    {% if evaluations_enabled %}
+                        <a class="nav-subitem {% if nav == 'evaluation_rubric' %}active{% endif %}" href="{% url 'management:evaluation_rubric' %}">{% trans "Evaluations" %}</a>
                     {% endif %}
                 {% endif %}
             </div>

@@ -1,0 +1,36 @@
+{% load i18n lucide ui %}
+{% comment %}
+    One row of the rubric editor's own formset -- same shape as
+    management/_form_field_formset_row.html, plus an inline ``order`` number
+    (reorder without drag-and-drop, same idiom as FormBuilderFieldForm's own
+    ``order`` field) and a second line for the optional guidance/options
+    textareas, which don't fit alongside the first line without cramming it.
+{% endcomment %}
+<div class="bulk-add-row flex flex-col gap-2 rounded-lg border border-line p-3">
+    <div class="flex items-center gap-2">
+        <div class="flex-1 self-start">
+            {{ form.label }}
+            {% for error in form.label.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
+        </div>
+        <div class="w-40 self-start">
+            {{ form.field_type }}
+        </div>
+        <div class="flex h-11 w-16 shrink-0 flex-col items-center justify-center gap-1 self-start">
+            {{ form.required|daisy:"checkbox" }}
+            <span class="text-[10px] text-muted">{% trans "Req." %}</span>
+        </div>
+        <div class="w-20 self-start">
+            {{ form.order }}
+        </div>
+        <button class="btn btn-ghost btn-sm btn-square remove-row self-start" type="button" aria-label="{% trans 'Remove this row' %}" title="{% trans 'Remove this row' %}">{% lucide "x" size=16 %}</button>
+    </div>
+    <div class="flex items-start gap-2">
+        <div class="flex-1">
+            {{ form.help_text }}
+        </div>
+        <div class="w-64">
+            {{ form.options }}
+            {% for error in form.options.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
+        </div>
+    </div>
+</div>

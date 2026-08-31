@@ -20,7 +20,7 @@ from django.db.models import Q, QuerySet
 from django.utils import timezone
 
 from authentication.models import User
-from club.models import Club, ClubMembership, ClubRole, Season, ShopManager
+from club.models import Club, ClubMembership, ClubRole, EvaluationManager, Season, ShopManager
 from events.models import Event
 from members.models import FamilyMembership, Group, Member
 from teams.models import StaffAssignment, Team
@@ -219,6 +219,17 @@ def is_shop_admin(user: User, club: Club) -> bool:
 
 def can_manage_shop(user: User, club: Club) -> bool:
     return is_club_admin(user, club) or is_shop_admin(user, club)
+
+
+def is_evaluation_manager(user: User, club: Club) -> bool:
+    """An additive grant (club.models.EvaluationManager), not a ClubRole value --
+    same shape as is_shop_admin, for the same reason: see that model's own
+    docstring."""
+    return EvaluationManager.objects.filter(member__user=user, club=club).exists()
+
+
+def can_manage_evaluations(user: User, club: Club) -> bool:
+    return is_club_admin(user, club) or is_evaluation_manager(user, club)
 
 
 def can_add_news(user: User, club: Club) -> bool:

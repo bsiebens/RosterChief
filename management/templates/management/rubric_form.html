@@ -1,0 +1,53 @@
+{% extends "management/base.html" %}
+{% load i18n lucide static ui %}
+
+{% block panel_title %}{% trans "Evaluation rubric" %}{% endblock panel_title %}
+{% block heading %}{% trans "Evaluation rubric" %}{% endblock heading %}
+
+{% block panel %}
+    <form method="post">
+        {% csrf_token %}
+        {{ formset.management_form }}
+
+        <div class="card mb-4 card-body">
+            <h2 class="card-title">{% lucide "list-checks" size=18 %} {% trans "Criteria" %}</h2>
+            <p class="text-sm text-muted">{% trans "What coaches score a player against. Saving creates a new version of the rubric -- evaluations already filled in keep showing exactly what they were scored against, unaffected by this edit." %}</p>
+
+            {% for error in formset.non_form_errors %}
+                <div class="alert alert-error">
+                    {% lucide "circle-x" size=18 %}
+                    <span>{{ error }}</span>
+                </div>
+            {% endfor %}
+
+            <div class="flex items-center gap-2 px-3">
+                <span class="flex-1 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Criterion" %}</span>
+                <span class="w-40 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Type" %}</span>
+                <span class="w-16 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Req." %}</span>
+                <span class="w-20 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Order" %}</span>
+                <span class="w-8"></span>
+            </div>
+            <div id="bulk-add-rows" data-prefix="{{ formset.prefix }}" class="flex flex-col gap-2">
+                {% for criterion_form in formset %}
+                    {% include "management/_rubric_criterion_formset_row.html" with form=criterion_form %}
+                {% endfor %}
+            </div>
+
+            <template id="bulk-add-row-template">
+                {% include "management/_rubric_criterion_formset_row.html" with form=formset.empty_form %}
+            </template>
+
+            <div>
+                <button class="btn btn-outline btn-sm gap-2" type="button" id="add-row">{% lucide "plus" size=14 %} {% trans "Add another criterion" %}</button>
+            </div>
+        </div>
+
+        <div class="flex justify-start gap-2">
+            <button class="btn btn-primary gap-2" type="submit">{% lucide "save" size=16 %} {% trans "Save" %}</button>
+        </div>
+    </form>
+{% endblock panel %}
+
+{% block extra_body %}
+    <script src="{% static 'js/bulk-add-rows.js' %}"></script>
+{% endblock extra_body %}

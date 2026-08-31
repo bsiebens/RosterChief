@@ -21,9 +21,11 @@ from waffle import get_waffle_flag_model
 
 from billing.models import Plan, PlanPrice
 from billing.services.dues import record_payment, subscribe
-from club.models import Club, ClubMembership, ClubRole, DuesInvoice, FeePayment, MemberRequirementStatus, OnboardingRequirement, Season, ShopManager, Sponsor
+from club.models import Club, ClubMembership, ClubRole, DuesInvoice, EvaluationManager, FeePayment, MemberRequirementStatus, OnboardingRequirement, Season, ShopManager, Sponsor
 from club.services.invoicing import DuesInvoicePDFError, create_or_resend_invoice
 from club.services.onboarding import mark_complete
+from evaluations.models import EvaluationSettings, PlayerEvaluation
+from evaluations.services import current_rubric_form
 from events.models import Attendance, Competition, Event, EventReferee, EventSeries, EventTask, EventTaskClaim, Location, Opponent, RefereeSignup
 from events.services.calendar import week_bounds
 from events.services.notifications import notify_new_event
@@ -7830,9 +7832,51 @@ class FeatureGatedSectionsTests(ManagementTestBase):
         self.assertNotContains(response, "Forms")
 
 
-class EvaluationsComingSoonViewTests(ManagementTestBase):
-    """Placeholder nav entry/page for player evaluations (design: ARCHITECTURE.md
-    §5.8) -- see management.views.EvaluationsComingSoonView."""
+class EvaluationManagementTestBase(ManagementTestBase):
+    """Shared fixture for the evaluations desktop UI: the "evaluations" waffle
+    flag active for the club, plus a plain EvaluationManager grant (broader
+    than ADMIN, see EvaluationManagerRequiredMixin) and a plain staff member
+    with neither."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.player = Member.objects.create(first_name="Paul", last_name="Player")
+        ClubMembership.objects.create(club=cls.club, member=cls.player, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
+
+        cls.eval_manager_user = User.objects.create_user(email="eval-manager@example.com", password="pw-secret-123")
+        cls.eval_manager_member = Member.objects.create(user=cls.eval_manager_user, first_name="Erin", last_name="Evaluator")
+        ClubMembership.objects.create(club=cls.club, member=cls.eval_manager_member, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
+        EvaluationManager.objects.create(club=cls.club, member=cls.eval_manager_member)
+        # Also a plain (non-management) StaffAssignment -- has_management_access
+        # (club.mixins.ClubStaffRequiredMixin's own gate for the whole management
+        # app, member_detail included) doesn't consider a bare EvaluationManager/
+        # ShopManager grant "staff" by itself, same already-accepted layering gap
+        # noted on FormManagerRequiredMixin's own docstring. A real evaluation
+        # manager who needs to actually reach a member's page in practice holds
+        # some other staff standing too -- mirrors physio-style fixtures elsewhere
+        # in this file (e.g. FormManagementTests.plain_staff).
+        eval_team = Team.objects.create(club=cls.club, name="Evaluators Team", short_name="EVL")
+        eval_position = Position.objects.create(club=cls.club, name="Technical Director", short_name="TD", staff_position=True, management_position=False)
+        StaffAssignment.objects.create(team=eval_team, member=cls.eval_manager_member, season=cls.season, position=eval_position)
+        # And self.player on that same team's roster -- members_visible_to's
+        # own non-admin branch (club/services/access.py, used generally by
+        # MemberDetailView and every other member-scoped view, not just
+        # evaluations) only surfaces players on a team the requester is
+        # actually staffed on, regardless of an EvaluationManager grant's own
+        # club-wide reach. Out of scope to change here; this fixture just
+        # reflects the realistic case of an evaluation manager who's also
+        # this player's own team's staff.
+        TeamMembership.objects.create(team=eval_team, member=cls.player, season=cls.season)
+
+    def setUp(self):
+        super().setUp()
+        cache.clear()
+        self.addCleanup(cache.clear)
+        # get_or_create, not create -- evaluations/migrations/0002_create_evaluations_flag.py
+        # already seeds this flag (off by default), unlike "shop"/"formbuilder" above.
+        flag, _created = get_waffle_flag_model().objects.get_or_create(name="evaluations")
+        flag.clubs.add(self.club)
 
     def make_plain_staff(self, email="physio-eval@example.com"):
         staff_user = User.objects.create_user(email=email, password="pw-secret-123")
@@ -7841,42 +7885,282 @@ class EvaluationsComingSoonViewTests(ManagementTestBase):
         team = Team.objects.create(club=self.club, name="Physio Team", short_name="PHY")
         position = Position.objects.create(club=self.club, name="Physio", short_name="PH", staff_position=True, management_position=False)
         StaffAssignment.objects.create(team=team, member=staff_member, season=self.season, position=position)
+        # self.player on this same team's roster -- members_visible_to's
+        # non-admin branch (club/services/access.py) only surfaces players on
+        # a team the requester is staffed on, so without this the physio
+        # couldn't even reach member_detail for self.player to see whether
+        # the Evaluations section is hidden from them.
+        TeamMembership.objects.create(team=team, member=self.player, season=self.season)
         return staff_user
 
-    def test_member_admin_can_reach_it(self):
+    def make_rubric(self):
+        form_obj = FormBuilderForm.objects.create(club=self.club, title="Evaluation form")
+        FormBuilderField.objects.create(form=form_obj, label="Ball control", field_type=FormBuilderField.FieldType.NUMBER, order=1)
+        EvaluationSettings.objects.create(club=self.club, form=form_obj)
+        return form_obj
+
+
+class EvaluationFeatureGatingTests(EvaluationManagementTestBase):
+    """The whole surface is gated behind the "evaluations" waffle flag on top
+    of its own permission tiers -- rubric editing is ADMIN-only
+    (FeatureRequiredMixin), the rest is EvaluationManagerRequiredMixin
+    (ADMIN or an EvaluationManager grant)."""
+
+    def test_rubric_view_404s_when_the_flag_is_off(self):
+        get_waffle_flag_model().objects.filter(name="evaluations").first().clubs.remove(self.club)
         self.client.force_login(self.admin_user)
 
-        response = self.club_get("evaluations")
+        self.assertEqual(self.club_get("evaluation_rubric").status_code, 404)
 
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Player evaluations")
+    def test_admin_can_reach_the_rubric_editor(self):
+        self.client.force_login(self.admin_user)
 
-    def test_plain_staff_gets_403(self):
+        self.assertEqual(self.club_get("evaluation_rubric").status_code, 200)
+
+    def test_evaluation_manager_gets_403_on_the_rubric_editor(self):
+        # Rubric editing is narrower than EvaluationManagerRequiredMixin --
+        # only ADMIN may redefine what everyone scores players against.
+        self.client.force_login(self.eval_manager_user)
+
+        self.assertEqual(self.club_get("evaluation_rubric").status_code, 403)
+
+    def test_plain_staff_gets_403_on_the_rubric_editor(self):
         self.client.force_login(self.make_plain_staff())
 
-        response = self.club_get("evaluations")
+        self.assertEqual(self.club_get("evaluation_rubric").status_code, 403)
 
-        self.assertEqual(response.status_code, 403)
+    def test_evaluation_manager_can_open_the_new_evaluation_form(self):
+        self.make_rubric()
+        self.client.force_login(self.eval_manager_user)
 
-    def test_nav_hides_the_placeholder_when_the_forms_flag_is_off(self):
-        # Evaluations is designed to reuse formbuilder underneath (ARCHITECTURE.md
-        # §5.8), so its nav entry is gated on that same flag, like Forms itself.
+        self.assertEqual(self.club_get("evaluation_create", self.player.pk).status_code, 200)
+
+    def test_plain_staff_gets_403_on_the_new_evaluation_form(self):
+        self.make_rubric()
+        self.client.force_login(self.make_plain_staff())
+
+        self.assertEqual(self.club_get("evaluation_create", self.player.pk).status_code, 403)
+
+    def test_nav_hides_evaluations_when_the_flag_is_off(self):
+        # Evaluations sits under Settings' own sub-nav, which only expands on
+        # a Settings-section page -- same reasoning as
+        # test_nav_shows_shop_once_its_flag_is_active visiting membership_list
+        # for Finance's own sub-nav.
+        get_waffle_flag_model().objects.filter(name="evaluations").first().clubs.remove(self.club)
         self.client.force_login(self.admin_user)
 
-        response = self.club_get("member_list")
+        response = self.club_get("club_settings")
 
         self.assertNotContains(response, "Evaluations")
 
-    def test_nav_shows_the_placeholder_once_the_forms_flag_is_active(self):
-        cache.clear()
-        self.addCleanup(cache.clear)
-        flag = get_waffle_flag_model().objects.create(name="formbuilder")
-        flag.clubs.add(self.club)
+    def test_nav_shows_evaluations_once_the_flag_is_active(self):
         self.client.force_login(self.admin_user)
 
-        response = self.club_get("member_list")
+        response = self.club_get("club_settings")
 
         self.assertContains(response, "Evaluations")
+
+
+class EvaluationRubricViewTests(EvaluationManagementTestBase):
+    """The rubric editor -- always saves through start_new_rubric_version,
+    never mutates the current Form's Fields in place."""
+
+    def rubric_post_data(self, **rows):
+        data = {
+            "criteria-TOTAL_FORMS": str(len(rows)),
+            "criteria-INITIAL_FORMS": "0",
+            "criteria-MIN_NUM_FORMS": "0",
+            "criteria-MAX_NUM_FORMS": "1000",
+        }
+        for index, row in enumerate(rows.values()):
+            for key, value in row.items():
+                data[f"criteria-{index}-{key}"] = value
+        return data
+
+    def test_first_save_creates_a_rubric_from_nothing(self):
+        self.client.force_login(self.admin_user)
+        data = self.rubric_post_data(
+            row0={"label": "Ball control", "field_type": "number", "required": "on", "help_text": "", "options": "", "order": "1"},
+        )
+
+        response = self.club_post("evaluation_rubric", data)
+
+        self.assertRedirects(response, reverse("management:evaluation_rubric"))
+        form_obj = current_rubric_form(self.club)
+        self.assertIsNotNone(form_obj)
+        field = form_obj.fields.get()
+        self.assertEqual(field.label, "Ball control")
+        self.assertEqual(field.key, "ball-control")
+
+    def test_saving_an_edit_creates_a_new_version_and_keeps_the_old_one_intact(self):
+        original = self.make_rubric()
+        self.client.force_login(self.admin_user)
+        data = self.rubric_post_data(
+            row0={"label": "Ball control", "field_type": "number", "required": "on", "help_text": "", "options": "", "order": "1"},
+            row1={"label": "Passing", "field_type": "number", "required": "on", "help_text": "", "options": "", "order": "2"},
+        )
+
+        self.club_post("evaluation_rubric", data)
+
+        new_form = current_rubric_form(self.club)
+        self.assertNotEqual(new_form.pk, original.pk)
+        self.assertEqual(list(new_form.fields.order_by("order").values_list("label", flat=True)), ["Ball control", "Passing"])
+        # The old version's own Field is untouched -- an already-scored
+        # evaluation would still point at exactly this.
+        self.assertTrue(original.fields.filter(label="Ball control").exists())
+
+    def test_a_blank_row_is_dropped(self):
+        self.client.force_login(self.admin_user)
+        data = self.rubric_post_data(
+            row0={"label": "Ball control", "field_type": "number", "required": "on", "help_text": "", "options": "", "order": "1"},
+            row1={"label": "", "field_type": "number", "required": "", "help_text": "", "options": "", "order": "2"},
+        )
+
+        self.club_post("evaluation_rubric", data)
+
+        self.assertEqual(current_rubric_form(self.club).fields.count(), 1)
+
+    def test_clearing_every_row_is_rejected(self):
+        self.make_rubric()
+        self.client.force_login(self.admin_user)
+        data = self.rubric_post_data(row0={"label": "", "field_type": "number", "required": "", "help_text": "", "options": "", "order": "1"})
+
+        response = self.club_post("evaluation_rubric", data)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Add at least one criterion")
+
+    def test_a_choice_criterion_without_options_is_rejected(self):
+        self.client.force_login(self.admin_user)
+        data = self.rubric_post_data(row0={"label": "Overall", "field_type": "choice", "required": "on", "help_text": "", "options": "", "order": "1"})
+
+        response = self.club_post("evaluation_rubric", data)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(current_rubric_form(self.club))
+
+    def test_reordering_rows_persists_the_new_order(self):
+        self.client.force_login(self.admin_user)
+        data = self.rubric_post_data(
+            row0={"label": "Passing", "field_type": "number", "required": "on", "help_text": "", "options": "", "order": "2"},
+            row1={"label": "Ball control", "field_type": "number", "required": "on", "help_text": "", "options": "", "order": "1"},
+        )
+
+        self.club_post("evaluation_rubric", data)
+
+        labels = list(current_rubric_form(self.club).fields.order_by("order").values_list("label", flat=True))
+        self.assertEqual(labels, ["Ball control", "Passing"])
+
+
+class EvaluationCreateViewTests(EvaluationManagementTestBase):
+    """Filling in an evaluation for a player, from that player's member page."""
+
+    def test_no_rubric_configured_shows_the_blocked_screen_not_a_500(self):
+        self.client.force_login(self.eval_manager_user)
+
+        response = self.club_get("evaluation_create", self.player.pk)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "hasn't set up an evaluation rubric")
+
+    def test_submitting_a_valid_evaluation_saves_it(self):
+        self.make_rubric()
+        self.client.force_login(self.eval_manager_user)
+
+        response = self.club_post("evaluation_create", {"ball-control": "8"}, self.player.pk)
+
+        self.assertRedirects(response, reverse("management:member_detail", args=[self.player.pk]))
+        evaluation = PlayerEvaluation.objects.get(club=self.club, player=self.player)
+        self.assertEqual(evaluation.submission.answers.get().value, "8")
+
+    def test_a_missing_required_answer_is_rejected_with_the_field_flagged(self):
+        self.make_rubric()
+        self.client.force_login(self.eval_manager_user)
+
+        response = self.club_post("evaluation_create", {"ball-control": ""}, self.player.pk)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(PlayerEvaluation.objects.filter(club=self.club, player=self.player).exists())
+        self.assertTrue(response.context["form"].errors)
+
+    def test_no_current_season_shows_the_blocked_screen_not_a_500(self):
+        self.make_rubric()
+        self.season.start_date = datetime.date.today() + datetime.timedelta(days=10)
+        self.season.end_date = datetime.date.today() + datetime.timedelta(days=100)
+        self.season.save()
+        self.client.force_login(self.eval_manager_user)
+
+        response = self.club_get("evaluation_create", self.player.pk)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "no current season")
+
+
+class EvaluationDetailViewTests(EvaluationManagementTestBase):
+    def test_shows_the_answers_against_the_rubric_that_was_actually_scored(self):
+        self.make_rubric()
+        self.client.force_login(self.eval_manager_user)
+        self.club_post("evaluation_create", {"ball-control": "8"}, self.player.pk)
+        evaluation = PlayerEvaluation.objects.get(club=self.club, player=self.player)
+
+        response = self.club_get("evaluation_detail", evaluation.pk)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Ball control")
+        self.assertContains(response, "8")
+
+    def test_an_evaluation_from_another_club_404s(self):
+        self.make_rubric()
+        self.client.force_login(self.eval_manager_user)
+        self.club_post("evaluation_create", {"ball-control": "8"}, self.player.pk)
+        evaluation = PlayerEvaluation.objects.get(club=self.club, player=self.player)
+
+        other_club = Club.objects.create(name="Rival FC", slug="rival-fc-evals")
+        evaluation.club = other_club
+        # Bypass PlayerEvaluation.clean()'s own club-scope guard -- this is
+        # simulating cross-club data, not exercising that guard here.
+        PlayerEvaluation.objects.filter(pk=evaluation.pk).update(club=other_club)
+
+        response = self.club_get("evaluation_detail", evaluation.pk)
+
+        self.assertEqual(response.status_code, 404)
+
+
+class MemberDetailEvaluationsSectionTests(EvaluationManagementTestBase):
+    """The Evaluations section on a member's own page -- entirely hidden, not
+    just disabled, when the flag is off or the viewer lacks
+    can_manage_evaluations."""
+
+    def test_hidden_when_the_flag_is_off(self):
+        get_waffle_flag_model().objects.filter(name="evaluations").first().clubs.remove(self.club)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("member_detail", self.player.pk)
+
+        self.assertNotContains(response, "Evaluations")
+
+    def test_hidden_for_a_plain_staff_member(self):
+        self.client.force_login(self.make_plain_staff())
+
+        response = self.club_get("member_detail", self.player.pk)
+
+        self.assertNotContains(response, "Evaluations")
+
+    def test_shown_for_an_evaluation_manager(self):
+        self.client.force_login(self.eval_manager_user)
+
+        response = self.club_get("member_detail", self.player.pk)
+
+        self.assertContains(response, "Evaluations")
+
+    def test_lists_existing_evaluations(self):
+        self.make_rubric()
+        self.client.force_login(self.eval_manager_user)
+        self.club_post("evaluation_create", {"ball-control": "8"}, self.player.pk)
+
+        response = self.club_get("member_detail", self.player.pk)
+
+        self.assertContains(response, reverse("management:evaluation_detail", args=[PlayerEvaluation.objects.get(club=self.club, player=self.player).pk]))
 
 
 RBIHF_SAMPLE_HTML = """<html><body>

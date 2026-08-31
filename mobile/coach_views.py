@@ -19,9 +19,10 @@ from django.utils.dateparse import parse_datetime
 from django.utils.translation import gettext_lazy as _
 from django.utils.translation import ngettext
 from django.views.generic import TemplateView, View
+from waffle import flag_is_active
 
 from club.models import ClubMembership, Season
-from club.services.access import can_add_news, current_season
+from club.services.access import can_add_news, can_manage_evaluations, current_season
 from controlpanel.messages import notify
 from events.models import Attendance, Event, EventSeries, Lineup, LineupSelection, Location, Opponent
 from events.services import generate_occurrences
@@ -1133,6 +1134,11 @@ class CoachRosterMemberView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
             member=member,
             guardians=member.guardians,
             attendance_counts=member_attendance_counts(member, membership.season),
+            # Gates the "Evaluations" row below -- a club-wide grant (see
+            # mobile.coach_evaluation_views.EvaluationAccessMixin), not
+            # can_manage_active_team, so a coach who merely staffs this team
+            # doesn't see it just because they can edit the roster.
+            evaluations_enabled=flag_is_active(self.request, "evaluations") and can_manage_evaluations(self.request.user, self.request.club),
             **kwargs,
         )
 

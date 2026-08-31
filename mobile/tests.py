@@ -16,7 +16,8 @@ from icalendar import Calendar as ICalCalendar
 from pywebpush import WebPushException
 from waffle import get_waffle_flag_model
 
-from club.models import Club, ClubMembership, DuesInvoice, MemberRequirementStatus, OnboardingRequirement, Season, Sponsor
+from club.models import Club, ClubMembership, DuesInvoice, EvaluationManager, MemberRequirementStatus, OnboardingRequirement, Season, Sponsor
+from evaluations.models import EvaluationSettings, PlayerEvaluation
 from events.models import Attendance, Competition, Event, EventReferee, EventSeries, EventTask, EventTaskClaim, Lineup, LineupSelection, Location, Opponent, RefereeSignup
 from events.services.attendance import record_check_in
 from events.services.calendar import week_bounds
@@ -1336,7 +1337,7 @@ class CalendarRefereeSignupTests(TestCase):
 
         self.assertContains(response, "Referee")
         self.assertContains(response, "Reply needed")
-        self.assertContains(response, f'href="{reverse("mobile:event_detail", kwargs={"pk": self.game.pk})}"')
+        self.assertContains(response, f'href="{reverse("mobile:event_detail", kwargs={"pk": self.game.pk})}?from=calendar"')
 
     def test_declined_signup_is_not_shown(self):
         signup = RefereeSignup.objects.get(event=self.game, member=self.member)
@@ -6677,3 +6678,219 @@ class FormFillViewTests(TestCase):
         response = self.client.post(reverse("mobile:notifications"), {"action": "mark_read", "notification_id": str(notification.pk)}, HTTP_HOST="ajax-united.rosterchief.app")
 
         self.assertRedirects(response, self._url(send))
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class CoachEvaluationViewsTests(TestCase):
+    """mobile.coach_evaluation_views -- fill in / review a player's
+    evaluations against the club's current rubric. Access is the club-wide
+    EvaluationManager grant (club.services.access.can_manage_evaluations),
+    not can_manage_active_team -- see EvaluationAccessMixin's own docstring
+    -- so these tests grant/withhold it separately from self.member's
+    StaffAssignment on the team."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        today = timezone.localdate()
+        cls.season = Season.objects.create(club=cls.club, start_date=today - datetime.timedelta(days=30), end_date=today + datetime.timedelta(days=300))
+        cls.user = User.objects.create_user(email="coach@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Sam", last_name="Coach", email="coach@example.com", user=cls.user)
+        cls.team = Team.objects.create(club=cls.club, name="U16", short_name="U16")
+        cls.position = Position.objects.create(club=cls.club, name="Head coach", short_name="HC", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=cls.team, member=cls.member, season=cls.season, position=cls.position)
+        cls.player = Member.objects.create(first_name="Anna", last_name="Player")
+        TeamMembership.objects.create(team=cls.team, member=cls.player, season=cls.season)
+
+        cls.rubric = FormBuilderForm.objects.create(club=cls.club, title="Player rubric")
+        cls.skill_field = FormBuilderField.objects.create(form=cls.rubric, key="skill", label="Skill", field_type=FormBuilderField.FieldType.NUMBER, required=True, order=1)
+        EvaluationSettings.objects.create(club=cls.club, form=cls.rubric)
+
+    def _activate_flag(self):
+        # waffle caches flag_is_active results -- cleared here (and again on
+        # teardown) so one test's activation can't leak into the next via a
+        # stale cache entry, same idiom management.tests' own flag-toggling
+        # tests already use.
+        cache.clear()
+        self.addCleanup(cache.clear)
+        get_waffle_flag_model().objects.get_or_create(name="evaluations")[0].clubs.add(self.club)
+
+    def _grant(self, member):
+        EvaluationManager.objects.create(club=self.club, member=member)
+
+    def _history_url(self, player=None):
+        return reverse("mobile:coach_evaluation_history", kwargs={"player_pk": (player or self.player).pk})
+
+    def _create_url(self, player=None):
+        return reverse("mobile:coach_evaluation_create", kwargs={"player_pk": (player or self.player).pk})
+
+    def test_requires_login(self):
+        response = self.client.get(self._history_url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 302)
+
+    def test_404s_when_the_evaluations_flag_is_off(self):
+        self._grant(self.member)
+        self.client.force_login(self.user)
+
+        response = self.client.get(self._history_url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_403s_a_signed_in_coach_without_the_grant(self):
+        self._activate_flag()
+        self.client.force_login(self.user)
+
+        response = self.client.get(self._history_url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_an_evaluation_manager_who_does_not_staff_the_team_can_still_reach_it(self):
+        # The whole point of the club-wide grant -- a technical director with
+        # no StaffAssignment on this team at all can still evaluate its players.
+        self._activate_flag()
+        director_user = User.objects.create_user(email="director@example.com", password="pw-secret-123")
+        director_member = Member.objects.create(first_name="Dana", last_name="Director", email="director@example.com", user=director_user)
+        self._grant(director_member)
+        self.client.force_login(director_user)
+
+        response = self.client.get(self._history_url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_history_lists_a_past_evaluation(self):
+        self._activate_flag()
+        self._grant(self.member)
+        send = FormSend.objects.create(club=self.club, form=self.rubric, is_active=False)
+        submission = Submission.objects.create(send=send, member=self.member)
+        Answer.objects.create(submission=submission, field=self.skill_field, value="8")
+        PlayerEvaluation.objects.create(club=self.club, player=self.player, season=self.season, submission=submission)
+        self.client.force_login(self.user)
+
+        response = self.client.get(self._history_url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, "Sam Coach")
+        self.assertContains(response, str(self.season))
+
+    def test_history_shows_an_empty_state_when_no_rubric_is_configured(self):
+        EvaluationSettings.objects.filter(club=self.club).delete()
+        self._activate_flag()
+        self._grant(self.member)
+        self.client.force_login(self.user)
+
+        response = self.client.get(self._history_url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, "hasn't set up an evaluation form")
+        self.assertNotContains(response, self._create_url())
+
+    def test_a_player_from_another_club_404s(self):
+        self._activate_flag()
+        self._grant(self.member)
+        other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
+        other_season = Season.objects.create(club=other_club, start_date=self.season.start_date, end_date=self.season.end_date)
+        other_player = Member.objects.create(first_name="Otto", last_name="Other")
+        ClubMembership.objects.create(club=other_club, member=other_player, season=other_season)
+        self.client.force_login(self.user)
+
+        response = self.client.get(self._history_url(other_player), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_create_get_renders_the_rubrics_fields(self):
+        self._activate_flag()
+        self._grant(self.member)
+        self.client.force_login(self.user)
+
+        response = self.client.get(self._create_url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, "Skill")
+
+    def test_create_post_records_the_evaluation_and_redirects_to_history(self):
+        self._activate_flag()
+        self._grant(self.member)
+        self.client.force_login(self.user)
+
+        response = self.client.post(self._create_url(), {"skill": "8"}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertRedirects(response, self._history_url())
+        evaluation = PlayerEvaluation.objects.get(club=self.club, player=self.player)
+        self.assertEqual(evaluation.season, self.season)
+        self.assertEqual(evaluation.submission.member, self.member)
+        self.assertEqual(Answer.objects.get(submission=evaluation.submission, field=self.skill_field).value, "8")
+
+    def test_create_post_with_a_missing_required_field_re_renders_with_an_error(self):
+        self._activate_flag()
+        self._grant(self.member)
+        self.client.force_login(self.user)
+
+        response = self.client.post(self._create_url(), {}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(PlayerEvaluation.objects.exists())
+        self.assertContains(response, "This field is required")
+
+    def test_create_404s_when_no_rubric_is_configured(self):
+        EvaluationSettings.objects.filter(club=self.club).delete()
+        self._activate_flag()
+        self._grant(self.member)
+        self.client.force_login(self.user)
+
+        response = self.client.get(self._create_url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "hasn't set up an evaluation form")
+
+    def test_detail_shows_the_recorded_answers(self):
+        self._activate_flag()
+        self._grant(self.member)
+        send = FormSend.objects.create(club=self.club, form=self.rubric, is_active=False)
+        submission = Submission.objects.create(send=send, member=self.member)
+        Answer.objects.create(submission=submission, field=self.skill_field, value="8")
+        evaluation = PlayerEvaluation.objects.create(club=self.club, player=self.player, season=self.season, submission=submission)
+        self.client.force_login(self.user)
+
+        url = reverse("mobile:coach_evaluation_detail", kwargs={"player_pk": self.player.pk, "evaluation_pk": evaluation.pk})
+        response = self.client.get(url, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Skill")
+        self.assertContains(response, "8")
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class CoachRosterMemberEvaluationsLinkTests(TestCase):
+    """The "Evaluations" row roster_member.html adds -- gated on the
+    club-wide can_manage_evaluations grant, not can_manage_active_team, so a
+    coach who merely manages this team's roster doesn't see it just for that."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        today = timezone.localdate()
+        cls.season = Season.objects.create(club=cls.club, start_date=today - datetime.timedelta(days=30), end_date=today + datetime.timedelta(days=300))
+        cls.user = User.objects.create_user(email="coach@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Sam", last_name="Coach", email="coach@example.com", user=cls.user)
+        cls.team = Team.objects.create(club=cls.club, name="U16", short_name="U16")
+        cls.position = Position.objects.create(club=cls.club, name="Head coach", short_name="HC", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=cls.team, member=cls.member, season=cls.season, position=cls.position)
+        cls.player = Member.objects.create(first_name="Anna", last_name="Player")
+        cls.membership = TeamMembership.objects.create(team=cls.team, member=cls.player, season=cls.season)
+
+    def _get(self):
+        return self.client.get(reverse("mobile:coach_roster_member", kwargs={"membership_pk": self.membership.pk}), HTTP_HOST="ajax-united.rosterchief.app")
+
+    def test_link_hidden_without_the_flag_or_the_grant(self):
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertNotContains(response, reverse("mobile:coach_evaluation_history", kwargs={"player_pk": self.player.pk}))
+
+    def test_link_shown_once_flag_and_grant_are_both_present(self):
+        get_waffle_flag_model().objects.get_or_create(name="evaluations")[0].clubs.add(self.club)
+        EvaluationManager.objects.create(club=self.club, member=self.member)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, reverse("mobile:coach_evaluation_history", kwargs={"player_pk": self.player.pk}))

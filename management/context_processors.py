@@ -197,7 +197,9 @@ _NAV_SECTIONS = {
     "formsend_update": "form_list",
     "formsend_responses": "form_list",
     "formsend_responses_export": "form_list",
-    "evaluations": "evaluations",
+    "evaluation_rubric": "evaluation_rubric",
+    "evaluation_detail": "member_list",
+    "evaluation_create": "member_list",
     "club_settings": "club_settings",
     "onboarding_requirement_list": "onboarding_requirement_list",
     "onboarding_requirement_create": "onboarding_requirement_list",
@@ -233,7 +235,6 @@ _TOP_SECTION = {
     "parent_claim_list": "members",
     "group_list": "members",
     "volunteer_list": "members",
-    "evaluations": "members",
     "membership_list": "finance",
     "registration_invoice_queue": "finance",
     "team_list": "teams",
@@ -251,6 +252,7 @@ _TOP_SECTION = {
     "voucher_list": "finance",
     "invoice_list": "finance",
     "form_list": "settings",
+    "evaluation_rubric": "settings",
     "club_settings": "settings",
     "onboarding_requirement_list": "settings",
     "role_list": "settings",
@@ -328,20 +330,21 @@ def management_link(request):
 
 
 def feature_sections(request):
-    """Whether the nav's Shop/Forms sections -- and the Events page's "Import
-    from RBIHF" button -- should show at all. Each is gated behind its own
-    waffle Flag (see club.mixins.FeatureRequiredMixin, which gates the
-    underlying views regardless), on top of the existing is_club_admin check
-    those all already require."""
+    """Whether the nav's Shop/Forms/Evaluations sections -- and the Events
+    page's "Import from RBIHF" button -- should show at all. Each is gated
+    behind its own waffle Flag (see club.mixins.FeatureRequiredMixin, which
+    gates the underlying views regardless), on top of the existing
+    is_club_admin check those all already require."""
     club = getattr(request, "club", None)
     if club is None or not request.user.is_authenticated:
-        return {"shop_enabled": False, "forms_enabled": False, "rbihf_enabled": False, "officials_enabled": False}
+        return {"shop_enabled": False, "forms_enabled": False, "rbihf_enabled": False, "officials_enabled": False, "evaluations_enabled": False}
 
     return {
         "shop_enabled": flag_is_active(request, "shop"),
         "forms_enabled": flag_is_active(request, "formbuilder"),
         "rbihf_enabled": flag_is_active(request, "RBIHF"),
         "officials_enabled": flag_is_active(request, "officials"),
+        "evaluations_enabled": flag_is_active(request, "evaluations"),
     }
 
 

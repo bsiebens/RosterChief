@@ -1,0 +1,33 @@
+{% extends "management/base.html" %}
+{% load i18n lucide ui %}
+
+{% block panel_title %}{% blocktrans with name=member.get_full_name %}Evaluate {{ name }}{% endblocktrans %}{% endblock panel_title %}
+{% block heading %}{% blocktrans with name=member.get_full_name %}Evaluate {{ name }}{% endblocktrans %}{% endblock heading %}
+
+{% block actions %}
+    <a class="btn btn-outline gap-2" href="{% url 'management:member_detail' member.pk %}">{% lucide "arrow-left" size=16 %} {% trans "Back" %}</a>
+{% endblock actions %}
+
+{% block panel %}
+    <form method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+
+        {% for error in form.non_field_errors %}
+            <div class="alert alert-error mb-4">
+                {% lucide "circle-x" size=18 %}
+                <span>{{ error }}</span>
+            </div>
+        {% endfor %}
+
+        <div class="card mb-4 card-body gap-4">
+            {% for bound_field in form %}
+                {% form_field bound_field %}
+            {% endfor %}
+        </div>
+
+        <div class="flex justify-start gap-2">
+            <a class="btn btn-outline gap-2" href="{% url 'management:member_detail' member.pk %}">{% lucide "arrow-left" size=16 %} {% trans "Cancel" %}</a>
+            <button class="btn btn-primary gap-2" type="submit">{% lucide "save" size=16 %} {% trans "Save evaluation" %}</button>
+        </div>
+    </form>
+{% endblock panel %}

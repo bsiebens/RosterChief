@@ -63,6 +63,7 @@ urlpatterns = [
     path("roles/new/", views.ClubRoleCreateView.as_view(), name="role_create"),
     path("roles/<uuid:pk>/revoke/", views.ClubRoleRevokeView.as_view(), name="role_revoke"),
     path("roles/shop-admins/<uuid:pk>/revoke/", views.ShopManagerRevokeView.as_view(), name="shop_admin_revoke"),
+    path("roles/evaluation-managers/<uuid:pk>/revoke/", views.EvaluationManagerRevokeView.as_view(), name="evaluation_manager_revoke"),
     path("parent-claims/", views.ParentClaimListView.as_view(), name="parent_claim_list"),
     path("parent-claims/<uuid:pk>/approve/", views.ParentClaimApproveView.as_view(), name="parent_claim_approve"),
     path("parent-claims/<uuid:pk>/reject/", views.ParentClaimRejectView.as_view(), name="parent_claim_reject"),
@@ -215,8 +216,10 @@ urlpatterns = [
     path("forms/<uuid:form_pk>/sends/<uuid:pk>/edit/", views.FormSendUpdateView.as_view(), name="formsend_update"),
     path("forms/<uuid:form_pk>/sends/<uuid:pk>/responses/", views.FormSendResponsesView.as_view(), name="formsend_responses"),
     path("forms/<uuid:form_pk>/sends/<uuid:pk>/responses/export/", views.FormSendResponsesExportView.as_view(), name="formsend_responses_export"),
-    # Evaluations (placeholder -- see ARCHITECTURE.md §5.8, nothing built yet)
-    path("evaluations/", views.EvaluationsComingSoonView.as_view(), name="evaluations"),
+    # Evaluations (see ARCHITECTURE.md §5.8)
+    path("evaluations/rubric/", views.EvaluationRubricView.as_view(), name="evaluation_rubric"),
+    path("evaluations/<uuid:pk>/", views.EvaluationDetailView.as_view(), name="evaluation_detail"),
+    path("members/<uuid:pk>/evaluations/new/", views.EvaluationCreateView.as_view(), name="evaluation_create"),
     # Settings (admin only)
     path("settings/", views.ClubSettingsView.as_view(), name="club_settings"),
     path("settings/email-previews/<str:key>/render/", views.EmailPreviewRenderView.as_view(), name="email_preview_render"),

@@ -19,7 +19,7 @@
     signup) is where that action lives, so this row and every other one
     share one interaction model (tap through, act on the event page).
 {% endcomment %}
-<a class="flex items-center gap-3 bg-white px-4 py-3" href="{% url "mobile:event_detail" row.event.pk %}">
+<a class="flex items-center gap-3 bg-white px-4 py-3" href="{% url "mobile:event_detail" row.event.pk %}?from=calendar">
     <div class="w-9.5 shrink-0 text-center">
         <div class="font-mono text-[10px] tracking-wide text-muted uppercase">{{ row.event.start|date:"D" }}</div>
         <div class="font-display text-2xl leading-none font-extrabold text-ink">{{ row.event.start|date:"d" }}</div>

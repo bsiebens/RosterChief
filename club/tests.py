@@ -26,15 +26,17 @@ from registration.models import RegistrationBatch, RegistrationDetails
 from teams.models import Position, StaffAssignment, Team, TeamMembership
 from teams.services import eligible_roster_members
 
-from .models import Club, ClubMembership, ClubRole, DuesInvoice, FeePayment, MemberRequirementStatus, OnboardingRequirement, Season, ShopManager, Sponsor, club_logo_path
+from .models import Club, ClubMembership, ClubRole, DuesInvoice, EvaluationManager, FeePayment, MemberRequirementStatus, OnboardingRequirement, Season, ShopManager, Sponsor, club_logo_path
 from .services.access import (
     COACH_MANAGER,
     can_edit_event,
+    can_manage_evaluations,
     can_manage_members,
     can_manage_shop,
     has_club_role,
     has_management_access,
     is_club_admin,
+    is_evaluation_manager,
     is_member_admin,
     is_platform_superuser,
     is_shop_admin,
@@ -1104,6 +1106,40 @@ class AccessServiceTests(TestCase):
         ShopManager.objects.create(club=self.other_club, member=member)
 
         self.assertFalse(can_manage_shop(user, self.club))
+
+    # --- can_manage_evaluations / is_evaluation_manager ---
+    def test_admin_can_manage_evaluations_without_a_grant(self):
+        admin_user, admin_member = self.make_user_member("admin-eval@example.com")
+        self.grant(admin_member, ClubRole.Roles.ADMIN)
+        editor_user, editor_member = self.make_user_member("editor-eval@example.com")
+        self.grant(editor_member, ClubRole.Roles.EDITOR)
+
+        self.assertTrue(can_manage_evaluations(admin_user, self.club))
+        self.assertFalse(can_manage_evaluations(editor_user, self.club))
+
+    def test_an_evaluation_manager_grant_is_additive_on_top_of_another_role(self):
+        # Same point as ShopManager: someone can be EDITOR *and* an evaluation
+        # manager at once -- this must never cost them their existing ClubRole.
+        user, member = self.make_user_member("editor-evalmanager@example.com")
+        self.grant(member, ClubRole.Roles.EDITOR)
+        EvaluationManager.objects.create(club=self.club, member=member)
+
+        self.assertTrue(is_evaluation_manager(user, self.club))
+        self.assertTrue(can_manage_evaluations(user, self.club))
+        self.assertTrue(has_club_role(user, self.club, ClubRole.Roles.EDITOR))
+
+    def test_an_evaluation_manager_grant_alone_is_enough_with_no_clubrole_at_all(self):
+        user, member = self.make_user_member("evalmanageronly@example.com")
+        EvaluationManager.objects.create(club=self.club, member=member)
+
+        self.assertTrue(can_manage_evaluations(user, self.club))
+        self.assertFalse(is_club_admin(user, self.club))
+
+    def test_an_evaluation_manager_grant_in_another_club_does_not_count_here(self):
+        user, member = self.make_user_member("otherevalmanager@example.com")
+        EvaluationManager.objects.create(club=self.other_club, member=member)
+
+        self.assertFalse(can_manage_evaluations(user, self.club))
 
     # --- platform superuser bypass ---
     def test_superuser_is_club_admin_everywhere_with_no_clubrole_at_all(self):

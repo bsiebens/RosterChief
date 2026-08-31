@@ -413,6 +413,59 @@
         {% endif %}
     {% endfor %}
 
+    {% if evaluations_enabled %}
+        {% comment %}
+            Entirely hidden, not just disabled, when the "evaluations" flag is off
+            for the club or the viewer lacks can_manage_evaluations -- same gate
+            officials_enabled/official_profile above already uses for the same
+            reason (see MemberDetailView.get_context_data).
+        {% endcomment %}
+        <div class="card card-body mt-4">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+                <h2 class="card-title">{% lucide "clipboard-list" size=18 %} {% trans "Evaluations" %}</h2>
+                {% if rubric_configured %}
+                    <a class="btn btn-outline btn-sm gap-2" href="{% url 'management:evaluation_create' member.pk %}">{% lucide "plus" size=14 %} {% trans "New evaluation" %}</a>
+                {% elif is_club_admin %}
+                    <a class="btn btn-outline btn-sm gap-2" href="{% url 'management:evaluation_rubric' %}">{% lucide "list-checks" size=14 %} {% trans "Set up rubric" %}</a>
+                {% endif %}
+            </div>
+            {% if not rubric_configured %}
+                <p class="text-sm text-muted">
+                    {% if is_club_admin %}
+                        {% trans "Set up the club's evaluation rubric before scoring any player." %}
+                    {% else %}
+                        {% trans "This club hasn't set up an evaluation rubric yet -- ask an admin to set one up." %}
+                    {% endif %}
+                </p>
+            {% elif not player_evaluations %}
+                <p class="text-sm text-muted">{% trans "No evaluations yet." %}</p>
+            {% else %}
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>{% trans "Season" %}</th>
+                            <th>{% trans "Evaluator" %}</th>
+                            <th>{% trans "Date" %}</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for evaluation in player_evaluations %}
+                            <tr>
+                                <td>{{ evaluation.season }}</td>
+                                <td>{{ evaluation.submission.member|default:"—" }}</td>
+                                <td class="font-mono text-xs">{{ evaluation.created|date:"d M Y" }}</td>
+                                <td class="text-right">
+                                    <a class="btn btn-outline btn-xs" href="{% url 'management:evaluation_detail' evaluation.pk %}">{% trans "Open" %}</a>
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            {% endif %}
+        </div>
+    {% endif %}
+
     {% if is_club_admin %}
         <div class="card card-body mt-4">
             <div class="flex flex-wrap items-center justify-between gap-2">

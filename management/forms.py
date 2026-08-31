@@ -833,22 +833,25 @@ class EventSeriesForm(EventAudienceFormMixin, forms.ModelForm):
 
 class ClubRoleAssignForm(forms.ModelForm):
     """Grant a club-wide role to a member already affiliated with this club --
-    "Shop admin" rides along in the same dropdown even though it isn't really
-    a ClubRole (see club.models.ShopManager's own docstring): one grant
-    button/one dropdown on the roles page, not a second, separately-triggered
-    mechanism just for shop admin. management.views.ClubRoleCreateView
-    branches on SHOP_ADMIN itself, since granting it is a different
-    operation (a ShopManager row, not a ClubRole one), not a different value
-    of the same one."""
+    "Shop admin"/"Evaluation manager" ride along in the same dropdown even
+    though neither is really a ClubRole (see club.models.ShopManager's own
+    docstring): one grant button/one dropdown on the roles page, not a
+    separately-triggered mechanism per additive grant. management.views.
+    ClubRoleCreateView branches on SHOP_ADMIN/EVALUATION_MANAGER themselves,
+    since granting either is a different operation (a ShopManager/
+    EvaluationManager row, not a ClubRole one), not a different value of the
+    same one."""
 
     SHOP_ADMIN = "shop_admin"
+    EVALUATION_MANAGER = "evaluation_manager"
 
     # Deliberately NOT in Meta.fields below -- a ModelForm's _post_clean() calls
     # instance.full_clean() on whatever it constructs from Meta.fields, which would
-    # validate "shop_admin" against ClubRole.role's own model-level choices (which
-    # don't include it) and silently fail the whole form. Declaring it here instead
-    # keeps it a real, validated form field without ever touching the model instance.
-    role = forms.ChoiceField(label=_("Role"), choices=[*(choice for choice in ClubRole.Roles.choices if choice[0] != ClubRole.Roles.MEMBER), (SHOP_ADMIN, _("shop admin"))])
+    # validate "shop_admin"/"evaluation_manager" against ClubRole.role's own
+    # model-level choices (which don't include either) and silently fail the whole
+    # form. Declaring it here instead keeps it a real, validated form field without
+    # ever touching the model instance.
+    role = forms.ChoiceField(label=_("Role"), choices=[*(choice for choice in ClubRole.Roles.choices if choice[0] != ClubRole.Roles.MEMBER), (SHOP_ADMIN, _("shop admin")), (EVALUATION_MANAGER, _("evaluation manager"))])
 
     class Meta:
         model = ClubRole
@@ -1752,6 +1755,81 @@ class BaseFieldFormSet(forms.BaseFormSet):
 
 
 FieldFormSet = forms.formset_factory(FieldRowForm, formset=BaseFieldFormSet, extra=5)
+
+
+# --- evaluations --------------------------------------------------------------
+
+#: A sensible subset of Field.FieldType for scoring a player against a rubric
+#: criterion -- a numeric scale, a labelled scale (e.g. Poor/Average/Good/
+#: Excellent), a free-text note, or a plain yes/no. EMAIL/DATE/FILE/TEXT/
+#: MULTICHOICE don't fit "assess this player against this criterion" the way
+#: these four do, so they're left out rather than exposing every FieldType.
+RUBRIC_FIELD_TYPES = [
+    (FormBuilderField.FieldType.NUMBER, FormBuilderField.FieldType.NUMBER.label),
+    (FormBuilderField.FieldType.CHOICE, FormBuilderField.FieldType.CHOICE.label),
+    (FormBuilderField.FieldType.TEXTAREA, FormBuilderField.FieldType.TEXTAREA.label),
+    (FormBuilderField.FieldType.CHECKBOX, FormBuilderField.FieldType.CHECKBOX.label),
+]
+
+
+class RubricCriterionForm(forms.Form):
+    """One row of the rubric editor's own formset -- same "blank means skip
+    this row" idiom as FieldRowForm, since there's no Form/Field to attach a
+    criterion to until the whole rubric is saved (the view builds Field rows
+    from the cleaned rows on the brand-new Form evaluations.services.
+    start_new_rubric_version returns). ``order`` is a plain number rather than
+    drag-and-drop -- same idiom as FormBuilderFieldForm's own ``order`` field,
+    just editable inline here since there's no per-row save step to visit
+    separately."""
+
+    label = forms.CharField(label=_("Criterion"), max_length=255, required=False, widget=forms.TextInput(attrs={"class": "input input-bordered w-full", "placeholder": _("e.g. Ball control")}))
+    field_type = forms.ChoiceField(label=_("Type"), choices=RUBRIC_FIELD_TYPES, required=False, initial=FormBuilderField.FieldType.NUMBER, widget=forms.Select(attrs={"class": "select select-bordered w-full"}))
+    required = forms.BooleanField(label=_("Required"), required=False, initial=True)
+    help_text = forms.CharField(label=_("Guidance"), required=False, widget=forms.Textarea(attrs={"class": "textarea textarea-bordered w-full", "rows": 2, "placeholder": _("Optional guidance shown to whoever fills this in")}))
+    options = forms.CharField(label=_("Options"), required=False, widget=forms.Textarea(attrs={"class": "textarea textarea-bordered w-full", "rows": 2, "placeholder": _("One per line -- only used for Choice")}))
+    order = forms.IntegerField(label=_("Order"), required=False, widget=forms.NumberInput(attrs={"class": "input input-bordered w-20"}))
+
+    def clean_options(self):
+        return _options_from_text(self.cleaned_data.get("options", ""))
+
+    def clean(self):
+        cleaned = super().clean()
+        if cleaned.get("options") and not cleaned.get("label"):
+            self.add_error("label", _("Give this criterion text too."))
+        if cleaned.get("field_type") == FormBuilderField.FieldType.CHOICE and cleaned.get("label") and not cleaned.get("options"):
+            self.add_error("options", _("Choice criteria need at least one option, one per line."))
+        return cleaned
+
+
+class BaseRubricCriterionFormSet(forms.BaseFormSet):
+    """Same duplicate-label guard as BaseFieldFormSet, plus a "the rubric
+    can't end up empty" one -- a save that clears every row's label would
+    otherwise still call start_new_rubric_version and leave the fresh Form
+    with no Fields at all, silently producing a rubric with nothing to
+    score."""
+
+    def clean(self):
+        super().clean()
+        if any(self.errors):
+            return
+
+        seen = set()
+        any_row = False
+        for form in self.forms:
+            label = (form.cleaned_data or {}).get("label")
+            if not label:
+                continue
+            any_row = True
+            key = label.strip().lower()
+            if key in seen:
+                form.add_error("label", _("This criterion is listed twice."))
+            seen.add(key)
+
+        if not any_row:
+            raise forms.ValidationError(_("Add at least one criterion."))
+
+
+RubricCriterionFormSet = forms.formset_factory(RubricCriterionForm, formset=BaseRubricCriterionFormSet, extra=3)
 
 
 class FormBuilderFieldForm(forms.ModelForm):

@@ -21,7 +21,7 @@
         {% if page.object_list %}
             <div class="flex flex-col gap-px bg-line">
                 {% for item in page.object_list %}
-                    <a class="flex flex-col gap-1 bg-white px-4 py-3" href="{% url "mobile:news_detail" item.slug %}">
+                    <a class="flex flex-col gap-1 bg-white px-4 py-3" href="{% url "mobile:news_detail" item.slug %}?from=news_list">
                         <div class="font-display text-[11px] font-extrabold text-club uppercase tracking-wide">
                             {% with team=item.teams.first %}{% if team %}{{ team.name }}{% else %}{% trans "Club news" %}{% endif %}{% endwith %} &middot; {{ item.published_at|date:"d M Y" }}
                         </div>

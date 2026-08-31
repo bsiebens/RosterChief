@@ -16,7 +16,7 @@
     to tap into doing, just an explanation, so it links straight to the event
     like every other row rather than growing its own inert button.
 {% endcomment %}
-<a class="flex items-center gap-3 bg-white px-4 py-3 opacity-70" href="{% url "mobile:event_detail" row.event.pk %}">
+<a class="flex items-center gap-3 bg-white px-4 py-3 opacity-70" href="{% url "mobile:event_detail" row.event.pk %}?from=calendar">
     <div class="w-9.5 shrink-0 text-center">
         <div class="font-mono text-[10px] tracking-wide text-muted uppercase">{{ row.event.start|date:"D" }}</div>
         <div class="font-display text-2xl leading-none font-extrabold text-ink">{{ row.event.start|date:"d" }}</div>

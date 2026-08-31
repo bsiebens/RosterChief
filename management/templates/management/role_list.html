@@ -91,6 +91,44 @@
                 </tbody>
             </table>
         </div>
+
+        {% comment %}
+            EvaluationManager -- same additive-grant shape as ShopManager above,
+            same reasoning: its own section, granted through the same modal
+            ("Evaluation manager" is one of ClubRoleAssignForm's dropdown values),
+            revoked through its own view since it isn't a ClubRole row.
+        {% endcomment %}
+        <div class="card card-body">
+            <div>
+                <h2 class="card-title">{% trans "Evaluation managers" %}</h2>
+                <p class="text-sm text-muted">{% trans "Can view and fill in player evaluations club-wide, without needing the Admin role." %}</p>
+            </div>
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>{% trans "Member" %}</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for grant in evaluation_managers %}
+                        <tr>
+                            <td class="font-semibold text-ink">{{ grant.member }}</td>
+                            <td class="text-right">
+                                <form method="post" action="{% url 'management:evaluation_manager_revoke' grant.pk %}">
+                                    {% csrf_token %}
+                                    <button class="btn btn-outline btn-error btn-xs gap-1" type="submit">{% lucide "x" size=13 %} {% trans "Revoke" %}</button>
+                                </form>
+                            </td>
+                        </tr>
+                    {% empty %}
+                        <tr>
+                            <td colspan="2" class="py-4 text-center text-muted">{% trans "No one has been granted evaluation manager yet." %}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
     </div>
 
     {% trans "Grant role" as grant_role_label %}

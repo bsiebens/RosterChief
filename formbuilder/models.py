@@ -1,4 +1,5 @@
 from django.core.exceptions import ValidationError
+from django.core.serializers.json import DjangoJSONEncoder
 from django.db import models
 from django.db.models import UniqueConstraint
 from django.utils.translation import gettext_lazy as _
@@ -143,7 +144,10 @@ class Submission(UUIDModel):
 class Answer(UUIDModel):
     submission = models.ForeignKey(Submission, on_delete=models.CASCADE, related_name="answers", verbose_name=_("submission"))
     field = models.ForeignKey(Field, on_delete=models.PROTECT, related_name="answers", verbose_name=_("field"))
-    value = models.JSONField(_("value"), blank=True, null=True)
+    #: DjangoJSONEncoder, not the plain default -- a NUMBER field validates to
+    #: a Decimal (forms.DecimalField, see formbuilder.services.form_factory),
+    #: which the stdlib json.JSONEncoder can't serialize at all.
+    value = models.JSONField(_("value"), blank=True, null=True, encoder=DjangoJSONEncoder)
 
     class Meta:
         verbose_name = _("answer")
