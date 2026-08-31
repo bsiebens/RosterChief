@@ -1121,6 +1121,24 @@ class CalendarViewTests(TestCase):
         self.assertEqual(self._events_in_context(response), {invited})
         self.assertNotContains(response, not_invited.title)
 
+    def test_shows_a_friendly_indicator_for_a_friendly_game(self):
+        game = self.make_event(title="Vs Rivals", kind=Event.EventKind.GAME, is_friendly=True)
+        Attendance.objects.create(event=game, member=self.member, status=Attendance.AttendanceStatus.PRESENT)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, 'aria-label="Friendly"')
+
+    def test_does_not_show_a_friendly_indicator_for_a_league_game(self):
+        game = self.make_event(title="League game", kind=Event.EventKind.GAME, is_friendly=False)
+        Attendance.objects.create(event=game, member=self.member, status=Attendance.AttendanceStatus.PRESENT)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertNotContains(response, "Friendly")
+
     def test_excludes_cancelled_events(self):
         cancelled = self.make_event(title="Cancelled practice", cancelled=True)
         Attendance.objects.create(event=cancelled, member=self.member, status=Attendance.AttendanceStatus.PRESENT)
@@ -4211,6 +4229,24 @@ class CoachScheduleViewTests(TestCase):
 
         self.assertContains(response, reverse("mobile:coach_attendance", kwargs={"event_id": practice.pk}))
 
+    def test_shows_a_friendly_indicator_for_a_friendly_game(self):
+        game = Event.objects.create(club=self.club, title="Big game", kind=Event.EventKind.GAME, start=timezone.now() + datetime.timedelta(days=2), is_friendly=True)
+        game.teams.add(self.team)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, 'aria-label="Friendly"')
+
+    def test_does_not_show_a_friendly_indicator_for_a_league_game(self):
+        game = Event.objects.create(club=self.club, title="League game", kind=Event.EventKind.GAME, start=timezone.now() + datetime.timedelta(days=2), is_friendly=False)
+        game.teams.add(self.team)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertNotContains(response, "Friendly")
+
     def test_past_and_cancelled_events_are_excluded(self):
         past = Event.objects.create(club=self.club, title="Old practice", kind=Event.EventKind.TRAINING, start=timezone.now() - datetime.timedelta(days=2))
         past.teams.add(self.team)
@@ -4678,7 +4714,12 @@ class CoachCreateEventViewTests(TestCase):
 
     def _post(self, **overrides):
         start = timezone.localtime(timezone.now() + datetime.timedelta(days=5)).strftime("%Y-%m-%dT%H:%M")
-        data = {"kind": "training", "title": "Extra practice", "start": start, "teams": [str(self.team.pk)]}
+        # max_referees is required (no blank=True on the model field) even
+        # though this screen only shows it for a Game/Tournament -- same as
+        # every other .officiating-only/game-only field, it's still present
+        # (just hidden) in the DOM for any other kind, so a real submission
+        # always carries its rendered default along regardless.
+        data = {"kind": "training", "title": "Extra practice", "start": start, "teams": [str(self.team.pk)], "max_referees": "2"}
         data.update(overrides)
         return self.client.post(reverse("mobile:coach_create_event"), data, HTTP_HOST="ajax-united.rosterchief.app")
 
@@ -4740,12 +4781,32 @@ class CoachCreateEventViewTests(TestCase):
         kind_choices = {value for value, _label in response.context["form"].fields["kind"].choices}
         self.assertEqual(kind_choices, {"training", "game", "tournament", "meeting"})
 
-    def test_max_referees_is_not_offered(self):
+    def test_max_referees_is_offered(self):
         self.client.force_login(self.user)
 
         response = self.client.get(reverse("mobile:coach_create_event"), HTTP_HOST="ajax-united.rosterchief.app")
 
-        self.assertNotIn("max_referees", response.context["form"].fields)
+        self.assertIn("max_referees", response.context["form"].fields)
+        self.assertContains(response, "Referees needed")
+
+    def test_creating_a_tournament_records_max_referees(self):
+        # Referees needed shows (and is required) for a Tournament too, not
+        # just a Game -- a home tournament needs a referee count arranged
+        # just as much (Event.is_home_fixture).
+        self.client.force_login(self.user)
+
+        self._post(kind="tournament", title="Regional Cup", max_referees="4")
+
+        event = Event.objects.get(title="Regional Cup")
+        self.assertEqual(event.max_referees, 4)
+
+    def test_creating_a_game_records_is_friendly(self):
+        self.client.force_login(self.user)
+
+        self._post(kind="game", title="Cup game", is_friendly="on")
+
+        event = Event.objects.get(title="Cup game")
+        self.assertTrue(event.is_friendly)
 
     def test_max_officials_is_not_offered_when_the_flag_is_off(self):
         self.client.force_login(self.user)
@@ -4833,10 +4894,12 @@ class CoachCreateEventViewTests(TestCase):
         Competition.objects.create(name="Regional League", module="none")
         self.client.force_login(self.user)
 
+        # Title posted here doesn't stick -- EventForm.save() always retitles
+        # a Game from its team/opponent once both are known.
         self._post(kind="game", title="Away game", opponent=str(opponent.pk), competition="Regional League")
 
-        event = Event.objects.get(title="Away game")
-        self.assertEqual(event.opponent, opponent)
+        event = Event.objects.get(opponent=opponent)
+        self.assertEqual(event.title, f"{self.team.short_name} vs {opponent}")
         self.assertEqual(event.competition, "Regional League")
 
     def test_can_set_a_competition_id_for_a_game(self):

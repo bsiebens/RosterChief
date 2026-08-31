@@ -700,6 +700,26 @@ class EventForm(EventAudienceFormMixin, forms.ModelForm):
         self.clean_club_wide_excludes_teams_and_groups(cleaned)
         return cleaned
 
+    def save(self, commit=True):
+        # Auto-named, not staff-typed, for a Game once both sides of the
+        # match-up are known -- always overwrites whatever title was there
+        # before (including one someone typed by hand), so a game's title
+        # never drifts from who's actually playing whom. teams/opponent come
+        # from cleaned_data, not self.instance -- teams is a M2M, not yet
+        # written to the instance at save() time (ModelForm defers that to
+        # save_m2m(), called from commit=True below/the view's own
+        # form.save_m2m() when commit=False), and cleaned_data already holds
+        # the real picked values either way. Left alone whenever there's no
+        # opponent yet (a game can be scheduled before the opponent is
+        # confirmed) or no team, rather than producing a half title.
+        if self.cleaned_data.get("kind") == Event.EventKind.GAME:
+            teams = self.cleaned_data.get("teams")
+            opponent = self.cleaned_data.get("opponent")
+            if teams and opponent:
+                vs = _("vs")
+                self.instance.title = f"{', '.join(team.short_name for team in teams)} {vs} {opponent}"
+        return super().save(commit=commit)
+
 
 class RBIHFImportForm(forms.Form):
     """Step 1 of importing a team's fixtures from RBIHF's own website -- see

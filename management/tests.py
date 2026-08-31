@@ -6302,6 +6302,42 @@ class EventManagementTests(ManagementTestBase):
 
         self.assertNotContains(response, "Referees:")
 
+    def test_the_list_shows_a_friendly_badge_for_a_friendly_game(self):
+        game = Event.objects.create(club=self.club, title="Cup game", kind=Event.EventKind.GAME, start=timezone.now() + datetime.timedelta(days=1), is_friendly=True)
+        game.teams.add(self.own_team)
+        self.client.force_login(self.own_team_coach)
+
+        response = self.club_get("event_list", params={"view": "list"})
+
+        self.assertContains(response, "Friendly")
+
+    def test_the_list_does_not_show_a_friendly_badge_for_a_league_game(self):
+        game = Event.objects.create(club=self.club, title="Cup game", kind=Event.EventKind.GAME, start=timezone.now() + datetime.timedelta(days=1), is_friendly=False)
+        game.teams.add(self.own_team)
+        self.client.force_login(self.own_team_coach)
+
+        response = self.club_get("event_list", params={"view": "list"})
+
+        self.assertNotContains(response, "Friendly")
+
+    def test_the_week_calendar_marks_a_friendly_game(self):
+        game = Event.objects.create(club=self.club, title="Cup game", kind=Event.EventKind.GAME, start=timezone.now(), is_friendly=True)
+        game.teams.add(self.own_team)
+        self.client.force_login(self.own_team_coach)
+
+        response = self.club_get("event_list")  # default view=calendar, range=week
+
+        self.assertContains(response, 'aria-label="Friendly"')
+
+    def test_the_month_calendar_marks_a_friendly_game(self):
+        game = Event.objects.create(club=self.club, title="Cup game", kind=Event.EventKind.GAME, start=timezone.now(), is_friendly=True)
+        game.teams.add(self.own_team)
+        self.client.force_login(self.own_team_coach)
+
+        response = self.club_get("event_list", params={"range": "month"})
+
+        self.assertContains(response, 'aria-label="Friendly"')
+
     def test_the_calendar_page_highlights_the_events_sidebar_item(self):
         # Regression: EventListView's own "calendar_nav" context (prev/next/today
         # for the Week/Month view) used to be keyed "nav", shadowing
@@ -6526,6 +6562,46 @@ class EventManagementTests(ManagementTestBase):
         self.assertTrue(game.is_friendly)
         self.assertIsNone(game.score_for)
         self.assertFalse(game.is_live)
+
+    def test_creating_a_game_auto_titles_it_from_team_and_opponent(self):
+        opponent = Opponent.objects.create(club=self.club, name="Rivals FC")
+        self.client.force_login(self.own_team_coach)
+
+        self.club_post("event_create", self.event_data(title="Whatever I typed", kind="game", opponent=str(opponent.pk)))
+
+        game = Event.objects.get(opponent=opponent)
+        self.assertEqual(game.title, f"{self.own_team.short_name} vs {opponent}")
+
+    def test_editing_a_game_re_titles_it_when_the_opponent_changes(self):
+        opponent = Opponent.objects.create(club=self.club, name="Rivals FC")
+        new_opponent = Opponent.objects.create(club=self.club, name="Bears HC")
+        game = Event.objects.create(club=self.club, title="Old title", kind=Event.EventKind.GAME, start=timezone.now() + datetime.timedelta(days=1), opponent=opponent)
+        game.teams.add(self.own_team)
+        self.client.force_login(self.own_team_coach)
+
+        self.club_post("event_update", self.event_data(title="Old title", kind="game", opponent=str(new_opponent.pk)), game.pk)
+
+        game.refresh_from_db()
+        self.assertEqual(game.title, f"{self.own_team.short_name} vs {new_opponent}")
+
+    def test_a_game_with_no_opponent_yet_keeps_its_typed_title(self):
+        self.client.force_login(self.own_team_coach)
+
+        self.club_post("event_create", self.event_data(title="Cup semi-final", kind="game"))
+
+        game = Event.objects.get(title="Cup semi-final")
+        self.assertEqual(game.title, "Cup semi-final")
+
+    def test_a_training_keeps_its_typed_title_even_with_an_opponent_posted(self):
+        # Only Game auto-titles -- a tampered/leftover opponent value in the
+        # POST for a non-game kind shouldn't retitle it.
+        opponent = Opponent.objects.create(club=self.club, name="Rivals FC")
+        self.client.force_login(self.own_team_coach)
+
+        self.club_post("event_create", self.event_data(title="Practice", kind="training", opponent=str(opponent.pk)))
+
+        event = Event.objects.get(title="Practice")
+        self.assertEqual(event.title, "Practice")
 
     def test_the_add_form_has_no_score_or_live_fields(self):
         self.client.force_login(self.own_team_coach)

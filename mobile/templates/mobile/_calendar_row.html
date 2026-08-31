@@ -1,4 +1,4 @@
-{% load i18n %}
+{% load i18n lucide %}
 {% comment %}
     One M3 agenda row -- included from calendar.html once per bucket. Expects
     ``row`` ({event, pill_class, pill_label}) in scope. A 3px colour bar next
@@ -16,7 +16,10 @@
     </div>
     <div class="w-[3px] shrink-0 self-stretch rounded-full {% if row.event.kind == "game" %}bg-club{% elif row.event.kind == "training" %}bg-info{% else %}bg-warn{% endif %}"></div>
     <div class="min-w-0 flex-1">
-        <div class="text-sm font-semibold text-ink">{{ row.event.title }}</div>
+        <div class="flex items-center gap-1 text-sm font-semibold text-ink">
+            {% if row.event.is_friendly %}<span class="shrink-0" title="{% trans 'Friendly' %}" aria-label="{% trans 'Friendly' %}">{% lucide "handshake" size=13 stroke_width=2.4 class="text-dim" %}</span>{% endif %}
+            <span class="truncate">{{ row.event.title }}</span>
+        </div>
         <div class="truncate text-xs text-muted">
             {{ row.event.start|date:"H:i" }}
             {% if row.member %}&middot; {{ row.member.first_name }}{% endif %}

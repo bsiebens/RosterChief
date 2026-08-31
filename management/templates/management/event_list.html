@@ -175,6 +175,7 @@
                                                 <span class="flex items-center gap-1">
                                                     <span class="cal-block-time">{{ block.start|date:"H:i" }}</span>
                                                     {% if block.event.series_id %}<span class="shrink-0" title="{% trans 'Part of a series' %}" aria-label="{% trans 'Part of a series' %}">{% lucide "repeat" size=10 %}</span>{% endif %}
+                                                    {% if block.event.is_friendly %}<span class="shrink-0" title="{% trans 'Friendly' %}" aria-label="{% trans 'Friendly' %}">{% lucide "handshake" size=10 %}</span>{% endif %}
                                                 </span>
                                                 <span class="cal-block-title">{{ block.event.title }}</span>
                                             </a>
@@ -208,6 +209,7 @@
                                         <span class="cal-dot cal-dot-{{ event.kind }}"></span>
                                         <span class="truncate">{{ event.title }}</span>
                                         {% if event.series_id %}<span class="shrink-0" title="{% trans 'Part of a series' %}" aria-label="{% trans 'Part of a series' %}">{% lucide "repeat" size=10 %}</span>{% endif %}
+                                        {% if event.is_friendly %}<span class="shrink-0" title="{% trans 'Friendly' %}" aria-label="{% trans 'Friendly' %}">{% lucide "handshake" size=10 %}</span>{% endif %}
                                     </a>
                                 {% endfor %}
                                 {% if cell.events|length > 3 %}

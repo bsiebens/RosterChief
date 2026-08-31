@@ -453,26 +453,17 @@ class CoachCreateEventView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
         # one of the four tiles COACH_EVENT_KINDS offers below.
         instance = Event(club=self.request.club, created_by=self.me, kind=Event.EventKind.TRAINING)
         form = EventForm(data, club=self.request.club, user=self.request.user, editing=False, instance=instance)
-        # max_referees has a model default (2) but no blank=True, so the field
-        # is required despite it -- delete it rather than render a referee-
-        # count control this screen has no use for; construct_instance skips
-        # a deleted field entirely, leaving the instance's own default.
-        del form.fields["max_referees"]
-        # max_officials, unlike max_referees above, IS rendered here (see
-        # _officiating_only in the template) -- unlike referees, whether a
-        # club needs to arrange officials at all is a new, per-club opt-in
-        # most clubs don't have on, so its own default (1) is worth a coach
-        # actually seeing and being able to raise rather than a fixed
-        # assumption baked in silently. EventForm.__init__ already deletes
-        # this field entirely when the "officials" flag isn't on for this
-        # club, same as the desktop form -- nothing extra to gate here.
         # Narrowed to the four kinds the tile picker actually offers -- social/
         # other don't get their own tile, and this keeps a tampered request from
         # setting one anyway (the desktop form still offers the full list).
         form.fields["kind"].choices = [choice for choice in form.fields["kind"].choices if choice[0] in COACH_EVENT_KINDS]
         self._scope_shared_fields(form)
-        for field_name in ("start", "gathering", "deadline", "competition", "external_game_id"):
+        for field_name in ("start", "gathering", "deadline", "competition", "external_game_id", "max_referees"):
             form.fields[field_name].widget.attrs["class"] = _INPUT_CLASSES
+        form.fields["is_friendly"].widget.attrs["class"] = "h-5 w-5 shrink-0 accent-ink"
+        # max_officials, unlike the fields above, isn't always on the form at
+        # all -- EventForm.__init__ deletes it entirely when the "officials"
+        # flag isn't on for this club, same as the desktop form.
         if "max_officials" in form.fields:
             form.fields["max_officials"].widget.attrs["class"] = _INPUT_CLASSES
         return form

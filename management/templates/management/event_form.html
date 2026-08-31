@@ -52,10 +52,11 @@
             </div>
         </div>
 
+        <!--
         <div class="card event-summary">
             <span class="event-summary-icon">{% lucide "sparkles" size=16 %}</span>
             <span id="event-summary-text">{% trans "This line updates live as you fill in the form below." %}</span>
-        </div>
+        </div> -->
 
         <div class="card">
             <div class="card-body">
@@ -120,11 +121,9 @@
                     </div>
                 </div>
 
-                <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
+                <div class="grid grid-cols-1 gap-4 md:grid-cols-3 items-center">
                     {% form_field form.competition %}
                     {% form_field form.external_game_id %}
-                </div>
-                <div class="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
                     {% form_field form.is_friendly show_as_toggle=True %}
                 </div>
                 {% if update_view %}
@@ -133,7 +132,7 @@
                     actually been created -- the add form leaves them out
                     entirely (see EventForm's editing=False path).
                     {% endcomment %}
-                    <div class="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
+                    <div class="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3 items-center">
                         {% form_field form.score_for %}
                         {% form_field form.score_against %}
                         {% form_field form.is_live show_as_toggle=True %}
@@ -152,7 +151,7 @@
                     </div>
                 </div>
 
-                <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
+                <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
                     {% form_field form.max_referees %}
                     {% if "max_officials" in form.fields %}{% form_field form.max_officials %}{% endif %}
                 </div>

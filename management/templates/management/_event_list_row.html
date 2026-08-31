@@ -9,6 +9,7 @@
             {% if event.series_id %}
                 <span class="shrink-0 text-dim" title="{% trans 'Part of a series' %}" aria-label="{% trans 'Part of a series' %}">{% lucide "repeat" size=12 %}</span>
             {% endif %}
+            {% if event.is_friendly %}<span class="badge badge-sm badge-outline shrink-0">{% trans "Friendly" %}</span>{% endif %}
         </div>
         <div class="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 font-mono text-xs text-muted">
             <span>{{ event.start|date:"D j M, H:i" }}</span>
