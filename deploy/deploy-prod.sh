@@ -105,18 +105,20 @@ else
 fi
 
 step "Pulling image for ${BRANCH}"
-IMAGE_TAG="$BRANCH" dc pull web
+IMAGE_TAG="$BRANCH" dc pull web live_score_poller
 
 step "Running migrations"
 # -T and </dev/null: this whole script IS ssh's stdin (a heredoc) -- see deploy-dev.sh's own
 # comment on why `compose run` needs both or web never restarts.
 dc run --rm -T web python manage.py migrate --noinput </dev/null
 
-step "Restarting web"
+step "Restarting web + live_score_poller"
 # No worker/beat to restart -- scheduled jobs run via host cron calling `manage.py <job>`
-# directly (see DEPLOYMENT.md's "Scheduled jobs"), not a persistent process this deploy
-# needs to cycle onto the new image.
-IMAGE_TAG="$BRANCH" dc up -d --no-deps web
+# directly (see DEPLOYMENT.md's "Scheduled jobs"). live_score_poller is the one exception, a
+# persistent process on the same image as web (see DEPLOYMENT.md's "Long-running processes") --
+# it needs cycling onto the new image here too, or a deploy would silently leave it running the
+# old code indefinitely.
+IMAGE_TAG="$BRANCH" dc up -d --no-deps web live_score_poller
 REMOTE
 
 say "Waiting for https://${BASE_DOMAIN}/healthz"

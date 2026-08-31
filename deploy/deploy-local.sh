@@ -13,10 +13,12 @@
 #
 #   ensure db/redis/caddy are up (caddy doesn't need a code deploy, so nothing else here would
 #   otherwise ever start it -- this is exactly the gap that bit the first manual deploy) ->
-#   back up the database -> pull the image -> migrate -> restart web -> verify
-#   https://$BASE_DOMAIN/healthz. No worker/beat -- scheduled jobs run via host cron calling
-#   `manage.py <job>` directly (see DEPLOYMENT.md's "Scheduled jobs"), nothing persistent
-#   here for this script to cycle onto the new image.
+#   back up the database -> pull the image -> migrate -> restart web + live_score_poller ->
+#   verify https://$BASE_DOMAIN/healthz. No worker/beat -- scheduled jobs run via host cron
+#   calling `manage.py <job>` directly (see DEPLOYMENT.md's "Scheduled jobs"). live_score_poller
+#   is the one exception, a persistent process on the same image as web (see DEPLOYMENT.md's
+#   "Long-running processes") -- it gets cycled onto the new image right alongside web, or a
+#   deploy would silently leave it running the old code indefinitely.
 set -Eeuo pipefail
 
 COMPOSE_FILE="${COMPOSE_FILE:-compose.yaml}"
@@ -50,13 +52,13 @@ else
 fi
 
 say "Pulling image tag '${IMAGE_TAG}'"
-IMAGE_TAG="$IMAGE_TAG" dc pull web
+IMAGE_TAG="$IMAGE_TAG" dc pull web live_score_poller
 
 say "Running migrations"
 dc run --rm web python manage.py migrate --noinput
 
-say "Restarting web"
-IMAGE_TAG="$IMAGE_TAG" dc up -d --no-deps web
+say "Restarting web + live_score_poller"
+IMAGE_TAG="$IMAGE_TAG" dc up -d --no-deps web live_score_poller
 
 say "Waiting for https://${BASE_DOMAIN}/healthz"
 for attempt in $(seq 1 20); do
