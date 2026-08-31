@@ -891,6 +891,18 @@
         font-size: 0.875rem;
     }
 
+    /* mobile/base.html's flash-message banner -- same alert-level colours as
+       .alert, but a flat full-bleed strip (no radius, no border) so it reads as
+       one solid block flowing straight into whatever's below, not a floating
+       card. Stacked messages (rare) separate with a white rule instead of a gap. */
+    .m-flash {
+        display: flex;
+        align-items: flex-start;
+        gap: 0.75rem;
+        padding: 0.875rem 1rem;
+        font-size: 0.875rem;
+    }
+
     .alert-error {
         background: var(--color-danger-bg);
         border-color: var(--color-danger-border);

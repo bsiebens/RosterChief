@@ -167,8 +167,8 @@
         </div>
     </div>
 
-    {# Attendance, Documents and Referee eligibility side by side rather than three full-width rows -- h-full keeps them matched in height regardless of which has more content. #}
-    <div class="grid grid-cols-1 gap-4 lg:grid-cols-3 mt-4">
+    {# Attendance, Documents, Referee eligibility and (when the officials feature is on) Official eligibility side by side rather than stacked full-width rows -- h-full keeps them matched in height regardless of which has more content. With all four showing, a 2x2 grid gives each card more width than cramming 4 across one row would. #}
+    <div class="grid grid-cols-1 gap-4 mt-4 {% if officials_enabled and official_profile or officials_enabled and is_club_admin %}lg:grid-cols-2{% else %}lg:grid-cols-3{% endif %}">
         {% if show_attendance %}
             {# D7's season card: a 12-bar attendance sparkline (present/absent/upcoming, oldest first) beside the season's Present/Absent/No-reply totals. #}
             <div class="card card-body h-full">

@@ -15,7 +15,7 @@ from icalendar import Calendar as ICalCalendar
 from pywebpush import WebPushException
 
 from club.models import Club, ClubMembership, DuesInvoice, MemberRequirementStatus, OnboardingRequirement, Season, Sponsor
-from events.models import Attendance, Competition, Event, EventReferee, EventSeries, Lineup, LineupSelection, Location, Opponent, RefereeSignup
+from events.models import Attendance, Competition, Event, EventReferee, EventSeries, EventTask, EventTaskClaim, Lineup, LineupSelection, Location, Opponent, RefereeSignup
 from events.services.attendance import record_check_in
 from events.services.calendar import week_bounds
 from events.services.notifications import notify_new_event
@@ -383,6 +383,59 @@ class HomeViewTests(TestCase):
 
         needs_answer_events = {attendance.event for attendance in response.context["needs_answer"]}
         self.assertEqual(needs_answer_events, {open_deadline})
+
+    def test_open_tasks_lists_an_unclaimed_slot_on_an_upcoming_event(self):
+        event = self.make_event(title="Home game")
+        Attendance.objects.create(event=event, member=self.member, status=Attendance.AttendanceStatus.PRESENT)
+        task = EventTask.objects.create(event=event, title="Bring fruit", needed_quantity=2)
+        EventTaskClaim.objects.create(task=task, member=self.member)
+        self.client.force_login(self.user)
+
+        response = self._get("home")
+
+        open_tasks = list(response.context["open_tasks"])
+        self.assertEqual(len(open_tasks), 1)
+        self.assertEqual(open_tasks[0].pk, task.pk)
+        self.assertEqual(open_tasks[0].open_count, 1)
+        self.assertContains(response, "Bring fruit")
+        self.assertContains(response, "1 open")
+
+    def test_open_tasks_excludes_a_fully_claimed_task(self):
+        event = self.make_event(title="Home game")
+        Attendance.objects.create(event=event, member=self.member, status=Attendance.AttendanceStatus.PRESENT)
+        task = EventTask.objects.create(event=event, title="Bring fruit", needed_quantity=1)
+        EventTaskClaim.objects.create(task=task, member=self.member)
+        self.client.force_login(self.user)
+
+        response = self._get("home")
+
+        self.assertEqual(list(response.context["open_tasks"]), [])
+        self.assertNotContains(response, "Bring fruit")
+
+    def test_open_tasks_ignores_a_task_on_an_event_not_in_scope(self):
+        # A task on some other club event this member has no Attendance row
+        # for at all -- open_tasks is scoped to invited/upcoming events the
+        # same way needs_answer is, not every task in the club.
+        other_event = self.make_event(title="Someone else's event")
+        EventTask.objects.create(event=other_event, title="Bring fruit", needed_quantity=1)
+        self.client.force_login(self.user)
+
+        response = self._get("home")
+
+        self.assertEqual(list(response.context["open_tasks"]), [])
+
+    def test_open_tasks_is_capped_with_a_remaining_count(self):
+        for day in range(1, 8):
+            event = self.make_event(title=f"Game {day}", start=self.future + datetime.timedelta(days=day))
+            Attendance.objects.create(event=event, member=self.member, status=Attendance.AttendanceStatus.PRESENT)
+            EventTask.objects.create(event=event, title=f"Task {day}", needed_quantity=1)
+        self.client.force_login(self.user)
+
+        response = self._get("home")
+
+        self.assertEqual(len(response.context["open_tasks"]), 5)
+        self.assertEqual(response.context["open_tasks_remaining"], 2)
+        self.assertNotContains(response, "task open")
 
     def test_needs_your_answer_is_capped_at_five_with_a_remaining_count(self):
         # 8 unanswered events -- the soonest becomes the hero (excluded from
@@ -5356,6 +5409,36 @@ class CoachLineupViewTests(TestCase):
         self.assertEqual(categories[0]["label"], "No position set")
         self.assertEqual([row["member"] for row in categories[0]["rows"]], [self.player])
         self.assertFalse(categories[0]["rows"][0]["selected"])
+
+    def test_shows_open_and_claimed_tasks(self):
+        claimed = EventTask.objects.create(event=self.event, title="Bring fruit", needed_quantity=1)
+        EventTaskClaim.objects.create(task=claimed, member=self.player)
+        EventTask.objects.create(event=self.event, title="Penalty bench", needed_quantity=2)
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mobile:coach_lineup", kwargs={"event_id": self.event.pk}), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, "Bring fruit: Anna Player")
+        self.assertContains(response, "Penalty bench: open")
+
+    def test_shows_referee_names_for_a_home_game(self):
+        home_ground = Location.objects.create(club=self.club, name="Home Arena", address="1 St", city="Town", zip_code="1000", country="BE", is_home=True)
+        self.event.location = home_ground
+        self.event.save(update_fields=["location"])
+        referee = Member.objects.create(first_name="Ref", last_name="Eree")
+        EventReferee.objects.create(event=self.event, member=referee)
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mobile:coach_lineup", kwargs={"event_id": self.event.pk}), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, "Referees: Ref Eree")
+
+    def test_does_not_show_referees_for_an_away_game(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mobile:coach_lineup", kwargs={"event_id": self.event.pk}), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertNotContains(response, "Referees:")
 
     def test_a_player_with_too_little_history_shows_no_turnout_rate(self):
         # self.player has exactly one Attendance row (for the upcoming game

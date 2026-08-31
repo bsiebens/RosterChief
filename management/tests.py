@@ -24,7 +24,7 @@ from billing.services.dues import record_payment, subscribe
 from club.models import Club, ClubMembership, ClubRole, DuesInvoice, FeePayment, MemberRequirementStatus, OnboardingRequirement, Season, ShopManager, Sponsor
 from club.services.invoicing import DuesInvoicePDFError, create_or_resend_invoice
 from club.services.onboarding import mark_complete
-from events.models import Attendance, Competition, Event, EventReferee, EventSeries, Location, Opponent, RefereeSignup
+from events.models import Attendance, Competition, Event, EventReferee, EventSeries, EventTask, EventTaskClaim, Location, Opponent, RefereeSignup
 from events.services.calendar import week_bounds
 from events.services.notifications import notify_new_event
 from events.services.rbihf_import import RBIHFImportError
@@ -6025,6 +6025,7 @@ class EventManagementTests(ManagementTestBase):
         super().setUpTestData()
         cls.own_team = Team.objects.create(club=cls.club, name="First Team", short_name="1st")
         cls.other_team = Team.objects.create(club=cls.club, name="Second Team", short_name="2nd")
+        cls.home_ground = Location.objects.create(club=cls.club, name="Home Ground", address="1 St", city="Town", zip_code="1000", country="BE", is_home=True)
         cls.coach_position = Position.objects.create(club=cls.club, name="Head Coach", short_name="HC", staff_position=True, management_position=True)
 
         # Manager of own_team only -- "may for my team, may not for theirs" is the
@@ -6256,6 +6257,40 @@ class EventManagementTests(ManagementTestBase):
         # is the delete action being present.
         self.assertContains(response, reverse("management:event_delete", args=[own_event.pk]))
         self.assertNotContains(response, reverse("management:event_delete", args=[other_event.pk]))
+
+    def test_the_list_shows_open_and_claimed_tasks(self):
+        event = Event.objects.create(club=self.club, title="Training", start=timezone.now() + datetime.timedelta(days=1))
+        event.teams.add(self.own_team)
+        claimed = EventTask.objects.create(event=event, title="Bring fruit", needed_quantity=1)
+        claimer = Member.objects.create(first_name="Fran", last_name="Family")
+        EventTaskClaim.objects.create(task=claimed, member=claimer)
+        EventTask.objects.create(event=event, title="Penalty bench", needed_quantity=2)
+        self.client.force_login(self.own_team_coach)
+
+        response = self.club_get("event_list", params={"view": "list"})
+
+        self.assertContains(response, "Bring fruit: Fran Family")
+        self.assertContains(response, "Penalty bench: open")
+
+    def test_the_list_shows_referee_names_for_a_home_game(self):
+        game = Event.objects.create(club=self.club, title="Cup game", kind=Event.EventKind.GAME, start=timezone.now() + datetime.timedelta(days=1), location=self.home_ground)
+        game.teams.add(self.own_team)
+        referee = Member.objects.create(first_name="Ref", last_name="Eree")
+        EventReferee.objects.create(event=game, member=referee)
+        self.client.force_login(self.own_team_coach)
+
+        response = self.club_get("event_list", params={"view": "list"})
+
+        self.assertContains(response, "Referees: Ref Eree")
+
+    def test_the_list_does_not_show_referees_for_an_away_game(self):
+        game = Event.objects.create(club=self.club, title="Away game", kind=Event.EventKind.GAME, start=timezone.now() + datetime.timedelta(days=1))
+        game.teams.add(self.own_team)
+        self.client.force_login(self.own_team_coach)
+
+        response = self.club_get("event_list", params={"view": "list"})
+
+        self.assertNotContains(response, "Referees:")
 
     def test_the_calendar_page_highlights_the_events_sidebar_item(self):
         # Regression: EventListView's own "calendar_nav" context (prev/next/today
@@ -7556,10 +7591,7 @@ class RefereeManagementDashboardTests(ManagementTestBase):
 
         self.assertEqual(response.context["kpi_active_referees"], 1)
         self.assertEqual(response.context["kpi_total_assignments"], 2)
-        stats = response.context["referee_stats"]
-        self.assertEqual(stats[0]["games"], 2)
-        self.assertEqual(stats[0]["total_fees"], Decimal("35.00"))
-        self.assertContains(response, "Games refereed per referee")
+        self.assertEqual(response.context["kpi_avg_games_per_referee"], 2)
 
     def test_workload_stats_exclude_external_referees(self):
         game = self.make_game()
@@ -7575,8 +7607,8 @@ class RefereeManagementDashboardTests(ManagementTestBase):
 
         response = self.club_get("referee_management")
 
-        self.assertEqual(response.context["referee_stats"], [])
-        self.assertContains(response, "No referee assignments recorded yet this season.")
+        self.assertEqual(response.context["kpi_active_referees"], 0)
+        self.assertEqual(response.context["kpi_avg_games_per_referee"], 0)
 
 
 class FeatureGatedSectionsTests(ManagementTestBase):

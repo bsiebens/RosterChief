@@ -2994,7 +2994,11 @@ class EventListView(ClubStaffRequiredMixin, ListView):
 
     def _base_queryset(self):
         club, user = self.request.club, self.request.user
-        events = Event.objects.filter(club=club).select_related("location", "opponent").prefetch_related("teams")
+        events = (
+            Event.objects.filter(club=club)
+            .select_related("location", "opponent")
+            .prefetch_related("teams", "tasks__claims__member", "referees__member", "officials__member")
+        )
         kind = self.request.GET.get("kind", "")
         if kind:
             events = events.filter(kind=kind)
@@ -3031,6 +3035,25 @@ class EventListView(ClubStaffRequiredMixin, ListView):
         managed_team_ids = set() if is_admin else set(teams_managed_by(user, club).values_list("pk", flat=True))
         for event in events:
             event.can_manage = is_admin or any(team.pk in managed_team_ids for team in event.teams.all())
+
+        # List mode only -- the calendar's own cells/blocks have no room for
+        # this, and every event in a full month/season grid doesn't need it
+        # computed. Read-only here (who's covering what), unlike the same
+        # data on the event's own detail page -- assigning/claiming still
+        # only happens there.
+        if self.request.GET.get("view", "calendar") == "list":
+            officials_enabled = officials_enabled_for(club)
+            for event in events:
+                event.task_rows = list(event.tasks.all())
+                for task in event.task_rows:
+                    task.claim_labels = [claim_label_for(claim.member) for claim in task.claims.all()]
+                    task.is_full = len(task.claim_labels) >= task.needed_quantity
+
+                event.needs_referees = needs_referee_management(event)
+                event.referee_rows = list(event.referees.all()) if event.needs_referees else []
+                event.needs_officials = officials_enabled and needs_official_management(event)
+                event.official_rows = list(event.officials.all()) if event.needs_officials else []
+
         return events
 
     def _calendar_context(self, range_kind, anchor, selected_season):
@@ -3604,19 +3627,6 @@ def upcoming_games_needing_official_management(club):
     )
 
 
-def official_workload_stats(club):
-    """The officials counterpart to referee_workload_stats."""
-    season = current_season(club)
-    queryset = EventOfficial.objects.filter(event__club=club, member__isnull=False)
-    if season is not None:
-        queryset = queryset.filter(event__start__date__gte=season.start_date, event__start__date__lte=season.end_date)
-    return list(
-        queryset.values("member__id", "member__first_name", "member__last_name")
-        .annotate(games=Count("id"), total_fees=Sum("fee"))
-        .order_by("-games", "member__last_name")
-    )
-
-
 def games_missing_officials_count(club, limit=10):
     """The officials counterpart to games_missing_referees_count -- 0 when
     the "officials" flag is off for this club, same as every other officials
@@ -3731,20 +3741,6 @@ class RefereeManagementDashboardView(MemberAdminRequiredMixin, TemplateView):
         kpi_active_referees = len(stats)
         kpi_total_assignments = sum(row["games"] for row in stats)
         kpi_avg_games_per_referee = round(kpi_total_assignments / kpi_active_referees, 1) if kpi_active_referees else 0
-        # Top 15 for the chart's own readability -- fees ride along per bar
-        # for the tooltip (see referee_management.html's extra_body) rather
-        # than a separate list underneath, to keep this a compact single row
-        # next to the KPIs, not a second tall section pushing the actual
-        # games-needing-a-referee list off screen.
-        charts = {
-            "referee_games": {
-                "labels": [f"{row['member__first_name']} {row['member__last_name']}" for row in stats[:15]],
-                "games": [row["games"] for row in stats[:15]],
-                "fees": [float(row["total_fees"] or 0) for row in stats[:15]],
-            }
-        }
-
-        official_stats = official_workload_stats(club) if officials_enabled else []
 
         return super().get_context_data(
             games=games,
@@ -3754,17 +3750,14 @@ class RefereeManagementDashboardView(MemberAdminRequiredMixin, TemplateView):
             kpi_understaffed=kpi_understaffed,
             kpi_fully_staffed=kpi_fully_staffed,
             kpi_fees_pending=kpi_fees_pending,
-            referee_stats=stats,
             kpi_active_referees=kpi_active_referees,
             kpi_total_assignments=kpi_total_assignments,
             kpi_avg_games_per_referee=kpi_avg_games_per_referee,
-            charts=charts,
             officials_enabled=officials_enabled,
             kpi_no_official=kpi_no_official,
             kpi_officials_understaffed=kpi_officials_understaffed,
             kpi_officials_fully_staffed=kpi_officials_fully_staffed,
             kpi_official_fees_pending=kpi_official_fees_pending,
-            official_stats=official_stats,
             **kwargs,
         )
 

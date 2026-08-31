@@ -29,8 +29,11 @@ from events.services.attendance import member_attendance_counts, player_attendan
 from events.services.calendar import agenda_groups
 from events.services.lineup import UNAVAILABLE_STATUSES, cancel_scheduled_publish, publish_lineup, schedule_lineup_publish, toggle_selection
 from events.services.notifications import dispatch_notify_new_event
+from events.services.officials import needs_official_management, officials_enabled_for
+from events.services.referees import needs_referee_management
 from management.forms import EventForm, EventSeriesForm, LocationForm, NewsForm, NewsPhotoUploadForm, OpponentForm
 from members.models import Member
+from members.services.family import claim_label_for
 from news.models import News, NewsPhoto
 from news.services import notify_editors_of_pending_review
 from notifications.services import notify_members
@@ -957,6 +960,34 @@ class CoachLineupView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
 
         return sorted(buckets.values(), key=lambda bucket: (bucket["ordering"], bucket["label"]))
 
+    def _officiating_info(self, event):
+        """Read-only summary of this game's logistics -- open tasks and,
+        for a home game the club itself arranges, who's refereeing/
+        officiating -- so a coach opening the line-up sees the same picture
+        management.views.EventListView's own list row shows on the desktop
+        side, without having to go find the event on the desktop app.
+        Nothing here is editable from mobile; assigning/claiming still only
+        happens on the desktop event page or (for tasks) a member's own
+        Home/Calendar screen."""
+        task_rows = list(event.tasks.prefetch_related("claims__member"))
+        for task in task_rows:
+            task.claim_labels = [claim_label_for(claim.member) for claim in task.claims.all()]
+            task.is_full = len(task.claim_labels) >= task.needed_quantity
+
+        needs_referees = needs_referee_management(event)
+        referee_rows = list(event.referees.select_related("member")) if needs_referees else []
+
+        needs_officials = officials_enabled_for(self.request.club) and needs_official_management(event)
+        official_rows = list(event.officials.select_related("member")) if needs_officials else []
+
+        return {
+            "task_rows": task_rows,
+            "needs_referees": needs_referees,
+            "referee_rows": referee_rows,
+            "needs_officials": needs_officials,
+            "official_rows": official_rows,
+        }
+
     def get_context_data(self, **kwargs):
         event = self.get_event()
         lineup, _created = Lineup.objects.get_or_create(event=event, defaults={"team": self.active_team, "created_by": self.me})
@@ -967,6 +998,7 @@ class CoachLineupView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
             lineup=lineup,
             categories=self._categories(event, lineup),
             unavailable=unavailable,
+            **self._officiating_info(event),
             **kwargs,
         )
 

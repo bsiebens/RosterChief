@@ -19,7 +19,7 @@
         <button class="btn btn-outline btn-sm gap-1" type="button" onclick="document.getElementById('{{ event.pk|dom_id:"task_create_modal" }}').showModal()">{% lucide "plus" size=14 %} {% trans "Add task" %}</button>
     {% endif %}
 </div>
-<ul class="divide-y">
+<ul class="divide-y divide-rule">
     {% for task in tasks %}
         <li class="flex flex-wrap items-start justify-between gap-3 py-2.5">
             <div class="flex min-w-0 flex-col gap-0.5">

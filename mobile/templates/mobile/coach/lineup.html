@@ -37,6 +37,23 @@
 {% endblock header_extra %}
 
 {% block content %}
+    {% if task_rows or needs_referees or needs_officials %}
+        <div class="m-card-dark mb-3 p-3">
+            <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-ice uppercase">{% trans "Tasks & officiating" %}</div>
+            <div class="flex flex-wrap gap-1.5">
+                {% for task in task_rows %}
+                    <span class="pill pill-sm {% if task.is_full %}pill-ok{% else %}pill-warn{% endif %}">{{ task.title }}: {% if task.claim_labels %}{{ task.claim_labels|join:", " }}{% else %}{% trans "open" %}{% endif %}</span>
+                {% endfor %}
+                {% if needs_referees %}
+                    <span class="pill pill-sm {% if not referee_rows %}pill-danger{% elif referee_rows|length < event.max_referees %}pill-warn{% else %}pill-ok{% endif %}">{% trans "Referees" %}: {% if referee_rows %}{% for referee in referee_rows %}{{ referee.display_name }}{% if not forloop.last %}, {% endif %}{% endfor %}{% else %}{% trans "open" %}{% endif %}</span>
+                {% endif %}
+                {% if needs_officials %}
+                    <span class="pill pill-sm {% if not official_rows %}pill-danger{% elif official_rows|length < event.max_officials %}pill-warn{% else %}pill-ok{% endif %}">{% trans "Officials" %}: {% if official_rows %}{% for official in official_rows %}{{ official.display_name }}{% if not forloop.last %}, {% endif %}{% endfor %}{% else %}{% trans "open" %}{% endif %}</span>
+                {% endif %}
+            </div>
+        </div>
+    {% endif %}
+
     <form method="post" action="{% url "mobile:coach_lineup" event.pk %}" hx-boost="false">
         {% csrf_token %}
         <div class="flex flex-col gap-3">

@@ -1,5 +1,5 @@
 {% extends "management/base.html" %}
-{% load i18n lucide static ui %}
+{% load i18n lucide ui %}
 
 {% block heading %}{% if officials_enabled %}{% trans "Officiating" %}{% else %}{% trans "Referee management" %}{% endif %}{% endblock heading %}
 {% block topbar_context %}<span class="text-sm text-muted">{% if officials_enabled %}{% trans "Every upcoming home game that needs a club-arranged referee or official." %}{% else %}{% trans "Every upcoming home game that needs a club-arranged referee." %}{% endif %}</span>{% endblock topbar_context %}
@@ -18,94 +18,76 @@
 {% endblock filter_strip %}
 
 {% block panel %}
-    <div class="flex flex-wrap gap-3.5">
-        <div class="card min-w-0 flex-1 p-4">
+    {% comment %}
+        Same big-tile style as the other KPI rows in this app (see
+        management/home.html) -- but laid out on a fixed 6-column grid rather
+        than three separate flex-wrap rows, so all 12 (8 with officials off)
+        land in 2 rows instead of 3.
+    {% endcomment %}
+    <div class="grid grid-cols-2 gap-3.5 sm:grid-cols-3 lg:grid-cols-6">
+        <div class="card min-w-0 p-4">
             <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Games in view" %}</div>
             <div class="mt-1 font-display text-[34px] leading-none font-extrabold text-ink tabular-nums">{{ kpi_total }}</div>
             <div class="mt-1 text-[13px] text-muted">{% trans "In the selected range" %}</div>
         </div>
-        <div class="card min-w-0 flex-1 p-4">
+        <div class="card min-w-0 p-4">
             <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Without a referee" %}</div>
             <div class="mt-1 font-display text-[34px] leading-none font-extrabold tabular-nums {% if kpi_no_referee %}text-club{% else %}text-ink{% endif %}">{{ kpi_no_referee }}</div>
             <div class="mt-1 text-[13px] text-muted">{% trans "Nobody assigned yet" %}</div>
         </div>
-        <div class="card min-w-0 flex-1 p-4">
+        <div class="card min-w-0 p-4">
             <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Partially staffed" %}</div>
             <div class="mt-1 font-display text-[34px] leading-none font-extrabold tabular-nums {% if kpi_understaffed %}text-warn{% else %}text-ink{% endif %}">{{ kpi_understaffed }}</div>
             <div class="mt-1 text-[13px] text-muted">{% trans "Still short a referee" %}</div>
         </div>
-        <div class="card min-w-0 flex-1 p-4">
+        <div class="card min-w-0 p-4">
             <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Fully staffed" %}</div>
             <div class="mt-1 font-display text-[34px] leading-none font-extrabold text-ok tabular-nums">{{ kpi_fully_staffed }}</div>
             <div class="mt-1 text-[13px] text-muted">{% trans "Nothing left to do" %}</div>
         </div>
-        <div class="card min-w-0 flex-1 p-4">
+        <div class="card min-w-0 p-4">
             <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Fees not set" %}</div>
             <div class="mt-1 font-display text-[34px] leading-none font-extrabold tabular-nums {% if kpi_fees_pending %}text-warn{% else %}text-ink{% endif %}">{{ kpi_fees_pending }}</div>
             <div class="mt-1 text-[13px] text-muted">{% trans "Referee fee missing" %}</div>
         </div>
-    </div>
 
-    {% if officials_enabled %}
-        <div class="flex flex-wrap gap-3.5">
-            <div class="card min-w-0 flex-1 p-4">
+        {% if officials_enabled %}
+            <div class="card min-w-0 p-4">
                 <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Without an official" %}</div>
                 <div class="mt-1 font-display text-[34px] leading-none font-extrabold tabular-nums {% if kpi_no_official %}text-club{% else %}text-ink{% endif %}">{{ kpi_no_official }}</div>
                 <div class="mt-1 text-[13px] text-muted">{% trans "Nobody assigned yet" %}</div>
             </div>
-            <div class="card min-w-0 flex-1 p-4">
+            <div class="card min-w-0 p-4">
                 <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Officials partially staffed" %}</div>
                 <div class="mt-1 font-display text-[34px] leading-none font-extrabold tabular-nums {% if kpi_officials_understaffed %}text-warn{% else %}text-ink{% endif %}">{{ kpi_officials_understaffed }}</div>
                 <div class="mt-1 text-[13px] text-muted">{% trans "Still short an official" %}</div>
             </div>
-            <div class="card min-w-0 flex-1 p-4">
+            <div class="card min-w-0 p-4">
                 <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Officials fully staffed" %}</div>
                 <div class="mt-1 font-display text-[34px] leading-none font-extrabold text-ok tabular-nums">{{ kpi_officials_fully_staffed }}</div>
                 <div class="mt-1 text-[13px] text-muted">{% trans "Nothing left to do" %}</div>
             </div>
-            <div class="card min-w-0 flex-1 p-4">
+            <div class="card min-w-0 p-4">
                 <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Official fees not set" %}</div>
                 <div class="mt-1 font-display text-[34px] leading-none font-extrabold tabular-nums {% if kpi_official_fees_pending %}text-warn{% else %}text-ink{% endif %}">{{ kpi_official_fees_pending }}</div>
                 <div class="mt-1 text-[13px] text-muted">{% trans "Official fee missing" %}</div>
             </div>
-        </div>
-    {% endif %}
+        {% endif %}
 
-    {% comment %}
-        Season workload -- separate from the "games in view" KPIs above
-        (which track the upcoming range picked by the filter strip), this is
-        about who's actually done the refereeing this season, all-time
-        within it, not just what's still upcoming. Deliberately one compact
-        row, not a tall section of its own -- the games-needing-a-referee
-        list below is the actual point of this page, so this shouldn't push
-        it below the fold. Fees ride along as a chart tooltip (see
-        extra_body) rather than a separate list, for the same reason.
-    {% endcomment %}
-    <div class="flex flex-wrap gap-3.5">
-        <div class="card min-w-0 flex-1 p-4">
+        <div class="card min-w-0 p-4">
             <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Active referees" %}</div>
             <div class="mt-1 font-display text-[34px] leading-none font-extrabold text-ink tabular-nums">{{ kpi_active_referees }}</div>
             <div class="mt-1 text-[13px] text-muted">{% trans "This season" %}</div>
         </div>
-        <div class="card min-w-0 flex-1 p-4">
+        <div class="card min-w-0 p-4">
             <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Games refereed" %}</div>
             <div class="mt-1 font-display text-[34px] leading-none font-extrabold text-ink tabular-nums">{{ kpi_total_assignments }}</div>
             <div class="mt-1 text-[13px] text-muted">{% trans "This season" %}</div>
         </div>
-        <div class="card min-w-0 flex-1 p-4">
+        <div class="card min-w-0 p-4">
             <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Average per referee" %}</div>
             <div class="mt-1 font-display text-[34px] leading-none font-extrabold text-ink tabular-nums">{{ kpi_avg_games_per_referee }}</div>
             <div class="mt-1 text-[13px] text-muted">{% trans "This season" %}</div>
-        </div>
-        <div class="card min-w-0 flex-[3] p-4">
-            <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Games refereed per referee" %}</div>
-            {% if referee_stats %}
-                <div class="mt-1 h-20">
-                    <canvas id="referee-games-chart"></canvas>
-                </div>
-            {% else %}
-                <p class="mt-1 text-[13px] text-muted">{% trans "No referee assignments recorded yet this season." %}</p>
-            {% endif %}
         </div>
     </div>
 
@@ -207,51 +189,3 @@
         </div>
     {% endfor %}
 {% endblock panel %}
-
-{% block extra_body %}
-    {% trans "Games" as games_label %}
-    {{ charts|json_script:"referee-chart-data" }}
-    <script src="{% static 'js/chart.js' %}"></script>
-    <script>
-        (() => {
-            const data = JSON.parse(document.getElementById("referee-chart-data").textContent);
-            // Same pattern as management/home.html's own charts -- Chart.js paints to a
-            // canvas, so it needs the club accent resolved, not the CSS variable itself.
-            const clubColor = getComputedStyle(document.documentElement).getPropertyValue("--color-club").trim() || "#E4002B";
-            const ink = "#3A4658";
-            const grid = "#EEF0F3";
-
-            const gamesCanvas = document.getElementById("referee-games-chart");
-            if (gamesCanvas && data.referee_games.labels.length) {
-                new Chart(gamesCanvas, {
-                    type: "bar",
-                    data: {
-                        labels: data.referee_games.labels,
-                        datasets: [{label: "{{ games_label|escapejs }}", data: data.referee_games.games, backgroundColor: clubColor}],
-                    },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        indexAxis: "y",
-                        plugins: {
-                            legend: {display: false},
-                            tooltip: {
-                                callbacks: {
-                                    label: (context) => {
-                                        const fee = data.referee_games.fees[context.dataIndex];
-                                        const label = `{{ games_label|escapejs }}: ${context.parsed.x}`;
-                                        return fee ? `${label} — €${fee.toFixed(2)}` : label;
-                                    },
-                                },
-                            },
-                        },
-                        scales: {
-                            x: {beginAtZero: true, ticks: {color: ink, precision: 0}, grid: {color: grid}},
-                            y: {ticks: {color: ink, font: {size: 11}}, grid: {display: false}},
-                        },
-                    },
-                });
-            }
-        })();
-    </script>
-{% endblock extra_body %}

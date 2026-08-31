@@ -15,6 +15,19 @@
             {% if event.teams.all %}<span>{% for team in event.teams.all %}{{ team.short_name }}{% if not forloop.last %}, {% endif %}{% endfor %}</span>{% endif %}
             {% if event.location %}<span>{{ event.location.name }}</span>{% endif %}
         </div>
+        {% if event.task_rows or event.needs_referees or event.needs_officials %}
+            <div class="mt-1.5 flex flex-wrap items-center gap-1.5">
+                {% for task in event.task_rows %}
+                    <span class="badge badge-sm {% if task.is_full %}badge-success{% else %}badge-outline{% endif %}" title="{{ task.description }}">{% lucide "clipboard-list" size=10 %} {{ task.title }}: {% if task.claim_labels %}{{ task.claim_labels|join:", " }}{% else %}{% trans "open" %}{% endif %}</span>
+                {% endfor %}
+                {% if event.needs_referees %}
+                    <span class="badge badge-sm {% if not event.referee_rows %}badge-error{% elif event.referee_rows|length < event.max_referees %}badge-warning{% else %}badge-success{% endif %}">{% lucide "flag" size=10 %} {% trans "Referees" %}: {% if event.referee_rows %}{% for referee in event.referee_rows %}{{ referee.display_name }}{% if not forloop.last %}, {% endif %}{% endfor %}{% else %}{% trans "open" %}{% endif %}</span>
+                {% endif %}
+                {% if event.needs_officials %}
+                    <span class="badge badge-sm {% if not event.official_rows %}badge-error{% elif event.official_rows|length < event.max_officials %}badge-warning{% else %}badge-success{% endif %}">{% lucide "shield" size=10 %} {% trans "Officials" %}: {% if event.official_rows %}{% for official in event.official_rows %}{{ official.display_name }}{% if not forloop.last %}, {% endif %}{% endfor %}{% else %}{% trans "open" %}{% endif %}</span>
+                {% endif %}
+            </div>
+        {% endif %}
     </div>
     {% if event.can_manage %}
         <div class="flex shrink-0 gap-1">

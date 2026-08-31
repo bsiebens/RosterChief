@@ -106,11 +106,11 @@
         <main class="flex-1">
             <div class="flex flex-col gap-4 px-4 py-4">
                 {% if messages %}
-                    {# Same alert styling as _auth_base.html's own messages block -- level-aware (colour/icon), not the flat neutral card this used to be. Django's messages framework already consumes each one after this render, so this doubles as the "shown once" banner mobile:home redirects need (e.g. ShopScopeMixin's own "the shop is closed" notice). Full-bleed white (-mx-4 -mt-4, same idiom as e.g. shop_order_detail.html's own back-header) rather than sitting on the grey page background: on a page whose own content starts with that same white/-mt-4 back-header, the -mt-4 there cancels this block's trailing gap-4 exactly (both 1rem), so the two read as one continuous white panel instead of a grey seam between them. #}
-                    <div class="-mx-4 -mt-4 flex flex-col gap-2 border-b border-line bg-white p-4">
+                    {# Level-aware (colour/icon) same as _auth_base.html's own messages block, but a solid full-bleed band here rather than that screen's own rounded, bordered card -- this sits above a page's real content instead of inside a small centred auth form, so it reads better as one flat strip than as a floating card. Django's messages framework already consumes each one after this render, so this doubles as the "shown once" banner mobile:home redirects need (e.g. ShopScopeMixin's own "the shop is closed" notice). Full-bleed (-mx-4 -mt-4, same idiom as e.g. shop_order_detail.html's own back-header): on a page whose own content starts with that same white/-mt-4 back-header, the -mt-4 there cancels this block's trailing gap-4 exactly (both 1rem), so the two read as one continuous panel instead of a grey seam between them. #}
+                    <div class="-mx-4 -mt-4 flex flex-col">
                         {% for message in messages %}
                             {% with alert=message|as_alert %}
-                                <div class="alert {{ alert.css }}" role="alert">
+                                <div class="m-flash {{ alert.css }} {% if not forloop.first %}border-t-2 border-white{% endif %}" role="alert">
                                     {% lucide alert.icon size=18 %}
                                     <div>
                                         <div class="font-display text-sm font-bold tracking-wide uppercase">{{ alert.title }}</div>

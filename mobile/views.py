@@ -206,10 +206,12 @@ class HomeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
     """M1 -- design_handoff_rosterchief_platform/README.md's M1 section: a
     hero card for the soonest upcoming event across everyone currently in
     scope (with a quick In/Out RSVP -- see EventDetailView.post below), a
-    "needs your answer" list of upcoming events still NO_RESPONSE/MAYBE, a
-    season-dues card per person who owes money, and a news teaser. Every
-    card is independently optional -- an empty-state screen is just the
-    four `if`s below all being falsy.
+    "needs your answer" list of upcoming events still NO_RESPONSE/MAYBE, an
+    "open tasks" list of unclaimed EventTask slots on those same in-scope
+    upcoming events (regardless of RSVP status -- a task is open to anyone,
+    not tied to one person's reply), a season-dues card per person who owes
+    money, and a news teaser. Every card is independently optional -- an
+    empty-state screen is just those `if`s all being falsy.
 
     Scoped to ``self.people_in_scope`` (mobile/mixins.py), not just
     ``scope_person`` -- with the header's "All" chip now the default the
@@ -225,6 +227,9 @@ class HomeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
     #: Keeps the card from crowding the dues/news cards below it off the first
     #: screenful -- Calendar is the place to see everything still awaiting a reply.
     NEEDS_ANSWER_LIMIT = 5
+    #: Same reasoning -- an event's own page (linked from each row) is where
+    #: every task for it, open or not, actually lives.
+    OPEN_TASKS_LIMIT = 5
     #: Same reasoning -- mobile:news_list is the place to see everything.
     NEWS_LIMIT = 3
     #: Same reasoning again -- mobile:me lists every form, not just the pending ones.
@@ -238,6 +243,8 @@ class HomeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         rsvp_closed = False
         needs_answer = []
         needs_answer_total = 0
+        open_tasks = []
+        open_tasks_total = 0
         dues_rows = []
         news_items = []
         forms_to_complete = []
@@ -278,6 +285,25 @@ class HomeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
             needs_answer_total = needs_answer_qs.count()
             needs_answer = list(needs_answer_qs[: self.NEEDS_ANSWER_LIMIT])
 
+            # Its own card, not folded into "Needs your answer" above -- a task
+            # ("bring fruit") isn't a reply owed, it's a slot anyone in scope
+            # could take, and an event already answered can still have one
+            # open. Scoped to the same upcoming/invited events as the rest of
+            # this screen (not every upcoming club event), one row per open
+            # task rather than per event, so which specific ask is open is
+            # visible without a tap through to the event.
+            open_tasks_qs = (
+                EventTask.objects.filter(event_id__in=upcoming.values_list("event_id", flat=True).distinct())
+                .annotate(claim_count=Count("claims"))
+                .filter(claim_count__lt=F("needed_quantity"))
+                .select_related("event")
+                .order_by("event__start")
+            )
+            open_tasks_total = open_tasks_qs.count()
+            open_tasks = list(open_tasks_qs[: self.OPEN_TASKS_LIMIT])
+            for task in open_tasks:
+                task.open_count = task.needed_quantity - task.claim_count
+
             season = current_season(self.request.club)
             if season is not None:
                 # Holds back a balance nobody's reviewed yet -- same filter
@@ -316,6 +342,8 @@ class HomeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
             rsvp_closed=rsvp_closed,
             needs_answer=needs_answer,
             needs_answer_remaining=max(needs_answer_total - len(needs_answer), 0),
+            open_tasks=open_tasks,
+            open_tasks_remaining=max(open_tasks_total - len(open_tasks), 0),
             dues_rows=dues_rows,
             news_items=news_items,
             forms_to_complete=forms_to_complete,
