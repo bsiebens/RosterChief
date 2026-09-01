@@ -117,6 +117,17 @@ def send_publish_notification(news_item):
     News.notified_at afterwards -- this function only sends, doesn't mark done."""
     from notifications.services import notify_members
 
+    from .models import News
+
+    if news_item.visibility == News.Visibility.EXTERNAL:
+        # External-only news never shows up in mobile's own home/list views
+        # (mobile.views.HomeView/NewsListView both filter to
+        # visibility__in=[INTERNAL, BOTH] -- the opposite of api.py's
+        # _visible_news, which is the public *website* feed), so a push/inbox
+        # notification for one would point members at an article they'd have
+        # no way to find or tap into from the app.
+        return []
+
     members = _dedupe_by_recipients(_notify_audience(news_item))
     if not members:
         return []

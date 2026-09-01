@@ -204,6 +204,18 @@ class SendPublishNotificationTests(TestCase):
         self.assertTrue(Notification.objects.filter(club=self.club, member=member, title="Big news").exists())
         self.assertEqual(len(notifications), 1)
 
+    def test_external_only_news_is_never_notified(self):
+        # Mobile's own home/list views (mobile.views.HomeView/NewsListView)
+        # exclude visibility=EXTERNAL, so notifying members about one would
+        # point them at an article the app never surfaces.
+        self.make_member("Jamie", email="jamie@example.com")
+        news_item = News.objects.create(club=self.club, title="Sponsor announcement", body="Body.", status=News.Status.PUBLISHED, published_at=timezone.now(), visibility=News.Visibility.EXTERNAL)
+
+        notifications = send_publish_notification(news_item)
+
+        self.assertEqual(notifications, [])
+        self.assertFalse(Notification.objects.exists())
+
     def test_team_scoped_news_only_notifies_that_teams_roster(self):
         team = Team.objects.create(club=self.club, name="U16", short_name="U16")
         other_team = Team.objects.create(club=self.club, name="U18", short_name="U18")
