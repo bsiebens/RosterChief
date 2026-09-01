@@ -9913,6 +9913,17 @@ class VolunteerListTests(ManagementTestBase):
         self.assertContains(response, "Cara Coach")
         self.assertContains(response, "U9")
 
+    def test_groups_multiple_assignments_for_the_same_volunteer_into_one_row(self):
+        coach_member = Member.objects.create(first_name="Cara", last_name="Coach")
+        other_team = Team.objects.create(club=self.club, name="U11", short_name="U11")
+        StaffAssignment.objects.create(team=self.team, member=coach_member, season=self.season, position=self.position)
+        StaffAssignment.objects.create(team=other_team, member=coach_member, season=self.season, position=self.position)
+
+        response = self.club_get("volunteer_list")
+
+        self.assertEqual(len(response.context["volunteers"]), 1)
+        self.assertEqual(len(response.context["volunteers"][0]["assignments"]), 2)
+
     def test_shows_a_pending_volunteer_awaiting_placement(self):
         member, _details = self.make_pending_volunteer(requested_team=self.team, requested_position=self.position)
 

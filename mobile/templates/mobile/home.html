@@ -74,21 +74,23 @@
                     <span class="font-display text-lg font-extrabold text-club">{{ needs_answer|length|add:needs_answer_remaining }}</span>
                 </div>
                 <div class="mt-3 flex flex-col gap-2.5">
-                    {% for attendance in needs_answer %}
+                    {% for row in needs_answer %}
                         {% if not forloop.first %}<div class="h-px bg-rule"></div>{% endif %}
-                        <a class="flex items-center gap-3" href="{% url "mobile:event_detail" attendance.event.pk %}">
+                        <a class="flex items-center gap-3" href="{% url "mobile:event_detail" row.event.pk %}">
                             <div class="w-9.5 shrink-0 text-center">
-                                <div class="font-display text-xl leading-none font-extrabold text-ink">{{ attendance.event.start|date:"d" }}</div>
-                                <div class="font-mono text-[10px] text-muted uppercase tracking-wide">{{ attendance.event.start|date:"M" }}</div>
+                                <div class="font-display text-xl leading-none font-extrabold text-ink">{{ row.event.start|date:"d" }}</div>
+                                <div class="font-mono text-[10px] text-muted uppercase tracking-wide">{{ row.event.start|date:"M" }}</div>
                             </div>
                             <div class="min-w-0 flex-1">
-                                <div class="text-sm font-semibold text-ink">{{ attendance.event.title }}</div>
-                                <div class="text-xs text-muted">{{ attendance.member.first_name }} &middot; {{ attendance.event.start|date:"H:i" }}</div>
+                                <div class="text-sm font-semibold text-ink">
+                                    {% if row.kind == "referee" %}{% trans "Referee" %} &middot; {% elif row.kind == "official" %}{% trans "Official" %} &middot; {% endif %}{{ row.event.title }}
+                                </div>
+                                <div class="text-xs text-muted">{{ row.member.first_name }} &middot; {{ row.event.start|date:"H:i" }}</div>
                             </div>
                             <div class="flex shrink-0 flex-col items-end gap-1">
-                                <span class="pill pill-sm pill-warn">{% trans "Reply" %}</span>
-                                {% if attendance.open_task_count %}
-                                    <span class="pill pill-sm pill-info">{% lucide "clipboard-list" size=10 %} {% blocktrans count counter=attendance.open_task_count %}{{ counter }} task open{% plural %}{{ counter }} tasks open{% endblocktrans %}</span>
+                                <span class="pill pill-sm {% if row.kind == "referee" %}pill-referee{% elif row.kind == "official" %}pill-info{% else %}pill-warn{% endif %}">{% trans "Reply" %}</span>
+                                {% if row.attendance.open_task_count %}
+                                    <span class="pill pill-sm pill-info">{% lucide "clipboard-list" size=10 %} {% blocktrans count counter=row.attendance.open_task_count %}{{ counter }} task open{% plural %}{{ counter }} tasks open{% endblocktrans %}</span>
                                 {% endif %}
                             </div>
                         </a>

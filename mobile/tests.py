@@ -18,7 +18,7 @@ from waffle import get_waffle_flag_model
 
 from club.models import Club, ClubMembership, DuesInvoice, EvaluationManager, MemberRequirementStatus, OnboardingRequirement, Season, Sponsor
 from evaluations.models import EvaluationSettings, PlayerEvaluation
-from events.models import Attendance, Competition, Event, EventReferee, EventSeries, EventTask, EventTaskClaim, Lineup, LineupSelection, Location, OfficialSignup, Opponent, RefereeSignup
+from events.models import Attendance, Competition, Event, EventOfficial, EventReferee, EventSeries, EventTask, EventTaskClaim, Lineup, LineupSelection, Location, OfficialSignup, Opponent, RefereeSignup
 from events.services.attendance import record_check_in
 from events.services.calendar import week_bounds
 from events.services.notifications import notify_new_event
@@ -366,7 +366,7 @@ class HomeViewTests(TestCase):
         response = self._get("home")
 
         self.assertEqual(response.context["hero_attendance"].event, hero_event)
-        needs_answer_events = {attendance.event for attendance in response.context["needs_answer"]}
+        needs_answer_events = {row["event"] for row in response.context["needs_answer"]}
         self.assertEqual(needs_answer_events, {awaiting, maybe})
 
     def test_needs_your_answer_excludes_events_with_a_closed_registration_deadline(self):
@@ -384,8 +384,50 @@ class HomeViewTests(TestCase):
 
         response = self._get("home")
 
-        needs_answer_events = {attendance.event for attendance in response.context["needs_answer"]}
+        needs_answer_events = {row["event"] for row in response.context["needs_answer"]}
         self.assertEqual(needs_answer_events, {open_deadline})
+
+    def test_needs_your_answer_includes_an_invited_referee_signup(self):
+        game = self.make_event(title="Home game", start=self.future)
+        RefereeSignup.objects.create(event=game, member=self.member, status=RefereeSignup.Status.INVITED)
+        self.client.force_login(self.user)
+
+        response = self._get("home")
+
+        self.assertEqual(len(response.context["needs_answer"]), 1)
+        self.assertEqual(response.context["needs_answer"][0]["kind"], "referee")
+        self.assertEqual(response.context["needs_answer"][0]["event"], game)
+        self.assertContains(response, "Referee")
+
+    def test_needs_your_answer_excludes_an_already_accepted_referee_signup(self):
+        game = self.make_event(title="Home game", start=self.future)
+        RefereeSignup.objects.create(event=game, member=self.member, status=RefereeSignup.Status.ACCEPTED)
+        self.client.force_login(self.user)
+
+        response = self._get("home")
+
+        self.assertEqual(list(response.context["needs_answer"]), [])
+
+    def test_needs_your_answer_includes_an_invited_official_signup_when_the_flag_is_on(self):
+        get_waffle_flag_model().objects.get_or_create(name="officials")[0].clubs.add(self.club)
+        game = self.make_event(title="Home game", start=self.future)
+        OfficialSignup.objects.create(event=game, member=self.member, status=OfficialSignup.Status.INVITED)
+        self.client.force_login(self.user)
+
+        response = self._get("home")
+
+        self.assertEqual(len(response.context["needs_answer"]), 1)
+        self.assertEqual(response.context["needs_answer"][0]["kind"], "official")
+        self.assertContains(response, "Official")
+
+    def test_needs_your_answer_ignores_an_official_signup_when_the_flag_is_off(self):
+        game = self.make_event(title="Home game", start=self.future)
+        OfficialSignup.objects.create(event=game, member=self.member, status=OfficialSignup.Status.INVITED)
+        self.client.force_login(self.user)
+
+        response = self._get("home")
+
+        self.assertEqual(list(response.context["needs_answer"]), [])
 
     def test_open_tasks_lists_an_unclaimed_slot_on_an_upcoming_event(self):
         event = self.make_event(title="Home game")
@@ -748,7 +790,7 @@ class HomeViewTests(TestCase):
 
         response = self._get("home")
 
-        needs_answer_events = {a.event for a in response.context["needs_answer"]}
+        needs_answer_events = {row["event"] for row in response.context["needs_answer"]}
         self.assertEqual(needs_answer_events, {theirs})  # mine is the hero, excluded from the list
         self.assertEqual(len(response.context["dues_rows"]), 1)
         self.assertEqual(response.context["dues_rows"][0]["membership"].member, child)
@@ -1767,7 +1809,7 @@ class EventDetailScreenTests(TestCase):
         self.assertContains(response, "I'll ref")
         self.assertNotContains(response, "Confirmed")
 
-    def test_accepted_referee_signup_shows_a_confirmed_pill_with_no_actions(self):
+    def test_accepted_referee_signup_shows_a_confirmed_pill_with_a_retract_action(self):
         RefereeSignup.objects.create(event=self.event, member=self.member, status=RefereeSignup.Status.ACCEPTED)
         self.client.force_login(self.user)
 
@@ -1775,6 +1817,51 @@ class EventDetailScreenTests(TestCase):
 
         self.assertContains(response, "Confirmed")
         self.assertNotContains(response, "I'll ref")
+        self.assertContains(response, "Can't make it after all")
+
+    def test_retracting_an_accepted_referee_signup_removes_the_assignment_and_notifies_the_manager(self):
+        signup = RefereeSignup.objects.create(event=self.event, member=self.member, status=RefereeSignup.Status.ACCEPTED)
+        EventReferee.objects.create(event=self.event, member=self.member, assigned_by=None)
+        manager = Member.objects.create(first_name="Cara", last_name="Coach")
+        management_position = Position.objects.create(club=self.club, name="Head coach", short_name="HC", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=self.team, member=manager, season=self.season, position=management_position)
+        self.client.force_login(self.user)
+
+        response = self.client.post(reverse("mobile:referee_signup_respond", kwargs={"signup_id": signup.pk}), {"response": "decline"}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 302)
+        signup.refresh_from_db()
+        self.assertEqual(signup.status, RefereeSignup.Status.DECLINED)
+        self.assertFalse(EventReferee.objects.filter(event=self.event, member=self.member).exists())
+        self.assertTrue(Notification.objects.filter(member=manager, title="Referee dropped out").exists())
+
+    def test_accepted_official_signup_shows_a_confirmed_pill_with_a_retract_action(self):
+        get_waffle_flag_model().objects.get_or_create(name="officials")[0].clubs.add(self.club)
+        OfficialSignup.objects.create(event=self.event, member=self.member, status=OfficialSignup.Status.ACCEPTED)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, "Confirmed")
+        self.assertNotContains(response, "I'll do it")
+        self.assertContains(response, "Can't make it after all")
+
+    def test_retracting_an_accepted_official_signup_removes_the_assignment_and_notifies_the_manager(self):
+        get_waffle_flag_model().objects.get_or_create(name="officials")[0].clubs.add(self.club)
+        signup = OfficialSignup.objects.create(event=self.event, member=self.member, status=OfficialSignup.Status.ACCEPTED)
+        EventOfficial.objects.create(event=self.event, member=self.member, assigned_by=None)
+        manager = Member.objects.create(first_name="Cara", last_name="Coach")
+        management_position = Position.objects.create(club=self.club, name="Head coach", short_name="HC", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=self.team, member=manager, season=self.season, position=management_position)
+        self.client.force_login(self.user)
+
+        response = self.client.post(reverse("mobile:official_signup_respond", kwargs={"signup_id": signup.pk}), {"response": "decline"}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 302)
+        signup.refresh_from_db()
+        self.assertEqual(signup.status, OfficialSignup.Status.DECLINED)
+        self.assertFalse(EventOfficial.objects.filter(event=self.event, member=self.member).exists())
+        self.assertTrue(Notification.objects.filter(member=manager, title="Official dropped out").exists())
 
     def test_declined_referee_signup_is_not_shown(self):
         RefereeSignup.objects.create(event=self.event, member=self.member, status=RefereeSignup.Status.DECLINED)

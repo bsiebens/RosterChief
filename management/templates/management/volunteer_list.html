@@ -44,22 +44,26 @@
                 <thead>
                     <tr>
                         <th>{% trans "Volunteer" %}</th>
-                        <th>{% trans "Team" %}</th>
-                        <th>{% trans "Position" %}</th>
+                        <th>{% trans "Teams & roles" %}</th>
                     </tr>
                 </thead>
                 <tbody>
-                    {% for assignment in assignments %}
+                    {% for volunteer in volunteers %}
                         <tr>
                             <td>
-                                <a class="link link-hover font-semibold" href="{% url 'management:member_detail' assignment.member.pk %}">{{ assignment.member.get_full_name }}</a>
+                                <a class="link link-hover font-semibold" href="{% url 'management:member_detail' volunteer.member.pk %}">{{ volunteer.member.get_full_name }}</a>
                             </td>
-                            <td class="text-sm text-ink">{{ assignment.team.name }}</td>
-                            <td class="text-sm text-ink">{{ assignment.position.name }}</td>
+                            <td class="text-sm text-ink">
+                                <div class="flex flex-wrap gap-1">
+                                    {% for assignment in volunteer.assignments %}
+                                        <span class="badge badge-sm badge-ghost">{{ assignment.team.name }} · {{ assignment.position.name }}</span>
+                                    {% endfor %}
+                                </div>
+                            </td>
                         </tr>
                     {% empty %}
                         <tr>
-                            <td colspan="3" class="py-6 text-center text-muted">{% trans "No one holds a staff position this season yet." %}</td>
+                            <td colspan="2" class="py-6 text-center text-muted">{% trans "No one holds a staff position this season yet." %}</td>
                         </tr>
                     {% endfor %}
                 </tbody>

@@ -69,7 +69,14 @@
                             <span class="text-[15px] font-semibold text-ink">{{ signup.member.get_full_name }}</span>
                             {% if signup.status == "accepted" %}<span class="pill pill-referee shrink-0">{% trans "Confirmed" %}</span>{% endif %}
                         </div>
-                        {% if signup.status != "accepted" %}
+                        {% if signup.status == "accepted" %}
+                            <form method="post" action="{% url "mobile:referee_signup_respond" signup.pk %}">
+                                {% csrf_token %}
+                                <input type="hidden" name="response" value="decline">
+                                <input type="hidden" name="next" value="event_detail">
+                                <button type="submit" class="btn btn-secondary w-full text-xs">{% trans "Can't make it after all" %}</button>
+                            </form>
+                        {% else %}
                             <div class="grid grid-cols-2 gap-2">
                                 <form method="post" action="{% url "mobile:referee_signup_respond" signup.pk %}">
                                     {% csrf_token %}
@@ -102,7 +109,14 @@
                             <span class="text-[15px] font-semibold text-ink">{{ signup.member.get_full_name }}</span>
                             {% if signup.status == "accepted" %}<span class="pill pill-info shrink-0">{% trans "Confirmed" %}</span>{% endif %}
                         </div>
-                        {% if signup.status != "accepted" %}
+                        {% if signup.status == "accepted" %}
+                            <form method="post" action="{% url "mobile:official_signup_respond" signup.pk %}">
+                                {% csrf_token %}
+                                <input type="hidden" name="response" value="decline">
+                                <input type="hidden" name="next" value="event_detail">
+                                <button type="submit" class="btn btn-secondary w-full text-xs">{% trans "Can't make it after all" %}</button>
+                            </form>
+                        {% else %}
                             <div class="grid grid-cols-2 gap-2">
                                 <form method="post" action="{% url "mobile:official_signup_respond" signup.pk %}">
                                     {% csrf_token %}

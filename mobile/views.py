@@ -206,7 +206,10 @@ class HomeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
     """M1 -- design_handoff_rosterchief_platform/README.md's M1 section: a
     hero card for the soonest upcoming event across everyone currently in
     scope (with a quick In/Out RSVP -- see EventDetailView.post below), a
-    "needs your answer" list of upcoming events still NO_RESPONSE/MAYBE, an
+    "needs your answer" list of upcoming events still NO_RESPONSE/MAYBE --
+    merged with any still-INVITED RefereeSignup/OfficialSignup for the same
+    people, since those are exactly the same kind of "we need a yes/no from
+    you" ask, just on a different model -- an
     "open tasks" list of unclaimed EventTask slots on those same in-scope
     upcoming events (regardless of RSVP status -- a task is open to anyone,
     not tied to one person's reply), a season-dues card per person who owes
@@ -275,15 +278,29 @@ class HomeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
             # in a "still needs a reply" list -- unlike hero_attendance above,
             # which always shows the true next event regardless of RSVP state
             # and falls back to a read-only pill once its own deadline closes.
-            needs_answer_qs = (
-                upcoming.filter(status__in=[Attendance.AttendanceStatus.NO_RESPONSE, Attendance.AttendanceStatus.MAYBE])
-                .filter(Q(event__deadline__isnull=True) | Q(event__deadline__gte=now))
-                .order_by("event__start")
-            )
+            needs_answer_qs = upcoming.filter(status__in=[Attendance.AttendanceStatus.NO_RESPONSE, Attendance.AttendanceStatus.MAYBE]).filter(Q(event__deadline__isnull=True) | Q(event__deadline__gte=now))
             if hero_attendance is not None:
                 needs_answer_qs = needs_answer_qs.exclude(pk=hero_attendance.pk)
-            needs_answer_total = needs_answer_qs.count()
-            needs_answer = list(needs_answer_qs[: self.NEEDS_ANSWER_LIMIT])
+            needs_answer_items = [{"kind": "rsvp", "event": attendance.event, "member": attendance.member, "attendance": attendance} for attendance in needs_answer_qs]
+
+            # Same "still owed" idea as the RSVP rows above, for the two
+            # self-service invite tracks (RefereeSignup/OfficialSignup) --
+            # merged into this same box rather than a separate card, since
+            # from the invited person's point of view it's exactly the same
+            # kind of ask: an event that needs a yes/no from them. Only
+            # INVITED counts -- ACCEPTED/DECLINED already have an answer, so
+            # unlike the Calendar agenda (which also keeps ACCEPTED visible
+            # as a confirmed commitment) this box drops them.
+            referee_invites = RefereeSignup.objects.filter(member__in=people, event__club=self.request.club, event__cancelled=False, event__start__gte=now, status=RefereeSignup.Status.INVITED).select_related("event", "member")
+            needs_answer_items += [{"kind": "referee", "event": signup.event, "member": signup.member} for signup in referee_invites]
+
+            if flag_is_active(self.request, "officials"):
+                official_invites = OfficialSignup.objects.filter(member__in=people, event__club=self.request.club, event__cancelled=False, event__start__gte=now, status=OfficialSignup.Status.INVITED).select_related("event", "member")
+                needs_answer_items += [{"kind": "official", "event": signup.event, "member": signup.member} for signup in official_invites]
+
+            needs_answer_items.sort(key=lambda row: row["event"].start)
+            needs_answer_total = len(needs_answer_items)
+            needs_answer = needs_answer_items[: self.NEEDS_ANSWER_LIMIT]
 
             # Its own card, not folded into "Needs your answer" above -- a task
             # ("bring fruit") isn't a reply owed, it's a slot anyone in scope

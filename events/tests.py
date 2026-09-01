@@ -1922,6 +1922,30 @@ class RefereeSignupServiceTests(EventsTestBase):
 
         self.assertTrue(EventReferee.objects.filter(event=game, member=self.referee, assigned_by=self.alice).exists())
 
+    def test_decline_after_accepting_notifies_the_teams_managers(self):
+        game = self.make_home_game()
+        signup = RefereeSignup.objects.get(event=game, member=self.referee)
+        accept_referee_signup(signup)
+        manager = Member.objects.create(first_name="Cara", last_name="Coach")
+        management_position = Position.objects.create(club=self.club, name="Head coach", short_name="HC", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=self.team, member=manager, season=self.season, position=management_position)
+
+        decline_referee_signup(signup)
+
+        notification = Notification.objects.get(member=manager, title="Referee dropped out")
+        self.assertIn(self.referee.get_full_name(), notification.body)
+
+    def test_declining_an_unanswered_invite_does_not_notify_managers(self):
+        game = self.make_home_game()
+        signup = RefereeSignup.objects.get(event=game, member=self.referee)
+        manager = Member.objects.create(first_name="Cara", last_name="Coach")
+        management_position = Position.objects.create(club=self.club, name="Head coach", short_name="HC", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=self.team, member=manager, season=self.season, position=management_position)
+
+        decline_referee_signup(signup)
+
+        self.assertFalse(Notification.objects.filter(member=manager, title="Referee dropped out").exists())
+
 
 class OfficialsTestBase(EventsTestBase):
     """Shared scaffolding for every officials test: the "officials" waffle
@@ -2122,6 +2146,19 @@ class OfficialSignupServiceTests(OfficialsTestBase):
         decline_official_signup(signup)
 
         self.assertFalse(EventOfficial.objects.filter(event=game, member=self.official).exists())
+
+    def test_decline_after_accepting_notifies_the_teams_managers(self):
+        game = self.make_home_game()
+        signup = OfficialSignup.objects.get(event=game, member=self.official)
+        accept_official_signup(signup)
+        manager = Member.objects.create(first_name="Cara", last_name="Coach")
+        management_position = Position.objects.create(club=self.club, name="Head coach", short_name="HC", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=self.team, member=manager, season=self.season, position=management_position)
+
+        decline_official_signup(signup)
+
+        notification = Notification.objects.get(member=manager, title="Official dropped out")
+        self.assertIn(self.official.get_full_name(), notification.body)
 
     def test_sync_does_not_reinvite_someone_who_already_responded(self):
         game = self.make_home_game()

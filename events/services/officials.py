@@ -15,12 +15,13 @@ from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from waffle import get_waffle_flag_model
 
+from club.services.access import event_season
 from events.models import Event, EventOfficial, OfficialSignup
 from events.services.attendance import effective_members
 from events.services.referees import event_window
 from members.models import Member
 from notifications.services import notify_members
-from teams.models import OfficialLevel, Team
+from teams.models import OfficialLevel, StaffAssignment, Team
 
 #: Name of the waffle Flag gating the whole officials surface. Views/nav go
 #: through the request-scoped flag_is_active(request, OFFICIALS_FLAG) the
@@ -185,9 +186,20 @@ def accept_official_signup(signup):
 def decline_official_signup(signup):
     """Declines `signup`. If they'd already accepted, also removes their
     self-service EventOfficial row (assigned_by is None -- never touches an
-    admin-made assignment)."""
-    EventOfficial.objects.filter(event=signup.event, member=signup.member, assigned_by__isnull=True).delete()
+    admin-made assignment) -- and, in that case only, tells the game's own
+    manager(s), same reasoning as decline_referee_signup's own retraction
+    notice (deliberately not shared code -- see this module's own
+    docstring)."""
+    retracted = EventOfficial.objects.filter(event=signup.event, member=signup.member, assigned_by__isnull=True).delete()[0] > 0
     signup.status = OfficialSignup.Status.DECLINED
     signup.responded_at = timezone.now()
     signup.save(update_fields=["status", "responded_at"])
+
+    if retracted:
+        manager_ids = StaffAssignment.objects.filter(team__in=signup.event.teams.all(), position__management_position=True, season=event_season(signup.event)).values_list("member_id", flat=True).distinct()
+        managers = Member.objects.filter(pk__in=manager_ids)
+        if managers:
+            body = _("%(member)s can no longer act as an official for %(event)s after all -- you may need to find a replacement.") % {"member": signup.member.get_full_name(), "event": signup.event.title}
+            notify_members(managers, club=signup.event.club, title=_("Official dropped out"), body=body, source=signup.event)
+
     return signup

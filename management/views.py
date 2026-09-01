@@ -1,6 +1,7 @@
 import csv
 from datetime import date, timedelta
 from decimal import Decimal
+from itertools import groupby
 
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
@@ -6844,11 +6845,12 @@ class VolunteerListView(MemberAdminRequiredMixin, TemplateView):
     def get_context_data(self, **kwargs):
         club = self.request.club
         season = current_season(club)
-        assignments = []
+        volunteers = []
         pending = []
 
         if season is not None:
-            assignments = list(StaffAssignment.objects.filter(team__club=club, season=season).select_related("member", "team", "position").order_by("team__name", "position__name"))
+            assignments = StaffAssignment.objects.filter(team__club=club, season=season).select_related("member", "team", "position").order_by("member__last_name", "member__first_name", "team__name", "position__name")
+            volunteers = [{"member": member, "assignments": list(member_assignments)} for member, member_assignments in groupby(assignments, key=lambda assignment: assignment.member)]
             pending = list(
                 RegistrationDetails.objects.filter(
                     entry_kind=RegistrationDetails.EntryKind.VOLUNTEER,
@@ -6862,7 +6864,7 @@ class VolunteerListView(MemberAdminRequiredMixin, TemplateView):
                     club=club, season=season, member=details.membership.member, initial={"team": details.requested_team_id, "position": details.requested_position_id}
                 )
 
-        return super().get_context_data(season=season, assignments=assignments, pending=pending, **kwargs)
+        return super().get_context_data(season=season, volunteers=volunteers, pending=pending, **kwargs)
 
 
 class VolunteerPlaceView(MemberAdminRequiredMixin, View):

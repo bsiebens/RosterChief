@@ -27,11 +27,12 @@ from django.db import transaction
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
+from club.services.access import event_season
 from events.models import ASSUMED_EVENT_DURATION, Event, EventReferee, RefereeSignup
 from events.services.attendance import effective_members
 from members.models import Member
 from notifications.services import notify_members
-from teams.models import RefereeLevel, Team
+from teams.models import RefereeLevel, StaffAssignment, Team
 
 
 class RefereeAssignmentError(Exception):
@@ -196,9 +197,20 @@ def decline_referee_signup(signup):
     admin-made assignment for the same member/event, though assign_referee's
     own "already assigned" guard makes that pairing impossible anyway) so
     the desktop screen stops counting someone who's since said they can't
-    make it after all."""
-    EventReferee.objects.filter(event=signup.event, member=signup.member, assigned_by__isnull=True).delete()
+    make it after all -- and, in that case only, tells the game's own
+    manager(s) (management position, same audience as lineup.notify_dropout):
+    unlike declining an invite nobody was counting on yet, retracting an
+    acceptance leaves a hole someone now has to fill."""
+    retracted = EventReferee.objects.filter(event=signup.event, member=signup.member, assigned_by__isnull=True).delete()[0] > 0
     signup.status = RefereeSignup.Status.DECLINED
     signup.responded_at = timezone.now()
     signup.save(update_fields=["status", "responded_at"])
+
+    if retracted:
+        manager_ids = StaffAssignment.objects.filter(team__in=signup.event.teams.all(), position__management_position=True, season=event_season(signup.event)).values_list("member_id", flat=True).distinct()
+        managers = Member.objects.filter(pk__in=manager_ids)
+        if managers:
+            body = _("%(member)s can no longer referee %(event)s after all -- you may need to find a replacement.") % {"member": signup.member.get_full_name(), "event": signup.event.title}
+            notify_members(managers, club=signup.event.club, title=_("Referee dropped out"), body=body, source=signup.event)
+
     return signup
