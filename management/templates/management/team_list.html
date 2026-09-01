@@ -25,9 +25,9 @@
                 {% for team in teams %}
                     <tr>
                         <td><a class="link link-hover font-semibold" href="{% url 'management:team_detail' team.pk %}">{{ team.name }}</a></td>
-                        <td class="font-mono text-muted">{{ team.short_name }}</td>
-                        <td class="font-mono tabular-nums">{{ team.player_count }}</td>
-                        <td class="font-mono tabular-nums">{{ team.staff_count }}</td>
+                        <td class="font-mono text-xs text-muted">{{ team.short_name }}</td>
+                        <td class="font-mono text-xs tabular-nums">{{ team.player_count }}</td>
+                        <td class="font-mono text-xs tabular-nums">{{ team.staff_count }}</td>
                         <td class="text-right">
                             {% if is_club_admin %}
                                 <div class="flex justify-end gap-1">
