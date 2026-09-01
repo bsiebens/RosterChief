@@ -18,7 +18,7 @@ from waffle import get_waffle_flag_model
 
 from club.models import Club, ClubMembership, DuesInvoice, EvaluationManager, MemberRequirementStatus, OnboardingRequirement, Season, Sponsor
 from evaluations.models import EvaluationSettings, PlayerEvaluation
-from events.models import Attendance, Competition, Event, EventReferee, EventSeries, EventTask, EventTaskClaim, Lineup, LineupSelection, Location, Opponent, RefereeSignup
+from events.models import Attendance, Competition, Event, EventReferee, EventSeries, EventTask, EventTaskClaim, Lineup, LineupSelection, Location, OfficialSignup, Opponent, RefereeSignup
 from events.services.attendance import record_check_in
 from events.services.calendar import week_bounds
 from events.services.notifications import notify_new_event
@@ -32,7 +32,7 @@ from registration.models import RegistrationBatch, RegistrationDetails
 from shop.models import Cart, CartItem, Discount, Order, OrderLine, Product, ProductCategory, ProductionStatus, ProductVariant, Voucher
 from shop.services.checkout import place_order
 from shop.services.invoices import create_invoice_for_order
-from teams.models import NumberPool, Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership
+from teams.models import NumberPool, OfficialLevel, OfficialProfile, Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership
 
 from .coach_views import CoachTodayView
 from .models import CalendarFeedToken, PushSubscription
@@ -1382,6 +1382,99 @@ class CalendarRefereeSignupTests(TestCase):
 
         self.assertTrue(RefereeSignup.objects.filter(event=other_game, member=child).exists())
         self.assertContains(response, "Kid")
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class CalendarOfficialSignupTests(TestCase):
+    """The officials counterpart to CalendarRefereeSignupTests -- same shape,
+    gated by the "officials" waffle flag (mobile/_calendar_official_row.html,
+    CalendarView's own docstring)."""
+
+    def setUp(self):
+        # waffle caches a flag's active-club ids (features/models.py's Flag.
+        # _get_club_ids) outside the per-test transaction -- clear it so a
+        # flag flipped on in one test doesn't leak into the next.
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        today = timezone.localdate()
+        cls.season = Season.objects.create(club=cls.club, start_date=today - datetime.timedelta(days=30), end_date=today + datetime.timedelta(days=300))
+        cls.user = User.objects.create_user(email="official@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Ophelia", last_name="Cial", email="official@example.com", user=cls.user)
+        ClubMembership.objects.create(club=cls.club, member=cls.member, season=cls.season)
+
+        cls.home_ground = Location.objects.create(club=cls.club, name="Home Rink", address="1 St", city="Town", zip_code="1000", country="BE", is_home=True)
+        cls.team = Team.objects.create(club=cls.club, name="U16", short_name="U16")
+        cls.level = OfficialLevel.objects.create(club=cls.club, name="Table official")
+        cls.level.teams.add(cls.team)
+        OfficialProfile.objects.create(member=cls.member, level=cls.level, valid_until=today + datetime.timedelta(days=30))
+
+        cls.game = Event.objects.create(club=cls.club, title="Home game", kind=Event.EventKind.GAME, location=cls.home_ground, start=timezone.now() + datetime.timedelta(days=1))
+
+    def _get(self, **params):
+        url = reverse("mobile:calendar")
+        if params:
+            url += "?" + "&".join(f"{key}={value}" for key, value in params.items())
+        return self.client.get(url, HTTP_HOST="ajax-united.rosterchief.app")
+
+    def _enable_officials_flag(self):
+        get_waffle_flag_model().objects.get_or_create(name="officials")[0].clubs.add(self.club)
+
+    def test_invited_game_does_not_show_up_when_the_flag_is_off(self):
+        self.game.teams.add(self.team)  # triggers sync_official_invites via events/signals.py
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertNotContains(response, "Official")
+
+    def test_invited_game_shows_up_on_the_calendar_when_the_flag_is_on(self):
+        self._enable_officials_flag()
+        self.game.teams.add(self.team)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, "Official")
+        self.assertContains(response, "Reply needed")
+        self.assertContains(response, f'href="{reverse("mobile:event_detail", kwargs={"pk": self.game.pk})}?from=calendar"')
+
+    def test_declined_signup_is_not_shown(self):
+        self._enable_officials_flag()
+        self.game.teams.add(self.team)
+        signup = OfficialSignup.objects.get(event=self.game, member=self.member)
+        signup.status = OfficialSignup.Status.DECLINED
+        signup.save()
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertNotContains(response, "Reply needed")
+
+    def test_accepted_signup_shows_a_confirmed_pill(self):
+        self._enable_officials_flag()
+        self.game.teams.add(self.team)
+        signup = OfficialSignup.objects.get(event=self.game, member=self.member)
+        signup.status = OfficialSignup.Status.ACCEPTED
+        signup.save()
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, "Confirmed")
+        self.assertNotContains(response, "Reply needed")
+
+    def test_training_filter_excludes_official_rows(self):
+        self._enable_officials_flag()
+        self.game.teams.add(self.team)
+        self.client.force_login(self.user)
+
+        response = self._get(kind="training")
+
+        self.assertNotContains(response, "Reply needed")
 
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
@@ -6806,6 +6899,15 @@ class CoachEvaluationViewsTests(TestCase):
         response = self.client.get(self._create_url(), HTTP_HOST="ajax-united.rosterchief.app")
 
         self.assertContains(response, "Skill")
+
+    def test_create_get_header_has_a_back_link_to_the_players_history(self):
+        self._activate_flag()
+        self._grant(self.member)
+        self.client.force_login(self.user)
+
+        response = self.client.get(self._create_url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, f'href="{self._history_url()}"')
 
     def test_create_post_records_the_evaluation_and_redirects_to_history(self):
         self._activate_flag()

@@ -1,0 +1,33 @@
+{% load i18n %}
+{% comment %}
+    The officials counterpart to _calendar_referee_row.html -- same shape,
+    same reasoning (see that row's own comment), gated by the caller on
+    officials_enabled since the "officials" waffle flag isn't on for every
+    club yet. Uses the info accent (--color-info/.pill-info), matching
+    event_detail.html's own "Officiating" card, rather than the referee
+    accent -- the two sign-up kinds read as distinct commitments even when
+    both appear on the same event.
+
+    Expects ``row`` ({event, official_signup, official_member}) in scope --
+    official_member is only set once there's more than one managed person to
+    tell apart, same rule mobile/_calendar_row.html's own ``member`` uses.
+{% endcomment %}
+<a class="flex items-center gap-3 bg-white px-4 py-3" href="{% url "mobile:event_detail" row.event.pk %}?from=calendar">
+    <div class="w-9.5 shrink-0 text-center">
+        <div class="font-mono text-[10px] tracking-wide text-muted uppercase">{{ row.event.start|date:"D" }}</div>
+        <div class="font-display text-2xl leading-none font-extrabold text-ink">{{ row.event.start|date:"d" }}</div>
+    </div>
+    <div class="w-[3px] shrink-0 self-stretch rounded-full" style="background: var(--color-info)"></div>
+    <div class="min-w-0 flex-1">
+        <div class="truncate text-sm font-semibold text-ink">{% trans "Official" %} &middot; {{ row.event.title }}</div>
+        <div class="truncate text-xs text-muted">
+            {{ row.event.start|date:"H:i" }}
+            {% if row.official_member %}&middot; {{ row.official_member.first_name }}{% endif %}
+            {% for team in row.event.teams.all %}&middot; {{ team.name }}{% endfor %}
+            {% if row.event.location %}&middot; {{ row.event.location.name }}{% endif %}
+        </div>
+    </div>
+    <span class="pill {% if row.official_signup.status == "accepted" %}pill-info{% else %}pill-neutral{% endif %} shrink-0">
+        {% if row.official_signup.status == "accepted" %}{% trans "Confirmed" %}{% else %}{% trans "Reply needed" %}{% endif %}
+    </span>
+</a>

@@ -450,6 +450,25 @@ class CalendarView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
             )
             rows += [{"event": signup.event, "referee_signup": signup, "referee_member": signup.member if show_member else None} for signup in signups]
 
+        # Official sign-ups -- same reasoning and scope as the referee block
+        # above, gated behind the "officials" waffle flag (mirrors
+        # EventDetailView's own official_signups, mobile/mixins.py's
+        # officials_enabled context var) since the feature isn't on for
+        # every club yet.
+        if self.managed_people and kind_filter != "training" and flag_is_active(self.request, "officials"):
+            official_signups = (
+                OfficialSignup.objects.filter(
+                    member__in=self.managed_people,
+                    event__club=self.request.club,
+                    event__cancelled=False,
+                    event__start__gte=now,
+                    status__in=[OfficialSignup.Status.INVITED, OfficialSignup.Status.ACCEPTED],
+                )
+                .select_related("event", "event__location", "event__opponent", "member")
+                .prefetch_related("event__teams")
+            )
+            rows += [{"event": signup.event, "official_signup": signup, "official_member": signup.member if show_member else None} for signup in official_signups]
+
         # A blocked event would otherwise just silently never appear (effective_
         # members() already excludes it from Attendance sync) -- shown here
         # instead, with which onboarding requirement is in the way, rather than
