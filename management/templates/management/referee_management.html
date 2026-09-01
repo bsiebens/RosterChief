@@ -7,6 +7,31 @@
 {% block filter_strip %}
     <div class="flex flex-wrap items-center gap-3 border-b border-line bg-white px-7 py-3">
         <div class="flex-1"></div>
+        {% if officials_enabled %}
+            {% comment %}
+                Which bucket the list itself renders -- referees-only,
+                officials-only, or both (the default, and the only option
+                when officials aren't on for this club at all, so this whole
+                toggle stays hidden then). Each label's own count is that
+                bucket's game count within the *currently selected* range
+                (see RefereeManagementDashboardView._apply_range) -- always
+                exactly what clicking it would show, not a separate total.
+            {% endcomment %}
+            <div class="flex items-center gap-1 rounded-full bg-steel p-1">
+                <a href="{% querystring need="referees" %}" class="flex items-center gap-1.5 rounded-full px-3 py-1.5 font-display text-xs font-bold tracking-[.08em] uppercase {% if need_choice == "referees" %}bg-white text-ink{% else %}text-on-dark hover:text-white{% endif %}">
+                    {% trans "Missing referees" %}
+                    <span class="rounded-full px-1.5 py-0.5 text-[11px] tabular-nums {% if need_choice == "referees" %}bg-ink text-white{% else %}bg-white/15 text-on-dark{% endif %}">{{ need_counts.referees }}</span>
+                </a>
+                <a href="{% querystring need="officials" %}" class="flex items-center gap-1.5 rounded-full px-3 py-1.5 font-display text-xs font-bold tracking-[.08em] uppercase {% if need_choice == "officials" %}bg-white text-ink{% else %}text-on-dark hover:text-white{% endif %}">
+                    {% trans "Missing officials" %}
+                    <span class="rounded-full px-1.5 py-0.5 text-[11px] tabular-nums {% if need_choice == "officials" %}bg-ink text-white{% else %}bg-white/15 text-on-dark{% endif %}">{{ need_counts.officials }}</span>
+                </a>
+                <a href="{% querystring need="both" %}" class="flex items-center gap-1.5 rounded-full px-3 py-1.5 font-display text-xs font-bold tracking-[.08em] uppercase {% if need_choice == "both" %}bg-white text-ink{% else %}text-on-dark hover:text-white{% endif %}">
+                    {% trans "Missing either" %}
+                    <span class="rounded-full px-1.5 py-0.5 text-[11px] tabular-nums {% if need_choice == "both" %}bg-ink text-white{% else %}bg-white/15 text-on-dark{% endif %}">{{ need_counts.both }}</span>
+                </a>
+            </div>
+        {% endif %}
         <div class="flex items-center gap-1 rounded-full bg-steel p-1">
             <a href="{% querystring range="week" %}" class="rounded-full px-3 py-1.5 font-display text-xs font-bold tracking-[.08em] uppercase {% if range_choice == "week" %}bg-white text-ink{% else %}text-on-dark hover:text-white{% endif %}">{% trans "This week" %}</a>
             <a href="{% querystring range="two_weeks" %}" class="rounded-full px-3 py-1.5 font-display text-xs font-bold tracking-[.08em] uppercase {% if range_choice == "two_weeks" %}bg-white text-ink{% else %}text-on-dark hover:text-white{% endif %}">{% trans "+ next week" %}</a>

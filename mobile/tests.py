@@ -4892,7 +4892,9 @@ class CoachCreateEventViewTests(TestCase):
 
     def test_can_set_opponent_and_competition_for_a_game(self):
         opponent = Opponent.objects.create(club=self.club, name="Rival FC")
-        Competition.objects.create(name="Regional League", module="none")
+        flag = get_waffle_flag_model().objects.create(name="regional-league")
+        flag.clubs.add(self.club)
+        Competition.objects.create(name="Regional League", module="none", flag=flag)
         self.client.force_login(self.user)
 
         # Title posted here doesn't stick -- EventForm.save() always retitles

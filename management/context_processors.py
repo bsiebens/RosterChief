@@ -384,16 +384,16 @@ def sidebar_counters(request):
         # Imported here rather than at module level to keep this module's own
         # import graph small -- management.views pulls in most of the app's
         # models/services, none of which any other context processor here needs.
-        from management.views import RefereeManagementDashboardView, games_missing_officials_count, games_missing_referees_count
+        from management.views import RefereeManagementDashboardView, games_missing_referee_or_official_count
 
         counters["pending_parent_claims_count"] = ParentClaim.objects.filter(club=club, status=ParentClaim.Status.PENDING).count()
-        # games_missing_officials_count is 0 whenever the "officials" flag is
-        # off for this club (checked inside that function itself) -- so this
-        # sum is just the referee count, unchanged, for every club that's
-        # never turned officials on.
-        counters["games_missing_referees_count"] = games_missing_referees_count(club, limit=int(RefereeManagementDashboardView.DEFAULT_RANGE)) + games_missing_officials_count(
-            club, limit=int(RefereeManagementDashboardView.DEFAULT_RANGE)
-        )
+        # games_missing_referee_or_official_count, not games_missing_referees_count(...)
+        # + games_missing_officials_count(...) -- that naive sum double-counts a
+        # game missing both (see that function's own docstring for why). It's
+        # 0 for the officials half whenever that flag is off for this club
+        # (checked inside the combined function itself), so this is just the
+        # referee count, unchanged, for every club that's never turned officials on.
+        counters["games_missing_referees_count"] = games_missing_referee_or_official_count(club, limit=int(RefereeManagementDashboardView.DEFAULT_RANGE))
 
     if is_club_admin(request.user, club):
         from management.views import signup_queue_count

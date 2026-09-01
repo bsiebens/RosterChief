@@ -668,16 +668,20 @@ class EventForm(EventAudienceFormMixin, forms.ModelForm):
     def __init__(self, *args, club=None, user=None, editing=False, **kwargs):
         super().__init__(*args, **kwargs)
         self.scope_audience_fields(club, user)
-        # Unlike the Django-admin form (events.admin.EventAdminForm), this dropdown
-        # isn't filtered by which competitions have their feature flag on for the
-        # club -- a manager should be able to pick any competition when scheduling a
-        # game; it's fetch_game_info (events.services.competitions) that gates the
-        # actual per-club fetch once a competition is set.
+        # Same filtering as the Django-admin form (events.admin.EventAdminForm):
+        # only a competition whose feature flag is active for this club is
+        # offered -- fetch_game_info (events.services.competitions) already
+        # gates the actual per-club fetch on this, so a manager choosing one
+        # this club hasn't got turned on would only ever silently fail to
+        # fetch anything. A competition with no flag never appears at all.
+        competitions = Competition.objects.filter(flag__isnull=False).select_related("flag")
+        if club is not None:
+            competitions = [competition for competition in competitions if competition.flag.is_active_for_club(club)]
         self.fields["competition"] = forms.ChoiceField(
-            choices=[("", "---------"), *[(competition.name, competition.name) for competition in Competition.objects.all()]],
+            choices=[("", "---------"), *[(competition.name, competition.name) for competition in competitions]],
             required=False,
             label=self.fields["competition"].label,
-            help_text=self.fields["competition"].help_text,
+            help_text=_("Only competitions whose feature flag is active for this club are offered here."),
         )
         # Same reasoning as management._official_assignment_panel.html only
         # showing up when the flag's on for this club -- offering a count

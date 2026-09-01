@@ -8,16 +8,21 @@ FROM node:22-slim AS css
 WORKDIR /build
 COPY package.json package-lock.json ./
 RUN npm ci
-# Every directory assets/app.css's @source lines scan -- miss one here and Tailwind's build
+# Every directory any assets/*.css's @source lines scan -- miss one here and Tailwind's build
 # silently emits no utilities for classes used only in that app's templates. Locally `npm run
 # build` runs against the full checkout and never shows this; only a container image, built
-# from just what's COPYed here, can.
+# from just what's COPYed here, can. `registration` (assets/management.css's own @source) and
+# `mobile` (assets/mobile.css's own @source) were missing here until this comment was added --
+# management.css and mobile.css were each silently missing every utility class used only in
+# that app's own templates, in every image built before this fix.
 COPY assets ./assets
 COPY templates ./templates
 COPY controlpanel ./controlpanel
 COPY billing ./billing
 COPY management ./management
 COPY club ./club
+COPY registration ./registration
+COPY mobile ./mobile
 RUN npm run build
 
 
@@ -87,6 +92,7 @@ COPY . .
 COPY --from=css /build/static/css/app.css ./static/css/app.css
 COPY --from=css /build/static/css/controlpanel.css ./static/css/controlpanel.css
 COPY --from=css /build/static/css/management.css ./static/css/management.css
+COPY --from=css /build/static/css/mobile.css ./static/css/mobile.css
 
 # collectstatic needs a settings module that imports: a throwaway key, never used at runtime.
 RUN DJANGO_SECRET_KEY=build-only-not-a-secret \

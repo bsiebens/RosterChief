@@ -6222,19 +6222,25 @@ class EventManagementTests(ManagementTestBase):
 
         self.assertEqual(response.status_code, 200)
 
-    def test_the_new_event_forms_competition_dropdown_shows_every_competition_regardless_of_flag(self):
-        # Unlike the Django-admin form, this dropdown isn't filtered by whether the
-        # competition's flag is active for the club -- see management.forms.EventForm
-        # and events.services.competitions.fetch_game_info (which is where that
-        # per-club gate actually lives).
-        Competition.objects.create(name="Active Cup", module="events.competition.active")
-        Competition.objects.create(name="Inactive Cup", module="events.competition.inactive")
+    def test_the_new_event_forms_competition_dropdown_only_offers_flags_active_for_this_club(self):
+        # Same filtering as the Django-admin form (events.admin.EventAdminForm) --
+        # see management.forms.EventForm. A flagless competition, or one whose
+        # flag isn't active for this club, never appears; fetch_game_info
+        # (events.services.competitions) would silently do nothing for either
+        # anyway, so offering them here would just be a dead end.
+        active_flag = get_waffle_flag_model().objects.create(name="active-competition")
+        active_flag.clubs.add(self.club)
+        inactive_flag = get_waffle_flag_model().objects.create(name="inactive-competition")
+        Competition.objects.create(name="Active Cup", module="events.competition.active", flag=active_flag)
+        Competition.objects.create(name="Inactive Cup", module="events.competition.inactive", flag=inactive_flag)
+        Competition.objects.create(name="Flagless Cup", module="events.competition.flagless")
         self.client.force_login(self.own_team_coach)
 
         response = self.club_get("event_create")
 
         self.assertContains(response, "Active Cup")
-        self.assertContains(response, "Inactive Cup")
+        self.assertNotContains(response, "Inactive Cup")
+        self.assertNotContains(response, "Flagless Cup")
 
     def test_a_team_manager_cannot_create_an_event_for_a_team_they_dont_manage(self):
         self.client.force_login(self.own_team_coach)
@@ -6552,7 +6558,9 @@ class EventManagementTests(ManagementTestBase):
         # scheduled -- the add form doesn't even offer those fields (see
         # test_the_add_form_has_no_score_or_live_fields below), so posting them
         # here has no effect.
-        Competition.objects.create(name="Regional Cup", module="events.competition.regional")
+        flag = get_waffle_flag_model().objects.create(name="regional-cup")
+        flag.clubs.add(self.club)
+        Competition.objects.create(name="Regional Cup", module="events.competition.regional", flag=flag)
         self.client.force_login(self.own_team_coach)
 
         self.club_post("event_create", self.event_data(kind="game", competition="Regional Cup", external_game_id="ext-42", score_for="3", score_against="1", is_live="on", is_friendly="on"))
@@ -6639,7 +6647,9 @@ class EventManagementTests(ManagementTestBase):
         self.assertEqual(game.max_officials, 3)
 
     def test_editing_a_game_can_record_its_score_and_live_status(self):
-        Competition.objects.create(name="Regional Cup", module="events.competition.regional")
+        flag = get_waffle_flag_model().objects.create(name="regional-cup")
+        flag.clubs.add(self.club)
+        Competition.objects.create(name="Regional Cup", module="events.competition.regional", flag=flag)
         game = Event.objects.create(club=self.club, title="Cup game", kind=Event.EventKind.GAME, start=timezone.now() + datetime.timedelta(days=1))
         game.teams.add(self.own_team)
         self.client.force_login(self.own_team_coach)
@@ -7733,6 +7743,124 @@ class RefereeManagementDashboardTests(ManagementTestBase):
         self.assertEqual(response.context["kpi_active_referees"], 0)
         self.assertEqual(response.context["kpi_avg_games_per_referee"], 0)
 
+    # --- the "need" toggle (referees / officials / both) ---
+
+    def setUp_officials(self):
+        # get_or_create, not create -- events/migrations/0031_create_officials_flag
+        # already seeded this row at migrate time, so a plain create() collides with
+        # it. waffle also caches Flag lookups outside the DB transaction each test
+        # rolls back -- see FeatureGatedSectionsTests' own identical setUp for why.
+        cache.clear()
+        self.addCleanup(cache.clear)
+        get_waffle_flag_model().objects.get_or_create(name="officials")[0].clubs.add(self.club)
+
+    def test_the_toggle_is_hidden_when_the_officials_flag_is_off(self):
+        self.make_game()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("referee_management")
+
+        self.assertNotContains(response, "Officials")
+
+    def test_a_fully_staffed_game_is_not_missing_a_referee(self):
+        # Regression: one internal + one external referee is 2 rows against
+        # Event.max_referees' own default of 2 -- fully staffed, so this game
+        # must not appear in "Missing referees" (or its count) just because
+        # it's still under this club's referee governance. Governance
+        # (upcoming_games_needing_referee_management) and "missing" (referee_
+        # count < max_referees) are different questions -- this toggle answers
+        # the second one.
+        game = self.make_game(title="Fully staffed")
+        EventReferee.objects.create(event=game, member=self.referee, assigned_by=self.admin_member)
+        add_external_referee(game, "Guest Ref", assigned_by=self.admin_member)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("referee_management", params={"need": "referees"})
+
+        self.assertEqual(response.context["need_counts"]["referees"], 0)
+        self.assertEqual(list(response.context["games"]), [])
+
+    def test_a_fully_staffed_game_is_excluded_from_missing_either_too(self):
+        game = self.make_game(title="Fully staffed")
+        EventReferee.objects.create(event=game, member=self.referee, assigned_by=self.admin_member)
+        add_external_referee(game, "Guest Ref", assigned_by=self.admin_member)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("referee_management")
+
+        self.assertEqual(response.context["need_choice"], "both")
+        self.assertEqual(list(response.context["games"]), [])
+
+    def test_each_buckets_count_matches_what_it_actually_shows(self):
+        self.setUp_officials()
+        # self.team defaults to referee_management=CLUB *and* official_management=CLUB,
+        # so this game needs both. federation_team opted out of referee tools
+        # (RefereeManagement.FEDERATION) but still defaults to official_management=CLUB,
+        # so its game needs officials only -- see teams.models.Team's own docstring on
+        # why the two are independent flags.
+        self.make_game(title="Needs both")
+        self.make_game(title="Needs officials only", team=self.federation_team)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("referee_management")
+
+        self.assertEqual(response.context["need_counts"], {"referees": 1, "officials": 2, "both": 2})
+
+    def test_referees_filter_excludes_an_officials_only_game(self):
+        self.setUp_officials()
+        both_game = self.make_game(title="Needs both")
+        self.make_game(title="Needs officials only", team=self.federation_team)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("referee_management", params={"need": "referees"})
+
+        self.assertEqual(response.context["need_choice"], "referees")
+        games = response.context["games"]
+        self.assertEqual([game.pk for game in games], [both_game.pk])
+
+    def test_officials_filter_excludes_a_referees_only_game(self):
+        self.setUp_officials()
+        # official_management=FEDERATION opts a team's games out of officials
+        # tools entirely, same as referee_management=FEDERATION does for
+        # referees -- see teams.models.Team's own docstring.
+        referees_only_team = Team.objects.create(club=self.club, name="Referees Only", short_name="RO", official_management=Team.OfficialManagement.FEDERATION)
+        officials_only_game = self.make_game(title="Needs officials only", team=self.federation_team)
+        self.make_game(title="Needs referees only", team=referees_only_team)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("referee_management", params={"need": "officials"})
+
+        games = response.context["games"]
+        self.assertEqual([game.pk for game in games], [officials_only_game.pk])
+
+    def test_both_is_the_default_and_shows_every_game(self):
+        self.setUp_officials()
+        both_game = self.make_game(title="Needs both")
+        officials_only_game = self.make_game(title="Needs officials only", team=self.federation_team)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("referee_management")
+
+        self.assertEqual(response.context["need_choice"], "both")
+        games = response.context["games"]
+        self.assertEqual({game.pk for game in games}, {both_game.pk, officials_only_game.pk})
+
+    def test_an_unknown_need_value_falls_back_to_both(self):
+        self.setUp_officials()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("referee_management", params={"need": "bogus"})
+
+        self.assertEqual(response.context["need_choice"], "both")
+
+    def test_need_officials_falls_back_to_both_when_the_flag_is_off(self):
+        # No setUp_officials() here -- the flag stays off for this club.
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("referee_management", params={"need": "officials"})
+
+        self.assertEqual(response.context["need_choice"], "both")
+
 
 class FeatureGatedSectionsTests(ManagementTestBase):
     """The Shop and Forms sections are still stubs (StubListMixin) and, on top
@@ -8762,6 +8890,40 @@ class SidebarCounterTests(ManagementTestBase):
         response = self.club_get("home")
 
         self.assertEqual(response.context["games_missing_referees_count"], 0)
+
+    def test_a_game_missing_both_referee_and_official_counts_once_not_twice(self):
+        # get_or_create, not create -- events/migrations/0031_create_officials_flag
+        # already seeds this row at migrate time, so a plain create() collides.
+        cache.clear()
+        self.addCleanup(cache.clear)
+        get_waffle_flag_model().objects.get_or_create(name="officials")[0].clubs.add(self.club)
+        # make_home_game's team defaults to CLUB for both referee_management and
+        # official_management, so one unstaffed game needs both -- the naive
+        # games_missing_referees_count(...) + games_missing_officials_count(...)
+        # would count it twice (1 + 1 = 2) for what's actually one game.
+        self.make_home_game()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("home")
+
+        self.assertEqual(response.context["games_missing_referees_count"], 1)
+
+    def test_a_referee_assigned_game_still_counts_when_missing_an_official(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
+        get_waffle_flag_model().objects.get_or_create(name="officials")[0].clubs.add(self.club)
+        referee = Member.objects.create(first_name="Ref", last_name="Eree")
+        ClubMembership.objects.create(club=self.club, member=referee, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        # A referee assigned takes this game out of the referee side (see
+        # test_a_refereed_game_does_not_count above), but it has no official
+        # assigned at all -- the combined count must still surface it as 1,
+        # not silently drop it because the referee side alone is settled.
+        self.make_home_game(referee=referee)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("home")
+
+        self.assertEqual(response.context["games_missing_referees_count"], 1)
 
     def test_an_already_reviewed_claim_does_not_count(self):
         claim = self.make_pending_claim()
