@@ -30,6 +30,12 @@
                     <option value="{{ value }}" {% if value == selected_kind %}selected{% endif %}>{{ label }}</option>
                 {% endfor %}
             </select>
+            <select name="team" class="select w-auto">
+                <option value="">{% trans "All teams" %}</option>
+                {% for team in teams %}
+                    <option value="{{ team.pk }}" {% if selected_team == team.pk|stringformat:"s" %}selected{% endif %}>{{ team.name }}</option>
+                {% endfor %}
+            </select>
             {% if view_mode == "list" %}
                 <label class="flex cursor-pointer items-center gap-2 text-sm text-slate">
                     <input type="checkbox" name="show_past" value="1" class="checkbox" {% if show_past %}checked{% endif %} onchange="this.form.submit()">

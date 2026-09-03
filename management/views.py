@@ -3059,6 +3059,9 @@ class EventListView(ClubStaffRequiredMixin, ListView):
         kind = self.request.GET.get("kind", "")
         if kind:
             events = events.filter(kind=kind)
+        self.selected_team = self.request.GET.get("team", "")
+        if self.selected_team:
+            events = events.filter(teams__id=self.selected_team).distinct()
         return scoped_to_managed_teams(events, user, club)
 
     def get_queryset(self):
@@ -3158,6 +3161,8 @@ class EventListView(ClubStaffRequiredMixin, ListView):
             seasons=Season.objects.filter(club=club).order_by("-start_date"),
             selected_season=selected_season,
             selected_kind=self.request.GET.get("kind", ""),
+            selected_team=self.selected_team,
+            teams=Team.objects.filter(club=club),
             show_past=show_past,
             event_kinds=Event.EventKind.choices,
             can_create=is_club_admin(user, club) or teams_managed_by(user, club).exists(),
