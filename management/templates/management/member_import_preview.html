@@ -38,8 +38,12 @@
                         <td class="text-muted">{{ result.raw.email }}</td>
                         <td>
                             {% if result.family_group %}
-                                {{ result.family_group }}
-                                {% if result.family_role %}<span class="badge badge-neutral badge-sm">{{ result.family_role|capfirst }}</span>{% endif %}
+                                <div class="flex items-center gap-2">
+                                    <span class="inline-flex min-w-28 items-center gap-1 truncate" title="{{ result.family_group }}">{% lucide "users" size=12 %} {{ result.family_group }}</span>
+                                    {% if result.family_role %}
+                                        <span class="badge badge-sm w-16 shrink-0 justify-center {% if result.family_role == "child" %}badge-outline{% else %}badge-info{% endif %}">{{ result.family_role|capfirst }}</span>
+                                    {% endif %}
+                                </div>
                             {% else %}
                                 <span class="text-dim">—</span>
                             {% endif %}

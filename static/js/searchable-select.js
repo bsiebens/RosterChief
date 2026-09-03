@@ -95,7 +95,8 @@
         window.addEventListener("resize", () => { if (!list.classList.contains("hidden")) positionList(); });
 
         select.parentNode.insertBefore(wrapper, select);
-        // list is appended to <body>, not into wrapper, even though it's only ever
+        // list lives under the nearest open <dialog> (a daisyUI `.modal`), or
+        // <body> otherwise -- not inside `wrapper`, even though it's only ever
         // positioned via positionList()'s own inline top/left/bottom -- a `fixed`
         // element's containing block becomes its nearest ancestor with a `transform`
         // (or filter/perspective/will-change) rather than the viewport, and
@@ -103,9 +104,22 @@
         // (transform: translateX(...), see assets/management.css), which silently
         // repositioned the whole dropdown relative to the drawer instead of the
         // screen -- rect math from getBoundingClientRect() (always viewport-relative)
-        // then pointed nowhere useful. Living directly under <body> keeps it immune
-        // to any such ancestor, present or future, anywhere this widget is used.
-        document.body.appendChild(list);
+        // then pointed nowhere useful. Living directly under such an ancestor
+        // keeps it immune to any such ancestor, present or future, anywhere
+        // this widget is used.
+        //
+        // A <dialog> shown via showModal() paints in the browser's top layer,
+        // above every element outside it regardless of z-index -- appending to
+        // <body> put the list back among that regular stacking order, behind
+        // the modal itself (see add_staff_modal in team_detail.html). Appending
+        // into the dialog (as a sibling of .modal-box, not inside it -- daisyUI
+        // animates .modal-box's own `translate`/`scale`, which would otherwise
+        // become this list's containing block) keeps it in the same top-layer
+        // paint order, on top of the modal's content. `.modal` itself sets
+        // `overflow:clip`, but that doesn't clip a `fixed` descendant whose
+        // containing block is the viewport (same escape hatch as above).
+        const listHost = select.closest("dialog") || document.body;
+        listHost.appendChild(list);
         if (isMultiple) {
             // Chips render below the input, not above it: above meant every pick grew
             // the block ahead of the input and shoved it (and your cursor) down --
