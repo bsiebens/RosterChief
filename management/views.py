@@ -215,7 +215,7 @@ class HomeView(ClubStaffRequiredMixin, TemplateView):
             if latest_due is not None and 0 <= (latest_due.period_end - timezone.localdate()).days <= subscription.plan.renewal_lead_days:
                 billing_ends_at = latest_due.period_end
 
-        upcoming_events = scoped_to_managed_teams(Event.objects.filter(club=club, start__gte=timezone.now()), user, club).order_by("start").prefetch_related("teams")[:5]
+        upcoming_events = scoped_to_managed_teams(Event.objects.filter(club=club, start__gte=timezone.now()), user, club).order_by("start").prefetch_related("teams")[:10]
 
         attention = club_attention(club)
         season = attention["season"]
@@ -605,9 +605,7 @@ class MembershipListView(ClubAdminRequiredMixin, ListView):
             registration_batch = registration_batches_by_membership_id.get(membership.pk)
             membership.registration_batch = registration_batch
             membership.registration_invoice_batch = None if dues_invoice else registration_batch
-            membership.registration_invoice_is_overdue = bool(
-                registration_batch and registration_batch.invoice_due_date and registration_batch.invoice_due_date < timezone.localdate() and membership.fee_status != ClubMembership.FeeStatus.PAID
-            )
+            membership.registration_invoice_is_overdue = bool(registration_batch and registration_batch.invoice_due_date and registration_batch.invoice_due_date < timezone.localdate() and membership.fee_status != ClubMembership.FeeStatus.PAID)
             # Every parent/guardian on record, not just whoever the member's
             # own contact_email happens to be (own email first when they
             # have one, each guardian's own labelled by their actual role in
@@ -1376,11 +1374,7 @@ class TeamDetailView(ClubStaffRequiredMixin, DetailView):
             # forms below) -- a coach needs to see who's still PENDING
             # (registered, possibly already placed here, but not yet
             # approved on Sign-up) just as much as an admin does.
-            pending_member_ids = set(
-                ClubMembership.objects.filter(club=club, season=season, member_id__in=[membership.member_id for membership in roster], status=ClubMembership.StatusChoices.PENDING).values_list(
-                    "member_id", flat=True
-                )
-            )
+            pending_member_ids = set(ClubMembership.objects.filter(club=club, season=season, member_id__in=[membership.member_id for membership in roster], status=ClubMembership.StatusChoices.PENDING).values_list("member_id", flat=True))
             for membership in roster:
                 membership.club_status_pending = membership.member_id in pending_member_ids
             if can_manage:
@@ -1390,9 +1384,7 @@ class TeamDetailView(ClubStaffRequiredMixin, DetailView):
                 # editable) only while nothing's been typed in yet, so
                 # editing the field afterwards can't be silently overwritten
                 # by revisiting this page.
-                requested_numbers = dict(
-                    RegistrationDetails.objects.filter(membership__club=club, membership__season=season, requested_team=team).exclude(requested_jersey_number=None).values_list("membership__member_id", "requested_jersey_number")
-                )
+                requested_numbers = dict(RegistrationDetails.objects.filter(membership__club=club, membership__season=season, requested_team=team).exclude(requested_jersey_number=None).values_list("membership__member_id", "requested_jersey_number"))
                 for membership in roster:
                     initial = {"jersey_number": requested_numbers[membership.member_id]} if membership.jersey_number is None and membership.member_id in requested_numbers else None
                     membership.edit_form = TeamMembershipForm(instance=membership, club=club, team=team, season=season, initial=initial)
@@ -1427,9 +1419,9 @@ class TeamDetailView(ClubStaffRequiredMixin, DetailView):
             # same reasoning as events.services.referees.eligible_referees, since
             # a level may qualify for this team only via what it inherits from.
             eligible_referees=(
-                Member.objects.filter(
-                    referee_profile__level_id__in=[level.pk for level in RefereeLevel.objects.filter(club=club) if team.pk in level.eligible_team_ids()], referee_profile__valid_until__gte=timezone.localdate()
-                ).order_by("last_name", "first_name")
+                Member.objects.filter(referee_profile__level_id__in=[level.pk for level in RefereeLevel.objects.filter(club=club) if team.pk in level.eligible_team_ids()], referee_profile__valid_until__gte=timezone.localdate()).order_by(
+                    "last_name", "first_name"
+                )
                 if team.referee_management == Team.RefereeManagement.CLUB
                 else None
             ),
@@ -2966,7 +2958,7 @@ class NewsPhotoSetFocalPointView(NewsEditRequiredMixin, View):
         try:
             focal_x = int(request.POST["focal_x"])
             focal_y = int(request.POST["focal_y"])
-        except (KeyError, ValueError):
+        except KeyError, ValueError:
             notify(request, f"e|{_('Could not set focal point')}|{_('That was not a valid position.')}")
             return redirect("management:news_detail", pk=news_item.pk)
 
@@ -3051,11 +3043,7 @@ class EventListView(ClubStaffRequiredMixin, ListView):
 
     def _base_queryset(self):
         club, user = self.request.club, self.request.user
-        events = (
-            Event.objects.filter(club=club)
-            .select_related("location", "opponent")
-            .prefetch_related("teams", "tasks__claims__member", "referees__member", "officials__member")
-        )
+        events = Event.objects.filter(club=club).select_related("location", "opponent").prefetch_related("teams", "tasks__claims__member", "referees__member", "officials__member")
         kind = self.request.GET.get("kind", "")
         if kind:
             events = events.filter(kind=kind)
@@ -3524,9 +3512,7 @@ class EventOfficialFormPdfView(OfficialsAdminRequiredMixin, View):
         event = get_object_or_404(Event.objects.filter(club=request.club).prefetch_related("teams", "officials__member"), pk=pk)
         document_address = resolve_document_address(request.club)
         officials = list(event.officials.all())
-        context = {"club": request.club, "event": event, "officials": officials, "document_address": document_address, "grand_total": sum((official.total_payable for official in officials), Decimal("0"))} | referee_form_colors(
-            request.club
-        )
+        context = {"club": request.club, "event": event, "officials": officials, "document_address": document_address, "grand_total": sum((official.total_payable for official in officials), Decimal("0"))} | referee_form_colors(request.club)
 
         try:
             pdf = event_official_form_pdf(context)
@@ -3657,11 +3643,7 @@ def referee_workload_stats(club):
         # date when left blank"), so matching the FK directly would silently
         # exclude almost everything.
         queryset = queryset.filter(event__start__date__gte=season.start_date, event__start__date__lte=season.end_date)
-    return list(
-        queryset.values("member__id", "member__first_name", "member__last_name")
-        .annotate(games=Count("id"), total_fees=Sum("fee"))
-        .order_by("-games", "member__last_name")
-    )
+    return list(queryset.values("member__id", "member__first_name", "member__last_name").annotate(games=Count("id"), total_fees=Sum("fee")).order_by("-games", "member__last_name"))
 
 
 def games_missing_referees_count(club, limit=10):
@@ -4505,9 +4487,7 @@ class ProductCreateView(ShopManagerRequiredMixin, View):
             product = form.save(commit=False)
             product.club = request.club
             product.save()
-            ProductVariant.objects.bulk_create(
-                [ProductVariant(product=product, name=row["name"], price=row.get("price")) for row in variant_formset.cleaned_data if row.get("name")]
-            )
+            ProductVariant.objects.bulk_create([ProductVariant(product=product, name=row["name"], price=row.get("price")) for row in variant_formset.cleaned_data if row.get("name")])
             ProductRegistrantDiscountTier.objects.bulk_create(
                 [ProductRegistrantDiscountTier(product=product, min_registrants=row["min_registrants"], discount_type=row["discount_type"], discount_amount=row["discount_amount"]) for row in tier_formset.cleaned_data if row.get("min_registrants")]
             )
@@ -6597,11 +6577,7 @@ def signup_queue_count(club, season):
     memberships = list(ClubMembership.objects.filter(club=club, season=season, kind=ClubMembership.Kind.MEMBER).exclude(pk__in=membership_ids_awaiting_confirmation(club)))
     annotate_onboarding_status(memberships)
     clean_fee_statuses = (ClubMembership.FeeStatus.PAID, ClubMembership.FeeStatus.WAIVED)
-    return sum(
-        1
-        for membership in memberships
-        if not (membership.status == ClubMembership.StatusChoices.ACTIVE and membership.onboarding_open == 0 and membership.fee_status in clean_fee_statuses)
-    )
+    return sum(1 for membership in memberships if not (membership.status == ClubMembership.StatusChoices.ACTIVE and membership.onboarding_open == 0 and membership.fee_status in clean_fee_statuses))
 
 
 class SignupDashboardView(ClubAdminRequiredMixin, TemplateView):
@@ -6646,10 +6622,7 @@ class SignupDashboardView(ClubAdminRequiredMixin, TemplateView):
             # both), so it's a to-many relation: prefetch_related, not
             # select_related.
             memberships = list(
-                ClubMembership.objects.filter(club=club, season=season, kind=ClubMembership.Kind.MEMBER)
-                .exclude(pk__in=membership_ids_awaiting_confirmation(club))
-                .select_related("member")
-                .prefetch_related("registration_details__requested_team")
+                ClubMembership.objects.filter(club=club, season=season, kind=ClubMembership.Kind.MEMBER).exclude(pk__in=membership_ids_awaiting_confirmation(club)).select_related("member").prefetch_related("registration_details__requested_team")
             )
             # Sorted in Python, not via .order_by("-status", ...): StatusChoices'
             # string values only put PENDING first alphabetically by accident, and
@@ -6865,9 +6838,7 @@ class VolunteerListView(MemberAdminRequiredMixin, TemplateView):
                 ).select_related("membership__member", "requested_team", "requested_position")
             )
             for details in pending:
-                details.placement_form = VolunteerPlacementForm(
-                    club=club, season=season, member=details.membership.member, initial={"team": details.requested_team_id, "position": details.requested_position_id}
-                )
+                details.placement_form = VolunteerPlacementForm(club=club, season=season, member=details.membership.member, initial={"team": details.requested_team_id, "position": details.requested_position_id})
 
         return super().get_context_data(season=season, volunteers=volunteers, pending=pending, **kwargs)
 
