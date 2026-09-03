@@ -21,6 +21,7 @@ from bs4 import BeautifulSoup
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
+from django.utils.translation import gettext_lazy as _
 
 from events.models import Event, Location, Opponent
 
@@ -271,7 +272,7 @@ def apply_plan(plan: ImportPlan, locations_by_game_id: dict, opponents_by_game_i
             opponent = resolve_opponent(planned.fixture)
             event = Event.objects.create(
                 club=plan.club,
-                title=f"vs {opponent.name}",
+                title=f"{plan.team.short_name} {_('vs')} {opponent.name}",
                 kind=Event.EventKind.GAME,
                 start=planned.fixture.start,
                 competition="RBIHF",

@@ -25,7 +25,9 @@
                                         <th>{% trans "#" %}</th>
                                         <th>{% trans "Start" %}</th>
                                         <th>{% trans "Opponent" %}</th>
+                                        <th>{% trans "RBIHF opponent" %}</th>
                                         <th>{% trans "Location" %}</th>
+                                        <th>{% trans "RBIHF venue" %}</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -34,27 +36,23 @@
                                             <td class="font-mono text-xs">{{ planned.fixture.external_game_id }}</td>
                                             <td class="font-mono text-xs">{{ planned.fixture.start|date:"Y-m-d H:i" }}</td>
                                             <td>
-                                                <div class="flex items-center gap-2">
-                                                    <select name="opponent_{{ planned.fixture.external_game_id }}" class="select w-full">
-                                                        <option value="">{% trans "Use scraped name" %}</option>
-                                                        {% for opponent in plan.opponent_choices %}
-                                                            <option value="{{ opponent.pk }}" {% if planned.suggested_opponent.pk == opponent.pk %}selected{% endif %}>{{ opponent.name }}</option>
-                                                        {% endfor %}
-                                                    </select>
-                                                    <span class="text-xs whitespace-nowrap text-muted">{% blocktrans with opponent=planned.fixture.opponent_name %}RBIHF: {{ opponent }}{% endblocktrans %}</span>
-                                                </div>
+                                                <select name="opponent_{{ planned.fixture.external_game_id }}" class="select w-full">
+                                                    <option value="">{% trans "Use scraped name" %}</option>
+                                                    {% for opponent in plan.opponent_choices %}
+                                                        <option value="{{ opponent.pk }}" {% if planned.suggested_opponent.pk == opponent.pk %}selected{% endif %}>{{ opponent.name }}</option>
+                                                    {% endfor %}
+                                                </select>
                                             </td>
+                                            <td class="text-xs whitespace-nowrap text-muted">{{ planned.fixture.opponent_name }}</td>
                                             <td>
-                                                <div class="flex items-center gap-2">
-                                                    <select name="location_{{ planned.fixture.external_game_id }}" class="select w-full">
-                                                        <option value="">&mdash;</option>
-                                                        {% for location in plan.location_choices %}
-                                                            <option value="{{ location.pk }}" {% if planned.suggested_location.pk == location.pk %}selected{% endif %}>{{ location.name }}</option>
-                                                        {% endfor %}
-                                                    </select>
-                                                    <span class="text-xs whitespace-nowrap text-muted">{% blocktrans with venue=planned.fixture.venue_text %}RBIHF: {{ venue }}{% endblocktrans %}</span>
-                                                </div>
+                                                <select name="location_{{ planned.fixture.external_game_id }}" class="select w-full">
+                                                    <option value="">&mdash;</option>
+                                                    {% for location in plan.location_choices %}
+                                                        <option value="{{ location.pk }}" {% if planned.suggested_location.pk == location.pk %}selected{% endif %}>{{ location.name }}</option>
+                                                    {% endfor %}
+                                                </select>
                                             </td>
+                                            <td class="text-xs whitespace-nowrap text-muted">{{ planned.fixture.venue_text }}</td>
                                         </tr>
                                     {% endfor %}
                                 </tbody>
@@ -76,7 +74,9 @@
                                         <th>{% trans "#" %}</th>
                                         <th>{% trans "Changes" %}</th>
                                         <th>{% trans "Opponent" %}</th>
+                                        <th>{% trans "RBIHF opponent" %}</th>
                                         <th>{% trans "Location" %}</th>
+                                        <th>{% trans "RBIHF venue" %}</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -94,27 +94,23 @@
                                                 {% endfor %}
                                             </td>
                                             <td>
-                                                <div class="flex items-center gap-2">
-                                                    <select name="opponent_{{ planned.fixture.external_game_id }}" class="select w-full">
-                                                        <option value="">{% trans "Use scraped name" %}</option>
-                                                        {% for opponent in plan.opponent_choices %}
-                                                            <option value="{{ opponent.pk }}" {% if planned.suggested_opponent.pk == opponent.pk %}selected{% endif %}>{{ opponent.name }}</option>
-                                                        {% endfor %}
-                                                    </select>
-                                                    <span class="text-xs whitespace-nowrap text-muted">{% blocktrans with opponent=planned.fixture.opponent_name %}RBIHF: {{ opponent }}{% endblocktrans %}</span>
-                                                </div>
+                                                <select name="opponent_{{ planned.fixture.external_game_id }}" class="select w-full">
+                                                    <option value="">{% trans "Use scraped name" %}</option>
+                                                    {% for opponent in plan.opponent_choices %}
+                                                        <option value="{{ opponent.pk }}" {% if planned.suggested_opponent.pk == opponent.pk %}selected{% endif %}>{{ opponent.name }}</option>
+                                                    {% endfor %}
+                                                </select>
                                             </td>
+                                            <td class="text-xs whitespace-nowrap text-muted">{{ planned.fixture.opponent_name }}</td>
                                             <td>
-                                                <div class="flex items-center gap-2">
-                                                    <select name="location_{{ planned.fixture.external_game_id }}" class="select w-full">
-                                                        <option value="">&mdash;</option>
-                                                        {% for location in plan.location_choices %}
-                                                            <option value="{{ location.pk }}" {% if planned.suggested_location.pk == location.pk %}selected{% endif %}>{{ location.name }}</option>
-                                                        {% endfor %}
-                                                    </select>
-                                                    <span class="text-xs whitespace-nowrap text-muted">{% blocktrans with venue=planned.fixture.venue_text %}RBIHF: {{ venue }}{% endblocktrans %}</span>
-                                                </div>
+                                                <select name="location_{{ planned.fixture.external_game_id }}" class="select w-full">
+                                                    <option value="">&mdash;</option>
+                                                    {% for location in plan.location_choices %}
+                                                        <option value="{{ location.pk }}" {% if planned.suggested_location.pk == location.pk %}selected{% endif %}>{{ location.name }}</option>
+                                                    {% endfor %}
+                                                </select>
                                             </td>
+                                            <td class="text-xs whitespace-nowrap text-muted">{{ planned.fixture.venue_text }}</td>
                                         </tr>
                                     {% endfor %}
                                 </tbody>
