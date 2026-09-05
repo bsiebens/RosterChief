@@ -8935,6 +8935,37 @@ class SidebarCounterTests(ManagementTestBase):
 
         self.assertEqual(response.context["pending_parent_claims_count"], 0)
 
+    def test_a_fully_staffed_game_does_not_crowd_out_the_next_limit_window(self):
+        # Regression: the badge used to slice to the next `limit` games BEFORE
+        # dropping fully-staffed ones, while RefereeManagementDashboardView's own
+        # kpi_no_referee (for the same default range) filters to understaffed
+        # games first and only then slices. A fully-staffed game chronologically
+        # ahead of the unstaffed ones used to eat a slot in the badge's window
+        # without eating one in the dashboard's, so the two disagreed -- the
+        # inconsistency reported from production.
+        team = Team.objects.create(club=self.club, name="First Team", short_name="1st")
+        home_ground = Location.objects.create(club=self.club, name="Home Ground", address="1 St", city="Town", zip_code="1000", country="BE", is_home=True)
+        referees = [Member.objects.create(first_name=f"Ref{i}", last_name="Eree") for i in range(2)]
+        for referee in referees:
+            ClubMembership.objects.create(club=self.club, member=referee, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+
+        staffed = Event.objects.create(club=self.club, title="Staffed game", kind=Event.EventKind.GAME, location=home_ground, start=timezone.now() + datetime.timedelta(days=1))
+        staffed.teams.add(team)
+        for referee in referees:
+            EventReferee.objects.create(event=staffed, member=referee, assigned_by=self.admin_member)
+
+        for day in range(2, 12):
+            event = Event.objects.create(club=self.club, title=f"Unstaffed game {day}", kind=Event.EventKind.GAME, location=home_ground, start=timezone.now() + datetime.timedelta(days=day))
+            event.teams.add(team)
+
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("home")
+        dashboard_response = self.club_get("referee_management")
+
+        self.assertEqual(response.context["games_missing_referees_count"], 10)
+        self.assertEqual(dashboard_response.context["kpi_no_referee"], 10)
+
     def test_a_non_admin_gets_no_counters_and_no_badge_links(self):
         coach_user = User.objects.create_user(email="coach-badge@example.com", password="pw-secret-123")
         coach_member = Member.objects.create(user=coach_user, first_name="Cara", last_name="Coach")

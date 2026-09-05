@@ -3647,12 +3647,19 @@ def referee_workload_stats(club):
 
 
 def games_missing_referees_count(club, limit=10):
-    """How many of the next `limit` upcoming club-managed home games have nobody
-    assigned yet -- the same games RefereeManagementDashboardView's own
-    kpi_no_referee counts for its default "next 10" range, but via one annotated
-    query rather than the per-game referee_rows/eligible_referees loop the
-    dashboard builds for rendering (which a nav badge has no use for)."""
-    games = upcoming_games_needing_referee_management(club).annotate(referee_count=Count("referees", distinct=True))[:limit]
+    """How many of the next `limit` upcoming, understaffed club-managed home
+    games have nobody assigned yet -- the same games RefereeManagementDashboardView's
+    own kpi_no_referee counts for its default "next 10" range, but via one
+    annotated query rather than the per-game referee_rows/eligible_referees
+    loop the dashboard builds for rendering (which a nav badge has no use for).
+
+    Filter to understaffed (referee_count < max_referees) BEFORE slicing to
+    `limit`, not after: the dashboard's own referee_qs does the same, so a
+    fully-staffed game chronologically ahead of an unstaffed one doesn't eat
+    a slot in the "next `limit`" window and silently shrink the badge below
+    what the page itself shows for the same range.
+    """
+    games = upcoming_games_needing_referee_management(club).annotate(referee_count=Count("referees", distinct=True)).filter(referee_count__lt=F("max_referees"))[:limit]
     return sum(1 for game in games if game.referee_count == 0)
 
 
@@ -3678,10 +3685,11 @@ def games_missing_officials_count(club, limit=10):
     """The officials counterpart to games_missing_referees_count -- 0 when
     the "officials" flag is off for this club, same as every other officials
     entry point (checked here, not just at the view layer, since this feeds
-    the nav badge directly)."""
+    the nav badge directly). Filters to understaffed before slicing to
+    `limit`, for the same reason games_missing_referees_count does."""
     if not officials_enabled_for(club):
         return 0
-    games = upcoming_games_needing_official_management(club).annotate(official_count=Count("officials", distinct=True))[:limit]
+    games = upcoming_games_needing_official_management(club).annotate(official_count=Count("officials", distinct=True)).filter(official_count__lt=F("max_officials"))[:limit]
     return sum(1 for game in games if game.official_count == 0)
 
 
@@ -3697,11 +3705,11 @@ def games_missing_referee_or_official_count(club, limit=10):
     sidebar_counters, and RefereeManagementDashboardView's own kpi_total for
     the same "count distinct games, not distinct (game, gap) pairs" rule.
     """
-    referee_games = upcoming_games_needing_referee_management(club).annotate(referee_count=Count("referees", distinct=True))[:limit]
+    referee_games = upcoming_games_needing_referee_management(club).annotate(referee_count=Count("referees", distinct=True)).filter(referee_count__lt=F("max_referees"))[:limit]
     missing_ids = {game.pk for game in referee_games if game.referee_count == 0}
 
     if officials_enabled_for(club):
-        official_games = upcoming_games_needing_official_management(club).annotate(official_count=Count("officials", distinct=True))[:limit]
+        official_games = upcoming_games_needing_official_management(club).annotate(official_count=Count("officials", distinct=True)).filter(official_count__lt=F("max_officials"))[:limit]
         missing_ids |= {game.pk for game in official_games if game.official_count == 0}
 
     return len(missing_ids)
