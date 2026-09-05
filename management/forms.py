@@ -570,8 +570,10 @@ def _location_label(location) -> str:
     """"Name — City" for the location picker, plus the country when it isn't
     Belgium (the club's home country and, in practice, nearly every location
     a club will ever add) -- lets an admin tell two same-named venues apart,
-    or spot an away trip abroad, straight from the dropdown."""
-    label = f"{location.name} — {location.city}"
+    or spot an away trip abroad, straight from the dropdown. Just the name
+    when the two are identical (e.g. a venue named after its own city) --
+    "City — City" says nothing "City" doesn't already."""
+    label = location.name if location.name == location.city else f"{location.name} — {location.city}"
     if location.country.code != "BE":
         label += f", {location.country.name}"
     return label
@@ -716,12 +718,23 @@ class EventForm(EventAudienceFormMixin, forms.ModelForm):
         # the real picked values either way. Left alone whenever there's no
         # opponent yet (a game can be scheduled before the opponent is
         # confirmed) or no team, rather than producing a half title.
+        #
+        # Home side first, away side second -- not "us first" -- same
+        # Location.is_home the calendar's own "Home game"/"Away game" label
+        # (Event.is_home_game) already keys off. No location at all keeps the
+        # historical "us first" ordering (there's nothing to say otherwise);
+        # only a location explicitly on record as *not* the club's home ground
+        # flips it.
         if self.cleaned_data.get("kind") == Event.EventKind.GAME:
             teams = self.cleaned_data.get("teams")
             opponent = self.cleaned_data.get("opponent")
             if teams and opponent:
                 vs = _("vs")
-                self.instance.title = f"{', '.join(team.short_name for team in teams)} {vs} {opponent}"
+                us = ", ".join(team.short_name for team in teams)
+                location = self.cleaned_data.get("location")
+                is_away = location is not None and not location.is_home
+                home_side, away_side = (opponent, us) if is_away else (us, opponent)
+                self.instance.title = f"{home_side} {vs} {away_side}"
         return super().save(commit=commit)
 
 

@@ -6144,6 +6144,24 @@ class EventManagementTests(ManagementTestBase):
 
         self.assertContains(response, "Rival Hall — Lille, France")
 
+    def test_the_location_dropdown_omits_the_redundant_city_when_they_match(self):
+        Location.objects.create(club=self.club, name="Mechelen", address="Straat 1", city="Mechelen", zip_code="2800", country="BE")
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("event_create")
+
+        self.assertContains(response, "Mechelen")
+        self.assertNotContains(response, "Mechelen — Mechelen")
+
+    def test_the_location_dropdown_still_adds_the_country_when_name_and_city_match(self):
+        Location.objects.create(club=self.club, name="Lille", address="Rue 2", city="Lille", zip_code="59000", country="FR")
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("event_create")
+
+        self.assertContains(response, "Lille, France")
+        self.assertNotContains(response, "Lille — Lille")
+
     def test_the_location_field_is_searchable(self):
         self.client.force_login(self.admin_user)
 
@@ -6597,6 +6615,48 @@ class EventManagementTests(ManagementTestBase):
 
         game.refresh_from_db()
         self.assertEqual(game.title, f"{self.own_team.short_name} vs {new_opponent}")
+
+    def test_a_home_game_lists_the_home_team_first(self):
+        # self.home_ground is_home=True -- unchanged from the plain "us vs
+        # opponent" convention, since we ARE the home side.
+        opponent = Opponent.objects.create(club=self.club, name="Rivals FC")
+        self.client.force_login(self.own_team_coach)
+
+        self.club_post("event_create", self.event_data(kind="game", opponent=str(opponent.pk), location=str(self.home_ground.pk)))
+
+        game = Event.objects.get(opponent=opponent)
+        self.assertEqual(game.title, f"{self.own_team.short_name} vs {opponent}")
+
+    def test_an_away_game_lists_the_opponent_first(self):
+        away_ground = Location.objects.create(club=self.club, name="Their Rink", address="2 St", city="Elsewhere", zip_code="2000", country="BE", is_home=False)
+        opponent = Opponent.objects.create(club=self.club, name="Rivals FC")
+        self.client.force_login(self.own_team_coach)
+
+        self.club_post("event_create", self.event_data(kind="game", opponent=str(opponent.pk), location=str(away_ground.pk)))
+
+        game = Event.objects.get(opponent=opponent)
+        self.assertEqual(game.title, f"{opponent} vs {self.own_team.short_name}")
+
+    def test_a_game_with_no_location_yet_keeps_the_historical_us_first_order(self):
+        opponent = Opponent.objects.create(club=self.club, name="Rivals FC")
+        self.client.force_login(self.own_team_coach)
+
+        self.club_post("event_create", self.event_data(kind="game", opponent=str(opponent.pk)))
+
+        game = Event.objects.get(opponent=opponent)
+        self.assertEqual(game.title, f"{self.own_team.short_name} vs {opponent}")
+
+    def test_editing_a_home_game_to_an_away_location_flips_the_title(self):
+        away_ground = Location.objects.create(club=self.club, name="Their Rink", address="2 St", city="Elsewhere", zip_code="2000", country="BE", is_home=False)
+        opponent = Opponent.objects.create(club=self.club, name="Rivals FC")
+        game = Event.objects.create(club=self.club, title="Old title", kind=Event.EventKind.GAME, start=timezone.now() + datetime.timedelta(days=1), opponent=opponent, location=self.home_ground)
+        game.teams.add(self.own_team)
+        self.client.force_login(self.own_team_coach)
+
+        self.club_post("event_update", self.event_data(kind="game", opponent=str(opponent.pk), location=str(away_ground.pk)), game.pk)
+
+        game.refresh_from_db()
+        self.assertEqual(game.title, f"{opponent} vs {self.own_team.short_name}")
 
     def test_a_game_with_no_opponent_yet_keeps_its_typed_title(self):
         self.client.force_login(self.own_team_coach)

@@ -270,9 +270,15 @@ def apply_plan(plan: ImportPlan, locations_by_game_id: dict, opponents_by_game_i
     with transaction.atomic():
         for planned in plan.to_create:
             opponent = resolve_opponent(planned.fixture)
+            # Home side first -- RBIHF's own is_home flag for this fixture is the
+            # authoritative signal here (that's what picked the club's home Location
+            # too, see suggested_location above), same convention management.forms.
+            # EventForm.save() derives from Location.is_home for a manually-created game.
+            us, them = plan.team.short_name, opponent.name
+            home_side, away_side = (us, them) if planned.fixture.is_home else (them, us)
             event = Event.objects.create(
                 club=plan.club,
-                title=f"{plan.team.short_name} {_('vs')} {opponent.name}",
+                title=f"{home_side} {_('vs')} {away_side}",
                 kind=Event.EventKind.GAME,
                 start=planned.fixture.start,
                 competition="RBIHF",

@@ -2783,3 +2783,66 @@ class PollLiveGameResultsTests(EventsTestBase):
         run = JobRun.objects.get(name="events.tasks.poll_live_game_results")
         self.assertEqual(run.status, JobRun.Status.SUCCESS)
         self.assertIn("Checked 0 game(s)", run.detail)
+
+
+class BackfillGameTitlesMigrationTests(TestCase):
+    """events.migrations.0033_backfill_game_titles_home_away -- run directly against
+    the real app registry (a data-only migration touching no removed fields, so the
+    live models work fine here), not through Django's migration test harness."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United")
+        cls.team = Team.objects.create(club=cls.club, name="First Team", short_name="1st")
+        cls.opponent = Opponent.objects.create(club=cls.club, name="Rivals FC")
+        cls.home_ground = Location.objects.create(club=cls.club, name="Home Ground", address="1 St", city="Town", zip_code="1000", country="BE", is_home=True)
+        cls.away_ground = Location.objects.create(club=cls.club, name="Their Rink", address="2 St", city="Elsewhere", zip_code="2000", country="BE", is_home=False)
+
+    def game(self, **kwargs):
+        kwargs.setdefault("club", self.club)
+        kwargs.setdefault("kind", Event.EventKind.GAME)
+        kwargs.setdefault("start", timezone.now() + timedelta(days=1))
+        kwargs.setdefault("opponent", self.opponent)
+        event = Event.objects.create(**kwargs)
+        event.teams.add(self.team)
+        return event
+
+    def run_migration(self):
+        from importlib import import_module
+
+        from django.apps import apps
+
+        migration = import_module("events.migrations.0033_backfill_game_titles_home_away")
+        migration.backfill_game_titles(apps, None)
+
+    def test_a_home_games_title_is_left_as_is(self):
+        game = self.game(title=f"{self.team.short_name} vs {self.opponent}", location=self.home_ground)
+
+        self.run_migration()
+
+        game.refresh_from_db()
+        self.assertEqual(game.title, f"{self.team.short_name} vs {self.opponent}")
+
+    def test_an_away_games_title_is_flipped(self):
+        game = self.game(title=f"{self.team.short_name} vs {self.opponent}", location=self.away_ground)
+
+        self.run_migration()
+
+        game.refresh_from_db()
+        self.assertEqual(game.title, f"{self.opponent} vs {self.team.short_name}")
+
+    def test_a_game_with_no_location_is_left_as_is(self):
+        game = self.game(title=f"{self.team.short_name} vs {self.opponent}")
+
+        self.run_migration()
+
+        game.refresh_from_db()
+        self.assertEqual(game.title, f"{self.team.short_name} vs {self.opponent}")
+
+    def test_a_training_is_untouched(self):
+        event = Event.objects.create(club=self.club, kind=Event.EventKind.TRAINING, title="Practice", start=timezone.now() + timedelta(days=1))
+
+        self.run_migration()
+
+        event.refresh_from_db()
+        self.assertEqual(event.title, "Practice")

@@ -3519,6 +3519,21 @@ class CalendarFeedViewTests(TestCase):
         summaries = {str(component.get("summary")) for component in calendar.walk("VEVENT")}
         self.assertIn("Right now", summaries)
 
+    def test_the_location_field_is_the_address_without_the_venue_name(self):
+        # Deliberately no location.name -- a bare street/zip/city string is what
+        # lets an external calendar app (Apple Calendar, ...) actually geocode
+        # it; a name-prefixed one often doesn't resolve to anything.
+        location = Location.objects.create(club=self.club, name="Sportcentrum", address="Straat 1", city="Mechelen", zip_code="2800", country="BE")
+        event = Event.objects.create(club=self.club, title="Practice", start=timezone.now() + datetime.timedelta(days=1), location=location)
+        Attendance.objects.create(event=event, member=self.member)
+
+        response = self._get()
+
+        calendar = ICalCalendar.from_ical(response.content)
+        component = next(iter(calendar.walk("VEVENT")))
+        self.assertEqual(str(component.get("location")), "Straat 1, 2800 Mechelen")
+        self.assertNotIn("Sportcentrum", str(component.get("location")))
+
     def test_scoped_to_the_club_the_url_is_fetched_on(self):
         # The same token/account can be a member of more than one club -- the
         # feed must only ever show whichever club's subdomain it was fetched

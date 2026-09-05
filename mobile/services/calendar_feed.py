@@ -65,7 +65,11 @@ def build_feed(club, people) -> bytes:
         component.add("status", "CANCELLED" if event.cancelled else "CONFIRMED")
 
         if event.location:
-            address = ", ".join(part for part in [event.location.name, event.location.address, f"{event.location.zip_code} {event.location.city}".strip()] if part)
+            # Address only, deliberately without event.location.name -- a bare
+            # street/zip/city string is what lets a calendar app (Apple Calendar,
+            # Google Calendar, ...) actually geocode/map it, where a name-prefixed
+            # string often doesn't resolve to anything.
+            address = ", ".join(part for part in [event.location.address, f"{event.location.zip_code} {event.location.city}".strip()] if part)
             component.add("location", address)
 
         description_lines = [_("RSVP: %(status)s") % {"status": attendance.get_status_display()}]
