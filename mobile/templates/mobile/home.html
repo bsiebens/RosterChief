@@ -9,11 +9,14 @@
     resolution still runs for every screen, but only Home's UI exposes it).
     Independently-optional cards below it, scoped to people_in_scope --
     everyone the account manages once there's more than one ("All", on by
-    default), or just the one person picked from the chip row. A hero for
-    the soonest upcoming event with a quick In/Out RSVP, a "needs your
-    answer" list, an "open tasks" list for events already answered (or
-    anyone's) that still need a volunteer, a season-dues card per person who
-    owes money, and a news teaser.
+    default), or just the one person picked from the chip row. Two
+    independent hero cards -- the soonest upcoming event nobody's answered
+    yet, with a quick In/Out RSVP (hidden entirely when nothing needs a
+    reply), and the soonest upcoming event someone's actually going to, as a
+    read-only overview -- then a "needs your answer" list, an "open tasks"
+    list for events already answered (or anyone's) that still need a
+    volunteer, a season-dues card per person who owes money, and a news
+    teaser.
 {% endcomment %}
 
 {% block content %}
@@ -63,6 +66,21 @@
                             {% include "mobile/_hero_rsvp.html" %}
                         {% endif %}
                     </div>
+                </div>
+            </div>
+        {% endif %}
+
+        {% if going_attendance %}
+            <div class="m-card p-4">
+                <p class="font-display text-xs font-extrabold text-muted uppercase tracking-wide">{% blocktrans with date=going_attendance.event.start|date:"D d M" %}Next up &middot; {{ date }}{% endblocktrans %}</p>
+                <p class="mt-1 font-display text-xl leading-none font-extrabold text-ink uppercase">{{ going_attendance.event.title }}</p>
+                <div class="mt-3 flex flex-wrap gap-4 font-mono text-xs text-muted">
+                    <span>{% blocktrans with time=going_attendance.event.start|date:"H:i" %}{{ time }} face-off{% endblocktrans %}</span>
+                    {% if going_attendance.event.location %}<span>{{ going_attendance.event.location.name }}</span>{% endif %}
+                </div>
+                <div class="mt-3 flex items-center justify-between">
+                    <span class="text-xs text-muted">{{ going_attendance.member.first_name }}</span>
+                    <span class="pill pill-ok">{{ going_attendance.get_status_display }}</span>
                 </div>
             </div>
         {% endif %}
@@ -205,7 +223,7 @@
             {% endif %}
         </div>
 
-        {% if not hero_attendance and not needs_answer and not open_tasks and not dues_rows and not forms_to_complete %}
+        {% if not hero_attendance and not going_attendance and not needs_answer and not open_tasks and not dues_rows and not forms_to_complete %}
             <div class="m-card p-6 text-center">
                 <p class="text-sm text-muted">{% trans "Nothing to show right now." %}</p>
             </div>

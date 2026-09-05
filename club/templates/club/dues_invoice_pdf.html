@@ -48,6 +48,7 @@
                     <div class="muted">{{ document_address.zip_code }} {{ document_address.city }}</div>
                 {% endif %}
                 {% if club.contact_email %}<div class="muted">{{ club.contact_email }}</div>{% endif %}
+                {% if club.vat_id %}<div class="muted">{% blocktrans with vat_id=club.vat_id %}VAT {{ vat_id }}{% endblocktrans %}</div>{% endif %}
             </div>
             <div class="right">
                 <h1 class="accent">{% trans "Invoice" %}</h1>

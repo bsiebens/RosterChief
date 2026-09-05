@@ -16,6 +16,7 @@ from icalendar import Calendar as ICalCalendar
 from pywebpush import WebPushException
 from waffle import get_waffle_flag_model
 
+from bugs.models import BugNote, BugReport
 from club.models import Club, ClubMembership, DuesInvoice, EvaluationManager, MemberRequirementStatus, OnboardingRequirement, Season, Sponsor
 from evaluations.models import EvaluationSettings, PlayerEvaluation
 from events.models import Attendance, Competition, Event, EventOfficial, EventReferee, EventSeries, EventTask, EventTaskClaim, Lineup, LineupSelection, Location, OfficialSignup, Opponent, RefereeSignup
@@ -507,7 +508,10 @@ class HomeViewTests(TestCase):
         self.assertEqual(response.context["hero_attendance"].event, soon)
         self.assertEqual(list(response.context["needs_answer"]), [])
 
-    def test_hero_falls_back_to_the_true_next_event_once_everything_is_answered(self):
+    def test_response_hero_is_absent_once_everything_is_answered(self):
+        # No NO_RESPONSE attendance left in scope -- the "needs your answer"
+        # hero card no longer falls back to an already-answered event, it's
+        # simply not shown (see the separate "going" card below for that).
         soon = self.make_event(title="Soonest", start=self.future)
         later = self.make_event(title="Later", start=self.future + datetime.timedelta(days=5))
         Attendance.objects.create(event=soon, member=self.member, status=Attendance.AttendanceStatus.PRESENT)
@@ -516,27 +520,48 @@ class HomeViewTests(TestCase):
 
         response = self._get("home")
 
-        self.assertEqual(response.context["hero_attendance"].event, soon)
+        self.assertIsNone(response.context["hero_attendance"])
 
-    def test_hero_in_button_is_highlighted_when_already_present(self):
+    def test_going_shows_the_soonest_event_youre_attending(self):
         soon = self.make_event(title="Soonest", start=self.future)
+        later = self.make_event(title="Later", start=self.future + datetime.timedelta(days=5))
         Attendance.objects.create(event=soon, member=self.member, status=Attendance.AttendanceStatus.PRESENT)
+        Attendance.objects.create(event=later, member=self.member, status=Attendance.AttendanceStatus.ABSENT)
         self.client.force_login(self.user)
 
         response = self._get("home")
 
-        self.assertContains(response, "btn-success")
-        self.assertNotContains(response, "btn-error")
+        self.assertEqual(response.context["going_attendance"].event, soon)
 
-    def test_hero_out_button_is_highlighted_when_already_absent(self):
+    def test_going_also_matches_a_selected_roster_pick(self):
+        soon = self.make_event(title="Soonest", start=self.future)
+        Attendance.objects.create(event=soon, member=self.member, status=Attendance.AttendanceStatus.SELECTED)
+        self.client.force_login(self.user)
+
+        response = self._get("home")
+
+        self.assertEqual(response.context["going_attendance"].event, soon)
+
+    def test_going_is_absent_when_nothing_is_confirmed(self):
         soon = self.make_event(title="Soonest", start=self.future)
         Attendance.objects.create(event=soon, member=self.member, status=Attendance.AttendanceStatus.ABSENT)
         self.client.force_login(self.user)
 
         response = self._get("home")
 
-        self.assertContains(response, "btn-error")
-        self.assertNotContains(response, "btn-success")
+        self.assertIsNone(response.context["going_attendance"])
+
+    def test_hero_and_going_cards_can_appear_together_for_different_events(self):
+        unanswered = self.make_event(title="Needs a reply", start=self.future)
+        attending = self.make_event(title="Already going", start=self.future + datetime.timedelta(days=1))
+        Attendance.objects.create(event=unanswered, member=self.member, status=Attendance.AttendanceStatus.NO_RESPONSE)
+        Attendance.objects.create(event=attending, member=self.member, status=Attendance.AttendanceStatus.PRESENT)
+        self.client.force_login(self.user)
+
+        response = self._get("home")
+
+        self.assertEqual(response.context["hero_attendance"].event, unanswered)
+        self.assertEqual(response.context["going_attendance"].event, attending)
 
     def test_hero_buttons_are_neutral_when_genuinely_unanswered(self):
         soon = self.make_event(title="Soonest", start=self.future)
@@ -4037,6 +4062,22 @@ class CoachRosterMemberViewTests(TestCase):
         self.assertIsNotNone(response.context["form"])
         self.assertContains(response, "Remove from roster")
 
+    def test_switching_team_links_to_that_teams_home_not_a_bare_query_string(self):
+        # A path-relative "?team=<pk>" kept the URL on this page's own path
+        # (coach/squad/<membership_pk>/), so switching teams while looking at
+        # a member never actually navigated anywhere -- see mobile/templates/
+        # mobile/coach/base.html's team pill.
+        other_team = Team.objects.create(club=self.club, name="U14", short_name="U14")
+        StaffAssignment.objects.create(team=other_team, member=self.member, season=self.season, position=self.coach_position)
+        self.client.force_login(self.user)
+
+        response = self.client.get(
+            reverse("mobile:coach_roster_member", kwargs={"membership_pk": self.membership.pk}) + f"?team={self.team.pk}",
+            HTTP_HOST="ajax-united.rosterchief.app",
+        )
+
+        self.assertContains(response, f'href="{reverse("mobile:coach_today")}?team={other_team.pk}"')
+
     def test_non_managing_staff_sees_a_read_only_view(self):
         physio_position = Position.objects.create(club=self.club, name="Physio", short_name="PHY", staff_position=True, management_position=False)
         physio_user = User.objects.create_user(email="physio@example.com", password="pw-secret-123")
@@ -7085,3 +7126,113 @@ class CoachRosterMemberEvaluationsLinkTests(TestCase):
         response = self._get()
 
         self.assertContains(response, reverse("mobile:coach_evaluation_history", kwargs={"player_pk": self.player.pk}))
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class BugListViewTests(TestCase):
+    """"Report a bug" row off Me -- files into the standalone ``bugs`` app
+    (bugs.services.file_report). Scoped to self.me directly, not the family/
+    "scope" concept the rest of Member mode uses (see BugListView's own
+    docstring), so these cover that an account's own reports show up, another
+    account's don't, and only the reporter-visible fields ever render --
+    never priority, club, reported_by or a note's author."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        today = timezone.localdate()
+        cls.season = Season.objects.create(club=cls.club, start_date=today - datetime.timedelta(days=30), end_date=today + datetime.timedelta(days=300))
+        cls.user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", email="parent@example.com", user=cls.user)
+        ClubMembership.objects.create(club=cls.club, member=cls.member, season=cls.season)
+
+    def _get(self):
+        return self.client.get(reverse("mobile:bug_list"), HTTP_HOST="ajax-united.rosterchief.app")
+
+    def test_requires_login(self):
+        response = self._get()
+
+        self.assertEqual(response.status_code, 302)
+
+    def test_shows_own_report_without_priority_or_note_author(self):
+        bug = BugReport.objects.create(
+            club=self.club,
+            reported_by=self.member,
+            title="Broken save button",
+            description="Nothing happens when I tap Save.",
+            priority=BugReport.Priority.CRITICAL,
+            status=BugReport.Status.IN_PROGRESS,
+        )
+        admin = User.objects.create_user(email="admin@example.com", password="pw-secret-123")
+        BugNote.objects.create(bug=bug, author=admin, body="Looking into it.")
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, "Broken save button")
+        self.assertContains(response, "Nothing happens when I tap Save.")
+        self.assertContains(response, "Looking into it.")
+        self.assertContains(response, bug.get_status_display())
+        self.assertNotContains(response, "Critical")
+        self.assertNotContains(response, admin.email)
+
+    def test_post_creates_a_report_and_redirects(self):
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse("mobile:bug_list"),
+            {"title": "Calendar sync fails", "description": "Webcal link 404s on iOS."},
+            HTTP_HOST="ajax-united.rosterchief.app",
+        )
+
+        self.assertRedirects(response, reverse("mobile:bug_list"), fetch_redirect_response=False)
+        self.assertTrue(BugReport.objects.filter(reported_by=self.member, title="Calendar sync fails").exists())
+
+    def test_invalid_post_re_renders_with_errors(self):
+        self.client.force_login(self.user)
+
+        response = self.client.post(reverse("mobile:bug_list"), {"title": "", "description": ""}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(BugReport.objects.filter(reported_by=self.member).exists())
+
+    def test_fixed_report_shows_fix_details_unfixed_does_not(self):
+        BugReport.objects.create(club=self.club, reported_by=self.member, title="Fixed one", description="Detail", status=BugReport.Status.FIXED, fixed_version="1.4.0", fixed_at=timezone.now())
+        # fixed_version wouldn't normally be set on a still-open report -- set here
+        # anyway to prove the template gates fix details on status, not just presence.
+        BugReport.objects.create(club=self.club, reported_by=self.member, title="Open one", description="Detail", status=BugReport.Status.SUBMITTED, fixed_version="9.9.9")
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, "1.4.0")
+        self.assertNotContains(response, "9.9.9")
+
+    def test_another_accounts_report_is_not_shown(self):
+        other_user = User.objects.create_user(email="other@example.com", password="pw-secret-123")
+        other_member = Member.objects.create(first_name="Noor", last_name="Devries", email="other@example.com", user=other_user)
+        BugReport.objects.create(club=self.club, reported_by=other_member, title="Someone else's bug", description="Detail")
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertNotContains(response, "Someone else's bug")
+
+    def test_no_bugs_yet_shows_a_friendly_empty_state(self):
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, "No bugs reported yet.")
+
+    def test_no_linked_member_shows_a_friendly_message_and_hides_the_form(self):
+        user_without_member = User.objects.create_user(email="noone@example.com", password="pw-secret-123")
+        self.client.force_login(user_without_member)
+
+        response = self._get()
+
+        self.assertEqual(response.status_code, 200)
+        # Not a bare "<form" check -- base.html's own announcement pop-up (templates/
+        # _announcement_popup.html) always renders a <form method="dialog">, unrelated
+        # to this page's own report-a-bug form.
+        self.assertNotContains(response, '<form method="post"')

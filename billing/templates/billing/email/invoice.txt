@@ -1,0 +1,12 @@
+{% load i18n %}{% blocktrans with club=club.name %}Hello,
+
+Please find attached the RosterChief invoice for {{ club }}.{% endblocktrans %}
+
+{% blocktrans with amount=due.amount %}Amount:  EUR {{ amount }}{% endblocktrans %}
+{% blocktrans with start=due.period_start|date:"j M Y" end=due.period_end|date:"j M Y" %}Period:  {{ start }} to {{ end }}{% endblocktrans %}
+{% blocktrans with number=invoice.number %}Invoice: {{ number }}{% endblocktrans %}
+
+{% blocktrans with contact=billing_contact %}Questions about this invoice? Reply to {{ contact }}.{% endblocktrans %}
+
+{% trans "Thank you," %}
+{% trans "RosterChief" %}

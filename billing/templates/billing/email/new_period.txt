@@ -1,0 +1,12 @@
+{% load i18n %}{% blocktrans with club=club.name %}Hello,
+
+A new billing period has opened for {{ club }} and its invoice is ready to send.{% endblocktrans %}
+
+{% blocktrans with amount=due.amount %}Amount:  EUR {{ amount }}{% endblocktrans %}
+{% blocktrans with start=due.period_start|date:"j M Y" end=due.period_end|date:"j M Y" %}Period:  {{ start }} to {{ end }}{% endblocktrans %}
+{% blocktrans with number=invoice.number %}Invoice: {{ number }}{% endblocktrans %}
+
+{% trans "Send it from the control panel, or mark it as sent if it goes out through e-invoicing instead." %}
+
+{% trans "Thank you," %}
+{% trans "RosterChief" %}

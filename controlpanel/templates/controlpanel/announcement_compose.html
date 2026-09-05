@@ -1,0 +1,88 @@
+{% extends "controlpanel/base.html" %}
+{% load i18n lucide ui %}
+
+{% comment %}
+    Two stages of the same form on one URL (controlpanel/views.py's AnnouncementComposeView) --
+    ``preview`` absent renders the editable compose form; present, it renders a read-only
+    review (title/message/audience/timing) with the same values echoed back as hidden fields,
+    and only THAT submission (carrying confirmed=1) actually creates+pushes the announcement.
+{% endcomment %}
+
+{% block panel_title %}{% trans "New announcement" %}{% endblock panel_title %}
+
+{% block breadcrumb %}
+    <a class="hover:text-ink" href="{% url 'controlpanel:announcement_list' %}">{% trans "broadcast" %}</a>
+    <span>/</span>
+    <span class="text-ink">{% trans "new" %}</span>
+{% endblock breadcrumb %}
+
+{% block panel %}
+    <div class="card">
+        <div class="card-body">
+            {% if preview %}
+                <h2 class="card-title">{% lucide "megaphone" size=18 %} {% trans "Review before pushing" %}</h2>
+
+                <div class="alert alert-warning">
+                    {% lucide "triangle-alert" size=18 %}
+                    <span>{% trans "This pushes a real notification and cannot be undone. Check it over first." %}</span>
+                </div>
+
+                <dl class="flex flex-col gap-3 text-sm">
+                    <div>
+                        <dt class="font-mono text-[11px] tracking-[.06em] text-muted uppercase">{% trans "Title" %}</dt>
+                        <dd class="font-semibold text-ink">{{ preview.title }}</dd>
+                    </div>
+                    <div>
+                        <dt class="font-mono text-[11px] tracking-[.06em] text-muted uppercase">{% trans "Message" %}</dt>
+                        <dd>{{ preview.message|linebreaksbr }}</dd>
+                    </div>
+                    <div>
+                        <dt class="font-mono text-[11px] tracking-[.06em] text-muted uppercase">{% trans "Audience" %}</dt>
+                        <dd>
+                            {% if preview.club %}{{ preview.club.name }}{% else %}{% trans "Every club" %}{% endif %}
+                            &middot;
+                            {% blocktrans count counter=audience %}{{ counter }} subscribed device will get a push{% plural %}{{ counter }} subscribed devices will get a push{% endblocktrans %}
+                        </dd>
+                    </div>
+                    <div>
+                        <dt class="font-mono text-[11px] tracking-[.06em] text-muted uppercase">{% trans "When" %}</dt>
+                        <dd>
+                            {% if preview.scheduled_for %}
+                                {% blocktrans with when=preview.scheduled_for|date:"j M Y H:i" %}Scheduled for {{ when }}{% endblocktrans %}
+                            {% else %}
+                                {% trans "Immediately" %}
+                            {% endif %}
+                        </dd>
+                    </div>
+                </dl>
+
+                <form method="post" class="card-actions justify-start pt-2">
+                    {% csrf_token %}
+                    <input type="hidden" name="title" value="{{ form.title.value }}">
+                    <input type="hidden" name="message" value="{{ form.message.value }}">
+                    <input type="hidden" name="club" value="{{ form.club.value|default:"" }}">
+                    <input type="hidden" name="scheduled_for" value="{{ form.scheduled_for.value|default:"" }}">
+                    <input type="hidden" name="confirmed" value="1">
+                    <a class="btn btn-outline gap-2" href="{% url 'controlpanel:announcement_compose' %}">{% lucide "pencil" size=16 %} {% trans "Edit" %}</a>
+                    <button class="btn btn-primary gap-2" type="submit">{% lucide "send" size=16 %} {% trans "Confirm & push" %}</button>
+                </form>
+            {% else %}
+                <h2 class="card-title">{% lucide "megaphone" size=18 %} {% trans "New announcement" %}</h2>
+
+                <form method="post" class="flex flex-col gap-4">
+                    {% csrf_token %}
+                    {% for error in form.non_field_errors %}
+                        <div class="alert alert-error"><span>{{ error }}</span></div>
+                    {% endfor %}
+                    {% form_field form.title %}
+                    {% form_field form.message %}
+                    {% form_field form.club %}
+                    {% form_field form.scheduled_for %}
+                    <div class="card-actions justify-start">
+                        <button class="btn btn-primary gap-2" type="submit">{% lucide "arrow-right" size=16 %} {% trans "Review" %}</button>
+                    </div>
+                </form>
+            {% endif %}
+        </div>
+    </div>
+{% endblock panel %}

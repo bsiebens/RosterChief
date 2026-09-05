@@ -1,0 +1,68 @@
+{% extends "controlpanel/base.html" %}
+{% load i18n lucide %}
+
+{% comment %}
+    Every bug reported from a club's management panel or the mobile app (bugs.models.BugReport),
+    across every club -- platform-staff triage, not club-scoped. See controlpanel/views.py's
+    BugListView and bugs/services.py for what a status change actually does (fixed_at handling).
+{% endcomment %}
+
+{% block panel_title %}{% trans "Bugs" %}{% endblock panel_title %}
+
+{% block breadcrumb %}
+    <span class="text-ink">bugs</span>
+    <span class="text-edge">|</span>
+    <span>{{ bugs|length }} bug{{ bugs|length|pluralize }}</span>
+{% endblock breadcrumb %}
+
+{% block panel %}
+    <div class="flex items-center gap-2">
+        <a class="btn btn-sm {% if not status_filter %}btn-primary{% else %}btn-outline{% endif %}" href="{% url 'controlpanel:bug_list' %}">{% trans "All" %}</a>
+        <a class="btn btn-sm {% if status_filter == 'open' %}btn-primary{% else %}btn-outline{% endif %}" href="{% url 'controlpanel:bug_list' %}?status=open">{% trans "Open" %}</a>
+        <a class="btn btn-sm {% if status_filter == 'fixed' %}btn-primary{% else %}btn-outline{% endif %}" href="{% url 'controlpanel:bug_list' %}?status=fixed">{% trans "Fixed" %}</a>
+        <a class="btn btn-sm {% if status_filter == 'wont_fix' %}btn-primary{% else %}btn-outline{% endif %}" href="{% url 'controlpanel:bug_list' %}?status=wont_fix">{% trans "Won't fix" %}</a>
+    </div>
+
+    <div class="card">
+        <div class="overflow-x-auto">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>{% trans "Title" %}</th>
+                        <th>{% trans "Club" %}</th>
+                        <th>{% trans "Reported by" %}</th>
+                        <th>{% trans "Priority" %}</th>
+                        <th>{% trans "Status" %}</th>
+                        <th class="text-right">{% trans "Submitted" %}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for bug in bugs %}
+                        <tr>
+                            <td><a class="link link-hover font-semibold text-ink" href="{% url 'controlpanel:bug_detail' bug.pk %}">{{ bug.title }}</a></td>
+                            <td>{{ bug.club.name }}</td>
+                            <td>{{ bug.reported_by.get_full_name }}</td>
+                            <td>{{ bug.get_priority_display }}</td>
+                            <td>
+                                {% if bug.status == "submitted" %}
+                                    <span class="badge badge-ghost">{{ bug.get_status_display }}</span>
+                                {% elif bug.status == "in_progress" %}
+                                    <span class="badge badge-warning">{{ bug.get_status_display }}</span>
+                                {% elif bug.status == "fixed" %}
+                                    <span class="badge badge-success">{{ bug.get_status_display }}</span>
+                                {% else %}
+                                    <span class="badge badge-error">{{ bug.get_status_display }}</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-right font-mono text-[11px] whitespace-nowrap text-muted">{{ bug.created|date:"j M Y" }}</td>
+                        </tr>
+                    {% empty %}
+                        <tr>
+                            <td colspan="6" class="text-center text-muted">{% trans "No bug reports." %}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+{% endblock panel %}

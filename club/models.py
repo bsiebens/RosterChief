@@ -62,6 +62,7 @@ class Club(UUIDModel):
     )
     legal_zip_code = models.CharField(_("legal zip code"), max_length=255, blank=True)
     legal_city = models.CharField(_("legal city"), max_length=255, blank=True)
+    vat_id = models.CharField(_("VAT ID"), max_length=32, blank=True, help_text=_("VAT/tax registration number, if the club has one. Shown on invoices sent to or by the club when set."))
 
     payment_instructions = models.TextField(
         _("payment instructions"),

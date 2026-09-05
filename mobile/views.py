@@ -22,6 +22,9 @@ from django.views import View
 from django.views.generic import TemplateView
 from waffle import flag_is_active
 
+from bugs.forms import BugReportForm
+from bugs.models import BugReport
+from bugs.services import file_report
 from club.models import ClubMembership
 from club.services.access import current_season, has_management_access, teams_managed_by
 from club.services.fees import open_dues_rows
@@ -66,7 +69,7 @@ from shop.services.pricing import cart_totals
 from teams.models import StaffAssignment, Team, TeamMembership
 from teams.services.numbers import member_current_number
 
-from .forms import MemberProfileForm, style_dynamic_form
+from .forms import _INPUT_CLASSES, _TEXTAREA_CLASSES, MemberProfileForm, style_dynamic_form
 from .mixins import PersonScopeMixin, ShopScopeMixin
 from .models import CalendarFeedToken, PushSubscription
 from .services.calendar_feed import build_feed
@@ -203,13 +206,17 @@ class CalendarFeedSettingsView(PersonScopeMixin, LoginRequiredMixin, TemplateVie
 
 
 class HomeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
-    """M1 -- design_handoff_rosterchief_platform/README.md's M1 section: a
-    hero card for the soonest upcoming event across everyone currently in
-    scope (with a quick In/Out RSVP -- see EventDetailView.post below), a
-    "needs your answer" list of upcoming events still NO_RESPONSE/MAYBE --
-    merged with any still-INVITED RefereeSignup/OfficialSignup for the same
-    people, since those are exactly the same kind of "we need a yes/no from
-    you" ask, just on a different model -- an
+    """M1 -- design_handoff_rosterchief_platform/README.md's M1 section: two
+    independent "next up" hero cards for everyone currently in scope -- the
+    soonest event nobody's answered yet (with a quick In/Out RSVP -- see
+    EventDetailView.post below), shown only when such an event exists, and
+    the soonest event someone's actually going to (PRESENT/SELECTED), shown
+    as a read-only overview since there's nothing left to ask -- then a
+    "needs your answer" list of upcoming events still NO_RESPONSE/MAYBE
+    (excluding whichever one is already the top hero card) -- merged with
+    any still-INVITED RefereeSignup/OfficialSignup for the same people,
+    since those are exactly the same kind of "we need a yes/no from you"
+    ask, just on a different model -- an
     "open tasks" list of unclaimed EventTask slots on those same in-scope
     upcoming events (regardless of RSVP status -- a task is open to anyone,
     not tied to one person's reply), a season-dues card per person who owes
@@ -244,6 +251,7 @@ class HomeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
 
         hero_attendance = None
         rsvp_closed = False
+        going_attendance = None
         needs_answer = []
         needs_answer_total = 0
         open_tasks = []
@@ -260,24 +268,25 @@ class HomeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
                 event__start__gte=now,
             ).select_related("event", "event__location", "member")
 
-            # The soonest event nobody's answered yet takes priority over the
-            # true chronological next event -- a reply still owed is the more
-            # useful thing to surface. Once everything upcoming has an answer,
-            # fall back to the true next event so there's still something to
-            # show; _hero_rsvp.html colour-codes whichever button matches that
-            # already-recorded answer instead of presenting it as unanswered.
+            # Two independent hero cards, not one that falls back between the
+            # two ideas: the soonest event nobody's answered yet (a reply
+            # still owed -- home.html hides this card entirely once nothing
+            # needs a reply), and separately the soonest event someone in
+            # scope is actually going to (PRESENT, or SELECTED onto a roster)
+            # -- a read-only "you're in" overview, since there's nothing left
+            # to ask about it.
             hero_attendance = upcoming.filter(status=Attendance.AttendanceStatus.NO_RESPONSE).order_by("event__start").first()
-            if hero_attendance is None:
-                hero_attendance = upcoming.order_by("event__start").first()
             if hero_attendance is not None:
                 deadline = hero_attendance.event.deadline
                 rsvp_closed = deadline is not None and deadline < now
 
+            going_attendance = upcoming.filter(status__in=[Attendance.AttendanceStatus.PRESENT, Attendance.AttendanceStatus.SELECTED]).order_by("event__start").first()
+
             # Deadline already passed -> replying is no longer possible (see
             # EventDetailView.post's own deadline check), so it doesn't belong
             # in a "still needs a reply" list -- unlike hero_attendance above,
-            # which always shows the true next event regardless of RSVP state
-            # and falls back to a read-only pill once its own deadline closes.
+            # which still shows a closed-but-unanswered event as a read-only
+            # pill rather than dropping it.
             needs_answer_qs = upcoming.filter(status__in=[Attendance.AttendanceStatus.NO_RESPONSE, Attendance.AttendanceStatus.MAYBE]).filter(Q(event__deadline__isnull=True) | Q(event__deadline__gte=now))
             if hero_attendance is not None:
                 needs_answer_qs = needs_answer_qs.exclude(pk=hero_attendance.pk)
@@ -357,6 +366,7 @@ class HomeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         return super().get_context_data(
             hero_attendance=hero_attendance,
             rsvp_closed=rsvp_closed,
+            going_attendance=going_attendance,
             needs_answer=needs_answer,
             needs_answer_remaining=max(needs_answer_total - len(needs_answer), 0),
             open_tasks=open_tasks,
@@ -1564,6 +1574,74 @@ class NotificationsView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
             return HttpResponseRedirect(url or reverse("mobile:notifications"))
 
         return HttpResponseBadRequest(_("Unknown action."))
+
+
+#: Pill styling for BugListView's own report list -- SUBMITTED and WONT_FIX
+#: both read as "nothing to act on right now" (neutral), IN_PROGRESS as an
+#: open, in-flight state (warn), FIXED as resolved (ok). Never danger: a
+#: reporter's own bug isn't an urgent/overdue signal the way an unpaid dues
+#: balance is.
+BUG_STATUS_PILL_CLASSES = {
+    BugReport.Status.SUBMITTED: "pill-neutral",
+    BugReport.Status.IN_PROGRESS: "pill-warn",
+    BugReport.Status.FIXED: "pill-ok",
+    BugReport.Status.WONT_FIX: "pill-neutral",
+}
+
+
+class BugListView(LoginRequiredMixin, TemplateView):
+    """"Report a bug" row on the Me screen (mobile/templates/mobile/me.html) --
+    files into the standalone ``bugs`` app (bugs.services.file_report), which
+    already handles admin notification, so this view is just a form + the
+    reporter's own history.
+
+    Scoped to the signed-in account itself, not PersonScopeMixin's family/
+    "scope" concept -- a bug report isn't filed on behalf of a managed child --
+    so this resolves ``self.me`` the same one-liner way mixins.py:49 does,
+    rather than pulling in the full mixin.
+
+    Template-visible fields are deliberately narrow -- see BugReport's own
+    docstring: title, description, submitted date (created), status and notes
+    (body/created, never note.author) always; fixed_at/fixed_version only once
+    status is FIXED. priority, club and reported_by never reach the template.
+    """
+
+    template_name = "mobile/bug_list.html"
+    screen_title = _("Report a bug")
+    active_tab = "me"
+
+    def dispatch(self, request, *args, **kwargs):
+        self.me = Member.objects.filter(user=request.user).first() if request.user.is_authenticated else None
+        return super().dispatch(request, *args, **kwargs)
+
+    def _build_form(self, data=None):
+        form = BugReportForm(data)
+        form.fields["title"].widget.attrs["class"] = _INPUT_CLASSES
+        form.fields["description"].widget.attrs["class"] = _TEXTAREA_CLASSES
+        return form
+
+    def get(self, request, *args, **kwargs):
+        return self.render_to_response(self.get_context_data(form=self._build_form()))
+
+    def post(self, request, *args, **kwargs):
+        # BugReport.reported_by is a required FK -- with no Member record
+        # linked to this account there's nothing to file the report as, and
+        # the form is never rendered in that state either (see bug_list.html),
+        # so a POST reaching here regardless (a stale tab, a replayed request)
+        # is simply ignored rather than raising on the not-null constraint.
+        if self.me is None:
+            return HttpResponseRedirect(reverse("mobile:bug_list"))
+
+        form = self._build_form(request.POST)
+        if form.is_valid():
+            file_report(club=request.club, reported_by=self.me, title=form.cleaned_data["title"], description=form.cleaned_data["description"])
+            return HttpResponseRedirect(reverse("mobile:bug_list"))
+        return self.render_to_response(self.get_context_data(form=form))
+
+    def get_context_data(self, **kwargs):
+        bugs = BugReport.objects.filter(reported_by=self.me).order_by("-created").prefetch_related("notes") if self.me is not None else []
+        rows = [{"bug": bug, "pill_class": BUG_STATUS_PILL_CLASSES.get(bug.status, "pill-neutral")} for bug in bugs]
+        return super().get_context_data(me=self.me, rows=rows, **kwargs)
 
 
 #: Pill styling shared by ShopOrdersView's list rows and ShopOrderDetailView's

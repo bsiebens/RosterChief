@@ -19,7 +19,7 @@ from members.models import Member
 from .models import DEFAULT_DURATION_MONTHS, DEFAULT_GRACE_DAYS, DEFAULT_RENEWAL_LEAD_DAYS, Due, Invoice, Plan, PlanPrice, Subscription, add_months
 from .services import BillingError
 from .services.dues import archivable_clubs, dues_in_grace, dues_overdue, next_period_start, open_period, reactivate, record_payment, remove_payment, renew, start_trial, subscribe, subscriptions_due_for_renewal, waive
-from .services.invoices import invoice_pdf, issue_invoice, render_pdf
+from .services.invoices import invoice_pdf, issue_invoice, mark_invoice_sent_manually, render_pdf, send_invoice
 from .services.notices import club_billing_notice
 from .services.plans import delete_plan, plan_deletion_impact
 from .services.reminders import admin_emails, reminders_to_send, send_reminder
@@ -353,6 +353,26 @@ class InvoiceTests(BillingTestBase):
         html = renderer.call_args.args[0]
         self.assertIn("Ajax United VZW", html)
 
+    def test_the_invoice_shows_the_clubs_vat_id_when_set(self):
+        self.club.vat_id = "BE0123456789"
+        self.club.save(update_fields=["vat_id"])
+        due = self.bill()
+
+        with mock.patch("billing.services.invoices.render_pdf", return_value=b"%PDF-fake") as renderer:
+            invoice_pdf(due.invoice)
+
+        html = renderer.call_args.args[0]
+        self.assertIn("BE0123456789", html)
+
+    def test_the_invoice_omits_vat_when_the_club_has_none(self):
+        due = self.bill()
+
+        with mock.patch("billing.services.invoices.render_pdf", return_value=b"%PDF-fake") as renderer:
+            invoice_pdf(due.invoice)
+
+        html = renderer.call_args.args[0]
+        self.assertNotIn("VAT", html)
+
     def test_the_pdf_library_is_only_needed_when_a_pdf_is_asked_for(self):
         # WeasyPrint binds to native pango/cairo. The app, the tests and every other page must
         # run without them; only this call may fail.
@@ -366,6 +386,76 @@ class InvoiceTests(BillingTestBase):
             render_pdf("<p>hi</p>")
 
         self.assertIn("pango", str(caught.exception))
+
+
+class InvoiceSendingTests(BillingTestBase):
+    """billing.services.dues.open_period -> issue_invoice notifying platform admins that an
+    invoice is ready, and the two ways an admin can then clear that: send_invoice (emails the
+    club) or mark_invoice_sent_manually (e-invoicing, no email)."""
+
+    def test_opening_a_period_emails_platform_admins_that_an_invoice_is_ready(self):
+        User.objects.create_user(email="staff@example.com", password="pw-secret-123", is_staff=True)
+
+        due = self.bill()
+
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn("staff@example.com", mail.outbox[0].to)
+        self.assertIn("Ajax United", mail.outbox[0].subject)
+        self.assertIn(due.invoice.number, mail.outbox[0].body)
+
+    def test_no_admin_notification_when_there_are_no_platform_admins(self):
+        self.bill()
+
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_a_zero_amount_period_does_not_notify_admins(self):
+        User.objects.create_user(email="staff@example.com", password="pw-secret-123", is_staff=True)
+        free_plan = Plan.objects.create(name="Free")
+        PlanPrice.objects.create(plan=free_plan, active_from=self.today - datetime.timedelta(days=1200), amount=Decimal("0.00"))
+
+        open_period(self.club, plan=free_plan)
+
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_send_invoice_emails_the_clubs_admins_and_records_it_as_sent(self):
+        member = Member.objects.create(first_name="Anna", last_name="Devos", email="anna@example.com")
+        ClubRole.objects.create(club=self.club, member=member, role=ClubRole.Roles.ADMIN)
+        due = self.bill()
+        mail.outbox = []  # clear the new-period admin notification triggered by self.bill()
+
+        with mock.patch("billing.services.invoices.render_pdf", return_value=b"%PDF-fake"):
+            send_invoice(due.invoice)
+
+        due.invoice.refresh_from_db()
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn("anna@example.com", mail.outbox[0].to)
+        self.assertEqual(len(mail.outbox[0].attachments), 1)
+        self.assertIsNotNone(due.invoice.sent_at)
+        self.assertEqual(due.invoice.sent_method, Invoice.SentMethod.EMAIL)
+
+    def test_send_invoice_raises_when_nobody_is_reachable(self):
+        due = self.bill()
+
+        with self.assertRaises(BillingError):
+            send_invoice(due.invoice)
+
+    def test_mark_invoice_sent_manually_records_it_without_emailing(self):
+        due = self.bill()
+        mail.outbox = []
+
+        mark_invoice_sent_manually(due.invoice)
+
+        due.invoice.refresh_from_db()
+        self.assertEqual(len(mail.outbox), 0)
+        self.assertIsNotNone(due.invoice.sent_at)
+        self.assertEqual(due.invoice.sent_method, Invoice.SentMethod.MANUAL)
+
+    def test_needs_sending_is_false_once_marked_sent(self):
+        due = self.bill()
+
+        mark_invoice_sent_manually(due.invoice)
+
+        self.assertFalse(due.invoice.needs_sending)
 
 
 class ModelStringTests(BillingTestBase):

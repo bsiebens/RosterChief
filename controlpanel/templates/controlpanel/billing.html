@@ -156,9 +156,21 @@
                                 {% endif %}
                             </td>
                             <td>
-                                <div class="flex justify-end gap-2">
+                                <div class="flex flex-wrap items-center justify-end gap-2">
                                     <button class="btn btn-outline btn-success btn-sm gap-1" type="button" onclick="document.getElementById('{{ due.pk|dom_id:"due_pay_modal" }}').showModal()">{% lucide "banknote" size=13 %} {% trans "Record payment" %}</button>
                                     <a class="btn btn-outline btn-sm gap-1" href="{% url 'controlpanel:due_invoice' due.pk %}">{% lucide "file-down" size=13 %} {% trans "Invoice" %}</a>
+                                    {% if due.invoice.needs_sending %}
+                                        <form class="inline" method="post" action="{% url 'controlpanel:due_invoice_send' due.pk %}">
+                                            {% csrf_token %}
+                                            <button class="btn btn-outline btn-sm gap-1" type="submit">{% lucide "send" size=13 %} {% trans "Send invoice" %}</button>
+                                        </form>
+                                        <form class="inline" method="post" action="{% url 'controlpanel:due_invoice_mark_sent' due.pk %}">
+                                            {% csrf_token %}
+                                            <button class="btn btn-outline btn-sm gap-1" type="submit">{% lucide "check" size=13 %} {% trans "Mark as sent" %}</button>
+                                        </form>
+                                    {% else %}
+                                        <span class="badge badge-ghost gap-1">{% lucide "check" size=11 %} {% blocktrans with date=due.invoice.sent_at|date:"j M" %}Sent {{ date }}{% endblocktrans %}</span>
+                                    {% endif %}
                                 </div>
                             </td>
                         </tr>

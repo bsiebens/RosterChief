@@ -1,0 +1,77 @@
+{% extends "management/base.html" %}
+{% load i18n lucide ui %}
+
+{% block heading %}{% trans "Report a bug" %}{% endblock heading %}
+
+{% block panel %}
+    <div class="card card-body">
+        <h2 class="card-title">{% lucide "bug" size=18 %} {% trans "Report a bug" %}</h2>
+        <form method="post">
+            {% csrf_token %}
+
+            {% for error in form.non_field_errors %}
+                <div class="alert alert-error">
+                    <span>{{ error }}</span>
+                </div>
+            {% endfor %}
+
+            <div class="flex flex-col gap-4">
+                {% for field in form %}
+                    {% form_field field %}
+                {% endfor %}
+            </div>
+
+            <div class="card-actions justify-start pt-4">
+                <button class="btn btn-primary gap-2" type="submit">{% lucide "send" size=16 %} {% trans "Submit report" %}</button>
+            </div>
+        </form>
+    </div>
+
+    <div class="card card-body">
+        <h2 class="card-title">{% lucide "list" size=18 %} {% trans "Your reports" %}</h2>
+        {% if not bugs %}
+            <p class="text-sm text-muted">{% trans "You haven't reported any bugs yet." %}</p>
+        {% else %}
+            <div class="flex flex-col divide-y divide-rule">
+                {% for bug in bugs %}
+                    <div class="flex flex-col gap-2 py-4">
+                        <div class="flex flex-wrap items-center justify-between gap-2">
+                            <span class="font-semibold text-ink">{{ bug.title }}</span>
+                            {% if bug.status == "submitted" %}
+                                <span class="badge badge-sm badge-neutral">{{ bug.get_status_display }}</span>
+                            {% elif bug.status == "in_progress" %}
+                                <span class="badge badge-sm badge-warning">{{ bug.get_status_display }}</span>
+                            {% elif bug.status == "fixed" %}
+                                <span class="badge badge-sm badge-success">{{ bug.get_status_display }}</span>
+                            {% else %}
+                                <span class="badge badge-sm badge-error">{{ bug.get_status_display }}</span>
+                            {% endif %}
+                        </div>
+
+                        <p class="text-sm text-muted">{{ bug.description|linebreaksbr }}</p>
+
+                        <p class="font-mono text-xs text-dim">{% blocktrans with date=bug.created|date:"j M Y H:i" %}Submitted {{ date }}{% endblocktrans %}</p>
+
+                        {% if bug.status == "fixed" %}
+                            <p class="text-sm text-slate">
+                                {% blocktrans with date=bug.fixed_at|date:"j M Y" %}Fixed on {{ date }}{% endblocktrans %}
+                                {% if bug.fixed_version %}&middot; {% blocktrans with version=bug.fixed_version %}version {{ version }}{% endblocktrans %}{% endif %}
+                            </p>
+                        {% endif %}
+
+                        {% if bug.notes.all %}
+                            <div class="mt-1 flex flex-col gap-2 border-t border-line pt-2">
+                                {% for note in bug.notes.all %}
+                                    <div class="text-sm text-muted">
+                                        <p>{{ note.body|linebreaksbr }}</p>
+                                        <p class="font-mono text-xs text-dim">{{ note.created|date:"j M Y H:i" }}</p>
+                                    </div>
+                                {% endfor %}
+                            </div>
+                        {% endif %}
+                    </div>
+                {% endfor %}
+            </div>
+        {% endif %}
+    </div>
+{% endblock panel %}

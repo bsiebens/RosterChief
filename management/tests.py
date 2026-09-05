@@ -21,6 +21,7 @@ from waffle import get_waffle_flag_model
 
 from billing.models import Plan, PlanPrice
 from billing.services.dues import record_payment, subscribe
+from bugs.models import BugNote, BugReport
 from club.models import Club, ClubMembership, ClubRole, DuesInvoice, EvaluationManager, FeePayment, MemberRequirementStatus, OnboardingRequirement, Season, ShopManager, Sponsor
 from club.services.invoicing import DuesInvoicePDFError, create_or_resend_invoice
 from club.services.onboarding import mark_complete
@@ -6074,7 +6075,10 @@ class EventManagementTests(ManagementTestBase):
             "excluded_members": [],
             "location": "",
             "opponent": "",
-            "start": "2026-09-01T18:00",
+            # Relative to now, not a hardcoded date: sync_event_attendances (and this
+            # test's own notification check) is a no-op for an event that has already
+            # started, which a fixed literal eventually rots into as real time passes.
+            "start": (timezone.now() + datetime.timedelta(days=7)).strftime("%Y-%m-%dT%H:%M"),
             "end": "",
             "gathering": "",
             "deadline": "",
@@ -13197,3 +13201,66 @@ class FormManagementTests(ManagementTestBase):
         self.assertEqual(response["Content-Type"], "text/csv")
         content = response.content.decode()
         self.assertIn("Jane", content)
+
+
+class BugListViewTests(ManagementTestBase):
+    """The self-service "Report a bug" page reached from the topbar bug icon (see
+    management/base.html) -- a submission form plus the reporter's own history of
+    reports, filed through bugs.services.file_report. Priority, club, reported_by
+    and a note's author are internal-only and must never render here (see
+    bugs.models.BugReport's own docstring)."""
+
+    def test_a_plain_club_member_without_staff_access_is_denied(self):
+        player_user = User.objects.create_user(email="player-bug@example.com", password="pw-secret-123")
+        player_member = Member.objects.create(user=player_user, first_name="Paul", last_name="Player")
+        ClubMembership.objects.create(club=self.club, member=player_member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        self.client.force_login(player_user)
+
+        self.assertEqual(self.club_get("bug_list").status_code, 403)
+
+    def test_get_shows_the_reporters_own_bug_without_priority_or_note_author(self):
+        note_author = User.objects.create_user(email="platform-admin-bug@example.com", password="pw-secret-123")
+        bug = BugReport.objects.create(
+            club=self.club,
+            reported_by=self.admin_member,
+            title="Broken export button",
+            description="Nothing happens when I click it.",
+            priority=BugReport.Priority.CRITICAL,
+            status=BugReport.Status.SUBMITTED,
+        )
+        BugNote.objects.create(bug=bug, author=note_author, body="Looking into it.")
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("bug_list")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Broken export button")
+        self.assertContains(response, "Nothing happens when I click it.")
+        self.assertContains(response, "Submitted")
+        self.assertContains(response, "Looking into it.")
+        self.assertNotContains(response, "Critical")
+        self.assertNotContains(response, "platform-admin-bug@example.com")
+
+    def test_post_creates_a_bug_report_via_file_report_and_redirects(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("bug_list", {"title": "Crash on save", "description": "Steps to reproduce the crash."})
+
+        self.assertRedirects(response, reverse("management:bug_list"))
+        bug = BugReport.objects.get(title="Crash on save")
+        self.assertEqual(bug.reported_by, self.admin_member)
+        self.assertEqual(bug.club, self.club)
+
+    def test_fixed_bug_shows_fix_details_unfixed_bug_does_not(self):
+        BugReport.objects.create(club=self.club, reported_by=self.admin_member, title="Fixed thing", description="was broken", status=BugReport.Status.FIXED, fixed_at=timezone.now(), fixed_version="1.4.2")
+        BugReport.objects.create(club=self.club, reported_by=self.admin_member, title="Open thing", description="still broken", status=BugReport.Status.SUBMITTED)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("bug_list")
+        content = response.content.decode()
+
+        self.assertIn("Fixed thing", content)
+        self.assertIn("Open thing", content)
+        self.assertIn("1.4.2", content)
+        # Only the fixed report renders a fix date -- the open one must not.
+        self.assertEqual(content.count("Fixed on"), 1)

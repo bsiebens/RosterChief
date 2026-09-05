@@ -10,8 +10,10 @@
 <a class="flex h-full items-center px-3.5 {% if nav == 'clubs' %}bg-steel text-white border-b-2 border-ice{% else %}text-on-dark-dim hover:text-white{% endif %}" href="{% url 'controlpanel:club_list' %}">clubs</a>
 <a class="flex h-full items-center px-3.5 {% if nav == 'features' %}bg-steel text-white border-b-2 border-ice{% else %}text-on-dark-dim hover:text-white{% endif %}" href="{% url 'controlpanel:features' %}">features</a>
 <a class="flex h-full items-center px-3.5 {% if nav == 'billing' %}bg-steel text-white border-b-2 border-ice{% else %}text-on-dark-dim hover:text-white{% endif %}" href="{% url 'controlpanel:billing' %}">billing</a>
+<a class="flex h-full items-center px-3.5 {% if nav == 'bugs' %}bg-steel text-white border-b-2 border-ice{% else %}text-on-dark-dim hover:text-white{% endif %}" href="{% url 'controlpanel:bug_list' %}">bugs</a>
 {% if user.is_superuser %}
     {# Superusers only, exactly as the view is gated: a tab staff cannot follow is a lie. #}
     <a class="flex h-full items-center px-3.5 {% if nav == 'admins' %}bg-steel text-white border-b-2 border-ice{% else %}text-on-dark-dim hover:text-white{% endif %}" href="{% url 'controlpanel:admins' %}">admins</a>
+    <a class="flex h-full items-center px-3.5 {% if nav == 'announcements' %}bg-steel text-white border-b-2 border-ice{% else %}text-on-dark-dim hover:text-white{% endif %}" href="{% url 'controlpanel:announcement_list' %}">broadcast</a>
 {% endif %}
 <a class="flex h-full items-center px-3.5 {% if nav == 'jobs' %}bg-steel text-white border-b-2 border-ice{% else %}text-on-dark-dim hover:text-white{% endif %}" href="{% url 'controlpanel:jobs' %}">jobs</a>

@@ -20,6 +20,9 @@ from django.views.generic import CreateView, DetailView, FormView, ListView, Tem
 from waffle import flag_is_active
 
 from billing.models import Due
+from bugs.forms import BugReportForm
+from bugs.models import BugReport
+from bugs.services import file_report
 from club.mixins import (
     ClubAdminRequiredMixin,
     ClubStaffRequiredMixin,
@@ -6881,3 +6884,40 @@ class VolunteerPlaceView(MemberAdminRequiredMixin, View):
             notify(request, f"s|{_('Volunteer placed')}|" + _("%(member)s is now %(position)s for %(team)s.") % {"member": member, "position": assignment.position, "team": assignment.team})
 
         return redirect("management:volunteer_list")
+
+
+class BugListView(ClubStaffRequiredMixin, FormView):
+    """The "Report a bug" page reached from the topbar bug icon next to the
+    notification bell (see management/base.html) -- a submission form plus this
+    person's own history of reports. Deliberately *not* club-scoped on the list
+    (bugs.services.file_report stamps the club at submission time): this is every
+    bug this person has ever filed, regardless of which club they were managing
+    when they filed each one.
+
+    Only title/description/status/notes/fixed_at/fixed_version ever reach the
+    template -- priority, club and reported_by are control-panel-only fields per
+    the product spec (see bugs.models.BugReport's own docstring)."""
+
+    template_name = "management/bug_list.html"
+    form_class = BugReportForm
+
+    def get_member(self):
+        return Member.objects.filter(user=self.request.user).first()
+
+    def get_context_data(self, **kwargs):
+        member = self.get_member()
+        bugs = BugReport.objects.filter(reported_by=member).order_by("-created").prefetch_related("notes") if member is not None else BugReport.objects.none()
+        return super().get_context_data(bugs=bugs, **kwargs)
+
+    def form_valid(self, form):
+        member = self.get_member()
+        if member is None:
+            notify(self.request, f"e|{_('Could not file report')}|{_('No member profile is linked to your account.')}")
+            return redirect(self.get_success_url())
+
+        file_report(club=self.request.club, reported_by=member, title=form.cleaned_data["title"], description=form.cleaned_data["description"])
+        notify(self.request, f"s|{_('Bug reported')}|{_('Thanks for the report. We will take a look.')}")
+        return super().form_valid(form)
+
+    def get_success_url(self):
+        return reverse("management:bug_list")

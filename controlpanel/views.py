@@ -16,11 +16,18 @@ from django.utils.translation import ngettext
 from django.views.generic import CreateView, DetailView, FormView, ListView, TemplateView, UpdateView, View
 from waffle import get_waffle_flag_model, get_waffle_switch_model
 
+from announcements.forms import AnnouncementComposeForm
+from announcements.models import Announcement
+from announcements.services import audience_member_count, create_and_confirm
+from announcements.services import cancel as cancel_announcement
 from billing.models import Due, Plan, PlanPrice
 from billing.services import BillingError
 from billing.services.dues import next_period_start, open_period, reactivate, record_payment, start_trial, subscribe, waive
-from billing.services.invoices import invoice_pdf, issue_invoice
+from billing.services.invoices import invoice_pdf, issue_invoice, mark_invoice_sent_manually, send_invoice
 from billing.services.plans import delete_plan, plan_deletion_impact
+from bugs.forms import BugAdminForm, BugNoteForm
+from bugs.models import BugReport
+from bugs.services import add_note, update_bug
 from club.models import Club, ClubRole
 from events.models import Competition, Location
 from features.jobs import JOB_REGISTRY
@@ -572,7 +579,7 @@ class BillingView(PlatformStaffRequiredMixin, TemplateView):
             plan.edit_form = PlanForm(instance=plan)
             plan.price_form = PlanPriceForm()
 
-        owing = list(Due.objects.filter(status__in=Due.OWING).select_related("club", "plan").order_by("grace_until"))
+        owing = list(Due.objects.filter(status__in=Due.OWING).select_related("club", "plan", "invoice").order_by("grace_until"))
         for due in owing:
             due.payment_form = DuePaymentForm(initial={"amount": due.balance})
 
@@ -857,3 +864,163 @@ class InvoicePdfView(PlatformStaffRequiredMixin, View):
         response = HttpResponse(pdf, content_type="application/pdf")
         response["Content-Disposition"] = f'attachment; filename="{invoice.number}.pdf"'
         return response
+
+
+class SendInvoiceView(PlatformStaffRequiredMixin, View):
+    def post(self, request, pk):
+        due = get_object_or_404(Due.objects.select_related("club", "invoice"), pk=pk)
+        with suppress_billing_errors(request, title="Couldn't send invoice"):
+            send_invoice(due.invoice, actor=request.user)
+            notify(request, f"s|Invoice sent|Invoice {due.invoice.number} emailed to {due.club}'s admins.")
+
+        return redirect("controlpanel:billing")
+
+
+class MarkInvoiceSentView(PlatformStaffRequiredMixin, View):
+    def post(self, request, pk):
+        due = get_object_or_404(Due.objects.select_related("club", "invoice"), pk=pk)
+        mark_invoice_sent_manually(due.invoice, actor=request.user)
+        notify(request, f"s|Invoice marked as sent|Invoice {due.invoice.number} marked as sent.")
+
+        return redirect("controlpanel:billing")
+
+
+#: The status query-string values the bug list's filter pills accept, and the statuses
+#: each one maps to -- "open" and "" (all) are not single BugReport.Status values, so
+#: this can't just be BugReport.Status.values.
+BUG_STATUS_FILTERS = {
+    "open": [BugReport.Status.SUBMITTED, BugReport.Status.IN_PROGRESS],
+    "fixed": [BugReport.Status.FIXED],
+    "wont_fix": [BugReport.Status.WONT_FIX],
+}
+
+
+class BugListView(PlatformStaffRequiredMixin, ListView):
+    template_name = "controlpanel/bug_list.html"
+    context_object_name = "bugs"
+
+    @property
+    def status_filter(self):
+        return self.request.GET.get("status", "")
+
+    def get_queryset(self):
+        bugs = BugReport.objects.select_related("club", "reported_by").order_by("-created")
+        statuses = BUG_STATUS_FILTERS.get(self.status_filter)
+        if statuses:
+            bugs = bugs.filter(status__in=statuses)
+        return bugs
+
+    def get_context_data(self, **kwargs):
+        return super().get_context_data(nav="bugs", status_filter=self.status_filter, **kwargs)
+
+
+class BugDetailView(PlatformStaffRequiredMixin, DetailView):
+    model = BugReport
+    template_name = "controlpanel/bug_detail.html"
+    context_object_name = "bug"
+
+    def get_queryset(self):
+        return BugReport.objects.select_related("club", "reported_by").prefetch_related("notes__author")
+
+    def get_context_data(self, **kwargs):
+        return super().get_context_data(nav="bugs", admin_form=BugAdminForm(instance=self.object), note_form=BugNoteForm(), **kwargs)
+
+
+class BugUpdateView(PlatformStaffRequiredMixin, RedirectOnInvalidMixin, FormView):
+    """Applies status/priority/fixed_version through bugs.services.update_bug rather than
+    form.save(), so fixed_at stays derived -- see BugAdminForm's own docstring."""
+
+    form_class = BugAdminForm
+    http_method_names = ["post"]
+    invalid_redirect_url_name = "controlpanel:bug_detail"
+
+    @property
+    def bug(self):
+        return get_object_or_404(BugReport, pk=self.kwargs["pk"])
+
+    def get_invalid_redirect_kwargs(self):
+        return {"pk": self.kwargs["pk"]}
+
+    def get_form_kwargs(self):
+        return super().get_form_kwargs() | {"instance": self.bug}
+
+    def form_valid(self, form):
+        bug = update_bug(self.bug, status=form.cleaned_data["status"], priority=form.cleaned_data["priority"], fixed_version=form.cleaned_data["fixed_version"])
+        notify(self.request, f"s|{_('Bug updated')}|" + _("“%(title)s” updated.") % {"title": bug.title})
+        return redirect("controlpanel:bug_detail", pk=bug.pk)
+
+
+class BugAddNoteView(PlatformStaffRequiredMixin, RedirectOnInvalidMixin, FormView):
+    form_class = BugNoteForm
+    http_method_names = ["post"]
+    invalid_redirect_url_name = "controlpanel:bug_detail"
+
+    @property
+    def bug(self):
+        return get_object_or_404(BugReport, pk=self.kwargs["pk"])
+
+    def get_invalid_redirect_kwargs(self):
+        return {"pk": self.kwargs["pk"]}
+
+    def form_valid(self, form):
+        bug = self.bug
+        add_note(bug, author=self.request.user, body=form.cleaned_data["body"])
+        notify(self.request, f"s|{_('Note added')}|" + _("Note added to “%(title)s”.") % {"title": bug.title})
+        return redirect("controlpanel:bug_detail", pk=bug.pk)
+
+
+class AnnouncementListView(PlatformSuperuserRequiredMixin, ListView):
+    template_name = "controlpanel/announcement_list.html"
+    context_object_name = "announcements"
+
+    def get_queryset(self):
+        return Announcement.objects.select_related("club", "created_by").order_by("-created")
+
+    def get_context_data(self, **kwargs):
+        return super().get_context_data(nav="announcements", **kwargs)
+
+
+class AnnouncementCancelView(PlatformSuperuserRequiredMixin, View):
+    def post(self, request, pk):
+        announcement = get_object_or_404(Announcement, pk=pk)
+        cancel_announcement(announcement)
+        notify(request, f"w|{_('Announcement cancelled')}|" + _("“%(title)s” will not be pushed.") % {"title": announcement.title})
+        return redirect("controlpanel:announcement_list")
+
+
+class AnnouncementComposeView(PlatformSuperuserRequiredMixin, TemplateView):
+    """Compose, then confirm, then push -- two stages of the same form on the same URL,
+    not two separate views: GET (or an invalid POST) renders the editable form; a valid
+    POST without ``confirmed`` re-renders the *same* data as a read-only preview (title,
+    message, audience size, and when it'll go out) with that data echoed back as hidden
+    fields; only a POST that also carries ``confirmed=1`` -- re-validated exactly like the
+    first one, never trusted from the hidden fields alone -- actually calls
+    announcements.services.create_and_confirm. See that function's own docstring for why
+    there is deliberately no Announcement row before this last step.
+    """
+
+    template_name = "controlpanel/announcement_compose.html"
+
+    def get_context_data(self, **kwargs):
+        return super().get_context_data(nav="announcements", form=kwargs.pop("form", None) or AnnouncementComposeForm(), **kwargs)
+
+    def post(self, request, *args, **kwargs):
+        form = AnnouncementComposeForm(request.POST)
+        if not form.is_valid():
+            return self.render_to_response(self.get_context_data(form=form))
+
+        if request.POST.get("confirmed") != "1":
+            return self.render_to_response(self.get_context_data(form=form, preview=form.cleaned_data, audience=audience_member_count(form.cleaned_data["club"])))
+
+        announcement = create_and_confirm(
+            title=form.cleaned_data["title"],
+            message=form.cleaned_data["message"],
+            club=form.cleaned_data["club"],
+            scheduled_for=form.cleaned_data["scheduled_for"],
+            created_by=request.user,
+        )
+        if announcement.status == Announcement.Status.SENT:
+            notify(request, f"s|{_('Announcement pushed')}|" + _("“%(title)s” was pushed out.") % {"title": announcement.title})
+        else:
+            notify(request, f"s|{_('Announcement scheduled')}|" + _("“%(title)s” will be pushed at %(when)s.") % {"title": announcement.title, "when": date_format(timezone.localtime(announcement.scheduled_for), "DATETIME_FORMAT")})
+        return redirect("controlpanel:announcement_list")

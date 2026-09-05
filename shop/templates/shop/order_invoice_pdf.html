@@ -82,6 +82,7 @@
                         {% if snapshot.address %}<div class="muted">{{ snapshot.address }}</div>{% endif %}
                         {% if snapshot.zip_code or snapshot.city %}<div class="muted">{{ snapshot.zip_code }} {{ snapshot.city }}</div>{% endif %}
                         {% if snapshot.contact_email %}<div class="muted">{{ snapshot.contact_email }}</div>{% endif %}
+                        {% if snapshot.vat_id %}<div class="muted">{% blocktrans with vat_id=snapshot.vat_id %}VAT {{ vat_id }}{% endblocktrans %}</div>{% endif %}
                     {% endwith %}
                 </div>
             </div>

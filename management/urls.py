@@ -6,6 +6,7 @@ app_name = "management"
 
 urlpatterns = [
     path("", views.HomeView.as_view(), name="home"),
+    path("bugs/", views.BugListView.as_view(), name="bug_list"),
     path("notifications/mark-all-read/", views.NotificationMarkAllReadView.as_view(), name="notification_mark_all_read"),
     path("notifications/clear-all/", views.NotificationClearAllView.as_view(), name="notification_clear_all"),
     # People

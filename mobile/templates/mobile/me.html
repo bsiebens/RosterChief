@@ -150,6 +150,11 @@
                 <span class="flex-1 text-[15px] font-semibold text-ink">{% trans "Calendar sync" %}</span>
                 {% lucide "chevron-right" size=18 class="shrink-0 text-dim" %}
             </a>
+            <div class="h-px bg-rule"></div>
+            <a class="flex items-center gap-3 p-3.5" href="{% url "mobile:bug_list" %}">
+                <span class="flex-1 text-[15px] font-semibold text-ink">{% trans "Report a bug" %}</span>
+                {% lucide "chevron-right" size=18 class="shrink-0 text-dim" %}
+            </a>
         </div>
 
         <a class="m-card flex items-center justify-center gap-2 p-3.5 text-[15px] font-semibold text-club" href="{% url "account_logout" %}" hx-boost="false">

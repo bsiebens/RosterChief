@@ -88,7 +88,7 @@
             {% if staffed_teams|length > 1 %}
                 <div class="mt-3 flex gap-2 overflow-x-auto scrollbar-hide">
                     {% for team in staffed_teams %}
-                        <a class="shrink-0 rounded-full px-3 py-1.5 font-display text-xs font-extrabold tracking-wide uppercase {% if team == active_team %}bg-ice text-ice-ink{% else %}bg-steel text-on-dark{% endif %}" href="?team={{ team.pk }}">
+                        <a class="shrink-0 rounded-full px-3 py-1.5 font-display text-xs font-extrabold tracking-wide uppercase {% if team == active_team %}bg-ice text-ice-ink{% else %}bg-steel text-on-dark{% endif %}" href="{% url "mobile:coach_today" %}?team={{ team.pk }}">
                             {{ team.short_name }}
                         </a>
                     {% endfor %}
@@ -150,6 +150,7 @@
         </nav>
 
         <script src="{% static "js/mobile-app.js" %}" defer></script>
+        {% include "_announcement_popup.html" %}
         {% block extra_body %}{% endblock extra_body %}
     </body>
 </html>

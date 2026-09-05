@@ -36,9 +36,20 @@ urlpatterns = [
     path("billing/dues/<uuid:pk>/pay/", views.RecordPaymentView.as_view(), name="due_pay"),
     path("billing/dues/<uuid:pk>/waive/", views.WaiveDueView.as_view(), name="due_waive"),
     path("billing/dues/<uuid:pk>/invoice.pdf", views.InvoicePdfView.as_view(), name="due_invoice"),
+    path("billing/dues/<uuid:pk>/invoice/send/", views.SendInvoiceView.as_view(), name="due_invoice_send"),
+    path("billing/dues/<uuid:pk>/invoice/mark-sent/", views.MarkInvoiceSentView.as_view(), name="due_invoice_mark_sent"),
     path("clubs/<uuid:pk>/subscription/", views.SubscribeClubView.as_view(), name="club_subscribe"),
     path("clubs/<uuid:pk>/trial/start/", views.ClubStartTrialView.as_view(), name="club_trial_start"),
     path("clubs/<uuid:pk>/period/new/", views.OpenPeriodView.as_view(), name="club_open_period"),
+    # Bugs
+    path("bugs/", views.BugListView.as_view(), name="bug_list"),
+    path("bugs/<uuid:pk>/", views.BugDetailView.as_view(), name="bug_detail"),
+    path("bugs/<uuid:pk>/update/", views.BugUpdateView.as_view(), name="bug_update"),
+    path("bugs/<uuid:pk>/note/", views.BugAddNoteView.as_view(), name="bug_add_note"),
+    # Announcements (superusers only)
+    path("announcements/", views.AnnouncementListView.as_view(), name="announcement_list"),
+    path("announcements/new/", views.AnnouncementComposeView.as_view(), name="announcement_compose"),
+    path("announcements/<uuid:pk>/cancel/", views.AnnouncementCancelView.as_view(), name="announcement_cancel"),
     # Platform admins (superusers only)
     path("admins/", views.PlatformAdminListView.as_view(), name="admins"),
     path("admins/add/", views.PlatformAdminAddView.as_view(), name="admin_add"),

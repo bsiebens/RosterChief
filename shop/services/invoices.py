@@ -55,6 +55,7 @@ def create_invoice_for_order(order):
         "zip_code": document_address.zip_code if document_address else "",
         "city": document_address.city if document_address else "",
         "contact_email": club.contact_email,
+        "vat_id": club.vat_id,
     }
     return Invoice.objects.create(club=club, order=order, billing_snapshot=snapshot)
 

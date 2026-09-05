@@ -1,0 +1,99 @@
+{% extends "mobile/base.html" %}
+{% load i18n lucide %}
+
+{% comment %}
+    "Report a bug" row off Me -- see BugListView's own docstring (mobile/views.py)
+    for the judgment calls: this is scoped to the signed-in account itself
+    (self.me), not the family/"scope" concept the rest of Member mode uses,
+    since a bug report isn't filed on behalf of a managed child. White sticky
+    back-header, same pattern as forms_list.html/calendar_feed_settings.html --
+    not a tab of its own, active_tab stays "me".
+
+    Only what bugs.models.BugReport calls out as reporter-visible ever renders
+    here: title, description, submitted date, status and each note's body/
+    created (never note.author), plus fixed_at/fixed_version once a report is
+    Fixed. priority, club and reported_by never appear on this page.
+{% endcomment %}
+
+{% block content %}
+    <div class="-mx-4 -mt-4 flex items-center gap-1 border-b border-line bg-white px-4 py-3">
+        <a class="-ml-2.5 flex h-11 w-11 shrink-0 items-center justify-center" href="{% url "mobile:me" %}" aria-label="{% trans "Back" %}">
+            {% lucide "chevron-left" size=20 stroke_width=2.4 class="text-ink" %}
+        </a>
+        <span class="min-w-0 flex-1 truncate font-display text-xl leading-none font-extrabold text-ink uppercase">{% trans "Report a bug" %}</span>
+    </div>
+
+    {% if not me %}
+        <div class="m-card p-6 text-center">
+            <p class="font-display text-lg font-extrabold text-ink uppercase">{% trans "No account to file from" %}</p>
+            <p class="mt-1 text-sm text-muted">{% trans "Once you're linked to a member record, you'll be able to report bugs here." %}</p>
+        </div>
+    {% else %}
+        <div>
+            <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "New report" %}</div>
+            <form method="post" class="m-card flex flex-col gap-3 p-3.5" hx-boost="false">
+                {% csrf_token %}
+                <div>
+                    <label class="mb-1 block text-xs text-muted" for="{{ form.title.id_for_label }}">{{ form.title.label }}</label>
+                    {{ form.title }}
+                    {% for error in form.title.errors %}<p class="mt-1 text-xs text-club">{{ error }}</p>{% endfor %}
+                </div>
+                <div>
+                    <label class="mb-1 block text-xs text-muted" for="{{ form.description.id_for_label }}">{{ form.description.label }}</label>
+                    {{ form.description }}
+                    {% for error in form.description.errors %}<p class="mt-1 text-xs text-club">{{ error }}</p>{% endfor %}
+                </div>
+                <button type="submit" class="btn btn-primary w-full">{% trans "Submit" %}</button>
+            </form>
+        </div>
+
+        <div>
+            <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Your reports" %}</div>
+            {% if rows %}
+                <div class="flex flex-col gap-2.5">
+                    {% for row in rows %}
+                        <div class="m-card p-3.5">
+                            <div class="flex items-start justify-between gap-3">
+                                <div class="min-w-0 flex-1">
+                                    <div class="text-[15px] font-semibold text-ink">{{ row.bug.title }}</div>
+                                    <div class="text-xs text-muted">{% blocktrans with date=row.bug.created|date:"d M Y" %}Submitted {{ date }}{% endblocktrans %}</div>
+                                </div>
+                                <span class="pill {{ row.pill_class }} shrink-0">{{ row.bug.get_status_display }}</span>
+                            </div>
+
+                            <p class="mt-2 text-sm text-ink">{{ row.bug.description|linebreaksbr }}</p>
+
+                            {% if row.bug.status == "fixed" %}
+                                <div class="mt-2 text-xs text-muted">
+                                    {% if row.bug.fixed_version %}{% blocktrans with version=row.bug.fixed_version %}Fixed in {{ version }}{% endblocktrans %}{% endif %}
+                                    {% if row.bug.fixed_at %}
+                                        {% if row.bug.fixed_version %}&middot;{% endif %}
+                                        {% blocktrans with date=row.bug.fixed_at|date:"d M Y" %}Fixed on {{ date }}{% endblocktrans %}
+                                    {% endif %}
+                                </div>
+                            {% endif %}
+
+                            {% if row.bug.notes.all %}
+                                <div class="mt-3 border-t border-rule pt-2.5">
+                                    <div class="mt-1 mb-1.5 font-display text-xs font-extrabold text-muted uppercase tracking-wide">{% trans "Notes from the platform" %}</div>
+                                    <div class="flex flex-col gap-2">
+                                        {% for note in row.bug.notes.all %}
+                                            <div class="text-sm text-ink">
+                                                <p>{{ note.body|linebreaksbr }}</p>
+                                                <p class="mt-0.5 text-xs text-dim">{{ note.created|date:"d M Y" }}</p>
+                                            </div>
+                                        {% endfor %}
+                                    </div>
+                                </div>
+                            {% endif %}
+                        </div>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <div class="m-card p-6 text-center">
+                    <p class="text-sm text-muted">{% trans "No bugs reported yet." %}</p>
+                </div>
+            {% endif %}
+        </div>
+    {% endif %}
+{% endblock content %}

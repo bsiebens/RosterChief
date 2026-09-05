@@ -84,6 +84,13 @@ JOB_REGISTRY = {
         "command": "notify_published_news",
         "args": [],
     },
+    "announcements.tasks.publish_scheduled_announcements": {
+        "label": _("Publish scheduled announcements"),
+        "description": _("Pushes any platform announcement whose scheduled time has arrived."),
+        "schedule": _("Every 5 minutes"),
+        "command": "publish_scheduled_announcements",
+        "args": [],
+    },
     "formbuilder.tasks.send_form_reminders": {
         "label": _("Send form reminders"),
         "description": _("Nudges whoever hasn't submitted a form send yet, a few days before it closes."),

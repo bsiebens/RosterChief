@@ -1,0 +1,91 @@
+{% extends "controlpanel/base.html" %}
+{% load i18n lucide %}
+
+{% comment %}
+    One bug report, platform-admin view: the reporter's contact details, priority and
+    club (never shown back to the reporter -- see BugReport's own docstring), the full
+    notes thread with author (the one place `author` IS shown), and the two small forms
+    controlpanel.views.BugUpdateView / BugAddNoteView post to.
+{% endcomment %}
+
+{% block panel_title %}{{ bug.title }}{% endblock panel_title %}
+
+{% block breadcrumb %}
+    <a class="hover:text-ink" href="{% url 'controlpanel:bug_list' %}">{% trans "bugs" %}</a>
+    <span>/</span>
+    <span class="text-ink">{{ bug.title }}</span>
+{% endblock breadcrumb %}
+
+{% block panel %}
+    <div class="card flex flex-col gap-3 p-4">
+        <div class="flex flex-wrap items-center gap-2">
+            <span class="font-display text-xl font-extrabold text-ink">{{ bug.title }}</span>
+            {% if bug.status == "submitted" %}
+                <span class="badge badge-ghost">{{ bug.get_status_display }}</span>
+            {% elif bug.status == "in_progress" %}
+                <span class="badge badge-warning">{{ bug.get_status_display }}</span>
+            {% elif bug.status == "fixed" %}
+                <span class="badge badge-success">{{ bug.get_status_display }}</span>
+            {% else %}
+                <span class="badge badge-error">{{ bug.get_status_display }}</span>
+            {% endif %}
+            <span class="badge badge-outline">{{ bug.get_priority_display }}</span>
+        </div>
+
+        <p class="text-sm whitespace-pre-line text-slate">{{ bug.description }}</p>
+
+        <div class="grid grid-cols-2 gap-3 font-mono text-xs text-muted md:grid-cols-4">
+            <div>
+                <div class="text-dim uppercase">{% trans "Club" %}</div>
+                <div class="text-ink">{{ bug.club.name }}</div>
+            </div>
+            <div>
+                <div class="text-dim uppercase">{% trans "Reported by" %}</div>
+                <div class="text-ink">{{ bug.reported_by.get_full_name }}</div>
+                {% if bug.reported_by.contact_email %}<div>{{ bug.reported_by.contact_email }}</div>{% endif %}
+            </div>
+            <div>
+                <div class="text-dim uppercase">{% trans "Submitted" %}</div>
+                <div class="text-ink">{{ bug.created|date:"j M Y H:i" }}</div>
+            </div>
+            {% if bug.fixed_at %}
+                <div>
+                    <div class="text-dim uppercase">{% trans "Fixed" %}</div>
+                    <div class="text-ink">{{ bug.fixed_at|date:"j M Y H:i" }}{% if bug.fixed_version %} &middot; {{ bug.fixed_version }}{% endif %}</div>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div class="card flex flex-col gap-3 p-4">
+            <span class="font-display text-sm font-extrabold tracking-[.1em] text-ink uppercase">{% trans "Update" %}</span>
+            <form method="post" action="{% url 'controlpanel:bug_update' bug.pk %}">
+                {% csrf_token %}
+                {% include "controlpanel/_form_fields.html" with form=admin_form %}
+                <button class="btn btn-primary gap-2" type="submit">{% lucide "check" size=14 %} {% trans "Save" %}</button>
+            </form>
+        </div>
+
+        <div class="card flex flex-col gap-3 p-4">
+            <span class="font-display text-sm font-extrabold tracking-[.1em] text-ink uppercase">{% trans "Notes" %}</span>
+            <div class="flex flex-col gap-2">
+                {% for note in bug.notes.all %}
+                    <div class="border-l-2 border-line pl-2.5 text-sm">
+                        <div class="text-ink">{{ note.body }}</div>
+                        <div class="font-mono text-[11px] text-muted">
+                            {% if note.author %}{{ note.author }} &middot; {% endif %}{{ note.created|date:"j M Y H:i" }}
+                        </div>
+                    </div>
+                {% empty %}
+                    <div class="text-sm text-muted">{% trans "No notes yet." %}</div>
+                {% endfor %}
+            </div>
+            <form method="post" action="{% url 'controlpanel:bug_add_note' bug.pk %}">
+                {% csrf_token %}
+                {% include "controlpanel/_form_fields.html" with form=note_form %}
+                <button class="btn btn-outline gap-2" type="submit">{% lucide "plus" size=14 %} {% trans "Add note" %}</button>
+            </form>
+        </div>
+    </div>
+{% endblock panel %}

@@ -142,6 +142,12 @@
                             <div class="text-on-dark-dim">past grace — see billing</div>
                         </div>
                     {% endif %}
+                    {% if attention.invoices_to_send %}
+                        <div class="border-l-2 border-warn pl-2.5">
+                            <div>{{ attention.invoices_to_send }} invoice{{ attention.invoices_to_send|pluralize }} not sent yet</div>
+                            <div class="text-on-dark-dim"><a class="link link-hover" href="{% url 'controlpanel:billing' %}">send from billing</a></div>
+                        </div>
+                    {% endif %}
                     {% for run in job_log %}
                         {% if run.status == "failure" %}
                             <div class="border-l-2 border-club pl-2.5">
@@ -162,7 +168,13 @@
                             <div class="text-on-dark-dim">using the platform for free</div>
                         </div>
                     {% endif %}
-                    {% if not attention.renewals_pending and not attention.dues_overdue and not attention.admins_pending_mfa and not attention.clubs_unbilled and not failed_jobs %}
+                    {% if attention.open_bugs %}
+                        <div class="border-l-2 border-warn pl-2.5">
+                            <div>{{ attention.open_bugs }} bug report{{ attention.open_bugs|pluralize }} awaiting triage</div>
+                            <div class="text-on-dark-dim"><a class="link link-hover" href="{% url 'controlpanel:bug_list' %}">see bugs</a></div>
+                        </div>
+                    {% endif %}
+                    {% if not attention.renewals_pending and not attention.dues_overdue and not attention.invoices_to_send and not attention.admins_pending_mfa and not attention.clubs_unbilled and not attention.open_bugs and not failed_jobs %}
                         <div class="text-on-dark-dim">Nothing needs attention.</div>
                     {% endif %}
                 </div>

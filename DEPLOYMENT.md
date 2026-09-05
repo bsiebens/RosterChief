@@ -171,11 +171,11 @@ docker compose up -d --no-deps web
 
 ## Scheduled jobs
 
-Nine of the ten platform jobs run on a schedule via **host cron** calling `manage.py <job>`
+Ten of the eleven platform jobs run on a schedule via **host cron** calling `manage.py <job>`
 directly — there is no `worker`/`beat` process (see "Sizing the server" for why: on a small box,
 two more persistent Django processes was real, measured memory pressure for a job volume light
 enough that a plain `docker compose run` one-off pays that cost for a few seconds instead of
-24/7). The tenth, `poll_live_game_results`, runs as its own persistent process instead — see
+24/7). The eleventh, `poll_live_game_results`, runs as its own persistent process instead — see
 "Long-running processes" below for why that one job crossed the line cron makes sense for. Each
 job is a `features.commands.ScheduledJobCommand` subclass — see `features/jobs.py` for what each
 one is and `features/commands.py` for the shared Maintenance/JobToggle-aware, JobRun-recording
@@ -193,6 +193,7 @@ base class every one of them runs through, `poll_live_game_results` included.
 | `generate_seasons` | monthly, 1st 05:00 | generates the next 2 years of seasons for every active club |
 | `notify_published_news` | every 15 min | notifies the audience of any published news item whose publish time has arrived and hasn't been notified yet |
 | `send_form_reminders` | daily 07:30 | nudges whoever hasn't submitted a form send yet, a few days before it closes |
+| `publish_scheduled_announcements` | every 5 min | pushes any platform announcement whose scheduled time has arrived |
 
 **`--commit` is not optional for the two billing jobs it's shown on** — `send_billing_reminders`
 and `archive_overdue_clubs` default to a dry-run/report-only preview (per their own `--help`);
@@ -215,6 +216,8 @@ COMPOSE_FILE=compose.yaml
 
 */15 * * * * flock -n /tmp/rosterchief-publish_scheduled_lineups.lock -c "cd $REMOTE_DIR && docker compose -f $COMPOSE_FILE run --rm web python manage.py publish_scheduled_lineups"
 */15 * * * * flock -n /tmp/rosterchief-notify_published_news.lock -c "cd $REMOTE_DIR && docker compose -f $COMPOSE_FILE run --rm web python manage.py notify_published_news"
+
+*/5  * * * * flock -n /tmp/rosterchief-publish_scheduled_announcements.lock -c "cd $REMOTE_DIR && docker compose -f $COMPOSE_FILE run --rm web python manage.py publish_scheduled_announcements"
 ```
 
 `poll_live_game_results` is deliberately **not** in this crontab — it runs continuously via the

@@ -446,7 +446,11 @@ class EarlyPaymentDeadlineFeeTests(TestCase):
         self.assertEqual(remaining_balance(membership, when=datetime.date(2026, 9, 2)), Decimal("80.00"))
 
     def test_paying_the_discounted_amount_before_the_deadline_resolves_to_paid(self):
-        membership = self.make_membership(early_payment_deadline=datetime.date(2026, 9, 1), early_payment_discount=Decimal("10.00"))
+        # record_payment has no `when` param -- it evaluates the deadline against the
+        # real paid_at, so unlike the other tests here (which pass `when=` explicitly)
+        # this deadline has to be a real future date, not a fixed literal that rots
+        # into the past as real time passes.
+        membership = self.make_membership(early_payment_deadline=timezone.localdate() + datetime.timedelta(days=10), early_payment_discount=Decimal("10.00"))
 
         record_payment(membership, amount=Decimal("70.00"))
 

@@ -1,0 +1,12 @@
+{% load i18n %}{% trans "Hello," %}
+
+{% blocktrans with reporter=reporter.first_name club=club.name %}{{ reporter }} ({{ club }}) just filed a bug report:{% endblocktrans %}
+
+{% blocktrans with title=bug.title %}Title: {{ title }}{% endblocktrans %}
+
+{{ bug.description }}
+
+{% trans "Review it from the control panel's Bugs page." %}
+
+{% trans "Thank you," %}
+{% trans "RosterChief" %}

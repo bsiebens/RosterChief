@@ -54,6 +54,7 @@
                 <h2>Billed to</h2>
                 <div><strong>{{ club.official_name }}</strong></div>
                 <div class="muted">{{ club.slug }}.rosterchief.app</div>
+                {% if club.vat_id %}<div class="muted">VAT {{ club.vat_id }}</div>{% endif %}
             </div>
             <div class="right">
                 <h2>Period</h2>

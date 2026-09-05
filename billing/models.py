@@ -339,9 +339,21 @@ class Invoice(UUIDModel):
     against, so it is allocated once and never recomputed.
     """
 
+    class SentMethod(models.TextChoices):
+        EMAIL = "email", _("emailed")
+        MANUAL = "manual", _("marked as sent")
+
     due = models.OneToOneField(Due, on_delete=models.CASCADE, related_name="invoice", verbose_name=_("due"))
     number = models.CharField(_("number"), max_length=32, unique=True, blank=True)
     issued_at = models.DateTimeField(_("issued at"), default=timezone.now)
+
+    # Invoices are sent to clubs by hand (see billing.services.invoices.send_invoice /
+    # mark_invoice_sent_manually) -- a club that needs e-invoicing never receives our
+    # email at all, so "sent" has to cover both "we emailed it" and "an admin confirmed
+    # it went out some other way" rather than assuming email is the only channel.
+    sent_at = models.DateTimeField(_("sent at"), null=True, blank=True)
+    sent_method = models.CharField(_("sent method"), max_length=10, choices=SentMethod.choices, blank=True)
+    sent_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("sent by"))
 
     class Meta:
         verbose_name = _("invoice")
@@ -350,6 +362,10 @@ class Invoice(UUIDModel):
 
     def __str__(self):
         return self.number
+
+    @property
+    def needs_sending(self) -> bool:
+        return self.sent_at is None and self.due.amount != ZERO
 
     def save(self, *args, **kwargs):
         if not self.number:

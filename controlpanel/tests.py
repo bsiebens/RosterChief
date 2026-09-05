@@ -17,13 +17,17 @@ from django.urls import reverse
 from django.utils import timezone
 from waffle import get_waffle_flag_model, get_waffle_switch_model
 
+from announcements.models import Announcement
 from billing.models import DEFAULT_GRACE_DAYS, Due, Plan, PlanPrice, Subscription
 from billing.services import BillingError
 from billing.services.dues import record_payment, start_trial, subscribe, waive
+from bugs.models import BugReport
+from bugs.services import add_note
 from club.models import Club, ClubMembership, ClubRole, Season
 from events.models import Attendance, Competition, Event, Location
 from features.models import EmailSuppression, JobRun, JobToggle, Maintenance
 from members.models import Member
+from mobile.models import PushSubscription
 from shop.models import Order
 from teams.models import Position, StaffAssignment, Team, TeamMembership
 
@@ -151,6 +155,15 @@ class ClubManagementTests(ControlPanelTestBase):
 
         self.club.refresh_from_db()
         self.assertEqual(self.club.name, "Renamed")
+
+    def test_update_club_vat_id(self):
+        self.client.post(
+            reverse("controlpanel:club_update", args=[self.club.pk]),
+            {"name": self.club.name, "slug": self.club.slug, "sport_type": "other", "season_start": "2000-08-01", "season_duration_months": "12", "vat_id": "BE0123456789"},
+        )
+
+        self.club.refresh_from_db()
+        self.assertEqual(self.club.vat_id, "BE0123456789")
 
     def test_update_club_sport_type(self):
         self.client.post(
@@ -497,6 +510,17 @@ class StatisticsTests(TestCase):
         self.assertEqual(groups["Shop"]["Revenue"], Decimal("50.00"))
         self.assertEqual(groups["Shop"]["Outstanding"], Decimal("20.00"))
         self.assertEqual(groups["Shop"]["Orders unpaid"], 1)
+
+    def test_events_this_season_counts_events_with_a_derived_season_too(self):
+        # Event.season is usually left blank and derived from the start date (see
+        # events.models.Event's own help text) -- "This season" must not undercount
+        # to zero just because most events never set the FK explicitly.
+        Event.objects.create(club=self.club, title="Derived-season game", start=timezone.now())
+        Event.objects.create(club=self.club, season=self.season, title="Explicit-season game", start=timezone.now())
+
+        groups = self.groups_for(self.club)
+
+        self.assertEqual(groups["Events"]["This season"], 2)
 
     def test_orders_unpaid_matches_the_outstanding_order_set(self):
         # Same OWED_STATUSES order set as "Outstanding" -- purely payment_status
@@ -2123,3 +2147,228 @@ class EmailSuppressionPanelTests(ControlPanelTestBase):
         response = self.client.get(reverse("controlpanel:dashboard"))
 
         self.assertNotContains(response, "Automated email paused")
+
+
+class BugManagementTests(ControlPanelTestBase):
+    """The bugs tab: controlpanel.views.BugListView/BugDetailView/BugUpdateView/
+    BugAddNoteView, all backed by bugs.services (fixed_at is derived, never posted
+    directly -- see BugUpdateView's own docstring)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.reporter = Member.objects.create(first_name="Rita", last_name="Reporter", email="rita@example.com")
+        season = Season.objects.create(club=cls.club, start_date=datetime.date(2025, 8, 1), end_date=datetime.date(2026, 6, 30))
+        ClubMembership.objects.create(club=cls.club, member=cls.reporter, season=season)
+        cls.bug = BugReport.objects.create(
+            club=cls.club,
+            reported_by=cls.reporter,
+            title="Broken roster export",
+            description="Exporting the roster to CSV throws a 500.",
+        )
+
+    def test_anonymous_is_sent_to_login(self):
+        self.client.logout()
+
+        self.assertEqual(self.client.get(reverse("controlpanel:bug_list")).status_code, 302)
+
+    def test_signed_in_non_staff_gets_403(self):
+        self.client.force_login(User.objects.create_user(email="notstaff@example.com", password="pw-secret-123"))
+
+        self.assertEqual(self.client.get(reverse("controlpanel:bug_list")).status_code, 403)
+
+    def test_list_view_shows_the_bugs_title_club_and_reporter(self):
+        response = self.client.get(reverse("controlpanel:bug_list"))
+
+        self.assertContains(response, "Broken roster export")
+        self.assertContains(response, "Ajax United")
+        self.assertContains(response, "Rita Reporter")
+
+    def test_list_view_can_filter_to_open_bugs(self):
+        fixed_bug = BugReport.objects.create(club=self.club, reported_by=self.reporter, title="Already fixed", description="...", status=BugReport.Status.FIXED)
+
+        response = self.client.get(reverse("controlpanel:bug_list"), {"status": "open"})
+
+        self.assertContains(response, self.bug.title)
+        self.assertNotContains(response, fixed_bug.title)
+
+    def test_list_view_can_filter_to_fixed_bugs(self):
+        fixed_bug = BugReport.objects.create(club=self.club, reported_by=self.reporter, title="Already fixed", description="...", status=BugReport.Status.FIXED)
+
+        response = self.client.get(reverse("controlpanel:bug_list"), {"status": "fixed"})
+
+        self.assertContains(response, fixed_bug.title)
+        self.assertNotContains(response, self.bug.title)
+
+    def test_detail_view_shows_full_info_including_a_notes_author(self):
+        add_note(self.bug, author=self.staff, body="Looking into this.")
+
+        response = self.client.get(reverse("controlpanel:bug_detail", args=[self.bug.pk]))
+
+        self.assertContains(response, self.bug.title)
+        self.assertContains(response, self.bug.description)
+        self.assertContains(response, "Rita Reporter")
+        self.assertContains(response, "rita@example.com")
+        self.assertContains(response, "Looking into this.")
+        self.assertContains(response, self.staff.email)
+
+    def test_updating_status_to_fixed_stamps_fixed_at(self):
+        self.assertIsNone(self.bug.fixed_at)
+
+        response = self.client.post(
+            reverse("controlpanel:bug_update", args=[self.bug.pk]),
+            {"status": BugReport.Status.FIXED, "priority": BugReport.Priority.HIGH, "fixed_version": "1.2.0"},
+        )
+
+        self.bug.refresh_from_db()
+        self.assertRedirects(response, reverse("controlpanel:bug_detail", args=[self.bug.pk]))
+        self.assertEqual(self.bug.status, BugReport.Status.FIXED)
+        self.assertEqual(self.bug.priority, BugReport.Priority.HIGH)
+        self.assertEqual(self.bug.fixed_version, "1.2.0")
+        self.assertIsNotNone(self.bug.fixed_at)
+
+    def test_moving_a_fixed_bug_back_to_in_progress_clears_fixed_at(self):
+        self.client.post(
+            reverse("controlpanel:bug_update", args=[self.bug.pk]),
+            {"status": BugReport.Status.FIXED, "priority": BugReport.Priority.MEDIUM, "fixed_version": "1.2.0"},
+        )
+        self.client.post(
+            reverse("controlpanel:bug_update", args=[self.bug.pk]),
+            {"status": BugReport.Status.IN_PROGRESS, "priority": BugReport.Priority.MEDIUM, "fixed_version": ""},
+        )
+
+        self.bug.refresh_from_db()
+        self.assertIsNone(self.bug.fixed_at)
+
+    def test_adding_a_note_records_the_logged_in_staff_as_author(self):
+        response = self.client.post(reverse("controlpanel:bug_add_note", args=[self.bug.pk]), {"body": "Reproduced locally."})
+
+        self.assertRedirects(response, reverse("controlpanel:bug_detail", args=[self.bug.pk]))
+        note = self.bug.notes.get()
+        self.assertEqual(note.body, "Reproduced locally.")
+        self.assertEqual(note.author, self.staff)
+
+    def test_an_invalid_note_redirects_back_with_an_error_rather_than_500(self):
+        response = self.client.post(reverse("controlpanel:bug_add_note", args=[self.bug.pk]), {"body": ""}, follow=True)
+
+        self.assertEqual(self.bug.notes.count(), 0)
+        self.assertContains(response, "Couldn&#x27;t save")
+
+
+class BugAttentionTests(TestCase):
+    """platform_attention()'s open_bugs entry, and the dashboard alert it feeds."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United")
+        cls.reporter = Member.objects.create(first_name="Rita", last_name="Reporter")
+
+    def bug(self, status):
+        return BugReport.objects.create(club=self.club, reported_by=self.reporter, title=f"A {status} bug", description="...", status=status)
+
+    def test_submitted_and_in_progress_count_as_open(self):
+        self.bug(BugReport.Status.SUBMITTED)
+        self.bug(BugReport.Status.IN_PROGRESS)
+        self.bug(BugReport.Status.FIXED)
+        self.bug(BugReport.Status.WONT_FIX)
+
+        self.assertEqual(platform_attention()["open_bugs"], 2)
+
+    def test_no_bugs_means_zero(self):
+        self.assertEqual(platform_attention()["open_bugs"], 0)
+
+
+class AnnouncementAccessTests(ControlPanelTestBase):
+    """Broadcasting is superuser-only -- plain staff (is_staff without is_superuser)
+    must not reach any of it, same gate as Platform admins."""
+
+    def test_staff_cannot_reach_the_list(self):
+        self.assertEqual(self.client.get(reverse("controlpanel:announcement_list")).status_code, 403)
+
+    def test_staff_cannot_reach_compose(self):
+        self.assertEqual(self.client.get(reverse("controlpanel:announcement_compose")).status_code, 403)
+
+    def test_the_broadcast_tab_is_hidden_from_staff(self):
+        self.assertNotContains(self.client.get(reverse("controlpanel:dashboard")), reverse("controlpanel:announcement_list"))
+
+
+class AnnouncementManagementTests(TestCase):
+    """controlpanel.views.AnnouncementComposeView/AnnouncementListView/AnnouncementCancelView,
+    backed by announcements.services -- see that app's own tests for the lower-level
+    publish/audience/consume_for behaviour this only exercises through the view layer."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United")
+        cls.root = User.objects.create_superuser(email="root@example.com", password="pw-secret-123")
+        enrol_mfa(cls.root)
+
+    def setUp(self):
+        self.client.force_login(self.root)
+
+    def test_superuser_sees_the_broadcast_section(self):
+        self.assertEqual(self.client.get(reverse("controlpanel:announcement_list")).status_code, 200)
+
+    def compose(self, **overrides):
+        data = {"title": "Heads up", "message": "Maintenance tonight.", "club": "", "scheduled_for": ""}
+        data.update(overrides)
+        return self.client.post(reverse("controlpanel:announcement_compose"), data)
+
+    @mock.patch("announcements.services.send_push_to_member")
+    def test_the_first_submission_only_previews_nothing_is_created_yet(self, send_push):
+        response = self.compose()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Review before pushing")
+        self.assertEqual(Announcement.objects.count(), 0)
+        send_push.assert_not_called()
+
+    @mock.patch("announcements.services.send_push_to_member")
+    def test_confirming_creates_and_immediately_pushes(self, send_push):
+        member = Member.objects.create(first_name="Jane", last_name="Doe")
+        PushSubscription.objects.create(club=self.club, member=member, endpoint="https://push.example/1", p256dh="k", auth="a")
+
+        self.compose(confirmed="1")
+
+        announcement = Announcement.objects.get(title="Heads up")
+        self.assertEqual(announcement.status, Announcement.Status.SENT)
+        self.assertIsNotNone(announcement.sent_at)
+        self.assertEqual(announcement.created_by, self.root)
+        send_push.assert_called_once_with(member, title="Heads up", body="Maintenance tonight.")
+
+    @mock.patch("announcements.services.send_push_to_member")
+    def test_confirming_a_future_schedule_leaves_it_pending_and_does_not_push(self, send_push):
+        when = (timezone.now() + datetime.timedelta(days=1)).strftime("%Y-%m-%dT%H:%M")
+
+        self.compose(confirmed="1", scheduled_for=when)
+
+        announcement = Announcement.objects.get(title="Heads up")
+        self.assertEqual(announcement.status, Announcement.Status.PENDING)
+        send_push.assert_not_called()
+
+    @mock.patch("announcements.services.send_push_to_member")
+    def test_confirming_targets_only_the_chosen_club(self, send_push):
+        other_club = Club.objects.create(name="Feyenoord")
+        in_scope = Member.objects.create(first_name="In", last_name="Scope")
+        out_of_scope = Member.objects.create(first_name="Out", last_name="Scope")
+        PushSubscription.objects.create(club=self.club, member=in_scope, endpoint="https://push.example/1", p256dh="k", auth="a")
+        PushSubscription.objects.create(club=other_club, member=out_of_scope, endpoint="https://push.example/2", p256dh="k", auth="a")
+
+        self.compose(confirmed="1", club=str(self.club.pk))
+
+        send_push.assert_called_once_with(in_scope, title="Heads up", body="Maintenance tonight.")
+
+    def test_cancelling_a_pending_announcement(self):
+        announcement = Announcement.objects.create(title="Heads up", message="Body", scheduled_for=timezone.now() + datetime.timedelta(days=1))
+
+        self.client.post(reverse("controlpanel:announcement_cancel", args=[announcement.pk]))
+
+        announcement.refresh_from_db()
+        self.assertEqual(announcement.status, Announcement.Status.CANCELLED)
+
+    def test_the_list_shows_every_announcement(self):
+        Announcement.objects.create(title="Heads up", message="Body", status=Announcement.Status.SENT, sent_at=timezone.now())
+
+        response = self.client.get(reverse("controlpanel:announcement_list"))
+
+        self.assertContains(response, "Heads up")

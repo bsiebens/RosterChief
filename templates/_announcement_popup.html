@@ -1,0 +1,79 @@
+{% load i18n %}
+{% comment %}
+    Shared by management/base.html, mobile/base.html and mobile/coach/base.html --
+    a platform superuser's broadcast (announcements.models.Announcement), shown at
+    most once per account. Deliberately a plain fetch on page load, not a context
+    processor: marking it "seen" only happens once this script actually runs client-
+    side (see announcements.views.PendingAnnouncementView's own docstring for why --
+    a context processor would fire on every server render, including an htmx partial
+    that never actually shows this dialog).
+
+    Styled inline, not with either app's own component classes -- management (.modal/
+    .modal-box, assets/management.css) and mobile (m-card/pill-*, assets/mobile.css)
+    are two different design systems, and this one partial has to render correctly in
+    both without knowing which one it landed in. Native <dialog> normally centers
+    itself via the UA stylesheet's `margin: auto`, but both apps' own Tailwind
+    preflight resets margin to 0 on every element -- including this one -- so
+    centering is done explicitly below (fixed + transform) rather than relied on.
+{% endcomment %}
+<dialog id="announcement-popup">
+    <style>
+        #announcement-popup {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            margin: 0;
+            max-width: 420px;
+            width: calc(100% - 2rem);
+            border: none;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25);
+            font-family: system-ui, sans-serif;
+            color: #111;
+        }
+        #announcement-popup::backdrop {
+            background: rgba(0, 0, 0, 0.5);
+        }
+        #announcement-popup h3 {
+            margin: 0 0 8px;
+            font-size: 1.1rem;
+            font-weight: 700;
+        }
+        #announcement-popup p {
+            margin: 0 0 16px;
+            font-size: 0.9rem;
+            line-height: 1.4;
+            white-space: pre-line;
+        }
+        #announcement-popup button {
+            border: none;
+            border-radius: 8px;
+            background: #111;
+            color: #fff;
+            padding: 8px 16px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+        }
+    </style>
+    <h3 id="announcement-popup-title"></h3>
+    <p id="announcement-popup-message"></p>
+    <form method="dialog">
+        <button type="submit">{% trans "Close" %}</button>
+    </form>
+</dialog>
+<script>
+    (() => {
+        fetch("{% url 'announcement_pending' %}", { headers: { "X-Requested-With": "XMLHttpRequest" } })
+            .then((response) => (response.ok ? response.json() : null))
+            .then((data) => {
+                if (!data || !data.title) return;
+                document.getElementById("announcement-popup-title").textContent = data.title;
+                document.getElementById("announcement-popup-message").textContent = data.message;
+                document.getElementById("announcement-popup").showModal();
+            })
+            .catch(() => {});
+    })();
+</script>

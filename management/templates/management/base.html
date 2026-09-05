@@ -110,6 +110,9 @@
                     <span class="font-display text-2xl font-extrabold text-ink uppercase">{% block heading %}{% block topbar_title %}Management{% endblock topbar_title %}{% endblock heading %}</span>
                     {% block topbar_context %}{% endblock topbar_context %}
                     <div class="flex-1"></div>
+                    <a class="btn btn-outline btn-square" href="{% url 'management:bug_list' %}" aria-label="{% trans "Report a bug" %}">
+                        {% lucide "bug" size=16 %}
+                    </a>
                     {% if unread_notification_count is not None %}
                         {# Same <details>/<summary> convention as the sidebar's own user-menu below -- no JS needed to open it, only the shared outside-click/Escape listener to close it. #}
                         <details id="notification-menu" class="dismissable-details relative">
@@ -219,6 +222,8 @@
                 });
             });
         </script>
+
+        {% include "_announcement_popup.html" %}
 
         {% block extra_body %}{% endblock extra_body %}
     </body>

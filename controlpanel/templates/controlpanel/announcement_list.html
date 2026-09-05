@@ -1,0 +1,91 @@
+{% extends "controlpanel/base.html" %}
+{% load i18n lucide ui %}
+
+{% comment %}
+    Every platform announcement ever composed (announcements.models.Announcement),
+    superuser-only -- see controlpanel/views.py's AnnouncementListView/AnnouncementComposeView
+    and announcements/services.py for what "push" actually does (real web push to every
+    subscribed device in scope, plus a one-time pop-up on next login -- see that app's
+    own docstrings).
+{% endcomment %}
+
+{% block panel_title %}{% trans "Broadcast" %}{% endblock panel_title %}
+
+{% block breadcrumb %}
+    <span class="text-ink">broadcast</span>
+    <span class="text-edge">|</span>
+    <span>{{ announcements|length }} announcement{{ announcements|length|pluralize }}</span>
+{% endblock breadcrumb %}
+
+{% block actions %}
+    <a class="btn btn-primary gap-2" href="{% url 'controlpanel:announcement_compose' %}">{% lucide "megaphone" size=16 %} {% trans "New announcement" %}</a>
+{% endblock actions %}
+
+{% block panel %}
+    <div class="card">
+        <div class="overflow-x-auto">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>{% trans "Title" %}</th>
+                        <th>{% trans "Audience" %}</th>
+                        <th>{% trans "Status" %}</th>
+                        <th>{% trans "When" %}</th>
+                        <th>{% trans "Created by" %}</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for announcement in announcements %}
+                        <tr>
+                            <td>
+                                <div class="font-semibold text-ink">{{ announcement.title }}</div>
+                                <div class="text-xs text-muted">{{ announcement.message|truncatechars:80 }}</div>
+                            </td>
+                            <td>{% if announcement.club %}{{ announcement.club.name }}{% else %}{% trans "Every club" %}{% endif %}</td>
+                            <td>
+                                {% if announcement.status == "sent" %}
+                                    <span class="badge badge-success gap-1">{% lucide "check" size=11 %} {% trans "Sent" %}</span>
+                                {% elif announcement.status == "cancelled" %}
+                                    <span class="badge badge-ghost gap-1">{% trans "Cancelled" %}</span>
+                                {% else %}
+                                    <span class="badge badge-warning gap-1">{% lucide "clock" size=11 %} {% trans "Pending" %}</span>
+                                {% endif %}
+                            </td>
+                            <td class="font-mono text-[11px] whitespace-nowrap text-muted">
+                                {% if announcement.sent_at %}
+                                    {% blocktrans with date=announcement.sent_at|date:"j M Y H:i" %}Sent {{ date }}{% endblocktrans %}
+                                {% elif announcement.scheduled_for %}
+                                    {% blocktrans with date=announcement.scheduled_for|date:"j M Y H:i" %}Due {{ date }}{% endblocktrans %}
+                                {% else %}
+                                    {% trans "Immediately" %}
+                                {% endif %}
+                            </td>
+                            <td class="text-muted">{{ announcement.created_by.email|default:"—" }}</td>
+                            <td class="text-right">
+                                {% if announcement.status == "pending" %}
+                                    <button class="btn btn-outline btn-error btn-sm gap-1" type="button" onclick="document.getElementById('{{ announcement.pk|dom_id:"announcement_cancel_modal" }}').showModal()">{% lucide "ban" size=13 %} {% trans "Cancel" %}</button>
+                                {% endif %}
+                            </td>
+                        </tr>
+                    {% empty %}
+                        <tr>
+                            <td colspan="6" class="text-center text-muted">{% trans "No announcements yet." %}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        {% comment %} Dialogs live outside the table: <tbody> may only contain <tr> elements. {% endcomment %}
+        {% for announcement in announcements %}
+            {% if announcement.status == "pending" %}
+                {% url 'controlpanel:announcement_cancel' announcement.pk as announcement_cancel_url %}
+                {% blocktrans asvar cancel_body with title=announcement.title %}Cancel “{{ title }}”? It will not be pushed.{% endblocktrans %}
+                {% trans "Cancel announcement" as cancel_title %}
+                {% trans "Cancel" as cancel_label %}
+                {% include "controlpanel/_confirm_modal.html" with modal_id=announcement.pk|dom_id:"announcement_cancel_modal" title=cancel_title body=cancel_body action_url=announcement_cancel_url submit_label=cancel_label submit_icon="ban" %}
+            {% endif %}
+        {% endfor %}
+    </div>
+{% endblock panel %}

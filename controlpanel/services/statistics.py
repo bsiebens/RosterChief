@@ -19,8 +19,9 @@ from django.utils.translation import gettext_lazy as _
 from waffle import get_waffle_flag_model
 
 from authentication.middleware import ELEVATED_ROLES
-from billing.models import Due, DuePayment, Subscription
+from billing.models import Due, DuePayment, Invoice, Subscription
 from billing.services.dues import dues_in_grace, dues_overdue, subscriptions_due_for_renewal
+from bugs.models import BugReport
 from club.models import Club, ClubMembership, ClubRole, Season
 from events.models import Attendance, Event
 from members.models import Member
@@ -239,7 +240,9 @@ def platform_attention():
         "dues_owed": _dues_owed(),
         "dues_in_grace": dues_in_grace().count(),
         "dues_overdue": dues_overdue().count(),
+        "invoices_to_send": Invoice.objects.filter(sent_at__isnull=True).exclude(due__amount=0).count(),
         "clubs_unbilled": Club.objects.active().filter(subscription__isnull=True).count(),
+        "open_bugs": BugReport.objects.filter(status__in=[BugReport.Status.SUBMITTED, BugReport.Status.IN_PROGRESS]).count(),
         # Normally ~0: the renewal job keeps it there. A number that sits here means cron is
         # dead, and a club is about to use the platform for free — silently, because nothing is
         # owed, so no other number on this page would go red.
@@ -508,7 +511,7 @@ def club_statistics(club):
             "icon": "calendar-days",
             "stats": [
                 (_("Upcoming"), events.filter(start__gte=now).count()),
-                (_("This season"), events.filter(season=season).count() if season else 0),
+                (_("This season"), events.filter(Q(season=season) | Q(season__isnull=True, start__date__gte=season.start_date, start__date__lte=season.end_date)).count() if season else 0),
             ],
         },
         {

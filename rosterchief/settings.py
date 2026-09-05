@@ -69,6 +69,8 @@ INSTALLED_APPS = [
     "events.apps.EventsConfig",
     "news.apps.NewsConfig",
     "notifications.apps.NotificationsConfig",
+    "bugs.apps.BugsConfig",
+    "announcements.apps.AnnouncementsConfig",
     "formbuilder.apps.FormbuilderConfig",
     "evaluations.apps.EvaluationsConfig",
     "shop.apps.ShopConfig",
