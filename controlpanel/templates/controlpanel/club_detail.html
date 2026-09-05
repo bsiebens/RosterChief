@@ -184,6 +184,20 @@
             {% include "controlpanel/_club_billing_card.html" %}
         </div>
     </div>
+
+    {% if user.is_superuser %}
+        {# --- danger zone: superuser-only, separate from every other action above -- #}
+        <div class="card border-l-4 border-l-club-dark">
+            <div class="flex items-center gap-2.5 border-b border-line px-4 py-3">
+                {% lucide "triangle-alert" size=16 class="text-club-dark" %}
+                <span class="font-display text-sm font-extrabold tracking-[.1em] text-club-dark uppercase">Danger zone</span>
+            </div>
+            <div class="flex items-center justify-between gap-4 px-4 py-3">
+                <p class="text-sm text-slate">Permanently delete this club and every row it owns — members, teams, events, orders, invoices, everything. Unlike Archive above, this cannot be undone.</p>
+                <a class="btn btn-error shrink-0 gap-2" href="{% url 'controlpanel:club_delete' club.pk %}">{% lucide "trash-2" size=14 %} Delete club</a>
+            </div>
+        </div>
+    {% endif %}
 {% endblock panel %}
 
 {% block extra_body %}

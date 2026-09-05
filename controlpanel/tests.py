@@ -87,6 +87,11 @@ class AccessTests(ControlPanelTestBase):
     def test_staff_can_reach_the_panel(self):
         self.assertEqual(self.client.get(reverse("controlpanel:dashboard")).status_code, 200)
 
+    def test_the_header_shows_the_platform_version(self):
+        response = self.client.get(reverse("controlpanel:dashboard"))
+
+        self.assertContains(response, f"v{settings.ROSTERCHIEF_VERSION}")
+
     def test_anonymous_is_sent_to_login(self):
         self.client.logout()
 
@@ -216,6 +221,107 @@ class ClubManagementTests(ControlPanelTestBase):
 
         self.assertContains(response, "Ajax United")
         self.assertNotContains(response, "Rival FC")
+
+
+class ClubDeletionTests(TestCase):
+    """The control panel's superuser-only "danger zone" -- controlpanel.views.
+    ClubDeleteView, backed by controlpanel.services.club_deletion. Unlike
+    ClubArchiveView (any platform staff, fully reversible), this actually removes
+    the club and everything it owns, gated a second way by typing the club's own
+    slug into the confirm field."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United")
+        cls.staff = User.objects.create_user(email="staff@example.com", password="pw-secret-123", is_staff=True)
+        enrol_mfa(cls.staff)
+        cls.root = User.objects.create_superuser(email="root@example.com", password="pw-secret-123")
+        enrol_mfa(cls.root)
+
+    def delete_url(self, club=None):
+        return reverse("controlpanel:club_delete", args=[(club or self.club).pk])
+
+    def test_staff_cannot_reach_the_delete_page(self):
+        self.client.force_login(self.staff)
+
+        self.assertEqual(self.client.get(self.delete_url()).status_code, 403)
+
+    def test_the_delete_button_is_hidden_from_staff(self):
+        self.client.force_login(self.staff)
+
+        response = self.client.get(reverse("controlpanel:club_detail", args=[self.club.pk]))
+
+        self.assertNotContains(response, self.delete_url())
+
+    def test_the_delete_button_is_shown_to_a_superuser(self):
+        self.client.force_login(self.root)
+
+        response = self.client.get(reverse("controlpanel:club_detail", args=[self.club.pk]))
+
+        self.assertContains(response, self.delete_url())
+
+    def test_the_confirm_page_shows_what_will_be_deleted(self):
+        member = Member.objects.create(first_name="Jane", last_name="Doe")
+        season = Season.objects.create(club=self.club, start_date=datetime.date(2025, 8, 1), end_date=datetime.date(2026, 6, 30))
+        ClubMembership.objects.create(club=self.club, member=member, season=season)
+        self.client.force_login(self.root)
+
+        response = self.client.get(self.delete_url())
+
+        self.assertEqual(response.status_code, 200)
+        impact = response.context["impact"]
+        self.assertGreaterEqual(impact.total, 2)
+        self.assertTrue(impact.can_delete)
+        self.assertContains(response, self.club.slug)
+
+    def test_a_relation_still_protected_after_every_pass_blocks_deletion(self):
+        # Simulates a genuine dead end (a PROTECT cycle, or something outside this
+        # club's own cascade) by giving the resolver zero passes to work with --
+        # the confirm page should say so and hide the delete form, not 500.
+        member = Member.objects.create(first_name="Jane", last_name="Doe")
+        season = Season.objects.create(club=self.club, start_date=datetime.date(2025, 8, 1), end_date=datetime.date(2026, 6, 30))
+        ClubMembership.objects.create(club=self.club, member=member, season=season)
+        self.client.force_login(self.root)
+
+        with mock.patch("controlpanel.services.club_deletion._MAX_RESOLUTION_PASSES", 0):
+            response = self.client.get(self.delete_url())
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.context["impact"].can_delete)
+        self.assertNotContains(response, 'name="confirm_slug"')
+        self.assertTrue(Club.objects.filter(pk=self.club.pk).exists())
+
+    def test_a_mismatched_slug_deletes_nothing(self):
+        self.client.force_login(self.root)
+
+        response = self.client.post(self.delete_url(), {"confirm_slug": "not-the-slug"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(Club.objects.filter(pk=self.club.pk).exists())
+
+    def test_the_correct_slug_deletes_the_club_and_its_data_but_not_the_member(self):
+        member = Member.objects.create(first_name="Jane", last_name="Doe")
+        season = Season.objects.create(club=self.club, start_date=datetime.date(2025, 8, 1), end_date=datetime.date(2026, 6, 30))
+        membership = ClubMembership.objects.create(club=self.club, member=member, season=season)
+        self.client.force_login(self.root)
+
+        response = self.client.post(self.delete_url(), {"confirm_slug": self.club.slug})
+
+        self.assertRedirects(response, reverse("controlpanel:club_list"))
+        self.assertFalse(Club.objects.filter(pk=self.club.pk).exists())
+        self.assertFalse(ClubMembership.objects.filter(pk=membership.pk).exists())
+        self.assertFalse(Season.objects.filter(pk=season.pk).exists())
+        self.assertTrue(Member.objects.filter(pk=member.pk).exists())
+
+    def test_deleting_a_club_does_not_touch_another_clubs_data(self):
+        other_club = Club.objects.create(name="Feyenoord")
+        other_season = Season.objects.create(club=other_club, start_date=datetime.date(2025, 8, 1), end_date=datetime.date(2026, 6, 30))
+        self.client.force_login(self.root)
+
+        self.client.post(self.delete_url(), {"confirm_slug": self.club.slug})
+
+        self.assertTrue(Club.objects.filter(pk=other_club.pk).exists())
+        self.assertTrue(Season.objects.filter(pk=other_season.pk).exists())
 
 
 class ClubAdminManagementTests(ControlPanelTestBase):

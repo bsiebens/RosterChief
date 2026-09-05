@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
+import tomllib
 from importlib.util import find_spec
 from pathlib import Path
 
@@ -18,6 +19,13 @@ from dj_database_url import parse as db_url
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# The one place the platform version is defined -- pyproject.toml -- read once at
+# startup rather than duplicated as a separate constant, so bumping it there (the
+# usual release step) is the only thing that needs to happen for every "vX.Y.Z"
+# label across the control panel/management/mobile footers to update.
+with open(BASE_DIR / "pyproject.toml", "rb") as _pyproject_file:
+    ROSTERCHIEF_VERSION = tomllib.load(_pyproject_file)["project"]["version"]
 
 
 # Quick-start development settings - unsuitable for production
@@ -203,6 +211,7 @@ TEMPLATES = [
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
+                "rosterchief.context_processors.version",
                 "club.context_processors.branding",
                 "features.context_processors.maintenance",
                 "controlpanel.context_processors.job_health",

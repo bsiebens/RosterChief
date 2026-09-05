@@ -5,6 +5,7 @@ from unittest import mock
 from unittest.mock import patch
 
 from django import forms
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -2376,6 +2377,13 @@ class MeViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Lars Bakker")
         self.assertContains(response, "(me)")
+
+    def test_the_footer_shows_the_platform_version(self):
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, f"v{settings.ROSTERCHIEF_VERSION}")
 
     def test_no_register_link_without_an_active_registration_product(self):
         self.client.force_login(self.user)

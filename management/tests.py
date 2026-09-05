@@ -9,6 +9,7 @@ from urllib.parse import parse_qs, urlparse
 
 import openpyxl
 from allauth.mfa.models import Authenticator
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core import mail
 from django.core.cache import cache
@@ -144,6 +145,13 @@ class AccessTests(ManagementTestBase):
         self.client.force_login(self.admin_user)
 
         self.assertEqual(self.club_get("home").status_code, 200)
+
+    def test_the_sidebar_shows_the_platform_version(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("home")
+
+        self.assertContains(response, f"v{settings.ROSTERCHIEF_VERSION}")
 
     def test_it_does_not_exist_on_the_base_domain(self):
         # The management UI manages one club; the mirror image of controlpanel

@@ -37,6 +37,7 @@ from .forms import ClubAdminForm, ClubForm, CompetitionForm, DuePaymentForm, Fla
 from .messages import notify
 from .mixins import PlatformStaffRequiredMixin, PlatformSuperuserRequiredMixin, RedirectOnInvalidMixin
 from .services.admins import grant_club_admin, revoke_club_admin
+from .services.club_deletion import ClubDeletionBlocked, delete_club, deletion_impact
 from .services.jobs import job_overview, recent_job_runs
 from .services.platform_admins import (
     PlatformAdminError,
@@ -259,7 +260,9 @@ class ClubDetailView(PlatformStaffRequiredMixin, DetailView):
 
 
 class ClubArchiveView(PlatformStaffRequiredMixin, View):
-    """Clubs are archived, never destroyed — their data (and invoices) are kept."""
+    """The normal way to shut a club off — archived, never destroyed, its data (and
+    invoices) kept intact and restorable by any platform staff. ClubDeleteView below
+    is the separate, superuser-only, actually-irreversible escape hatch."""
 
     def post(self, request, pk):
         club = get_object_or_404(Club, pk=pk)
@@ -274,6 +277,45 @@ class ClubRestoreView(PlatformStaffRequiredMixin, View):
         club.restore()
         notify(request, f"s|Club restored|Club “{club}” restored.")
         return redirect("controlpanel:club_detail", pk=club.pk)
+
+
+class ClubDeleteView(PlatformSuperuserRequiredMixin, TemplateView):
+    """Full, irreversible deletion of a club and every row it owns -- the "danger
+    zone" button on the club detail page. Superuser-only (ClubArchiveView above is
+    the ordinary, staff-reachable, fully-reversible way to shut a club off). A real
+    page, not a modal: the whole point is showing exactly what's about to be
+    destroyed (controlpanel.services.club_deletion.deletion_impact) before it
+    happens, and it only proceeds once the admin types the club's own slug into the
+    confirm field -- a wrong or missing slug just re-shows this same page."""
+
+    template_name = "controlpanel/club_delete.html"
+
+    @property
+    def club(self):
+        return get_object_or_404(Club, pk=self.kwargs["pk"])
+
+    def get_context_data(self, **kwargs):
+        return super().get_context_data(club=self.club, impact=deletion_impact(self.club), **kwargs)
+
+    def post(self, request, *args, **kwargs):
+        club = self.club
+
+        if request.POST.get("confirm_slug") != club.slug:
+            notify(request, f"e|{_('Not deleted')}|{_('Type the club\'s exact slug to confirm. Nothing was deleted.')}")
+            return self.render_to_response(self.get_context_data())
+
+        name = club.name
+        try:
+            delete_club(club)
+        except ClubDeletionBlocked:
+            # Belt and suspenders: the confirm page's own preview already runs this
+            # same resolution and would normally have caught this, but data can
+            # change between viewing that page and submitting this form.
+            notify(request, f"e|{_('Cannot delete')}|{_('Some of this club\'s data is protected elsewhere and cannot be removed automatically. Nothing was deleted.')}")
+            return self.render_to_response(self.get_context_data())
+
+        notify(request, f"w|{_('Club deleted')}|" + _("“%(name)s” and all of its data have been permanently deleted.") % {"name": name})
+        return redirect("controlpanel:club_list")
 
 
 class ClubAdminAddView(PlatformStaffRequiredMixin, RedirectOnInvalidMixin, FormView):
