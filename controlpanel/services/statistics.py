@@ -379,13 +379,19 @@ def teams_without_a_manager(club, season):
 
 
 def unrostered_members(club, season):
-    """Active members who are on no team this season — people who paid and play nowhere."""
+    """Active members with no team and no staff position this season — people who paid and have no role at all."""
     if season is None:
         return Member.objects.none()
 
     rostered = TeamMembership.objects.filter(team__club=club, season=season).values("member")
+    staffed = StaffAssignment.objects.filter(team__club=club, season=season).values("member")
 
-    return Member.objects.filter(member_of__club=club, member_of__season=season, member_of__kind=ClubMembership.Kind.MEMBER, member_of__status=ClubMembership.StatusChoices.ACTIVE).exclude(pk__in=rostered).distinct()
+    return (
+        Member.objects.filter(member_of__club=club, member_of__season=season, member_of__kind=ClubMembership.Kind.MEMBER, member_of__status=ClubMembership.StatusChoices.ACTIVE)
+        .exclude(pk__in=rostered)
+        .exclude(pk__in=staffed)
+        .distinct()
+    )
 
 
 def fee_aging(club):

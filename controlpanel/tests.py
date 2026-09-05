@@ -1233,6 +1233,15 @@ class ClubAttentionTests(TestCase):
 
         self.assertNotIn(self.member, unrostered_members(self.club, self.season))
 
+    def test_an_active_member_with_only_a_staff_position_is_not_unrostered(self):
+        # They have a role at the club -- coaching -- even though they play on no team.
+        self.membership(status=ClubMembership.StatusChoices.ACTIVE)
+        team = Team.objects.create(club=self.club, name="U15")
+        coach = Position.objects.create(club=self.club, name="Coach", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=team, member=self.member, season=self.season, position=coach)
+
+        self.assertNotIn(self.member, unrostered_members(self.club, self.season))
+
     def test_renewal_compares_against_the_previous_season(self):
         previous = Season.objects.create(club=self.club, start_date=self.today - datetime.timedelta(days=400), end_date=self.today - datetime.timedelta(days=40))
         stayed = self.member
