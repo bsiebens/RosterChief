@@ -89,7 +89,7 @@ from members.models import Family, FamilyMembership, Group, GroupMembership, Mem
 from members.services.claims import ClaimError, approve_claim, children_awaiting_a_parent, reject_claim, send_claim_approved_email, suggested_children
 from members.services.family import add_child_to_family, add_parent_to_family, attach_to_family, claim_label_for, detach_from_family, family_contacts, find_member_by_email, get_or_create_login_user, grant_login, register_family
 from news.models import News, NewsPhoto
-from news.services import dispatch_send_publish_notification, notify_editors_of_pending_review, render_body_html
+from news.services import dispatch_notify_editors_of_pending_review, dispatch_send_publish_notification, render_body_html
 from notifications.models import Notification
 from registration.models import RegistrationBatch, RegistrationDetails
 from registration.services.invoicing import (
@@ -2884,7 +2884,7 @@ class NewsSubmitForReviewView(NewsEditRequiredMixin, View):
     def post(self, request, pk):
         news_item = self.get_news_item()
         news_item.submit_for_review()
-        notify_editors_of_pending_review(news_item)
+        dispatch_notify_editors_of_pending_review(news_item.pk)
 
         body = _("“%(news)s” is ready for review.") % {"news": news_item}
         notify(request, f"s|{_('Sent for review')}|{body}")
@@ -5166,7 +5166,7 @@ class OrderBulkMarkReadyForPickupView(ShopManagerRequiredMixin, View):
             order.pickup_instructions = pickup_instructions
             order.fulfillment_status = Order.FulfillmentStatus.READY_FOR_PICKUP
             order.save(update_fields=["fulfillment_status", "pickup_instructions"])
-            dispatch_order_ready_for_pickup_notification(order)
+            dispatch_order_ready_for_pickup_notification(order.pk)
             count += 1
 
         notify(request, f"s|{_('Orders ready for pickup')}|{_('%(count)d order(s) marked ready — purchasers notified.') % {'count': count}}")
@@ -5423,7 +5423,7 @@ class OrderMarkReadyForPickupView(ShopManagerRequiredMixin, View):
         order.pickup_instructions = form.cleaned_data["pickup_instructions"]
         order.fulfillment_status = Order.FulfillmentStatus.READY_FOR_PICKUP
         order.save(update_fields=["fulfillment_status", "pickup_instructions"])
-        dispatch_order_ready_for_pickup_notification(order)
+        dispatch_order_ready_for_pickup_notification(order.pk)
 
         notify(request, f"s|{_('Order ready for pickup')}|{_('%(purchaser)s has been notified order %(number)s is ready.') % {'purchaser': order.purchaser, 'number': order.number}}")
         return redirect("management:order_detail", pk=pk)

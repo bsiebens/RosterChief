@@ -78,6 +78,6 @@ def place_order(cart: Cart, *, purchaser, discount_code: str = "") -> Order:
     cart.save(update_fields=["status", "modified"])
 
     create_invoice_for_order(order)
-    dispatch_order_placed_notification(order)
+    dispatch_order_placed_notification(order.pk)
 
     return order

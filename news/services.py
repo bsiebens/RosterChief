@@ -13,15 +13,14 @@ club staff, who aren't a fully trusted boundary for content served straight
 into someone else's public website.
 """
 
-import threading
-
 import markdown as _markdown
 import nh3
-from django.db import connections
 from django.utils import timezone
 from django.utils.html import strip_tags
 from django.utils.text import Truncator
 from django.utils.translation import gettext_lazy as _
+
+from rosterchief.concurrency import run_in_background
 
 _EXTENSIONS = [
     "nl2br",  # staff type in a plain textarea -- a single Enter should break the line,
@@ -160,26 +159,24 @@ def dispatch_send_publish_notification(news_id):
     item (published_at in the future) skips this entirely and lets the sweep handle it
     once due -- see the view itself for which case is which.
 
-    connections.close_all() in the finally is load-bearing, same reasoning as
-    events.services.notifications.dispatch_notify_new_event's own: a manually-
-    spawned thread doesn't get Django's usual per-request connection teardown."""
-
-    def _run():
-        try:
-            _send_and_mark_notified(news_id)
-        finally:
-            connections.close_all()
-
-    threading.Thread(target=_run, daemon=True).start()
+    See rosterchief.concurrency.run_in_background for why a plain thread and not a task
+    queue."""
+    run_in_background(_send_and_mark_notified, news_id)
 
 
 def notify_editors_of_pending_review(news_item):
     """In-app only (see notifications.services.notify_members's send_email
     param) -- a review queue that emailed every editor/admin on every
     submission would get noisy fast; the topbar bell and the dashboard card
-    are enough for this. Called from management.views.NewsSubmitForReviewView,
-    not from News.submit_for_review() itself, same as publish()/unpublish()
-    never send anything on their own either."""
+    are enough for this. Called from dispatch_notify_editors_of_pending_review
+    below (management.views.NewsSubmitForReviewView, mobile.coach_views'
+    equivalent), not from News.submit_for_review() itself, same as
+    publish()/unpublish() never send anything on their own either.
+
+    Still worth dispatching even though send_email=False means no email goes
+    out here: notify_members's notifications_created signal still fires a
+    real web-push HTTP call per subscribed editor/admin (mobile.services.push),
+    so this was blocking the request thread on that network I/O regardless."""
     from club.models import ClubRole
     from members.models import Member
     from notifications.services import notify_members
@@ -188,3 +185,23 @@ def notify_editors_of_pending_review(news_item):
     title = _("“%(news)s” is ready for review") % {"news": news_item.title}
     body = _("%(author)s submitted this news item for review before it can go live.") % {"author": news_item.created_by or _("Someone")}
     return notify_members(editors, club=news_item.club, title=title, body=body, source=news_item, send_email=False)
+
+
+def _notify_editors_of_pending_review_by_id(news_id):
+    from .models import News
+
+    news_item = News.objects.filter(pk=news_id).select_related("club").first()
+    if news_item is not None:
+        notify_editors_of_pending_review(news_item)
+
+
+def dispatch_notify_editors_of_pending_review(news_id):
+    """Runs notify_editors_of_pending_review on a daemon background thread so the request
+    that just submitted the news item for review doesn't wait on it -- see
+    rosterchief.concurrency.run_in_background for why a plain thread and not a task queue.
+
+    Takes an id, not the News instance notify_editors_of_pending_review itself takes: the
+    same reasoning as every other dispatch_* here, re-fetching inside the background thread
+    rather than handing it a Python object built on the request's own (about to be closed)
+    connection."""
+    run_in_background(_notify_editors_of_pending_review_by_id, news_id)

@@ -46,7 +46,7 @@ from management.shop_export import build_production_export, stash_production_exp
 from members.models import Family, FamilyMembership, Group, GroupMembership, Member, ParentClaim
 from members.services.claims import children_awaiting_a_parent
 from news.models import News, NewsPhoto
-from news.services import _send_and_mark_notified
+from news.services import _notify_editors_of_pending_review_by_id, _send_and_mark_notified
 from notifications.models import Notification
 from registration.models import RegistrationBatch, RegistrationDetails
 from registration.services import EntryInput, submit_registration
@@ -55,6 +55,7 @@ from registration.services.notifications import confirm_and_send_invoice
 from rosterchief.test_support import enrol_mfa
 from shop.models import Discount, DiscountType, Invoice, Order, OrderLine, Payment, Product, ProductCategory, ProductionStatus, ProductRegistrantDiscountTier, ProductVariant, Voucher, VoucherConsumption
 from shop.services.invoices import ShopInvoicePDFError, create_invoice_for_order
+from shop.services.notifications import _notify_order_ready_for_pickup_by_id
 from teams.models import NumberPool, NumberReservation, Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
 from teams.services import eligible_roster_members
 
@@ -5019,7 +5020,12 @@ class NewsManagementTests(ManagementTestBase):
         item = News.objects.create(club=self.club, title="Draft item", body="Body.")
         self.client.force_login(self.coach_manager)
 
-        self.club_post("news_submit_for_review", {}, item.pk)
+        # dispatch_notify_editors_of_pending_review fires on a real background thread now
+        # (see news.services) -- run its underlying, synchronous by-id lookup inline
+        # instead, so the assertion below isn't racing a thread that may not have
+        # finished yet.
+        with mock.patch("management.views.dispatch_notify_editors_of_pending_review", side_effect=_notify_editors_of_pending_review_by_id):
+            self.club_post("news_submit_for_review", {}, item.pk)
 
         self.assertTrue(Notification.objects.filter(member=editor_member, title__contains="Draft item").exists())
         self.assertEqual(len(mail.outbox), 0)
@@ -11112,7 +11118,12 @@ class OrderManagementTests(ShopTestBase):
         order = self.make_order()
         self.client.force_login(self.make_shop_manager())
 
-        self.club_post("order_mark_ready_for_pickup", {"pickup_instructions": ""}, order.pk)
+        # dispatch_order_ready_for_pickup_notification fires on a real background thread
+        # now (see shop.services.notifications) -- run its underlying, synchronous by-id
+        # lookup inline instead, so this assertion isn't racing a thread that may not
+        # have finished yet.
+        with mock.patch("management.views.dispatch_order_ready_for_pickup_notification", side_effect=_notify_order_ready_for_pickup_by_id):
+            self.club_post("order_mark_ready_for_pickup", {"pickup_instructions": ""}, order.pk)
 
         notification = Notification.objects.get(member=self.purchaser)
         self.assertIn(order.number, notification.title)
@@ -11222,7 +11233,9 @@ class OrderManagementTests(ShopTestBase):
         second = self.make_order()
         self.client.force_login(self.make_shop_manager())
 
-        self.club_post("order_bulk_mark_ready_for_pickup", {"order_ids": [str(first.pk), str(second.pk)], "pickup_instructions": ""})
+        # See test_marking_ready_for_pickup_notifies_the_purchaser's own comment on why.
+        with mock.patch("management.views.dispatch_order_ready_for_pickup_notification", side_effect=_notify_order_ready_for_pickup_by_id):
+            self.club_post("order_bulk_mark_ready_for_pickup", {"order_ids": [str(first.pk), str(second.pk)], "pickup_instructions": ""})
 
         self.assertEqual(Notification.objects.filter(member=self.purchaser, title__icontains=first.number).count(), 1)
         self.assertEqual(Notification.objects.filter(member=self.purchaser, title__icontains=second.number).count(), 1)

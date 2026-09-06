@@ -569,7 +569,7 @@ class JobRunNowViewTests(ControlPanelTestBase):
 
     def test_runs_with_the_registrys_own_args(self):
         # send_billing_reminders defaults to a dry run -- features.jobs.JOB_REGISTRY's
-        # own ["--commit"] is what a manual run needs too, same as the crontab entry,
+        # own ["--commit"] is what a manual run needs too, same as a scheduled tick,
         # or "Run now" would look like it worked while actually doing nothing.
         with mock.patch("controlpanel.views.call_command") as call_command:
             self.run_now(name="billing.tasks.send_billing_reminders")

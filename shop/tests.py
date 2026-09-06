@@ -36,7 +36,7 @@ from .models import (
 )
 from .services.checkout import CheckoutError, find_discount, place_order
 from .services.invoices import ShopInvoicePDFError, create_invoice_for_order, invalidate_cached_invoice_pdf, render_invoice_pdf
-from .services.notifications import dispatch_order_ready_for_pickup_notification
+from .services.notifications import _notify_order_placed_by_id, notify_order_ready_for_pickup
 from .services.payments import PaymentError, amount_due, amount_paid, record_payment, sync_payment_status
 from .services.pricing import cart_totals, order_total
 from .services.production import mark_line_received, mark_lines_in_production, pending_production_lines, sync_production_status
@@ -887,6 +887,16 @@ class PlaceOrderTests(TestCase):
         cls.member = Member.objects.create(first_name="Jane", last_name="Doe", email="shopper@example.com", user=cls.user)
         cls.product = Product.objects.create(club=cls.club, name="Home Jersey", price=Decimal("25.00"))
 
+    def setUp(self):
+        # dispatch_order_placed_notification fires on a real background thread now (see
+        # shop.services.notifications) -- same reasoning as management.tests's own
+        # dispatch_send_publish_notification patch: run its underlying, synchronous
+        # by-id lookup inline instead, so a test asserting on the Notification/email it
+        # produces isn't racing a thread that may not have finished yet.
+        patcher = patch("shop.services.checkout.dispatch_order_placed_notification", side_effect=_notify_order_placed_by_id)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def make_cart(self, quantity=2):
         cart = Cart.objects.create(club=self.club, user=self.user)
         CartItem.objects.create(cart=cart, product=self.product, quantity=quantity, unit_price=self.product.price)
@@ -1008,8 +1018,10 @@ class PlaceOrderTests(TestCase):
 
 
 class OrderReadyForPickupNotificationTests(TestCase):
-    """shop.services.notifications.dispatch_order_ready_for_pickup_notification --
-    the purchaser told (app + email) their order is ready to collect."""
+    """shop.services.notifications.notify_order_ready_for_pickup -- the purchaser told
+    (app + email) their order is ready to collect. Tests the synchronous primitive
+    directly, not dispatch_order_ready_for_pickup_notification (which just re-fetches
+    this same order by id on a background thread -- see that module's own docstring)."""
 
     @classmethod
     def setUpTestData(cls):
@@ -1018,7 +1030,7 @@ class OrderReadyForPickupNotificationTests(TestCase):
         cls.order = Order.objects.create(club=cls.club, purchaser=cls.member, fulfillment_status=Order.FulfillmentStatus.READY_FOR_PICKUP, total=Decimal("50.00"))
 
     def test_creates_an_in_app_notification(self):
-        dispatch_order_ready_for_pickup_notification(self.order)
+        notify_order_ready_for_pickup(self.order)
 
         notification = Notification.objects.get(member=self.member)
         self.assertIn(self.order.number, notification.title)
@@ -1026,7 +1038,7 @@ class OrderReadyForPickupNotificationTests(TestCase):
         self.assertEqual(notification.source, self.order)
 
     def test_emails_the_purchaser(self):
-        dispatch_order_ready_for_pickup_notification(self.order)
+        notify_order_ready_for_pickup(self.order)
 
         self.assertEqual(len(mail.outbox), 1)
         self.assertEqual(mail.outbox[0].to, ["shopper@example.com"])
@@ -1035,13 +1047,13 @@ class OrderReadyForPickupNotificationTests(TestCase):
         self.order.pickup_instructions = "Ask for it at the clubhouse desk."
         self.order.save(update_fields=["pickup_instructions"])
 
-        dispatch_order_ready_for_pickup_notification(self.order)
+        notify_order_ready_for_pickup(self.order)
 
         notification = Notification.objects.get(member=self.member)
         self.assertIn("Ask for it at the clubhouse desk.", notification.body)
 
     def test_no_instructions_is_a_plain_body(self):
-        dispatch_order_ready_for_pickup_notification(self.order)
+        notify_order_ready_for_pickup(self.order)
 
         notification = Notification.objects.get(member=self.member)
         self.assertNotIn("None", notification.body)

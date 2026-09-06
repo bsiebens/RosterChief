@@ -8,15 +8,13 @@ crash mid-send (acceptable for a one-off, low-stakes notification; see the migra
 discussion for why this was chosen over a synchronous call).
 """
 
-import threading
-
-from django.db import connections
 from django.utils import timezone
 from django.utils.translation import gettext as _
 
 from events.models import Attendance, Event
 from members.models import Member
 from notifications.services import notify_members
+from rosterchief.concurrency import run_in_background
 
 
 def notify_new_event(event_id):
@@ -49,14 +47,6 @@ def notify_new_event(event_id):
 
 def dispatch_notify_new_event(event_id):
     """Runs notify_new_event on a daemon background thread so the request that just
-    created the event doesn't wait on it. connections.close_all() in the finally is
-    load-bearing: a manually-spawned thread doesn't get Django's usual per-request
-    connection teardown, so skipping it leaks one DB connection per dispatch."""
-
-    def _run():
-        try:
-            notify_new_event(event_id)
-        finally:
-            connections.close_all()
-
-    threading.Thread(target=_run, daemon=True).start()
+    created the event doesn't wait on it -- see rosterchief.concurrency.run_in_background
+    for why a plain thread and not a task queue."""
+    run_in_background(notify_new_event, event_id)

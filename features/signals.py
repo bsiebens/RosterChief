@@ -7,8 +7,8 @@ stale cached set and the flag would keep answering with the old value.
 JobRun bookkeeping for the scheduled platform jobs (see features/jobs.py) used to live
 here too, via Celery's task_prerun/task_postrun/task_failure signals -- removed along
 with Celery itself (see DEPLOYMENT.md's "Scheduled jobs"). features.commands.
-ScheduledJobCommand writes the same bookkeeping directly now, since cron invoking a
-management command has no equivalent signal to hook.
+ScheduledJobCommand writes the same bookkeeping directly now, since a plain call_command()
+invocation (features/scheduler.py's own ticks included) has no equivalent signal to hook.
 """
 
 from django.db.models.signals import m2m_changed

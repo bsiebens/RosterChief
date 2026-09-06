@@ -228,15 +228,16 @@ class EmailSuppression(UUIDModel):
 class JobToggle(UUIDModel):
     """Per-job on/off switch for the scheduled platform jobs in features/jobs.py's
     JOB_REGISTRY, so the control panel can pause one specific job (a runaway job, one
-    under investigation, ...) without touching cron's own schedule or reaching for the
-    platform-wide Maintenance lock, which stands down every job at once.
+    under investigation, ...) without touching the scheduler's own schedule (features/
+    scheduler.py) or reaching for the platform-wide Maintenance lock, which stands down
+    every job at once.
 
     One row per job that's ever been toggled off; a job with no row here is enabled --
     same "absence means default" shape as Maintenance's own singleton, but keyed instead
     of a single row, since there's one of these per registry entry rather than one for
-    the whole platform. Cached the same write-through way for the same reason: a flip
-    made in the control panel has to reach whichever cron-invoked process checks next,
-    not just the process that made it.
+    the whole platform. Cached the same write-through way for the same reason: a flip made
+    in the control panel has to reach whichever process's scheduler thread checks next
+    (or another node's, if ever scaled beyond one), not just the process that made it.
     """
 
     CACHE_KEY = "job_toggle:%s"
@@ -277,11 +278,11 @@ class JobToggle(UUIDModel):
 
 class JobRun(UUIDModel):
     """One execution of a scheduled platform job -- see features/jobs.py for the registry
-    of what each job is, and DEPLOYMENT.md's "Scheduled jobs" for the crontab that decides
-    when it runs.
+    of what each job is, and features/scheduler.py (plus DEPLOYMENT.md's "Scheduled jobs")
+    for what decides when it runs.
 
-    Written entirely by features.commands.ScheduledJobCommand, wrapped around each cron-
-    invoked command's own execute(): individual commands (billing/club/events/news
+    Written entirely by features.commands.ScheduledJobCommand, wrapped around each
+    scheduler-invoked command's own execute(): individual commands (billing/club/events/news
     management commands) don't touch this model themselves, so a command that raises --
     including one stood down by Maintenance or JobToggle -- still gets a row regardless of
     how it ended.

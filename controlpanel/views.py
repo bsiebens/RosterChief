@@ -85,10 +85,10 @@ class DashboardView(PlatformStaffRequiredMixin, TemplateView):
 class JobsView(PlatformStaffRequiredMixin, TemplateView):
     """Status and recent history of the scheduled platform jobs -- see features/jobs.py for
     the registry and features/models.JobRun for what a run writes (features.commands.
-    ScheduledJobCommand, around each command's own execution). These run on cron's own
-    schedule (see DEPLOYMENT.md's "Scheduled jobs") -- there is no "run now" here -- but
-    each one can be paused/resumed individually via JobToggleView below, without reaching
-    for the platform-wide Maintenance lock."""
+    ScheduledJobCommand, around each command's own execution). These run on the in-process
+    scheduler's own schedule (see features/scheduler.py and DEPLOYMENT.md's "Scheduled
+    jobs") -- there is no "run now" here -- but each one can be paused/resumed individually
+    via JobToggleView below, without reaching for the platform-wide Maintenance lock."""
 
     template_name = "controlpanel/jobs.html"
 
@@ -120,7 +120,7 @@ class JobToggleView(PlatformStaffRequiredMixin, View):
 
 
 class JobRunNowView(PlatformStaffRequiredMixin, View):
-    """Manually trigger one scheduled job outside its normal cron schedule. Dispatched on a
+    """Manually trigger one scheduled job outside its normal schedule. Dispatched on a
     daemon background thread, same pattern as events.services.notifications.
     dispatch_notify_new_event -- there is no Celery broker left to hand this off to, and a
     job that hangs (the reason this button exists: see the JobRun history that motivated it)
@@ -128,15 +128,16 @@ class JobRunNowView(PlatformStaffRequiredMixin, View):
     just however long it's supposed to take.
 
     Runs through call_command, i.e. the exact same features.commands.ScheduledJobCommand.
-    execute() path cron does -- same Maintenance/JobToggle checks (a paused job still
-    refuses here, on purpose: force it by resuming first, not by routing around the pause),
-    same JobRun row, same args as the crontab entry (features.jobs.JOB_REGISTRY's own
-    ``args`` -- the two billing jobs that need --commit to actually act get it here too, so
-    a manual run isn't a silent no-op dry run someone mistakes for having worked) -- plus
-    detailed_logging=True, always: every SQL query this run makes gets logged with timing
-    (see ScheduledJobCommand.execute()'s own comment). cron never passes this -- every
-    query, on every scheduled run, would drown the log -- but a manual run is exactly the
-    "someone's actively watching, about to go dig through docker compose logs" case it's
+    execute() path features.scheduler's own ticks do -- same Maintenance/JobToggle checks (a
+    paused job still refuses here, on purpose: force it by resuming first, not by routing
+    around the pause), same JobRun row, same args as a scheduled tick (features.jobs.
+    JOB_REGISTRY's own ``args`` -- the two billing jobs that need --commit to actually act
+    get it here too, so a manual run isn't a silent no-op dry run someone mistakes for having
+    worked) -- plus detailed_logging=True, always: every SQL query this run makes gets logged
+    with timing (see ScheduledJobCommand.execute()'s own comment). The scheduler never passes
+    this on its own ticks -- every query, on every scheduled run, would drown the log -- but
+    a manual run is exactly the "someone's actively watching, about to go dig through docker
+    compose logs" case it's
     for."""
 
     def post(self, request, name):

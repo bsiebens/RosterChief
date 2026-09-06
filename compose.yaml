@@ -11,15 +11,12 @@
 # or `:<branch>-<short-sha>` to pin/roll back to an exact build -- see DEPLOYMENT.md's
 # "Deploying a specific version".
 #
-# No `worker`/`beat` here -- the scheduled platform jobs run via host cron calling `manage.py
-# <job>` directly instead of a persistent Celery worker/beat pair. See DEPLOYMENT.md's
-# "Scheduled jobs" for the crontab and features/commands.py's ScheduledJobCommand for the
-# JobRun/JobToggle bookkeeping those processes used to provide.
-#
-# `live_score_poller` is the one exception: a single persistent process for the once-a-minute
-# poll_live_game_results job instead of cron, so that job doesn't pay a fresh container start
-# every 60 seconds. restart: unless-stopped is what makes it resilient to a crash -- see
-# DEPLOYMENT.md's "Long-running processes" for why this job specifically and not the other nine.
+# No `worker`/`beat`, and no separate scheduler/poller container either -- every scheduled
+# platform job (the once-a-minute live-score poll included) runs from an in-process
+# APScheduler thread inside `web` itself, started by gunicorn.conf.py's when_ready hook. See
+# features/scheduler.py's own docstring for the full picture (and its history: Celery
+# worker/beat, then host cron + a lone poller container, then this) and DEPLOYMENT.md's
+# "Scheduled jobs" for the operational picture.
 
 name: rosterchief
 
@@ -75,18 +72,6 @@ services:
       retries: 3
       start_period: 20s
 
-  live_score_poller:
-    image: ghcr.io/bsiebens/rosterchief:${IMAGE_TAG:-main}
-    build: .
-    restart: unless-stopped
-    env_file: .env.production
-    command: ["python", "manage.py", "run_live_score_poller"]
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_started
-
   db:
     image: postgres:17-alpine
     restart: unless-stopped
@@ -110,12 +95,13 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    # Cache only now (waffle flags, Maintenance -- see rosterchief/settings.py) -- no more
-    # Celery broker/result-backend duty since the scheduled jobs moved to host cron (see
-    # DEPLOYMENT.md's "Scheduled jobs"). maxmemory-policy allkeys-lru (evict rather than grow
-    # unbounded) and --save ""/--appendonly no (nothing persists across a restart) are both
-    # exactly right for a pure cache -- no queued task message that eviction or a restart
-    # could ever lose anymore.
+    # Cache only (waffle flags, Maintenance -- see rosterchief/settings.py) plus
+    # features/scheduler.py's leader-election lease -- no Celery broker/result-backend duty,
+    # and the lease itself is disposable (a lost lease just means a several-second gap before
+    # another process reclaims it, not lost work). maxmemory-policy allkeys-lru (evict rather
+    # than grow unbounded) and --save ""/--appendonly no (nothing persists across a restart)
+    # are both exactly right for that -- nothing stored here needs to survive an eviction or
+    # a restart.
     command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "32mb", "--maxmemory-policy", "allkeys-lru"]
 
 volumes:

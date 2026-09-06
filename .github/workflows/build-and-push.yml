@@ -131,11 +131,20 @@ jobs:
 
   deploy-dev:
     needs: build
-    # Opt-in: skipped entirely until DEV_SSH_HOST is actually configured (Settings ->
-    # Secrets and variables -> Actions on the repo -- not something this workflow file can
-    # set for you). deploy/deploy-prod.sh stays a human's deliberate call either way; this is
-    # only ever wired to the throwaway dev instance deploy/deploy-dev.sh already targets.
-    if: ${{ github.event_name == 'push' && secrets.DEV_SSH_HOST != '' }}
+    # Opt-in: the actual deploy step below skips entirely until DEV_SSH_HOST is configured
+    # (Settings -> Secrets and variables -> Actions on the repo -- not something this
+    # workflow file can set for you). deploy/deploy-prod.sh stays a human's deliberate call
+    # either way; this is only ever wired to the throwaway dev instance
+    # deploy/deploy-dev.sh already targets.
+    #
+    # The secrets check used to live in this job's own `if:` -- moved to the step below
+    # instead because `secrets` isn't in the set of contexts GitHub Actions allows in a
+    # job-level `if:` ("Unrecognized named-value: 'secrets'"), which doesn't just skip this
+    # one job, it fails the *entire workflow file* as invalid before any job (including
+    # `test`/`build` above) ever runs. `secrets` is allowed in a step-level `if:`, so the
+    # job itself always runs -- one cheap checkout -- and only the actual deploy is
+    # conditional.
+    if: ${{ github.event_name == 'push' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -145,6 +154,7 @@ jobs:
           fetch-depth: 1
 
       - name: Deploy to the dev instance
+        if: ${{ secrets.DEV_SSH_HOST != '' }}
         env:
           SSH_HOST: ${{ secrets.DEV_SSH_HOST }}
           SSH_USER: ${{ secrets.DEV_SSH_USER }}

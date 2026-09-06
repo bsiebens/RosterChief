@@ -36,7 +36,7 @@ from management.forms import EventForm, EventSeriesForm, LocationForm, NewsForm,
 from members.models import Member
 from members.services.family import claim_label_for
 from news.models import News, NewsPhoto
-from news.services import notify_editors_of_pending_review
+from news.services import dispatch_notify_editors_of_pending_review
 from notifications.services import notify_members
 from teams.models import Position, StaffAssignment, Team, TeamMembership
 from teams.services import eligible_roster_members
@@ -704,7 +704,7 @@ class CoachCreateNewsView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
         for index, image in enumerate(photo_form.cleaned_data["images"]):
             NewsPhoto.objects.create(news_item=news_item, image=image, is_main=index == 0)
         news_item.submit_for_review()
-        notify_editors_of_pending_review(news_item)
+        dispatch_notify_editors_of_pending_review(news_item.pk)
 
         body = _("“%(news)s” is ready for review.") % {"news": news_item}
         notify(request, f"s|{_('Sent for review')}|{body}")

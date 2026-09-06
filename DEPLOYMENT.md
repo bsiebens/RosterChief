@@ -25,7 +25,11 @@ A   *.rosterchief.app  -> <server ip>
 `waffle` caches each feature flag's targeting in the Django cache, and `LocMemCache` is
 private to a single process. Under several gunicorn workers, toggling a feature in the
 control panel flushes **one** worker's cache while the others keep serving the stale flag —
-a feature that "sometimes doesn't turn on". A shared cache is the fix.
+a feature that "sometimes doesn't turn on". A shared cache is the fix. It also carries the
+in-process job scheduler's leader-election lease (see "Scheduled jobs" below) — harmless to
+run on `LocMemCache` with one node (there's only ever one process trying to become leader:
+the gunicorn master), but the thing that keeps exactly one node's scheduler active, not
+every node's, the moment there's more than one `web` container running this image.
 
 **3. `SECURE_PROXY_SSL_HEADER` must be set, and Caddy must send the header.**
 Caddy terminates TLS, so without it Django believes every request is plain HTTP:
@@ -171,22 +175,21 @@ docker compose up -d --no-deps web
 
 ## Scheduled jobs
 
-Ten of the eleven platform jobs run on a schedule via **host cron** calling `manage.py <job>`
-directly — there is no `worker`/`beat` process (see "Sizing the server" for why: on a small box,
-two more persistent Django processes was real, measured memory pressure for a job volume light
-enough that a plain `docker compose run` one-off pays that cost for a few seconds instead of
-24/7). The eleventh, `poll_live_game_results`, runs as its own persistent process instead — see
-"Long-running processes" below for why that one job crossed the line cron makes sense for. Each
-job is a `features.commands.ScheduledJobCommand` subclass — see `features/jobs.py` for what each
-one is and `features/commands.py` for the shared Maintenance/JobToggle-aware, JobRun-recording
-base class every one of them runs through, `poll_live_game_results` included.
+All eleven platform jobs run from **one in-process scheduler thread inside `web` itself** —
+`features/scheduler.py`, an APScheduler `BackgroundScheduler` started by `gunicorn.conf.py`'s
+`when_ready` hook. There is no host cron, no `worker`/`beat`, and no separate poller
+container: the schedule is `features/jobs.py`'s `JOB_REGISTRY`, in code, in git, deployed with
+every image — nothing left to configure by hand on a new box. Each job is a
+`features.commands.ScheduledJobCommand` subclass — see `features/jobs.py` for what each one is
+and `features/commands.py` for the shared Maintenance/JobToggle-aware, JobRun-recording base
+class every one of them runs through.
 
 | Job (management command) | Cadence | What it does |
 |---|---|---|
 | `extend_event_series` | daily 03:00 | materialises recurring event occurrences so the calendar never runs dry |
 | `send_deadline_reminders` | daily 07:00 | nudges whoever hasn't answered an event, a week before its deadline (or start) |
 | `publish_scheduled_lineups` | every 15 min | publishes any coach-scheduled line-up whose publish time has arrived |
-| `poll_live_game_results` | every minute, via `run_live_score_poller` (see below) | refreshes score/live status from each game's competition data source, from 20 min before kickoff through 1h after its planned end (or until it's seen finishing) |
+| `poll_live_game_results` | every minute | refreshes score/live status from each game's competition data source, from 20 min before kickoff through 1h after its planned end (or until it's seen finishing) |
 | `renew_subscriptions` | daily 04:00 | opens the next billing period for clubs whose current one is running out |
 | `send_billing_reminders --commit` | daily 05:00 | emails club admins about outstanding platform fees, once per escalation level |
 | `archive_overdue_clubs --commit` | daily 06:00 | archives clubs unpaid past their grace period |
@@ -195,103 +198,75 @@ base class every one of them runs through, `poll_live_game_results` included.
 | `send_form_reminders` | daily 07:30 | nudges whoever hasn't submitted a form send yet, a few days before it closes |
 | `publish_scheduled_announcements` | every 5 min | pushes any platform announcement whose scheduled time has arrived |
 
+Cadences above are the human-readable label each job's `JOB_REGISTRY` entry carries (also
+shown on the control panel's **Jobs** tab); the actual trigger the scheduler runs from is that
+same entry's `trigger` field (an APScheduler cron/interval spec) — keep the two in sync by hand
+if either ever changes, the same discipline the old crontab table needed, just in one file
+instead of two.
+
 **`--commit` is not optional for the two billing jobs it's shown on** — `send_billing_reminders`
 and `archive_overdue_clubs` default to a dry-run/report-only preview (per their own `--help`);
-without `--commit` cron would run them forever and nothing would actually happen. The other seven
-act by default. `renew_subscriptions` also has a `--dry-run` to preview instead, for manual use.
+without `--commit` the scheduler would tick them forever and nothing would actually happen. The
+other seven act by default. `renew_subscriptions` also has a `--dry-run` to preview instead, for
+manual use.
 
-```cron
-# /etc/cron.d/rosterchief, or crontab -e as whichever user owns the checkout -- adjust
-# REMOTE_DIR and COMPOSE_FILE to match your deploy (see "Deploying with one command" above).
-REMOTE_DIR=/home/bernard/RosterChief
-COMPOSE_FILE=compose.yaml
+**Overlap and misfire protection is APScheduler's job config, not `flock`.** Every job is added
+with `max_instances=1` (a still-running tick makes the next one skip, not queue — the same thing
+`flock -n` gave the old crontab, per-job rather than one shared lock so a stuck
+`notify_published_news` doesn't also block `publish_scheduled_lineups`) and
+`coalesce=True, misfire_grace_time=300` (a tick or two missed — a deploy, a brief outage — runs
+once to catch up instead of once per missed tick; older misfires are dropped rather than piling
+up, the same "don't catch up the whole backlog" behaviour cron itself had).
 
-0  3 * * *  flock -n /tmp/rosterchief-extend_event_series.lock -c "cd $REMOTE_DIR && docker compose -f $COMPOSE_FILE run --rm web python manage.py extend_event_series"
-0  7 * * *  flock -n /tmp/rosterchief-send_deadline_reminders.lock -c "cd $REMOTE_DIR && docker compose -f $COMPOSE_FILE run --rm web python manage.py send_deadline_reminders"
-0  4 * * *  flock -n /tmp/rosterchief-renew_subscriptions.lock -c "cd $REMOTE_DIR && docker compose -f $COMPOSE_FILE run --rm web python manage.py renew_subscriptions"
-0  5 * * *  flock -n /tmp/rosterchief-send_billing_reminders.lock -c "cd $REMOTE_DIR && docker compose -f $COMPOSE_FILE run --rm web python manage.py send_billing_reminders --commit"
-0  6 * * *  flock -n /tmp/rosterchief-archive_overdue_clubs.lock -c "cd $REMOTE_DIR && docker compose -f $COMPOSE_FILE run --rm web python manage.py archive_overdue_clubs --commit"
-0  5 1 * *  flock -n /tmp/rosterchief-generate_seasons.lock -c "cd $REMOTE_DIR && docker compose -f $COMPOSE_FILE run --rm web python manage.py generate_seasons"
-30 7 * * *  flock -n /tmp/rosterchief-send_form_reminders.lock -c "cd $REMOTE_DIR && docker compose -f $COMPOSE_FILE run --rm web python manage.py send_form_reminders"
-
-*/15 * * * * flock -n /tmp/rosterchief-publish_scheduled_lineups.lock -c "cd $REMOTE_DIR && docker compose -f $COMPOSE_FILE run --rm web python manage.py publish_scheduled_lineups"
-*/15 * * * * flock -n /tmp/rosterchief-notify_published_news.lock -c "cd $REMOTE_DIR && docker compose -f $COMPOSE_FILE run --rm web python manage.py notify_published_news"
-
-*/5  * * * * flock -n /tmp/rosterchief-publish_scheduled_announcements.lock -c "cd $REMOTE_DIR && docker compose -f $COMPOSE_FILE run --rm web python manage.py publish_scheduled_announcements"
-```
-
-`poll_live_game_results` is deliberately **not** in this crontab — it runs continuously via the
-`live_score_poller` compose service instead (`docker compose up -d` starts it alongside `web`
-with no separate cron entry needed). See "Long-running processes" below.
-
-**`flock -n` is load-bearing, not decoration** — plain cron has no idea whether the *previous*
-invocation of a job is still running, and fires the next one anyway regardless. For the two
-every-15-minute jobs especially, a single run that hangs (a stuck DB connection, a lock, the
-host itself under memory pressure) would otherwise let cron pile up a new overlapping instance
-every 15 minutes on top of it, each holding its own DB connection — turning one slow run into a
-connection-pool exhaustion problem for every other job on the box, scheduled or manual. `-n`
-(non-blocking) makes a job whose previous run hasn't finished skip this tick entirely rather than
-queue up behind it; the next scheduled tick tries again. One lockfile per job (not one shared
-lockfile) so a stuck `notify_published_news` doesn't also block `publish_scheduled_lineups` from
-running.
+**Exactly one process runs the schedule, enforced by a Redis lease, not by convention.**
+`features.scheduler._try_acquire_or_renew` takes out a short-lived leader lease in the shared
+cache before starting its local `BackgroundScheduler`, and renews it every 10 seconds for as
+long as it holds it. Today, with one `web` container, this is nearly invisible — the gunicorn
+master is the only process that ever tries. It's there for the day this scales to more than one
+`web` node (see "Multi-server" below): every node runs the same scheduler code, but only the one
+holding the lease actually ticks, the same "one scheduler" rule this document's multi-server
+section already asked for by convention, now enforced automatically. A lost lease (a crashed
+leader, Redis briefly unreachable) means at most ~30 seconds before another node picks it back
+up — see that module's own docstring for the accepted small race window and why it isn't worth
+a harder distributed lock at this job volume.
 
 Run status (started, finished, success/failure, what it returned or raised) is recorded in
-`features.models.JobRun` and shown on the control panel's **Jobs** tab regardless of cron's own
-stderr-mailing (which needs a configured MTA this box may not have) — check there first, not
-your inbox, if a job seems to have gone quiet. The Jobs tab also has a **Run now** button per
-job, for testing one off-schedule — it runs on a background thread (no request/gunicorn worker
-tied up waiting on it, same reasoning as `flock` above: a hung job shouldn't cost you anything
-beyond itself) and goes through the exact same command, args, and JobRun bookkeeping the crontab
-entry does, `--commit` included where the crontab has it.
+`features.models.JobRun` and shown on the control panel's **Jobs** tab — check there first if a
+job seems to have gone quiet. The Jobs tab also has a **Run now** button per job, for testing one
+off-schedule — it runs on a background thread (no request/gunicorn worker tied up waiting on it)
+and goes through the exact same command, args, and JobRun bookkeeping a scheduled tick does,
+`--commit` included where the registry has it.
 
 Every job run also logs `job.start`/`job.finished`/`job.failed` lines (with elapsed time, and for
 `job.start`, the OS pid) through Django's own `logging`, flushed immediately rather than sitting
-in a stdio buffer — `docker compose -f compose.yaml logs` (the one-off `run` containers log the
-same way `web` does) is where to look first if a run seems stuck: the last line reached tells you
-whether it got past creating its own `JobRun` row (a DB-connectivity problem from the very first
-write) or hung somewhere inside the command's own work.
+in a stdio buffer — `docker compose -f compose.yaml logs web` is where to look first if a run
+seems stuck: the last line reached tells you whether it got past creating its own `JobRun` row (a
+DB-connectivity problem from the very first write) or hung somewhere inside the command's own
+work. `scheduler.leader_acquired`/`scheduler.leader_lost` lines show which node currently owns
+the schedule, if there's more than one.
 
 Each command still has its own `--help` for manual/dry-run use from a shell (`generate_seasons
 --resync`, for one, is still CLI-only: it can delete rows, so it isn't something a schedule
 should ever run unattended, Run now button included).
 
-## Long-running processes
+### Why not host cron, and why not Celery
 
-`poll_live_game_results` is the one scheduled job that doesn't run via cron. Every other job's
-cadence (15 minutes or slower) makes a fresh `docker compose run` one-off cheap relative to how
-rarely it fires — see "Sizing the server" for why that beat a persistent Celery `worker`/`beat`
-pair for this whole app. Once-a-minute crossed that line: 1,440 container starts a day, each
-paying its own Django import, for a job whose actual work (checking a handful of games due to
-start soon or still in their post-game window) takes a fraction of a second. `run_live_score_poller`
-(`events/management/commands/run_live_score_poller.py`) replaces that with one persistent process
-that calls `poll_live_game_results` in a loop, roughly once every 60 seconds, and the
-`live_score_poller` compose service runs it with `restart: unless-stopped` — the same policy
-`web`/`db`/`redis`/`caddy` already use.
+Both were tried. **Celery** (`worker`/`beat`) measured **~740 MB** for `worker` alone on a real
+1 GB box — see "Sizing the server" for the full story (prefork forking defeats Python's
+reference-counting-based copy-on-write once Django has ~46 apps loaded, so each forked child
+pays close to the *full* import cost again). **Host cron** fixed the memory problem (a
+`docker compose run` one-off pays the Django-import cost for a few seconds instead of 24/7,
+and the once-a-minute `poll_live_game_results` ran as a single persistent process instead of
+1,440 container starts a day) but traded it for an operational one: the schedule lived in
+`/etc/cron.d/rosterchief` on the host, outside git, provisioned by hand on every new box, with
+nothing to stop it drifting from `features/jobs.py`'s own idea of the schedule.
 
-That `restart: unless-stopped` is what "resilient to a crash" actually means here, at two levels:
-
-- **A single tick's failure never reaches Docker.** `poll_live_game_results` is still a
-  `ScheduledJobCommand` — every tick gets its own `JobRun` row and the same Maintenance/JobToggle
-  checks a cron invocation would get, cache TTL well under the 60s interval so a control-panel
-  toggle takes effect on the next tick either way. The loop wraps that call in a `try/except`
-  and logs-and-continues on any exception, so one bad tick (a competition API timeout, a
-  transient DB error) costs one `JobRun(FAILURE)` row, not the process. `connections.close_all()`
-  runs after every tick (the same thing `controlpanel.views.JobRunNowView` already does after its
-  own off-cycle background-thread run) so a connection Postgres drops between ticks — an idle
-  timeout, a restart — doesn't fail every tick after it, just gets reconnected on the next one.
-- **If the process dies anyway** — OOM, an unhandled signal, a bug the try/except doesn't
-  catch — Docker's `restart: unless-stopped` brings the container back. `SIGTERM` (what
-  `docker compose stop`/`down`/a redeploy sends first) is caught to finish the in-flight tick and
-  exit the loop cleanly instead of leaving a `JobRun` stuck at `STARTED`; only a harder kill
-  bypasses that.
-
-This is one lightweight process, not a queue: no forking, no worker pool, a single Django import
-paid once instead of 1,440 times a day. Expect it to cost roughly what one gunicorn worker
-costs (~50-100 MB — see "Sizing the server"'s own per-worker figure) on top of the existing
-steady state, nowhere near the ~740 MB the old Celery `worker` measured. Don't reach for this
-pattern for any of the other nine jobs without redoing this math first — the win here comes
-specifically from the gap between "once a minute" and "everything else," not from long-running
-processes being free.
+The in-process scheduler keeps Celery's actual lesson (no persistent worker *pool*, no
+forking, no broker) while fixing what made cron itself annoying: the schedule is a Python
+dict, reviewed in the same PR as the code it schedules, and shipped with the image instead of
+configured separately per host. Expect it to cost a background thread's worth of memory inside
+the process gunicorn's master already runs, not a new process — cheaper than even the old
+`live_score_poller` container's ~50–100 MB, let alone Celery's `worker`.
 
 ## Maintenance mode
 
@@ -853,7 +828,7 @@ Nothing in the code changes. What changes is where the services live:
 | Cache / flags | `redis` container | managed Redis (or your existing one) |
 | Uploads | local disk | **S3 bucket** (`AWS_STORAGE_BUCKET_NAME`) |
 | Static files | WhiteNoise, in the image | unchanged — that is why WhiteNoise is there |
-| Scheduled jobs | host cron, one node | EventBridge Scheduler + a one-off ECS task (see below) — or cron on **exactly one** node, same "one scheduler" rule either way |
+| Scheduled jobs | in-process scheduler, the only node | unchanged — every node runs the same in-process scheduler, but `features/scheduler.py`'s Redis leader lease makes exactly one of them the active one automatically (see "Scheduled jobs" above); no separate infra needed, unlike the AWS layout below |
 | TLS | Caddy on the box | load balancer, or Caddy on each node |
 
 Drop `db` and `redis` from `compose.yaml`, point the URLs at the central services, and run

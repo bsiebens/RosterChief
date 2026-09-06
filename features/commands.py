@@ -43,10 +43,12 @@ class MaintenanceAwareCommand(BaseCommand):
 
 class ScheduledJobCommand(MaintenanceAwareCommand):
     """A MaintenanceAwareCommand that's also one of features.jobs.JOB_REGISTRY's scheduled
-    platform jobs -- cron invokes these directly (see DEPLOYMENT.md's "Scheduled jobs"),
-    there is no Celery worker/beat left to provide task_prerun/task_postrun/task_failure
-    signals, so this writes the same JobRun bookkeeping those signals used to (see the now-
-    deleted features/signals.py task handlers) directly around its own execute().
+    platform jobs -- features.scheduler invokes these directly on their own schedule (see
+    DEPLOYMENT.md's "Scheduled jobs"), and the control panel's "Run now" button invokes them
+    manually the same way; there is no Celery worker/beat left to provide task_prerun/
+    task_postrun/task_failure signals, so this writes the same JobRun bookkeeping those
+    signals used to (see the now-deleted features/signals.py task handlers) directly around
+    its own execute().
 
     Also stands down via JobToggle -- a per-job switch, narrower than Maintenance's platform-
     wide one -- checked here rather than in MaintenanceAwareCommand.execute() itself so a
@@ -70,9 +72,9 @@ class ScheduledJobCommand(MaintenanceAwareCommand):
             "--detailed-logging",
             action="store_true",
             help="Log every SQL query this run makes, with timing -- for a one-off manual run "
-            "you're actively watching, not something cron should ever pass (every query, on "
-            'every scheduled run, would drown the log). The control panel\'s own "Run now" '
-            "button always passes this.",
+            "you're actively watching, not something the scheduler should ever pass on its own "
+            'ticks (every query, on every scheduled run, would drown the log). The control '
+            'panel\'s own "Run now" button always passes this.',
         )
         return parser
 

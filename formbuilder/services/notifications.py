@@ -6,14 +6,12 @@ task, since there's no worker/beat left to hand it off to (see
 DEPLOYMENT.md's "Scheduled jobs").
 """
 
-import threading
-
-from django.db import connections
 from django.utils import timezone
 from django.utils.translation import gettext as _
 
 from formbuilder.models import FormSend
 from notifications.services import notify_members
+from rosterchief.concurrency import run_in_background
 
 from .audience import effective_members
 
@@ -41,15 +39,7 @@ def notify_form_send(send_id):
 
 def dispatch_notify_form_send(send_id):
     """Runs notify_form_send on a daemon background thread so the request that
-    just created the send doesn't wait on it. connections.close_all() in the
-    finally is load-bearing: a manually-spawned thread doesn't get Django's
-    usual per-request connection teardown, so skipping it leaks one DB
-    connection per dispatch."""
-
-    def _run():
-        try:
-            notify_form_send(send_id)
-        finally:
-            connections.close_all()
-
-    threading.Thread(target=_run, daemon=True).start()
+    just created the send doesn't wait on it -- see
+    rosterchief.concurrency.run_in_background for why a plain thread and not a
+    task queue."""
+    run_in_background(notify_form_send, send_id)

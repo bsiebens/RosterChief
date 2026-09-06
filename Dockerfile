@@ -117,9 +117,13 @@ EXPOSE 8000
 # worker duplicates a full Django process — the single biggest lever on a memory-limited box.
 # --preload imports the app once in the master and forks workers via copy-on-write instead of
 # each re-importing Django independently (safe here: no app's ready() touches DB/Redis eagerly,
-# checked club/features/news/events). --max-requests recycles a worker periodically so the one
-# that happens to render a WeasyPrint invoice doesn't carry that +50-100MB forever.
+# checked club/features/news/events) -- and is also what makes gunicorn.conf.py's when_ready
+# hook (which starts features/scheduler.py's in-process job scheduler) run with Django already
+# set up, in the master process, exactly once regardless of --workers. --max-requests recycles
+# a worker periodically so the one that happens to render a WeasyPrint invoice doesn't carry
+# that +50-100MB forever.
 CMD ["gunicorn", "rosterchief.wsgi:application", \
+     "--config", "gunicorn.conf.py", \
      "--bind", "0.0.0.0:8000", \
      "--workers", "2", \
      "--threads", "4", \

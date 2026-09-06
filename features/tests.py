@@ -1,4 +1,6 @@
+import time
 from io import StringIO
+from unittest import mock
 
 from allauth.mfa.models import Authenticator
 from django.contrib.auth import get_user_model
@@ -11,6 +13,8 @@ from waffle import flag_is_active, get_waffle_flag_model
 
 from club.models import Club
 
+from . import scheduler as scheduler_module
+from .jobs import JOB_REGISTRY
 from .models import EmailSuppression, JobRun, JobToggle, Maintenance
 
 Flag = get_waffle_flag_model()
@@ -351,8 +355,8 @@ class JobRunTests(TestCase):
 
     def test_detailed_logging_logs_every_query(self):
         # --detailed-logging is what the control panel's "Run now" button always passes
-        # (see controlpanel.views.JobRunNowView) -- cron never does, on purpose, since
-        # every query on every scheduled run would drown the log.
+        # (see controlpanel.views.JobRunNowView) -- features.scheduler's own ticks never
+        # do, on purpose, since every query on every scheduled run would drown the log.
         with self.assertLogs("django.db.backends", level="DEBUG") as captured:
             call_command("archive_overdue_clubs", "--detailed-logging", stdout=StringIO())
 
@@ -395,3 +399,145 @@ class JobToggleTests(TestCase):
         JobToggle.set_enabled("events.tasks.extend_event_series", False)
 
         self.assertTrue(JobToggle.is_enabled("events.tasks.send_deadline_reminders"))
+
+
+class BuildSchedulerTests(TestCase):
+    """features.scheduler._build_scheduler wires every JOB_REGISTRY entry into an
+    APScheduler job -- this checks the wiring itself (one job per registry entry, the
+    right trigger kwargs, overlap/misfire guards), not APScheduler's own trigger math."""
+
+    def setUp(self):
+        # Never started -- add_job() only populates the in-memory jobstore, no thread/pool
+        # spun up, so there's nothing here that needs a shutdown() to clean up after itself.
+        self.scheduler = scheduler_module._build_scheduler()
+
+    def test_one_job_per_registry_entry(self):
+        job_ids = {job.id for job in self.scheduler.get_jobs()}
+
+        self.assertEqual(job_ids, set(JOB_REGISTRY))
+
+    def test_every_job_guards_against_overlap_and_pauses_only_a_missed_run(self):
+        for job in self.scheduler.get_jobs():
+            self.assertEqual(job.max_instances, 1, job.id)
+            self.assertTrue(job.coalesce, job.id)
+            self.assertEqual(job.misfire_grace_time, scheduler_module.MISFIRE_GRACE_SECONDS, job.id)
+
+    def test_a_cron_entrys_trigger_carries_its_own_hour_and_minute(self):
+        job = self.scheduler.get_job("events.tasks.extend_event_series")
+
+        # APScheduler's CronTrigger stringifies as "cron[hour='3', minute='0', ...]" --
+        # asserting on that representation rather than reaching into private trigger
+        # internals for the same fields JOB_REGISTRY's own "trigger" dict already states.
+        self.assertIn("hour='3'", str(job.trigger))
+        self.assertIn("minute='0'", str(job.trigger))
+
+    def test_an_interval_entrys_trigger_carries_its_own_period(self):
+        job = self.scheduler.get_job("events.tasks.poll_live_game_results")
+
+        self.assertIn("0:01:00", str(job.trigger))
+
+
+class RunJobTests(TestCase):
+    """features.scheduler._run_job is what every tick actually calls -- same call_command
+    path controlpanel.views.JobRunNowView and the old crontab entries used, plus the
+    connection cleanup a thread outside the request/response cycle needs for itself.
+
+    _run_job's own `finally: connections.close_all()` is only safe called from its own
+    dedicated thread (the production case, and JobRunNowView's/the live-score loop's own
+    precedent) -- called here, inline on the test's own thread, it would tear down the
+    connection this TestCase's wrapping atomic() block depends on, the exact bug
+    controlpanel.tests._SyncThread hit against Postgres. Patched to a no-op for every test
+    in this class for that reason, not just the one that asserts on it directly.
+    """
+
+    def setUp(self):
+        self.connections_close_all = mock.patch("features.scheduler.connections.close_all").start()
+        self.addCleanup(mock.patch.stopall)
+
+    def test_calls_call_command_with_the_registrys_own_args(self):
+        with mock.patch("features.scheduler.call_command") as call_command_mock:
+            scheduler_module._run_job("billing.tasks.send_billing_reminders", "send_billing_reminders", ["--commit"])
+
+        call_command_mock.assert_called_once_with("send_billing_reminders", "--commit")
+
+    def test_a_failing_job_is_caught_and_logged_not_raised(self):
+        with mock.patch("features.scheduler.call_command", side_effect=RuntimeError("boom")):
+            # Must not raise -- an uncaught exception here would take the whole scheduler
+            # thread's job down with it, not just this one tick.
+            scheduler_module._run_job("events.tasks.extend_event_series", "extend_event_series", [])
+
+    def test_closes_connections_even_when_the_job_raises(self):
+        with mock.patch("features.scheduler.call_command", side_effect=RuntimeError("boom")):
+            scheduler_module._run_job("events.tasks.extend_event_series", "extend_event_series", [])
+
+        self.connections_close_all.assert_called_once()
+
+
+class LeaderElectionTests(TestCase):
+    """features.scheduler._try_acquire_or_renew is the cooperative lease every process
+    (only ever one today, but see that module's own docstring) uses to decide whether it's
+    the one actually running the schedule."""
+
+    def setUp(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def test_acquires_an_unheld_lease(self):
+        self.assertTrue(scheduler_module._try_acquire_or_renew())
+        self.assertEqual(cache.get(scheduler_module.LEADER_CACHE_KEY), scheduler_module._TOKEN)
+
+    def test_renews_a_lease_it_already_holds(self):
+        scheduler_module._try_acquire_or_renew()
+
+        self.assertTrue(scheduler_module._try_acquire_or_renew())
+
+    def test_refuses_a_lease_held_by_another_token(self):
+        cache.set(scheduler_module.LEADER_CACHE_KEY, "someone-else", scheduler_module.LEASE_SECONDS)
+
+        self.assertFalse(scheduler_module._try_acquire_or_renew())
+        self.assertEqual(cache.get(scheduler_module.LEADER_CACHE_KEY), "someone-else")
+
+
+class SchedulerLifecycleTests(TestCase):
+    """start()/stop() -- the two entry points gunicorn.conf.py's when_ready/on_exit hooks
+    call. Runs the real leader thread rather than mocking it: what's worth proving here is
+    that the observable state (the lease, the running scheduler) ends up right, not that
+    specific internal calls were made."""
+
+    def setUp(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
+        self.addCleanup(scheduler_module.stop)
+
+    def _wait_until(self, predicate, timeout=2.0):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if predicate():
+                return True
+            time.sleep(0.02)
+        return False
+
+    def test_start_acquires_leadership_and_runs_a_scheduler(self):
+        scheduler_module.start()
+
+        self.assertTrue(self._wait_until(lambda: scheduler_module._scheduler is not None))
+        self.assertEqual(cache.get(scheduler_module.LEADER_CACHE_KEY), scheduler_module._TOKEN)
+        self.assertTrue(scheduler_module._scheduler.running)
+
+    def test_stop_releases_the_lease_and_shuts_the_scheduler_down(self):
+        scheduler_module.start()
+        self.assertTrue(self._wait_until(lambda: scheduler_module._scheduler is not None))
+
+        scheduler_module.stop()
+
+        self.assertIsNone(scheduler_module._scheduler)
+        self.assertIsNone(cache.get(scheduler_module.LEADER_CACHE_KEY))
+
+    def test_start_is_a_noop_if_already_started(self):
+        scheduler_module.start()
+        self.assertTrue(self._wait_until(lambda: scheduler_module._scheduler is not None))
+        first_thread = scheduler_module._leader_thread
+
+        scheduler_module.start()
+
+        self.assertIs(scheduler_module._leader_thread, first_thread)
