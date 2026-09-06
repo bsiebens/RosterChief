@@ -362,6 +362,11 @@ class Order(ClubScopedModel):
         constraints = [
             UniqueConstraint(fields=["club", "number"], name="unique_order_number_per_club"),
         ]
+        indexes = [
+            # Matches Meta.ordering above, scoped to the tenant every list view
+            # already filters on -- OrderListView's own default ordering.
+            models.Index(fields=["club", "-created"]),
+        ]
 
     def __str__(self):
         return self.number

@@ -358,6 +358,14 @@ class ClubMembership(ClubScopedModel):
         constraints = [
             models.UniqueConstraint(fields=["club", "member", "season"], name="unique_member_per_club_per_season"),
         ]
+        indexes = [
+            # The hottest multi-tenant lookup shape in the codebase -- onboarding,
+            # fees, the sign-up queue, the dashboard, mobile coach mode, and form
+            # audience resolution all filter this exact triple together.
+            models.Index(fields=["club", "season", "kind"]),
+            # The dashboard's own status breakdowns filter this triple instead.
+            models.Index(fields=["club", "season", "status"]),
+        ]
 
     def __str__(self):
         return f"{self.club} - {self.member}"
@@ -460,6 +468,11 @@ class DuesInvoice(ClubScopedModel):
         ordering = ["-sent_at"]
         constraints = [
             UniqueConstraint(fields=["club", "number"], name="unique_dues_invoice_number_per_club"),
+        ]
+        indexes = [
+            # invoices_due_for_reminder's own club + sent_at__isnull filter --
+            # unindexed before this.
+            models.Index(fields=["club", "sent_at"]),
         ]
 
     def __str__(self):

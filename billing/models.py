@@ -248,6 +248,12 @@ class Due(UUIDModel):
         constraints = [
             models.UniqueConstraint(fields=["club", "period_start"], name="unique_due_per_club_per_period"),
         ]
+        indexes = [
+            # Scanned platform-wide, across every club, by the daily reminder/
+            # archive cron jobs (billing/services/reminders.py) -- not scoped to
+            # one club the way most other indexes in this codebase are.
+            models.Index(fields=["status", "grace_until"]),
+        ]
 
     def __str__(self):
         return f"{self.club} — {self.period_start} to {self.period_end}"

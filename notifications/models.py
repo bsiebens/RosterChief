@@ -36,7 +36,14 @@ class Notification(ClubScopedModel):
         verbose_name = _("notification")
         verbose_name_plural = _("notifications")
         ordering = ["-created"]
-        indexes = [models.Index(fields=["content_type", "object_id"])]
+        indexes = [
+            models.Index(fields=["content_type", "object_id"]),
+            # The unread-count badge query runs on every management and mobile
+            # request via a global context processor/mixin -- see
+            # members.services.lookup/club.services.access's request-scoped
+            # caching of the surrounding lookups.
+            models.Index(fields=["club", "member", "read_at"]),
+        ]
 
     def __str__(self):
         return f"{self.member} — {self.title}"

@@ -117,6 +117,13 @@ class Event(ClubScopedModel):
         verbose_name = _("event")
         verbose_name_plural = _("events")
         ordering = ["-start"]
+        indexes = [
+            # Covers both the tenant scope every query already filters on and the
+            # -start ordering/range filter (calendars, statistics, dashboards,
+            # recurrence, referee/official scheduling) -- Meta.ordering above had
+            # no supporting index at all before this.
+            models.Index(fields=["club", "start"]),
+        ]
 
     def __str__(self):
         return self.title
@@ -215,6 +222,11 @@ class Attendance(UUIDModel):
         ordering = ["event", "member__last_name", "member__first_name"]
         constraints = [
             models.UniqueConstraint(fields=["event", "member"], name="unique_attendance_per_event_per_member"),
+        ]
+        indexes = [
+            # RSVP screens, coach attendance, lineups, and deadline reminders all
+            # filter event+status together -- status itself was unindexed before this.
+            models.Index(fields=["event", "status"]),
         ]
 
     def __str__(self):

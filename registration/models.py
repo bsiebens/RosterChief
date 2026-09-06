@@ -81,6 +81,11 @@ class RegistrationBatch(ClubScopedModel):
         constraints = [
             UniqueConstraint(fields=["club", "invoice_number"], name="unique_registration_invoice_number_per_club", condition=~models.Q(invoice_number="")),
         ]
+        indexes = [
+            # registrations_awaiting_confirmation/registration_invoices_due_for_reminder's
+            # own club + invoice_sent_at__isnull filter -- unindexed before this.
+            models.Index(fields=["club", "invoice_sent_at"]),
+        ]
 
     def clean(self):
         validate_club_scope(self, self.club_id, same_club_fields=("season",))
