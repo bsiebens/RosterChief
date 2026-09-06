@@ -1,15 +1,20 @@
-# Builds the app image on GitHub's own runners (native x86_64, plenty of RAM) instead of on
-# the small deploy VPS -- see DEPLOYMENT.md's "Sizing the server" section: `docker compose
-# build` (npm + uv + collectstatic together) is the memory spike that OOMs a small box, not
-# serving traffic. Building here and pulling on the server sidesteps that entirely.
+# Test -> build -> push, strictly in that order. `test` (lint + the full suite) runs on
+# every push and every pull request; `build` only runs on a push to main, and only once
+# `test` has passed -- see the `needs:`/`if:` on each job below. A red run on a branch never
+# produces an image, and nothing reaches ghcr.io that hasn't been linted and tested first.
 #
-# Runs on every push to main/development; deploy/deploy-dev.sh (and whatever drives the real
-# prod deploy) then does `docker compose pull` instead of `docker compose build` on the server.
-name: Build and push image
+# The image itself is still built on GitHub's own runners (native x86_64, plenty of RAM)
+# rather than on the small deploy VPS -- see DEPLOYMENT.md's "Sizing the server" section:
+# `docker compose build` (npm + uv + collectstatic together) is the memory spike that OOMs a
+# small box, not serving traffic. Building here and pulling on the server sidesteps that
+# entirely. deploy/deploy-prod.sh (a human's call, on purpose) and the `deploy-dev` job below
+# both do `docker compose pull` instead of `docker compose build` on the server they target.
+name: CI
 
 on:
   push:
     branches: [main]
+  pull_request:
   workflow_dispatch:
 
 env:
@@ -19,7 +24,38 @@ env:
   IMAGE_NAME: bsiebens/rosterchief
 
 jobs:
+  test:
+    # Every push and every PR -- this is the one job a branch-protection rule on main should
+    # require (see DEPLOYMENT.md/the hardening plan for that one-time repo-settings step;
+    # nothing here can flip it on for you).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Installs `uv` itself and provisions the exact Python this project requires
+      # (pyproject.toml's requires-python) -- no separate actions/setup-python step needed.
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      # --frozen: fails instead of silently re-resolving if uv.lock is out of date, the same
+      # guarantee a production build gets from the committed lockfile.
+      - run: uv sync --frozen
+
+      - run: uv run ruff check .
+
+      - run: uv run python manage.py test
+        env:
+          # The only setting with no default (see rosterchief/settings.py) -- a throwaway
+          # value, never used for anything real, exists only so Django will start.
+          DJANGO_SECRET_KEY: ci-test-not-a-secret
+
   build:
+    needs: test
+    # PRs stop at `test` above -- a branch that hasn't merged has no business publishing an
+    # image. `workflow_dispatch` is exempt from the ref check so it can still be used to
+    # force a rebuild of main by hand.
+    if: github.event_name != 'pull_request' && (github.event_name != 'push' || github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -46,7 +82,45 @@ jobs:
             type=ref,event=branch
             type=sha,prefix={{branch}}-,format=short
 
+      # Built once, locally (push: false, load: true means "hand it to the local docker
+      # daemon", not "publish it"), and smoke-tested below before anything is actually
+      # published. The real build-and-push step further down reuses this same GHA cache, so
+      # it costs a re-tag, not a rebuild.
       - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: rosterchief:smoke-test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Confirms the image actually boots and serves traffic before it's published -- catches
+      # e.g. a broken entrypoint or a missing static file that no unit test would ever see.
+      # No Postgres/Redis alongside it: DJANGO_DATABASE_URL/DJANGO_REDIS_URL are both left
+      # unset, so the app falls back to its own dev defaults (sqlite, local-memory cache) --
+      # exactly like running it locally with no .env -- which is enough for /healthz's own
+      # "can I reach my database and cache" check to go green without standing up real infra
+      # just for this one check.
+      - name: Smoke test the built image
+        run: |
+          docker run -d --name smoke -p 8000:8000 \
+            -e DJANGO_SECRET_KEY=ci-smoke-not-a-secret \
+            -e DJANGO_ALLOWED_HOSTS='*' \
+            rosterchief:smoke-test
+          for attempt in $(seq 1 20); do
+            if curl -fsS http://localhost:8000/healthz; then
+              echo "Healthy after ${attempt} check(s)."
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "ERROR: image never became healthy." >&2
+          docker logs smoke >&2
+          exit 1
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
         with:
           context: .
           push: true
@@ -54,3 +128,31 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  deploy-dev:
+    needs: build
+    # Opt-in: skipped entirely until DEV_SSH_HOST is actually configured (Settings ->
+    # Secrets and variables -> Actions on the repo -- not something this workflow file can
+    # set for you). deploy/deploy-prod.sh stays a human's deliberate call either way; this is
+    # only ever wired to the throwaway dev instance deploy/deploy-dev.sh already targets.
+    if: ${{ github.event_name == 'push' && secrets.DEV_SSH_HOST != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # deploy-dev.sh's own preflight checks `origin/<branch>` locally -- a shallow,
+          # single-commit checkout still has that ref, so the default depth is fine.
+          fetch-depth: 1
+
+      - name: Deploy to the dev instance
+        env:
+          SSH_HOST: ${{ secrets.DEV_SSH_HOST }}
+          SSH_USER: ${{ secrets.DEV_SSH_USER }}
+          REMOTE_DIR: ${{ secrets.DEV_REMOTE_DIR }}
+          BRANCH: main
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEV_SSH_KEY }}" > ~/.ssh/dev_deploy_key
+          chmod 600 ~/.ssh/dev_deploy_key
+          ssh-keyscan -H "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          SSH_KEY_FILE=~/.ssh/dev_deploy_key ./deploy/deploy-dev.sh

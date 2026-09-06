@@ -1,0 +1,50 @@
+# The everyday test job (build-and-push.yml) runs the full suite against the same in-memory
+# sqlite rosterchief/test_runner.py uses locally -- fast, and right for every-PR feedback, but
+# production runs Postgres (see DEPLOYMENT.md). A migration or a Postgres-specific query
+# behavior (locking, a constraint, CONCURRENTLY) could pass on sqlite and still break for
+# real. This runs the identical suite against a real postgres:17 service container instead --
+# same major version compose.yaml pins in production -- on a slower cadence than every PR,
+# since it's a safety net for drift between the two databases, not a substitute for the fast
+# every-push/every-PR job.
+name: Test against Postgres
+
+on:
+  schedule:
+    # 05:00 UTC, daily -- clear of the low-single-digits-UTC window compose.yaml's own
+    # scheduled jobs run in (see DEPLOYMENT.md's "Scheduled jobs"), so a slow CI run here
+    # never contends with anything production actually depends on.
+    - cron: "0 5 * * *"
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test-postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: rosterchief
+          POSTGRES_PASSWORD: rosterchief
+          POSTGRES_DB: rosterchief
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - run: uv sync --frozen
+
+      - run: uv run python manage.py test
+        env:
+          DJANGO_SECRET_KEY: ci-test-not-a-secret
+          DJANGO_DATABASE_URL: postgres://rosterchief:rosterchief@localhost:5432/rosterchief

@@ -492,11 +492,47 @@ rather than typing them every deploy.
 
 #### Where the image comes from
 
-The app image is **not** built on the server. `.github/workflows/build-and-push.yml` builds it
-on GitHub's own runners on every push to `main`/`development` and pushes it to
+The app image is **not** built on the server. `.github/workflows/build-and-push.yml` (workflow
+`CI`) builds it on GitHub's own runners on every push to `main` and pushes it to
 `ghcr.io/bsiebens/rosterchief`, tagged `:<branch>` and `:<branch>-<short-sha>`. The server only
 ever `docker compose pull`s — see "Sizing the server" below for why building on a small box is
 what you're avoiding by doing this.
+
+**Nothing reaches the registry untested.** The same workflow runs three jobs in order:
+
+1. `test` — `ruff check` + the full suite (`uv run python manage.py test`). Runs on every push
+   *and* every pull request, not just `main`.
+2. `build` — only on a push to `main`, and only once `test` has passed (`needs: test`). Builds
+   the image once locally (not pushed yet), boots it, and curls its own `/healthz` before
+   building-and-pushing the real, published tags — catching a broken entrypoint or a missing
+   static file that no unit test would ever see.
+3. `deploy-dev` — opt-in (see below), redeploys the throwaway dev/test instance automatically
+   once `build` succeeds.
+
+A separate workflow, `.github/workflows/test-postgres.yml`, runs the identical suite against a
+real `postgres:17` service container (compose.yaml's own major version) on a daily schedule
+plus every push to `main` — the everyday `test` job above runs against the same in-memory
+sqlite `rosterchief/test_runner.py` uses locally, which is fast but isn't what production
+actually runs on.
+
+**Make `test` a required check.** None of the above blocks a merge to `main` on its own —
+GitHub only enforces that once `test` is added as a required status check under the repo's
+Settings → Branches → branch protection rule for `main`. This is a one-time setting, not
+something a workflow file can turn on for itself.
+
+**Auto-deploying the dev instance.** The `deploy-dev` job runs `deploy/deploy-dev.sh` over SSH
+the same way a person would, and is skipped entirely unless these repo secrets are set
+(Settings → Secrets and variables → Actions):
+
+| Secret | Value |
+|---|---|
+| `DEV_SSH_HOST` | the dev server's host/IP (this repo's own dev box, matching "Behind an existing Caddy" below) |
+| `DEV_SSH_USER` | the SSH user on that box |
+| `DEV_SSH_KEY` | a private key authorized on that box, scoped to deploys only |
+| `DEV_REMOTE_DIR` | the checkout path there, e.g. `/home/bernard/RosterChief` |
+
+Production is deliberately **not** wired to auto-deploy — `deploy/deploy-prod.sh` stays a
+human's call, with its own backup-before-migrate and refuse-non-`main` guardrails intact.
 
 **Deploying a specific version**: `deploy/deploy-dev.sh` always pulls `:$BRANCH` (latest for
 that branch). To pin an exact build instead — for a rollback, or to test one commit without
