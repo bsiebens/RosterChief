@@ -1,6 +1,7 @@
 import datetime
 import io
 
+from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.utils import timezone
@@ -28,6 +29,14 @@ class ApiTestBase(TestCase):
         today = timezone.localdate()
         cls.season = Season.objects.create(club=cls.club, start_date=today - datetime.timedelta(days=30), end_date=today + datetime.timedelta(days=300))
         cls.team = Team.objects.create(club=cls.club, name="First Team", short_name="1st")
+
+    def setUp(self):
+        # Several endpoints cache their query per club (active_sponsors, and the
+        # news/teams/events endpoints -- see api/cache.py) -- process-wide, so a
+        # club fixture reused across test methods in the same class would
+        # otherwise leak one test's cached response into the next's assertions.
+        cache.clear()
+        self.addCleanup(cache.clear)
 
     def api_get(self, path, **params):
         return self.client.get(f"/api/v1{path}", params, HTTP_HOST="ajax-united.rosterchief.app")

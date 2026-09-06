@@ -12,9 +12,11 @@ from decimal import Decimal
 from allauth.mfa.models import Authenticator
 from dateutil.relativedelta import relativedelta
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from django.db.models import Count, DateField, DecimalField, Exists, F, IntegerField, OuterRef, Q, Subquery, Sum, Value
 from django.db.models.functions import Coalesce, TruncMonth
 from django.utils import timezone
+from django.utils.translation import get_language
 from django.utils.translation import gettext_lazy as _
 from waffle import get_waffle_flag_model
 
@@ -287,6 +289,42 @@ def platform_charts():
 
 def _money(queryset):
     return queryset.aggregate(total=Sum("total"))["total"] or ZERO
+
+
+#: Platform-wide, staff-only, and cheap to be briefly stale -- see
+#: dashboard_snapshot's own docstring.
+DASHBOARD_CACHE_KEY = "controlpanel:dashboard_snapshot:%s"
+DASHBOARD_CACHE_SECONDS = 120
+
+
+def dashboard_snapshot() -> dict:
+    """The whole DashboardView context (totals/attention/funnel/flags/charts/
+    clubs) in one cached bundle, instead of each of those six functions'
+    own ~25 queries combined running fresh on every hit. A small, staff-only
+    audience that doesn't need second-by-second freshness -- invalidated by
+    expiry alone, like Maintenance/JobToggle's own write-through caches,
+    except there's no single write path here worth busting early (dozens of
+    different actions across the platform could move one of these numbers).
+
+    Keyed by the active language: every value here is either a number or a
+    gettext_lazy label (onboarding_funnel's step names) -- harmless today
+    since no .po files exist yet, but a bare key would otherwise serve one
+    locale's cached labels to another once translations are actually on."""
+    cache_key = DASHBOARD_CACHE_KEY % get_language()
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    snapshot = {
+        "totals": platform_totals(),
+        "attention": platform_attention(),
+        "funnel": onboarding_funnel(),
+        "flags": flag_adoption(),
+        "charts": platform_charts(),
+        "clubs": clubs_by_risk(),
+    }
+    cache.set(cache_key, snapshot, DASHBOARD_CACHE_SECONDS)
+    return snapshot
 
 
 def previous_season(club, season):

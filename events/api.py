@@ -12,6 +12,7 @@ from django.utils import timezone
 from ninja import Router, Schema
 from ninja.errors import HttpError
 
+from api.cache import cached_for_club
 from api.errors import require_club
 from club.services.access import current_season
 from teams.models import Team
@@ -127,21 +128,27 @@ def list_upcoming_games(request, count: int = DEFAULT_UPCOMING_COUNT):
     explicit or assumed end) still counts, not just ones that haven't started."""
     club = require_club(request)
     count = max(1, min(count, MAX_UPCOMING_COUNT))
-    now = timezone.now()
 
-    events = (
-        Event.objects.filter(club=club, kind__in=UPCOMING_KINDS, cancelled=False)
-        .filter(Q(end__gte=now) | Q(end__isnull=True, start__gte=now - ASSUMED_EVENT_DURATION))
-        .select_related("opponent", "location")
-        .prefetch_related("teams")
-        .order_by("start")[:count]
-    )
+    def compute():
+        now = timezone.now()
+        events = (
+            Event.objects.filter(club=club, kind__in=UPCOMING_KINDS, cancelled=False)
+            .filter(Q(end__gte=now) | Q(end__isnull=True, start__gte=now - ASSUMED_EVENT_DURATION))
+            .select_related("opponent", "location")
+            .prefetch_related("teams")
+            .order_by("start")[:count]
+        )
+        return [_to_game_out(event, request, club) for event in events]
 
-    return [_to_game_out(event, request, club) for event in events]
+    return cached_for_club(club.pk, f"games:upcoming:{count}", compute)
 
 
 @router.get("/games/live/", response=list[GameOut], summary="Live games")
 def list_live_games(request):
+    # Deliberately not cached (see api/cache.py's own module docstring for every
+    # other endpoint here) -- this is the one route whose entire purpose is a
+    # score that's changing right now; even the short CACHE_SECONDS window would
+    # directly work against what an external site is polling this for.
     club = require_club(request)
 
     events = Event.objects.filter(club=club, kind=Event.EventKind.GAME, cancelled=False, is_live=True).select_related("opponent", "location").prefetch_related("teams").order_by("start")
@@ -155,19 +162,22 @@ def list_team_games(request, team_id: uuid.UUID):
     include both teams' scores. Same "explicit season, else derived from
     start date" scoping management.views.EventListView already applies."""
     club = require_club(request)
-    team = Team.objects.filter(club=club, pk=team_id).first()
-    if team is None:
-        raise HttpError(404, "No such team.")
 
-    season = current_season(club)
-    if season is None:
-        return []
+    def compute():
+        team = Team.objects.filter(club=club, pk=team_id).first()
+        if team is None:
+            raise HttpError(404, "No such team.")
 
-    events = (
-        Event.objects.filter(club=club, teams=team, kind=Event.EventKind.GAME, cancelled=False)
-        .filter(Q(season=season) | Q(season__isnull=True, start__date__gte=season.start_date, start__date__lte=season.end_date))
-        .select_related("opponent", "location")
-        .order_by("start")
-    )
+        season = current_season(club)
+        if season is None:
+            return []
 
-    return [_to_game_out(event, request, club, team=team) for event in events]
+        events = (
+            Event.objects.filter(club=club, teams=team, kind=Event.EventKind.GAME, cancelled=False)
+            .filter(Q(season=season) | Q(season__isnull=True, start__date__gte=season.start_date, start__date__lte=season.end_date))
+            .select_related("opponent", "location")
+            .order_by("start")
+        )
+        return [_to_game_out(event, request, club, team=team) for event in events]
+
+    return cached_for_club(club.pk, f"games:team:{team_id}", compute)

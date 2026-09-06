@@ -11,6 +11,7 @@ from django.db.models import F
 from ninja import Router, Schema
 from ninja.errors import HttpError
 
+from api.cache import cached_for_club
 from api.errors import require_club
 from club.models import ClubMembership
 from club.services.access import current_season
@@ -110,21 +111,29 @@ def build_roster(team, request) -> RosterOut:
 @router.get("/", response=list[TeamOut], summary="List teams")
 def list_teams(request):
     club = require_club(request)
-    teams = list(Team.objects.filter(club=club).order_by("name"))
 
-    season = current_season(club)
-    photos_by_team_id = {}
-    if season is not None and teams:
-        photos_by_team_id = {photo.team_id: photo for photo in TeamPhoto.objects.filter(team__in=teams, season=season)}
+    def compute():
+        teams = list(Team.objects.filter(club=club).order_by("name"))
 
-    return [_to_team_out(team, request, photo=photos_by_team_id.get(team.pk)) for team in teams]
+        season = current_season(club)
+        photos_by_team_id = {}
+        if season is not None and teams:
+            photos_by_team_id = {photo.team_id: photo for photo in TeamPhoto.objects.filter(team__in=teams, season=season)}
+
+        return [_to_team_out(team, request, photo=photos_by_team_id.get(team.pk)) for team in teams]
+
+    return cached_for_club(club.pk, "teams:list", compute)
 
 
 @router.get("/{team_id}/roster/", response=RosterOut, summary="Current season's roster")
 def get_roster(request, team_id: uuid.UUID):
     club = require_club(request)
-    team = _get_team_or_404(club, team_id)
-    return build_roster(team, request)
+
+    def compute():
+        team = _get_team_or_404(club, team_id)
+        return build_roster(team, request)
+
+    return cached_for_club(club.pk, f"teams:roster:{team_id}", compute)
 
 
 def _get_team_or_404(club, team_id):

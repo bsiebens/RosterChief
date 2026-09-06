@@ -19,7 +19,7 @@ from members.models import Member
 from .models import DEFAULT_DURATION_MONTHS, DEFAULT_GRACE_DAYS, DEFAULT_RENEWAL_LEAD_DAYS, Due, Invoice, Plan, PlanPrice, Subscription, add_months
 from .services import BillingError
 from .services.dues import archivable_clubs, dues_in_grace, dues_overdue, next_period_start, open_period, reactivate, record_payment, remove_payment, renew, start_trial, subscribe, subscriptions_due_for_renewal, waive
-from .services.invoices import invoice_pdf, issue_invoice, mark_invoice_sent_manually, render_pdf, send_invoice
+from .services.invoices import invalidate_cached_invoice_pdf, invoice_pdf, issue_invoice, mark_invoice_sent_manually, render_pdf, send_invoice
 from .services.notices import club_billing_notice
 from .services.plans import delete_plan, plan_deletion_impact
 from .services.reminders import admin_emails, reminders_to_send, send_reminder
@@ -386,6 +386,74 @@ class InvoiceTests(BillingTestBase):
             render_pdf("<p>hi</p>")
 
         self.assertIn("pango", str(caught.exception))
+
+
+class InvoicePDFCacheTests(BillingTestBase):
+    """invoice_pdf's cache-to-storage, and billing.signals busting it the moment its
+    due's status/amount_paid actually changes -- same shape as club/shop's own
+    invoice PDF caching, see billing.signals' own docstring."""
+
+    def setUp(self):
+        self.due = self.bill()
+        self.invoice = self.due.invoice
+        invalidate_cached_invoice_pdf(self.invoice)
+
+    def test_a_second_render_reuses_the_cached_copy(self):
+        with mock.patch("billing.services.invoices.render_pdf", side_effect=lambda html: b"%PDF-fake") as renderer:
+            first = invoice_pdf(self.invoice)
+            second = invoice_pdf(self.invoice)
+
+        renderer.assert_called_once()
+        self.assertEqual(first, second)
+
+    def test_recording_a_payment_busts_the_cache(self):
+        with mock.patch("billing.services.invoices.render_pdf", side_effect=lambda html: b"%PDF-fake"):
+            invoice_pdf(self.invoice)
+
+        record_payment(self.due, Decimal("200.00"))
+
+        with mock.patch("billing.services.invoices.render_pdf", side_effect=lambda html: b"%PDF-fake-2") as renderer:
+            second = invoice_pdf(self.invoice)
+
+        renderer.assert_called_once()
+        self.assertEqual(second, b"%PDF-fake-2")
+
+    def test_removing_a_payment_busts_the_cache(self):
+        payment = record_payment(self.due, Decimal("200.00"))
+
+        with mock.patch("billing.services.invoices.render_pdf", side_effect=lambda html: b"%PDF-fake"):
+            invoice_pdf(self.invoice)
+
+        remove_payment(payment)
+
+        with mock.patch("billing.services.invoices.render_pdf", side_effect=lambda html: b"%PDF-fake-2") as renderer:
+            second = invoice_pdf(self.invoice)
+
+        renderer.assert_called_once()
+        self.assertEqual(second, b"%PDF-fake-2")
+
+    def test_waiving_the_period_busts_the_cache(self):
+        with mock.patch("billing.services.invoices.render_pdf", side_effect=lambda html: b"%PDF-fake"):
+            invoice_pdf(self.invoice)
+
+        waive(self.due)
+
+        with mock.patch("billing.services.invoices.render_pdf", side_effect=lambda html: b"%PDF-fake-2") as renderer:
+            second = invoice_pdf(self.invoice)
+
+        renderer.assert_called_once()
+        self.assertEqual(second, b"%PDF-fake-2")
+
+    def test_saving_a_due_without_a_status_or_amount_change_keeps_the_cache(self):
+        with mock.patch("billing.services.invoices.render_pdf", side_effect=lambda html: b"%PDF-fake"):
+            invoice_pdf(self.invoice)
+
+        self.due.save(update_fields=["status"])  # same status, re-saved
+
+        with mock.patch("billing.services.invoices.render_pdf") as renderer:
+            invoice_pdf(self.invoice)
+
+        renderer.assert_not_called()
 
 
 class InvoiceSendingTests(BillingTestBase):

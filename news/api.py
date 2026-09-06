@@ -14,6 +14,7 @@ from django.utils import timezone
 from ninja import Router, Schema
 from ninja.errors import HttpError
 
+from api.cache import cached_for_club
 from api.errors import require_club
 
 from .models import News
@@ -106,19 +107,23 @@ def list_news(request, limit: int = DEFAULT_LIMIT, offset: int = 0):
     limit = max(1, min(limit, MAX_LIMIT))
     offset = max(0, offset)
 
-    queryset = _visible_news(club).prefetch_related("photos", "teams").order_by("-published_at")
+    def compute():
+        queryset = _visible_news(club).prefetch_related("photos", "teams").order_by("-published_at")
+        count = queryset.count()
+        page = queryset[offset : offset + limit]
+        return NewsListOut(count=count, limit=limit, offset=offset, results=[_to_news_item_out(item, request) for item in page])
 
-    count = queryset.count()
-    page = queryset[offset : offset + limit]
-
-    return NewsListOut(count=count, limit=limit, offset=offset, results=[_to_news_item_out(item, request) for item in page])
+    return cached_for_club(club.pk, f"news:list:{limit}:{offset}", compute)
 
 
 @router.get("/{slug}/", response=NewsItemOut, summary="Single published news item")
 def get_news_item(request, slug: str):
     club = require_club(request)
-    item = _visible_news(club).filter(slug=slug).prefetch_related("photos", "teams").first()
-    if item is None:
-        raise HttpError(404, "No such news item.")
 
-    return _to_news_item_out(item, request)
+    def compute():
+        item = _visible_news(club).filter(slug=slug).prefetch_related("photos", "teams").first()
+        if item is None:
+            raise HttpError(404, "No such news item.")
+        return _to_news_item_out(item, request)
+
+    return cached_for_club(club.pk, f"news:item:{slug}", compute)

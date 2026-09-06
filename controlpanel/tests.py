@@ -81,6 +81,12 @@ class ControlPanelTestBase(TestCase):
     def setUp(self):
         # The test client is per-test, so the session it carries has to be too.
         self.client.force_login(self.staff)
+        # dashboard_snapshot() is process-wide cached (see its own docstring) and
+        # would otherwise leak stale club/attention/chart data into whichever test
+        # runs next in this worker -- same reasoning as FlagAdoptionTests' own
+        # cache.clear() below, for waffle's identically process-wide flag cache.
+        cache.clear()
+        self.addCleanup(cache.clear)
 
 
 class AccessTests(ControlPanelTestBase):
@@ -1651,6 +1657,15 @@ class PlatformDuesMetricTests(TestCase):
         cls.club = Club.objects.create(name="Ajax United")
         cls.plan = Plan.objects.create(name="Standard")
         PlanPrice.objects.create(plan=cls.plan, active_from=cls.today - datetime.timedelta(days=1200), amount=Decimal("500.00"))
+
+    def setUp(self):
+        # test_the_dashboard_surfaces_pending_renewals below hits the actual
+        # dashboard view, whose context is now process-wide cached (see
+        # dashboard_snapshot's own docstring) -- same leak-into-the-next-test
+        # risk ControlPanelTestBase.setUp already guards against, needed here
+        # too since this class doesn't extend that base.
+        cache.clear()
+        self.addCleanup(cache.clear)
 
     def test_dues_owed_is_the_unpaid_balance_across_every_club(self):
         subscribe(self.club, self.plan)

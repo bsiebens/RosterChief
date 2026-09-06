@@ -13,13 +13,17 @@ Separately: DuesInvoice's PDF (club/templates/club/dues_invoice_pdf.html) render
 paid/owed off the membership's own live fee_status, not anything stored on the
 invoice -- see club.services.invoicing.invoice_pdf's own caching. A cached copy
 from before a payment was recorded would keep showing "owed" forever otherwise.
+
+Also separately: club.services.sponsors.active_sponsors caches its query per club --
+a save or delete on Sponsor busts that same club's cached list.
 """
 
 from django.db.models.signals import post_delete, post_save, pre_save
 from django.dispatch import receiver
 
-from .models import ClubMembership, ClubRole, DuesInvoice
+from .models import ClubMembership, ClubRole, DuesInvoice, Sponsor
 from .services.invoicing import invalidate_cached_invoice_pdf
+from .services.sponsors import invalidate_active_sponsors_cache
 
 
 @receiver(post_save, sender=ClubMembership)
@@ -58,3 +62,9 @@ def invalidate_dues_pdf_on_fee_status_change(sender, instance, **kwargs):
     invoice = DuesInvoice.objects.filter(membership_id=instance.pk).first()
     if invoice is not None:
         invalidate_cached_invoice_pdf(invoice)
+
+
+@receiver(post_save, sender=Sponsor)
+@receiver(post_delete, sender=Sponsor)
+def invalidate_sponsors_cache(sender, instance, **kwargs):
+    invalidate_active_sponsors_cache(instance.club_id)

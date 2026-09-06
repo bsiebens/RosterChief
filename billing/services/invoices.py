@@ -2,11 +2,16 @@
 
 The PDF is rendered on demand from the Due's frozen snapshot (plan, amount, dates), so it
 carries no state of its own beyond the number. Only the number is stored — an accountant
-reconciles against it, so it is allocated once, never recomputed.
+reconciles against it, so it is allocated once, never recomputed. The rendered PDF is cached
+to storage, same shape as club.services.invoicing/shop.services.invoices' own -- see
+invoice_pdf's own docstring for why it still needs invalidating despite the "frozen snapshot"
+above.
 """
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.core.files.base import ContentFile
+from django.core.files.storage import default_storage
 from django.core.mail import EmailMultiAlternatives
 from django.template.loader import render_to_string
 from django.utils import timezone
@@ -109,7 +114,32 @@ def render_pdf(html: str) -> bytes:
     return HTML(string=html).write_pdf()
 
 
-def invoice_pdf(invoice: Invoice, base_url: str | None = None) -> bytes:
-    html = render_to_string("billing/invoice.html", {"invoice": invoice, "due": invoice.due, "club": invoice.due.club, "payments": invoice.due.payments.all()})
+def _cache_path(invoice: Invoice) -> str:
+    return f"clubs/{invoice.due.club.slug}/billing/invoices/cache/{invoice.pk}.pdf"
 
-    return render_pdf(html)
+
+def invalidate_cached_invoice_pdf(invoice: Invoice) -> None:
+    """Drop invoice's cached PDF, if any -- called from billing.signals the
+    moment its due's status/amount_paid actually changes (a payment
+    recorded or removed, or the period waived). Despite the module
+    docstring's "frozen snapshot", the PDF itself renders the running list
+    of payments and the current balance/status (see billing/invoice.html),
+    so unlike the number and the period's own amount/dates, those two
+    genuinely go stale. A no-op when nothing was cached yet."""
+    path = _cache_path(invoice)
+    if default_storage.exists(path):
+        default_storage.delete(path)
+
+
+def invoice_pdf(invoice: Invoice, base_url: str | None = None) -> bytes:
+    # Cached to disk, same reasoning/shape as club.services.invoicing.invoice_pdf /
+    # shop.services.invoices.render_invoice_pdf -- see those modules' own docstrings.
+    cache_path = _cache_path(invoice)
+    if default_storage.exists(cache_path):
+        with default_storage.open(cache_path, "rb") as cached:
+            return cached.read()
+
+    html = render_to_string("billing/invoice.html", {"invoice": invoice, "due": invoice.due, "club": invoice.due.club, "payments": invoice.due.payments.all()})
+    pdf_bytes = render_pdf(html)
+    default_storage.save(cache_path, ContentFile(pdf_bytes))
+    return pdf_bytes

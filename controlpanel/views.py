@@ -46,7 +46,7 @@ from .services.platform_admins import (
     revoke_platform_access,
     set_platform_access,
 )
-from .services.statistics import club_attention, club_charts, club_statistics, clubs_by_risk, clubs_with_health, flag_adoption, flags_for_club, onboarding_funnel, platform_attention, platform_charts, platform_totals
+from .services.statistics import club_attention, club_charts, club_statistics, clubs_with_health, dashboard_snapshot, flags_for_club
 
 Flag = get_waffle_flag_model()
 Switch = get_waffle_switch_model()
@@ -72,17 +72,12 @@ class DashboardView(PlatformStaffRequiredMixin, TemplateView):
     def get_context_data(self, **kwargs):
         return super().get_context_data(
             nav="dashboard",
-            totals=platform_totals(),
-            attention=platform_attention(),
-            funnel=onboarding_funnel(),
-            flags=flag_adoption(),
-            charts=platform_charts(),
-            clubs=clubs_by_risk(),
             # failed_jobs itself comes from controlpanel.context_processors.job_health, on
             # every controlpanel page (the command bar's status indicator needs it too) --
             # not re-fetched here, so the query only runs once per request.
             job_log=recent_job_runs(),
             today=timezone.localdate(),
+            **dashboard_snapshot(),
             **kwargs,
         )
 
