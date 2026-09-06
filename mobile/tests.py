@@ -31,6 +31,7 @@ from members.models import Family, FamilyMembership, Member
 from news.models import News, NewsPhoto
 from notifications.models import Notification
 from registration.models import RegistrationBatch, RegistrationDetails
+from rosterchief.test_support import make_club as _make_club
 from shop.models import Cart, CartItem, Discount, Order, OrderLine, Product, ProductCategory, ProductionStatus, ProductVariant, Voucher
 from shop.services.checkout import place_order
 from shop.services.invoices import create_invoice_for_order
@@ -51,7 +52,7 @@ def make_image_file(name="photo.png"):
 
 
 def make_club(**kwargs):
-    return Club.objects.create(name="Ajax United", slug="ajax-united", secondary_color="#e4002b", **kwargs)
+    return _make_club(secondary_color="#e4002b", **kwargs)
 
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])

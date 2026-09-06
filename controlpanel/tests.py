@@ -3,7 +3,6 @@ import pathlib
 from decimal import Decimal
 from unittest import mock
 
-from allauth.mfa.models import Authenticator
 from django import forms
 from django.conf import settings
 from django.contrib import messages
@@ -28,6 +27,7 @@ from events.models import Attendance, Competition, Event, Location
 from features.models import EmailSuppression, JobRun, JobToggle, Maintenance
 from members.models import Member
 from mobile.models import PushSubscription
+from rosterchief.test_support import enrol_mfa
 from shop.models import Order
 from teams.models import Position, StaffAssignment, Team, TeamMembership
 
@@ -60,10 +60,6 @@ from .templatetags.ui import as_alert, daisy, excluded, field_icon, form_field
 User = get_user_model()
 Flag = get_waffle_flag_model()
 Switch = get_waffle_switch_model()
-
-
-def enrol_mfa(user):
-    return Authenticator.objects.create(user=user, type=Authenticator.Type.TOTP, data={"secret": "JBSWY3DPEHPK3PXP"})
 
 
 class ControlPanelTestBase(TestCase):

@@ -9,21 +9,16 @@ from django.urls import reverse
 from django.utils import timezone
 
 from authentication.models import User
-from club.models import Club, ClubMembership, MemberRequirementStatus, OnboardingRequirement, Season
+from club.models import ClubMembership, MemberRequirementStatus, OnboardingRequirement, Season
 from club.services.fees import effective_fee_amount, record_payment, remaining_balance
 from members.models import Family, FamilyMembership, Member
+from rosterchief.test_support import make_club
 from shop.models import Product, ProductCategory, ProductRegistrantDiscountTier, ProductVariant
 from teams.models import NumberPool, Position, Team, TeamMembership
 
 from .models import RegistrationBatch, RegistrationDetails
 from .services import EntryInput, PricingError, RegistrationError, available_registration_products, jersey_choices_for_entry, price_entries, resolve_registration_season, submit_registration
 from .services.invoicing import RegistrationInvoicePDFError
-
-
-def make_club(**kwargs):
-    defaults = {"name": "Ajax United", "slug": "ajax-united"}
-    defaults.update(kwargs)
-    return Club.objects.create(**defaults)
 
 
 def make_season(club, start=None, end=None):

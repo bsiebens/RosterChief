@@ -8,7 +8,6 @@ from unittest import mock
 from urllib.parse import parse_qs, urlparse
 
 import openpyxl
-from allauth.mfa.models import Authenticator
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core import mail
@@ -53,6 +52,7 @@ from registration.models import RegistrationBatch, RegistrationDetails
 from registration.services import EntryInput, submit_registration
 from registration.services.invoicing import active_batch_entries, batch_totals
 from registration.services.notifications import confirm_and_send_invoice
+from rosterchief.test_support import enrol_mfa
 from shop.models import Discount, DiscountType, Invoice, Order, OrderLine, Payment, Product, ProductCategory, ProductionStatus, ProductRegistrantDiscountTier, ProductVariant, Voucher, VoucherConsumption
 from shop.services.invoices import ShopInvoicePDFError, create_invoice_for_order
 from teams.models import NumberPool, NumberReservation, Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
@@ -76,10 +76,6 @@ def make_import_workbook(rows):
     workbook.save(buffer)
     buffer.seek(0)
     return SimpleUploadedFile("members.xlsx", buffer.read(), content_type=XLSX_CONTENT_TYPE)
-
-
-def enrol_mfa(user):
-    return Authenticator.objects.create(user=user, type=Authenticator.Type.TOTP, data={"secret": "JBSWY3DPEHPK3PXP"})
 
 
 def make_season(club):
@@ -4087,11 +4083,14 @@ class MembershipExportPdfTests(ManagementTestBase):
 
 
 class MembershipSendInvoicesTests(ManagementTestBase):
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.member = Member.objects.create(first_name="Jane", last_name="Doe", email="jane@example.com")
+        cls.membership = ClubMembership.objects.create(club=cls.club, member=cls.member, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE, fee_amount=Decimal("150.00"))
+
     def setUp(self):
-        super().setUp()
         self.client.force_login(self.admin_user)
-        self.member = Member.objects.create(first_name="Jane", last_name="Doe", email="jane@example.com")
-        self.membership = ClubMembership.objects.create(club=self.club, member=self.member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE, fee_amount=Decimal("150.00"))
 
     def test_sending_creates_and_emails_an_invoice(self):
         self.club_post("membership_send_invoices", {"membership_ids": [str(self.membership.pk)], "due_in_days": "14"})
@@ -4226,12 +4225,15 @@ class MembershipSendInvoiceRemindersTests(ManagementTestBase):
 
 
 class DuesInvoiceDetailViewTests(ManagementTestBase):
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.member = Member.objects.create(first_name="Jane", last_name="Doe", email="jane@example.com")
+        cls.membership = ClubMembership.objects.create(club=cls.club, member=cls.member, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE, fee_amount=Decimal("150.00"))
+        cls.invoice = DuesInvoice.objects.create(club=cls.club, membership=cls.membership, number="DUE-2026-00001", amount=Decimal("150.00"), due_date=timezone.now().date(), sent_at=timezone.now(), sent_to_email="jane@example.com")
+
     def setUp(self):
-        super().setUp()
         self.client.force_login(self.admin_user)
-        self.member = Member.objects.create(first_name="Jane", last_name="Doe", email="jane@example.com")
-        self.membership = ClubMembership.objects.create(club=self.club, member=self.member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE, fee_amount=Decimal("150.00"))
-        self.invoice = DuesInvoice.objects.create(club=self.club, membership=self.membership, number="DUE-2026-00001", amount=Decimal("150.00"), due_date=timezone.now().date(), sent_at=timezone.now(), sent_to_email="jane@example.com")
 
     def test_shows_the_invoice(self):
         response = self.club_get("membership_invoice_detail", self.membership.pk)
@@ -9287,11 +9289,15 @@ class MemberRequirementChecklistTests(ManagementTestBase):
     same way FeePayment/Club-logo-style tests elsewhere in this suite do.
     """
 
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.requirement = OnboardingRequirement.objects.create(club=cls.club, name="Medical certificate", requires_document=True)
+        cls.member = Member.objects.create(first_name="Noor", last_name="Somers")
+        cls.membership = ClubMembership.objects.create(club=cls.club, member=cls.member, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE, fee_status=ClubMembership.FeeStatus.PAID)
+
     def setUp(self):
         self.client.force_login(self.admin_user)
-        self.requirement = OnboardingRequirement.objects.create(club=self.club, name="Medical certificate", requires_document=True)
-        self.member = Member.objects.create(first_name="Noor", last_name="Somers")
-        self.membership = ClubMembership.objects.create(club=self.club, member=self.member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE, fee_status=ClubMembership.FeeStatus.PAID)
 
     def upload_certificate(self):
         upload = SimpleUploadedFile("certificate.pdf", b"%PDF-1.4 fake", content_type="application/pdf")
@@ -9982,10 +9988,14 @@ class VolunteerListTests(ManagementTestBase):
     roster plus pending registration.models.RegistrationDetails volunteer
     entries awaiting placement into a real StaffAssignment."""
 
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.team = Team.objects.create(club=cls.club, name="U9", short_name="U9")
+        cls.position = Position.objects.create(club=cls.club, name="Coach", short_name="CO", staff_position=True)
+
     def setUp(self):
         self.client.force_login(self.admin_user)
-        self.team = Team.objects.create(club=self.club, name="U9", short_name="U9")
-        self.position = Position.objects.create(club=self.club, name="Coach", short_name="CO", staff_position=True)
 
     def make_pending_volunteer(self, requested_team=None, requested_position=None):
         member = Member.objects.create(first_name="Val", last_name="Volunteer")

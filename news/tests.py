@@ -10,20 +10,17 @@ from django.db import IntegrityError
 from django.test import TestCase
 from django.utils import timezone
 
-from club.models import Club, ClubMembership, ClubRole, Season
+from club.models import Club, ClubMembership, ClubRole
 from features.models import JobRun, JobToggle, Maintenance
 from members.models import Family, FamilyMembership, Member
 from notifications.models import Notification
+from rosterchief.test_support import make_season
 from teams.models import Position, Team, TeamMembership
 
 from .models import News, NewsPhoto
 from .services import notify_editors_of_pending_review, send_publish_notification
 
 User = get_user_model()
-
-
-def make_season(club, start_year=2026):
-    return Season.objects.create(club=club, start_date=datetime.date(start_year, 8, 1), end_date=datetime.date(start_year + 1, 5, 31))
 
 
 def make_photo(news_item, *, is_main=False):

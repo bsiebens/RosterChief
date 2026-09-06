@@ -5,7 +5,6 @@ from decimal import Decimal
 from io import StringIO
 from unittest import mock
 
-from allauth.mfa.models import Authenticator
 from dateutil.relativedelta import relativedelta
 from django.contrib import admin as django_admin
 from django.contrib.auth import get_user_model
@@ -23,6 +22,7 @@ from events.models import Event, Location
 from features.models import JobRun
 from members.models import Family, FamilyMembership, Member
 from registration.models import RegistrationBatch, RegistrationDetails
+from rosterchief.test_support import enrol_mfa, make_season
 from teams.models import Position, StaffAssignment, Team, TeamMembership
 from teams.services import eligible_roster_members
 
@@ -105,14 +105,6 @@ class ClubModelTests(TestCase):
     def test_verbose_names(self):
         self.assertEqual(Club._meta.verbose_name, "club")
         self.assertEqual(Club._meta.verbose_name_plural, "clubs")
-
-
-def make_season(club, start_year=2026):
-    return Season.objects.create(
-        club=club,
-        start_date=datetime.date(start_year, 8, 1),
-        end_date=datetime.date(start_year + 1, 5, 31),
-    )
 
 
 class ClubMembershipModelTests(TestCase):
@@ -586,7 +578,7 @@ class AdminRegistrationSmokeTests(TestCase):
         cls.admin = get_user_model().objects.create_superuser(email="root@club.test", password="pw-secret-123")
         # Staff must hold a second factor (RequireMFAMiddleware), else they are
         # redirected to enrolment instead of reaching the admin.
-        Authenticator.objects.create(user=cls.admin, type=Authenticator.Type.TOTP, data={"secret": "JBSWY3DPEHPK3PXP"})
+        enrol_mfa(cls.admin)
 
     def setUp(self):
         # The test client is per-test, so the session it carries has to be too.
@@ -1392,7 +1384,7 @@ class ManagementBrandingTests(TestCase):
         member = Member.objects.create(user=cls.staff_user, first_name="Ada", last_name="Admin")
         ClubMembership.objects.create(club=cls.club, member=member, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
         ClubRole.objects.filter(club=cls.club, member=member).update(role=ClubRole.Roles.ADMIN)
-        Authenticator.objects.create(user=cls.staff_user, type=Authenticator.Type.TOTP, data={"secret": "JBSWY3DPEHPK3PXP"})
+        enrol_mfa(cls.staff_user)
 
     def test_the_change_password_screen_stays_club_branded_without_a_visit_to_manage(self):
         self.client.force_login(self.staff_user)

@@ -1,23 +1,18 @@
-import datetime
-
 from django.contrib.auth import get_user_model
 from django.core import mail
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.test import TestCase
 
-from club.models import Club, ClubMembership, Season
+from club.models import Club, ClubMembership
 from features.models import EmailSuppression
 from members.models import Family, FamilyMembership, Member
+from rosterchief.test_support import make_season
 
 from .models import Notification
 from .services import notify_members, recipient_emails
 
 User = get_user_model()
-
-
-def make_season(club, start_year=2026):
-    return Season.objects.create(club=club, start_date=datetime.date(start_year, 8, 1), end_date=datetime.date(start_year + 1, 5, 31))
 
 
 class RecipientEmailsTests(TestCase):

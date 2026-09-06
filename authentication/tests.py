@@ -20,16 +20,12 @@ from django.urls import reverse
 from club.models import Club, ClubRole
 from features.models import EmailSuppression
 from members.models import Member
+from rosterchief.test_support import enrol_mfa
 
 from .adapters import RosterChiefAccountAdapter, RosterChiefMFAAdapter, webauthn_rp_id
 from .middleware import RequireMFAMiddleware, mfa_required_for
 
 User = get_user_model()
-
-
-def enrol_mfa(user):
-    """Give ``user`` a second factor (enough for is_mfa_enabled)."""
-    return Authenticator.objects.create(user=user, type=Authenticator.Type.TOTP, data={"secret": "JBSWY3DPEHPK3PXP"})
 
 
 class UserManagerTests(TestCase):
