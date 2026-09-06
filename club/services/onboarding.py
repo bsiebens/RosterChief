@@ -212,8 +212,19 @@ def is_signup_clean(membership) -> bool:
     approve_all_clean and approve_one gate on, and what the Sign-up page's
     per-member Approve button enables/disables against. Not itself a shortcut
     for "already active": a membership can be exactly this clean and still be
-    PENDING, waiting on this deliberately manual step."""
-    return membership.fee_status in _CLEAN_FEE_STATUSES and membership.onboarding_complete
+    PENDING, waiting on this deliberately manual step.
+
+    Reads `membership.onboarding_open` if it's already been annotated (see
+    annotate_onboarding_status) rather than always falling back to
+    onboarding_complete's own live, per-membership queries -- a caller
+    that's already batched a whole list through annotate_onboarding_status
+    (the Sign-up queue) shouldn't pay for it a second time here."""
+    if membership.fee_status not in _CLEAN_FEE_STATUSES:
+        return False
+    onboarding_open = getattr(membership, "onboarding_open", None)
+    if onboarding_open is not None:
+        return onboarding_open == 0
+    return membership.onboarding_complete
 
 
 def approve_one(membership) -> bool:

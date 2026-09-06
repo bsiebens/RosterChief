@@ -1,11 +1,11 @@
 """Web Push delivery -- the push channel for notifications.Notification.
 
-Wired in from mobile.signals (a post_save on Notification), deliberately kept
-out of the notifications app itself, which stays channel-agnostic (see that
-app's models.py docstring: "the whole point is reusing this for other kinds
-of activity later"). A backward dependency the other way -- notifications
-importing mobile -- would be the wrong direction: notifications has no
-reason to know a PWA exists.
+Wired in from mobile.signals (a notifications.signals.notifications_created
+receiver), deliberately kept out of the notifications app itself, which stays
+channel-agnostic (see that app's models.py docstring: "the whole point is
+reusing this for other kinds of activity later"). A backward dependency the
+other way -- notifications importing mobile -- would be the wrong direction:
+notifications has no reason to know a PWA exists.
 """
 
 import json
@@ -17,6 +17,29 @@ from pywebpush import WebPushException, webpush
 from .. import models
 
 logger = logging.getLogger(__name__)
+
+
+def _deliver(subscription, payload: str, *, label) -> None:
+    try:
+        webpush(
+            subscription_info=subscription.as_subscription_info(),
+            data=payload,
+            vapid_private_key=settings.VAPID_PRIVATE_KEY,
+            vapid_claims={"sub": f"mailto:{settings.VAPID_ADMIN_EMAIL}"},
+        )
+    except WebPushException as exc:
+        status = exc.response.status_code if exc.response is not None else None
+        if status in (404, 410):
+            # The browser's push service says this registration is gone for good --
+            # not a transient failure, so keeping it around would only mean retrying
+            # a subscription that will never accept a push again.
+            subscription.delete()
+        else:
+            logger.warning("Push send failed for %s: %s", label, exc)
+    except OSError as exc:
+        # Never fatal -- same reasoning as every other branded send in this app
+        # (see e.g. notifications.services._send_email).
+        logger.warning("Push send failed for %s: %s", label, exc)
 
 
 def send_push_to_member(member, *, title: str, body: str, url: str = "/app/") -> None:
@@ -32,23 +55,27 @@ def send_push_to_member(member, *, title: str, body: str, url: str = "/app/") ->
     # auditing every caller across the app that builds a title/body.
     payload = json.dumps({"title": str(title), "body": str(body), "url": url})
     for subscription in models.PushSubscription.objects.filter(member=member):
-        try:
-            webpush(
-                subscription_info=subscription.as_subscription_info(),
-                data=payload,
-                vapid_private_key=settings.VAPID_PRIVATE_KEY,
-                vapid_claims={"sub": f"mailto:{settings.VAPID_ADMIN_EMAIL}"},
-            )
-        except WebPushException as exc:
-            status = exc.response.status_code if exc.response is not None else None
-            if status in (404, 410):
-                # The browser's push service says this registration is gone for good --
-                # not a transient failure, so keeping it around would only mean retrying
-                # a subscription that will never accept a push again.
-                subscription.delete()
-            else:
-                logger.warning("Push send failed for %s: %s", member, exc)
-        except OSError as exc:
-            # Never fatal -- same reasoning as every other branded send in this app
-            # (see e.g. notifications.services._send_email).
-            logger.warning("Push send failed for %s: %s", member, exc)
+        _deliver(subscription, payload, label=member)
+
+
+def send_push_for_notifications(notifications, url: str = "/app/") -> None:
+    """Batched send_push_to_member for a whole notifications.services.
+    notify_members() fan-out at once: every notification's member's
+    PushSubscriptions are fetched in a single query instead of one query per
+    member (what a post_save-per-instance signal would otherwise cost),
+    still delivering each notification's own title/body."""
+    if not settings.VAPID_PRIVATE_KEY or not notifications:
+        return
+
+    member_ids = {notification.member_id for notification in notifications}
+    subscriptions_by_member = {}
+    for subscription in models.PushSubscription.objects.filter(member_id__in=member_ids).select_related("member"):
+        subscriptions_by_member.setdefault(subscription.member_id, []).append(subscription)
+
+    for notification in notifications:
+        subscriptions = subscriptions_by_member.get(notification.member_id)
+        if not subscriptions:
+            continue
+        payload = json.dumps({"title": str(notification.title), "body": str(notification.body), "url": url})
+        for subscription in subscriptions:
+            _deliver(subscription, payload, label=subscription.member)

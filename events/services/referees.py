@@ -74,19 +74,28 @@ def eligible_referees(event):
     return Member.objects.filter(referee_profile__level_id__in=qualifying_level_ids, referee_profile__valid_until__gte=today).exclude(pk__in=assigned_ids).distinct()
 
 
+def conflicting_events_for_members(members, event):
+    """Same overlap-and-audience check as conflicting_events, batched across
+    every member in `members` at once: each overlapping candidate's
+    effective_members() is resolved once and shared across every member,
+    instead of once per (member, candidate) pair -- the shape a whole
+    eligible-candidates list needs its conflicts checked in (event detail,
+    the referee dashboard), where the old per-member loop meant one query
+    per candidate for *each* of dozens of candidates. Returns
+    ``{member.pk: [conflicting events]}``."""
+    start, end = event_window(event)
+    overlapping = [candidate for candidate in Event.objects.filter(club=event.club).exclude(pk=event.pk).filter(start__lt=end) if event_window(candidate)[1] > start]
+    member_ids_by_candidate = {candidate.pk: set(effective_members(candidate).values_list("id", flat=True)) for candidate in overlapping}
+    return {member.pk: [candidate for candidate in overlapping if member.pk in member_ids_by_candidate[candidate.pk]] for member in members}
+
+
 def conflicting_events(member, event):
     """Other events in this club overlapping `event`'s time window where
     `member` is part of the expected audience -- informational only, never
-    blocks an assignment."""
-    start, end = event_window(event)
-    candidates = Event.objects.filter(club=event.club).exclude(pk=event.pk).filter(start__lt=end)
-
-    conflicts = []
-    for candidate in candidates:
-        _candidate_start, candidate_end = event_window(candidate)
-        if candidate_end > start and effective_members(candidate).filter(pk=member.pk).exists():
-            conflicts.append(candidate)
-    return conflicts
+    blocks an assignment. Single-member convenience wrapper around
+    conflicting_events_for_members -- checking a whole candidate list should
+    call that directly instead of this in a loop."""
+    return conflicting_events_for_members([member], event)[member.pk]
 
 
 def _lock_and_check_capacity(event):

@@ -15,6 +15,7 @@ from django.utils import timezone
 from rosterchief.mail import send_message
 
 from .models import Notification
+from .signals import notifications_created
 
 
 def recipient_emails(member) -> list[str]:
@@ -67,16 +68,29 @@ def notify_members(members, *, club, title: str, body: str, source=None, send_em
     ``attachments``, when given, is a list of ``(filename, content, mimetype)``
     tuples attached to every email this batch sends -- e.g.
     shop.services.notifications.dispatch_order_placed_notification's invoice
-    PDF. Nobody else passes this today, so it costs existing callers nothing."""
-    notifications = []
-    for member in members:
-        notification = Notification.objects.create(club=club, member=member, title=title, body=body, source=source)
-        if send_email:
+    PDF. Nobody else passes this today, so it costs existing callers nothing.
+
+    One bulk_create for every row instead of one INSERT per member, and one
+    notifications_created signal for the whole batch instead of a
+    post_save-per-instance signal -- see that signal's own docstring for why
+    a delivery channel (mobile.services.push) needs the batch shape, not one
+    row at a time."""
+    members = list(members)
+    notifications = [Notification(club=club, member=member, title=title, body=body, source=source) for member in members]
+    Notification.objects.bulk_create(notifications)
+
+    if send_email:
+        sent = []
+        for notification, member in zip(notifications, members, strict=True):
             emails = recipient_emails(member)
             if emails:
                 _send_email(notification, emails, attachments=attachments)
                 notification.sent_at = timezone.now()
                 notification.sent_to_emails = emails
-                notification.save(update_fields=["sent_at", "sent_to_emails", "modified"])
-        notifications.append(notification)
+                notification.modified = timezone.now()
+                sent.append(notification)
+        if sent:
+            Notification.objects.bulk_update(sent, ["sent_at", "sent_to_emails", "modified"])
+
+    notifications_created.send(sender=Notification, notifications=notifications)
     return notifications

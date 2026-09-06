@@ -254,6 +254,16 @@ class RefereeLevel(ClubScopedModel):
             current = current.inherits_from
         return team_ids
 
+    @staticmethod
+    def eligible_team_ids_by_level(club) -> dict:
+        """``{level.pk: team_ids}`` for every RefereeLevel in ``club``, each
+        level's own eligible_team_ids() resolved once and shared -- built for
+        a referees list, where many referees typically hold the same one of
+        a club's "handful" of levels (see this model's own docstring); calling
+        eligible_team_ids() once per referee row would repeat the same
+        level's chain walk once per referee holding it, instead of once."""
+        return {level.pk: level.eligible_team_ids() for level in RefereeLevel.objects.filter(club=club).select_related("inherits_from")}
+
 
 class RefereeProfile(UUIDModel):
     """Marks a member as a club referee: their level (which determines which
@@ -359,6 +369,12 @@ class OfficialLevel(ClubScopedModel):
             seen.add(current.pk)
             current = current.inherits_from
         return team_ids
+
+    @staticmethod
+    def eligible_team_ids_by_level(club) -> dict:
+        """The officials counterpart to RefereeLevel.eligible_team_ids_by_level
+        -- see that method's own docstring."""
+        return {level.pk: level.eligible_team_ids() for level in OfficialLevel.objects.filter(club=club).select_related("inherits_from")}
 
 
 class OfficialProfile(UUIDModel):

@@ -5,7 +5,7 @@
 {% block heading %}{% trans "Orders" %}{% endblock heading %}
 
 {% block topbar_context %}
-    <span class="badge badge-neutral">{% blocktrans count counter=orders|length %}{{ counter }} order{% plural %}{{ counter }} orders{% endblocktrans %}</span>
+    <span class="badge badge-neutral">{% blocktrans count counter=paginator.count %}{{ counter }} order{% plural %}{{ counter }} orders{% endblocktrans %}</span>
 {% endblock topbar_context %}
 
 {% block actions %}
@@ -88,7 +88,7 @@
         <div class="card overflow-hidden">
             <div class="flex flex-wrap items-center justify-between gap-2 border-b border-line px-4.5 py-3.5">
                 <span class="font-display text-sm font-bold tracking-wide text-muted uppercase">
-                    {% blocktrans count counter=orders|length %}{{ counter }} order{% plural %}{{ counter }} orders{% endblocktrans %}
+                    {% blocktrans count counter=paginator.count %}{{ counter }} order{% plural %}{{ counter }} orders{% endblocktrans %}
                 </span>
                 <div class="flex gap-2">
                     <button class="btn btn-success btn-sm gap-2" type="button" onclick="document.getElementById('bulk_mark_paid_modal').showModal()">{% lucide "circle-check" size=14 %} {% trans "Mark selected paid" %}</button>
@@ -135,7 +135,7 @@
                                 </span>
                             </td>
                             <td>
-                                {% if order.has_production_lines %}
+                                {% if order.has_production_line_items %}
                                     <span class="badge badge-sm
                                         {% if order.production_status == "received" %}badge-success
                                         {% elif order.production_status == "in_production" %}badge-info
@@ -161,6 +161,8 @@
             </table>
         </div>
     </form>
+
+    {% include "management/_pagination.html" %}
 
     <dialog id="bulk_mark_paid_modal" class="modal">
         <div class="modal-box">

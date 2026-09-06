@@ -16,6 +16,8 @@ Explicitly ``invited_members`` bypasses that: a named, individual invite is a
 deliberate staff decision that should win regardless.
 """
 
+from collections import defaultdict
+
 from django.db.models import Count, Q
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
@@ -25,7 +27,7 @@ from club.models import ClubMembership, Season
 from club.services.access import current_season
 from club.services.onboarding import blocked_member_ids_for_event, open_requirements_blocking
 from events.models import Attendance, Event
-from members.models import Member
+from members.models import GroupMembership, Member
 from notifications.services import notify_members
 from teams.models import TeamMembership
 
@@ -89,6 +91,71 @@ def sync_event_attendances(event):
         event.attendances.filter(member_id__in=to_remove).delete()
 
 
+def blocked_upcoming_events_for_members(members, club):
+    """Batched blocked_upcoming_events_for_member across every member in
+    ``members`` at once: the season, team/group memberships, candidate
+    events, and existing Attendance rows are each resolved once for the
+    whole group instead of once per member -- what a multi-child family's
+    own calendar (mobile.views.CalendarView) needs instead of looping the
+    single-member function once per managed person, each loop re-deriving
+    all of the above from scratch. Returns
+    ``{member.pk: [(event, [blocking OnboardingRequirement, ...]), ...]}``,
+    each list soonest-first."""
+    members = list(members)
+    result = {member.pk: [] for member in members}
+    if not members:
+        return result
+
+    season = current_season(club)
+    if season is None:
+        return result
+
+    member_ids = [member.pk for member in members]
+    team_ids_by_member = defaultdict(set)
+    for member_id, team_id in TeamMembership.objects.filter(member_id__in=member_ids, season=season).values_list("member_id", "team_id"):
+        team_ids_by_member[member_id].add(team_id)
+    group_ids_by_member = defaultdict(set)
+    for member_id, group_id in GroupMembership.objects.filter(member_id__in=member_ids).values_list("member_id", "group_id"):
+        group_ids_by_member[member_id].add(group_id)
+
+    all_team_ids = {team_id for ids in team_ids_by_member.values() for team_id in ids}
+    all_group_ids = {group_id for ids in group_ids_by_member.values() for group_id in ids}
+    if not all_team_ids and not all_group_ids:
+        return result
+
+    candidates = list(
+        Event.objects.filter(club=club, cancelled=False, start__gte=timezone.now())
+        .filter(Q(teams__id__in=all_team_ids) | Q(groups__id__in=all_group_ids))
+        .distinct()
+        .prefetch_related("teams", "groups", "excluded_members")
+        .order_by("start")
+    )
+    if not candidates:
+        return result
+
+    existing_ids_by_member = defaultdict(set)
+    for member_id, event_id in Attendance.objects.filter(member_id__in=member_ids, event__in=candidates).values_list("member_id", "event_id"):
+        existing_ids_by_member[member_id].add(event_id)
+
+    for member in members:
+        member_team_ids = team_ids_by_member.get(member.pk, set())
+        member_group_ids = group_ids_by_member.get(member.pk, set())
+        if not member_team_ids and not member_group_ids:
+            continue
+        existing_ids = existing_ids_by_member.get(member.pk, set())
+        for event in candidates:
+            if event.pk in existing_ids or member.pk in {excluded.pk for excluded in event.excluded_members.all()}:
+                continue
+            event_team_ids = {team.pk for team in event.teams.all()}
+            event_group_ids = {group.pk for group in event.groups.all()}
+            if not (member_team_ids & event_team_ids) and not (member_group_ids & event_group_ids):
+                continue
+            requirements = open_requirements_blocking(member, club, season, event.kind)
+            if requirements:
+                result[member.pk].append((event, requirements))
+    return result
+
+
 def blocked_upcoming_events_for_member(member, club):
     """Upcoming events ``member`` would normally see (via a team roster or a
     group they're in) but has no ``Attendance`` row for, because an open
@@ -101,30 +168,12 @@ def blocked_upcoming_events_for_member(member, club):
     Returns ``[(event, [blocking OnboardingRequirement, ...]), ...]``, soonest
     first. A member explicitly ``invited_members`` on an event never appears
     here -- that bypasses blocking entirely (see ``effective_members``'s own
-    docstring), so they already have a normal Attendance row for it."""
-    season = current_season(club)
-    if season is None:
-        return []
+    docstring), so they already have a normal Attendance row for it.
 
-    team_ids = list(TeamMembership.objects.filter(member=member, season=season).values_list("team_id", flat=True))
-    group_ids = list(member.group_memberships.values_list("group_id", flat=True))
-    if not team_ids and not group_ids:
-        return []
-
-    candidates = list(Event.objects.filter(club=club, cancelled=False, start__gte=timezone.now()).filter(Q(teams__id__in=team_ids) | Q(groups__id__in=group_ids)).exclude(excluded_members=member).distinct().order_by("start"))
-    if not candidates:
-        return []
-
-    existing_ids = set(Attendance.objects.filter(member=member, event__in=candidates).values_list("event_id", flat=True))
-
-    results = []
-    for event in candidates:
-        if event.pk in existing_ids:
-            continue
-        requirements = open_requirements_blocking(member, club, season, event.kind)
-        if requirements:
-            results.append((event, requirements))
-    return results
+    Single-member convenience wrapper around blocked_upcoming_events_for_members
+    -- checking a whole family/roster should call that directly instead of
+    this in a loop."""
+    return blocked_upcoming_events_for_members([member], club)[member.pk]
 
 
 def notify_newly_invited(member, *, club, events):

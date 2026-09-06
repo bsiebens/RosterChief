@@ -10,9 +10,8 @@ club), so there is at most one row to find regardless of which club is current.
 
 from django.http import HttpRequest
 
-from rosterchief.request_cache import cached_on_request
-
 from members.models import Member
+from rosterchief.request_cache import cached_on_request
 
 
 def get_request_member(request: HttpRequest) -> Member | None:

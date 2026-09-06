@@ -9,6 +9,7 @@ from collections import defaultdict
 from decimal import Decimal
 
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.contrib.contenttypes.prefetch import GenericPrefetch
 from django.core.paginator import Paginator
 from django.db.models import Count, F, Q
 from django.http import Http404, HttpResponse, HttpResponseBadRequest, HttpResponseRedirect, JsonResponse
@@ -32,7 +33,7 @@ from club.services.onboarding import checklist_for, open_requirements_blocking
 from club.services.sponsors import active_sponsors
 from controlpanel.messages import notify
 from events.models import Attendance, Event, EventTask, Lineup, OfficialSignup, RefereeSignup
-from events.services.attendance import blocked_upcoming_events_for_member
+from events.services.attendance import blocked_upcoming_events_for_members
 from events.services.calendar import agenda_groups, week_bounds
 from events.services.lineup import notify_dropout, selected_members_by_position
 from events.services.officials import OfficialAssignmentError, accept_official_signup, decline_official_signup
@@ -496,8 +497,9 @@ class CalendarView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         # members() already excludes it from Attendance sync) -- shown here
         # instead, with which onboarding requirement is in the way, rather than
         # a managed person's game quietly vanishing with no explanation at all.
+        blocked_by_person = blocked_upcoming_events_for_members(self.managed_people, self.request.club)
         for person in self.managed_people:
-            for event, requirements in blocked_upcoming_events_for_member(person, self.request.club):
+            for event, requirements in blocked_by_person[person.pk]:
                 if kind_filter in self.KIND_FILTERS and event.kind != self.KIND_FILTERS[kind_filter]:
                     continue
                 rows.append({"event": event, "blocked_requirements": requirements, "blocked_member": person if show_member else None})
@@ -1512,7 +1514,16 @@ class NotificationsView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
             this_week_start, _this_week_end = week_bounds(timezone.localdate())
             local_today = timezone.localdate()
 
-            notifications = Notification.objects.filter(club=self.request.club, member__in=self.managed_people).select_related("member").order_by("-created")
+            # GenericPrefetch batches `source` by content type (one query per type
+            # actually used -- News/Event/FormSend) instead of one query per
+            # notification the plain GenericForeignKey lookup below would otherwise
+            # issue on this unbounded list.
+            notifications = (
+                Notification.objects.filter(club=self.request.club, member__in=self.managed_people)
+                .select_related("member")
+                .prefetch_related(GenericPrefetch("source", [News.objects.all(), Event.objects.all(), FormSend.objects.all()]))
+                .order_by("-created")
+            )
 
             for notification in notifications:
                 source_label, _url = _notification_source_link(notification.source)

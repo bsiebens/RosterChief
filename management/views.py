@@ -6,7 +6,7 @@ from itertools import groupby
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
 from django.db import IntegrityError, transaction
-from django.db.models import Count, F, ProtectedError, Q, Sum
+from django.db.models import Count, Exists, F, OuterRef, ProtectedError, Q, Sum
 from django.http import FileResponse, Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -44,6 +44,7 @@ from club.mixins import (
 from club.models import ClubMembership, ClubRole, DuesInvoice, EvaluationManager, MemberRequirementStatus, OnboardingRequirement, Season, ShopManager, Sponsor
 from club.services.access import (
     _guardians_only,
+    can_add_news,
     can_edit_news,
     can_manage_evaluations,
     can_manage_members,
@@ -75,7 +76,7 @@ from events.services.notifications import dispatch_notify_new_event
 from events.services.officials import OfficialAssignmentError, add_external_official, assign_official, eligible_officials, needs_official_management, officials_enabled_for, remove_official, set_official_fee
 from events.services.rbihf_import import RBIHFImportError, apply_plan, build_plan, extract_team_id, fetch_html
 from events.services.recurrence import cancel_occurrence, detach_occurrence, generate_occurrences, propagate_series
-from events.services.referees import RefereeAssignmentError, add_external_referee, assign_referee, conflicting_events, eligible_referees, needs_referee_management, remove_referee, set_referee_fee
+from events.services.referees import RefereeAssignmentError, add_external_referee, assign_referee, conflicting_events_for_members, eligible_referees, needs_referee_management, remove_referee, set_referee_fee
 from formbuilder.models import Field as FormBuilderField
 from formbuilder.models import Form as FormBuilderForm
 from formbuilder.models import FormSend
@@ -2344,13 +2345,26 @@ class RefereeListView(ClubStaffRequiredMixin, ListView):
 
     template_name = "management/referee_list.html"
     context_object_name = "referees"
+    paginate_by = 25
 
     def get_queryset(self):
         # No prefetch for eligible_teams below select_related's level: it walks the
         # level's own inherits_from chain (RefereeLevel.eligible_team_ids), which a
-        # single prefetch_related path can't cover anyway.
+        # single prefetch_related path can't cover anyway -- see get_context_data,
+        # which precomputes it once per level instead.
         members = members_visible_to(self.request.user, self.request.club, include_guardians=True).filter(referee_profile__isnull=False)
         return members.select_related("referee_profile", "referee_profile__level").order_by("last_name", "first_name")
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        referees = context[self.context_object_name]
+        team_ids_by_level = RefereeLevel.eligible_team_ids_by_level(self.request.club)
+        teams_by_id = {team.pk: team for team in Team.objects.filter(club=self.request.club)}
+        for referee in referees:
+            profile = referee.referee_profile
+            team_ids = team_ids_by_level.get(profile.level_id, set()) if profile.is_eligible else set()
+            profile.cached_eligible_teams = [teams_by_id[team_id] for team_id in team_ids if team_id in teams_by_id]
+        return context
 
 
 class OfficialLevelListView(OfficialsStaffRequiredMixin, ListView):
@@ -2428,10 +2442,22 @@ class OfficialListView(OfficialsStaffRequiredMixin, ListView):
 
     template_name = "management/official_list.html"
     context_object_name = "officials"
+    paginate_by = 25
 
     def get_queryset(self):
         members = members_visible_to(self.request.user, self.request.club, include_guardians=True).filter(official_profile__isnull=False)
         return members.select_related("official_profile", "official_profile__level").order_by("last_name", "first_name")
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        officials = context[self.context_object_name]
+        team_ids_by_level = OfficialLevel.eligible_team_ids_by_level(self.request.club)
+        teams_by_id = {team.pk: team for team in Team.objects.filter(club=self.request.club)}
+        for official in officials:
+            profile = official.official_profile
+            team_ids = team_ids_by_level.get(profile.level_id, set()) if profile.is_eligible else set()
+            profile.cached_eligible_teams = [teams_by_id[team_id] for team_id in team_ids if team_id in teams_by_id]
+        return context
 
 
 class NumberListView(ClubStaffRequiredMixin, TemplateView):
@@ -2720,8 +2746,19 @@ class NewsListView(ClubStaffRequiredMixin, ListView):
         base = News.objects.filter(club=club)
         now = timezone.now()
 
+        # can_edit_news only actually varies by news_item.status (published vs.
+        # not) -- two possible outcomes, computed once here and picked between
+        # per row, instead of can_edit_news re-running can_publish_news/
+        # can_add_news's own uncached queries for each of up to 20 rows on
+        # this page.
+        can_publish = can_publish_news(user, club)
+        can_edit_draft = can_add_news(user, club)
+
+        def can_edit_for(news_item):
+            return can_publish if news_item.status == News.Status.PUBLISHED else can_edit_draft
+
         for news_item in self.object_list:
-            news_item.can_edit = can_edit_news(user, news_item)
+            news_item.can_edit = can_edit_for(news_item)
 
         selected_pk = self.request.GET.get("selected")
         selected_item = None
@@ -2730,7 +2767,7 @@ class NewsListView(ClubStaffRequiredMixin, ListView):
         if selected_item is None and self.object_list:
             selected_item = self.object_list[0]
         if selected_item is not None:
-            selected_item.can_edit = can_edit_news(user, selected_item)
+            selected_item.can_edit = can_edit_for(selected_item)
 
         return super().get_context_data(
             status_filter=self.request.GET.get("status", "all"),
@@ -2742,7 +2779,7 @@ class NewsListView(ClubStaffRequiredMixin, ListView):
             },
             news_item=selected_item,
             can_edit=selected_item.can_edit if selected_item else False,
-            can_publish=can_publish_news(user, club),
+            can_publish=can_publish,
             publish_form=NewsPublishForm(),
             photo_upload_form=NewsPhotoUploadForm(),
             # Markdown source -> sanitised HTML, same renderer the public API/
@@ -3215,11 +3252,12 @@ class EventDetailView(ClubStaffRequiredMixin, DetailView):
             referees = list(event.referees.select_related("member", "assigned_by").order_by("member__last_name", "member__first_name"))
             referees_full = len(referees) >= event.max_referees
             if can_manage_referees and not referees_full:
-                for candidate in eligible_referees(event):
-                    conflicts = conflicting_events(candidate, event)
+                referee_candidates = list(eligible_referees(event))
+                conflicts_by_member = conflicting_events_for_members(referee_candidates, event)
+                for candidate in referee_candidates:
+                    conflicts = conflicts_by_member[candidate.pk]
                     candidate.has_conflict = bool(conflicts)
                     candidate.conflict_titles = ", ".join(conflict.title for conflict in conflicts)
-                    referee_candidates.append(candidate)
             if can_manage_referees:
                 pending_signups = list(event.referee_signups.filter(status=RefereeSignup.Status.INVITED).select_related("member"))
 
@@ -3238,11 +3276,12 @@ class EventDetailView(ClubStaffRequiredMixin, DetailView):
                 officials = list(event.officials.select_related("member", "assigned_by").order_by("member__last_name", "member__first_name"))
                 officials_full = len(officials) >= event.max_officials
                 if can_manage_referees and not officials_full:
-                    for candidate in eligible_officials(event):
-                        conflicts = conflicting_events(candidate, event)
+                    official_candidates = list(eligible_officials(event))
+                    conflicts_by_member = conflicting_events_for_members(official_candidates, event)
+                    for candidate in official_candidates:
+                        conflicts = conflicts_by_member[candidate.pk]
                         candidate.has_conflict = bool(conflicts)
                         candidate.conflict_titles = ", ".join(conflict.title for conflict in conflicts)
-                        official_candidates.append(candidate)
                 if can_manage_referees:
                     pending_official_signups = list(event.official_signups.filter(status=OfficialSignup.Status.INVITED).select_related("member"))
 
@@ -3830,11 +3869,12 @@ class RefereeManagementDashboardView(MemberAdminRequiredMixin, TemplateView):
                 if game.fees_pending:
                     kpi_fees_pending += 1
                 if not game.referees_full:
-                    for candidate in eligible_referees(game):
-                        conflicts = conflicting_events(candidate, game)
+                    game.referee_candidates = list(eligible_referees(game))
+                    conflicts_by_member = conflicting_events_for_members(game.referee_candidates, game)
+                    for candidate in game.referee_candidates:
+                        conflicts = conflicts_by_member[candidate.pk]
                         candidate.has_conflict = bool(conflicts)
                         candidate.conflict_titles = ", ".join(conflict.title for conflict in conflicts)
-                        game.referee_candidates.append(candidate)
 
             game.needs_officials = officials_enabled and needs_official_management(game)
             game.official_rows = list(game.officials.all())
@@ -3852,11 +3892,12 @@ class RefereeManagementDashboardView(MemberAdminRequiredMixin, TemplateView):
                 if game.official_fees_pending:
                     kpi_official_fees_pending += 1
                 if not game.officials_full:
-                    for candidate in eligible_officials(game):
-                        conflicts = conflicting_events(candidate, game)
+                    game.official_candidates = list(eligible_officials(game))
+                    conflicts_by_member = conflicting_events_for_members(game.official_candidates, game)
+                    for candidate in game.official_candidates:
+                        conflicts = conflicts_by_member[candidate.pk]
                         candidate.has_conflict = bool(conflicts)
                         candidate.conflict_titles = ", ".join(conflict.title for conflict in conflicts)
-                        game.official_candidates.append(candidate)
 
         stats = referee_workload_stats(club)
         kpi_active_referees = len(stats)
@@ -4897,9 +4938,19 @@ class OrderListView(ShopManagerRequiredMixin, ListView):
 
     template_name = "management/order_list.html"
     context_object_name = "orders"
+    paginate_by = 50
 
     def get_queryset(self):
-        orders = Order.objects.filter(club=self.request.club).select_related("purchaser")
+        # has_production_line_items, not the Order.has_production_lines property --
+        # an Exists() annotation resolved once per page here instead of one query per
+        # row from the template calling that property directly (order_list.html was
+        # the one place still doing that; order_detail.html's single order still uses
+        # the property, which is the right call for exactly one row).
+        orders = (
+            Order.objects.filter(club=self.request.club)
+            .select_related("purchaser")
+            .annotate(has_production_line_items=Exists(OrderLine.objects.filter(order=OuterRef("pk"), product__product_type=Product.ProductType.MERCHANDISE)))
+        )
 
         payment_status = self.request.GET.get("payment_status", "")
         fulfillment_status = self.request.GET.get("fulfillment_status", "")

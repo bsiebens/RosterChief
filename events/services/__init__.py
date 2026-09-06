@@ -1,5 +1,6 @@
 from .attendance import (
     blocked_upcoming_events_for_member,
+    blocked_upcoming_events_for_members,
     effective_members,
     notify_newly_invited,
     player_attendance_rankings,
@@ -22,6 +23,7 @@ from .recurrence import (
 __all__ = [
     "apply_template",
     "blocked_upcoming_events_for_member",
+    "blocked_upcoming_events_for_members",
     "cancel_occurrence",
     "detach_occurrence",
     "effective_members",

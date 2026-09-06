@@ -23,7 +23,7 @@
                         <td class="text-slate">{{ referee.referee_profile.level|default:"—" }}</td>
                         <td>
                             {% if referee.referee_profile.is_eligible %}
-                                {% for team in referee.referee_profile.eligible_teams %}
+                                {% for team in referee.referee_profile.cached_eligible_teams %}
                                     <span class="badge badge-outline badge-sm">{{ team.name }}</span>
                                 {% empty %}
                                     <span class="text-dim">—</span>
@@ -54,4 +54,5 @@
             </tbody>
         </table>
     </div>
+    {% include "management/_pagination.html" %}
 {% endblock panel %}

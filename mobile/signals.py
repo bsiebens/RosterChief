@@ -1,13 +1,10 @@
-from django.db.models.signals import post_save
 from django.dispatch import receiver
 
-from notifications.models import Notification
+from notifications.signals import notifications_created
 
-from .services.push import send_push_to_member
+from .services.push import send_push_for_notifications
 
 
-@receiver(post_save, sender=Notification)
-def push_new_notification(sender, instance, created, **kwargs):
-    if not created:
-        return
-    send_push_to_member(instance.member, title=instance.title, body=instance.body)
+@receiver(notifications_created)
+def push_new_notifications(sender, notifications, **kwargs):
+    send_push_for_notifications(notifications)
