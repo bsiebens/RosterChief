@@ -511,13 +511,29 @@ class _SyncThread:
     """Stands in for threading.Thread in tests -- .start() runs the target immediately,
     in-process, instead of on a real background thread, so a job dispatched by
     JobRunNowView is guaranteed to have finished (JobRun row and all) by the time an
-    assertion runs, rather than racing a thread that may not be done yet."""
+    assertion runs, rather than racing a thread that may not be done yet.
+
+    Running it on a genuinely separate thread instead (own connection, like production)
+    was tried and reverted: SQLite's in-memory test database isn't shared across
+    connections, so a real second thread's JobRun insert becomes invisible to the test's
+    own connection -- JobRun.DoesNotExist even though `_run` completed and committed.
+
+    Inline still has one real side effect to guard against: JobRunNowView's `_run` closes
+    its thread's connections in a `finally` (correct in production, where `_run` genuinely
+    owns a separate connection on a separate thread) -- run inline, that `finally` would
+    instead tear down the SAME connection the test's own wrapping atomic() block depends
+    on, which Postgres reports right back as "the connection is closed" on the test's next
+    query. SQLite tolerates that well enough to hide the bug, which is why this only ever
+    showed up running the suite against Postgres. Patching close_all() to a no-op for the
+    duration neutralises exactly that side effect without changing what `_run` itself does.
+    """
 
     def __init__(self, target=None, **kwargs):
         self._target = target
 
     def start(self):
-        self._target()
+        with mock.patch("django.db.connections.close_all"):
+            self._target()
 
 
 class JobRunNowViewTests(ControlPanelTestBase):
