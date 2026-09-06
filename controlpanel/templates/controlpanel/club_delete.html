@@ -22,56 +22,54 @@
 {% endblock actions %}
 
 {% block panel %}
-    <div class="max-w-3xl">
-        <div class="card flex items-start gap-3 border-l-4 border-l-club-dark p-4">
-            {% lucide "triangle-alert" size=20 class="mt-0.5 shrink-0 text-club-dark" %}
-            <div>
-                <div class="font-display text-sm font-extrabold tracking-[.1em] text-ink uppercase">{% trans "This can't be undone" %}</div>
-                <p class="mt-1.5 text-sm text-slate">{% blocktrans with club=club.name %}Deleting “{{ club }}” permanently removes the club and every row it owns — members' club-specific records, teams, events, orders, invoices, everything listed below. There is no restore.{% endblocktrans %}</p>
-                <p class="mt-1.5 text-sm text-slate">{% trans "Member and user login accounts are never deleted — only this club's own data and its links to them (memberships, rosters, staff assignments, ...). Uploaded files (logos, cached invoice PDFs) may remain in storage." %}</p>
-            </div>
+    <div class="card flex items-start gap-3 border-l-4 border-l-club-dark p-4">
+        {% lucide "triangle-alert" size=20 class="mt-0.5 shrink-0 text-club-dark" %}
+        <div>
+            <div class="font-display text-sm font-extrabold tracking-[.1em] text-ink uppercase">{% trans "This can't be undone" %}</div>
+            <p class="mt-1.5 text-sm text-slate">{% blocktrans with club=club.name %}Deleting “{{ club }}” permanently removes the club and every row it owns — members' club-specific records, teams, events, orders, invoices, everything listed below. There is no restore.{% endblocktrans %}</p>
+            <p class="mt-1.5 text-sm text-slate">{% trans "Member and user login accounts are never deleted — only this club's own data and its links to them (memberships, rosters, staff assignments, ...). Uploaded files (logos, cached invoice PDFs) may remain in storage." %}</p>
         </div>
+    </div>
 
-        {% if not impact.can_delete %}
-            <div class="alert alert-error mt-4">
-                {% lucide "circle-x" size=18 %}
-                <span>{% blocktrans count counter=impact.protected|length %}{{ counter }} record can't be deleted because something else still depends on it. Nothing was removed.{% plural %}{{ counter }} records can't be deleted because something else still depends on them. Nothing was removed.{% endblocktrans %}</span>
-            </div>
-        {% endif %}
-
-        <div class="card mt-4 flex flex-col">
-            <div class="flex items-center justify-between gap-2.5 border-b border-line px-4 py-3">
-                <span class="font-display text-sm font-extrabold tracking-[.1em] text-ink uppercase">{% trans "What gets deleted" %}</span>
-                <span class="font-mono text-[11px] text-muted">{% blocktrans count counter=impact.total %}{{ counter }} record in total{% plural %}{{ counter }} records in total{% endblocktrans %}</span>
-            </div>
-            {% if impact.counts %}
-                <table class="table">
-                    <tbody>
-                        {% for label, count in impact.counts %}
-                            <tr>
-                                <td class="text-slate capitalize">{{ label }}</td>
-                                <td class="text-right font-mono font-semibold text-ink tabular-nums">{{ count }}</td>
-                            </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            {% else %}
-                <p class="px-4 py-3 text-sm text-muted">{% trans "This club has no data of its own yet — deleting it only removes the club record itself." %}</p>
-            {% endif %}
+    {% if not impact.can_delete %}
+        <div class="alert alert-error mt-4">
+            {% lucide "circle-x" size=18 %}
+            <span>{% blocktrans count counter=impact.protected|length %}{{ counter }} record can't be deleted because something else still depends on it. Nothing was removed.{% plural %}{{ counter }} records can't be deleted because something else still depends on them. Nothing was removed.{% endblocktrans %}</span>
         </div>
+    {% endif %}
 
-        {% if impact.can_delete %}
-            <form method="post" action="{% url 'controlpanel:club_delete' club.pk %}" class="card mt-4 flex flex-col gap-3 p-4">
-                {% csrf_token %}
-                <label class="flex flex-col gap-1.5">
-                    <span class="text-sm font-semibold text-ink">{% blocktrans with slug=club.slug %}Type <code class="rounded bg-rule px-1 py-0.5 font-mono">{{ slug }}</code> to confirm{% endblocktrans %}</span>
-                    <input class="input input-bordered w-full max-w-xs font-mono" type="text" name="confirm_slug" autocomplete="off" autocapitalize="off" spellcheck="false" required>
-                </label>
-                <div class="flex justify-end gap-2">
-                    <a class="btn btn-outline gap-2" href="{% url 'controlpanel:club_detail' club.pk %}">{% lucide "x" size=16 %} {% trans "Cancel" %}</a>
-                    <button class="btn btn-error gap-2" type="submit">{% lucide "trash-2" size=16 %} {% trans "Permanently delete" %}</button>
-                </div>
-            </form>
+    <div class="card mt-4 flex flex-col">
+        <div class="flex items-center justify-between gap-2.5 border-b border-line px-4 py-3">
+            <span class="font-display text-sm font-extrabold tracking-[.1em] text-ink uppercase">{% trans "What gets deleted" %}</span>
+            <span class="font-mono text-[11px] text-muted">{% blocktrans count counter=impact.total %}{{ counter }} record in total{% plural %}{{ counter }} records in total{% endblocktrans %}</span>
+        </div>
+        {% if impact.counts %}
+            <table class="table">
+                <tbody>
+                    {% for label, count in impact.counts %}
+                        <tr>
+                            <td class="text-slate capitalize">{{ label }}</td>
+                            <td class="text-right font-mono font-semibold text-ink tabular-nums">{{ count }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <p class="px-4 py-3 text-sm text-muted">{% trans "This club has no data of its own yet — deleting it only removes the club record itself." %}</p>
         {% endif %}
     </div>
+
+    {% if impact.can_delete %}
+        <form method="post" action="{% url 'controlpanel:club_delete' club.pk %}" class="card mt-4 flex flex-col gap-3 p-4">
+            {% csrf_token %}
+            <label class="flex flex-col gap-1.5">
+                <span class="text-sm font-semibold text-ink">{% blocktrans with slug=club.slug %}Type <code class="rounded bg-rule px-1 py-0.5 font-mono">{{ slug }}</code> to confirm{% endblocktrans %}</span>
+                <input class="input input-bordered w-full max-w-xs font-mono" type="text" name="confirm_slug" autocomplete="off" autocapitalize="off" spellcheck="false" required>
+            </label>
+            <div class="flex justify-end gap-2">
+                <a class="btn btn-outline gap-2" href="{% url 'controlpanel:club_detail' club.pk %}">{% lucide "x" size=16 %} {% trans "Cancel" %}</a>
+                <button class="btn btn-error gap-2" type="submit">{% lucide "trash-2" size=16 %} {% trans "Permanently delete" %}</button>
+            </div>
+        </form>
+    {% endif %}
 {% endblock panel %}
