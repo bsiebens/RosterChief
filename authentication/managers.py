@@ -1,10 +1,20 @@
 from django.contrib.auth.base_user import BaseUserManager
+from django.db.models import Q
 
 
 class UserManager(BaseUserManager):
     """Manager for the email-based custom User model."""
 
     use_in_migrations = True
+
+    def platform_admins(self):
+        """Every account with platform-wide access (staff or superuser) --
+        the one query shared by the control panel's own admin list
+        (controlpanel.services.platform_admins.platform_admins), and by
+        billing/bugs, which each need "who to email about this" without
+        importing controlpanel the wrong way round (controlpanel depends on
+        domain apps, not the other way)."""
+        return self.filter(Q(is_staff=True) | Q(is_superuser=True))
 
     def _create_user(self, email, password, **extra_fields):
         if not email:

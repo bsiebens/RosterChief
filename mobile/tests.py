@@ -2109,7 +2109,7 @@ class NotificationsViewTests(TestCase):
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
 class NewsListViewTests(TestCase):
-    """"All news" -- what Home's own news card links to. Every published,
+    """ "All news" -- what Home's own news card links to. Every published,
     internal-or-both news item, not filtered to any particular team."""
 
     @classmethod
@@ -4023,7 +4023,7 @@ class CoachRosterMemberViewTests(TestCase):
         StaffAssignment.objects.create(team=cls.team, member=cls.member, season=cls.season, position=cls.coach_position)
 
         cls.player_position = Position.objects.create(club=cls.club, name="Forward", short_name="FW", staff_position=False)
-        cls.player = Member.objects.create(first_name="Anna", last_name="Player", phone="+3247" "1234567", emergency_phone="+3247" "7654321")
+        cls.player = Member.objects.create(first_name="Anna", last_name="Player", phone="+32471234567", emergency_phone="+32477654321")
         cls.membership = TeamMembership.objects.create(team=cls.team, member=cls.player, season=cls.season, position=cls.player_position, jersey_number=9)
 
     def _get(self, membership=None):
@@ -4045,7 +4045,7 @@ class CoachRosterMemberViewTests(TestCase):
 
     def test_shows_a_guardians_call_buttons_for_a_child(self):
         family = Family.objects.create(name="Player family")
-        guardian = Member.objects.create(first_name="Gail", last_name="Guardian", phone="+3247" "1112222")
+        guardian = Member.objects.create(first_name="Gail", last_name="Guardian", phone="+32471112222")
         FamilyMembership.objects.create(family=family, member=guardian, role=FamilyMembership.FamilyRole.PARENT)
         FamilyMembership.objects.create(family=family, member=self.player, role=FamilyMembership.FamilyRole.CHILD)
         self.client.force_login(self.user)
@@ -6451,7 +6451,7 @@ class ShopCheckoutViewTests(TestCase):
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
 class ShopOrdersViewTests(TestCase):
-    """"My orders" -- scoped to self.managed_people (ShopOrdersView's own
+    """ "My orders" -- scoped to self.managed_people (ShopOrdersView's own
     docstring for why that's broader than just self.me)."""
 
     @classmethod
@@ -7153,7 +7153,7 @@ class CoachRosterMemberEvaluationsLinkTests(TestCase):
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
 class BugListViewTests(TestCase):
-    """"Report a bug" row off Me -- files into the standalone ``bugs`` app
+    """ "Report a bug" row off Me -- files into the standalone ``bugs`` app
     (bugs.services.file_report). Scoped to self.me directly, not the family/
     "scope" concept the rest of Member mode uses (see BugListView's own
     docstring), so these cover that an account's own reports show up, another

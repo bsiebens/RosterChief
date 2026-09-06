@@ -31,12 +31,7 @@ def family_contacts(member):
     just whoever happened to submit the online form that one time -- and
     wherever staff needs to see who that actually is (management's own Dues
     & billing page)."""
-    contacts = (
-        FamilyMembership.objects.filter(family__memberships__member=member, role__in=[FamilyMembership.FamilyRole.PARENT, FamilyMembership.FamilyRole.GUARDIAN])
-        .exclude(member=member)
-        .select_related("member")
-        .distinct()
-    )
+    contacts = FamilyMembership.objects.filter(family__memberships__member=member, role__in=[FamilyMembership.FamilyRole.PARENT, FamilyMembership.FamilyRole.GUARDIAN]).exclude(member=member).select_related("member").distinct()
 
     seen_emails = set()
     results = []

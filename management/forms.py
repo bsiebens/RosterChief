@@ -330,7 +330,7 @@ class GroupedPositionChoiceField(forms.ModelChoiceField):
 
 
 def bulk_add_member_label(member, *, rostered_ids, staffed_ids):
-    """"Peter Player — on roster" for the bulk-add member picker.
+    """ "Peter Player — on roster" for the bulk-add member picker.
 
     Already-assigned members stay selectable rather than being filtered out:
     someone already on the roster as a player can still legitimately be added
@@ -567,7 +567,7 @@ class SponsorForm(forms.ModelForm):
 
 
 def _location_label(location) -> str:
-    """"Name — City" for the location picker, plus the country when it isn't
+    """ "Name — City" for the location picker, plus the country when it isn't
     Belgium (the club's home country and, in practice, nearly every location
     a club will ever add) -- lets an admin tell two same-named venues apart,
     or spot an away trip abroad, straight from the dropdown. Just the name
@@ -1281,9 +1281,7 @@ class SignupLinkMemberForm(forms.Form):
     club.services.signup_linking.link_to_existing_member does the actual
     re-pointing; this is just the picker."""
 
-    member = forms.ModelChoiceField(
-        queryset=Member.objects.none(), label=_("Existing member"), widget=forms.Select(attrs={"data-searchable": "true", "data-search-placeholder": _("Type a name to search...")})
-    )
+    member = forms.ModelChoiceField(queryset=Member.objects.none(), label=_("Existing member"), widget=forms.Select(attrs={"data-searchable": "true", "data-search-placeholder": _("Type a name to search...")}))
 
     def __init__(self, *args, club=None, exclude_member=None, **kwargs):
         super().__init__(*args, **kwargs)
@@ -1580,7 +1578,7 @@ class OrderMarkReadyForPickupForm(forms.Form):
     own full_clean(), which would needlessly re-validate club/purchaser
     scoping on an already-persisted, already-valid order."""
 
-    pickup_instructions = forms.CharField(label=_("Pickup instructions"), required=False, widget=forms.Textarea(attrs={"rows": 3}), help_text=_("Optional -- included in the notification, e.g. \"ask for it at the clubhouse desk\"."))
+    pickup_instructions = forms.CharField(label=_("Pickup instructions"), required=False, widget=forms.Textarea(attrs={"rows": 3}), help_text=_('Optional -- included in the notification, e.g. "ask for it at the clubhouse desk".'))
 
 
 class OrderBulkMarkReadyForPickupForm(forms.Form):
@@ -1688,7 +1686,7 @@ class VoucherConsumptionForm(forms.Form):
     existing, not an afterthought."""
 
     amount = forms.DecimalField(label=_("Amount"), max_digits=10, decimal_places=2, min_value=Decimal("0.01"), widget=forms.NumberInput(attrs={"step": "0.01"}))
-    note = forms.CharField(label=_("What was this for?"), widget=forms.Textarea(attrs={"rows": 2}), help_text=_("e.g. \"Cash payment for the tournament fee, collected at the clubhouse.\""))
+    note = forms.CharField(label=_("What was this for?"), widget=forms.Textarea(attrs={"rows": 2}), help_text=_('e.g. "Cash payment for the tournament fee, collected at the clubhouse."'))
 
 
 class RequirementBypassForm(forms.Form):

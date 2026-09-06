@@ -68,9 +68,31 @@ class EventAdminForm(forms.ModelForm):
     class Meta:
         model = Event
         fields = [
-            "title", "kind", "season", "series", "detached", "cancelled", "teams", "groups", "club_wide", "invited_members", "excluded_members",
-            "start", "end", "gathering", "deadline", "location", "opponent",
-            "competition", "is_friendly", "external_game_id", "score_for", "score_against", "is_live", "max_referees", "max_officials",
+            "title",
+            "kind",
+            "season",
+            "series",
+            "detached",
+            "cancelled",
+            "teams",
+            "groups",
+            "club_wide",
+            "invited_members",
+            "excluded_members",
+            "start",
+            "end",
+            "gathering",
+            "deadline",
+            "location",
+            "opponent",
+            "competition",
+            "is_friendly",
+            "external_game_id",
+            "score_for",
+            "score_against",
+            "is_live",
+            "max_referees",
+            "max_officials",
         ]
 
     def __init__(self, *args, **kwargs):

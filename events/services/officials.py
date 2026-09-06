@@ -65,11 +65,7 @@ def eligible_officials(event):
     assigned_ids = event.officials.values_list("member_id", flat=True)
     today = timezone.localdate()
 
-    return (
-        Member.objects.filter(official_profile__level_id__in=qualifying_level_ids, official_profile__valid_until__gte=today)
-        .exclude(pk__in=assigned_ids)
-        .distinct()
-    )
+    return Member.objects.filter(official_profile__level_id__in=qualifying_level_ids, official_profile__valid_until__gte=today).exclude(pk__in=assigned_ids).distinct()
 
 
 def conflicting_events(member, event):

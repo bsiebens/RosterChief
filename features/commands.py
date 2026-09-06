@@ -71,7 +71,7 @@ class ScheduledJobCommand(MaintenanceAwareCommand):
             action="store_true",
             help="Log every SQL query this run makes, with timing -- for a one-off manual run "
             "you're actively watching, not something cron should ever pass (every query, on "
-            "every scheduled run, would drown the log). The control panel's own \"Run now\" "
+            'every scheduled run, would drown the log). The control panel\'s own "Run now" '
             "button always passes this.",
         )
         return parser

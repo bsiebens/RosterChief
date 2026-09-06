@@ -3752,9 +3752,7 @@ class MembershipListViewTests(ManagementTestBase):
         # Two kids from the same submission (RegistrationBatch) -- the whole
         # point of grouping is seeing them clustered together instead of
         # scattered alphabetically among everyone else.
-        batch = RegistrationBatch.objects.create(
-            club=self.club, season=self.season, contact_first_name="Shared", contact_last_name="Parent", contact_email="shared@example.com", invoice_number="REG-2026-00102", invoice_sent_at=timezone.now()
-        )
+        batch = RegistrationBatch.objects.create(club=self.club, season=self.season, contact_first_name="Shared", contact_last_name="Parent", contact_email="shared@example.com", invoice_number="REG-2026-00102", invoice_sent_at=timezone.now())
         first = Member.objects.create(first_name="Alice", last_name="Sibling")
         first_membership = ClubMembership.objects.create(club=self.club, member=first, season=self.season, fee_amount=Decimal("50.00"))
         RegistrationDetails.objects.create(membership=first_membership, batch=batch, price=Decimal("50.00"))
@@ -9464,9 +9462,7 @@ class SignupDashboardTests(ManagementTestBase):
 
     def test_a_confirmed_registration_appears(self):
         _member, membership = self.make_pending_member()
-        batch = RegistrationBatch.objects.create(
-            club=self.club, season=self.season, contact_first_name="Pat", contact_last_name="Parent", contact_email="pat-confirmed@example.com", invoice_sent_at=timezone.now()
-        )
+        batch = RegistrationBatch.objects.create(club=self.club, season=self.season, contact_first_name="Pat", contact_last_name="Parent", contact_email="pat-confirmed@example.com", invoice_sent_at=timezone.now())
         RegistrationDetails.objects.create(membership=membership, batch=batch)
 
         response = self.club_get("signup_list")
@@ -9529,9 +9525,7 @@ class SignupDashboardTests(ManagementTestBase):
     def test_shows_a_link_to_view_an_uploaded_document(self):
         member, membership = self.make_pending_member()
         requirement = OnboardingRequirement.objects.create(club=self.club, name="Medical certificate", requires_document=True)
-        status = MemberRequirementStatus.objects.create(
-            membership=membership, requirement=requirement, document=SimpleUploadedFile("certificate.pdf", b"%PDF-1.4 fake", content_type="application/pdf")
-        )
+        status = MemberRequirementStatus.objects.create(membership=membership, requirement=requirement, document=SimpleUploadedFile("certificate.pdf", b"%PDF-1.4 fake", content_type="application/pdf"))
         self.addCleanup(status.document.delete, save=False)
 
         response = self.club_get("signup_list")
@@ -10572,7 +10566,7 @@ class ProductCategoryManagementTests(ShopTestBase):
 
 
 class ProductVariantManagementTests(ShopTestBase):
-    """"Small", "Medium — Red", whatever label the club actually sells by --
+    """ "Small", "Medium — Red", whatever label the club actually sells by --
     see ProductVariant's own docstring for why it's one free-text field, not
     separate size/colour axes."""
 
@@ -11632,9 +11626,7 @@ class OrderLineManagementTests(ShopTestBase):
         order, line = self.make_order_with_line()
         self.client.force_login(self.make_shop_manager())
 
-        response = self.club_post(
-            "order_line_update", {"quantity": "2", "beneficiary": "", "variant": "", "personalization_number": "7", "personalization_name": "SMITH", "production_status": ProductionStatus.PENDING}, order.pk, line.pk
-        )
+        response = self.club_post("order_line_update", {"quantity": "2", "beneficiary": "", "variant": "", "personalization_number": "7", "personalization_name": "SMITH", "production_status": ProductionStatus.PENDING}, order.pk, line.pk)
 
         self.assertRedirects(response, reverse("management:order_detail", args=[order.pk]))
         line.refresh_from_db()
@@ -12995,8 +12987,6 @@ class ShopManagerGrantRevokeTests(ShopTestBase):
         self.assertContains(response, 'id="grant_role_modal"')
         self.assertNotContains(response, 'id="grant_shop_admin_modal"')
         self.assertContains(response, "Shop admin")
-
-
 
 
 class FormManagementTests(ManagementTestBase):

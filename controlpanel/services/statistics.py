@@ -389,12 +389,7 @@ def unrostered_members(club, season):
     rostered = TeamMembership.objects.filter(team__club=club, season=season).values("member")
     staffed = StaffAssignment.objects.filter(team__club=club, season=season).values("member")
 
-    return (
-        Member.objects.filter(member_of__club=club, member_of__season=season, member_of__kind=ClubMembership.Kind.MEMBER, member_of__status=ClubMembership.StatusChoices.ACTIVE)
-        .exclude(pk__in=rostered)
-        .exclude(pk__in=staffed)
-        .distinct()
-    )
+    return Member.objects.filter(member_of__club=club, member_of__season=season, member_of__kind=ClubMembership.Kind.MEMBER, member_of__status=ClubMembership.StatusChoices.ACTIVE).exclude(pk__in=rostered).exclude(pk__in=staffed).distinct()
 
 
 def fee_aging(club):

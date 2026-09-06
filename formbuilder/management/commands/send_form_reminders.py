@@ -35,12 +35,7 @@ class Command(ScheduledJobCommand):
         sends_reminded = 0
         members_notified = 0
 
-        candidates = (
-            FormSend.objects.filter(is_active=True, reminder_sent_at__isnull=True, closes_at__isnull=False)
-            .filter(closes_at__gt=now, closes_at__lte=now + FORM_REMINDER_LEAD_TIME)
-            .select_related("club", "form")
-            .iterator(chunk_size=200)
-        )
+        candidates = FormSend.objects.filter(is_active=True, reminder_sent_at__isnull=True, closes_at__isnull=False).filter(closes_at__gt=now, closes_at__lte=now + FORM_REMINDER_LEAD_TIME).select_related("club", "form").iterator(chunk_size=200)
         for send in candidates:
             members = members_not_yet_submitted(send)
             if members:

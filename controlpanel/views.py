@@ -301,7 +301,7 @@ class ClubDeleteView(PlatformSuperuserRequiredMixin, TemplateView):
         club = self.club
 
         if request.POST.get("confirm_slug") != club.slug:
-            notify(request, f"e|{_('Not deleted')}|{_('Type the club\'s exact slug to confirm. Nothing was deleted.')}")
+            notify(request, f"e|{_('Not deleted')}|{_("Type the club's exact slug to confirm. Nothing was deleted.")}")
             return self.render_to_response(self.get_context_data())
 
         name = club.name
@@ -311,7 +311,7 @@ class ClubDeleteView(PlatformSuperuserRequiredMixin, TemplateView):
             # Belt and suspenders: the confirm page's own preview already runs this
             # same resolution and would normally have caught this, but data can
             # change between viewing that page and submitting this form.
-            notify(request, f"e|{_('Cannot delete')}|{_('Some of this club\'s data is protected elsewhere and cannot be removed automatically. Nothing was deleted.')}")
+            notify(request, f"e|{_('Cannot delete')}|{_("Some of this club's data is protected elsewhere and cannot be removed automatically. Nothing was deleted.")}")
             return self.render_to_response(self.get_context_data())
 
         notify(request, f"w|{_('Club deleted')}|" + _("“%(name)s” and all of its data have been permanently deleted.") % {"name": name})

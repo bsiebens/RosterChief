@@ -150,10 +150,7 @@ def _guardians_only(club: Club) -> QuerySet[Member]:
     who happens to be a parent, and stays visible.
     """
     return Member.objects.filter(member_of__club=club, member_of__kind=ClubMembership.Kind.GUARDIAN).exclude(
-        Q(member_of__club=club, member_of__kind=ClubMembership.Kind.MEMBER)
-        | Q(team_memberships__team__club=club)
-        | Q(staff_assignments__team__club=club)
-        | Q(roles__club=club, roles__role__in=[ClubRole.Roles.ADMIN, ClubRole.Roles.EDITOR])
+        Q(member_of__club=club, member_of__kind=ClubMembership.Kind.MEMBER) | Q(team_memberships__team__club=club) | Q(staff_assignments__team__club=club) | Q(roles__club=club, roles__role__in=[ClubRole.Roles.ADMIN, ClubRole.Roles.EDITOR])
     )
 
 

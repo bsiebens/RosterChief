@@ -423,7 +423,7 @@ class NumberReservation(ClubScopedModel):
 
     pool = models.ForeignKey(NumberPool, on_delete=models.CASCADE, related_name="reservations", verbose_name=_("pool"))
     number = models.PositiveSmallIntegerField(_("number"))
-    note = models.CharField(_("note"), max_length=255, blank=True, help_text=_("e.g. \"Retired -- Jane Doe, #23\"."))
+    note = models.CharField(_("note"), max_length=255, blank=True, help_text=_('e.g. "Retired -- Jane Doe, #23".'))
     reserved_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="number_reservations", verbose_name=_("reserved by"))
 
     class Meta:

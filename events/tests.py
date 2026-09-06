@@ -931,9 +931,7 @@ class GenerateOccurrencesTests(RecurrenceTestBase):
         # 200 weeks of "existing" history, well past what a from-scratch walk
         # to `until` below would ever touch -- created directly, bypassing
         # generate_occurrences, purely to simulate an old series.
-        Event.objects.bulk_create(
-            [Event(club=self.club, series=series, start=self.anchor + timedelta(weeks=week), title="Weekly Training", kind=Event.EventKind.TRAINING) for week in range(200)]
-        )
+        Event.objects.bulk_create([Event(club=self.club, series=series, start=self.anchor + timedelta(weeks=week), title="Weekly Training", kind=Event.EventKind.TRAINING) for week in range(200)])
 
         # A generous ceiling, not an exact count -- apply_template's own m2m/
         # attendance-sync bookkeeping costs a real handful of queries per

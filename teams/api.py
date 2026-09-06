@@ -89,11 +89,7 @@ def build_roster(team, request) -> RosterOut:
     # SignupTeamPlacementForm) has no position yet -- those trail every real
     # position group instead of sorting first (NULL's default position varies by
     # database backend otherwise).
-    memberships = (
-        TeamMembership.objects.filter(team=team, season=season)
-        .select_related("member", "position")
-        .order_by(F("position__ordering").asc(nulls_last=True), F("position__name").asc(nulls_last=True), "jersey_number")
-    )
+    memberships = TeamMembership.objects.filter(team=team, season=season).select_related("member", "position").order_by(F("position__ordering").asc(nulls_last=True), F("position__name").asc(nulls_last=True), "jersey_number")
     assignments = team.staff_assignments.filter(season=season).select_related("member", "position").order_by("position__ordering", "position__name", "member__last_name")
 
     # A player's license lives on their club-wide ClubMembership for the season, not on
@@ -105,14 +101,8 @@ def build_roster(team, request) -> RosterOut:
     # position yet (position_id is None -- see the nulls_last comment above)
     # groups together under an empty "" label rather than crashing on
     # m.position.name; it's the caller's job to label that group, not this API's.
-    players = [
-        PositionGroupOut(position=position_name or "", players=[_to_player_out(m, license_by_member_id) for m in members])
-        for position_name, members in groupby(memberships, key=lambda m: m.position.name if m.position_id else None)
-    ]
-    staff = [
-        StaffMemberOut(id=assignment.member_id, first_name=assignment.member.first_name, last_name=assignment.member.last_name, position=assignment.position.name)
-        for assignment in assignments
-    ]
+    players = [PositionGroupOut(position=position_name or "", players=[_to_player_out(m, license_by_member_id) for m in members]) for position_name, members in groupby(memberships, key=lambda m: m.position.name if m.position_id else None)]
+    staff = [StaffMemberOut(id=assignment.member_id, first_name=assignment.member.first_name, last_name=assignment.member.last_name, position=assignment.position.name) for assignment in assignments]
 
     return RosterOut(team=_to_team_out(team, request, photo=photo), season=season.name, players=players, staff=staff)
 

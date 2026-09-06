@@ -71,11 +71,7 @@ def eligible_referees(event):
     assigned_ids = event.referees.values_list("member_id", flat=True)
     today = timezone.localdate()
 
-    return (
-        Member.objects.filter(referee_profile__level_id__in=qualifying_level_ids, referee_profile__valid_until__gte=today)
-        .exclude(pk__in=assigned_ids)
-        .distinct()
-    )
+    return Member.objects.filter(referee_profile__level_id__in=qualifying_level_ids, referee_profile__valid_until__gte=today).exclude(pk__in=assigned_ids).distinct()
 
 
 def conflicting_events(member, event):

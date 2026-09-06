@@ -9,7 +9,6 @@ management and mobile, so it belongs here rather than duplicated at each call si
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.mail import EmailMultiAlternatives
-from django.db.models import Q
 from django.template.loader import render_to_string
 from django.utils import timezone
 
@@ -20,7 +19,7 @@ from .models import BugNote, BugReport
 
 def _platform_admin_emails() -> list[str]:
     User = get_user_model()
-    return list(User.objects.filter(Q(is_staff=True) | Q(is_superuser=True)).exclude(email="").order_by("email").values_list("email", flat=True))
+    return list(User.objects.platform_admins().exclude(email="").order_by("email").values_list("email", flat=True))
 
 
 def notify_admins_of_new_bug(bug: BugReport) -> None:

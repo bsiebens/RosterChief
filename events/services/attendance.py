@@ -111,13 +111,7 @@ def blocked_upcoming_events_for_member(member, club):
     if not team_ids and not group_ids:
         return []
 
-    candidates = list(
-        Event.objects.filter(club=club, cancelled=False, start__gte=timezone.now())
-        .filter(Q(teams__id__in=team_ids) | Q(groups__id__in=group_ids))
-        .exclude(excluded_members=member)
-        .distinct()
-        .order_by("start")
-    )
+    candidates = list(Event.objects.filter(club=club, cancelled=False, start__gte=timezone.now()).filter(Q(teams__id__in=team_ids) | Q(groups__id__in=group_ids)).exclude(excluded_members=member).distinct().order_by("start"))
     if not candidates:
         return []
 

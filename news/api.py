@@ -94,10 +94,7 @@ def _to_news_item_out(item, request) -> NewsItemOut:
         body_en=render_body_html(item.effective_body_en),
         published_at=item.published_at,
         teams=[team.name for team in item.teams.all()],
-        photos=[
-            NewsPhotoOut(url=request.build_absolute_uri(photo.image.url), is_main=photo.is_main, ordering=photo.ordering, focal_x=photo.focal_x, focal_y=photo.focal_y, object_position=photo.object_position)
-            for photo in item.photos.all()
-        ],
+        photos=[NewsPhotoOut(url=request.build_absolute_uri(photo.image.url), is_main=photo.is_main, ordering=photo.ordering, focal_x=photo.focal_x, focal_y=photo.focal_y, object_position=photo.object_position) for photo in item.photos.all()],
     )
 
 

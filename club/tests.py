@@ -1562,9 +1562,7 @@ class FeeServiceTests(TestCase):
         cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
         cls.season = make_season(cls.club)
         cls.member = Member.objects.create(first_name="Jane", last_name="Doe")
-        cls.membership = ClubMembership.objects.create(
-            club=cls.club, member=cls.member, season=cls.season, status=ClubMembership.StatusChoices.PENDING, fee_amount=Decimal("150.00")
-        )
+        cls.membership = ClubMembership.objects.create(club=cls.club, member=cls.member, season=cls.season, status=ClubMembership.StatusChoices.PENDING, fee_amount=Decimal("150.00"))
 
     def roles(self):
         return ClubRole.objects.filter(club=self.club, member=self.member)
@@ -2328,7 +2326,6 @@ class GenerateSeasonsCommandTests(TestCase):
         self.assertIn("Generated", job_run.detail)
 
 
-
 class OnboardingRequirementTests(TestCase):
     """club.services.onboarding -- deliberately orthogonal to status/fee_status (see
     OnboardingRequirement's docstring): a fully paid, active membership can still
@@ -2339,9 +2336,7 @@ class OnboardingRequirementTests(TestCase):
         cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
         cls.season = make_season(cls.club)
         cls.member = Member.objects.create(first_name="Jane", last_name="Doe")
-        cls.membership = ClubMembership.objects.create(
-            club=cls.club, member=cls.member, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE, fee_status=ClubMembership.FeeStatus.PAID
-        )
+        cls.membership = ClubMembership.objects.create(club=cls.club, member=cls.member, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE, fee_status=ClubMembership.FeeStatus.PAID)
         cls.staff = get_user_model().objects.create_user(email="staff@example.com", password="pw-secret-123")
         cls.photo = OnboardingRequirement.objects.create(club=cls.club, name="Photo")
         cls.medical = OnboardingRequirement.objects.create(club=cls.club, name="Medical certificate", requires_document=True)

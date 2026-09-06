@@ -133,7 +133,7 @@ class PushSubscribeView(LoginRequiredMixin, ClubScopedPublicMixin, View):
             endpoint = payload["endpoint"]
             p256dh = payload["keys"]["p256dh"]
             auth = payload["keys"]["auth"]
-        except (KeyError, TypeError, ValueError):
+        except KeyError, TypeError, ValueError:
             return HttpResponseBadRequest("Malformed subscription payload.")
 
         PushSubscription.objects.update_or_create(
@@ -151,7 +151,7 @@ class PushSubscribeView(LoginRequiredMixin, ClubScopedPublicMixin, View):
     def delete(self, request):
         try:
             endpoint = json.loads(request.body)["endpoint"]
-        except (KeyError, TypeError, ValueError):
+        except KeyError, TypeError, ValueError:
             return HttpResponseBadRequest("Malformed unsubscribe payload.")
         PushSubscription.objects.filter(endpoint=endpoint).delete()
         return JsonResponse({"status": "ok"})
@@ -319,11 +319,7 @@ class HomeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
             # task rather than per event, so which specific ask is open is
             # visible without a tap through to the event.
             open_tasks_qs = (
-                EventTask.objects.filter(event_id__in=upcoming.values_list("event_id", flat=True).distinct())
-                .annotate(claim_count=Count("claims"))
-                .filter(claim_count__lt=F("needed_quantity"))
-                .select_related("event")
-                .order_by("event__start")
+                EventTask.objects.filter(event_id__in=upcoming.values_list("event_id", flat=True).distinct()).annotate(claim_count=Count("claims")).filter(claim_count__lt=F("needed_quantity")).select_related("event").order_by("event__start")
             )
             open_tasks_total = open_tasks_qs.count()
             open_tasks = list(open_tasks_qs[: self.OPEN_TASKS_LIMIT])
@@ -677,10 +673,7 @@ class EventDetailView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
 
             memberships_by_member = {}
             if season is not None:
-                memberships_by_member = {
-                    membership.member_id: membership
-                    for membership in TeamMembership.objects.filter(member_id__in=managed_ids, team__in=event.teams.all(), season=season).select_related("team", "position")
-                }
+                memberships_by_member = {membership.member_id: membership for membership in TeamMembership.objects.filter(member_id__in=managed_ids, team__in=event.teams.all(), season=season).select_related("team", "position")}
 
             for person in self.managed_people:
                 attendance = attendances_by_member.get(person.pk)
@@ -801,7 +794,7 @@ class EventDetailView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
 
 
 class NewsListView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
-    """"All news" -- what Home's own news card links to once there's more than
+    """ "All news" -- what Home's own news card links to once there's more than
     NEWS_LIMIT items to show. Unlike Home's own teaser (team-relevant items
     only), this is the full browsable archive: every published, member-visible
     news item for the club, newest first, regardless of which team it's about.
@@ -934,10 +927,7 @@ class MeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         if self.managed_people:
             memberships_by_member = {}
             if season is not None:
-                memberships_by_member = {
-                    membership.member_id: membership
-                    for membership in TeamMembership.objects.filter(member__in=self.managed_people, season=season).select_related("team")
-                }
+                memberships_by_member = {membership.member_id: membership for membership in TeamMembership.objects.filter(member__in=self.managed_people, season=season).select_related("team")}
             people_rows = [{"person": person, "membership": memberships_by_member.get(person.pk)} for person in self.managed_people]
 
         # Same "not reviewed yet" filter PaymentsView/HomeView apply to this
@@ -960,9 +950,7 @@ class MeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         vouchers = []
         if self.me is not None:
             family_ids = {self.me.pk, *self.me.family_members.values_list("pk", flat=True)}
-            vouchers = list(
-                Voucher.objects.filter(club=club, issued_to__in=family_ids, is_active=True, expiry_date__gte=timezone.localdate(), consumed_amount__lt=F("amount")).select_related("issued_to").order_by("expiry_date")
-            )
+            vouchers = list(Voucher.objects.filter(club=club, issued_to__in=family_ids, is_active=True, expiry_date__gte=timezone.localdate(), consumed_amount__lt=F("amount")).select_related("issued_to").order_by("expiry_date"))
 
         # Just the count for the "Forms" menu row's own pill -- the full,
         # per-person list (formbuilder.services.audience.form_status_rows_for)
@@ -1329,10 +1317,7 @@ class ReRegisterView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         return resolve_chosen_season(request.club, source.get("season"))
 
     def get_initial_entries(self):
-        return [
-            {"existing_member": person.pk, "first_name": person.first_name, "last_name": person.last_name, "date_of_birth": person.date_of_birth, "is_contact": self.me is not None and person.pk == self.me.pk}
-            for person in self.managed_people
-        ]
+        return [{"existing_member": person.pk, "first_name": person.first_name, "last_name": person.last_name, "date_of_birth": person.date_of_birth, "is_contact": self.me is not None and person.pk == self.me.pk} for person in self.managed_people]
 
     def get_formset(self, season, data=None):
         # enforce_single_contact=False -- here, is_contact is "Include this
@@ -1590,7 +1575,7 @@ BUG_STATUS_PILL_CLASSES = {
 
 
 class BugListView(LoginRequiredMixin, TemplateView):
-    """"Report a bug" row on the Me screen (mobile/templates/mobile/me.html) --
+    """ "Report a bug" row on the Me screen (mobile/templates/mobile/me.html) --
     files into the standalone ``bugs`` app (bugs.services.file_report), which
     already handles admin notification, so this view is just a form + the
     reporter's own history.
@@ -1873,7 +1858,7 @@ class ShopCheckoutView(ShopScopeMixin, LoginRequiredMixin, View):
 
 
 class ShopOrdersView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
-    """"My orders" -- every past Order across self.managed_people, not just
+    """ "My orders" -- every past Order across self.managed_people, not just
     self.me. Order.purchaser is always whoever's own login placed it (this
     app gives one Cart per account, never per managed person), so this is the
     same "aggregate across everyone I'm responsible for" scope PaymentsView/

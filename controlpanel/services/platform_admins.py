@@ -10,7 +10,6 @@ the platform out of itself. Two rules are enforced for every change:
 
 from django.contrib.auth import get_user_model
 from django.db import transaction
-from django.db.models import Q
 
 User = get_user_model()
 
@@ -20,7 +19,7 @@ class PlatformAdminError(Exception):
 
 
 def platform_admins():
-    return User.objects.filter(Q(is_staff=True) | Q(is_superuser=True)).order_by("email")
+    return User.objects.platform_admins().order_by("email")
 
 
 def is_last_superuser(user) -> bool:

@@ -8,7 +8,6 @@ reconciles against it, so it is allocated once, never recomputed.
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.mail import EmailMultiAlternatives
-from django.db.models import Q
 from django.template.loader import render_to_string
 from django.utils import timezone
 
@@ -35,7 +34,7 @@ def issue_invoice(due: Due) -> Invoice:
 
 def _platform_admin_emails() -> list[str]:
     User = get_user_model()
-    return list(User.objects.filter(Q(is_staff=True) | Q(is_superuser=True)).exclude(email="").order_by("email").values_list("email", flat=True))
+    return list(User.objects.platform_admins().exclude(email="").order_by("email").values_list("email", flat=True))
 
 
 def notify_admins_of_new_invoice(invoice: Invoice) -> None:

@@ -108,6 +108,7 @@ def _styled_opponent_form(data=None):
     form.fields["name"].widget.attrs["class"] = _INPUT_CLASSES
     return form
 
+
 #: How long an event stays "current" (CoachTodayView's session card, and the
 #: missing-line-up nudge) past the moment it starts -- events.start__gte=now
 #: alone would flip to the next session the instant this one begins, while
@@ -211,12 +212,16 @@ class CoachTodayView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
         hero_attendance = None
         rsvp_closed = False
         if self.me is not None:
-            my_upcoming = Attendance.objects.filter(
-                member=self.me,
-                event__club=self.request.club,
-                event__cancelled=False,
-                event__start__gte=now,
-            ).select_related("event", "event__location").order_by("event__start")
+            my_upcoming = (
+                Attendance.objects.filter(
+                    member=self.me,
+                    event__club=self.request.club,
+                    event__cancelled=False,
+                    event__start__gte=now,
+                )
+                .select_related("event", "event__location")
+                .order_by("event__start")
+            )
             hero_attendance = my_upcoming.first()
             if hero_attendance is not None:
                 deadline = hero_attendance.event.deadline
@@ -1090,11 +1095,7 @@ class CoachSquadView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
             staff = list(StaffAssignment.objects.filter(team=self.active_team, season=season).select_related("member", "position").order_by("position__ordering", "member__last_name"))
             # Same "not yet approved on Sign-up" warning management's own
             # TeamDetailView shows -- a coach needs to see it just as much.
-            pending_member_ids = set(
-                ClubMembership.objects.filter(club=self.request.club, season=season, member_id__in=[membership.member_id for membership in roster], status=ClubMembership.StatusChoices.PENDING).values_list(
-                    "member_id", flat=True
-                )
-            )
+            pending_member_ids = set(ClubMembership.objects.filter(club=self.request.club, season=season, member_id__in=[membership.member_id for membership in roster], status=ClubMembership.StatusChoices.PENDING).values_list("member_id", flat=True))
             for membership in roster:
                 membership.club_status_pending = membership.member_id in pending_member_ids
 

@@ -78,5 +78,5 @@ def get_image_dimensions(file) -> tuple[int | None, int | None]:
         # only on the success path, since a failed open/read leaves nothing to rewind.
         file.seek(0)
         return size
-    except (OSError, UnidentifiedImageError):
+    except OSError, UnidentifiedImageError:
         return None, None

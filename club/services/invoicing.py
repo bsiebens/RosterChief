@@ -110,11 +110,7 @@ def invoices_due_for_reminder(club, today=None):
     date. Reminders are opt-in per club-wide button push, not a cron job, so there's
     no "already reminded today" guard here -- see MembershipSendInvoiceRemindersView."""
     today = today or timezone.now().date()
-    return (
-        DuesInvoice.objects.filter(club=club, sent_at__isnull=False, due_date__lt=today)
-        .exclude(membership__fee_status__in=[ClubMembership.FeeStatus.PAID, ClubMembership.FeeStatus.WAIVED])
-        .select_related("membership__member")
-    )
+    return DuesInvoice.objects.filter(club=club, sent_at__isnull=False, due_date__lt=today).exclude(membership__fee_status__in=[ClubMembership.FeeStatus.PAID, ClubMembership.FeeStatus.WAIVED]).select_related("membership__member")
 
 
 def send_reminder_email(invoice: DuesInvoice, *, request=None) -> bool:

@@ -83,12 +83,7 @@ def open_dues_rows(club, people, season, *, include_zero=False):
     if season is None or not people:
         return []
 
-    memberships = (
-        ClubMembership.objects.filter(club=club, member__in=people, season=season)
-        .exclude(fee_status=ClubMembership.FeeStatus.WAIVED)
-        .exclude(status=ClubMembership.StatusChoices.CANCELLED)
-        .select_related("dues_invoice", "member")
-    )
+    memberships = ClubMembership.objects.filter(club=club, member__in=people, season=season).exclude(fee_status=ClubMembership.FeeStatus.WAIVED).exclude(status=ClubMembership.StatusChoices.CANCELLED).select_related("dues_invoice", "member")
     rows = []
     for membership in memberships:
         balance = remaining_balance(membership)

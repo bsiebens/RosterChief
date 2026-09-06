@@ -71,7 +71,7 @@ def _logo_data_uri(club) -> str | None:
     try:
         with club.logo.open("rb") as f:
             data = f.read()
-    except (FileNotFoundError, ValueError, OSError):
+    except FileNotFoundError, ValueError, OSError:
         return None
 
     extension = club.logo.name.rsplit(".", 1)[-1].lower()

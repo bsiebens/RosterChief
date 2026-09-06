@@ -44,11 +44,7 @@ def build_feed(club, people) -> bytes:
     show_member_name = len(people) > 1
     dtstamp = _utc(now)
 
-    attendances = (
-        Attendance.objects.filter(member__in=people, event__club=club, event__start__gte=now - datetime.timedelta(days=1))
-        .select_related("event", "event__location", "member")
-        .order_by("event__start")
-    )
+    attendances = Attendance.objects.filter(member__in=people, event__club=club, event__start__gte=now - datetime.timedelta(days=1)).select_related("event", "event__location", "member").order_by("event__start")
 
     for attendance in attendances:
         event = attendance.event

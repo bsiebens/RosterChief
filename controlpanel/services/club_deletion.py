@@ -86,7 +86,7 @@ def _resolve_protection(club, using) -> tuple[Counter, list]:
         for obj in list(collector.protected):
             try:
                 _count, per_model = obj.delete()
-            except (ProtectedError, RestrictedError):
+            except ProtectedError, RestrictedError:
                 continue
             tally.update(per_model)
             progress = True

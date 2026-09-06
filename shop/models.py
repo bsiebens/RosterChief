@@ -350,7 +350,7 @@ class Order(ClubScopedModel):
     #: Set (optionally) the moment an order is marked ready for pickup --
     #: shown to the member on their own order and in the notification that
     #: told them so (shop.services.notifications.dispatch_order_ready_for_pickup_notification).
-    pickup_instructions = models.TextField(_("pickup instructions"), blank=True, help_text=_("Optional -- shown to the member, e.g. \"ask for it at the clubhouse desk\"."))
+    pickup_instructions = models.TextField(_("pickup instructions"), blank=True, help_text=_('Optional -- shown to the member, e.g. "ask for it at the clubhouse desk".'))
 
     # `created`/`modified` come from TimeStampedModel — declaring them here as well
     # would clash with the abstract base.

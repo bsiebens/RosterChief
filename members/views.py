@@ -101,4 +101,3 @@ class MyFamilyView(ClubScopedPublicMixin, LoginRequiredMixin, TemplateView):
             ).distinct()
 
         return super().get_context_data(club=self.request.club, me=me, children=children, **kwargs)
-
