@@ -137,13 +137,13 @@ jobs:
     # either way; this is only ever wired to the throwaway dev instance
     # deploy/deploy-dev.sh already targets.
     #
-    # The secrets check used to live in this job's own `if:` -- moved to the step below
-    # instead because `secrets` isn't in the set of contexts GitHub Actions allows in a
-    # job-level `if:` ("Unrecognized named-value: 'secrets'"), which doesn't just skip this
-    # one job, it fails the *entire workflow file* as invalid before any job (including
-    # `test`/`build` above) ever runs. `secrets` is allowed in a step-level `if:`, so the
-    # job itself always runs -- one cheap checkout -- and only the actual deploy is
-    # conditional.
+    # The secrets check used to live in this job's own `if:` -- GitHub Actions rejects
+    # `secrets` in ANY `if:` conditional, job-level or step-level alike
+    # ("Unrecognized named-value: 'secrets'"), and that isn't just a skipped job, it fails
+    # the *entire workflow file* as invalid before any job (including `test`/`build` above)
+    # ever runs. So the job always runs -- one cheap checkout -- and the deploy step itself
+    # always runs too; whether it actually does anything is a plain shell `if` on its own
+    # env var, inside `run:`, where `secrets`-derived values are just strings.
     if: ${{ github.event_name == 'push' }}
     runs-on: ubuntu-latest
     steps:
@@ -154,13 +154,16 @@ jobs:
           fetch-depth: 1
 
       - name: Deploy to the dev instance
-        if: ${{ secrets.DEV_SSH_HOST != '' }}
         env:
           SSH_HOST: ${{ secrets.DEV_SSH_HOST }}
           SSH_USER: ${{ secrets.DEV_SSH_USER }}
           REMOTE_DIR: ${{ secrets.DEV_REMOTE_DIR }}
           BRANCH: main
         run: |
+          if [ -z "$SSH_HOST" ]; then
+            echo "DEV_SSH_HOST not configured (Settings -> Secrets and variables -> Actions) -- skipping dev deploy."
+            exit 0
+          fi
           mkdir -p ~/.ssh
           echo "${{ secrets.DEV_SSH_KEY }}" > ~/.ssh/dev_deploy_key
           chmod 600 ~/.ssh/dev_deploy_key
