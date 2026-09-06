@@ -1,3 +1,4 @@
+from members.services.lookup import get_request_member
 from members.services.member_csv_importer import (
     ImportedMemberRowResult,
     MemberCsvImporter,
@@ -10,4 +11,5 @@ __all__ = [
     "MemberCsvImporter",
     "MemberImportResult",
     "MemberImportRowError",
+    "get_request_member",
 ]

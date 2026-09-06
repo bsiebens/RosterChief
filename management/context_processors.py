@@ -10,8 +10,9 @@ action rather than the whole section (``NewsAuthorRequiredMixin``/``can_add_news
 from waffle import flag_is_active
 
 from billing.services.notices import club_billing_notice
-from club.services.access import can_add_news, can_manage_members, current_season, has_management_access, is_club_admin, is_coach_manager
+from club.services.access import can_add_news, can_manage_members, get_club_admin, get_current_season, has_management_access, is_coach_manager
 from members.models import ParentClaim
+from members.services.lookup import get_request_member
 
 #: Every management URL name, mapped to the nav item it should light up --
 #: management/templates/management/_nav_items.html compares against this.
@@ -282,7 +283,7 @@ def is_admin(request):
         return {"is_club_admin": False, "can_manage_members": False}
 
     return {
-        "is_club_admin": is_club_admin(request.user, club),
+        "is_club_admin": get_club_admin(request),
         # Gates the nav items MemberAdminRequiredMixin also gates at the view layer
         # (Members/Teams/Referee setup/Onboarding requirements) -- real ADMIN (which
         # already includes the platform-superuser bypass) or MEMBER_ADMIN.
@@ -301,7 +302,7 @@ def billing_notice(request):
     skipped entirely for everyone else rather than fetched and hidden in the template.
     """
     club = getattr(request, "club", None)
-    if club is None or not request.user.is_authenticated or not is_club_admin(request.user, club):
+    if club is None or not request.user.is_authenticated or not get_club_admin(request):
         return {"billing_notice": None}
 
     return {"billing_notice": club_billing_notice(club)}
@@ -315,7 +316,7 @@ def management_position(request):
     if club is None or not request.user.is_authenticated:
         return {"has_management_position": False}
 
-    return {"has_management_position": is_club_admin(request.user, club) or is_coach_manager(request.user, club)}
+    return {"has_management_position": get_club_admin(request) or is_coach_manager(request.user, club)}
 
 
 def management_link(request):
@@ -395,12 +396,12 @@ def sidebar_counters(request):
         # referee count, unchanged, for every club that's never turned officials on.
         counters["games_missing_referees_count"] = games_missing_referee_or_official_count(club, limit=int(RefereeManagementDashboardView.DEFAULT_RANGE))
 
-    if is_club_admin(request.user, club):
+    if get_club_admin(request):
         from management.views import signup_queue_count
         from registration.services.invoicing import registrations_awaiting_confirmation
 
         counters["registrations_awaiting_count"] = len(registrations_awaiting_confirmation(club))
-        counters["signup_pending_count"] = signup_queue_count(club, current_season(club))
+        counters["signup_pending_count"] = signup_queue_count(club, get_current_season(request))
 
     return counters
 
@@ -418,10 +419,9 @@ def notification_bell(request):
     if club is None or not request.user.is_authenticated:
         return {"unread_notification_count": None, "recent_notifications": None}
 
-    from members.models import Member
     from notifications.models import Notification
 
-    member = Member.objects.filter(user=request.user).first()
+    member = get_request_member(request)
     if member is None:
         return {"unread_notification_count": None, "recent_notifications": None}
 

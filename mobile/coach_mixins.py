@@ -5,8 +5,8 @@ pill), switching which team is "active" rather than aggregating across
 several people the way Member mode's person switcher does.
 """
 
-from club.services.access import current_season, teams_managed_by, teams_staffed_by
-from members.models import Member
+from club.services.access import get_current_season, teams_managed_by, teams_staffed_by
+from members.services.lookup import get_request_member
 from members.views import ClubScopedPublicMixin
 from teams.models import StaffAssignment
 
@@ -47,7 +47,7 @@ class CoachScopeMixin(ClubScopedPublicMixin):
         # a coach reaching /accounts/logout/ from the Coach shell also gets the app's
         # chrome, not the old public site's.
         request.session["mobile_context"] = True
-        self.me = Member.objects.filter(user=request.user).first() if request.user.is_authenticated else None
+        self.me = get_request_member(request)
         self.staffed_teams = list(teams_staffed_by(request.user, request.club)) if request.user.is_authenticated else []
         self.managed_teams = list(teams_managed_by(request.user, request.club)) if request.user.is_authenticated else []
         self.active_team = self._resolve_active_team(request)
@@ -58,7 +58,7 @@ class CoachScopeMixin(ClubScopedPublicMixin):
     def _resolve_active_team_role(self, request):
         if self.me is None or self.active_team is None:
             return None
-        assignment = StaffAssignment.objects.filter(member=self.me, team=self.active_team, season=current_season(request.club)).select_related("position").first()
+        assignment = StaffAssignment.objects.filter(member=self.me, team=self.active_team, season=get_current_season(request)).select_related("position").first()
         return assignment.position if assignment is not None else None
 
     def _resolve_active_team(self, request):
@@ -85,6 +85,6 @@ class CoachScopeMixin(ClubScopedPublicMixin):
             active_team=self.active_team,
             can_manage_active_team=self.can_manage_active_team,
             active_team_role=self.active_team_role,
-            season=current_season(self.request.club),
+            season=get_current_season(self.request),
             **kwargs,
         )

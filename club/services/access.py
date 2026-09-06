@@ -17,12 +17,14 @@ Two axes, deliberately separate:
 """
 
 from django.db.models import Q, QuerySet
+from django.http import HttpRequest
 from django.utils import timezone
 
 from authentication.models import User
 from club.models import Club, ClubMembership, ClubRole, EvaluationManager, Season, ShopManager
 from events.models import Event
 from members.models import FamilyMembership, Group, Member
+from rosterchief.request_cache import cached_on_request
 from teams.models import StaffAssignment, Team
 
 #: Derived (never stored) roles.
@@ -34,6 +36,20 @@ COACH_MANAGER = "coach_manager"
 def current_season(club: Club) -> Season | None:
     """The club's season covering today. Staff authority is scoped to it."""
     return Season.covering(club, timezone.localdate())
+
+
+def get_current_season(request: HttpRequest) -> Season | None:
+    """``current_season(request.club)``, computed once per request and reused for
+    the rest of it. Every management context processor, both mobile scope mixins,
+    and several season-scoped views all want this exact answer within one
+    request -- calling this instead of ``current_season(request.club)`` directly
+    avoids each of them re-deriving it with its own query. Not itself invalidated
+    by anything (a season's date range essentially never changes mid-request);
+    see rosterchief.request_cache for the caching primitive this is built on."""
+    club = getattr(request, "club", None)
+    if club is None:
+        return None
+    return cached_on_request(request, "current_season", lambda: current_season(club))
 
 
 def event_season(event: Event) -> Season | None:
@@ -55,6 +71,18 @@ def is_platform_superuser(user: User) -> bool:
 
 def is_club_admin(user: User, club: Club) -> bool:
     return is_platform_superuser(user) or has_club_role(user, club, ClubRole.Roles.ADMIN)
+
+
+def get_club_admin(request: HttpRequest) -> bool:
+    """``is_club_admin(request.user, request.club)``, computed once per request.
+    management/context_processors.py alone calls the plain function 4-6 times
+    per page (is_admin, billing_notice, management_position, sidebar_counters,
+    and again nested inside can_manage_members) -- this collapses that to one
+    real query, reused by every one of them for the rest of the request."""
+    club = getattr(request, "club", None)
+    if club is None or not request.user.is_authenticated:
+        return False
+    return cached_on_request(request, "is_club_admin", lambda: is_club_admin(request.user, club))
 
 
 def is_member_admin(user: User, club: Club) -> bool:

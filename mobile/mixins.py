@@ -11,9 +11,10 @@ from django.shortcuts import redirect
 from django.utils.translation import gettext_lazy as _
 from waffle import flag_is_active
 
-from club.services.access import current_season, has_management_access, teams_staffed_by
+from club.services.access import get_current_season, has_management_access, teams_staffed_by
 from controlpanel.messages import notify
 from members.models import FamilyMembership, Member
+from members.services.lookup import get_request_member
 from members.views import ClubScopedPublicMixin
 from notifications.models import Notification
 
@@ -46,7 +47,7 @@ class PersonScopeMixin(ClubScopedPublicMixin):
         # public site. Same pattern and same "sticks for the rest of the session"
         # reasoning as club/mixins.py's ClubStaffRequiredMixin sets management_context.
         request.session["mobile_context"] = True
-        self.me = Member.objects.filter(user=request.user).first() if request.user.is_authenticated else None
+        self.me = get_request_member(request)
         self.managed_people = self._managed_people(request)
         self.scope_everyone, self.scope_person = self._resolve_scope(request)
         self.people_in_scope = self.managed_people if self.scope_everyone else ([self.scope_person] if self.scope_person else [])
@@ -107,7 +108,7 @@ class PersonScopeMixin(ClubScopedPublicMixin):
             # staff assignment -- see mobile/coach_mixins.py's CoachScopeMixin.
             has_coach_access=self.me is not None and teams_staffed_by(self.request.user, self.request.club).exists(),
             unread_notification_count=unread_notification_count,
-            season=current_season(self.request.club),
+            season=get_current_season(self.request),
             vapid_public_key=settings.VAPID_PUBLIC_KEY,
             # Gates the Shop tab itself (base.html) -- same "just absent, not
             # disabled" treatment as the Coach/Member switcher above.

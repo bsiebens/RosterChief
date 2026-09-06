@@ -50,6 +50,7 @@ from club.services.access import (
     can_manage_shop,
     can_publish_news,
     current_season,
+    get_current_season,
     groups_manageable_by,
     is_club_admin,
     members_visible_to,
@@ -102,6 +103,7 @@ from registration.services.invoicing import (
 )
 from registration.services.notifications import confirm_and_send_invoice, send_registration_reminders
 from registration.services.pricing import team_number_pools, variant_prices
+from rosterchief.request_cache import cached_on_request
 from shop.models import Discount, Invoice, Order, OrderLine, Payment, Product, ProductCategory, ProductionStatus, ProductRegistrantDiscountTier, ProductVariant, Voucher, VoucherConsumption
 from shop.services.invoices import ShopInvoicePDFError, render_invoice_pdf
 from shop.services.notifications import dispatch_order_ready_for_pickup_notification
@@ -376,7 +378,7 @@ class MemberListView(ClubStaffRequiredMixin, ListView):
         # Status/fee status/team all key off the *current* season's ClubMembership --
         # a member's status/fee last season (or next) isn't what "filter by Pending"
         # means on a page showing everyone's standing right now.
-        season = current_season(self.request.club)
+        season = get_current_season(self.request)
         self.selected_status = self.request.GET.get("status", "")
         self.selected_fee_status = self.request.GET.get("fee_status", "")
         self.selected_team = self.request.GET.get("team", "")
@@ -428,7 +430,7 @@ class MemberListView(ClubStaffRequiredMixin, ListView):
         for member in members:
             member.family_memberships_display = memberships_by_member_id.get(member.pk, [])
 
-        season = current_season(self.request.club)
+        season = get_current_season(self.request)
         club_memberships_by_member_id = {}
         if season is not None:
             club_memberships = ClubMembership.objects.filter(club=self.request.club, season=season, member__in=members)
@@ -452,7 +454,7 @@ def selected_season_from_request(request, club):
         season = Season.objects.filter(club=club, pk=season_id).first()
         if season is not None:
             return season
-    return current_season(club)
+    return get_current_season(request)
 
 
 class MembershipListView(ClubAdminRequiredMixin, ListView):
@@ -464,7 +466,7 @@ class MembershipListView(ClubAdminRequiredMixin, ListView):
     context_object_name = "memberships"
 
     def get_selected_season(self):
-        return selected_season_from_request(self.request, self.request.club)
+        return cached_on_request(self.request, "membership_list_selected_season", lambda: selected_season_from_request(self.request, self.request.club))
 
     def get_queryset(self):
         season = self.get_selected_season()
@@ -523,7 +525,7 @@ class MembershipListView(ClubAdminRequiredMixin, ListView):
 
     def get_context_data(self, **kwargs):
         club = self.request.club
-        current = current_season(club)
+        current = get_current_season(self.request)
 
         counts = {}
         if current is not None:
