@@ -1527,22 +1527,65 @@ class ClubBrandingModelTests(TestCase):
     ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"],
 )
 class RootViewTests(TestCase):
+    IPHONE_UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148"
+    IPAD_UA = "Mozilla/5.0 (iPad; CPU OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148"
+    DESKTOP_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
+
     @classmethod
     def setUpTestData(cls):
         cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        cls.season = make_season(cls.club)
 
     def test_the_base_domain_hands_off_to_the_control_panel(self):
         response = self.client.get("/", HTTP_HOST="rosterchief.app")
 
         self.assertRedirects(response, reverse("controlpanel:dashboard"), fetch_redirect_response=False)
 
-    def test_a_club_subdomain_redirects_to_the_member_app(self):
-        # Unconditional -- mobile:home is itself LoginRequiredMixin, so an anonymous
-        # visitor's round trip through it to the login screen is that view's own
-        # concern (see mobile/tests.py), not root()'s.
-        response = self.client.get("/", HTTP_HOST="ajax-united.rosterchief.app")
+    def test_a_phone_always_lands_on_the_member_app(self):
+        # Unconditional, even for staff -- management isn't responsive yet.
+        staff_user = get_user_model().objects.create_user(email="phone-staff@example.com", password="pw-secret-123")
+        member = Member.objects.create(user=staff_user, first_name="Ada", last_name="Admin")
+        ClubRole.objects.create(club=self.club, member=member, role=ClubRole.Roles.ADMIN)
+        enrol_mfa(staff_user)
+        self.client.force_login(staff_user)
+
+        response = self.client.get("/", HTTP_HOST="ajax-united.rosterchief.app", HTTP_USER_AGENT=self.IPHONE_UA)
 
         self.assertRedirects(response, reverse("mobile:home"), fetch_redirect_response=False)
+
+    def test_a_tablet_also_lands_on_the_member_app(self):
+        response = self.client.get("/", HTTP_HOST="ajax-united.rosterchief.app", HTTP_USER_AGENT=self.IPAD_UA)
+
+        self.assertRedirects(response, reverse("mobile:home"), fetch_redirect_response=False)
+
+    def test_desktop_with_management_access_lands_on_the_management_app(self):
+        staff_user = get_user_model().objects.create_user(email="desktop-staff@example.com", password="pw-secret-123")
+        member = Member.objects.create(user=staff_user, first_name="Ada", last_name="Admin")
+        ClubRole.objects.create(club=self.club, member=member, role=ClubRole.Roles.ADMIN)
+        enrol_mfa(staff_user)
+        self.client.force_login(staff_user)
+
+        response = self.client.get("/", HTTP_HOST="ajax-united.rosterchief.app", HTTP_USER_AGENT=self.DESKTOP_UA)
+
+        self.assertRedirects(response, reverse("management:home"), fetch_redirect_response=False)
+
+    def test_desktop_without_management_access_falls_back_to_the_member_app(self):
+        member_user = get_user_model().objects.create_user(email="desktop-member@example.com", password="pw-secret-123")
+        member = Member.objects.create(user=member_user, first_name="Mo", last_name="Member")
+        ClubMembership.objects.create(club=self.club, member=member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        self.client.force_login(member_user)
+
+        response = self.client.get("/", HTTP_HOST="ajax-united.rosterchief.app", HTTP_USER_AGENT=self.DESKTOP_UA)
+
+        self.assertRedirects(response, reverse("mobile:home"), fetch_redirect_response=False)
+
+    def test_an_anonymous_desktop_visitor_is_bounced_to_login_and_not_straight_to_manage(self):
+        # Going straight to management:home would 403 a visitor who turns out to have
+        # no management access once logged in, instead of falling back to the member
+        # app -- so the login round trip must come back through root(), not /manage/.
+        response = self.client.get("/", HTTP_HOST="ajax-united.rosterchief.app", HTTP_USER_AGENT=self.DESKTOP_UA)
+
+        self.assertRedirects(response, f"{reverse('account_login')}?next=/", fetch_redirect_response=False)
 
 
 class FeeServiceTests(TestCase):
