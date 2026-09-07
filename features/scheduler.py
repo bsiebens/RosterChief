@@ -139,31 +139,47 @@ def _leader_loop():
 
 
 def _warm_cache_backend_import():
-    """Forces django_redis's lazy CLIENT_CLASS import to happen now, synchronously, on
-    whichever thread calls start() -- which gunicorn.conf.py's when_ready hook does in the
-    master's own main thread, before the arbiter forks the initial workers (when_ready
-    fires before that fork, not after, despite the name).
+    """Forces every module django_redis lazily imports via import_string to finish
+    importing now, synchronously, on whichever thread calls start() -- which
+    gunicorn.conf.py's when_ready hook does in the master's own main thread, before the
+    arbiter forks the initial workers (when_ready fires before that fork, not after,
+    despite the name).
 
     Without this, _leader_loop's first cache.add() below is the *first* cache access
-    anywhere in this process's life (no app's ready() touches Redis eagerly, and no
-    request has been served yet) -- and it happens on a background thread, racing gunicorn's
-    own imminent fork of the initial workers. If that fork lands mid-import, the forked
-    worker inherits a half-initialized `django_redis.client` module already sitting in
-    sys.modules (fork() copies it as-is, in-progress or not) -- every later cache access in
-    that worker then fails with "module ... has no attribute 'DefaultClient'" instead of
-    finishing the import, because Python sees the module already in sys.modules and never
-    re-runs it. This bit exactly one of two workers on first deploy, which is why /healthz
-    (round-robined to the other one) looked fine while every other request 500'd.
+    anywhere in this process's life (no app's ready() touches Redis eagerly, and no request
+    has been served yet) -- and it happens on a background thread, racing gunicorn's own
+    imminent fork of the initial workers. If that fork lands mid-import, the forked worker
+    inherits a half-initialized module already sitting in sys.modules (fork() copies it
+    as-is, in-progress or not) -- every later cache access in that worker then fails with
+    "module ... has no attribute 'X'" instead of finishing the import, because Python sees
+    the module already in sys.modules and never re-runs it. This bit exactly one of two
+    workers on first deploy (django_redis.client.DefaultClient), and again, one layer
+    deeper, on the very next deploy (django_redis.serializers.pickle.PickleSerializer, only
+    imported when DefaultClient is actually *constructed*, not merely referenced) --
+    /healthz (round-robined to the other worker) looked fine both times while everything
+    else 500'd.
 
-    Deliberately a plain import, not an actual cache.get()/set(): those need a real Redis
-    *connection*, and opening one here, pre-fork, would have every worker inherit and share
-    the same live socket after fork() -- a different, worse bug (multiple processes issuing
-    commands over one TCP connection corrupts Redis's own protocol framing). A plain module
-    import touches no socket, so there is nothing to be unsafe to share.
+    That history is why this builds the real client instead of hand-picking import_string
+    calls to replay one at a time: django_redis's CLIENT_CLASS, SERIALIZER, COMPRESSOR, and
+    connection-factory classes (pool_cls/redis_client_cls) are each resolved lazily, from
+    three different modules, only once something actually constructs a DefaultClient --
+    missing any one of them leaves the same race for whichever request first exercises that
+    particular path. Accessing caches["default"].client constructs the real DefaultClient
+    (and its ConnectionFactory), which is what actually resolves all of them in one place --
+    the same object graph a real request would build, just built here first. What it
+    deliberately does NOT do is issue a command: redis-py's connection pool is itself lazy,
+    so nothing here opens an actual socket, which fork()-sharing into every worker would
+    otherwise corrupt (multiple processes issuing commands over one inherited TCP connection
+    corrupts Redis's own protocol framing) -- confirmed by reading the installed
+    django_redis/client/default.py and pool.py: DefaultClient.__init__ and
+    ConnectionFactory.__init__ only import and instantiate classes, no I/O.
+
+    A no-op on LocMemCache (dev/test, no DJANGO_REDIS_URL) -- it has no `.client` at all,
+    and none of this lazy-import machinery to race in the first place.
     """
-    from django.utils.module_loading import import_string
+    from django.core.cache import caches
 
-    import_string("django_redis.client.DefaultClient")
+    getattr(caches["default"], "client", None)
 
 
 def start():
