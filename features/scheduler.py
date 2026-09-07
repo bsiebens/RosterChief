@@ -138,6 +138,34 @@ def _leader_loop():
         _stopping.wait(RENEW_INTERVAL_SECONDS)
 
 
+def _warm_cache_backend_import():
+    """Forces django_redis's lazy CLIENT_CLASS import to happen now, synchronously, on
+    whichever thread calls start() -- which gunicorn.conf.py's when_ready hook does in the
+    master's own main thread, before the arbiter forks the initial workers (when_ready
+    fires before that fork, not after, despite the name).
+
+    Without this, _leader_loop's first cache.add() below is the *first* cache access
+    anywhere in this process's life (no app's ready() touches Redis eagerly, and no
+    request has been served yet) -- and it happens on a background thread, racing gunicorn's
+    own imminent fork of the initial workers. If that fork lands mid-import, the forked
+    worker inherits a half-initialized `django_redis.client` module already sitting in
+    sys.modules (fork() copies it as-is, in-progress or not) -- every later cache access in
+    that worker then fails with "module ... has no attribute 'DefaultClient'" instead of
+    finishing the import, because Python sees the module already in sys.modules and never
+    re-runs it. This bit exactly one of two workers on first deploy, which is why /healthz
+    (round-robined to the other one) looked fine while every other request 500'd.
+
+    Deliberately a plain import, not an actual cache.get()/set(): those need a real Redis
+    *connection*, and opening one here, pre-fork, would have every worker inherit and share
+    the same live socket after fork() -- a different, worse bug (multiple processes issuing
+    commands over one TCP connection corrupts Redis's own protocol framing). A plain module
+    import touches no socket, so there is nothing to be unsafe to share.
+    """
+    from django.utils.module_loading import import_string
+
+    import_string("django_redis.client.DefaultClient")
+
+
 def start():
     """Called once from gunicorn.conf.py's when_ready hook, in the master process only."""
     global _leader_thread
@@ -146,6 +174,7 @@ def start():
         return
 
     logger.info("scheduler.start pid=%s token=%s", os.getpid(), _TOKEN)
+    _warm_cache_backend_import()
     _stopping.clear()
     _leader_thread = threading.Thread(target=_leader_loop, name="rosterchief-scheduler", daemon=True)
     _leader_thread.start()
