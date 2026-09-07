@@ -13,12 +13,13 @@
 #
 #   ensure db/redis/caddy are up (caddy doesn't need a code deploy, so nothing else here would
 #   otherwise ever start it -- this is exactly the gap that bit the first manual deploy) ->
-#   back up the database -> pull the image -> migrate -> restart web + live_score_poller ->
-#   verify https://$BASE_DOMAIN/healthz. No worker/beat -- scheduled jobs run via host cron
-#   calling `manage.py <job>` directly (see DEPLOYMENT.md's "Scheduled jobs"). live_score_poller
-#   is the one exception, a persistent process on the same image as web (see DEPLOYMENT.md's
-#   "Long-running processes") -- it gets cycled onto the new image right alongside web, or a
-#   deploy would silently leave it running the old code indefinitely.
+#   back up the database -> pull the image -> migrate -> restart web -> verify
+#   https://$BASE_DOMAIN/healthz. No worker/beat, and no separate scheduler/poller container
+#   either -- every scheduled platform job runs from an in-process APScheduler thread inside
+#   web itself (see features/scheduler.py and DEPLOYMENT.md's "Scheduled jobs"), so restarting
+#   web is all a deploy needs to cycle it onto the new image. `--remove-orphans` below cleans
+#   up a now-orphaned `live_score_poller` container left over from before that container was
+#   retired, on whichever box's first deploy after the change.
 set -Eeuo pipefail
 
 COMPOSE_FILE="${COMPOSE_FILE:-compose.yaml}"
@@ -42,7 +43,7 @@ say "Deploying image tag '${IMAGE_TAG}' — checkout at $(git rev-parse --short 
 # this is belt-and-suspenders (e.g. right after a host reboot, or a first deploy) before
 # backup.sh execs into db/web and before the healthz check below relies on caddy being there.
 say "Ensuring db + redis + caddy are up"
-dc up -d db redis caddy
+dc up -d --remove-orphans db redis caddy
 
 if [ "$SKIP_BACKUP" = "1" ]; then
     say "Skipping backup (SKIP_BACKUP=1) -- not recommended before a migration"
@@ -52,13 +53,13 @@ else
 fi
 
 say "Pulling image tag '${IMAGE_TAG}'"
-IMAGE_TAG="$IMAGE_TAG" dc pull web live_score_poller
+IMAGE_TAG="$IMAGE_TAG" dc pull web
 
 say "Running migrations"
 dc run --rm web python manage.py migrate --noinput
 
-say "Restarting web + live_score_poller"
-IMAGE_TAG="$IMAGE_TAG" dc up -d --no-deps web live_score_poller
+say "Restarting web"
+IMAGE_TAG="$IMAGE_TAG" dc up -d --no-deps --remove-orphans web
 
 say "Waiting for https://${BASE_DOMAIN}/healthz"
 for attempt in $(seq 1 20); do

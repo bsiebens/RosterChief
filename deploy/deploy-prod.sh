@@ -95,7 +95,10 @@ echo "     at $(git rev-parse --short HEAD) — $(git log -1 --pretty=%s)"
 # script would otherwise ever start it) before backup.sh execs into db/web and before the
 # healthz check below relies on caddy actually being there to terminate TLS.
 step "Starting db + redis + caddy"
-dc up -d db redis caddy
+# --remove-orphans: cleans up a now-orphaned live_score_poller container left over from
+# before that container was retired in favour of features/scheduler.py's in-process
+# scheduler (see DEPLOYMENT.md's "Scheduled jobs") -- a no-op once a box has deployed since.
+dc up -d --remove-orphans db redis caddy
 
 if [ "$SKIP_BACKUP" = "1" ]; then
     step "Skipping backup (SKIP_BACKUP=1) -- not recommended before a migration"
@@ -105,20 +108,19 @@ else
 fi
 
 step "Pulling image for ${BRANCH}"
-IMAGE_TAG="$BRANCH" dc pull web live_score_poller
+IMAGE_TAG="$BRANCH" dc pull web
 
 step "Running migrations"
 # -T and </dev/null: this whole script IS ssh's stdin (a heredoc) -- see deploy-dev.sh's own
 # comment on why `compose run` needs both or web never restarts.
 dc run --rm -T web python manage.py migrate --noinput </dev/null
 
-step "Restarting web + live_score_poller"
-# No worker/beat to restart -- scheduled jobs run via host cron calling `manage.py <job>`
-# directly (see DEPLOYMENT.md's "Scheduled jobs"). live_score_poller is the one exception, a
-# persistent process on the same image as web (see DEPLOYMENT.md's "Long-running processes") --
-# it needs cycling onto the new image here too, or a deploy would silently leave it running the
-# old code indefinitely.
-IMAGE_TAG="$BRANCH" dc up -d --no-deps web live_score_poller
+step "Restarting web"
+# No worker/beat, and no separate scheduler/poller container either -- every scheduled
+# platform job runs from an in-process APScheduler thread inside web itself (see
+# features/scheduler.py and DEPLOYMENT.md's "Scheduled jobs"), so restarting web is all a
+# deploy needs to cycle it onto the new image.
+IMAGE_TAG="$BRANCH" dc up -d --no-deps --remove-orphans web
 REMOTE
 
 say "Waiting for https://${BASE_DOMAIN}/healthz"
