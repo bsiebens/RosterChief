@@ -276,6 +276,25 @@ class DesktopTemplateSelectionTests(TestCase):
 
         self.assertTemplateUsed(response, "mobile/bug_list.html")
 
+    def test_bug_list_has_a_real_browser_tab_title(self):
+        # screen_title is a BugListView class attribute, but only reaches the
+        # template via get_context_data's own explicit wiring (PersonScopeMixin
+        # isn't in this view's MRO to do it automatically) -- without that the
+        # <title> tag silently rendered "· Ajax United" with nothing before it.
+        response = self.client.get(reverse("mobile:bug_list"), HTTP_HOST="ajax-united.rosterchief.app", HTTP_USER_AGENT=self.DESKTOP_UA)
+
+        self.assertContains(response, "<title>Report a bug &middot; Ajax United</title>")
+
+    def test_bug_list_shows_the_season_and_shop_tab_like_every_other_screen(self):
+        # Same underlying gap as has_staff_access/screen_title above --
+        # season/shop_open never reached this view's context either, so the
+        # sidebar's "Season ..." subtitle and Shop nav item silently vanished
+        # only on this one screen.
+        response = self.client.get(reverse("mobile:bug_list"), HTTP_HOST="ajax-united.rosterchief.app", HTTP_USER_AGENT=self.DESKTOP_UA)
+
+        self.assertContains(response, f"Season {self.season.name}")
+        self.assertContains(response, reverse("mobile:shop_home"))
+
     def test_manager_switcher_on_desktop_links_straight_to_management_not_coach_mode(self):
         # Reuses self.season (already covers today) rather than creating a second
         # one -- Season.covering()/current_season() pick with .first() among

@@ -8,6 +8,7 @@ import json
 from collections import defaultdict
 from decimal import Decimal
 
+from django.conf import settings
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.contrib.contenttypes.prefetch import GenericPrefetch
 from django.core.paginator import Paginator
@@ -27,7 +28,7 @@ from bugs.forms import BugReportForm
 from bugs.models import BugReport
 from bugs.services import file_report
 from club.models import ClubMembership
-from club.services.access import current_season, has_management_access, teams_managed_by
+from club.services.access import current_season, get_current_season, has_management_access, teams_managed_by
 from club.services.fees import open_dues_rows
 from club.services.onboarding import checklist_for, open_requirements_blocking
 from club.services.sponsors import active_sponsors
@@ -1639,11 +1640,28 @@ class BugListView(DesktopTemplateMixin, LoginRequiredMixin, TemplateView):
     def get_context_data(self, **kwargs):
         bugs = BugReport.objects.filter(reported_by=self.me).order_by("-created").prefetch_related("notes") if self.me is not None else []
         rows = [{"bug": bug, "pill_class": BUG_STATUS_PILL_CLASSES.get(bug.status, "pill-neutral")} for bug in bugs]
+        unread_notification_count = 0
+        if self.me is not None:
+            unread_notification_count = Notification.objects.filter(club=self.request.club, member=self.me, read_at__isnull=True).count()
         # PersonScopeMixin isn't in this view's MRO (see the class docstring), so
-        # unlike every other Member-mode screen it doesn't get has_staff_access/
-        # active_tab for free -- the desktop shell's Member/Manager switcher and
-        # sidebar highlighting depend on both, so they're set explicitly here.
-        return super().get_context_data(me=self.me, rows=rows, active_tab=self.active_tab, has_staff_access=self.me is not None and has_management_access(self.request.user, self.request.club), **kwargs)
+        # unlike every other Member-mode screen it doesn't get any of its
+        # get_context_data's shell context for free -- the base template (both
+        # the mobile and desktop shells) needs screen_title/active_tab/
+        # has_staff_access/season/unread_notification_count/vapid_public_key/
+        # shop_open regardless of this view's own narrower "just self.me" scope,
+        # so they're computed here the same way PersonScopeMixin does.
+        return super().get_context_data(
+            me=self.me,
+            rows=rows,
+            screen_title=self.screen_title,
+            active_tab=self.active_tab,
+            has_staff_access=self.me is not None and has_management_access(self.request.user, self.request.club),
+            unread_notification_count=unread_notification_count,
+            season=get_current_season(self.request),
+            vapid_public_key=settings.VAPID_PUBLIC_KEY,
+            shop_open=self.request.club.shop_open,
+            **kwargs,
+        )
 
 
 #: Pill styling shared by ShopOrdersView's list rows and ShopOrderDetailView's

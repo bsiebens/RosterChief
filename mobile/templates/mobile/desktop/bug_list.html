@@ -1,15 +1,6 @@
 {% extends "mobile/desktop/base.html" %}
 {% load i18n %}
 
-{% comment %}
-    BugListView (mobile/views.py) does not use PersonScopeMixin, so
-    screen_title never reaches this template's context (same gap mobile's
-    own bug_list.html works around by hardcoding its header text) -- the
-    page_title block override below does the same here.
-{% endcomment %}
-
-{% block page_title %}{% trans "Report a bug" %}{% endblock page_title %}
-
 {% block content %}
     {% if not me %}
         <div class="card p-6 text-center">
