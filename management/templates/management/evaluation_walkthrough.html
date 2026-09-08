@@ -1,0 +1,80 @@
+{% extends "management/base.html" %}
+{% load i18n lucide ui %}
+
+{% block panel_title %}{% blocktrans with name=checklist.name %}{{ name }} walkthrough{% endblocktrans %}{% endblock panel_title %}
+{% block heading %}{% blocktrans with name=checklist.name %}{{ name }} walkthrough{% endblocktrans %}{% endblock heading %}
+
+{% block topbar_context %}
+    {% if player %}<span class="badge badge-neutral">{% blocktrans count counter=remaining %}{{ counter }} left{% plural %}{{ counter }} left{% endblocktrans %}</span>{% endif %}
+{% endblock topbar_context %}
+
+{% block actions %}
+    <a class="btn btn-outline gap-2" href="{% url 'management:evaluation_checklist_list' %}">{% lucide "arrow-left" size=16 %} {% trans "All checklists" %}</a>
+{% endblock actions %}
+
+{% block panel %}
+    {% include "management/_evaluation_checklist_tabs.html" with active_tab="walkthrough" %}
+
+    {% if blocked_reason %}
+        <div class="alert alert-warning">
+            {% lucide "triangle-alert" size=18 %}
+            {% if blocked_reason == "archived" %}
+                <span>{% trans "This checklist is archived, so it can no longer be filled in." %}</span>
+            {% elif blocked_reason == "no_rubric" %}
+                <span>{% trans "This checklist has no criteria yet -- add some on the Questions tab first." %}</span>
+            {% else %}
+                <span>{% trans "There's no current season configured for this club, so there's nowhere to file an evaluation yet." %}</span>
+            {% endif %}
+        </div>
+    {% else %}
+        <div class="card mb-4 card-body">
+            <h2 class="card-title">{% lucide "calendar-clock" size=18 %} {% trans "Who's due a fresh look?" %}</h2>
+            <p class="text-sm text-muted">{% trans "Shows players already evaluated on this checklist whose newest evaluation is older than the date below, most overdue first. Players never evaluated on this checklist aren't included -- start theirs from their own member page." %}</p>
+            <form method="get" class="mt-2 flex flex-wrap items-end gap-3">
+                {% for field in start_form %}
+                    <div class="max-w-xs">{% form_field field %}</div>
+                {% endfor %}
+                <button class="btn btn-primary gap-2" type="submit">{% lucide "play" size=16 %} {% trans "Go" %}</button>
+            </form>
+        </div>
+
+        {% if cutoff_date %}
+            {% if not player %}
+                <div class="card card-body">
+                    <p class="text-sm text-muted">{% trans "Nobody's due a re-check before that date." %}</p>
+                </div>
+            {% else %}
+                <div class="card card-body">
+                    <div class="flex flex-wrap items-center justify-between gap-2">
+                        <h2 class="card-title">{{ player.get_full_name }}</h2>
+                        <a class="btn btn-outline btn-sm gap-2" href="{{ skip_url }}">{% trans "Skip for now" %} {% lucide "skip-forward" size=14 %}</a>
+                    </div>
+
+                    <form method="post" enctype="multipart/form-data" class="mt-2">
+                        {% csrf_token %}
+                        <input type="hidden" name="cutoff_date" value="{{ cutoff_date|date:'Y-m-d' }}">
+                        <input type="hidden" name="player_pk" value="{{ player.pk }}">
+                        <input type="hidden" name="skip" value="{{ skip_param }}">
+
+                        {% for error in form.non_field_errors %}
+                            <div class="alert alert-error mb-4">
+                                {% lucide "circle-x" size=18 %}
+                                <span>{{ error }}</span>
+                            </div>
+                        {% endfor %}
+
+                        <div class="flex flex-col gap-4">
+                            {% for bound_field in form %}
+                                {% form_field bound_field %}
+                            {% endfor %}
+                        </div>
+
+                        <div class="mt-4 flex justify-start gap-2">
+                            <button class="btn btn-primary gap-2" type="submit">{% lucide "save" size=16 %} {% trans "Save and next" %}</button>
+                        </div>
+                    </form>
+                </div>
+            {% endif %}
+        {% endif %}
+    {% endif %}
+{% endblock panel %}

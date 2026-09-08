@@ -20,14 +20,14 @@
         {% if reason == "no_season" %}
             <span>{% trans "There's no current season configured for this club, so there's nowhere to file an evaluation yet." %}</span>
         {% elif is_club_admin %}
-            <span>{% trans "This club hasn't set up an evaluation rubric yet." %}</span>
+            <span>{% trans "This club hasn't set up any evaluation checklist yet." %}</span>
         {% else %}
-            <span>{% trans "This club hasn't set up an evaluation rubric yet -- ask an admin to set one up." %}</span>
+            <span>{% trans "This club hasn't set up any evaluation checklist yet -- ask an admin to set one up." %}</span>
         {% endif %}
     </div>
     {% if reason == "no_rubric" and is_club_admin %}
         <div class="mt-4">
-            <a class="btn btn-primary gap-2" href="{% url 'management:evaluation_rubric' %}">{% lucide "list-checks" size=16 %} {% trans "Set up the rubric" %}</a>
+            <a class="btn btn-primary gap-2" href="{% url 'management:evaluation_checklist_list' %}">{% lucide "list-checks" size=16 %} {% trans "Set up a checklist" %}</a>
         </div>
     {% endif %}
 {% endblock panel %}

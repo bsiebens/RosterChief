@@ -1,0 +1,52 @@
+{% extends "management/base.html" %}
+{% load i18n lucide %}
+
+{% block panel_title %}{% blocktrans with name=checklist.name %}{{ name }} results{% endblocktrans %}{% endblock panel_title %}
+{% block heading %}{% blocktrans with name=checklist.name %}{{ name }} results{% endblocktrans %}{% endblock heading %}
+
+{% block actions %}
+    <a class="btn btn-outline gap-2" href="{% url 'management:evaluation_checklist_list' %}">{% lucide "arrow-left" size=16 %} {% trans "All checklists" %}</a>
+{% endblock actions %}
+
+{% block panel %}
+    {% include "management/_evaluation_checklist_tabs.html" with active_tab="matrix" %}
+
+    <p class="mb-4 text-sm text-muted">{% trans "Every player's latest answer to each question -- a quick way to spot who's missing a score. Add or edit players' evaluations from their own member page, or use the Walkthrough tab to go through them one by one." %}</p>
+
+    {% if not fields %}
+        <div class="card card-body">
+            <p class="text-sm text-muted">{% trans "No criteria on this checklist yet." %}</p>
+        </div>
+    {% elif not rows %}
+        <div class="card card-body">
+            <p class="text-sm text-muted">{% trans "Nobody's been evaluated against this checklist yet." %}</p>
+        </div>
+    {% else %}
+        <div class="card overflow-x-auto">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th class="sticky left-0 bg-base-100">{% trans "Player" %}</th>
+                        {% for field in fields %}
+                            <th class="whitespace-nowrap">{{ field.label }}</th>
+                        {% endfor %}
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in rows %}
+                        <tr>
+                            <td class="sticky left-0 bg-base-100 font-semibold whitespace-nowrap">{{ row.player.get_full_name }}</td>
+                            {% for cell in row.cells %}
+                                <td>{{ cell|default:"—" }}</td>
+                            {% endfor %}
+                            <td class="text-right">
+                                <a class="btn btn-outline btn-xs" href="{% url 'management:evaluation_detail' row.evaluation.pk %}">{% trans "Open" %}</a>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% endif %}
+{% endblock panel %}

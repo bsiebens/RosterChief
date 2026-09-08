@@ -645,11 +645,24 @@
     /* Circular, matching management.css's own .crest -- controlpanel.css settled
        on a circle over the design's original hexagon/rounded-square after that
        read as a "5-pointed" shape rather than a shield in practice (see that
-       file's own comment); this surface reuses the same call. */
+       file's own comment); this surface reuses the same call. A real uploaded
+       Club.logo sits on a plain white backing (not --color-club) -- crest
+       artwork is designed against white, and club branding often has
+       transparent edges, so painting it on the club colour instead produces a
+       different-looking crop from the other two shells (mobile.css's
+       .app-crest, management.css's .crest) for the exact same file. */
     .desktop-crest {
         width: 30px;
         height: 30px;
         border-radius: 999px;
+        background: #fff;
+        flex-shrink: 0;
+    }
+
+    /* Fallback-only: the initials badge shown when a club has no logo uploaded
+       (see .desktop-crest above for why the real-logo <img> doesn't share this
+       background). */
+    .desktop-crest-fallback {
         background: var(--color-club);
         color: #fff;
         display: flex;
@@ -658,7 +671,6 @@
         font-family: var(--font-display);
         font-weight: 800;
         font-size: 13px;
-        flex-shrink: 0;
     }
 
     .desktop-switcher {

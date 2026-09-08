@@ -17,7 +17,7 @@
         {% include "mobile/_avatar.html" with person=player size_class="h-12 w-12" text_class="text-base" %}
         <div class="min-w-0 flex-1">
             <span class="block truncate font-display text-lg leading-none font-extrabold text-white uppercase">{{ player.get_full_name }}</span>
-            <span class="block font-mono text-xs text-on-dark">{{ evaluation.submission.member|default:_("Unknown evaluator") }} &middot; {{ evaluation.created|date:"d M Y" }}</span>
+            <span class="block font-mono text-xs text-on-dark">{{ evaluation.checklist.name }} &middot; {{ evaluation.submission.member|default:_("Unknown evaluator") }} &middot; {{ evaluation.created|date:"d M Y" }}</span>
         </div>
     </div>
 {% endblock header_extra %}

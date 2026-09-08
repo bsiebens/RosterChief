@@ -19,7 +19,7 @@ from waffle import get_waffle_flag_model
 
 from bugs.models import BugNote, BugReport
 from club.models import Club, ClubMembership, DuesInvoice, EvaluationManager, MemberRequirementStatus, OnboardingRequirement, Season, Sponsor
-from evaluations.models import EvaluationSettings, PlayerEvaluation
+from evaluations.models import EvaluationChecklist, PlayerEvaluation
 from events.models import Attendance, Competition, Event, EventOfficial, EventReferee, EventSeries, EventTask, EventTaskClaim, Lineup, LineupSelection, Location, OfficialSignup, Opponent, RefereeSignup
 from events.services.attendance import record_check_in
 from events.services.calendar import week_bounds
@@ -7075,7 +7075,7 @@ class CoachEvaluationViewsTests(TestCase):
 
         cls.rubric = FormBuilderForm.objects.create(club=cls.club, title="Player rubric")
         cls.skill_field = FormBuilderField.objects.create(form=cls.rubric, key="skill", label="Skill", field_type=FormBuilderField.FieldType.NUMBER, required=True, order=1)
-        EvaluationSettings.objects.create(club=cls.club, form=cls.rubric)
+        cls.checklist = EvaluationChecklist.objects.create(club=cls.club, name="U16", form=cls.rubric)
 
     def _activate_flag(self):
         # waffle caches flag_is_active results -- cleared here (and again on
@@ -7135,7 +7135,7 @@ class CoachEvaluationViewsTests(TestCase):
         send = FormSend.objects.create(club=self.club, form=self.rubric, is_active=False)
         submission = Submission.objects.create(send=send, member=self.member)
         Answer.objects.create(submission=submission, field=self.skill_field, value="8")
-        PlayerEvaluation.objects.create(club=self.club, player=self.player, season=self.season, submission=submission)
+        PlayerEvaluation.objects.create(club=self.club, checklist=self.checklist, player=self.player, season=self.season, submission=submission)
         self.client.force_login(self.user)
 
         response = self.client.get(self._history_url(), HTTP_HOST="ajax-united.rosterchief.app")
@@ -7144,14 +7144,14 @@ class CoachEvaluationViewsTests(TestCase):
         self.assertContains(response, str(self.season))
 
     def test_history_shows_an_empty_state_when_no_rubric_is_configured(self):
-        EvaluationSettings.objects.filter(club=self.club).delete()
+        EvaluationChecklist.objects.filter(club=self.club).delete()
         self._activate_flag()
         self._grant(self.member)
         self.client.force_login(self.user)
 
         response = self.client.get(self._history_url(), HTTP_HOST="ajax-united.rosterchief.app")
 
-        self.assertContains(response, "hasn't set up an evaluation form")
+        self.assertContains(response, "hasn't set up an evaluation checklist")
         self.assertNotContains(response, self._create_url())
 
     def test_a_player_from_another_club_404s(self):
@@ -7210,7 +7210,7 @@ class CoachEvaluationViewsTests(TestCase):
         self.assertContains(response, "This field is required")
 
     def test_create_404s_when_no_rubric_is_configured(self):
-        EvaluationSettings.objects.filter(club=self.club).delete()
+        EvaluationChecklist.objects.filter(club=self.club).delete()
         self._activate_flag()
         self._grant(self.member)
         self.client.force_login(self.user)
@@ -7218,7 +7218,7 @@ class CoachEvaluationViewsTests(TestCase):
         response = self.client.get(self._create_url(), HTTP_HOST="ajax-united.rosterchief.app")
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "hasn't set up an evaluation form")
+        self.assertContains(response, "hasn't set up an evaluation checklist")
 
     def test_detail_shows_the_recorded_answers(self):
         self._activate_flag()
@@ -7226,7 +7226,7 @@ class CoachEvaluationViewsTests(TestCase):
         send = FormSend.objects.create(club=self.club, form=self.rubric, is_active=False)
         submission = Submission.objects.create(send=send, member=self.member)
         Answer.objects.create(submission=submission, field=self.skill_field, value="8")
-        evaluation = PlayerEvaluation.objects.create(club=self.club, player=self.player, season=self.season, submission=submission)
+        evaluation = PlayerEvaluation.objects.create(club=self.club, checklist=self.checklist, player=self.player, season=self.season, submission=submission)
         self.client.force_login(self.user)
 
         url = reverse("mobile:coach_evaluation_detail", kwargs={"player_pk": self.player.pk, "evaluation_pk": evaluation.pk})

@@ -209,10 +209,17 @@
 
     /* Club logo (img) or initials (span) in the app header -- always a plain
        circle, unlike management.css's own hexagon crest mark. */
+    /* A real uploaded Club.logo sits on a plain white backing -- crest artwork
+       is designed against white, and club branding often has transparent
+       edges, so leaving this unset lets whatever's behind the header bleed
+       through instead (see mobile-desktop.css's .desktop-crest for the fuller
+       version of this comment -- same reasoning, shared across all three
+       crest surfaces so the same logo file crops the same way everywhere). */
     .app-crest {
         width: 32px;
         height: 32px;
         border-radius: 999px;
+        background: #fff;
         flex-shrink: 0;
         object-fit: cover;
     }

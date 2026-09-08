@@ -4,6 +4,7 @@
 {% block panel_title %}{% blocktrans with name=evaluation.player.get_full_name %}Evaluation &middot; {{ name }}{% endblocktrans %}{% endblock panel_title %}
 {% block heading %}{% blocktrans with name=evaluation.player.get_full_name %}Evaluation &middot; {{ name }}{% endblocktrans %}{% endblock heading %}
 {% block topbar_context %}
+    <span class="badge badge-neutral">{{ evaluation.checklist.name }}</span>
     <span class="badge badge-neutral">{{ evaluation.season }}</span>
 {% endblock topbar_context %}
 

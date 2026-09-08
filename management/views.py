@@ -12,6 +12,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.decorators import method_decorator
+from django.utils.functional import cached_property
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils.translation import gettext_lazy as _
 from django.utils.translation import ngettext
@@ -66,8 +67,8 @@ from club.services.signup_linking import link_to_existing_member
 from controlpanel.messages import notify
 from controlpanel.mixins import RedirectOnInvalidMixin
 from controlpanel.services.statistics import club_attention, club_charts, club_statistics, unrostered_members
-from evaluations.models import PlayerEvaluation
-from evaluations.services import EvaluationRubricNotConfigured, EvaluationSubmissionError, current_rubric_form, start_new_rubric_version, submit_evaluation
+from evaluations.models import EvaluationChecklist, PlayerEvaluation
+from evaluations.services import EvaluationRubricNotConfigured, EvaluationSubmissionError, active_checklists, current_rubric_form, question_stats, results_matrix, start_new_rubric_version, submit_evaluation, walkthrough_queue
 from events.models import Attendance, Event, EventOfficial, EventReferee, EventSeries, EventTask, Location, OfficialSignup, Opponent, RefereeSignup
 from events.services.attendance import member_attendance_counts, member_attendance_sparkline, player_attendance_rankings, players_who_missed_recent_practices, team_attendance_rate, team_no_shows
 from events.services.calendar import add_months, agenda_groups, month_bounds, month_grid, season_grid, week_bounds, week_grid
@@ -128,6 +129,8 @@ from .forms import (
     ClubRoleAssignForm,
     ClubSettingsForm,
     DiscountForm,
+    EvaluationChecklistForm,
+    EvaluationWalkthroughStartForm,
     EventForm,
     EventOfficialFeeForm,
     EventRefereeFeeForm,
@@ -1067,8 +1070,12 @@ class MemberDetailView(ClubStaffRequiredMixin, DetailView):
         # for why this is broader than is_admin (an EvaluationManager grant
         # without ADMIN still sees this section, just not the rubric link).
         evaluations_enabled = flag_is_active(self.request, "evaluations") and can_manage_evaluations(self.request.user, self.request.club)
-        player_evaluations = PlayerEvaluation.objects.filter(club=self.request.club, player=self.object).select_related("season", "submission__member") if evaluations_enabled else PlayerEvaluation.objects.none()
-        rubric_configured = evaluations_enabled and current_rubric_form(self.request.club) is not None
+        player_evaluations = PlayerEvaluation.objects.filter(club=self.request.club, player=self.object).select_related("season", "checklist", "submission__member") if evaluations_enabled else PlayerEvaluation.objects.none()
+        # Whether at least one checklist can actually be filled in right now
+        # -- a club may have created a checklist but not yet built its
+        # rubric (EvaluationChecklist.form still None), same gap the old
+        # single-rubric "rubric_configured" flag covered.
+        rubric_configured = evaluations_enabled and active_checklists(self.request.club).exclude(form=None).exists()
 
         return super().get_context_data(
             family_groups=family_groups,
@@ -6235,9 +6242,76 @@ def _format_answer_value(value):
     return str(value)
 
 
-class EvaluationRubricView(FeatureRequiredMixin, View):
-    """The club's evaluation rubric editor -- add/edit/remove/reorder criteria
-    in one page and one save, ADMIN-only (plain FeatureRequiredMixin, not
+class EvaluationChecklistMixin:
+    """Shared checklist lookup for every checklist-scoped evaluations view
+    below -- resolves ``self.checklist`` from the ``checklist_slug`` URL
+    kwarg, lazily (a cached_property, not setup()) so the lookup runs after
+    the mixin's own permission gate, not before it. Not restricted to
+    is_active: an archived checklist's rubric/stats/results stay reachable,
+    only filing a *new* evaluation against it stops being offered (see
+    EvaluationCreateView)."""
+
+    @cached_property
+    def checklist(self):
+        return get_object_or_404(EvaluationChecklist.objects.filter(club=self.request.club), slug=self.kwargs["checklist_slug"])
+
+
+class EvaluationChecklistListView(EvaluationManagerRequiredMixin, ListView):
+    """Every checklist this club has ever created, active and archived --
+    reachable by any evaluation manager, though only ADMIN sees the
+    add/archive/edit-rubric actions (rubric editing stays the narrower
+    FeatureRequiredMixin tier below, same split as before there was more
+    than one checklist)."""
+
+    template_name = "management/evaluation_checklist_list.html"
+    context_object_name = "checklists"
+
+    def get_queryset(self):
+        return EvaluationChecklist.objects.filter(club=self.request.club).annotate(evaluation_count=Count("evaluations"))
+
+
+class EvaluationChecklistCreateView(FeatureRequiredMixin, CreateView):
+    """Name a new checklist -- ADMIN-only, same tier as the rubric editor
+    (redefining what's scored is narrower than filling one in). Its rubric
+    starts out empty; success routes straight into EvaluationRubricView so
+    criteria can be added in the same flow."""
+
+    feature_flag = "evaluations"
+    model = EvaluationChecklist
+    form_class = EvaluationChecklistForm
+    template_name = "management/evaluation_checklist_form.html"
+
+    def form_valid(self, form):
+        form.instance.club = self.request.club
+        response = super().form_valid(form)
+        notify(self.request, f"s|{_('Checklist created')}|" + _("“%(name)s” is ready -- add its criteria next.") % {"name": self.object.name})
+        return response
+
+    def get_success_url(self):
+        return reverse("management:evaluation_rubric", args=[self.object.slug])
+
+
+class EvaluationChecklistArchiveView(FeatureRequiredMixin, View):
+    """Toggle a checklist's is_active -- never a delete, since evaluations
+    already filed against it must keep working (PROTECT on
+    PlayerEvaluation.checklist)."""
+
+    feature_flag = "evaluations"
+
+    def post(self, request, checklist_slug):
+        checklist = get_object_or_404(EvaluationChecklist.objects.filter(club=request.club), slug=checklist_slug)
+        checklist.is_active = not checklist.is_active
+        checklist.save(update_fields=["is_active", "modified"])
+        if checklist.is_active:
+            notify(request, f"s|{_('Checklist reactivated')}|" + _("“%(name)s” can be picked for new evaluations again.") % {"name": checklist.name})
+        else:
+            notify(request, f"w|{_('Checklist archived')}|" + _("“%(name)s” can no longer be picked for new evaluations. Existing ones are unaffected.") % {"name": checklist.name})
+        return redirect("management:evaluation_checklist_list")
+
+
+class EvaluationRubricView(EvaluationChecklistMixin, FeatureRequiredMixin, View):
+    """One checklist's rubric editor -- add/edit/remove/reorder criteria in
+    one page and one save, ADMIN-only (plain FeatureRequiredMixin, not
     EvaluationManagerRequiredMixin -- redefining what everyone scores players
     against is narrower than filling one in, see EvaluationManagerRequiredMixin's
     own docstring). Never edits the current rubric's Fields in place: every
@@ -6252,7 +6326,7 @@ class EvaluationRubricView(FeatureRequiredMixin, View):
     template_name = "management/rubric_form.html"
 
     def _initial_rows(self):
-        current = current_rubric_form(self.request.club)
+        current = current_rubric_form(self.checklist)
         if current is None:
             return []
         return [
@@ -6278,7 +6352,7 @@ class EvaluationRubricView(FeatureRequiredMixin, View):
         return RubricCriterionFormSet(data, prefix="criteria", initial=initial)
 
     def render_formset(self, formset):
-        return render(self.request, self.template_name, {"formset": formset})
+        return render(self.request, self.template_name, {"formset": formset, "checklist": self.checklist})
 
     def get(self, request, *args, **kwargs):
         return self.render_formset(self.get_formset())
@@ -6292,7 +6366,7 @@ class EvaluationRubricView(FeatureRequiredMixin, View):
         rows.sort(key=lambda row: row["order"] if row["order"] is not None else 0)
 
         with transaction.atomic():
-            new_form = start_new_rubric_version(request.club)
+            new_form = start_new_rubric_version(self.checklist)
             # Safe to wipe rather than diff/patch: this Form was just created
             # above, in this same transaction, so nothing has answered it yet
             # -- there is no Answer anywhere pointing at these Fields for the
@@ -6310,21 +6384,153 @@ class EvaluationRubricView(FeatureRequiredMixin, View):
                 )
 
         notify(request, f"s|{_('Rubric updated')}|{_('The evaluation rubric has a new version -- evaluations already filled in keep showing exactly what they were scored against.')}")
-        return redirect("management:evaluation_rubric")
+        return redirect("management:evaluation_rubric", checklist_slug=self.checklist.slug)
+
+
+class EvaluationStatsView(EvaluationChecklistMixin, EvaluationManagerRequiredMixin, TemplateView):
+    """Per-question statistics for one checklist -- counts/averages for
+    numeric criteria, response breakdowns for choice-type ones, and a
+    recent-answers feed for free text, spanning every version the checklist
+    has ever had (evaluations.services.question_stats). Defaults to the
+    current season; ``?season=all`` widens it to every evaluation the
+    checklist has ever collected."""
+
+    template_name = "management/evaluation_stats.html"
+
+    def get_context_data(self, **kwargs):
+        season = current_season(self.request.club)
+        show_all_seasons = self.request.GET.get("season") == "all"
+        scoped_season = None if show_all_seasons else season
+        rows = question_stats(self.checklist, season=scoped_season)
+
+        evaluations = PlayerEvaluation.objects.filter(checklist=self.checklist)
+        if scoped_season is not None:
+            evaluations = evaluations.filter(season=scoped_season)
+
+        return super().get_context_data(
+            checklist=self.checklist,
+            rows=rows,
+            season=season,
+            show_all_seasons=show_all_seasons,
+            total_evaluations=evaluations.count(),
+            unique_players=evaluations.values("player_id").distinct().count(),
+            unique_evaluators=evaluations.values("submission__member_id").distinct().count(),
+            **kwargs,
+        )
+
+
+class EvaluationMatrixView(EvaluationChecklistMixin, EvaluationManagerRequiredMixin, TemplateView):
+    """One row per player ever evaluated against this checklist, one column
+    per current question, each cell their latest answer -- a quick way to
+    spot who hasn't been scored on something yet (evaluations.services.
+    results_matrix)."""
+
+    template_name = "management/evaluation_matrix.html"
+
+    def get_context_data(self, **kwargs):
+        matrix = results_matrix(self.checklist)
+        rows = [{"player": row["player"], "evaluation": row["evaluation"], "cells": [_format_answer_value(value) for value in row["values"]]} for row in matrix["rows"]]
+        return super().get_context_data(checklist=self.checklist, fields=matrix["fields"], rows=rows, **kwargs)
+
+
+class EvaluationWalkthroughView(EvaluationChecklistMixin, EvaluationManagerRequiredMixin, View):
+    """Step through every player due a fresh look under this checklist, one
+    at a time -- evaluations.services.walkthrough_queue's own "re-confirm,
+    not first-timers" population. Deliberately stateless: submitting an
+    evaluation is enough to drop that player out of the queue (their newest
+    evaluation is now after the cutoff), so re-fetching the queue after each
+    save naturally serves up whoever's next -- there's no session/progress
+    row to maintain, and refreshing or navigating away loses nothing."""
+
+    template_name = "management/evaluation_walkthrough.html"
+
+    def next_player(self, cutoff_date, skip_ids=()):
+        queue = list(walkthrough_queue(self.checklist, cutoff_date=cutoff_date, exclude_player_ids=skip_ids))
+        if not queue:
+            return None, 0
+        return Member.objects.get(pk=queue[0]["player_id"]), len(queue)
+
+    def blocked_reason(self):
+        if not self.checklist.is_active:
+            return "archived"
+        if current_rubric_form(self.checklist) is None:
+            return "no_rubric"
+        if current_season(self.request.club) is None:
+            return "no_season"
+        return None
+
+    def skip_ids_from(self, raw):
+        return [value for value in raw.split(",") if value]
+
+    def get(self, request, *args, **kwargs):
+        reason = self.blocked_reason()
+        if reason:
+            return render(request, self.template_name, {"checklist": self.checklist, "blocked_reason": reason})
+
+        start_form = EvaluationWalkthroughStartForm(request.GET or None)
+        skip_ids = self.skip_ids_from(request.GET.get("skip", ""))
+        context = {"checklist": self.checklist, "start_form": start_form, "skip_param": ",".join(skip_ids)}
+        if start_form.is_bound and start_form.is_valid():
+            cutoff_date = start_form.cleaned_data["cutoff_date"]
+            player, remaining = self.next_player(cutoff_date, skip_ids)
+            context.update(cutoff_date=cutoff_date, player=player, remaining=remaining)
+            if player is not None:
+                context["form"] = build_form(current_rubric_form(self.checklist))
+                context["skip_url"] = f"{reverse('management:evaluation_walkthrough', args=[self.checklist.slug])}?cutoff_date={cutoff_date}&skip={','.join([*skip_ids, str(player.pk)])}"
+        return render(request, self.template_name, context)
+
+    def post(self, request, *args, **kwargs):
+        reason = self.blocked_reason()
+        cutoff_date = request.POST.get("cutoff_date", "")
+        redirect_url = f"{reverse('management:evaluation_walkthrough', args=[self.checklist.slug])}?cutoff_date={cutoff_date}"
+        if reason:
+            return redirect(redirect_url)
+
+        player = get_object_or_404(Member, pk=request.POST.get("player_pk"))
+        rubric = current_rubric_form(self.checklist)
+        evaluator = Member.objects.filter(user=request.user).first()
+        try:
+            submit_evaluation(club=request.club, checklist=self.checklist, player=player, season=current_season(request.club), evaluator=evaluator, data=request.POST, files=request.FILES)
+        except EvaluationSubmissionError:
+            bound_form = build_form(rubric, data=request.POST, files=request.FILES)
+            bound_form.is_valid()
+            skip_ids = self.skip_ids_from(request.POST.get("skip", ""))
+            _next_player, remaining = self.next_player(cutoff_date, skip_ids)
+            skip_url = f"{reverse('management:evaluation_walkthrough', args=[self.checklist.slug])}?cutoff_date={cutoff_date}&skip={','.join([*skip_ids, str(player.pk)])}"
+            context = {
+                "checklist": self.checklist,
+                "start_form": EvaluationWalkthroughStartForm(initial={"cutoff_date": cutoff_date}),
+                "cutoff_date": cutoff_date,
+                "player": player,
+                "remaining": remaining,
+                "form": bound_form,
+                "skip_param": ",".join(skip_ids),
+                "skip_url": skip_url,
+            }
+            return render(request, self.template_name, context)
+
+        notify(request, f"s|{_('Evaluation saved')}|{_('Evaluation for “%(member)s” saved.') % {'member': player}}")
+        # Skip list resets after a save -- it's a "not right now" queue for
+        # this sitting, not a permanent exclusion; anyone still overdue
+        # after this cutoff will simply be offered again next time.
+        return redirect(redirect_url)
 
 
 class EvaluationCreateView(EvaluationManagerRequiredMixin, View):
-    """Score one player against the club's current rubric -- reachable only
-    from that player's own member page (management/member_detail.html's
-    Evaluations section), not a standalone list. Renders the rubric as a
-    plain dynamic Form (formbuilder.services.form_factory.build_form) and
-    hands the submitted data straight to evaluations.services.
-    submit_evaluation, which does the actual validating/persisting -- this
-    view's only job is wiring the request to that service and surfacing what
-    it reports back."""
+    """Score one player against one of the club's checklists -- reachable
+    only from that player's own member page (management/member_detail.html's
+    Evaluations section), not a standalone list. With exactly one active,
+    configured checklist it's picked automatically (unchanged from before a
+    club could have more than one); with several, a picker screen is shown
+    first. Renders the chosen checklist's rubric as a plain dynamic Form
+    (formbuilder.services.form_factory.build_form) and hands the submitted
+    data straight to evaluations.services.submit_evaluation, which does the
+    actual validating/persisting -- this view's only job is wiring the
+    request to that service and surfacing what it reports back."""
 
     template_name = "management/evaluation_form.html"
     blocked_template_name = "management/evaluation_blocked.html"
+    picker_template_name = "management/evaluation_checklist_picker.html"
 
     def get_member(self):
         # Not members_visible_to() -- for a non-admin that narrows to the
@@ -6336,33 +6542,54 @@ class EvaluationCreateView(EvaluationManagerRequiredMixin, View):
         club_members = Member.objects.filter(Q(member_of__club=self.request.club) | Q(team_memberships__team__club=self.request.club) | Q(staff_assignments__team__club=self.request.club) | Q(roles__club=self.request.club)).distinct()
         return get_object_or_404(club_members, pk=self.kwargs["pk"])
 
+    def get_checklist(self, checklists):
+        # None here means "ambiguous, not configured" -- the caller decides
+        # what that means for GET (show the picker) vs POST (bounce back to
+        # GET, since a normal navigation never posts without a slug once
+        # more than one checklist exists).
+        slug = self.kwargs.get("checklist_slug")
+        if slug:
+            return get_object_or_404(checklists, slug=slug)
+        if checklists.count() == 1:
+            return checklists.first()
+        return None
+
     def render_blocked(self, member, reason):
-        # Never a 500 for either gap: no rubric yet (only an admin can fix
-        # that -- see EvaluationRubricView) or no season currently configured
-        # for the club (nothing to file the evaluation under at all).
+        # Never a 500 for either gap: no checklist configured yet (only an
+        # admin can fix that -- see EvaluationChecklistListView) or no
+        # season currently configured for the club (nothing to file the
+        # evaluation under at all).
         return render(self.request, self.blocked_template_name, {"member": member, "reason": reason})
 
     def get(self, request, *args, **kwargs):
         member = self.get_member()
-        rubric = current_rubric_form(request.club)
-        if rubric is None:
+        checklists = active_checklists(request.club).exclude(form=None)
+        if not checklists.exists():
             return self.render_blocked(member, "no_rubric")
+
+        checklist = self.get_checklist(checklists)
+        if checklist is None:
+            return render(request, self.picker_template_name, {"member": member, "checklists": checklists})
+
         if current_season(request.club) is None:
             return self.render_blocked(member, "no_season")
-        return render(request, self.template_name, {"member": member, "form": build_form(rubric)})
+        return render(request, self.template_name, {"member": member, "checklist": checklist, "form": build_form(current_rubric_form(checklist))})
 
     def post(self, request, *args, **kwargs):
         member = self.get_member()
-        rubric = current_rubric_form(request.club)
-        if rubric is None:
-            return self.render_blocked(member, "no_rubric")
+        checklists = active_checklists(request.club).exclude(form=None)
+        checklist = self.get_checklist(checklists)
+        if checklist is None:
+            return redirect("management:evaluation_create", pk=member.pk)
+
+        rubric = current_rubric_form(checklist)
         season = current_season(request.club)
         if season is None:
             return self.render_blocked(member, "no_season")
 
         evaluator = Member.objects.filter(user=request.user).first()
         try:
-            submit_evaluation(club=request.club, player=member, season=season, evaluator=evaluator, data=request.POST, files=request.FILES)
+            submit_evaluation(club=request.club, checklist=checklist, player=member, season=season, evaluator=evaluator, data=request.POST, files=request.FILES)
         except EvaluationRubricNotConfigured:
             return self.render_blocked(member, "no_rubric")
         except EvaluationSubmissionError:
@@ -6376,7 +6603,7 @@ class EvaluationCreateView(EvaluationManagerRequiredMixin, View):
             # pass on this identical Form/data pair, so nothing to duplicate.
             bound_form = build_form(rubric, data=request.POST, files=request.FILES)
             bound_form.is_valid()
-            return render(request, self.template_name, {"member": member, "form": bound_form})
+            return render(request, self.template_name, {"member": member, "checklist": checklist, "form": bound_form})
 
         notify(request, f"s|{_('Evaluation saved')}|{_('Evaluation for “%(member)s” saved.') % {'member': member}}")
         return redirect("management:member_detail", pk=member.pk)
@@ -6391,7 +6618,7 @@ class EvaluationDetailView(EvaluationManagerRequiredMixin, DetailView):
     context_object_name = "evaluation"
 
     def get_queryset(self):
-        return PlayerEvaluation.objects.filter(club=self.request.club).select_related("player", "season", "submission", "submission__member", "submission__send__form")
+        return PlayerEvaluation.objects.filter(club=self.request.club).select_related("player", "season", "checklist", "submission", "submission__member", "submission__send__form")
 
     def get_context_data(self, **kwargs):
         evaluation = self.object

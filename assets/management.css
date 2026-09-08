@@ -964,9 +964,17 @@
 
     /* The club crest mark -- a circle fallback for a club with no logo uploaded (see
        controlpanel.css's own .crest, which settled on a circle over the design's original
-       hexagon after it read as a "5-pointed" shape rather than a shield in practice). */
+       hexagon after it read as a "5-pointed" shape rather than a shield in practice). A
+       real uploaded Club.logo also sits on a plain white backing here (not just the
+       fallback's bg-club) -- crest artwork is designed against white, and club branding
+       often has transparent edges, so leaving this unset lets the dark sidebar bleed
+       through instead (see mobile-desktop.css's .desktop-crest for the fuller version of
+       this comment -- same reasoning, shared across all three crest surfaces so the same
+       logo file crops the same way everywhere). bg-club (a later Tailwind utility) still
+       wins on the fallback span, same layering as .app-crest-fallback in mobile.css. */
     .crest {
         border-radius: 999px;
+        background: #fff;
     }
 
     /* "Place in" big team buttons on the Sign-up page (signup_list.html) -- a plain

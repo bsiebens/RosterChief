@@ -8,32 +8,49 @@ from members.models import Member
 from rosterchief.base import ClubScopedModel, validate_club_scope
 
 
-class EvaluationSettings(ClubScopedModel):
-    """Which formbuilder.Form is *the* current evaluation rubric for this club --
-    one row per club (see the unique constraint below), created lazily the
-    first time a club admin builds/edits their rubric (see
-    evaluations.services.current_rubric_form).
+class EvaluationChecklist(ClubScopedModel):
+    """One named, independently-versioned rubric for this club (e.g. "U8",
+    "U10", "Goalkeepers") -- a club can run several side by side, each
+    scoring a different cohort of players against its own set of criteria.
+    Formerly ``EvaluationSettings``, a singleton-per-club row; renamed and
+    given a name/slug once evaluations grew to support more than one
+    checklist per club.
 
-    Swapping the rubric re-points ``form`` at a new Form (see
+    ``form`` points at the formbuilder.Form backing this checklist's
+    *current* version, created lazily the first time an admin builds/edits
+    its rubric (see evaluations.services.current_rubric_form). Swapping the
+    rubric re-points ``form`` at a new Form (see
     evaluations.services.start_new_rubric_version) rather than mutating the
     existing one's Fields in place -- existing PlayerEvaluations keep
     referencing their Submission's original Form/Fields (already immutable
     once a Submission exists, via formbuilder's own FK shape), so an old
     evaluation still renders with the questions it was actually scored
-    against.
+    against. There is deliberately no FK from Form back to EvaluationChecklist
+    (formbuilder stays unaware evaluations exist at all, same reasoning as
+    evaluations.services' own module docstring) -- PlayerEvaluation.checklist
+    is what lets a checklist's past versions be found again, by walking its
+    own evaluations rather than Form.
     """
 
-    form = models.ForeignKey(Form, on_delete=models.PROTECT, related_name="evaluation_settings_for", verbose_name=_("form"))
+    name = models.CharField(_("name"), max_length=255)
+    slug = models.SlugField(_("slug"), blank=True)
+    description = models.TextField(_("description"), blank=True, help_text=_("Optional notes for whoever picks a checklist -- e.g. which age group or squad it's meant for."))
+    is_active = models.BooleanField(_("is active?"), default=True, help_text=_("Whether this checklist can still be picked for a new evaluation. Existing evaluations against it are unaffected."))
+    order = models.PositiveIntegerField(_("order"), default=0)
+    form = models.ForeignKey(Form, on_delete=models.PROTECT, related_name="evaluation_checklists_for", null=True, blank=True, verbose_name=_("form"))
+
+    slug_source = "name"
 
     class Meta:
-        verbose_name = _("evaluation settings")
-        verbose_name_plural = _("evaluation settings")
+        verbose_name = _("evaluation checklist")
+        verbose_name_plural = _("evaluation checklists")
+        ordering = ["order", "name"]
         constraints = [
-            models.UniqueConstraint(fields=["club"], name="unique_evaluation_settings_per_club"),
+            models.UniqueConstraint(fields=["club", "slug"], name="unique_evaluation_checklist_slug_per_club"),
         ]
 
     def __str__(self):
-        return f"{self.club} evaluation settings"
+        return f"{self.club} - {self.name}"
 
     def clean(self):
         validate_club_scope(self, self.club_id, same_club_fields=("form",))
@@ -64,6 +81,14 @@ class PlayerEvaluation(ClubScopedModel):
 
     player = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="evaluations_received", verbose_name=_("player"))
     season = models.ForeignKey(Season, on_delete=models.PROTECT, related_name="player_evaluations", verbose_name=_("season"))
+    #: Denormalized like ``club`` above, and for the same reason: this is what
+    #: lets a checklist's evaluations be found across every version of its
+    #: Form (each edit is a brand-new Form row -- see EvaluationChecklist's
+    #: own docstring), and what the statistics/results-matrix/walkthrough
+    #: views (evaluations.services) group and filter by. PROTECT -- a
+    #: checklist with evaluations against it can be deactivated but not
+    #: deleted out from under them.
+    checklist = models.ForeignKey(EvaluationChecklist, on_delete=models.PROTECT, related_name="evaluations", verbose_name=_("checklist"))
     #: CASCADE: a PlayerEvaluation has no meaning once its own Submission (the
     #: evaluator's actual answers) is gone -- there is nothing left to show.
     submission = models.OneToOneField("formbuilder.Submission", on_delete=models.CASCADE, related_name="player_evaluation", verbose_name=_("submission"))
@@ -82,6 +107,6 @@ class PlayerEvaluation(ClubScopedModel):
         return f"{self.player} - {self.season}"
 
     def clean(self):
-        validate_club_scope(self, self.club_id, member_fields=("player",))
+        validate_club_scope(self, self.club_id, member_fields=("player",), same_club_fields=("checklist",))
         if self.submission_id and self.submission.send.club_id != self.club_id:
             raise ValidationError({"submission": _("Must belong to the same club.")})

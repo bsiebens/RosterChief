@@ -426,15 +426,15 @@
                 {% if rubric_configured %}
                     <a class="btn btn-outline btn-sm gap-2" href="{% url 'management:evaluation_create' member.pk %}">{% lucide "plus" size=14 %} {% trans "New evaluation" %}</a>
                 {% elif is_club_admin %}
-                    <a class="btn btn-outline btn-sm gap-2" href="{% url 'management:evaluation_rubric' %}">{% lucide "list-checks" size=14 %} {% trans "Set up rubric" %}</a>
+                    <a class="btn btn-outline btn-sm gap-2" href="{% url 'management:evaluation_checklist_list' %}">{% lucide "list-checks" size=14 %} {% trans "Set up a checklist" %}</a>
                 {% endif %}
             </div>
             {% if not rubric_configured %}
                 <p class="text-sm text-muted">
                     {% if is_club_admin %}
-                        {% trans "Set up the club's evaluation rubric before scoring any player." %}
+                        {% trans "Set up at least one evaluation checklist before scoring any player." %}
                     {% else %}
-                        {% trans "This club hasn't set up an evaluation rubric yet -- ask an admin to set one up." %}
+                        {% trans "This club hasn't set up any evaluation checklist yet -- ask an admin to set one up." %}
                     {% endif %}
                 </p>
             {% elif not player_evaluations %}
@@ -443,6 +443,7 @@
                 <table class="table">
                     <thead>
                         <tr>
+                            <th>{% trans "Checklist" %}</th>
                             <th>{% trans "Season" %}</th>
                             <th>{% trans "Evaluator" %}</th>
                             <th>{% trans "Date" %}</th>
@@ -452,6 +453,7 @@
                     <tbody>
                         {% for evaluation in player_evaluations %}
                             <tr>
+                                <td>{{ evaluation.checklist.name }}</td>
                                 <td>{{ evaluation.season }}</td>
                                 <td>{{ evaluation.submission.member|default:"—" }}</td>
                                 <td class="font-mono text-xs">{{ evaluation.created|date:"d M Y" }}</td>

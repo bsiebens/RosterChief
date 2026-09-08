@@ -1,0 +1,30 @@
+{% extends "management/base.html" %}
+{% load i18n lucide %}
+
+{% comment %}
+    EvaluationCreateView's own "which checklist?" step -- shown only when the
+    club has more than one active, configured checklist to choose between;
+    with exactly one it's skipped entirely (see the view's own docstring).
+{% endcomment %}
+{% block panel_title %}{% blocktrans with name=member.get_full_name %}Evaluate {{ name }}{% endblocktrans %}{% endblock panel_title %}
+{% block heading %}{% blocktrans with name=member.get_full_name %}Evaluate {{ name }}{% endblocktrans %}{% endblock heading %}
+
+{% block actions %}
+    <a class="btn btn-outline gap-2" href="{% url 'management:member_detail' member.pk %}">{% lucide "arrow-left" size=16 %} {% trans "Back" %}</a>
+{% endblock actions %}
+
+{% block panel %}
+    <div class="card card-body">
+        <h2 class="card-title">{% lucide "list-checks" size=18 %} {% trans "Which checklist?" %}</h2>
+        <p class="text-sm text-muted">{% trans "This club has more than one evaluation checklist -- pick which one to score this player against." %}</p>
+        <div class="mt-2 flex flex-col gap-2">
+            {% for checklist in checklists %}
+                <a class="btn btn-outline justify-start gap-2" href="{% url 'management:evaluation_create_for_checklist' member.pk checklist.slug %}">
+                    {% lucide "clipboard-list" size=16 %}
+                    <span class="flex-1 text-left">{{ checklist.name }}</span>
+                    {% if checklist.description %}<span class="text-xs text-muted">{{ checklist.description }}</span>{% endif %}
+                </a>
+            {% endfor %}
+        </div>
+    </div>
+{% endblock panel %}

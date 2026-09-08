@@ -59,9 +59,9 @@
             <aside class="sticky top-0 flex h-screen w-[236px] shrink-0 flex-col overflow-y-auto bg-sidebar-bg py-5">
                 <a class="flex items-center gap-2.5 px-[18px] pb-[22px]" href="{% url 'management:home' %}">
                     {% if club.logo %}
-                        <img class="crest h-[30px] w-7 shrink-0 object-cover" src="{{ club.logo.url }}" alt="">
+                        <img class="crest h-[30px] w-[30px] shrink-0 object-cover" src="{{ club.logo.url }}" alt="">
                     {% else %}
-                        <span class="crest flex h-[30px] w-7 shrink-0 items-center justify-center bg-club">
+                        <span class="crest flex h-[30px] w-[30px] shrink-0 items-center justify-center bg-club">
                             <span class="font-display text-[10px] font-extrabold text-club-content">{{ club.initials }}</span>
                         </span>
                     {% endif %}

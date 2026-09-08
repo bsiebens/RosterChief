@@ -30,7 +30,7 @@
         </a>
     {% else %}
         <div class="m-card p-4 text-center text-sm text-muted">
-            {% trans "This club hasn't set up an evaluation form yet." %}
+            {% trans "This club hasn't set up an evaluation checklist yet." %}
         </div>
     {% endif %}
 
@@ -39,8 +39,8 @@
             {% if not forloop.first %}<div class="h-px bg-rule"></div>{% endif %}
             <a class="flex items-center gap-3 p-3.5" href="{% url "mobile:coach_evaluation_detail" player.pk evaluation.pk %}">
                 <div class="min-w-0 flex-1">
-                    <div class="text-[15px] font-semibold text-ink">{{ evaluation.submission.member|default:_("Unknown evaluator") }}</div>
-                    <div class="text-xs text-muted">{{ evaluation.season }} &middot; {{ evaluation.created|date:"d M Y" }}</div>
+                    <div class="text-[15px] font-semibold text-ink">{{ evaluation.checklist.name }}</div>
+                    <div class="text-xs text-muted">{{ evaluation.submission.member|default:_("Unknown evaluator") }} &middot; {{ evaluation.season }} &middot; {{ evaluation.created|date:"d M Y" }}</div>
                 </div>
                 {% lucide "chevron-right" size=18 class="shrink-0 text-dim" %}
             </a>

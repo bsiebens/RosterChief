@@ -1,0 +1,94 @@
+{% extends "management/base.html" %}
+{% load i18n lucide %}
+
+{% block panel_title %}{% blocktrans with name=checklist.name %}{{ name }} statistics{% endblocktrans %}{% endblock panel_title %}
+{% block heading %}{% blocktrans with name=checklist.name %}{{ name }} statistics{% endblocktrans %}{% endblock heading %}
+
+{% block actions %}
+    <a class="btn btn-outline gap-2" href="{% url 'management:evaluation_checklist_list' %}">{% lucide "arrow-left" size=16 %} {% trans "All checklists" %}</a>
+{% endblock actions %}
+
+{% block panel %}
+    {% include "management/_evaluation_checklist_tabs.html" with active_tab="stats" %}
+
+    <div class="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <div class="grid grid-cols-3 gap-4">
+            <div class="card card-body">
+                <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Evaluations" %}</div>
+                <div class="mt-1 font-display text-[22px] leading-none font-extrabold text-ink">{{ total_evaluations }}</div>
+            </div>
+            <div class="card card-body">
+                <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Players" %}</div>
+                <div class="mt-1 font-display text-[22px] leading-none font-extrabold text-ink">{{ unique_players }}</div>
+            </div>
+            <div class="card card-body">
+                <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Evaluators" %}</div>
+                <div class="mt-1 font-display text-[22px] leading-none font-extrabold text-ink">{{ unique_evaluators }}</div>
+            </div>
+        </div>
+        <div class="join">
+            <a class="btn btn-sm join-item {% if not show_all_seasons %}btn-active{% endif %}" href="?">{% if season %}{{ season }}{% else %}{% trans "Current season" %}{% endif %}</a>
+            <a class="btn btn-sm join-item {% if show_all_seasons %}btn-active{% endif %}" href="?season=all">{% trans "All-time" %}</a>
+        </div>
+    </div>
+
+    {% if not rows %}
+        <div class="card card-body">
+            <p class="text-sm text-muted">{% trans "No criteria on this checklist yet, or no evaluations to summarize." %}</p>
+        </div>
+    {% endif %}
+
+    <div class="flex flex-col gap-4">
+        {% for row in rows %}
+            <div class="card card-body">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                    <h2 class="card-title">{{ row.field.label }}</h2>
+                    <span class="badge badge-neutral">{% blocktrans count counter=row.response_count %}{{ counter }} response{% plural %}{{ counter }} responses{% endblocktrans %}</span>
+                </div>
+
+                {% if row.kind == "numeric" %}
+                    {% if row.average is not None %}
+                        <div class="mt-2 grid grid-cols-3 gap-4">
+                            <div>
+                                <div class="text-xs text-muted uppercase">{% trans "Average" %}</div>
+                                <div class="font-display text-lg font-extrabold text-ink">{{ row.average|floatformat:1 }}</div>
+                            </div>
+                            <div>
+                                <div class="text-xs text-muted uppercase">{% trans "Lowest" %}</div>
+                                <div class="font-display text-lg font-extrabold text-ink">{{ row.minimum|floatformat:0 }}</div>
+                            </div>
+                            <div>
+                                <div class="text-xs text-muted uppercase">{% trans "Highest" %}</div>
+                                <div class="font-display text-lg font-extrabold text-ink">{{ row.maximum|floatformat:0 }}</div>
+                            </div>
+                        </div>
+                    {% else %}
+                        <p class="mt-2 text-sm text-dim">{% trans "No responses yet." %}</p>
+                    {% endif %}
+                {% elif row.kind == "distribution" %}
+                    <div class="mt-2 flex flex-col gap-1">
+                        {% for option, count in row.distribution %}
+                            <div class="flex items-center gap-2 text-sm">
+                                <span class="w-32 shrink-0 truncate">{{ option }}</span>
+                                <div class="bg-base-200 h-2 flex-1 overflow-hidden rounded">
+                                    <div class="bg-primary h-2" style="width: {% widthratio count row.response_count 100 %}%"></div>
+                                </div>
+                                <span class="w-8 shrink-0 text-right font-mono text-xs">{{ count }}</span>
+                            </div>
+                        {% empty %}
+                            <p class="text-sm text-dim">{% trans "No responses yet." %}</p>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <div class="mt-2 flex flex-col gap-1">
+                        {% for answer in row.recent_answers %}
+                            <p class="border-rule border-b pb-1 text-sm text-ink last:border-0">{{ answer }}</p>
+                        {% empty %}
+                            <p class="text-sm text-dim">{% trans "No responses yet." %}</p>
+                        {% endfor %}
+                    </div>
+                {% endif %}
+            </div>
+        {% endfor %}
+    </div>
+{% endblock panel %}

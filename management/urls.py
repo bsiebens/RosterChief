@@ -218,9 +218,16 @@ urlpatterns = [
     path("forms/<uuid:form_pk>/sends/<uuid:pk>/responses/", views.FormSendResponsesView.as_view(), name="formsend_responses"),
     path("forms/<uuid:form_pk>/sends/<uuid:pk>/responses/export/", views.FormSendResponsesExportView.as_view(), name="formsend_responses_export"),
     # Evaluations (see ARCHITECTURE.md §5.8)
-    path("evaluations/rubric/", views.EvaluationRubricView.as_view(), name="evaluation_rubric"),
-    path("evaluations/<uuid:pk>/", views.EvaluationDetailView.as_view(), name="evaluation_detail"),
+    path("evaluations/", views.EvaluationChecklistListView.as_view(), name="evaluation_checklist_list"),
+    path("evaluations/new/", views.EvaluationChecklistCreateView.as_view(), name="evaluation_checklist_create"),
+    path("evaluations/<slug:checklist_slug>/archive/", views.EvaluationChecklistArchiveView.as_view(), name="evaluation_checklist_archive"),
+    path("evaluations/<slug:checklist_slug>/rubric/", views.EvaluationRubricView.as_view(), name="evaluation_rubric"),
+    path("evaluations/<slug:checklist_slug>/stats/", views.EvaluationStatsView.as_view(), name="evaluation_stats"),
+    path("evaluations/<slug:checklist_slug>/matrix/", views.EvaluationMatrixView.as_view(), name="evaluation_matrix"),
+    path("evaluations/<slug:checklist_slug>/walkthrough/", views.EvaluationWalkthroughView.as_view(), name="evaluation_walkthrough"),
+    path("evaluations/entries/<uuid:pk>/", views.EvaluationDetailView.as_view(), name="evaluation_detail"),
     path("members/<uuid:pk>/evaluations/new/", views.EvaluationCreateView.as_view(), name="evaluation_create"),
+    path("members/<uuid:pk>/evaluations/new/<slug:checklist_slug>/", views.EvaluationCreateView.as_view(), name="evaluation_create_for_checklist"),
     # Settings (admin only)
     path("settings/", views.ClubSettingsView.as_view(), name="club_settings"),
     path("settings/email-previews/<str:key>/render/", views.EmailPreviewRenderView.as_view(), name="email_preview_render"),

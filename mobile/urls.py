@@ -59,5 +59,6 @@ urlpatterns = [
     path("coach/lineup/<uuid:event_id>/publish/", coach_views.CoachLineupPublishView.as_view(), name="coach_lineup_publish"),
     path("coach/evaluations/<uuid:player_pk>/", coach_evaluation_views.CoachEvaluationHistoryView.as_view(), name="coach_evaluation_history"),
     path("coach/evaluations/<uuid:player_pk>/new/", coach_evaluation_views.CoachEvaluationCreateView.as_view(), name="coach_evaluation_create"),
+    path("coach/evaluations/<uuid:player_pk>/new/<slug:checklist_slug>/", coach_evaluation_views.CoachEvaluationCreateView.as_view(), name="coach_evaluation_create_for_checklist"),
     path("coach/evaluations/<uuid:player_pk>/<uuid:evaluation_pk>/", coach_evaluation_views.CoachEvaluationDetailView.as_view(), name="coach_evaluation_detail"),
 ]

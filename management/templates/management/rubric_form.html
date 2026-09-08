@@ -1,10 +1,16 @@
 {% extends "management/base.html" %}
 {% load i18n lucide static ui %}
 
-{% block panel_title %}{% trans "Evaluation rubric" %}{% endblock panel_title %}
-{% block heading %}{% trans "Evaluation rubric" %}{% endblock heading %}
+{% block panel_title %}{% blocktrans with name=checklist.name %}{{ name }} rubric{% endblocktrans %}{% endblock panel_title %}
+{% block heading %}{% blocktrans with name=checklist.name %}{{ name }} rubric{% endblocktrans %}{% endblock heading %}
+
+{% block actions %}
+    <a class="btn btn-outline gap-2" href="{% url 'management:evaluation_checklist_list' %}">{% lucide "arrow-left" size=16 %} {% trans "All checklists" %}</a>
+{% endblock actions %}
 
 {% block panel %}
+    {% include "management/_evaluation_checklist_tabs.html" with active_tab="questions" %}
+
     <form method="post">
         {% csrf_token %}
         {{ formset.management_form }}

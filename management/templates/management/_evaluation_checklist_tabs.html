@@ -1,0 +1,15 @@
+{% load i18n %}
+{% comment %}
+    Shared sub-nav for every checklist-scoped evaluations page. ``active_tab``
+    is one of "questions"/"stats"/"matrix"/"walkthrough". "Questions" is
+    ADMIN-only (rubric editing stays FeatureRequiredMixin's narrower tier),
+    the rest are open to any evaluation manager.
+{% endcomment %}
+<div class="tabs tabs-boxed mb-4">
+    {% if is_club_admin %}
+        <a href="{% url 'management:evaluation_rubric' checklist.slug %}" class="tab {% if active_tab == "questions" %}tab-active{% endif %}">{% trans "Questions" %}</a>
+    {% endif %}
+    <a href="{% url 'management:evaluation_stats' checklist.slug %}" class="tab {% if active_tab == "stats" %}tab-active{% endif %}">{% trans "Statistics" %}</a>
+    <a href="{% url 'management:evaluation_matrix' checklist.slug %}" class="tab {% if active_tab == "matrix" %}tab-active{% endif %}">{% trans "Results" %}</a>
+    <a href="{% url 'management:evaluation_walkthrough' checklist.slug %}" class="tab {% if active_tab == "walkthrough" %}tab-active{% endif %}">{% trans "Walkthrough" %}</a>
+</div>

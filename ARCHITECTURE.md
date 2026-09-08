@@ -45,7 +45,7 @@ labels to `known-first-party` in `pyproject.toml` when they land. The target dec
 | `formbuilder`    | **partial**  | Admin-defined dynamic forms + submissions + reporting — models, dynamic-form-class builder, and the submit service are built (§5.6); no view/template renders a form for someone to fill in yet | `Form`, `Field`, `Submission`, `Answer` |
 | `shop`           | planned      | Cart-like shop, orders, payments, PDF invoices            | `Product`, `Cart`, `CartItem`, `Order`, `OrderLine`, `Payment`, `Invoice` |
 | `search`         | planned      | Site search (likely no models; index/config only)         | — |
-| `evaluations`    | **partial** | Player evaluations: customizable rubric (reuses `formbuilder`), restricted to ADMIN/`EvaluationManager` grant, player profile (skills + notes) (§5.8) — models/services/migrations built; management + mobile UI in progress | `EvaluationSettings`, `PlayerEvaluation` |
+| `evaluations`    | **built**   | Player evaluations: multiple named, independently-versioned checklists per club (reuses `formbuilder`), restricted to ADMIN/`EvaluationManager` grant, per-question statistics + a results matrix + a re-confirm walkthrough, player profile (§5.8) | `EvaluationChecklist`, `PlayerEvaluation` |
 
 **`User` stays global** (one login identity across the whole platform); everything else
 that belongs to a club is tenant-scoped (§2.4). This is why `Member` — a *person within a
@@ -1128,49 +1128,86 @@ per-member entitlements would extend this — add an eligibility rule / code fie
 auto-apply service on top of the same model when that need is real, rather than a parallel
 mechanism.
 
-### 5.8 `evaluations` — player evaluations  *(built — models/services; management + mobile UI in progress)*
+### 5.8 `evaluations` — player evaluations  *(built)*
 
-Coaching-staff-only assessment of a player: a customizable rubric (skills, ratings, notes),
-club-wide and versioned over time, feeding a player profile alongside their attendance
-history — **never visible to the evaluated player or their guardians**, and gated behind a
-per-club `"evaluations"` waffle flag (off by default — see the migration note below).
+Coaching-staff-only assessment of a player against one of the club's **checklists** — a
+customizable rubric (skills, ratings, notes), independently versioned over time, feeding a
+player profile alongside their attendance history — **never visible to the evaluated player
+or their guardians**, and gated behind a per-club `"evaluations"` waffle flag (off by
+default — see the migration note below).
 
 **Built on `formbuilder` (§5.6), not a parallel form engine.** `formbuilder`'s `Form`/
 `Field`/`Submission`/`Answer` already do everything a rubric needs (admin-defined fields,
 normalized answers, a dynamic-form-class builder) — reuse them literally. The one thing
-`formbuilder` can't express is *who the submission is about*: `Submission.member` is the
-**submitter** (here, the evaluator), and a generic form has no notion of a separate subject.
-Rather than growing `formbuilder.Submission` an evaluation-specific field, `evaluations`
-owns a thin envelope that pairs a `Submission` with the player it was about — as built:
+`formbuilder` can't express is *who the submission is about*, or which of a club's several
+checklists it was scored against: `Submission.member` is the **submitter** (here, the
+evaluator), and a generic form has no notion of a separate subject or a checklist grouping.
+Rather than growing `formbuilder.Submission` evaluation-specific fields, `evaluations` owns a
+thin envelope that pairs a `Submission` with the player and checklist it was about — as
+built:
 
 ```
-EvaluationSettings(ClubScopedModel)     # which Form is *the* current rubric, one row per club
-  form   FK formbuilder.Form (PROTECT)
-  Meta: UniqueConstraint(fields=["club"])
+EvaluationChecklist(ClubScopedModel)    # one named, independently-versioned rubric per club
+  name          CharField
+  slug          SlugField (slug_source = "name")
+  description   TextField (blank)
+  is_active     BooleanField (default True)   # retire without deleting history
+  order         PositiveIntegerField
+  form          FK formbuilder.Form (PROTECT, null=True)   # current version
+  Meta: UniqueConstraint(fields=["club", "slug"])
 
-PlayerEvaluation(ClubScopedModel)       # the "this was about whom, which season" envelope
+PlayerEvaluation(ClubScopedModel)       # the "this was about whom, which checklist/season" envelope
   player      FK members.Member (CASCADE, related_name="evaluations_received")
+  checklist   FK EvaluationChecklist (PROTECT, related_name="evaluations")
   season      FK club.Season (PROTECT)
   submission  OneToOne FK formbuilder.Submission (CASCADE)  # evaluator + Answers live here
   Meta: ordering = ["-created"]
 ```
 
-Two deltas from the original sketch, resolved while building: **no `team` FK** — evaluations
-are club-wide per member, not scoped to one roster stint (a per-team games-played stat, if
-ever added, can compute live from `Attendance`/`TeamMembership` without one) — and both
-models carry their own explicit `club` FK (`ClubScopedModel`) rather than relying on
+Formerly a single `EvaluationSettings` singleton-per-club row (renamed `EvaluationChecklist`
+once a club needed more than one rubric side by side, e.g. "U8"/"U10"). Two deltas from the
+original sketch, resolved while first building this: **no `team` FK** — evaluations are
+club-wide per member, not scoped to one roster stint (a per-team games-played stat, if ever
+added, can compute live from `Attendance`/`TeamMembership` without one) — and every model
+here carries its own explicit `club` FK (`ClubScopedModel`) rather than relying on
 `player`'s/`submission`'s transitively, since management views query "every evaluation for
 this club" directly, unlike `formbuilder.Answer` which only ever reaches `Form` by joining
-through `Submission`.
+through `Submission`. `PlayerEvaluation.checklist` is denormalized the same way: it's what
+lets a checklist's evaluations be found across *every version* of its `Form` (each edit is a
+brand-new `Form` row — formbuilder itself stays unaware a "checklist" concept exists at all),
+and what the statistics/results-matrix/walkthrough views group and filter by.
 
 - **Rubric changes don't corrupt history.** `evaluations.services.start_new_rubric_version`
-  copies the current `Form`'s `Field`s onto a brand-new `Form` and re-points
-  `EvaluationSettings.form` at it — **every edit auto-versions** (no separate draft/publish
-  step): existing `PlayerEvaluation`s keep referencing their original `Submission`'s `Form`/
-  `Field`s (immutable once created — nothing ever mutates a past version's `Field` rows), so
-  an old evaluation still renders with the questions it was actually scored against.
-- **One rubric, club-wide** (not per team/age-group) — simplest, and keeps every age group
-  on a comparable scale. Revisit only if a club actually needs per-team rubrics.
+  copies the current `Form`'s `Field`s onto a brand-new `Form` and re-points a checklist's
+  `form` at it — **every edit auto-versions** (no separate draft/publish step): existing
+  `PlayerEvaluation`s keep referencing their original `Submission`'s `Form`/`Field`s
+  (immutable once created — nothing ever mutates a past version's `Field` rows), so an old
+  evaluation still renders with the questions it was actually scored against. `Field.key` is
+  copied verbatim across versions, which is what lets statistics match a question across a
+  checklist's whole version history rather than just its current one.
+- **Multiple named checklists per club**, each independently versioned (e.g. "U8", "U10") —
+  picked manually per evaluation (no team/age-group mapping; that's a documented, deliberate
+  simplification, revisit if clubs ask for auto-selection). With exactly one active,
+  configured checklist it's picked automatically and the flow is unchanged from the original
+  one-rubric-per-club design; with several, a picker screen is shown first.
+- **Per-question statistics** (`evaluations.services.question_stats`), spanning a checklist's
+  whole version history: count/average/min/max for numeric criteria, a response breakdown for
+  choice-type ones, a response count + recent-answers feed for free text. Default season
+  scope with an all-time toggle.
+- **Results matrix** (`evaluations.services.results_matrix`) — one row per player ever
+  evaluated against a checklist, one column per current question, each cell that player's
+  *latest* answer: a way to spot who's missing a score at a glance.
+- **Walkthrough** (`evaluations.services.walkthrough_queue`) — a re-confirm queue, not a way
+  to find first-timers: everyone with at least one evaluation on a checklist whose *newest*
+  one predates an evaluator-chosen cutoff date, most-overdue first. Deliberately stateless
+  (no session/progress row) — submitting an evaluation is itself what drops a player out of
+  the next fetch of the queue. A per-run "skip for now" list (threaded through the page, not
+  persisted) keeps an overdue player from being re-offered repeatedly in one sitting. Scoped
+  strictly to one checklist's own evaluations: a player moving up a level (e.g. U8 → U10)
+  getting a fresh U10 evaluation doesn't retroactively resolve a stale U8 entry for them — in
+  practice nobody keeps filing new U8 evaluations for a promoted player, so their U8 entry
+  just goes untouched; archiving a checklist is the deliberate way to stop offering its
+  walkthrough at all.
 - **Submission plumbing, not a real audience broadcast.** `formbuilder.Submission.send` is a
   mandatory FK to a `FormSend`, so `evaluations.services._evaluation_send_for` gets/creates
   one shadow `FormSend` per rubric `Form` — deliberately `club_wide=False` with no teams/
@@ -1320,11 +1357,13 @@ specified in **§8**.
   (checkout-date anchor, recommended, frozen total) or by *paying* before it (payment-date
   anchor, mutable total)? Doc implements checkout-date; confirm no club needs the literal
   "paid before date" semantics (§5.7.1).
-- **Player evaluations** (§5.8) — models/services built, confirmed: no `team` FK (club-wide
-  per member), `EvaluationManager` is an additive grant (not `ClubRole.EVALUATOR`), several
-  evaluators may each leave their own entry for the same player/season (no uniqueness
-  constraint — a feature, not a bug), and rubric edits auto-version on every save (no
-  separate draft/publish step). Management + mobile UI still in progress.
+- **Player evaluations** (§5.8) — built, confirmed: no `team` FK (club-wide per member),
+  `EvaluationManager` is an additive grant (not `ClubRole.EVALUATOR`), several evaluators may
+  each leave their own entry for the same player/season (no uniqueness constraint — a
+  feature, not a bug), rubric edits auto-version on every save (no separate draft/publish
+  step), and a club may run several independently-versioned checklists side by side, picked
+  manually per evaluation rather than mapped to a team/age-group. Revisit the manual-pick
+  choice if clubs ask for auto-selection.
 
 ---
 

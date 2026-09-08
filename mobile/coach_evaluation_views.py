@@ -20,7 +20,7 @@ that's a navigation convenience, not the access gate itself.
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.db.models import Q
 from django.http import Http404, HttpResponseForbidden, HttpResponseRedirect
-from django.shortcuts import get_object_or_404
+from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
 from django.utils.translation import gettext_lazy as _
 from django.views.generic import TemplateView
@@ -29,7 +29,7 @@ from waffle import flag_is_active
 from club.services.access import can_manage_evaluations, current_season
 from controlpanel.messages import notify
 from evaluations.models import PlayerEvaluation
-from evaluations.services import EvaluationRubricNotConfigured, EvaluationSubmissionError, current_rubric_form, submit_evaluation
+from evaluations.services import EvaluationRubricNotConfigured, EvaluationSubmissionError, active_checklists, current_rubric_form, submit_evaluation
 from formbuilder.services.form_factory import build_form
 from members.models import Member
 from teams.models import TeamMembership
@@ -98,10 +98,10 @@ class CoachEvaluationHistoryView(CoachEvaluationMixin, TemplateView):
     """One player's past evaluations, most recent first (PlayerEvaluation's
     own default ordering) -- reached from the Squad screen's per-player
     detail sheet (roster_member.html's "Evaluations" row). Renders a "no
-    evaluation form has been set up for this club yet" notice instead of a
-    "New evaluation" button when the club has no current rubric
-    (evaluations.services.current_rubric_form), rather than linking to a
-    create screen that would only 404.
+    evaluation checklist has been set up for this club yet" notice instead
+    of a "New evaluation" button when the club has no checklist with a
+    rubric built yet, rather than linking to a create screen that would
+    only 404.
     """
 
     template_name = "mobile/coach/evaluation_history.html"
@@ -109,21 +109,23 @@ class CoachEvaluationHistoryView(CoachEvaluationMixin, TemplateView):
 
     def get_context_data(self, **kwargs):
         player = self.get_player()
-        evaluations = list(PlayerEvaluation.objects.filter(club=self.request.club, player=player).select_related("submission__member", "season"))
+        evaluations = list(PlayerEvaluation.objects.filter(club=self.request.club, player=player).select_related("submission__member", "season", "checklist"))
         return super().get_context_data(
             player=player,
             evaluations=evaluations,
-            rubric_configured=current_rubric_form(self.request.club) is not None,
+            rubric_configured=active_checklists(self.request.club).exclude(form=None).exists(),
             membership=self.get_membership(player),
             **kwargs,
         )
 
 
 class CoachEvaluationCreateView(CoachEvaluationMixin, TemplateView):
-    """Fill in a new evaluation of one player against the club's current
-    rubric -- see evaluations.services.submit_evaluation. The evaluator is
-    always the signed-in account's own Member (self.me, resolved by
-    CoachScopeMixin), never a field on the form.
+    """Fill in a new evaluation of one player against one of the club's
+    checklists -- see evaluations.services.submit_evaluation. The evaluator
+    is always the signed-in account's own Member (self.me, resolved by
+    CoachScopeMixin), never a field on the form. With exactly one active,
+    configured checklist it's picked automatically; with several, a picker
+    screen is shown first (mirrors management.views.EvaluationCreateView).
 
     A rejected POST re-renders the same screen with the dynamic form's own
     field-level errors attached -- same idiom as mobile.views.FormFillView's
@@ -133,29 +135,47 @@ class CoachEvaluationCreateView(CoachEvaluationMixin, TemplateView):
     """
 
     template_name = "mobile/coach/evaluation_form.html"
+    picker_template_name = "mobile/coach/evaluation_checklist_picker.html"
     screen_title = _("New evaluation")
+
+    def get_checklist(self, checklists):
+        slug = self.kwargs.get("checklist_slug")
+        if slug:
+            return get_object_or_404(checklists, slug=slug)
+        if checklists.count() == 1:
+            return checklists.first()
+        return None
 
     def get(self, request, *args, **kwargs):
         player = self.get_player()
-        rubric_form = current_rubric_form(request.club)
-        bound_form = style_dynamic_form(build_form(rubric_form)) if rubric_form is not None else None
-        return self.render_to_response(self.get_context_data(player=player, rubric_configured=rubric_form is not None, form=bound_form))
+        checklists = active_checklists(request.club).exclude(form=None)
+        if not checklists.exists():
+            return self.render_to_response(self.get_context_data(player=player, rubric_configured=False))
+
+        checklist = self.get_checklist(checklists)
+        if checklist is None:
+            return render(request, self.picker_template_name, self.get_context_data(player=player, checklists=checklists))
+
+        bound_form = style_dynamic_form(build_form(current_rubric_form(checklist)))
+        return self.render_to_response(self.get_context_data(player=player, checklist=checklist, rubric_configured=True, form=bound_form))
 
     def post(self, request, *args, **kwargs):
         player = self.get_player()
-        rubric_form = current_rubric_form(request.club)
-        if rubric_form is None:
-            raise Http404("This club hasn't set up an evaluation form yet.")
+        checklists = active_checklists(request.club).exclude(form=None)
+        checklist = self.get_checklist(checklists)
+        if checklist is None:
+            return HttpResponseRedirect(reverse("mobile:coach_evaluation_create", kwargs={"player_pk": player.pk}))
 
+        rubric_form = current_rubric_form(checklist)
         try:
-            submit_evaluation(club=request.club, player=player, season=current_season(request.club), evaluator=self.me, data=request.POST, files=request.FILES)
+            submit_evaluation(club=request.club, checklist=checklist, player=player, season=current_season(request.club), evaluator=self.me, data=request.POST, files=request.FILES)
         except EvaluationRubricNotConfigured as error:
-            raise Http404("This club hasn't set up an evaluation form yet.") from error
+            raise Http404("This checklist hasn't been set up yet.") from error
         except EvaluationSubmissionError as error:
             bound_form = style_dynamic_form(build_form(rubric_form, data=request.POST, files=request.FILES))
             bound_form.is_valid()
             notify(request, f"e|{_('Could not submit')}|{error}")
-            return self.render_to_response(self.get_context_data(player=player, rubric_configured=True, form=bound_form))
+            return self.render_to_response(self.get_context_data(player=player, checklist=checklist, rubric_configured=True, form=bound_form))
 
         title = _("Evaluation submitted")
         body = _("Your evaluation of “%(player)s” has been recorded.") % {"player": player}
@@ -178,7 +198,7 @@ class CoachEvaluationDetailView(CoachEvaluationMixin, TemplateView):
 
     def get_evaluation(self):
         return get_object_or_404(
-            PlayerEvaluation.objects.filter(club=self.request.club, player_id=self.kwargs["player_pk"]).select_related("player", "season", "submission__member", "submission__send__form"),
+            PlayerEvaluation.objects.filter(club=self.request.club, player_id=self.kwargs["player_pk"]).select_related("player", "season", "checklist", "submission__member", "submission__send__form"),
             pk=self.kwargs["evaluation_pk"],
         )
 

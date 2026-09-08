@@ -64,7 +64,7 @@
                     {% if club.logo %}
                         <img class="desktop-crest object-cover" src="{{ club.logo.url }}" alt="">
                     {% else %}
-                        <span class="desktop-crest">{{ club.initials }}</span>
+                        <span class="desktop-crest desktop-crest-fallback">{{ club.initials }}</span>
                     {% endif %}
                 </a>
                 <a href="{% url "mobile:home" %}" class="min-w-0">
@@ -115,12 +115,30 @@
 
             <div class="flex-1"></div>
 
-            <div class="flex items-center gap-2.5 border-t px-[18px] pt-[14px]" style="border-color: var(--color-sidebar-hairline)">
-                {% include "mobile/_avatar.html" with person=me size_class="h-8 w-8" text_class="text-xs" bg_class="bg-steel" %}
-                <div class="min-w-0">
-                    <div class="truncate text-[13px] font-semibold text-white">{{ me.get_full_name }}</div>
-                    <a class="block font-mono text-[10px]" style="color: var(--color-sidebar-fg-faint)" href="{% url "account_logout" %}" hx-boost="false">{% trans "Log out" %}</a>
-                </div>
+            <div class="border-t px-[18px] pt-[14px]" style="border-color: var(--color-sidebar-hairline)">
+                {% comment %}
+                    <details>, not a click-driven dropdown -- same pattern as
+                    management/base.html's own user menu (see its comment): no JS
+                    needed to open it, only the shared outside-click/Escape listener
+                    below to close it. Opens upward for the same reason -- the
+                    trigger sits at the bottom of the sidebar.
+                {% endcomment %}
+                <details id="user-menu" class="dismissable-details relative">
+                    <summary class="flex cursor-pointer list-none items-center gap-2.5 [&::-webkit-details-marker]:hidden">
+                        {% include "mobile/_avatar.html" with person=me size_class="h-8 w-8" text_class="text-xs" bg_class="bg-steel" %}
+                        <span class="min-w-0 flex-1">
+                            <span class="block truncate text-[13px] font-semibold text-white">{{ me.get_full_name }}</span>
+                            <span class="block font-mono text-[10px] text-sidebar-fg-faint">{% trans "Account" %}</span>
+                        </span>
+                        {% lucide "chevron-up" size=14 class="shrink-0 text-sidebar-fg-faint" %}
+                    </summary>
+                    <div class="absolute bottom-full left-0 z-20 mb-2 w-full rounded-xl border border-sidebar-hairline bg-sidebar-bg p-1.5 shadow-lg">
+                        <a class="flex items-center gap-2 rounded-lg px-2.5 py-2 text-[13px] font-medium text-sidebar-fg-dim hover:bg-sidebar-hairline hover:text-sidebar-fg" href="{% url "account_change_password" %}" hx-boost="false">{% lucide "key-round" size=14 %} {% trans "Change password" %}</a>
+                        <a class="flex items-center gap-2 rounded-lg px-2.5 py-2 text-[13px] font-medium text-sidebar-fg-dim hover:bg-sidebar-hairline hover:text-sidebar-fg" href="{% url "mfa_index" %}" hx-boost="false">{% lucide "shield-check" size=14 %} {% trans "Manage two-factor auth" %}</a>
+                        <div class="my-1 h-px bg-sidebar-hairline"></div>
+                        <a class="flex items-center gap-2 rounded-lg px-2.5 py-2 text-[13px] font-medium text-sidebar-fg-dim hover:bg-sidebar-hairline hover:text-sidebar-fg" href="{% url "account_logout" %}" hx-boost="false">{% lucide "log-out" size=14 %} {% trans "Log out" %}</a>
+                    </div>
+                </details>
             </div>
         </aside>
 
@@ -164,6 +182,23 @@
         </div>
 
         <script src="{% static "js/mobile-app.js" %}" defer></script>
+        <script>
+            (() => {
+                // Same shared outside-click/Escape listener as management/base.html's
+                // own user menu -- a <details> stays open until its own <summary> is
+                // clicked again otherwise.
+                const menus = document.querySelectorAll(".dismissable-details");
+                if (!menus.length) return;
+                document.addEventListener("click", (event) => {
+                    menus.forEach((menu) => {
+                        if (menu.open && !menu.contains(event.target)) menu.open = false;
+                    });
+                });
+                document.addEventListener("keydown", (event) => {
+                    if (event.key === "Escape") menus.forEach((menu) => { menu.open = false; });
+                });
+            })();
+        </script>
         {% include "_announcement_popup.html" %}
         {% block extra_body %}{% endblock extra_body %}
     </body>

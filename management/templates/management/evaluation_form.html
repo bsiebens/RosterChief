@@ -4,6 +4,10 @@
 {% block panel_title %}{% blocktrans with name=member.get_full_name %}Evaluate {{ name }}{% endblocktrans %}{% endblock panel_title %}
 {% block heading %}{% blocktrans with name=member.get_full_name %}Evaluate {{ name }}{% endblocktrans %}{% endblock heading %}
 
+{% block topbar_context %}
+    <span class="badge badge-neutral">{{ checklist.name }}</span>
+{% endblock topbar_context %}
+
 {% block actions %}
     <a class="btn btn-outline gap-2" href="{% url 'management:member_detail' member.pk %}">{% lucide "arrow-left" size=16 %} {% trans "Back" %}</a>
 {% endblock actions %}

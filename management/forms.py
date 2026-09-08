@@ -9,6 +9,7 @@ from django.utils.translation import gettext_lazy as _
 
 from club.models import Club, ClubMembership, ClubRole, FeePayment, OnboardingRequirement, Season, Sponsor
 from club.services.access import groups_manageable_by, is_club_admin, teams_managed_by
+from evaluations.models import EvaluationChecklist
 from events.models import Competition, Event, EventOfficial, EventReferee, EventSeries, EventTask, Location, Opponent
 from events.services.officials import officials_enabled_for
 from events.services.rbihf_import import RBIHFImportError, extract_team_id
@@ -1845,6 +1846,31 @@ class BaseRubricCriterionFormSet(forms.BaseFormSet):
 
 
 RubricCriterionFormSet = forms.formset_factory(RubricCriterionForm, formset=BaseRubricCriterionFormSet, extra=3)
+
+
+class EvaluationChecklistForm(forms.ModelForm):
+    """Name/description/active editor for one EvaluationChecklist -- the
+    criteria themselves are edited separately via RubricCriterionFormSet
+    (EvaluationRubricView), same split as FormBuilderForm/FormBuilderFieldForm."""
+
+    class Meta:
+        model = EvaluationChecklist
+        fields = ["name", "description", "is_active", "order"]
+        widgets = {
+            "name": forms.TextInput(attrs={"class": "input input-bordered w-full", "placeholder": _("e.g. U8")}),
+            "description": forms.Textarea(attrs={"class": "textarea textarea-bordered w-full", "rows": 2, "placeholder": _("Optional -- which age group or squad this is for")}),
+            "order": forms.NumberInput(attrs={"class": "input input-bordered w-24"}),
+        }
+
+
+class EvaluationWalkthroughStartForm(forms.Form):
+    """Picks the cutoff date for one run of the "go through by name" helper
+    -- evaluations.services.walkthrough_queue's own docstring covers why this
+    is entered per run rather than a fixed club setting: every member whose
+    newest evaluation on this checklist predates the date entered here is
+    due another look."""
+
+    cutoff_date = forms.DateField(label=_("Show players last evaluated before"), widget=forms.DateInput(attrs={"class": "input input-bordered w-full", "type": "date"}))
 
 
 class FormBuilderFieldForm(forms.ModelForm):

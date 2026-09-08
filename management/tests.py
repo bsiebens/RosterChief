@@ -25,7 +25,7 @@ from bugs.models import BugNote, BugReport
 from club.models import Club, ClubMembership, ClubRole, DuesInvoice, EvaluationManager, FeePayment, MemberRequirementStatus, OnboardingRequirement, Season, ShopManager, Sponsor
 from club.services.invoicing import DuesInvoicePDFError, create_or_resend_invoice
 from club.services.onboarding import mark_complete
-from evaluations.models import EvaluationSettings, PlayerEvaluation
+from evaluations.models import EvaluationChecklist, PlayerEvaluation
 from evaluations.services import current_rubric_form
 from events.models import Attendance, Competition, Event, EventReferee, EventSeries, EventTask, EventTaskClaim, Location, Opponent, RefereeSignup
 from events.services.calendar import week_bounds
@@ -8111,11 +8111,13 @@ class EvaluationManagementTestBase(ManagementTestBase):
         TeamMembership.objects.create(team=team, member=self.player, season=self.season)
         return staff_user
 
-    def make_rubric(self):
+    def make_rubric(self, name="Default"):
+        checklist = EvaluationChecklist.objects.create(club=self.club, name=name)
         form_obj = FormBuilderForm.objects.create(club=self.club, title="Evaluation form")
         FormBuilderField.objects.create(form=form_obj, label="Ball control", field_type=FormBuilderField.FieldType.NUMBER, order=1)
-        EvaluationSettings.objects.create(club=self.club, form=form_obj)
-        return form_obj
+        checklist.form = form_obj
+        checklist.save(update_fields=["form"])
+        return checklist
 
 
 class EvaluationFeatureGatingTests(EvaluationManagementTestBase):
@@ -8125,27 +8127,31 @@ class EvaluationFeatureGatingTests(EvaluationManagementTestBase):
     (ADMIN or an EvaluationManager grant)."""
 
     def test_rubric_view_404s_when_the_flag_is_off(self):
+        checklist = self.make_rubric()
         get_waffle_flag_model().objects.filter(name="evaluations").first().clubs.remove(self.club)
         self.client.force_login(self.admin_user)
 
-        self.assertEqual(self.club_get("evaluation_rubric").status_code, 404)
+        self.assertEqual(self.club_get("evaluation_rubric", checklist.slug).status_code, 404)
 
     def test_admin_can_reach_the_rubric_editor(self):
+        checklist = self.make_rubric()
         self.client.force_login(self.admin_user)
 
-        self.assertEqual(self.club_get("evaluation_rubric").status_code, 200)
+        self.assertEqual(self.club_get("evaluation_rubric", checklist.slug).status_code, 200)
 
     def test_evaluation_manager_gets_403_on_the_rubric_editor(self):
         # Rubric editing is narrower than EvaluationManagerRequiredMixin --
         # only ADMIN may redefine what everyone scores players against.
+        checklist = self.make_rubric()
         self.client.force_login(self.eval_manager_user)
 
-        self.assertEqual(self.club_get("evaluation_rubric").status_code, 403)
+        self.assertEqual(self.club_get("evaluation_rubric", checklist.slug).status_code, 403)
 
     def test_plain_staff_gets_403_on_the_rubric_editor(self):
+        checklist = self.make_rubric()
         self.client.force_login(self.make_plain_staff())
 
-        self.assertEqual(self.club_get("evaluation_rubric").status_code, 403)
+        self.assertEqual(self.club_get("evaluation_rubric", checklist.slug).status_code, 403)
 
     def test_evaluation_manager_can_open_the_new_evaluation_form(self):
         self.make_rubric()
@@ -8196,31 +8202,35 @@ class EvaluationRubricViewTests(EvaluationManagementTestBase):
         return data
 
     def test_first_save_creates_a_rubric_from_nothing(self):
+        checklist = EvaluationChecklist.objects.create(club=self.club, name="Default")
         self.client.force_login(self.admin_user)
         data = self.rubric_post_data(
             row0={"label": "Ball control", "field_type": "number", "required": "on", "help_text": "", "options": "", "order": "1"},
         )
 
-        response = self.club_post("evaluation_rubric", data)
+        response = self.club_post("evaluation_rubric", data, checklist.slug)
 
-        self.assertRedirects(response, reverse("management:evaluation_rubric"))
-        form_obj = current_rubric_form(self.club)
+        self.assertRedirects(response, reverse("management:evaluation_rubric", args=[checklist.slug]))
+        checklist.refresh_from_db()
+        form_obj = current_rubric_form(checklist)
         self.assertIsNotNone(form_obj)
         field = form_obj.fields.get()
         self.assertEqual(field.label, "Ball control")
         self.assertEqual(field.key, "ball-control")
 
     def test_saving_an_edit_creates_a_new_version_and_keeps_the_old_one_intact(self):
-        original = self.make_rubric()
+        checklist = self.make_rubric()
+        original = checklist.form
         self.client.force_login(self.admin_user)
         data = self.rubric_post_data(
             row0={"label": "Ball control", "field_type": "number", "required": "on", "help_text": "", "options": "", "order": "1"},
             row1={"label": "Passing", "field_type": "number", "required": "on", "help_text": "", "options": "", "order": "2"},
         )
 
-        self.club_post("evaluation_rubric", data)
+        self.club_post("evaluation_rubric", data, checklist.slug)
 
-        new_form = current_rubric_form(self.club)
+        checklist.refresh_from_db()
+        new_form = current_rubric_form(checklist)
         self.assertNotEqual(new_form.pk, original.pk)
         self.assertEqual(list(new_form.fields.order_by("order").values_list("label", flat=True)), ["Ball control", "Passing"])
         # The old version's own Field is untouched -- an already-scored
@@ -8228,45 +8238,50 @@ class EvaluationRubricViewTests(EvaluationManagementTestBase):
         self.assertTrue(original.fields.filter(label="Ball control").exists())
 
     def test_a_blank_row_is_dropped(self):
+        checklist = EvaluationChecklist.objects.create(club=self.club, name="Default")
         self.client.force_login(self.admin_user)
         data = self.rubric_post_data(
             row0={"label": "Ball control", "field_type": "number", "required": "on", "help_text": "", "options": "", "order": "1"},
             row1={"label": "", "field_type": "number", "required": "", "help_text": "", "options": "", "order": "2"},
         )
 
-        self.club_post("evaluation_rubric", data)
+        self.club_post("evaluation_rubric", data, checklist.slug)
 
-        self.assertEqual(current_rubric_form(self.club).fields.count(), 1)
+        checklist.refresh_from_db()
+        self.assertEqual(current_rubric_form(checklist).fields.count(), 1)
 
     def test_clearing_every_row_is_rejected(self):
-        self.make_rubric()
+        checklist = self.make_rubric()
         self.client.force_login(self.admin_user)
         data = self.rubric_post_data(row0={"label": "", "field_type": "number", "required": "", "help_text": "", "options": "", "order": "1"})
 
-        response = self.club_post("evaluation_rubric", data)
+        response = self.club_post("evaluation_rubric", data, checklist.slug)
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Add at least one criterion")
 
     def test_a_choice_criterion_without_options_is_rejected(self):
+        checklist = EvaluationChecklist.objects.create(club=self.club, name="Default")
         self.client.force_login(self.admin_user)
         data = self.rubric_post_data(row0={"label": "Overall", "field_type": "choice", "required": "on", "help_text": "", "options": "", "order": "1"})
 
-        response = self.club_post("evaluation_rubric", data)
+        response = self.club_post("evaluation_rubric", data, checklist.slug)
 
         self.assertEqual(response.status_code, 200)
-        self.assertIsNone(current_rubric_form(self.club))
+        self.assertIsNone(current_rubric_form(checklist))
 
     def test_reordering_rows_persists_the_new_order(self):
+        checklist = EvaluationChecklist.objects.create(club=self.club, name="Default")
         self.client.force_login(self.admin_user)
         data = self.rubric_post_data(
             row0={"label": "Passing", "field_type": "number", "required": "on", "help_text": "", "options": "", "order": "2"},
             row1={"label": "Ball control", "field_type": "number", "required": "on", "help_text": "", "options": "", "order": "1"},
         )
 
-        self.club_post("evaluation_rubric", data)
+        self.club_post("evaluation_rubric", data, checklist.slug)
 
-        labels = list(current_rubric_form(self.club).fields.order_by("order").values_list("label", flat=True))
+        checklist.refresh_from_db()
+        labels = list(current_rubric_form(checklist).fields.order_by("order").values_list("label", flat=True))
         self.assertEqual(labels, ["Ball control", "Passing"])
 
 
@@ -8279,7 +8294,7 @@ class EvaluationCreateViewTests(EvaluationManagementTestBase):
         response = self.club_get("evaluation_create", self.player.pk)
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "hasn't set up an evaluation rubric")
+        self.assertContains(response, "hasn't set up any evaluation checklist yet")
 
     def test_submitting_a_valid_evaluation_saves_it(self):
         self.make_rubric()
@@ -8312,6 +8327,206 @@ class EvaluationCreateViewTests(EvaluationManagementTestBase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "no current season")
+
+    def test_a_single_active_checklist_is_picked_automatically(self):
+        self.make_rubric("U8")
+        self.client.force_login(self.eval_manager_user)
+
+        response = self.club_get("evaluation_create", self.player.pk)
+
+        self.assertContains(response, "U8")
+        self.assertNotContains(response, "Which checklist?")
+
+    def test_several_active_checklists_show_a_picker(self):
+        self.make_rubric("U8")
+        self.make_rubric("U10")
+        self.client.force_login(self.eval_manager_user)
+
+        response = self.club_get("evaluation_create", self.player.pk)
+
+        self.assertContains(response, "Which checklist?")
+        self.assertContains(response, "U8")
+        self.assertContains(response, "U10")
+
+    def test_picking_a_checklist_from_the_picker_scores_against_it(self):
+        self.make_rubric("U8")
+        u10 = self.make_rubric("U10")
+        self.client.force_login(self.eval_manager_user)
+
+        response = self.club_post("evaluation_create_for_checklist", {"ball-control": "7"}, self.player.pk, u10.slug)
+
+        self.assertRedirects(response, reverse("management:member_detail", args=[self.player.pk]))
+        evaluation = PlayerEvaluation.objects.get(club=self.club, player=self.player)
+        self.assertEqual(evaluation.checklist, u10)
+
+    def test_an_archived_checklist_is_not_offered(self):
+        checklist = self.make_rubric("U8")
+        checklist.is_active = False
+        checklist.save(update_fields=["is_active"])
+        self.client.force_login(self.eval_manager_user)
+
+        response = self.club_get("evaluation_create", self.player.pk)
+
+        self.assertContains(response, "hasn't set up any evaluation checklist yet")
+
+
+class EvaluationChecklistListViewTests(EvaluationManagementTestBase):
+    def test_admin_sees_add_and_archive_actions(self):
+        self.make_rubric("U8")
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("evaluation_checklist_list")
+
+        self.assertContains(response, "New checklist")
+        self.assertContains(response, "Archive")
+
+    def test_evaluation_manager_reaches_the_list_but_not_admin_actions(self):
+        self.make_rubric("U8")
+        self.client.force_login(self.eval_manager_user)
+
+        response = self.club_get("evaluation_checklist_list")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "New checklist")
+        self.assertNotContains(response, ">Archive<")
+
+    def test_plain_staff_gets_403(self):
+        self.client.force_login(self.make_plain_staff())
+
+        self.assertEqual(self.club_get("evaluation_checklist_list").status_code, 403)
+
+
+class EvaluationChecklistCreateViewTests(EvaluationManagementTestBase):
+    def test_admin_can_create_a_checklist_and_lands_on_its_rubric_editor(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("evaluation_checklist_create", {"name": "U8", "description": "", "is_active": "on", "order": "0"})
+
+        checklist = EvaluationChecklist.objects.get(club=self.club, name="U8")
+        self.assertRedirects(response, reverse("management:evaluation_rubric", args=[checklist.slug]))
+
+    def test_evaluation_manager_gets_403(self):
+        self.client.force_login(self.eval_manager_user)
+
+        response = self.club_post("evaluation_checklist_create", {"name": "U8", "description": "", "is_active": "on", "order": "0"})
+
+        self.assertEqual(response.status_code, 403)
+
+
+class EvaluationChecklistArchiveViewTests(EvaluationManagementTestBase):
+    def test_admin_can_archive_and_reactivate(self):
+        checklist = self.make_rubric("U8")
+        self.client.force_login(self.admin_user)
+
+        self.club_post("evaluation_checklist_archive", {}, checklist.slug)
+        checklist.refresh_from_db()
+        self.assertFalse(checklist.is_active)
+
+        self.club_post("evaluation_checklist_archive", {}, checklist.slug)
+        checklist.refresh_from_db()
+        self.assertTrue(checklist.is_active)
+
+    def test_evaluation_manager_gets_403(self):
+        checklist = self.make_rubric("U8")
+        self.client.force_login(self.eval_manager_user)
+
+        response = self.club_post("evaluation_checklist_archive", {}, checklist.slug)
+
+        self.assertEqual(response.status_code, 403)
+
+
+class EvaluationStatsViewTests(EvaluationManagementTestBase):
+    def test_reports_numeric_averages_for_the_current_season(self):
+        checklist = self.make_rubric("U8")
+        self.client.force_login(self.eval_manager_user)
+        self.club_post("evaluation_create_for_checklist", {"ball-control": "6"}, self.player.pk, checklist.slug)
+
+        response = self.club_get("evaluation_stats", checklist.slug)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Ball control")
+        self.assertContains(response, "6.0")
+
+    def test_evaluation_manager_can_reach_stats_without_admin(self):
+        checklist = self.make_rubric("U8")
+        self.client.force_login(self.eval_manager_user)
+
+        self.assertEqual(self.club_get("evaluation_stats", checklist.slug).status_code, 200)
+
+    def test_plain_staff_gets_403(self):
+        checklist = self.make_rubric("U8")
+        self.client.force_login(self.make_plain_staff())
+
+        self.assertEqual(self.club_get("evaluation_stats", checklist.slug).status_code, 403)
+
+
+class EvaluationMatrixViewTests(EvaluationManagementTestBase):
+    def test_shows_the_players_latest_answer(self):
+        checklist = self.make_rubric("U8")
+        self.client.force_login(self.eval_manager_user)
+        self.club_post("evaluation_create_for_checklist", {"ball-control": "3"}, self.player.pk, checklist.slug)
+        self.club_post("evaluation_create_for_checklist", {"ball-control": "9"}, self.player.pk, checklist.slug)
+
+        response = self.club_get("evaluation_matrix", checklist.slug)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, self.player.get_full_name())
+        self.assertContains(response, "9")
+
+
+class EvaluationWalkthroughViewTests(EvaluationManagementTestBase):
+    def _backdate(self, evaluation, days):
+        PlayerEvaluation.objects.filter(pk=evaluation.pk).update(created=timezone.now() - datetime.timedelta(days=days))
+
+    def test_shows_a_player_whose_evaluation_predates_the_cutoff(self):
+        checklist = self.make_rubric("U8")
+        self.client.force_login(self.eval_manager_user)
+        self.club_post("evaluation_create_for_checklist", {"ball-control": "5"}, self.player.pk, checklist.slug)
+        self._backdate(PlayerEvaluation.objects.get(club=self.club, player=self.player, checklist=checklist), days=10)
+
+        today = datetime.date.today().isoformat()
+        response = self.club_get("evaluation_walkthrough", checklist.slug, params={"cutoff_date": today})
+
+        self.assertContains(response, self.player.get_full_name())
+
+    def test_nobody_shown_when_nothing_predates_the_cutoff(self):
+        checklist = self.make_rubric("U8")
+        self.client.force_login(self.eval_manager_user)
+        self.club_post("evaluation_create_for_checklist", {"ball-control": "5"}, self.player.pk, checklist.slug)
+
+        yesterday = (datetime.date.today() - datetime.timedelta(days=1)).isoformat()
+        response = self.club_get("evaluation_walkthrough", checklist.slug, params={"cutoff_date": yesterday})
+
+        self.assertContains(response, "Nobody")
+
+    def test_submitting_saves_and_the_player_drops_out_of_the_queue(self):
+        checklist = self.make_rubric("U8")
+        self.client.force_login(self.eval_manager_user)
+        self.club_post("evaluation_create_for_checklist", {"ball-control": "5"}, self.player.pk, checklist.slug)
+        self._backdate(PlayerEvaluation.objects.get(club=self.club, player=self.player, checklist=checklist), days=10)
+
+        today = datetime.date.today().isoformat()
+        response = self.club_post(
+            "evaluation_walkthrough",
+            {"cutoff_date": today, "player_pk": str(self.player.pk), "skip": "", "ball-control": "8"},
+            checklist.slug,
+        )
+
+        self.assertRedirects(response, f"{reverse('management:evaluation_walkthrough', args=[checklist.slug])}?cutoff_date={today}")
+        self.assertEqual(PlayerEvaluation.objects.filter(club=self.club, player=self.player, checklist=checklist).count(), 2)
+
+        follow_up = self.club_get("evaluation_walkthrough", checklist.slug, params={"cutoff_date": today})
+        self.assertContains(follow_up, "Nobody")
+
+    def test_archived_checklist_shows_a_blocked_message(self):
+        checklist = self.make_rubric("U8")
+        checklist.is_active = False
+        checklist.save(update_fields=["is_active"])
+        self.client.force_login(self.eval_manager_user)
+
+        response = self.club_get("evaluation_walkthrough", checklist.slug)
+
+        self.assertContains(response, "archived")
 
 
 class EvaluationDetailViewTests(EvaluationManagementTestBase):
