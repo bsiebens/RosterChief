@@ -1,0 +1,170 @@
+{% load static i18n lucide ui %}
+
+{% comment %}
+    Desktop shell for Member mode -- the desktop counterpart of mobile/base.html,
+    served instead of it by mobile.mixins.DesktopTemplateMixin whenever
+    club.device.is_mobile_or_tablet(request) is False. Standalone (own
+    <!DOCTYPE>, own stylesheet: assets/mobile-desktop.css), not extending
+    mobile/base.html -- same relationship management/base.html has to
+    controlpanel/base.html: same product family, different shell for a
+    genuinely different layout (sidebar + topbar, not a bottom tab bar).
+
+    Every screen's context is identical to its mobile counterpart (same view,
+    same get_context_data) -- only the markup differs. The sidebar's nav
+    mirrors mobile's 5-item tab bar (Home/Calendar/News/Shop/Me) plus expands
+    "Me" into its own sub-items, since desktop has the width for that instead
+    of forcing everything through the Me hub page.
+
+    The Member/Manager switcher intentionally does NOT point at
+    mobile:coach_today like mobile/base.html's does -- Coach mode has no
+    desktop treatment (out of scope, see the design conversation), so
+    "Manager" here goes straight to the real desktop surface for staff,
+    management:home, gated on has_staff_access (a strict superset of
+    has_coach_access -- an EDITOR with no personal StaffAssignment still has
+    management access and should see this).
+{% endcomment %}
+<!DOCTYPE html>
+<html lang="{{ LANGUAGE_CODE|default:"en" }}">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <meta name="theme-color" content="{{ club.primary_color|default:"#101e36" }}">
+
+        <title>{% block title %}{{ screen_title }} &middot; {{ club.name }}{% endblock title %}</title>
+
+        <link rel="manifest" href="{% url "mobile:manifest" %}">
+        <link rel="icon" href="{% url "mobile:icon" size=192 %}">
+        <link rel="stylesheet" href="{% static "css/mobile-desktop.css" %}">
+
+        {% if club.secondary_color %}
+            <style>
+                :root {
+                    --tenant-club: {{ club.secondary_color }};
+                    --tenant-club-dark: color-mix(in srgb, {{ club.secondary_color }} 80%, black);
+                    --tenant-club-content: {{ club.secondary_content_color }};
+                }
+            </style>
+        {% endif %}
+        {% if club.primary_color %}
+            <style>
+                :root { --tenant-navy: {{ club.primary_color }}; }
+            </style>
+        {% endif %}
+
+        <script src="{% static "js/htmx.js" %}" defer></script>
+        <script src="{% static "js/alpine.js" %}" defer></script>
+
+        {% block extra_head %}{% endblock extra_head %}
+    </head>
+
+    <body class="flex min-h-screen bg-paper font-sans text-slate" hx-boost="true" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' data-vapid-public-key="{{ vapid_public_key }}" data-csrftoken="{{ csrf_token }}">
+        <aside class="desktop-sidebar">
+            <div class="flex items-center gap-2.5 border-b px-[18px] pb-[20px]" style="border-color: var(--color-sidebar-hairline)">
+                <a href="{% url "mobile:home" %}">
+                    {% if club.logo %}
+                        <img class="desktop-crest object-cover" src="{{ club.logo.url }}" alt="">
+                    {% else %}
+                        <span class="desktop-crest">{{ club.initials }}</span>
+                    {% endif %}
+                </a>
+                <a href="{% url "mobile:home" %}" class="min-w-0">
+                    <span class="block truncate font-display text-base font-extrabold tracking-wide text-white uppercase">{{ club.name }}</span>
+                    {% if season %}<span class="block font-mono text-[10px]" style="color: var(--color-sidebar-fg-faint)">{% blocktrans with name=season.name %}Season {{ name }}{% endblocktrans %}</span>{% endif %}
+                </a>
+            </div>
+
+            {% if has_staff_access %}
+                <div class="desktop-switcher">
+                    <span class="desktop-switcher-item desktop-switcher-item-active">{% trans "Member" %}</span>
+                    <a class="desktop-switcher-item" href="{% url "management:home" %}" hx-boost="false">{% trans "Manager" %}</a>
+                </div>
+            {% endif %}
+
+            <nav class="flex flex-col gap-0.5 px-2.5">
+                <a class="nav-item {% if active_tab == "home" %}active{% endif %}" href="{% url "mobile:home" %}">
+                    {% lucide "house" size=18 %}
+                    {% trans "Home" %}
+                </a>
+                <a class="nav-item {% if active_tab == "calendar" %}active{% endif %}" href="{% url "mobile:calendar" %}">
+                    {% lucide "calendar" size=18 %}
+                    {% trans "Calendar" %}
+                </a>
+                <a class="nav-item {% if active_tab == "news" %}active{% endif %}" href="{% url "mobile:news_list" %}">
+                    {% lucide "newspaper" size=18 %}
+                    {% trans "News" %}
+                </a>
+                {% if shop_open %}
+                    <a class="nav-item {% if active_tab == "shop" %}active{% endif %}" href="{% url "mobile:shop_home" %}">
+                        {% lucide "shopping-bag" size=18 %}
+                        {% trans "Shop" %}
+                    </a>
+                {% endif %}
+
+                <div class="desktop-nav-section">
+                    {% lucide "user" size=13 %}
+                    {% trans "Me" %}
+                </div>
+                <a class="nav-subitem {% if request.resolver_match.url_name == "me" %}active{% endif %}" href="{% url "mobile:me" %}">{% trans "Overview" %}</a>
+                <a class="nav-subitem {% if request.resolver_match.url_name == "edit_profile" %}active{% endif %}" href="{% url "mobile:edit_profile" me.pk %}">{% trans "Personal details" %}</a>
+                <a class="nav-subitem {% if request.resolver_match.url_name == "payments" %}active{% endif %}" href="{% url "mobile:payments" %}">{% trans "Payments &amp; dues" %}</a>
+                <a class="nav-subitem {% if request.resolver_match.url_name == "forms_list" or request.resolver_match.url_name == "form_fill" or request.resolver_match.url_name == "form_response" %}active{% endif %}" href="{% url "mobile:forms_list" %}">{% trans "Forms" %}</a>
+                <a class="nav-subitem {% if request.resolver_match.url_name == "notifications" %}active{% endif %}" href="{% url "mobile:notifications" %}">{% trans "Notifications" %}</a>
+                <a class="nav-subitem {% if request.resolver_match.url_name == "calendar_feed_settings" %}active{% endif %}" href="{% url "mobile:calendar_feed_settings" %}">{% trans "Calendar sync" %}</a>
+                <a class="nav-subitem {% if request.resolver_match.url_name == "bug_list" %}active{% endif %}" href="{% url "mobile:bug_list" %}">{% trans "Report a bug" %}</a>
+            </nav>
+
+            <div class="flex-1"></div>
+
+            <div class="flex items-center gap-2.5 border-t px-[18px] pt-[14px]" style="border-color: var(--color-sidebar-hairline)">
+                {% include "mobile/_avatar.html" with person=me size_class="h-8 w-8" text_class="text-xs" bg_class="bg-steel" %}
+                <div class="min-w-0">
+                    <div class="truncate text-[13px] font-semibold text-white">{{ me.get_full_name }}</div>
+                    <a class="block font-mono text-[10px]" style="color: var(--color-sidebar-fg-faint)" href="{% url "account_logout" %}" hx-boost="false">{% trans "Log out" %}</a>
+                </div>
+            </div>
+        </aside>
+
+        <div class="flex min-w-0 flex-1 flex-col">
+            <header class="flex h-16 shrink-0 items-center gap-3.5 border-b border-line bg-white px-7">
+                <span class="font-display text-2xl font-extrabold text-ink uppercase">{% block page_title %}{{ screen_title }}{% endblock page_title %}</span>
+                <div class="flex-1"></div>
+                {% block header_extra %}{% endblock header_extra %}
+                <a class="desktop-icobtn" href="{% url "mobile:bug_list" %}" aria-label="{% trans "Report a bug" %}">
+                    {% lucide "bug" size=17 %}
+                </a>
+                <a class="desktop-icobtn" href="{% url "mobile:notifications" %}" aria-label="{% trans "Notifications" %}">
+                    {% lucide "bell" size=17 %}
+                    {% if unread_notification_count %}
+                        <span class="desktop-notidot">{% if unread_notification_count > 9 %}9+{% else %}{{ unread_notification_count }}{% endif %}</span>
+                    {% endif %}
+                </a>
+            </header>
+
+            <main class="flex-1">
+                <div class="flex flex-col gap-4 px-7 py-6">
+                    {% if messages %}
+                        <div class="flex flex-col gap-2">
+                            {% for message in messages %}
+                                {% with alert=message|as_alert %}
+                                    <div class="alert {{ alert.css }}" role="alert">
+                                        {% lucide alert.icon size=18 %}
+                                        <div>
+                                            <div class="font-display text-sm font-bold tracking-wide uppercase">{{ alert.title }}</div>
+                                            <div class="text-sm">{{ alert.body }}</div>
+                                        </div>
+                                    </div>
+                                {% endwith %}
+                            {% endfor %}
+                        </div>
+                    {% endif %}
+
+                    {% block content %}{% endblock content %}
+                </div>
+            </main>
+        </div>
+
+        <script src="{% static "js/mobile-app.js" %}" defer></script>
+        {% include "_announcement_popup.html" %}
+        {% block extra_body %}{% endblock extra_body %}
+    </body>
+</html>

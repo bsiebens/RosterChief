@@ -1,0 +1,33 @@
+{% extends "mobile/desktop/base.html" %}
+{% load i18n %}
+
+{% block content %}
+    {% if page.object_list %}
+        <div class="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {% for item in page.object_list %}
+                <a class="card overflow-hidden" href="{% url "mobile:news_detail" item.slug %}?from=news_list">
+                    <div class="h-32" style="background: {% if item.main_photo %}url('{{ item.main_photo.image.url }}') {{ item.main_photo.object_position }} / cover{% else %}linear-gradient(135deg, var(--color-steel), var(--color-ink)){% endif %};"></div>
+                    <div class="p-4">
+                        <div class="font-mono text-xs text-muted">{% with team=item.teams.first %}{% if team %}{{ team.name }}{% else %}{% trans "Club news" %}{% endif %}{% endwith %} &middot; {{ item.published_at|date:"d M Y" }}</div>
+                        <div class="mt-1 text-[15px] font-bold text-ink">{{ item.title }}</div>
+                    </div>
+                </a>
+            {% endfor %}
+        </div>
+
+        {% if page.has_other_pages %}
+            <div class="mt-2 flex justify-center gap-4">
+                {% if page.has_previous %}
+                    <a class="font-display text-xs font-extrabold tracking-wide text-club-dark uppercase" href="?page={{ page.previous_page_number }}">&larr; {% trans "Newer" %}</a>
+                {% endif %}
+                {% if page.has_next %}
+                    <a class="font-display text-xs font-extrabold tracking-wide text-club-dark uppercase" href="?page={{ page.next_page_number }}">{% trans "Older" %} &rarr;</a>
+                {% endif %}
+            </div>
+        {% endif %}
+    {% else %}
+        <div class="card p-6 text-center">
+            <p class="text-sm text-muted">{% trans "No news yet." %}</p>
+        </div>
+    {% endif %}
+{% endblock content %}

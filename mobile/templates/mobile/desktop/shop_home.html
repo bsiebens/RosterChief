@@ -1,0 +1,52 @@
+{% extends "mobile/desktop/base.html" %}
+{% load i18n lucide %}
+
+{% block header_extra %}
+    <a class="font-display text-xs font-bold tracking-wide text-club-dark uppercase" href="{% url "mobile:shop_orders" %}">{% trans "My orders" %}</a>
+    <a class="desktop-icobtn" href="{% url "mobile:shop_cart" %}" aria-label="{% trans "Cart" %}">
+        {% lucide "shopping-cart" size=17 %}
+        {% if cart_item_count %}
+            <span class="desktop-notidot">{% if cart_item_count > 9 %}9+{% else %}{{ cart_item_count }}{% endif %}</span>
+        {% endif %}
+    </a>
+{% endblock header_extra %}
+
+{% block content %}
+    {% trans "Other" as other_label %}
+    {% if products %}
+        {% if groups|length > 1 %}
+            <div class="flex flex-wrap gap-2">
+                {% for group in groups %}
+                    <a class="badge" href="#cat-{{ group.category.pk|default:"none" }}">{{ group.category.name|default:other_label }}</a>
+                {% endfor %}
+            </div>
+        {% endif %}
+
+        {% for group in groups %}
+            <div id="cat-{{ group.category.pk|default:"none" }}" class="flex flex-col gap-3">
+                {% if groups|length > 1 %}
+                    <div class="font-display text-xs font-extrabold tracking-wide text-muted uppercase">{{ group.category.name|default:other_label }}</div>
+                {% endif %}
+                <div class="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
+                    {% for product in group.products %}
+                        <a class="card block overflow-hidden" href="{% url "mobile:shop_product_detail" product.slug %}">
+                            {% if product.image %}
+                                <img class="h-32 w-full object-cover" src="{{ product.image.url }}" alt="">
+                            {% else %}
+                                <div class="flex h-32 items-center justify-center bg-rule text-xs text-dim">{% trans "No photo" %}</div>
+                            {% endif %}
+                            <div class="p-3.5">
+                                <div class="truncate text-sm font-semibold text-ink">{{ product.name }}</div>
+                                <div class="mt-1 font-mono text-sm text-ink">{% blocktrans with amount=product.price|floatformat:2 %}&euro; {{ amount }}{% endblocktrans %}</div>
+                            </div>
+                        </a>
+                    {% endfor %}
+                </div>
+            </div>
+        {% endfor %}
+    {% else %}
+        <div class="card p-6 text-center">
+            <p class="text-sm text-muted">{% trans "Nothing in the shop yet." %}</p>
+        </div>
+    {% endif %}
+{% endblock content %}

@@ -1,0 +1,24 @@
+{% extends "mobile/desktop/base.html" %}
+{% load i18n %}
+
+{% block content %}
+    <div class="mx-auto flex w-full max-w-[640px] flex-col gap-4">
+        <div class="flex items-center gap-2 text-xs text-muted">
+            {% if submission.member != me %}<span>{{ submission.member.first_name }} &middot;</span>{% endif %}
+            <span>{% blocktrans with date=submission.submitted_at|date:"d M Y H:i" %}Submitted {{ date }}{% endblocktrans %}</span>
+        </div>
+
+        <div class="card">
+            {% for row in rows %}
+                <div class="border-b border-rule p-4.5 last:border-b-0">
+                    <div class="mb-1 text-xs text-muted">{{ row.field.label }}</div>
+                    {% if row.display is None %}
+                        <div class="text-[15px] text-dim">{% trans "No answer" %}</div>
+                    {% else %}
+                        <div class="text-[15px] whitespace-pre-line text-ink">{{ row.display }}</div>
+                    {% endif %}
+                </div>
+            {% endfor %}
+        </div>
+    </div>
+{% endblock content %}

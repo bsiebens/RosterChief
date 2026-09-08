@@ -1,0 +1,20 @@
+{% load i18n %}
+{% comment %}
+    Desktop counterpart of mobile/_dues_row.html -- same fields, same data
+    source (club.services.fees.open_dues_rows), only `.m-card` swapped for
+    the desktop `.card` class. Expects ``row`` ({membership, balance, invoice,
+    early_payment}) in scope.
+{% endcomment %}
+<div class="card flex items-center gap-3 p-4">
+    <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-danger-bg">
+        <span class="font-display text-lg font-extrabold text-club">&euro;</span>
+    </div>
+    <div class="min-w-0 flex-1">
+        <div class="text-sm font-semibold text-ink">{% blocktrans with name=row.membership.member.first_name %}Season dues &mdash; {{ name }}{% endblocktrans %}</div>
+        {% if row.invoice %}<div class="text-xs text-muted">{% blocktrans with due=row.invoice.due_date|date:"d M" %}Due {{ due }}{% endblocktrans %}</div>{% endif %}
+        {% if row.early_payment %}
+            <div class="mt-0.5 text-xs font-medium text-ok-text">{% blocktrans with amount=row.early_payment.discount|floatformat:2 date=row.early_payment.deadline|date:"d M" %}Save &euro;{{ amount }} if paid by {{ date }}{% endblocktrans %}</div>
+        {% endif %}
+    </div>
+    <div class="shrink-0 text-right font-mono text-lg font-extrabold tabular-nums text-ink">&euro;{{ row.balance|floatformat:2 }}</div>
+</div>

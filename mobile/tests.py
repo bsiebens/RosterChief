@@ -186,6 +186,92 @@ class MobileShellTests(TestCase):
         self.assertTrue(response.context["scope_everyone"])
 
 
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class DesktopTemplateSelectionTests(TestCase):
+    """mobile.mixins.DesktopTemplateMixin -- a desktop User-Agent gets the
+    mobile/desktop/*.html counterpart of every Member-mode screen, a phone
+    UA (or none at all -- see club.device.is_mobile_or_tablet's own "empty
+    means mobile" default) keeps the existing mobile/*.html template.
+    Covers a representative screen per view-base (PersonScopeMixin,
+    ShopScopeMixin) plus BugListView, which deliberately skips both."""
+
+    DESKTOP_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
+    PHONE_UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148"
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club(shop_open=True)
+        cls.season = Season.objects.create(club=cls.club, start_date=timezone.localdate() - datetime.timedelta(days=30), end_date=timezone.localdate() + datetime.timedelta(days=300))
+        cls.user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", email="parent@example.com", user=cls.user)
+        ClubMembership.objects.create(club=cls.club, member=cls.member, season=cls.season)
+        cls.event = Event.objects.create(club=cls.club, title="Friendly", kind=Event.EventKind.OTHER, start=timezone.now() + datetime.timedelta(days=3))
+
+    def setUp(self):
+        self.client.force_login(self.user)
+
+    def test_home_gets_the_desktop_template_on_a_desktop_user_agent(self):
+        response = self.client.get(reverse("mobile:home"), HTTP_HOST="ajax-united.rosterchief.app", HTTP_USER_AGENT=self.DESKTOP_UA)
+
+        self.assertTemplateUsed(response, "mobile/desktop/home.html")
+        self.assertTemplateNotUsed(response, "mobile/home.html")
+
+    def test_home_keeps_the_mobile_template_on_a_phone_user_agent(self):
+        response = self.client.get(reverse("mobile:home"), HTTP_HOST="ajax-united.rosterchief.app", HTTP_USER_AGENT=self.PHONE_UA)
+
+        self.assertTemplateUsed(response, "mobile/home.html")
+        self.assertTemplateNotUsed(response, "mobile/desktop/home.html")
+
+    def test_home_keeps_the_mobile_template_with_no_user_agent_at_all(self):
+        response = self.client.get(reverse("mobile:home"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertTemplateUsed(response, "mobile/home.html")
+        self.assertTemplateNotUsed(response, "mobile/desktop/home.html")
+
+    def test_calendar_gets_the_desktop_template(self):
+        response = self.client.get(reverse("mobile:calendar"), HTTP_HOST="ajax-united.rosterchief.app", HTTP_USER_AGENT=self.DESKTOP_UA)
+
+        self.assertTemplateUsed(response, "mobile/desktop/calendar.html")
+
+    def test_event_detail_gets_the_desktop_template(self):
+        response = self.client.get(reverse("mobile:event_detail", args=[self.event.pk]), HTTP_HOST="ajax-united.rosterchief.app", HTTP_USER_AGENT=self.DESKTOP_UA)
+
+        self.assertTemplateUsed(response, "mobile/desktop/event_detail.html")
+
+    def test_me_gets_the_desktop_template(self):
+        response = self.client.get(reverse("mobile:me"), HTTP_HOST="ajax-united.rosterchief.app", HTTP_USER_AGENT=self.DESKTOP_UA)
+
+        self.assertTemplateUsed(response, "mobile/desktop/me.html")
+
+    def test_shop_home_gets_the_desktop_template(self):
+        response = self.client.get(reverse("mobile:shop_home"), HTTP_HOST="ajax-united.rosterchief.app", HTTP_USER_AGENT=self.DESKTOP_UA)
+
+        self.assertTemplateUsed(response, "mobile/desktop/shop_home.html")
+
+    def test_bug_list_gets_the_desktop_template_despite_skipping_person_scope_mixin(self):
+        response = self.client.get(reverse("mobile:bug_list"), HTTP_HOST="ajax-united.rosterchief.app", HTTP_USER_AGENT=self.DESKTOP_UA)
+
+        self.assertTemplateUsed(response, "mobile/desktop/bug_list.html")
+        self.assertContains(response, "Report a bug")
+
+    def test_bug_list_keeps_the_mobile_template_on_a_phone_user_agent(self):
+        response = self.client.get(reverse("mobile:bug_list"), HTTP_HOST="ajax-united.rosterchief.app", HTTP_USER_AGENT=self.PHONE_UA)
+
+        self.assertTemplateUsed(response, "mobile/bug_list.html")
+
+    def test_manager_switcher_on_desktop_links_straight_to_management_not_coach_mode(self):
+        today = timezone.localdate()
+        current_season = Season.objects.create(club=self.club, start_date=today - datetime.timedelta(days=10), end_date=today + datetime.timedelta(days=300))
+        team = Team.objects.create(club=self.club, name="U16", short_name="U16")
+        position = Position.objects.create(club=self.club, name="Head coach", short_name="HC", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=team, member=self.member, season=current_season, position=position)
+
+        response = self.client.get(reverse("mobile:home"), HTTP_HOST="ajax-united.rosterchief.app", HTTP_USER_AGENT=self.DESKTOP_UA)
+
+        self.assertContains(response, reverse("management:home"))
+        self.assertNotContains(response, reverse("mobile:coach_today"))
+
+
 @override_settings(
     VAPID_PRIVATE_KEY="",
     ROSTERCHIEF_BASE_DOMAIN="rosterchief.app",

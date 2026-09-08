@@ -1,0 +1,30 @@
+{% load i18n %}
+{% comment %}
+    Desktop counterpart of mobile/_hero_rsvp.html -- same forms, same fields,
+    same Alpine state; only the surrounding classes changed (this renders
+    inside desktop/home.html's own dark hero card, same ink/navy tone family).
+    Expects ``hero_attendance`` in scope.
+{% endcomment %}
+<div x-data="{ asking: false, reason: '{{ hero_attendance.note|default:""|escapejs }}' }">
+    <div class="flex gap-2" x-show="!asking">
+        <form method="post" action="{% url "mobile:event_detail" hero_attendance.event.pk %}" hx-boost="false">
+            {% csrf_token %}
+            <input type="hidden" name="member_id" value="{{ hero_attendance.member.pk }}">
+            <input type="hidden" name="status" value="present">
+            <button class="btn border {% if hero_attendance.status == "present" %}btn-success border-transparent{% else %}border-white/30 bg-steel text-white{% endif %}" type="submit">{% trans "In" %}</button>
+        </form>
+        <button class="btn border {% if hero_attendance.status == "absent" %}btn-error border-transparent{% else %}border-white/30 bg-steel text-white{% endif %}" type="button" @click="asking = true">{% trans "Out" %}</button>
+    </div>
+
+    <form x-show="asking" x-cloak class="rounded-lg border border-white/30 bg-steel/60 p-3" method="post" action="{% url "mobile:event_detail" hero_attendance.event.pk %}" hx-boost="false">
+        {% csrf_token %}
+        <input type="hidden" name="member_id" value="{{ hero_attendance.member.pk }}">
+        <input type="hidden" name="status" value="absent">
+        <label class="mb-1 block text-xs font-semibold text-white">{% trans "Reason -- only you and the coach can see this" %}</label>
+        <textarea class="h-16 w-64 rounded-lg border border-white/20 bg-black/20 p-2 text-sm text-white placeholder:text-on-dark" name="note" x-model="reason" required minlength="2" placeholder="{% trans "e.g. sick, family event..." %}"></textarea>
+        <div class="mt-2 flex gap-2">
+            <button class="btn border border-white/30 bg-steel text-white" type="button" @click="asking = false">{% trans "Cancel" %}</button>
+            <button class="btn btn-primary" type="submit">{% trans "Confirm" %}</button>
+        </div>
+    </form>
+</div>

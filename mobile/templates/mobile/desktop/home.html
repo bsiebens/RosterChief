@@ -1,0 +1,176 @@
+{% extends "mobile/desktop/base.html" %}
+{% load i18n lucide %}
+
+{% block content %}
+    {% if managed_people|length > 1 %}
+        <div class="flex flex-wrap gap-2">
+            <a class="badge {% if scope_everyone %}badge-neutral{% endif %}" href="?as=all">{% trans "All" %}</a>
+            {% for person in managed_people %}
+                <a class="badge {% if not scope_everyone and person == scope_person %}badge-neutral{% endif %}" href="?as={{ person.pk }}">
+                    {{ person.first_name|slice:":1" }} {% if person == me %}{% trans "Me" %}{% else %}{{ person.first_name }}{% endif %}
+                </a>
+            {% endfor %}
+        </div>
+    {% endif %}
+
+    {% if managed_people %}
+        <div class="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_360px]">
+            <div class="flex flex-col gap-4">
+                {% if hero_attendance %}
+                    <div class="card overflow-hidden bg-gradient-to-br from-ink to-navy p-6 text-white" {% if club.event_background %}style="background-image: linear-gradient(rgba(11,18,32,.75), rgba(16,30,54,.85)), url('{{ club.event_background.url }}'); background-size: cover; background-position: center;"{% endif %}>
+                        <div class="font-mono text-xs tracking-wide text-on-dark uppercase">{% blocktrans with date=hero_attendance.event.start|date:"D d M" %}Next up &middot; {{ date }}{% endblocktrans %}</div>
+                        <div class="mt-1 font-display text-2xl font-extrabold uppercase">{{ hero_attendance.event.title }}</div>
+                        <div class="mt-2 flex flex-wrap gap-4 text-sm text-on-dark">
+                            <span>{% blocktrans with time=hero_attendance.event.start|date:"H:i" %}{{ time }} face-off{% endblocktrans %}{% if hero_attendance.event.gathering %} &middot; {% blocktrans with time=hero_attendance.event.gathering|date:"H:i" %}Meet {{ time }}{% endblocktrans %}{% endif %}</span>
+                            {% if hero_attendance.event.location %}<span>{{ hero_attendance.event.location.name }}</span>{% endif %}
+                        </div>
+                        <div class="mt-4 flex items-center gap-3.5 border-t pt-4" style="border-color: var(--color-hairline)">
+                            {% if rsvp_closed %}
+                                <span class="text-sm font-semibold">{% trans "Replies are closed for this event" %}</span>
+                                <span class="badge badge-neutral">{{ hero_attendance.get_status_display }}</span>
+                            {% else %}
+                                <span class="text-sm font-semibold">{% blocktrans with name=hero_attendance.member.first_name %}{{ name }} &mdash; are you in?{% endblocktrans %}</span>
+                                <div class="flex-1"></div>
+                                {% include "mobile/desktop/_hero_rsvp.html" %}
+                            {% endif %}
+                        </div>
+                    </div>
+                {% endif %}
+
+                {% if going_attendance %}
+                    <div class="card flex items-center gap-4 p-4">
+                        <div class="w-11 shrink-0 text-center font-display">
+                            <div class="text-[10px] text-muted uppercase">{{ going_attendance.event.start|date:"M" }}</div>
+                            <div class="text-lg font-extrabold text-ink">{{ going_attendance.event.start|date:"d" }}</div>
+                        </div>
+                        <div class="min-w-0 flex-1">
+                            <div class="text-sm font-semibold text-ink">{{ going_attendance.event.title }}</div>
+                            <div class="text-xs text-muted">{{ going_attendance.member.first_name }} &middot; {{ going_attendance.event.start|date:"H:i" }}{% if going_attendance.event.location %} &middot; {{ going_attendance.event.location.name }}{% endif %}</div>
+                        </div>
+                        <span class="badge badge-success">{{ going_attendance.get_status_display }}</span>
+                    </div>
+                {% endif %}
+
+                {% if needs_answer %}
+                    <div class="card">
+                        <div class="flex items-center gap-2.5 border-b border-line px-4.5 py-3.5">
+                            <span class="card-title">{% trans "Needs your answer" %}</span>
+                            <span class="badge badge-warning">{{ needs_answer|length|add:needs_answer_remaining }}</span>
+                        </div>
+                        {% for row in needs_answer %}
+                            <a class="flex items-center gap-3.5 border-b border-rule px-4.5 py-3" href="{% url "mobile:event_detail" row.event.pk %}">
+                                <div class="w-11 shrink-0 text-center font-display">
+                                    <div class="text-[10px] text-muted uppercase">{{ row.event.start|date:"M" }}</div>
+                                    <div class="text-lg font-extrabold text-ink">{{ row.event.start|date:"d" }}</div>
+                                </div>
+                                <div class="min-w-0 flex-1">
+                                    <div class="text-sm font-semibold text-ink">{% if row.kind == "referee" %}{% trans "Referee" %} &middot; {% elif row.kind == "official" %}{% trans "Official" %} &middot; {% endif %}{{ row.event.title }}</div>
+                                    <div class="text-xs text-muted">{{ row.member.first_name }} &middot; {{ row.event.start|date:"H:i" }}{% if row.attendance.open_task_count %} &middot; {% blocktrans count counter=row.attendance.open_task_count %}{{ counter }} task open{% plural %}{{ counter }} tasks open{% endblocktrans %}{% endif %}</div>
+                                </div>
+                                <span class="badge badge-warning">{% trans "Reply" %}</span>
+                            </a>
+                        {% endfor %}
+                        {% if needs_answer_remaining %}
+                            <a class="block px-4.5 py-3 text-sm font-semibold link link-hover" href="{% url "mobile:calendar" %}">{% blocktrans count counter=needs_answer_remaining %}+{{ counter }} more in Calendar &rarr;{% plural %}+{{ counter }} more in Calendar &rarr;{% endblocktrans %}</a>
+                        {% endif %}
+                    </div>
+                {% endif %}
+
+                {% if open_tasks %}
+                    <div class="card">
+                        <div class="flex items-center gap-2.5 border-b border-line px-4.5 py-3.5">
+                            <span class="card-title">{% trans "Open tasks" %}</span>
+                            <span class="badge badge-info">{{ open_tasks|length|add:open_tasks_remaining }}</span>
+                        </div>
+                        {% for task in open_tasks %}
+                            <a class="flex items-center gap-3.5 border-b border-rule px-4.5 py-3 last:border-b-0" href="{% url "mobile:event_detail" task.event.pk %}">
+                                <div class="min-w-0 flex-1">
+                                    <div class="text-sm font-semibold text-ink">{{ task.title }}</div>
+                                    <div class="text-xs text-muted">{{ task.event.title }}</div>
+                                </div>
+                                <span class="badge badge-info">{% blocktrans count counter=task.open_count %}{{ counter }} open{% plural %}{{ counter }} open{% endblocktrans %}</span>
+                            </a>
+                        {% endfor %}
+                        {% if open_tasks_remaining %}
+                            <div class="px-4.5 py-3 text-sm text-muted">{% blocktrans count counter=open_tasks_remaining %}+{{ counter }} more open task{% plural %}+{{ counter }} more open tasks{% endblocktrans %}</div>
+                        {% endif %}
+                    </div>
+                {% endif %}
+
+                {% if dues_rows %}
+                    <div class="flex flex-col gap-3">
+                        {% for row in dues_rows %}
+                            {% include "mobile/desktop/_dues_row.html" %}
+                        {% endfor %}
+                    </div>
+                {% endif %}
+
+                {% if not hero_attendance and not going_attendance and not needs_answer and not open_tasks and not dues_rows and not forms_to_complete %}
+                    <div class="card p-6 text-center text-sm text-muted">{% trans "Nothing to show right now." %}</div>
+                {% endif %}
+            </div>
+
+            <div class="flex flex-col gap-4">
+                {% if forms_to_complete %}
+                    <div class="card">
+                        <div class="flex items-center gap-2.5 border-b border-line px-4.5 py-3.5">
+                            <span class="card-title">{% trans "Forms to complete" %}</span>
+                            <span class="badge badge-warning">{{ forms_to_complete|length }}</span>
+                        </div>
+                        {% for row in forms_to_complete %}
+                            <a class="flex items-center gap-3.5 border-b border-rule px-4.5 py-3 last:border-b-0" href="{% url "mobile:form_fill" row.send.pk %}">
+                                <div class="min-w-0 flex-1">
+                                    <div class="text-sm font-semibold text-ink">{{ row.send.form.title }}</div>
+                                    <div class="text-xs text-muted">{{ row.member.first_name }}{% if row.send.closes_at %} &middot; {% blocktrans with date=row.send.closes_at|date:"d M Y" %}Due {{ date }}{% endblocktrans %}{% endif %}</div>
+                                </div>
+                                <span class="badge badge-warning">{% trans "Complete" %}</span>
+                            </a>
+                        {% endfor %}
+                        <a class="block px-4.5 py-3 text-sm font-semibold link link-hover" href="{% url "mobile:forms_list" %}">{% trans "All forms" %} &rarr;</a>
+                    </div>
+                {% endif %}
+
+                <div class="card">
+                    <div class="flex items-center gap-2.5 border-b border-line px-4.5 py-3.5">
+                        <span class="card-title">{% trans "Club news" %}</span>
+                    </div>
+                    {% if news_items %}
+                        {% with lead=news_items.0 %}
+                            <a class="block border-b border-rule p-4.5" href="{% url "mobile:news_detail" lead.slug %}">
+                                <div class="h-28 rounded-lg" style="background: {% if lead.main_photo %}url('{{ lead.main_photo.image.url }}') {{ lead.main_photo.object_position }} / cover{% else %}linear-gradient(135deg, var(--color-steel), var(--color-ink)){% endif %};"></div>
+                                <div class="mt-2.5 font-mono text-xs text-muted">{% with team=lead.teams.first %}{% if team %}{{ team.name }}{% else %}{% trans "Club news" %}{% endif %}{% endwith %} &middot; {{ lead.published_at|date:"d M" }}</div>
+                                <div class="mt-0.5 text-sm font-bold text-ink">{{ lead.title }}</div>
+                            </a>
+                        {% endwith %}
+                        {% if news_items|length > 1 %}
+                            <div class="flex flex-col">
+                                {% for item in news_items|slice:"1:" %}
+                                    <a class="border-b border-rule px-4.5 py-3 text-sm text-ink last:border-b-0" href="{% url "mobile:news_detail" item.slug %}">{{ item.title }}</a>
+                                {% endfor %}
+                            </div>
+                        {% endif %}
+                        <a class="block px-4.5 py-3 text-sm font-semibold link link-hover" href="{% url "mobile:news_list" %}">{% trans "All news" %} &rarr;</a>
+                    {% else %}
+                        <div class="p-4.5 text-sm text-muted">{% trans "No news yet." %}</div>
+                    {% endif %}
+                </div>
+
+                {% if sponsors %}
+                    <div class="card flex flex-wrap items-center gap-4 p-4.5">
+                        {% for sponsor in sponsors %}
+                            {% if sponsor.url %}<a href="{{ sponsor.url }}" target="_blank" rel="noopener">{% else %}<div>{% endif %}
+                                {% if sponsor.logo %}
+                                    <img class="h-7 w-auto object-contain grayscale" src="{{ sponsor.logo.url }}" alt="{{ sponsor.name }}">
+                                {% else %}
+                                    <span class="text-xs font-semibold text-muted">{{ sponsor.name }}</span>
+                                {% endif %}
+                            {% if sponsor.url %}</a>{% else %}</div>{% endif %}
+                        {% endfor %}
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    {% else %}
+        <div class="card p-6 text-center text-sm text-muted">{% trans "No one to show yet" %}</div>
+    {% endif %}
+{% endblock content %}

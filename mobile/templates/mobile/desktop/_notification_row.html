@@ -1,0 +1,23 @@
+{% load i18n %}
+{% comment %}
+    Desktop counterpart of mobile/_notification_row.html -- same fields/
+    logic, `.m-card` -> `.card`. Expects ``row`` ({notification,
+    source_label}) in scope.
+{% endcomment %}
+<form method="post" action="{% url "mobile:notifications" %}" hx-boost="false">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="mark_read">
+    <input type="hidden" name="notification_id" value="{{ row.notification.pk }}">
+    <button type="submit" class="card flex w-full items-center gap-3.5 p-4 text-left hover:bg-subhead">
+        <span class="w-1 shrink-0 self-stretch rounded-full {% if not row.notification.read_at %}bg-club{% else %}bg-line{% endif %}"></span>
+        <span class="min-w-0 flex-1">
+            <span class="block text-sm font-semibold text-ink">{{ row.notification.title }}</span>
+            <span class="block text-xs text-muted">{{ row.notification.body }}</span>
+            {% if row.source_label %}<span class="block font-display text-[11px] font-extrabold text-club uppercase tracking-wide">{{ row.source_label }}</span>{% endif %}
+        </span>
+        <span class="w-12 shrink-0 text-right">
+            <span class="block font-mono text-[11px] text-dim">{{ row.notification.created|date:"H:i" }}</span>
+            <span class="block font-mono text-[10px] text-dim">{{ row.notification.created|date:"d M" }}</span>
+        </span>
+    </button>
+</form>

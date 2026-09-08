@@ -11,6 +11,7 @@ from django.shortcuts import redirect
 from django.utils.translation import gettext_lazy as _
 from waffle import flag_is_active
 
+from club.device import is_mobile_or_tablet
 from club.services.access import get_current_season, has_management_access, teams_staffed_by
 from controlpanel.messages import notify
 from members.models import FamilyMembership, Member
@@ -19,7 +20,22 @@ from members.views import ClubScopedPublicMixin
 from notifications.models import Notification
 
 
-class PersonScopeMixin(ClubScopedPublicMixin):
+class DesktopTemplateMixin:
+    """Serves the desktop counterpart of a Member-mode template first, falling
+    back to the mobile one -- so a screen without a desktop template yet (or a
+    Coach-mode one, which never gets one) still just renders as before. See
+    club.device.is_mobile_or_tablet, which already backs root()'s own device
+    routing (club/views.py)."""
+
+    def get_template_names(self):
+        names = super().get_template_names()
+        if is_mobile_or_tablet(self.request):
+            return names
+        desktop_names = [name.replace("mobile/", "mobile/desktop/", 1) for name in names if name.startswith("mobile/")]
+        return desktop_names + names
+
+
+class PersonScopeMixin(DesktopTemplateMixin, ClubScopedPublicMixin):
     """Resolves the signed-in account's own Member record plus every child
     they're a parent/guardian of *in this club* (mirrors members.views.MyFamilyView's
     own query -- kept separate rather than imported from there, since that view

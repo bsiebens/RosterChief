@@ -1,0 +1,80 @@
+{% extends "mobile/desktop/base.html" %}
+{% load i18n lucide %}
+
+{% block content %}
+    <div class="mx-auto grid w-full max-w-[900px] grid-cols-1 gap-8 md:grid-cols-2">
+        <div class="card overflow-hidden">
+            {% if product.image %}
+                <img class="h-96 w-full object-cover" src="{{ product.image.url }}" alt="">
+            {% else %}
+                <div class="flex h-96 items-center justify-center bg-rule text-xs text-dim">{% trans "No photo" %}</div>
+            {% endif %}
+        </div>
+
+        <form method="post" class="flex flex-col gap-4" x-data="{ qty: 1, beneficiary: '{{ me.pk }}', variant: '{{ variants.0.pk|default:"" }}' }">
+            {% csrf_token %}
+            <div>
+                <div class="font-mono text-2xl text-ink">{% blocktrans with amount=product.price|floatformat:2 %}&euro; {{ amount }}{% endblocktrans %}</div>
+                {% if product.description %}<p class="mt-2 text-sm text-ink">{{ product.description|linebreaksbr }}</p>{% endif %}
+            </div>
+
+            {% if variants %}
+                <div>
+                    <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Option" %}</div>
+                    <div class="flex flex-wrap gap-2">
+                        {% for option in variants %}
+                            <button type="button" class="person-chip pl-2.5" :class="variant === '{{ option.pk }}' && 'person-chip-active'" @click="variant = '{{ option.pk }}'">
+                                <span class="person-chip-label">{{ option.name }}{% if option.price is not None %} &middot; &euro;{{ option.price|floatformat:2 }}{% endif %}</span>
+                            </button>
+                        {% endfor %}
+                    </div>
+                    <input type="hidden" name="variant" :value="variant">
+                </div>
+            {% endif %}
+
+            {% if managed_people|length > 1 %}
+                <div>
+                    <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "For" %}</div>
+                    <div class="flex flex-wrap gap-2">
+                        {% for person in managed_people %}
+                            <button type="button" class="person-chip" :class="beneficiary === '{{ person.pk }}' && 'person-chip-active'" @click="beneficiary = '{{ person.pk }}'">
+                                <span class="person-chip-avatar">{{ person.first_name|slice:":1" }}</span>
+                                <span class="person-chip-label">{% if person == me %}{% trans "Me" %}{% else %}{{ person.first_name }}{% endif %}</span>
+                            </button>
+                        {% endfor %}
+                    </div>
+                    <input type="hidden" name="beneficiary" :value="beneficiary">
+                </div>
+            {% endif %}
+
+            {% if product.personalization_enabled %}
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Number (optional)" %}</div>
+                        <input type="text" name="personalization_number" maxlength="20" placeholder="{% trans "e.g. 7" %}" class="input">
+                    </div>
+                    <div>
+                        <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Name (optional)" %}</div>
+                        <input type="text" name="personalization_name" maxlength="100" placeholder="{% trans "e.g. on the back" %}" class="input">
+                    </div>
+                </div>
+            {% endif %}
+
+            <div class="flex items-center justify-between">
+                <span class="font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Quantity" %}</span>
+                <div class="flex items-center gap-3">
+                    <button type="button" class="btn-square btn-outline btn" @click="qty = Math.max(1, qty - 1)" aria-label="{% trans "Decrease quantity" %}">
+                        {% lucide "minus" size=16 %}
+                    </button>
+                    <span class="w-6 text-center font-display text-lg font-extrabold text-ink" x-text="qty"></span>
+                    <button type="button" class="btn-square btn-outline btn" @click="qty += 1" aria-label="{% trans "Increase quantity" %}">
+                        {% lucide "plus" size=16 %}
+                    </button>
+                </div>
+            </div>
+            <input type="hidden" name="quantity" :value="qty">
+
+            <button type="submit" class="btn btn-primary">{% trans "Add to cart" %}</button>
+        </form>
+    </div>
+{% endblock content %}

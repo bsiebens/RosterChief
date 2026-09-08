@@ -1,0 +1,33 @@
+{% extends "mobile/desktop/base.html" %}
+{% load i18n %}
+
+{% block header_extra %}
+    <button type="submit" form="form-fill-form" class="btn btn-primary btn-sm">{% trans "Submit" %}</button>
+{% endblock header_extra %}
+
+{% block content %}
+    <form id="form-fill-form" method="post" enctype="multipart/form-data" class="mx-auto flex w-full max-w-[640px] flex-col gap-4" hx-boost="false">
+        {% csrf_token %}
+
+        {% if send.form.description %}
+            <p class="text-sm text-muted">{{ send.form.description|linebreaksbr }}</p>
+        {% endif %}
+
+        {% for error in form.non_field_errors %}
+            <div class="alert alert-warning">{{ error }}</div>
+        {% endfor %}
+
+        <div class="card">
+            {% for field in form %}
+                <div class="border-b border-rule p-4.5 last:border-b-0">
+                    <label class="mb-1.5 block text-xs font-semibold text-muted" for="{{ field.id_for_label }}">
+                        {{ field.label }}{% if field.field.required %} *{% endif %}
+                    </label>
+                    {{ field }}
+                    {% if field.help_text %}<p class="mt-1 text-xs text-muted">{{ field.help_text }}</p>{% endif %}
+                    {% for error in field.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
+                </div>
+            {% endfor %}
+        </div>
+    </form>
+{% endblock content %}

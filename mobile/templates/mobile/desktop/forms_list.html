@@ -1,0 +1,41 @@
+{% extends "mobile/desktop/base.html" %}
+{% load i18n %}
+
+{% block content %}
+    <div class="mx-auto w-full max-w-[760px]">
+        {% if forms_status %}
+            <div class="card">
+                {% for row in forms_status %}
+                    {% if row.submitted_at %}
+                        <a class="flex items-center gap-3.5 border-b border-rule px-4.5 py-3.5 last:border-b-0 hover:bg-subhead" href="{% url "mobile:form_response" row.submission.pk %}">
+                            <div class="min-w-0 flex-1">
+                                <div class="text-[15px] font-semibold text-ink">
+                                    {{ row.send.form.title }}
+                                    {% if row.member != me %}<span class="font-normal text-muted">&middot; {{ row.member.first_name }}</span>{% endif %}
+                                </div>
+                                <div class="text-xs text-muted">{% blocktrans with date=row.submitted_at|date:"d M Y" %}Submitted {{ date }}{% endblocktrans %}</div>
+                            </div>
+                            <span class="pill pill-ok shrink-0">{% trans "Completed" %}</span>
+                        </a>
+                    {% else %}
+                        <a class="flex items-center gap-3.5 border-b border-rule px-4.5 py-3.5 last:border-b-0 hover:bg-subhead" href="{% url "mobile:form_fill" row.send.pk %}">
+                            <div class="min-w-0 flex-1">
+                                <div class="text-[15px] font-semibold text-ink">
+                                    {{ row.send.form.title }}
+                                    {% if row.member != me %}<span class="font-normal text-muted">&middot; {{ row.member.first_name }}</span>{% endif %}
+                                </div>
+                                {% if row.send.closes_at %}<div class="text-xs text-muted">{% blocktrans with date=row.send.closes_at|date:"d M Y" %}Due {{ date }}{% endblocktrans %}</div>{% endif %}
+                            </div>
+                            <span class="pill pill-warn shrink-0">{% trans "Pending" %}</span>
+                        </a>
+                    {% endif %}
+                {% endfor %}
+            </div>
+        {% else %}
+            <div class="card p-6 text-center">
+                <p class="font-display text-lg font-extrabold text-ink uppercase">{% trans "Nothing here yet" %}</p>
+                <p class="mt-1 text-sm text-muted">{% trans "Any form sent to you or the people you manage will show up here." %}</p>
+            </div>
+        {% endif %}
+    </div>
+{% endblock content %}

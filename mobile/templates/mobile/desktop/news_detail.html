@@ -1,0 +1,40 @@
+{% extends "mobile/desktop/base.html" %}
+{% load i18n %}
+
+{% block header_extra %}
+    <a class="font-display text-xs font-extrabold tracking-wide text-muted uppercase" href="{% if request.GET.from == "news_list" %}{% url "mobile:news_list" %}{% else %}{% url "mobile:home" %}{% endif %}">&larr; {% trans "News" %}</a>
+{% endblock header_extra %}
+
+{% block content %}
+    <div class="mx-auto w-full max-w-[720px]">
+        <div class="h-72 rounded-xl" style="background: {% if news_item.main_photo %}url('{{ news_item.main_photo.image.url }}') {{ news_item.main_photo.object_position }} / cover{% else %}linear-gradient(135deg, var(--color-steel), var(--color-ink)){% endif %};"></div>
+
+        <div class="mt-5 flex items-center gap-2">
+            <span class="badge">{% with team=news_item.teams.first %}{% if team %}{{ team.short_name }}{% else %}{% trans "Club news" %}{% endif %}{% endwith %}</span>
+            <span class="font-mono text-xs text-muted">{{ news_item.published_at|date:"d M Y" }}</span>
+        </div>
+        <h1 class="mt-2.5 mb-4.5 font-display text-4xl leading-[1.02] font-extrabold text-ink uppercase">{{ article_title }}</h1>
+
+        <div class="article-body">{{ article_body|safe }}</div>
+
+        {% with teams=news_item.teams.all %}
+            {% if teams %}
+                <div class="mt-5 flex flex-wrap gap-2">
+                    {% for team in teams %}<span class="pill pill-neutral">{{ team.short_name }}</span>{% endfor %}
+                </div>
+            {% endif %}
+        {% endwith %}
+
+        <div class="mt-6 flex items-center gap-2.5 border-t border-line pt-5">
+            {% if news_item.created_by %}
+                {% include "mobile/_avatar.html" with person=news_item.created_by size_class="h-8 w-8" bg_class="bg-navy" %}
+                <span class="flex-1 text-sm font-semibold text-ink">{% blocktrans with name=news_item.created_by.get_full_name %}Posted by {{ name }}{% endblocktrans %}</span>
+            {% else %}
+                <span class="flex-1"></span>
+            {% endif %}
+            {% if news_item.visibility != "internal" %}
+                <button type="button" class="btn btn-outline btn-sm" onclick="navigator.share ? navigator.share({title: '{{ article_title|escapejs }}', url: window.location.href}).catch(() => {}) : null">{% trans "Share" %}</button>
+            {% endif %}
+        </div>
+    </div>
+{% endblock content %}

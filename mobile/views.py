@@ -71,7 +71,7 @@ from teams.models import StaffAssignment, Team, TeamMembership
 from teams.services.numbers import member_current_number
 
 from .forms import _INPUT_CLASSES, _TEXTAREA_CLASSES, MemberProfileForm, style_dynamic_form
-from .mixins import PersonScopeMixin, ShopScopeMixin
+from .mixins import DesktopTemplateMixin, PersonScopeMixin, ShopScopeMixin
 from .models import CalendarFeedToken, PushSubscription
 from .services.calendar_feed import build_feed
 from .services.icons import render_fallback_icon
@@ -1585,7 +1585,7 @@ BUG_STATUS_PILL_CLASSES = {
 }
 
 
-class BugListView(LoginRequiredMixin, TemplateView):
+class BugListView(DesktopTemplateMixin, LoginRequiredMixin, TemplateView):
     """ "Report a bug" row on the Me screen (mobile/templates/mobile/me.html) --
     files into the standalone ``bugs`` app (bugs.services.file_report), which
     already handles admin notification, so this view is just a form + the

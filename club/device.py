@@ -24,5 +24,18 @@ def is_mobile_or_tablet(request) -> bool:
     the visitor has switched their browser to "Request Mobile Website" --
     not worth chasing here, since root() already falls back to the mobile
     app for anyone without management access anyway.
+
+    A missing/empty User-Agent defaults to mobile, not desktop -- every real
+    browser (phone or desktop) always sends one, so an absent header means an
+    unidentifiable client (a stripped-down proxy, a bot, Django's own test
+    Client when a test doesn't set HTTP_USER_AGENT) rather than a genuine
+    desktop signal. Mobile is the safer default: it's the one surface this
+    app has served exclusively until desktop Member mode existed, so an
+    unknown client -- and every pre-existing test that never had to think
+    about device detection -- keeps landing there rather than silently
+    flipping to desktop-only markup.
     """
-    return bool(_MOBILE_OR_TABLET_UA.search(request.META.get("HTTP_USER_AGENT", "")))
+    user_agent = request.META.get("HTTP_USER_AGENT", "")
+    if not user_agent:
+        return True
+    return bool(_MOBILE_OR_TABLET_UA.search(user_agent))

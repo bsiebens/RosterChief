@@ -3,15 +3,17 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "npm run build:app && npm run build:controlpanel && npm run build:management && npm run build:mobile",
+    "build": "npm run build:app && npm run build:controlpanel && npm run build:management && npm run build:mobile && npm run build:mobile-desktop",
     "build:app": "tailwindcss -i ./assets/app.css -o ./static/css/app.css --minify",
     "build:controlpanel": "tailwindcss -i ./assets/controlpanel.css -o ./static/css/controlpanel.css --minify",
     "build:management": "tailwindcss -i ./assets/management.css -o ./static/css/management.css --minify",
     "build:mobile": "tailwindcss -i ./assets/mobile.css -o ./static/css/mobile.css --minify",
+    "build:mobile-desktop": "tailwindcss -i ./assets/mobile-desktop.css -o ./static/css/mobile-desktop.css --minify",
     "watch": "tailwindcss -i ./assets/app.css -o ./static/css/app.css --watch",
     "watch:controlpanel": "tailwindcss -i ./assets/controlpanel.css -o ./static/css/controlpanel.css --watch",
     "watch:management": "tailwindcss -i ./assets/management.css -o ./static/css/management.css --watch",
     "watch:mobile": "tailwindcss -i ./assets/mobile.css -o ./static/css/mobile.css --watch",
+    "watch:mobile-desktop": "tailwindcss -i ./assets/mobile-desktop.css -o ./static/css/mobile-desktop.css --watch",
     "vendor:chart": "node -e \"const fs=require('fs');const s=fs.readFileSync('node_modules/chart.js/dist/chart.umd.js','utf8').split('\\n').filter(l=>!l.startsWith('//# sourceMappingURL=')).join('\\n');fs.writeFileSync('static/js/chart.js',s)\"",
     "vendor:htmx": "node -e \"const fs=require('fs');const s=fs.readFileSync('node_modules/htmx.org/dist/htmx.min.js','utf8').split('\\n').filter(l=>!l.startsWith('//# sourceMappingURL=')).join('\\n');fs.writeFileSync('static/js/htmx.js',s)\"",
     "vendor:alpine": "node -e \"const fs=require('fs');const s=fs.readFileSync('node_modules/alpinejs/dist/cdn.min.js','utf8').split('\\n').filter(l=>!l.startsWith('//# sourceMappingURL=')).join('\\n');fs.writeFileSync('static/js/alpine.js',s)\""

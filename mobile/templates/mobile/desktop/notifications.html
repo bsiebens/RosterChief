@@ -1,0 +1,70 @@
+{% extends "mobile/desktop/base.html" %}
+{% load i18n %}
+
+{% block header_extra %}
+    {% if today or earlier_this_week or older %}
+        {% if unread_notification_count %}
+            <form method="post" action="{% url "mobile:notifications" %}" hx-boost="false">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="mark_all_read">
+                <button class="btn btn-outline btn-sm" type="submit">{% trans "Mark all read" %}</button>
+            </form>
+        {% endif %}
+        <form method="post" action="{% url "mobile:notifications" %}" hx-boost="false">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="clear_all">
+            <button class="btn btn-outline btn-sm" type="submit">{% trans "Clear all" %}</button>
+        </form>
+    {% endif %}
+{% endblock header_extra %}
+
+{% block content %}
+    <div class="mx-auto flex w-full max-w-[720px] flex-col gap-4">
+        {% if not managed_people %}
+            <div class="card p-6 text-center">
+                <p class="font-display text-lg font-extrabold text-ink uppercase">{% trans "No one to show yet" %}</p>
+                <p class="mt-1 text-sm text-muted">{% trans "Once you're linked to a member record, their notifications will show up here." %}</p>
+            </div>
+        {% else %}
+            <div class="card flex items-center gap-3.5 p-4" x-data="{ requested: false, failed: false, pending: false }" x-init="requested = await window.rosterchiefPush.isSubscribed()" x-show="!requested">
+                <div class="min-w-0 flex-1">
+                    <div class="text-sm font-semibold text-ink">{% trans "Enable push notifications" %}</div>
+                    <div class="text-xs text-muted" x-show="!failed">{% trans "Get notified on this device as soon as something new comes in." %}</div>
+                    <div class="text-xs text-club" x-show="failed" x-cloak>{% trans "Couldn't turn on notifications -- check this browser's notification permission for the site, then try again." %}</div>
+                </div>
+                <button type="button" class="btn shrink-0" :disabled="pending" @click="pending = true; failed = false; requested = await window.rosterchiefPush.subscribe(); failed = !requested; pending = false">{% trans "Enable" %}</button>
+            </div>
+
+            {% if not today and not earlier_this_week and not older %}
+                <div class="card p-6 text-center">
+                    <p class="text-sm text-muted">{% trans "Nothing here yet." %}</p>
+                </div>
+            {% else %}
+                {% if today %}
+                    <div>
+                        <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Today" %}</div>
+                        <div class="flex flex-col gap-2">
+                            {% for row in today %}{% include "mobile/desktop/_notification_row.html" %}{% endfor %}
+                        </div>
+                    </div>
+                {% endif %}
+                {% if earlier_this_week %}
+                    <div>
+                        <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Earlier this week" %}</div>
+                        <div class="flex flex-col gap-2">
+                            {% for row in earlier_this_week %}{% include "mobile/desktop/_notification_row.html" %}{% endfor %}
+                        </div>
+                    </div>
+                {% endif %}
+                {% if older %}
+                    <div>
+                        <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Older" %}</div>
+                        <div class="flex flex-col gap-2">
+                            {% for row in older %}{% include "mobile/desktop/_notification_row.html" %}{% endfor %}
+                        </div>
+                    </div>
+                {% endif %}
+            {% endif %}
+        {% endif %}
+    </div>
+{% endblock content %}

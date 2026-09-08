@@ -1,0 +1,28 @@
+{% load i18n lucide %}
+{% comment %}
+    Desktop counterpart of mobile/_calendar_row.html -- same fields/logic
+    (event kind colour bar, friendly-match icon, member/team/location line),
+    only the surrounding classes changed (row inside a .card instead of an
+    edge-to-edge mobile list). Expects ``row`` ({event, pill_class,
+    pill_label}) in scope.
+{% endcomment %}
+<a class="flex items-center gap-3.5 border-b border-rule px-4.5 py-3 last:border-b-0 hover:bg-subhead" href="{% url "mobile:event_detail" row.event.pk %}?from=calendar">
+    <div class="w-10 shrink-0 text-center">
+        <div class="font-mono text-[10px] tracking-wide text-muted uppercase">{{ row.event.start|date:"D" }}</div>
+        <div class="font-display text-lg leading-none font-extrabold text-ink">{{ row.event.start|date:"d" }}</div>
+    </div>
+    <div class="w-1 shrink-0 self-stretch rounded-full {% if row.event.kind == "game" %}bg-club{% elif row.event.kind == "training" %}bg-info{% else %}bg-warn{% endif %}"></div>
+    <div class="min-w-0 flex-1">
+        <div class="flex items-center gap-1 text-sm font-semibold text-ink">
+            {% if row.event.is_friendly %}<span class="shrink-0" title="{% trans 'Friendly' %}" aria-label="{% trans 'Friendly' %}">{% lucide "handshake" size=13 stroke_width=2.4 class="text-dim" %}</span>{% endif %}
+            <span>{{ row.event.title }}</span>
+        </div>
+        <div class="text-xs text-muted">
+            {{ row.event.start|date:"H:i" }}
+            {% if row.member %}&middot; {{ row.member.first_name }}{% endif %}
+            {% for team in row.event.teams.all %}&middot; {{ team.name }}{% endfor %}
+            {% if row.event.location %}&middot; {{ row.event.location.name }}{% endif %}
+        </div>
+    </div>
+    <span class="pill {{ row.pill_class }} shrink-0">{{ row.pill_label }}</span>
+</a>

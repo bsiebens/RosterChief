@@ -1,0 +1,54 @@
+{% extends "mobile/desktop/base.html" %}
+{% load i18n %}
+
+{% block content %}
+    <div class="flex gap-1 rounded-full bg-rule p-1" style="width: fit-content;">
+        <a class="badge {% if not kind_filter %}badge-neutral{% endif %} border-none" href="{% url "mobile:calendar" %}">{% trans "All" %}</a>
+        <a class="badge {% if kind_filter == "game" %}badge-neutral{% endif %} border-none" href="?kind=game">{% trans "Games" %}</a>
+        <a class="badge {% if kind_filter == "training" %}badge-neutral{% endif %} border-none" href="?kind=training">{% trans "Practices" %}</a>
+    </div>
+
+    {% if not managed_people %}
+        <div class="card p-6 text-center">
+            <p class="font-display text-lg font-extrabold text-ink uppercase">{% trans "No one to show yet" %}</p>
+            <p class="mt-1 text-sm text-muted">{% trans "Once you're linked to a member record, their schedule will show up here." %}</p>
+        </div>
+    {% elif not this_week and not next_week and not later_months %}
+        <div class="card p-6 text-center">
+            {% if kind_filter == "game" %}
+                <p class="text-sm text-muted">{% trans "No games scheduled." %}</p>
+            {% elif kind_filter == "training" %}
+                <p class="text-sm text-muted">{% trans "No practices scheduled." %}</p>
+            {% else %}
+                <p class="text-sm text-muted">{% trans "Nothing scheduled." %}</p>
+            {% endif %}
+        </div>
+    {% else %}
+        {% if this_week %}
+            <div class="card overflow-hidden">
+                <div class="border-b border-line px-4.5 py-3.5"><span class="card-title">{% trans "This week" %}</span></div>
+                {% for row in this_week %}
+                    {% if row.blocked_requirements %}{% include "mobile/desktop/_calendar_blocked_row.html" %}{% elif row.referee_signup %}{% include "mobile/desktop/_calendar_referee_row.html" %}{% elif row.official_signup %}{% include "mobile/desktop/_calendar_official_row.html" %}{% else %}{% include "mobile/desktop/_calendar_row.html" %}{% endif %}
+                {% endfor %}
+            </div>
+        {% endif %}
+
+        {% if next_week %}
+            <div class="card overflow-hidden">
+                <div class="border-b border-line px-4.5 py-3.5"><span class="card-title">{% trans "Next week" %}</span></div>
+                {% for row in next_week %}
+                    {% if row.blocked_requirements %}{% include "mobile/desktop/_calendar_blocked_row.html" %}{% elif row.referee_signup %}{% include "mobile/desktop/_calendar_referee_row.html" %}{% elif row.official_signup %}{% include "mobile/desktop/_calendar_official_row.html" %}{% else %}{% include "mobile/desktop/_calendar_row.html" %}{% endif %}
+                {% endfor %}
+            </div>
+        {% endif %}
+
+        {% for month in later_months %}
+            <div class="card overflow-hidden">
+                <div class="border-b border-line px-4.5 py-3.5"><span class="card-title">{{ month.month_start|date:"F Y" }}</span></div>
+                {% for row in month.items %}
+                    {% if row.blocked_requirements %}{% include "mobile/desktop/_calendar_blocked_row.html" %}{% elif row.referee_signup %}{% include "mobile/desktop/_calendar_referee_row.html" %}{% elif row.official_signup %}{% include "mobile/desktop/_calendar_official_row.html" %}{% else %}{% include "mobile/desktop/_calendar_row.html" %}{% endif %}
+                {% endfor %}
+            </div>
+        {% endfor %}
+    {% endif %}
+{% endblock content %}

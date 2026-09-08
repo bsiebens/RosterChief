@@ -1,0 +1,74 @@
+{% extends "mobile/desktop/base.html" %}
+{% load i18n lucide %}
+
+{% block content %}
+    {% if items %}
+        <div class="mx-auto grid w-full max-w-[900px] grid-cols-1 gap-4 lg:grid-cols-[1fr_320px] lg:items-start">
+            <div class="card overflow-hidden">
+                {% for item in items %}
+                    <div class="flex items-center gap-3.5 border-b border-rule p-4.5 last:border-b-0">
+                        <div class="min-w-0 flex-1">
+                            <div class="text-[15px] font-semibold text-ink">{{ item.product.name }}{% if item.variant %} &middot; {{ item.variant.name }}{% endif %}</div>
+                            <div class="text-xs text-muted">
+                                {% if item.beneficiary %}{% blocktrans with name=item.beneficiary.first_name %}For {{ name }} &middot; {% endblocktrans %}{% endif %}{% if item.personalization_number or item.personalization_name %}{% if item.personalization_number %}#{{ item.personalization_number }} {% endif %}{{ item.personalization_name }} &middot; {% endif %}{% blocktrans with amount=item.unit_price|floatformat:2 %}&euro; {{ amount }} each{% endblocktrans %}
+                            </div>
+                        </div>
+                        <form method="post" action="{% url "mobile:shop_cart_item_update" item.pk %}" class="flex items-center gap-2">
+                            {% csrf_token %}
+                            <button type="submit" name="action" value="decrement" class="btn-square btn-outline btn h-8 w-8" aria-label="{% trans "Decrease quantity" %}">{% lucide "minus" size=13 %}</button>
+                            <span class="w-5 text-center text-sm font-semibold text-ink">{{ item.quantity }}</span>
+                            <button type="submit" name="action" value="increment" class="btn-square btn-outline btn h-8 w-8" aria-label="{% trans "Increase quantity" %}">{% lucide "plus" size=13 %}</button>
+                        </form>
+                        <span class="w-20 shrink-0 text-right font-mono text-sm text-ink">{% blocktrans with amount=item.line_total|floatformat:2 %}&euro; {{ amount }}{% endblocktrans %}</span>
+                        <form method="post" action="{% url "mobile:shop_cart_item_update" item.pk %}">
+                            {% csrf_token %}
+                            <button type="submit" name="action" value="remove" class="flex h-8 w-8 items-center justify-center rounded-lg text-dim hover:text-club-dark" aria-label="{% trans "Remove" %}">{% lucide "trash-2" size=15 %}</button>
+                        </form>
+                    </div>
+                {% endfor %}
+            </div>
+
+            <div class="flex flex-col gap-4">
+                <div class="card p-4.5">
+                    <form method="get" class="flex items-center gap-2">
+                        <input type="text" name="code" value="{{ code }}" placeholder="{% trans "Discount code" %}" class="input">
+                        <button type="submit" class="btn btn-outline btn-sm">{% trans "Apply" %}</button>
+                    </form>
+                    {% if discount_error %}
+                        <p class="mt-2 text-sm font-medium text-club-dark">{{ discount_error }}</p>
+                    {% elif discount %}
+                        <p class="mt-2 text-sm font-medium text-ok-text">{% blocktrans with name=discount.name %}Discount applied: {{ name }}{% endblocktrans %}</p>
+                    {% endif %}
+                </div>
+
+                <div class="card p-4.5">
+                    <div class="flex items-center justify-between text-sm text-muted">
+                        <span>{% trans "Subtotal" %}</span>
+                        <span class="font-mono">{% blocktrans with amount=totals.subtotal|floatformat:2 %}&euro; {{ amount }}{% endblocktrans %}</span>
+                    </div>
+                    {% if totals.discount_amount %}
+                        <div class="mt-1 flex items-center justify-between text-sm text-muted">
+                            <span>{% trans "Discount" %}</span>
+                            <span class="font-mono">&minus;{% blocktrans with amount=totals.discount_amount|floatformat:2 %}&euro; {{ amount }}{% endblocktrans %}</span>
+                        </div>
+                    {% endif %}
+                    <div class="mt-2 flex items-center justify-between border-t border-rule pt-2 font-display text-lg font-extrabold text-ink">
+                        <span>{% trans "Total" %}</span>
+                        <span class="font-mono">{% blocktrans with amount=totals.total|floatformat:2 %}&euro; {{ amount }}{% endblocktrans %}</span>
+                    </div>
+                </div>
+
+                <form method="post" action="{% url "mobile:shop_checkout" %}">
+                    {% csrf_token %}
+                    <input type="hidden" name="discount_code" value="{{ code }}">
+                    <button type="submit" class="btn btn-primary w-full">{% trans "Place order" %}</button>
+                </form>
+                <p class="text-center text-xs text-dim">{% trans "Pay when you pick it up -- no online payment." %}</p>
+            </div>
+        </div>
+    {% else %}
+        <div class="card p-6 text-center">
+            <p class="text-sm text-muted">{% trans "Your cart is empty." %}</p>
+        </div>
+    {% endif %}
+{% endblock content %}

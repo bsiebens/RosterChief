@@ -1,0 +1,68 @@
+{% extends "mobile/desktop/base.html" %}
+{% load i18n %}
+
+{% block header_extra %}
+    <button type="submit" form="edit-profile-form" class="btn btn-primary btn-sm">{% trans "Save" %}</button>
+{% endblock header_extra %}
+
+{% block content %}
+    <form id="edit-profile-form" method="post" class="mx-auto flex w-full max-w-[640px] flex-col gap-4" hx-boost="false">
+        {% csrf_token %}
+
+        {% if open_requirement_names %}
+            <div class="alert alert-warning">
+                {% blocktrans count counter=open_requirement_names|length with names=open_requirement_summary %}{{ counter }} requirement still open: {{ names }}{% plural %}{{ counter }} requirements still open: {{ names }}{% endblocktrans %}
+            </div>
+        {% endif %}
+
+        <div class="card">
+            <div class="border-b border-line px-4.5 py-3.5"><span class="card-title">{% trans "Identity" %}</span></div>
+            <div class="grid grid-cols-2 gap-x-4 border-b border-rule p-4.5">
+                <div>
+                    <label class="mb-1.5 block text-xs font-semibold text-muted" for="{{ form.first_name.id_for_label }}">{{ form.first_name.label }}</label>
+                    {{ form.first_name }}
+                    {% for error in form.first_name.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
+                </div>
+                <div>
+                    <label class="mb-1.5 block text-xs font-semibold text-muted" for="{{ form.last_name.id_for_label }}">{{ form.last_name.label }}</label>
+                    {{ form.last_name }}
+                    {% for error in form.last_name.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
+                </div>
+            </div>
+            <div class="p-4.5">
+                <label class="mb-1.5 block text-xs font-semibold text-muted" for="{{ form.date_of_birth.id_for_label }}">{{ form.date_of_birth.label }}</label>
+                {{ form.date_of_birth }}
+                {% for error in form.date_of_birth.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="border-b border-line px-4.5 py-3.5"><span class="card-title">{% trans "Contact" %}</span></div>
+            <div class="border-b border-rule p-4.5">
+                <label class="mb-1.5 block text-xs font-semibold text-muted" for="{{ form.email.id_for_label }}">{{ form.email.label }}</label>
+                {{ form.email }}
+                {% for error in form.email.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
+            </div>
+            <div class="p-4.5">
+                <label class="mb-1.5 block text-xs font-semibold text-muted" for="{{ form.phone.id_for_label }}">{{ form.phone.label }}</label>
+                {{ form.phone }}
+                {% for error in form.phone.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="border-b border-line px-4.5 py-3.5"><span class="card-title">{% trans "Emergency" %}</span></div>
+            <div class="p-4.5{% if guardian_rows %} border-b border-rule{% endif %}">
+                <label class="mb-1.5 block text-xs font-semibold text-muted" for="{{ form.emergency_phone.id_for_label }}">{{ form.emergency_phone.label }}</label>
+                {{ form.emergency_phone }}
+                {% for error in form.emergency_phone.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
+            </div>
+            {% for row in guardian_rows %}
+                <div class="border-b border-rule px-4.5 py-3 last:border-b-0">
+                    <div class="text-xs text-muted">{% trans "Emergency contact" %}</div>
+                    <div class="text-[15px] font-medium text-ink">{{ row.member.get_full_name }} &middot; {{ row.role }}</div>
+                </div>
+            {% endfor %}
+        </div>
+    </form>
+{% endblock content %}
