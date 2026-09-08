@@ -1011,6 +1011,7 @@ class FormFillView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
 
     template_name = "mobile/form_fill.html"
     screen_title = _("Form")
+    active_tab = "me"
 
     def get_send(self):
         return get_object_or_404(FormSend.objects.select_related("form").filter(club=self.request.club), pk=self.kwargs["pk"])
@@ -1063,6 +1064,7 @@ class FormResponseView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
 
     template_name = "mobile/form_response.html"
     screen_title = _("Your responses")
+    active_tab = "me"
 
     def get_submission(self):
         managed_ids = {person.pk for person in self.managed_people}
@@ -1637,7 +1639,11 @@ class BugListView(DesktopTemplateMixin, LoginRequiredMixin, TemplateView):
     def get_context_data(self, **kwargs):
         bugs = BugReport.objects.filter(reported_by=self.me).order_by("-created").prefetch_related("notes") if self.me is not None else []
         rows = [{"bug": bug, "pill_class": BUG_STATUS_PILL_CLASSES.get(bug.status, "pill-neutral")} for bug in bugs]
-        return super().get_context_data(me=self.me, rows=rows, **kwargs)
+        # PersonScopeMixin isn't in this view's MRO (see the class docstring), so
+        # unlike every other Member-mode screen it doesn't get has_staff_access/
+        # active_tab for free -- the desktop shell's Member/Manager switcher and
+        # sidebar highlighting depend on both, so they're set explicitly here.
+        return super().get_context_data(me=self.me, rows=rows, active_tab=self.active_tab, has_staff_access=self.me is not None and has_management_access(self.request.user, self.request.club), **kwargs)
 
 
 #: Pill styling shared by ShopOrdersView's list rows and ShopOrderDetailView's

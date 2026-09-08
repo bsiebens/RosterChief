@@ -254,17 +254,36 @@ class DesktopTemplateSelectionTests(TestCase):
         self.assertTemplateUsed(response, "mobile/desktop/bug_list.html")
         self.assertContains(response, "Report a bug")
 
+    def test_bug_list_still_shows_the_manager_switcher_for_staff(self):
+        # BugListView (mobile/views.py) skips PersonScopeMixin, so
+        # has_staff_access needs its own explicit context wiring -- without it
+        # the desktop shell's Member/Manager switcher silently disappears on
+        # this one screen only.
+        # Reuses self.season (already covers today) rather than creating a second
+        # one -- Season.covering()/current_season() pick with .first() among
+        # overlapping seasons, so a redundant "current" season here would risk
+        # the StaffAssignment's own season losing that lookup entirely.
+        team = Team.objects.create(club=self.club, name="U16", short_name="U16")
+        position = Position.objects.create(club=self.club, name="Head coach", short_name="HC", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=team, member=self.member, season=self.season, position=position)
+
+        response = self.client.get(reverse("mobile:bug_list"), HTTP_HOST="ajax-united.rosterchief.app", HTTP_USER_AGENT=self.DESKTOP_UA)
+
+        self.assertContains(response, reverse("management:home"))
+
     def test_bug_list_keeps_the_mobile_template_on_a_phone_user_agent(self):
         response = self.client.get(reverse("mobile:bug_list"), HTTP_HOST="ajax-united.rosterchief.app", HTTP_USER_AGENT=self.PHONE_UA)
 
         self.assertTemplateUsed(response, "mobile/bug_list.html")
 
     def test_manager_switcher_on_desktop_links_straight_to_management_not_coach_mode(self):
-        today = timezone.localdate()
-        current_season = Season.objects.create(club=self.club, start_date=today - datetime.timedelta(days=10), end_date=today + datetime.timedelta(days=300))
+        # Reuses self.season (already covers today) rather than creating a second
+        # one -- Season.covering()/current_season() pick with .first() among
+        # overlapping seasons, so a redundant "current" season here would risk
+        # the StaffAssignment's own season losing that lookup entirely.
         team = Team.objects.create(club=self.club, name="U16", short_name="U16")
         position = Position.objects.create(club=self.club, name="Head coach", short_name="HC", staff_position=True, management_position=True)
-        StaffAssignment.objects.create(team=team, member=self.member, season=current_season, position=position)
+        StaffAssignment.objects.create(team=team, member=self.member, season=self.season, position=position)
 
         response = self.client.get(reverse("mobile:home"), HTTP_HOST="ajax-united.rosterchief.app", HTTP_USER_AGENT=self.DESKTOP_UA)
 

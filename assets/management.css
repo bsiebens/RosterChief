@@ -1017,6 +1017,47 @@
         background: color-mix(in srgb, var(--color-club) 10%, var(--color-paper));
     }
 
+    /* Member/Manager switcher (management/base.html's own sidebar, above the nav) --
+       same track/pill shape as mobile/desktop/base.html's .desktop-switcher, so the
+       control reads identically in both surfaces; here it always shows one active
+       pill ("Manager" -- reaching this page already proves staff access) plus one
+       plain link ("Member" -- mobile:home, which itself resolves to the desktop
+       Member UI or the phone PWA depending on device). */
+    .switcher {
+        display: flex;
+        gap: 4px;
+        background: var(--color-sidebar-chip);
+        border-radius: 999px;
+        padding: 3px;
+        margin: 0 18px 16px;
+    }
+
+    .switcher-item {
+        flex: 1;
+        text-align: center;
+        padding: 6px 0;
+        border-radius: 999px;
+        font-family: var(--font-display);
+        font-weight: 700;
+        font-size: 12px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--color-sidebar-fg-dim);
+    }
+
+    .switcher-item:hover {
+        color: var(--color-sidebar-fg);
+    }
+
+    .switcher-item-active {
+        background: #fff;
+        color: var(--color-ink);
+    }
+
+    .switcher-item-active:hover {
+        color: var(--color-ink);
+    }
+
     /* Sidebar nav (management/templates/management/_nav_items.html). */
     .nav-item {
         display: flex;

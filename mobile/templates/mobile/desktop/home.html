@@ -4,10 +4,14 @@
 {% block content %}
     {% if managed_people|length > 1 %}
         <div class="flex flex-wrap gap-2">
-            <a class="badge {% if scope_everyone %}badge-neutral{% endif %}" href="?as=all">{% trans "All" %}</a>
+            <a class="person-chip {% if scope_everyone %}person-chip-active{% endif %}" href="?as=all">
+                <span class="person-chip-avatar">{% lucide "users" size=14 stroke_width=2.6 %}</span>
+                <span class="person-chip-label">{% trans "All" %}</span>
+            </a>
             {% for person in managed_people %}
-                <a class="badge {% if not scope_everyone and person == scope_person %}badge-neutral{% endif %}" href="?as={{ person.pk }}">
-                    {{ person.first_name|slice:":1" }} {% if person == me %}{% trans "Me" %}{% else %}{{ person.first_name }}{% endif %}
+                <a class="person-chip {% if not scope_everyone and person == scope_person %}person-chip-active{% endif %}" href="?as={{ person.pk }}">
+                    <span class="person-chip-avatar">{{ person.first_name|slice:":1" }}</span>
+                    <span class="person-chip-label">{% if person == me %}{% trans "Me" %}{% else %}{{ person.first_name }}{% endif %}</span>
                 </a>
             {% endfor %}
         </div>

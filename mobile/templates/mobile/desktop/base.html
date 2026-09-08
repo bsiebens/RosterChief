@@ -59,7 +59,7 @@
 
     <body class="flex min-h-screen bg-paper font-sans text-slate" hx-boost="true" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' data-vapid-public-key="{{ vapid_public_key }}" data-csrftoken="{{ csrf_token }}">
         <aside class="desktop-sidebar">
-            <div class="flex items-center gap-2.5 border-b px-[18px] pb-[20px]" style="border-color: var(--color-sidebar-hairline)">
+            <div class="flex items-center gap-2.5 px-[18px] pb-[20px]" style="border-color: var(--color-sidebar-hairline)">
                 <a href="{% url "mobile:home" %}">
                     {% if club.logo %}
                         <img class="desktop-crest object-cover" src="{{ club.logo.url }}" alt="">
@@ -74,7 +74,7 @@
             </div>
 
             {% if has_staff_access %}
-                <div class="desktop-switcher">
+                <div class="desktop-switcher mt-4">
                     <span class="desktop-switcher-item desktop-switcher-item-active">{% trans "Member" %}</span>
                     <a class="desktop-switcher-item" href="{% url "management:home" %}" hx-boost="false">{% trans "Manager" %}</a>
                 </div>
@@ -100,10 +100,10 @@
                     </a>
                 {% endif %}
 
-                <div class="desktop-nav-section">
-                    {% lucide "user" size=13 %}
+                <a class="nav-item {% if active_tab == "me" %}active{% endif %}" href="{% url "mobile:me" %}">
+                    {% lucide "user" size=18 %}
                     {% trans "Me" %}
-                </div>
+                </a>
                 <a class="nav-subitem {% if request.resolver_match.url_name == "me" %}active{% endif %}" href="{% url "mobile:me" %}">{% trans "Overview" %}</a>
                 <a class="nav-subitem {% if request.resolver_match.url_name == "edit_profile" %}active{% endif %}" href="{% url "mobile:edit_profile" me.pk %}">{% trans "Personal details" %}</a>
                 <a class="nav-subitem {% if request.resolver_match.url_name == "payments" %}active{% endif %}" href="{% url "mobile:payments" %}">{% trans "Payments &amp; dues" %}</a>

@@ -51,10 +51,13 @@
     --color-club-dark: var(--tenant-club-dark, #b00021);
     --color-club-content: var(--tenant-club-content, #ffffff);
 
-    /* The desktop sidebar reuses mobile's own header colour (--tenant-navy,
-       Club.primary_color) rather than a second sidebar-specific variable --
-       see the file banner. */
-    --color-sidebar-bg: var(--tenant-navy, var(--color-navy));
+    /* The desktop sidebar reuses mobile's own header variable (--tenant-navy,
+       Club.primary_color) rather than a second sidebar-specific one -- see the
+       file banner. Falls back to --color-ink, not --color-navy: a club with no
+       primary_color set must still match management.css's own sidebar exactly
+       (its --color-sidebar-bg falls back to ink too), not drift to a visibly
+       different dark tone between the two surfaces. */
+    --color-sidebar-bg: var(--tenant-navy, var(--color-ink));
     --color-sidebar-fg: #ffffff;
     --color-sidebar-fg-dim: color-mix(in srgb, var(--color-sidebar-fg) 68%, var(--color-sidebar-bg));
     --color-sidebar-fg-faint: color-mix(in srgb, var(--color-sidebar-fg) 38%, var(--color-sidebar-bg));
@@ -639,10 +642,14 @@
         overflow-y: auto;
     }
 
+    /* Circular, matching management.css's own .crest -- controlpanel.css settled
+       on a circle over the design's original hexagon/rounded-square after that
+       read as a "5-pointed" shape rather than a shield in practice (see that
+       file's own comment); this surface reuses the same call. */
     .desktop-crest {
         width: 30px;
         height: 30px;
-        border-radius: 8px;
+        border-radius: 999px;
         background: var(--color-club);
         color: #fff;
         display: flex;
@@ -679,20 +686,6 @@
     .desktop-switcher-item-active {
         background: #fff;
         color: var(--color-ink);
-    }
-
-    .desktop-nav-section {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        margin-top: 14px;
-        padding: 0 12px 4px;
-        font-family: var(--font-display);
-        font-weight: 700;
-        font-size: 11px;
-        letter-spacing: 0.12em;
-        text-transform: uppercase;
-        color: var(--color-sidebar-fg-faint);
     }
 
     .desktop-icobtn {
@@ -770,14 +763,17 @@
 
     /* Person/option chip (shop product detail's beneficiary/variant pickers) --
        copied verbatim from mobile.css. */
+    /* Larger than mobile.css's own 22px avatar -- desktop has the room to let the
+       initial actually read as an avatar rather than a small tinted dot next to
+       the name. */
     .person-chip {
         display: flex;
         align-items: center;
-        gap: 6px;
+        gap: 8px;
         background: #fff;
         border: 1.5px solid var(--color-line);
         border-radius: 999px;
-        padding: 4px 10px 4px 4px;
+        padding: 5px 14px 5px 5px;
         color: var(--color-muted);
         cursor: pointer;
     }
@@ -788,8 +784,8 @@
     }
 
     .person-chip-avatar {
-        width: 22px;
-        height: 22px;
+        width: 30px;
+        height: 30px;
         border-radius: 999px;
         background: var(--color-stroke);
         color: #fff;
@@ -798,7 +794,7 @@
         justify-content: center;
         font-family: var(--font-display);
         font-weight: 800;
-        font-size: 0.6875rem;
+        font-size: 0.875rem;
         flex-shrink: 0;
     }
 
@@ -809,7 +805,7 @@
     .person-chip-label {
         font-family: var(--font-display);
         font-weight: 700;
-        font-size: 0.8125rem;
+        font-size: 0.875rem;
         letter-spacing: 0.06em;
         text-transform: uppercase;
     }

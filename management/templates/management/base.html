@@ -71,6 +71,11 @@
                     </span>
                 </a>
 
+                <div class="switcher">
+                    <a class="switcher-item" href="{% url 'mobile:home' %}">{% trans "Member" %}</a>
+                    <span class="switcher-item switcher-item-active">{% trans "Manager" %}</span>
+                </div>
+
                 <nav class="flex flex-col gap-0.5 px-2.5">
                     {% include "management/_nav_items.html" %}
                 </nav>

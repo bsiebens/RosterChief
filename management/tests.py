@@ -150,6 +150,18 @@ class AccessTests(ManagementTestBase):
 
         self.assertContains(response, f"v{settings.ROSTERCHIEF_VERSION}")
 
+    def test_the_sidebar_switcher_links_to_the_member_app(self):
+        # Mirrors mobile/desktop/base.html's own switcher -- reaching management
+        # already proves staff access, so "Manager" is a plain active pill here,
+        # not a link; "Member" goes to mobile:home, which itself resolves to the
+        # desktop Member UI or the phone PWA depending on the visitor's device.
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("home")
+
+        self.assertContains(response, f'href="{reverse("mobile:home")}"')
+        self.assertContains(response, 'class="switcher-item switcher-item-active"')
+
     def test_it_does_not_exist_on_the_base_domain(self):
         # The management UI manages one club; the mirror image of controlpanel
         # refusing to exist on a club subdomain.
