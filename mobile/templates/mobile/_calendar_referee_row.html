@@ -31,8 +31,8 @@
             {{ row.event.start|date:"H:i" }}
             {% if row.referee_member %}&middot; {{ row.referee_member.first_name }}{% endif %}
             {% for team in row.event.teams.all %}&middot; {{ team.name }}{% endfor %}
-            {% if row.event.location %}&middot; {{ row.event.location.name }}{% endif %}
         </div>
+        {% if row.event.location %}<div class="truncate text-xs text-muted">{{ row.event.location.name }}</div>{% endif %}
     </div>
     <span class="pill {% if row.referee_signup.status == "accepted" %}pill-referee{% else %}pill-neutral{% endif %} shrink-0">
         {% if row.referee_signup.status == "accepted" %}{% trans "Confirmed" %}{% else %}{% trans "Reply needed" %}{% endif %}
