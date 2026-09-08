@@ -68,8 +68,8 @@
                     {% endif %}
                 </a>
                 <a href="{% url "mobile:home" %}" class="min-w-0">
-                    <span class="block truncate font-display text-base font-extrabold tracking-wide text-white uppercase">{{ club.name }}</span>
-                    {% if season %}<span class="block font-mono text-[10px]" style="color: var(--color-sidebar-fg-faint)">{% blocktrans with name=season.name %}Season {{ name }}{% endblocktrans %}</span>{% endif %}
+                    <span class="block truncate font-display text-[17px] leading-none font-extrabold tracking-[.06em] text-sidebar-fg uppercase">{{ club.name }}</span>
+                    {% if season %}<span class="block font-mono text-[10px] text-sidebar-fg-faint">{% blocktrans with name=season.name %}Season {{ name }}{% endblocktrans %}</span>{% endif %}
                 </a>
             </div>
 
