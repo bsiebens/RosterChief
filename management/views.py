@@ -221,7 +221,7 @@ class HomeView(ClubStaffRequiredMixin, TemplateView):
             if latest_due is not None and 0 <= (latest_due.period_end - timezone.localdate()).days <= subscription.plan.renewal_lead_days:
                 billing_ends_at = latest_due.period_end
 
-        upcoming_events = scoped_to_managed_teams(Event.objects.filter(club=club, start__gte=timezone.now()), user, club).order_by("start").prefetch_related("teams")[:10]
+        upcoming_events = scoped_to_managed_teams(Event.objects.filter(club=club, start__gte=timezone.now()), user, club).order_by("start").prefetch_related("teams")[:8]
 
         attention = club_attention(club)
         season = attention["season"]
@@ -4946,11 +4946,7 @@ class OrderListView(ShopManagerRequiredMixin, ListView):
         # row from the template calling that property directly (order_list.html was
         # the one place still doing that; order_detail.html's single order still uses
         # the property, which is the right call for exactly one row).
-        orders = (
-            Order.objects.filter(club=self.request.club)
-            .select_related("purchaser")
-            .annotate(has_production_line_items=Exists(OrderLine.objects.filter(order=OuterRef("pk"), product__product_type=Product.ProductType.MERCHANDISE)))
-        )
+        orders = Order.objects.filter(club=self.request.club).select_related("purchaser").annotate(has_production_line_items=Exists(OrderLine.objects.filter(order=OuterRef("pk"), product__product_type=Product.ProductType.MERCHANDISE)))
 
         payment_status = self.request.GET.get("payment_status", "")
         fulfillment_status = self.request.GET.get("fulfillment_status", "")
