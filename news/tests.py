@@ -18,7 +18,7 @@ from rosterchief.test_support import make_season
 from teams.models import Position, Team, TeamMembership
 
 from .models import News, NewsPhoto
-from .services import notify_editors_of_pending_review, send_publish_notification
+from .services import notify_editors_of_pending_review, render_body_html, send_publish_notification
 
 User = get_user_model()
 
@@ -26,6 +26,38 @@ User = get_user_model()
 def make_photo(news_item, *, is_main=False):
     image = SimpleUploadedFile("photo.jpg", b"fake-image-bytes", content_type="image/jpeg")
     return NewsPhoto.objects.create(news_item=news_item, image=image, is_main=is_main)
+
+
+class RenderBodyHtmlTests(TestCase):
+    """news.services.render_body_html -- Markdown source to sanitised HTML."""
+
+    def test_a_table_renders_as_real_table_markup(self):
+        body = "| Name | Position |\n| --- | --- |\n| Finn | Forward |"
+
+        html = render_body_html(body)
+
+        self.assertIn("<table>", html)
+        self.assertIn("<th>Name</th>", html)
+        self.assertIn("<td>Finn</td>", html)
+
+    def test_column_alignment_survives_sanitisation_as_an_align_attribute(self):
+        # use_align_attribute=True (news/services.py) -- the extension's default
+        # inline style="text-align: ..." would otherwise be stripped outright,
+        # since style isn't in _ALLOWED_ATTRIBUTES.
+        body = "| Name | Goals |\n| --- | ---: |\n| Finn | 12 |"
+
+        html = render_body_html(body)
+
+        self.assertIn('<th align="right">Goals</th>', html)
+        self.assertIn('<td align="right">12</td>', html)
+        self.assertNotIn("style=", html)
+
+    def test_a_script_tag_inside_a_table_cell_is_still_stripped(self):
+        body = "| Name |\n| --- |\n| <script>alert(1)</script> |"
+
+        html = render_body_html(body)
+
+        self.assertNotIn("<script", html)
 
 
 class NewsModelTests(TestCase):

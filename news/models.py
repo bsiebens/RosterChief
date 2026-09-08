@@ -39,7 +39,7 @@ class News(ClubScopedModel):
 
     body = models.TextField(
         _("body"),
-        help_text=_("Supports Markdown: **bold**, *italic*, [link text](https://example.com), # heading, - list item, > quote. Rendered to HTML for the public website; shown as plain text here in the control panel."),
+        help_text=_("Supports Markdown: **bold**, *italic*, [link text](https://example.com), # heading, - list item, > quote, | table | header |. Rendered to HTML for the public website; shown as plain text here in the control panel."),
     )
 
     title_en = models.CharField(_("title (English)"), max_length=255, blank=True, help_text=_("Optional. Falls back to the title above when left blank."))

@@ -725,6 +725,46 @@
         margin: 1.1em 0;
     }
 
+    /* news.services.render_body_html's tables extension (use_align_attribute=True --
+       a `:---:`-style column marker becomes align="center"/"right" here, not an
+       inline style, since style isn't in that function's own sanitizer allowlist).
+       Horizontally scrollable, not shrunk to fit -- a wide table on a phone-width
+       screen needs to scroll, not squeeze its columns unreadably thin. */
+    .article-body table {
+        display: block;
+        width: 100%;
+        overflow-x: auto;
+        border-collapse: collapse;
+        margin: 0 0 0.85em;
+        font-size: 0.85em;
+    }
+
+    .article-body th,
+    .article-body td {
+        padding: 0.5em 0.75em;
+        border: 1px solid var(--color-line);
+        text-align: left;
+        white-space: nowrap;
+    }
+
+    .article-body th {
+        background: var(--color-rule);
+        font-family: var(--font-display);
+        font-weight: 800;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+    }
+
+    .article-body th[align="center"],
+    .article-body td[align="center"] {
+        text-align: center;
+    }
+
+    .article-body th[align="right"],
+    .article-body td[align="right"] {
+        text-align: right;
+    }
+
     /* --- Sponsor strip auto-scroll (Home, mobile/templates/mobile/home.html) -----------
        The strip is wider than the screen once there's more than a couple of sponsors, and
        a static overflow-x-auto row left most of them undiscoverable without a deliberate

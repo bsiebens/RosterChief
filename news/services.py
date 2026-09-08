@@ -27,16 +27,23 @@ _EXTENSIONS = [
     # not require a blank line like standard Markdown paragraphs do.
     "sane_lists",
     "fenced_code",
+    "tables",
 ]
 
-_ALLOWED_TAGS = {"p", "br", "strong", "em", "b", "i", "u", "a", "ul", "ol", "li", "blockquote", "code", "pre", "h2", "h3", "h4", "img", "hr"}
-_ALLOWED_ATTRIBUTES = {"a": {"href", "title"}, "img": {"src", "alt", "title"}}
+# use_align_attribute: the tables extension defaults to an inline style="text-align: ..."
+# for a `:---:`-style column alignment marker -- style is deliberately not in
+# _ALLOWED_ATTRIBUTES below (nothing else here needs raw CSS through the sanitizer), so
+# this switches it to a plain align="..." attribute instead, which is.
+_EXTENSION_CONFIGS = {"tables": {"use_align_attribute": True}}
+
+_ALLOWED_TAGS = {"p", "br", "strong", "em", "b", "i", "u", "a", "ul", "ol", "li", "blockquote", "code", "pre", "h2", "h3", "h4", "img", "hr", "table", "thead", "tbody", "tr", "th", "td"}
+_ALLOWED_ATTRIBUTES = {"a": {"href", "title"}, "img": {"src", "alt", "title"}, "th": {"align"}, "td": {"align"}}
 _ALLOWED_URL_SCHEMES = {"http", "https", "mailto"}
 
 
 def render_body_html(body: str) -> str:
     """Markdown source -> sanitized HTML."""
-    html = _markdown.markdown(body, extensions=_EXTENSIONS)
+    html = _markdown.markdown(body, extensions=_EXTENSIONS, extension_configs=_EXTENSION_CONFIGS)
     return nh3.clean(html, tags=_ALLOWED_TAGS, attributes=_ALLOWED_ATTRIBUTES, url_schemes=_ALLOWED_URL_SCHEMES)
 
 
