@@ -148,6 +148,9 @@
 
             <div class="flex flex-col gap-4 lg:col-span-2">
                 {% for question in history.questions %}
+                    {% ifchanged question.field.section %}
+                        {% if question.field.section %}<h3 class="mt-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase first:mt-0">{{ question.field.section }}</h3>{% endif %}
+                    {% endifchanged %}
                     <div class="card card-body">
                         <div class="flex flex-wrap items-center justify-between gap-2">
                             <h3 class="card-title text-base">{{ question.field.label }}</h3>

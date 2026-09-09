@@ -29,7 +29,7 @@ from waffle import flag_is_active
 from club.services.access import can_manage_evaluations, current_season
 from controlpanel.messages import notify
 from evaluations.models import PlayerEvaluation
-from evaluations.services import EvaluationRubricNotConfigured, EvaluationSubmissionError, active_checklists, current_rubric_form, submit_evaluation
+from evaluations.services import EvaluationRubricNotConfigured, EvaluationSubmissionError, active_checklists, current_rubric_form, rubric_field_rows, submit_evaluation
 from formbuilder.services.form_factory import build_form
 from members.models import Member
 from teams.models import TeamMembership
@@ -156,8 +156,9 @@ class CoachEvaluationCreateView(CoachEvaluationMixin, TemplateView):
         if checklist is None:
             return render(request, self.picker_template_name, self.get_context_data(player=player, checklists=checklists))
 
-        bound_form = style_dynamic_form(build_form(current_rubric_form(checklist)))
-        return self.render_to_response(self.get_context_data(player=player, checklist=checklist, rubric_configured=True, form=bound_form))
+        rubric = current_rubric_form(checklist)
+        bound_form = style_dynamic_form(build_form(rubric))
+        return self.render_to_response(self.get_context_data(player=player, checklist=checklist, rubric_configured=True, form=bound_form, rows=rubric_field_rows(rubric, bound_form)))
 
     def post(self, request, *args, **kwargs):
         player = self.get_player()
@@ -175,7 +176,7 @@ class CoachEvaluationCreateView(CoachEvaluationMixin, TemplateView):
             bound_form = style_dynamic_form(build_form(rubric_form, data=request.POST, files=request.FILES))
             bound_form.is_valid()
             notify(request, f"e|{_('Could not submit')}|{error}")
-            return self.render_to_response(self.get_context_data(player=player, checklist=checklist, rubric_configured=True, form=bound_form))
+            return self.render_to_response(self.get_context_data(player=player, checklist=checklist, rubric_configured=True, form=bound_form, rows=rubric_field_rows(rubric_form, bound_form)))
 
         title = _("Evaluation submitted")
         body = _("Your evaluation of “%(player)s” has been recorded.") % {"player": player}

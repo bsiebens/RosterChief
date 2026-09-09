@@ -3,11 +3,16 @@
     One row of the rubric editor's own formset -- same shape as
     management/_form_field_formset_row.html, plus an inline ``order`` number
     (reorder without drag-and-drop, same idiom as FormBuilderFieldForm's own
-    ``order`` field) and a second line for the optional guidance/options
+    ``order`` field), an optional ``section`` heading (repeat the same text on
+    consecutive rows to group them -- see formbuilder.Field.section's own
+    docstring), and a second line for the optional guidance/options
     textareas, which don't fit alongside the first line without cramming it.
 {% endcomment %}
 <div class="bulk-add-row flex flex-col gap-2 rounded-lg border border-line p-3">
     <div class="flex items-center gap-2">
+        <div class="w-36 shrink-0 self-start">
+            {{ form.section }}
+        </div>
         <div class="flex-1 self-start">
             {{ form.label }}
             {% for error in form.label.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}

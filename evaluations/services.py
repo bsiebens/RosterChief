@@ -79,6 +79,18 @@ def current_rubric_form(checklist: EvaluationChecklist) -> Form | None:
     return checklist.form
 
 
+def rubric_field_rows(rubric_form: Form, bound_form):
+    """Pair each of ``bound_form``'s fields with the raw rubric Field it was
+    built from, in the same order -- safe to zip positionally since
+    formbuilder.services.form_factory.build_form_class builds the Django Form
+    from this exact ordered queryset. Lets a fill-in template print a section
+    heading whenever Field.section changes between consecutive questions
+    (via {% ifchanged %}), which a bare bound Form can't expose -- templates
+    have no variable-keyed dict lookup to go from a BoundField back to the
+    Field it came from."""
+    return list(zip(bound_form, rubric_form.fields.filter(is_active=True).order_by("order"), strict=True))
+
+
 def _evaluation_send_for(form: Form) -> FormSend:
     """The FormSend a checklist's Submissions hang off -- plumbing only
     (formbuilder.Submission.send is a mandatory FK), not a real audience
@@ -147,6 +159,7 @@ def start_new_rubric_version(checklist: EvaluationChecklist) -> Form:
                     field_type=field.field_type,
                     required=field.required,
                     help_text=field.help_text,
+                    section=field.section,
                     order=field.order,
                     is_active=field.is_active,
                     options=field.options,

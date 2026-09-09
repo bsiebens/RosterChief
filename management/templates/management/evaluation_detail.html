@@ -32,6 +32,9 @@
         <h2 class="card-title">{% lucide "clipboard-list" size=18 %} {% trans "Answers" %}</h2>
         <dl class="flex flex-col gap-3">
             {% for row in rows %}
+                {% ifchanged row.field.section %}
+                    {% if row.field.section %}<dt class="mt-1 font-display text-xs font-extrabold tracking-wide text-muted uppercase first:mt-0">{{ row.field.section }}</dt>{% endif %}
+                {% endifchanged %}
                 <div class="flex flex-col gap-1 border-b border-rule pb-3 last:border-0 last:pb-0">
                     <dt class="text-sm font-semibold text-ink">{{ row.field.label }}</dt>
                     <dd class="text-sm text-muted">{{ row.value|default:"—" }}</dd>
