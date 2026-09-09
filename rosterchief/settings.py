@@ -88,6 +88,9 @@ INSTALLED_APPS = [
     "waffle",
     "features.apps.FeaturesConfig",
     "controlpanel.apps.ControlpanelConfig",
+    # The public marketing site on the base domain (rosterchief.app) -- see
+    # marketing/views.py:home and club/views.py:root.
+    "marketing.apps.MarketingConfig",
     # Club-facing UI for team managers, coaches and admins -- not controlpanel (platform
     # staff managing every club) and not the mobile member/parent app below.
     "management.apps.ManagementConfig",
@@ -408,6 +411,11 @@ SERVER_EMAIL = config("DJANGO_SERVER_EMAIL", default=DEFAULT_FROM_EMAIL)
 
 #: Where a club admin is told to direct a billing question. Shown in reminder emails.
 BILLING_CONTACT_EMAIL = config("ROSTERCHIEF_BILLING_CONTACT_EMAIL", default=DEFAULT_FROM_EMAIL)
+
+#: Where the marketing site's "Book a demo" form (marketing/views.py) sends its
+#: notification. reply_to is set to the visitor's own address, so replying goes
+#: straight back to them.
+ROSTERCHIEF_CONTACT_EMAIL = config("ROSTERCHIEF_CONTACT_EMAIL", default="bernard@rosterchief.app")
 
 # Web Push (mobile app, see mobile/services/push.py) -- one VAPID keypair for the whole
 # platform, not per club: it identifies the *sender* (RosterChief) to a browser's push

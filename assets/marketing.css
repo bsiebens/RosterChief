@@ -1,0 +1,341 @@
+/* RosterChief marketing site (rosterchief.app) -- the public, logged-out homepage.
+ *
+ * A distinct surface, same posture as assets/controlpanel.css: its own stylesheet, its
+ * own document shell (marketing/templates/marketing/home.html doesn't extend
+ * templates/_base.html), no daisyUI. Design source: design_handoff_rosterchief_platform/
+ * WEBSITE.md, which is explicit that "the tokens, fonts and component recipes [from the
+ * app handoff] apply verbatim" -- so the @theme block and @font-face declarations below
+ * are copied from assets/controlpanel.css rather than reinvented.
+ */
+@import "tailwindcss";
+
+@source "../marketing";
+
+@theme {
+    --font-display: "Barlow Condensed", ui-sans-serif, system-ui, sans-serif;
+    --font-sans: "Barlow", ui-sans-serif, system-ui, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
+
+    --color-ink: #0b1220; /* darkest -- header, hero, contact, footer */
+    --color-navy: #101e36;
+    --color-steel: #1b2b47;
+    --color-hairline: #1e2b42; /* rules on dark surfaces */
+    --color-paper: #f4f5f7; /* alternating section background */
+    --color-line: #e3e6eb; /* 1px borders on light */
+    --color-rule: #eef0f3; /* hairline dividers on light */
+    --color-edge: #d6dae1; /* input borders */
+    --color-stroke: #c9cfd8; /* secondary-button border */
+    --color-muted: #6c7787; /* secondary text on light */
+    --color-slate: #3a4658; /* body copy on light */
+    --color-on-dark: #93a0b4; /* secondary text on dark */
+    --color-on-dark-dim: #7c8aa0;
+
+    --color-club: #e4002b; /* platform brand red -- never club-themed here */
+    --color-club-dark: #b00021;
+
+    --color-ice: #14b8e8;
+
+    --color-ok: #14a05a;
+    --color-ok-bg: #e6f6ee;
+    --color-ok-text: #0c7a43;
+}
+
+/* --- fonts: self-hosted, same latin/latin-ext split and reasoning as assets/controlpanel.css
+   -- no request to Google's CDN on an EU club platform's own site. --- */
+
+@font-face {
+    font-family: "Barlow";
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url("../fonts/barlow-latin-400-normal.woff2") format("woff2");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+    font-family: "Barlow";
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url("../fonts/barlow-latin-ext-400-normal.woff2") format("woff2");
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+    font-family: "Barlow";
+    font-style: normal;
+    font-weight: 600;
+    font-display: swap;
+    src: url("../fonts/barlow-latin-600-normal.woff2") format("woff2");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+    font-family: "Barlow";
+    font-style: normal;
+    font-weight: 600;
+    font-display: swap;
+    src: url("../fonts/barlow-latin-ext-600-normal.woff2") format("woff2");
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+    font-family: "Barlow";
+    font-style: normal;
+    font-weight: 700;
+    font-display: swap;
+    src: url("../fonts/barlow-latin-700-normal.woff2") format("woff2");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+    font-family: "Barlow";
+    font-style: normal;
+    font-weight: 700;
+    font-display: swap;
+    src: url("../fonts/barlow-latin-ext-700-normal.woff2") format("woff2");
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+    font-family: "Barlow Condensed";
+    font-style: normal;
+    font-weight: 600;
+    font-display: swap;
+    src: url("../fonts/barlow-condensed-latin-600-normal.woff2") format("woff2");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+    font-family: "Barlow Condensed";
+    font-style: normal;
+    font-weight: 600;
+    font-display: swap;
+    src: url("../fonts/barlow-condensed-latin-ext-600-normal.woff2") format("woff2");
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+    font-family: "Barlow Condensed";
+    font-style: normal;
+    font-weight: 700;
+    font-display: swap;
+    src: url("../fonts/barlow-condensed-latin-700-normal.woff2") format("woff2");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+    font-family: "Barlow Condensed";
+    font-style: normal;
+    font-weight: 700;
+    font-display: swap;
+    src: url("../fonts/barlow-condensed-latin-ext-700-normal.woff2") format("woff2");
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+    font-family: "Barlow Condensed";
+    font-style: normal;
+    font-weight: 800;
+    font-display: swap;
+    src: url("../fonts/barlow-condensed-latin-800-normal.woff2") format("woff2");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+    font-family: "Barlow Condensed";
+    font-style: normal;
+    font-weight: 800;
+    font-display: swap;
+    src: url("../fonts/barlow-condensed-latin-ext-800-normal.woff2") format("woff2");
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+    font-family: "IBM Plex Mono";
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url("../fonts/ibm-plex-mono-latin-400-normal.woff2") format("woff2");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+    font-family: "IBM Plex Mono";
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url("../fonts/ibm-plex-mono-latin-ext-400-normal.woff2") format("woff2");
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+    font-family: "IBM Plex Mono";
+    font-style: normal;
+    font-weight: 500;
+    font-display: swap;
+    src: url("../fonts/ibm-plex-mono-latin-500-normal.woff2") format("woff2");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+    font-family: "IBM Plex Mono";
+    font-style: normal;
+    font-weight: 500;
+    font-display: swap;
+    src: url("../fonts/ibm-plex-mono-latin-ext-500-normal.woff2") format("woff2");
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@layer base {
+    body {
+        background: var(--color-paper);
+        color: var(--color-slate);
+        font-family: var(--font-sans);
+        -webkit-font-smoothing: antialiased;
+    }
+
+    ::selection {
+        background: var(--color-club);
+        color: #fff;
+    }
+}
+
+@layer components {
+    /* Buttons -- base shared by every CTA on the page; height/width/colour vary per call
+       site via plain utility classes (h-[54px], bg-club, ...), matching the per-section
+       sizes in WEBSITE.md (54px hero, 50px pricing/contact-info, 52px form submit). */
+    .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
+        font-family: var(--font-display);
+        font-weight: 800;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        white-space: nowrap;
+        cursor: pointer;
+        border: 0;
+        transition:
+            background-color 0.15s ease,
+            border-color 0.15s ease,
+            color 0.15s ease;
+    }
+
+    .btn-primary {
+        background: var(--color-club);
+        color: #fff;
+    }
+
+    .btn-primary:hover {
+        background: var(--color-club-dark);
+    }
+
+    .btn-outline-dark {
+        background: transparent;
+        color: #fff;
+        border: 1.5px solid rgb(255 255 255 / 34%);
+    }
+
+    .btn-outline-dark:hover {
+        background: rgb(255 255 255 / 10%);
+    }
+
+    .btn-outline-ink {
+        background: #fff;
+        color: var(--color-ink);
+        border: 1.5px solid var(--color-stroke);
+    }
+
+    .btn-outline-ink:hover {
+        background: var(--color-ink);
+        color: #fff;
+        border-color: var(--color-ink);
+    }
+
+    /* Form controls -- 46px minimum height per WEBSITE.md's Contact field spec. */
+    .input,
+    .select,
+    .textarea {
+        width: 100%;
+        min-height: 46px;
+        border: 1px solid var(--color-edge);
+        border-radius: 0.5rem;
+        background: #fff;
+        color: var(--color-ink);
+        font-family: var(--font-sans);
+        font-size: 0.9375rem;
+        padding: 0 0.75rem;
+        box-sizing: border-box;
+    }
+
+    .textarea {
+        height: auto;
+        padding: 0.75rem;
+        resize: vertical;
+        line-height: 1.5;
+    }
+
+    .select {
+        appearance: none;
+        padding-right: 2rem;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%236c7787' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 7.5L10 12.5L15 7.5'/%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: right 0.6rem center;
+        background-size: 1rem;
+    }
+
+    .input:focus,
+    .select:focus,
+    .textarea:focus {
+        outline: 2px solid var(--color-ink);
+        outline-offset: 1px;
+        border-color: var(--color-ink);
+    }
+
+    .input-error,
+    .select-error,
+    .textarea-error {
+        border-color: var(--color-club);
+    }
+
+    /* Pricing-tier tick list -- each row is `<span class="text-ok|text-ice">✓</span>` +
+       text, colour varies per tier (see marketing/templates/marketing/home.html), so the
+       checkmark itself is markup, not a ::before with a fixed colour. */
+    .tick {
+        display: flex;
+        gap: 0.625rem;
+    }
+
+    .tick > span {
+        font-weight: 700;
+    }
+
+    /* "One account" role chips ("Coach of U16" / "Parent of two" / ...). */
+    .chip {
+        display: inline-flex;
+        padding: 7px 13px;
+        border-radius: 999px;
+        background: #fff;
+        border: 1px solid var(--color-line);
+        color: var(--color-slate);
+        font-family: var(--font-display);
+        font-weight: 700;
+        font-size: 0.8125rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+    }
+
+    .chip-active {
+        background: var(--color-ink);
+        color: #fff;
+        border-color: var(--color-ink);
+    }
+
+    .chip-club {
+        background: var(--color-club);
+        color: #fff;
+        border-color: var(--color-club);
+    }
+}

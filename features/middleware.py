@@ -18,7 +18,7 @@ from features.models import Maintenance
 
 #: Reachable on the base domain while the platform is locked down.
 OPEN_PREFIXES = (
-    "/controlpanel/",  # the point of the exercise
+    "/control/",  # the point of the exercise
     "/accounts/",  # ...which you cannot reach without signing in
     "/admin/",
     "/static/",

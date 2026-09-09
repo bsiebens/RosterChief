@@ -1536,10 +1536,11 @@ class RootViewTests(TestCase):
         cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
         cls.season = make_season(cls.club)
 
-    def test_the_base_domain_hands_off_to_the_control_panel(self):
+    def test_the_base_domain_serves_the_marketing_homepage(self):
         response = self.client.get("/", HTTP_HOST="rosterchief.app")
 
-        self.assertRedirects(response, reverse("controlpanel:dashboard"), fetch_redirect_response=False)
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "marketing/home.html")
 
     def test_a_phone_always_lands_on_the_member_app(self):
         # Unconditional, even for staff -- management isn't responsive yet.

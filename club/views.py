@@ -11,7 +11,10 @@ def root(request):
     This is why allauth needs no login-redirect adapter: LOGIN_REDIRECT_URL is "/",
     and "/" resolves itself:
 
-    * The base domain hands off to the platform control panel.
+    * The base domain serves the public marketing site (marketing.views.home) --
+      not a redirect, so "/" is the site's own canonical URL. The platform
+      control panel lives at its own /control/ path instead, unlinked from
+      here (it's platform-staff-only, not something a visitor navigates to).
     * A club subdomain, on a phone or tablet, hands off to the member-facing PWA
       (mobile:home, which is itself LoginRequiredMixin -- an anonymous visitor lands
       on login with ?next= pointing back at it, same round trip as hitting /app/
@@ -27,7 +30,12 @@ def root(request):
       them to land on.
     """
     if request.club is None:
-        return redirect("controlpanel:dashboard")
+        # Deferred import: club is a low-level app plenty of others depend on, and
+        # marketing is a leaf app (the public site) -- it shouldn't gain a hard,
+        # module-level dependency in the other direction.
+        from marketing.views import home
+
+        return home(request)
 
     if not is_mobile_or_tablet(request):
         if not request.user.is_authenticated:

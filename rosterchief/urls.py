@@ -34,7 +34,7 @@ urlpatterns = [
     path("accounts/", include("allauth.urls")),
     path("", include("members.urls")),
     path("register/", include("registration.urls")),
-    path("controlpanel/", include("controlpanel.urls")),
+    path("control/", include("controlpanel.urls")),
     path("manage/", include("management.urls")),
     path("app/", include("mobile.urls")),
     path("api/v1/", api.urls),
@@ -42,7 +42,8 @@ urlpatterns = [
     # not nested under either app's urls.py, since both surfaces hit this one verbatim.
     path("announcements/pending/", PendingAnnouncementView.as_view(), name="announcement_pending"),
     # "/" resolves per tenant: a club subdomain lands on the club, the base domain
-    # hands off to the control panel. This is why LOGIN_REDIRECT_URL can stay "/".
+    # serves the public marketing site (marketing.views.home). This is why
+    # LOGIN_REDIRECT_URL can stay "/".
     path("", root, name="root"),
 ]
 

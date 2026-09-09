@@ -164,7 +164,7 @@ class MaintenanceModeTests(TestCase):
         Maintenance.start()
         self.client.force_login(self.user)
 
-        self.assertEqual(self.platform_get("/controlpanel/").status_code, 200)
+        self.assertEqual(self.platform_get("/control/").status_code, 200)
 
     def test_signing_in_stays_possible(self):
         # Close /accounts/ as well and you cannot sign in to turn maintenance off: a
