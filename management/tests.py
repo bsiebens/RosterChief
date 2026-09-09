@@ -25,7 +25,7 @@ from bugs.models import BugNote, BugReport
 from club.models import Club, ClubMembership, ClubRole, DuesInvoice, EvaluationManager, FeePayment, MemberRequirementStatus, OnboardingRequirement, Season, ShopManager, Sponsor
 from club.services.invoicing import DuesInvoicePDFError, create_or_resend_invoice
 from club.services.onboarding import mark_complete
-from evaluations.models import EvaluationChecklist, PlayerEvaluation
+from evaluations.models import EvaluationChecklist, EvaluationNote, PlayerEvaluation
 from evaluations.services import current_rubric_form
 from events.models import Attendance, Competition, Event, EventReferee, EventSeries, EventTask, EventTaskClaim, Location, Opponent, RefereeSignup
 from events.services.calendar import week_bounds
@@ -783,6 +783,112 @@ class TeamRosterStaffTests(ManagementTestBase):
         self.client.force_login(self.admin_user)
 
         response = self.club_post("team_roster_add", {"member": str(other_player.pk), "position": str(self.player_position.pk), "jersey_number": "7"}, self.team.pk, self.season.pk)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(TeamMembership.objects.filter(team=self.team, season=self.season, member=other_player).exists())
+
+    def test_an_admin_can_override_a_pool_conflict(self):
+        # Issue #6: during the transition period, historical numbers weren't
+        # always tracked accurately -- an admin/MEMBER_ADMIN may knowingly force
+        # a pool duplicate through rather than being hard-blocked by it.
+        pool = NumberPool.objects.create(club=self.club, name="Youth", min_number=1, max_number=99)
+        self.team.pool = pool
+        self.team.save()
+        self.other_team.pool = pool
+        self.other_team.save()
+        other_player = Member.objects.create(first_name="Olly", last_name="Other")
+        ClubMembership.objects.create(club=self.club, member=other_player, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        TeamMembership.objects.create(team=self.other_team, season=self.season, member=self.player, position=self.player_position, jersey_number=7)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post(
+            "team_roster_add",
+            {"member": str(other_player.pk), "position": str(self.player_position.pk), "jersey_number": "7", "override_conflict": "on"},
+            self.team.pk,
+            self.season.pk,
+        )
+
+        self.assertRedirects(response, f"{reverse('management:team_detail', args=[self.team.pk])}?season={self.season.pk}")
+        membership = TeamMembership.objects.get(team=self.team, season=self.season, member=other_player)
+        self.assertEqual(membership.jersey_number, 7)
+
+    def test_a_member_admin_can_also_override_on_edit(self):
+        pool = NumberPool.objects.create(club=self.club, name="Youth", min_number=1, max_number=99)
+        self.team.pool = pool
+        self.team.save()
+        self.other_team.pool = pool
+        self.other_team.save()
+        other_player = Member.objects.create(first_name="Olly", last_name="Other")
+        ClubMembership.objects.create(club=self.club, member=other_player, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        TeamMembership.objects.create(team=self.other_team, season=self.season, member=self.player, position=self.player_position, jersey_number=7)
+        editable = TeamMembership.objects.create(team=self.team, season=self.season, member=other_player, position=self.player_position, jersey_number=8)
+        # TeamManagerRequiredMixin (the view's own gate) needs a manager of
+        # *this* team specifically -- MEMBER_ADMIN alone wouldn't reach the
+        # view at all, so this fixture holds both: a coach who also happens to
+        # be a club-wide MEMBER_ADMIN, isolating that it's the latter role
+        # unlocking override_conflict, not the team-manager standing itself.
+        member_admin_user = self.make_team_coach(self.team, "member-admin-override@example.com")
+        member_admin_member = Member.objects.get(user=member_admin_user)
+        # make_team_coach doesn't create a ClubMembership (its own StaffAssignment is
+        # enough for TeamManagerRequiredMixin) -- ClubRole needs one to already exist
+        # to update, same as the ClubMembership-creates-a-default-ClubRole pattern
+        # every other MEMBER_ADMIN fixture in this file relies on.
+        ClubMembership.objects.create(club=self.club, member=member_admin_member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        ClubRole.objects.filter(club=self.club, member=member_admin_member).update(role=ClubRole.Roles.MEMBER_ADMIN)
+        enrol_mfa(member_admin_user)
+        self.client.force_login(member_admin_user)
+
+        response = self.club_post(
+            "team_roster_update",
+            {"member": str(other_player.pk), "position": str(self.player_position.pk), "jersey_number": "7", "override_conflict": "on"},
+            self.team.pk,
+            editable.pk,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        editable.refresh_from_db()
+        self.assertEqual(editable.jersey_number, 7)
+
+    def test_a_plain_team_coach_cannot_override_even_if_they_post_the_field(self):
+        # Server-side enforcement, not just a hidden checkbox: override_conflict
+        # isn't even in the form's fields unless can_manage_members is true, so
+        # a hand-crafted POST from a coach who lacks it is silently ignored --
+        # the conflict is still rejected exactly as if the field were absent.
+        pool = NumberPool.objects.create(club=self.club, name="Youth", min_number=1, max_number=99)
+        self.team.pool = pool
+        self.team.save()
+        self.other_team.pool = pool
+        self.other_team.save()
+        other_player = Member.objects.create(first_name="Olly", last_name="Other")
+        ClubMembership.objects.create(club=self.club, member=other_player, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        TeamMembership.objects.create(team=self.other_team, season=self.season, member=self.player, position=self.player_position, jersey_number=7)
+        self.client.force_login(self.team_coach)
+
+        response = self.club_post(
+            "team_roster_add",
+            {"member": str(other_player.pk), "position": str(self.player_position.pk), "jersey_number": "7", "override_conflict": "on"},
+            self.team.pk,
+            self.season.pk,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(TeamMembership.objects.filter(team=self.team, season=self.season, member=other_player).exists())
+
+    def test_override_does_not_bypass_the_same_team_duplicate_check(self):
+        # override_conflict only ever applies to the cross-team pool check --
+        # a same-team duplicate is a hard unique_jersey_number_per_team_per_season
+        # DB constraint no override could save past anyway.
+        other_player = Member.objects.create(first_name="Olly", last_name="Other")
+        ClubMembership.objects.create(club=self.club, member=other_player, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        TeamMembership.objects.create(team=self.team, season=self.season, member=self.player, position=self.player_position, jersey_number=7)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post(
+            "team_roster_add",
+            {"member": str(other_player.pk), "position": str(self.player_position.pk), "jersey_number": "7", "override_conflict": "on"},
+            self.team.pk,
+            self.season.pk,
+        )
 
         self.assertEqual(response.status_code, 302)
         self.assertFalse(TeamMembership.objects.filter(team=self.team, season=self.season, member=other_player).exists())
@@ -1869,6 +1975,41 @@ class NumberListViewTests(ManagementTestBase):
         tiles = {tile["number"]: tile for tile in response.context["tiles"]}
         self.assertEqual(tiles[3]["state"], "taken")
         self.assertEqual(tiles[3]["holders"], [f"{self.member} ({self.team.short_name})"])
+
+    def test_two_holders_with_no_age_gap_data_is_a_conflict(self):
+        # Issue #6: only reachable via TeamMembershipForm's override_conflict --
+        # is_number_available already blocks this pair at submit time, so two
+        # real holders on the same number this season means an admin knowingly
+        # forced it through. Missing date_of_birth on both sides means the age
+        # gap can't be verified either, so it's conservatively not exempt.
+        # Different teams sharing the pool, not the same team -- two holders
+        # on one team is a hard unique_jersey_number_per_team_per_season DB
+        # constraint, never actually reachable regardless of override.
+        other_team = Team.objects.create(club=self.club, name="Second Team", short_name="2nd", pool=self.pool)
+        other_member = Member.objects.create(first_name="Jack", last_name="Roe")
+        TeamMembership.objects.create(team=self.team, member=self.member, season=self.season, jersey_number=3)
+        TeamMembership.objects.create(team=other_team, member=other_member, season=self.season, jersey_number=3)
+
+        response = self.club_get("number_list")
+
+        tiles = {tile["number"]: tile for tile in response.context["tiles"]}
+        self.assertEqual(tiles[3]["state"], "conflict")
+        self.assertCountEqual(tiles[3]["holders"], [f"{self.member} ({self.team.short_name})", f"{other_member} ({other_team.short_name})"])
+
+    def test_two_holders_with_a_five_year_age_gap_stay_taken_not_conflict(self):
+        # The one legitimate way to share a number -- teams.services.numbers'
+        # own age-gap exception -- must not be flagged as something to resolve.
+        other_team = Team.objects.create(club=self.club, name="Second Team", short_name="2nd", pool=self.pool)
+        self.member.date_of_birth = datetime.date(2010, 1, 1)
+        self.member.save()
+        younger_member = Member.objects.create(first_name="Jack", last_name="Roe", date_of_birth=datetime.date(2018, 1, 1))
+        TeamMembership.objects.create(team=self.team, member=self.member, season=self.season, jersey_number=3)
+        TeamMembership.objects.create(team=other_team, member=younger_member, season=self.season, jersey_number=3)
+
+        response = self.club_get("number_list")
+
+        tiles = {tile["number"]: tile for tile in response.context["tiles"]}
+        self.assertEqual(tiles[3]["state"], "taken")
 
     def test_a_number_placed_last_season_only_is_previous(self):
         previous_season = Season.objects.create(club=self.club, start_date=self.season.start_date - datetime.timedelta(days=365), end_date=self.season.start_date - datetime.timedelta(days=1))
@@ -8400,7 +8541,7 @@ class EvaluationChecklistCreateViewTests(EvaluationManagementTestBase):
     def test_admin_can_create_a_checklist_and_lands_on_its_rubric_editor(self):
         self.client.force_login(self.admin_user)
 
-        response = self.club_post("evaluation_checklist_create", {"name": "U8", "description": "", "is_active": "on", "order": "0"})
+        response = self.club_post("evaluation_checklist_create", {"name": "U8", "description": "", "is_active": "on"})
 
         checklist = EvaluationChecklist.objects.get(club=self.club, name="U8")
         self.assertRedirects(response, reverse("management:evaluation_rubric", args=[checklist.slug]))
@@ -8408,7 +8549,7 @@ class EvaluationChecklistCreateViewTests(EvaluationManagementTestBase):
     def test_evaluation_manager_gets_403(self):
         self.client.force_login(self.eval_manager_user)
 
-        response = self.club_post("evaluation_checklist_create", {"name": "U8", "description": "", "is_active": "on", "order": "0"})
+        response = self.club_post("evaluation_checklist_create", {"name": "U8", "description": "", "is_active": "on"})
 
         self.assertEqual(response.status_code, 403)
 
@@ -8475,58 +8616,167 @@ class EvaluationMatrixViewTests(EvaluationManagementTestBase):
 
 
 class EvaluationWalkthroughViewTests(EvaluationManagementTestBase):
-    def _backdate(self, evaluation, days):
-        PlayerEvaluation.objects.filter(pk=evaluation.pk).update(created=timezone.now() - datetime.timedelta(days=days))
+    """The player-review browser -- see management.views.
+    EvaluationWalkthroughView's own docstring for why this reads history
+    instead of taking new answers (issue-tracked redesign, no ticket in this
+    repo's own tracker, just the conversation that produced it)."""
 
-    def test_shows_a_player_whose_evaluation_predates_the_cutoff(self):
+    def test_empty_state_when_nobody_has_been_evaluated_yet(self):
         checklist = self.make_rubric("U8")
-        self.client.force_login(self.eval_manager_user)
-        self.club_post("evaluation_create_for_checklist", {"ball-control": "5"}, self.player.pk, checklist.slug)
-        self._backdate(PlayerEvaluation.objects.get(club=self.club, player=self.player, checklist=checklist), days=10)
-
-        today = datetime.date.today().isoformat()
-        response = self.club_get("evaluation_walkthrough", checklist.slug, params={"cutoff_date": today})
-
-        self.assertContains(response, self.player.get_full_name())
-
-    def test_nobody_shown_when_nothing_predates_the_cutoff(self):
-        checklist = self.make_rubric("U8")
-        self.client.force_login(self.eval_manager_user)
-        self.club_post("evaluation_create_for_checklist", {"ball-control": "5"}, self.player.pk, checklist.slug)
-
-        yesterday = (datetime.date.today() - datetime.timedelta(days=1)).isoformat()
-        response = self.club_get("evaluation_walkthrough", checklist.slug, params={"cutoff_date": yesterday})
-
-        self.assertContains(response, "Nobody")
-
-    def test_submitting_saves_and_the_player_drops_out_of_the_queue(self):
-        checklist = self.make_rubric("U8")
-        self.client.force_login(self.eval_manager_user)
-        self.club_post("evaluation_create_for_checklist", {"ball-control": "5"}, self.player.pk, checklist.slug)
-        self._backdate(PlayerEvaluation.objects.get(club=self.club, player=self.player, checklist=checklist), days=10)
-
-        today = datetime.date.today().isoformat()
-        response = self.club_post(
-            "evaluation_walkthrough",
-            {"cutoff_date": today, "player_pk": str(self.player.pk), "skip": "", "ball-control": "8"},
-            checklist.slug,
-        )
-
-        self.assertRedirects(response, f"{reverse('management:evaluation_walkthrough', args=[checklist.slug])}?cutoff_date={today}")
-        self.assertEqual(PlayerEvaluation.objects.filter(club=self.club, player=self.player, checklist=checklist).count(), 2)
-
-        follow_up = self.club_get("evaluation_walkthrough", checklist.slug, params={"cutoff_date": today})
-        self.assertContains(follow_up, "Nobody")
-
-    def test_archived_checklist_shows_a_blocked_message(self):
-        checklist = self.make_rubric("U8")
-        checklist.is_active = False
-        checklist.save(update_fields=["is_active"])
         self.client.force_login(self.eval_manager_user)
 
         response = self.club_get("evaluation_walkthrough", checklist.slug)
 
+        self.assertContains(response, "Nobody")
+
+    def test_defaults_to_the_first_player_alphabetically(self):
+        checklist = self.make_rubric("U8")
+        other_player = Member.objects.create(first_name="Aaron", last_name="Aardvark")
+        ClubMembership.objects.create(club=self.club, member=other_player, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        self.client.force_login(self.eval_manager_user)
+        self.club_post("evaluation_create_for_checklist", {"ball-control": "5"}, self.player.pk, checklist.slug)
+        self.club_post("evaluation_create_for_checklist", {"ball-control": "6"}, other_player.pk, checklist.slug)
+
+        response = self.club_get("evaluation_walkthrough", checklist.slug)
+
+        self.assertEqual(response.context["player"], other_player)
+
+    def test_player_query_param_selects_a_specific_player(self):
+        checklist = self.make_rubric("U8")
+        other_player = Member.objects.create(first_name="Zoe", last_name="Zephyr")
+        ClubMembership.objects.create(club=self.club, member=other_player, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        self.client.force_login(self.eval_manager_user)
+        self.club_post("evaluation_create_for_checklist", {"ball-control": "5"}, self.player.pk, checklist.slug)
+        self.club_post("evaluation_create_for_checklist", {"ball-control": "6"}, other_player.pk, checklist.slug)
+
+        response = self.club_get("evaluation_walkthrough", checklist.slug, params={"player": str(other_player.pk)})
+
+        self.assertEqual(response.context["player"], other_player)
+        self.assertIsNone(response.context["next_player"])
+        self.assertEqual(response.context["previous_player"], self.player)
+
+    def test_shows_the_players_current_team_and_full_history_not_just_the_latest(self):
+        checklist = self.make_rubric("U8")
+        self.client.force_login(self.eval_manager_user)
+        self.club_post("evaluation_create_for_checklist", {"ball-control": "5"}, self.player.pk, checklist.slug)
+        self.club_post("evaluation_create_for_checklist", {"ball-control": "8"}, self.player.pk, checklist.slug)
+
+        response = self.club_get("evaluation_walkthrough", checklist.slug)
+
+        # eval_team's own short_name ("EVL") -- the template prefers it over the full name.
+        self.assertContains(response, "EVL")
+        history = response.context["history"]
+        self.assertEqual(len(history["questions"]), 1)
+        entries = history["questions"][0]["entries"]
+        self.assertEqual(len(entries), 2)
+        self.assertEqual({entry["value"] for entry in entries}, {"5", "8"})
+
+    def test_a_numeric_question_gets_a_trend_once_there_are_two_points(self):
+        checklist = self.make_rubric("U8")
+        self.client.force_login(self.eval_manager_user)
+        self.club_post("evaluation_create_for_checklist", {"ball-control": "5"}, self.player.pk, checklist.slug)
+
+        response = self.club_get("evaluation_walkthrough", checklist.slug)
+        question = response.context["history"]["questions"][0]
+        self.assertEqual(question["kind"], "numeric")
+        self.assertEqual(len(question["trend"]), 1)
+        # Not enough points for a trendline yet -- the template skips the chart, but the
+        # single value still shows in the entries list (asserted above), just no canvas.
+        # (The page's own <script> always references the [data-trend-canvas] selector,
+        # so the assertion checks for the actual <canvas> tag, not that bare string.)
+        self.assertNotContains(response, "<canvas data-trend-canvas")
+
+        self.club_post("evaluation_create_for_checklist", {"ball-control": "8"}, self.player.pk, checklist.slug)
+        response = self.club_get("evaluation_walkthrough", checklist.slug)
+
+        self.assertContains(response, "<canvas data-trend-canvas")
+        self.assertEqual(response.context["history"]["questions"][0]["trend"][-1]["value"], 8.0)
+
+    def test_previous_and_next_links_show_the_players_name(self):
+        checklist = self.make_rubric("U8")
+        other_player = Member.objects.create(first_name="Zoe", last_name="Zephyr")
+        ClubMembership.objects.create(club=self.club, member=other_player, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        self.client.force_login(self.eval_manager_user)
+        self.club_post("evaluation_create_for_checklist", {"ball-control": "5"}, self.player.pk, checklist.slug)
+        self.club_post("evaluation_create_for_checklist", {"ball-control": "6"}, other_player.pk, checklist.slug)
+
+        response = self.club_get("evaluation_walkthrough", checklist.slug, params={"player": str(other_player.pk)})
+
+        self.assertContains(response, self.player.get_full_name())
+
+    def test_since_narrows_the_player_list_to_new_evaluations_only(self):
+        checklist = self.make_rubric("U8")
+        stale_player = Member.objects.create(first_name="Sam", last_name="Stale")
+        ClubMembership.objects.create(club=self.club, member=stale_player, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        self.client.force_login(self.eval_manager_user)
+        self.club_post("evaluation_create_for_checklist", {"ball-control": "5"}, stale_player.pk, checklist.slug)
+        PlayerEvaluation.objects.filter(club=self.club, player=stale_player, checklist=checklist).update(created=timezone.now() - datetime.timedelta(days=30))
+        self.club_post("evaluation_create_for_checklist", {"ball-control": "8"}, self.player.pk, checklist.slug)
+
+        since = (datetime.date.today() - datetime.timedelta(days=7)).isoformat()
+        response = self.club_get("evaluation_walkthrough", checklist.slug, params={"since": since})
+
+        self.assertEqual(response.context["players"], [self.player])
+
+    def test_show_everyone_link_clears_the_since_filter(self):
+        checklist = self.make_rubric("U8")
+        self.client.force_login(self.eval_manager_user)
+        self.club_post("evaluation_create_for_checklist", {"ball-control": "5"}, self.player.pk, checklist.slug)
+
+        response = self.club_get("evaluation_walkthrough", checklist.slug, params={"since": "2020-01-01"})
+
+        self.assertContains(response, "Show everyone")
+
+    def test_adding_a_note_is_saved_and_shown(self):
+        checklist = self.make_rubric("U8")
+        self.client.force_login(self.eval_manager_user)
+        self.club_post("evaluation_create_for_checklist", {"ball-control": "5"}, self.player.pk, checklist.slug)
+
+        response = self.club_post("evaluation_walkthrough", {"player_pk": str(self.player.pk), "note": "Transfer candidate"}, checklist.slug)
+
+        self.assertRedirects(response, f"{reverse('management:evaluation_walkthrough', args=[checklist.slug])}?player={self.player.pk}")
+        note = EvaluationNote.objects.get(club=self.club, checklist=checklist, player=self.player)
+        self.assertEqual(note.note, "Transfer candidate")
+        self.assertEqual(note.author, self.eval_manager_member)
+
+        follow_up = self.club_get("evaluation_walkthrough", checklist.slug)
+        self.assertContains(follow_up, "Transfer candidate")
+
+    def test_a_blank_note_is_not_saved(self):
+        checklist = self.make_rubric("U8")
+        self.client.force_login(self.eval_manager_user)
+        self.club_post("evaluation_create_for_checklist", {"ball-control": "5"}, self.player.pk, checklist.slug)
+
+        self.club_post("evaluation_walkthrough", {"player_pk": str(self.player.pk), "note": "   "}, checklist.slug)
+
+        self.assertFalse(EvaluationNote.objects.filter(club=self.club, player=self.player).exists())
+
+    def test_note_redirect_preserves_the_since_filter(self):
+        checklist = self.make_rubric("U8")
+        self.client.force_login(self.eval_manager_user)
+        self.club_post("evaluation_create_for_checklist", {"ball-control": "5"}, self.player.pk, checklist.slug)
+
+        response = self.club_post("evaluation_walkthrough", {"player_pk": str(self.player.pk), "note": "x", "since": "2020-01-01"}, checklist.slug)
+
+        self.assertRedirects(response, f"{reverse('management:evaluation_walkthrough', args=[checklist.slug])}?player={self.player.pk}&since=2020-01-01")
+
+    def test_new_evaluation_link_hidden_for_an_archived_checklist(self):
+        checklist = self.make_rubric("U8")
+        self.client.force_login(self.eval_manager_user)
+        self.club_post("evaluation_create_for_checklist", {"ball-control": "5"}, self.player.pk, checklist.slug)
+        checklist.is_active = False
+        checklist.save(update_fields=["is_active"])
+
+        response = self.club_get("evaluation_walkthrough", checklist.slug)
+
+        self.assertNotContains(response, reverse("management:evaluation_create_for_checklist", args=[self.player.pk, checklist.slug]))
         self.assertContains(response, "archived")
+
+    def test_plain_staff_gets_403(self):
+        checklist = self.make_rubric("U8")
+        self.client.force_login(self.make_plain_staff())
+
+        self.assertEqual(self.club_get("evaluation_walkthrough", checklist.slug).status_code, 403)
 
 
 class EvaluationDetailViewTests(EvaluationManagementTestBase):

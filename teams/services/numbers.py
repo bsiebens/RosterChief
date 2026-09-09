@@ -16,6 +16,7 @@ isn't assumed.
 """
 
 import datetime
+import itertools
 
 from club.models import Season
 from members.models import Member
@@ -74,6 +75,19 @@ def is_number_available(pool, season: Season, number: int, *, for_member: Member
         if not _age_gap_exempts(holder, for_member):
             return False
     return True
+
+
+def has_unresolved_conflict(holders: list[Member]) -> bool:
+    """Whether ``holders`` (everyone currently sharing one number) includes a
+    pair the age-gap exception doesn't cover -- the only way that happens is
+    an admin's explicit override on TeamMembershipForm (see issue #6): a
+    member management/ADMIN grant may knowingly place someone on a number
+    is_number_available would otherwise reject, e.g. to carry over historical
+    data from before numbers were tracked accurately. Two holders the age gap
+    *does* cover is a legitimate, by-design share, not a conflict to flag --
+    management.views.NumberListView uses this to tell the two apart on the
+    Numbers page."""
+    return any(not _age_gap_exempts(a, b) for a, b in itertools.combinations(holders, 2))
 
 
 def available_numbers(pool, season: Season, *, for_member: Member | None = None) -> list[int]:

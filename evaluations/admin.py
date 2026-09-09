@@ -1,11 +1,11 @@
 from django.contrib import admin
 
-from .models import EvaluationChecklist, PlayerEvaluation
+from .models import EvaluationChecklist, EvaluationNote, PlayerEvaluation
 
 
 @admin.register(EvaluationChecklist)
 class EvaluationChecklistAdmin(admin.ModelAdmin):
-    list_display = ["name", "club", "is_active", "order", "form"]
+    list_display = ["name", "club", "is_active", "form"]
     list_filter = ["club", "is_active"]
     search_fields = ["name", "club__name"]
     prepopulated_fields = {"slug": ["name"]}
@@ -18,3 +18,11 @@ class PlayerEvaluationAdmin(admin.ModelAdmin):
     list_filter = ["club", "season", "checklist"]
     search_fields = ["player__first_name", "player__last_name"]
     raw_id_fields = ["player", "checklist", "submission"]
+
+
+@admin.register(EvaluationNote)
+class EvaluationNoteAdmin(admin.ModelAdmin):
+    list_display = ["player", "checklist", "club", "author", "created"]
+    list_filter = ["club", "checklist"]
+    search_fields = ["player__first_name", "player__last_name", "note"]
+    raw_id_fields = ["player", "checklist", "author"]

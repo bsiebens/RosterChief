@@ -68,7 +68,20 @@ from controlpanel.messages import notify
 from controlpanel.mixins import RedirectOnInvalidMixin
 from controlpanel.services.statistics import club_attention, club_charts, club_statistics, unrostered_members
 from evaluations.models import EvaluationChecklist, PlayerEvaluation
-from evaluations.services import EvaluationRubricNotConfigured, EvaluationSubmissionError, active_checklists, current_rubric_form, question_stats, results_matrix, start_new_rubric_version, submit_evaluation, walkthrough_queue
+from evaluations.services import (
+    EvaluationRubricNotConfigured,
+    EvaluationSubmissionError,
+    active_checklists,
+    add_evaluation_note,
+    checklist_players,
+    current_rubric_form,
+    player_evaluation_history,
+    player_notes,
+    question_stats,
+    results_matrix,
+    start_new_rubric_version,
+    submit_evaluation,
+)
 from events.models import Attendance, Event, EventOfficial, EventReferee, EventSeries, EventTask, Location, OfficialSignup, Opponent, RefereeSignup
 from events.services.attendance import member_attendance_counts, member_attendance_sparkline, player_attendance_rankings, players_who_missed_recent_practices, team_attendance_rate, team_no_shows
 from events.services.calendar import add_months, agenda_groups, month_bounds, month_grid, season_grid, week_bounds, week_grid
@@ -117,6 +130,7 @@ from shop.services.stats import order_kpis, quantity_sold_by_product, quantity_s
 from shop.services.vouchers import delete_manual_consumption, record_manual_consumption, voucher_history
 from teams.models import NumberPool, NumberReservation, OfficialLevel, OfficialProfile, Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
 from teams.services import eligible_roster_members, place_member_on_team
+from teams.services.numbers import has_unresolved_conflict
 
 from .bulk_import import build_member_import_template, parse_member_import_rows, read_member_import_workbook
 from .email_previews import EMAIL_PREVIEWS, EMAIL_PREVIEWS_BY_KEY, render_preview
@@ -130,7 +144,6 @@ from .forms import (
     ClubSettingsForm,
     DiscountForm,
     EvaluationChecklistForm,
-    EvaluationWalkthroughStartForm,
     EventForm,
     EventOfficialFeeForm,
     EventRefereeFeeForm,
@@ -1398,9 +1411,10 @@ class TeamDetailView(ClubStaffRequiredMixin, DetailView):
                 # editing the field afterwards can't be silently overwritten
                 # by revisiting this page.
                 requested_numbers = dict(RegistrationDetails.objects.filter(membership__club=club, membership__season=season, requested_team=team).exclude(requested_jersey_number=None).values_list("membership__member_id", "requested_jersey_number"))
+                can_override_numbers = can_manage_members(self.request.user, club)
                 for membership in roster:
                     initial = {"jersey_number": requested_numbers[membership.member_id]} if membership.jersey_number is None and membership.member_id in requested_numbers else None
-                    membership.edit_form = TeamMembershipForm(instance=membership, club=club, team=team, season=season, initial=initial)
+                    membership.edit_form = TeamMembershipForm(instance=membership, club=club, team=team, season=season, can_override=can_override_numbers, initial=initial)
                 for assignment in staff:
                     assignment.edit_form = StaffAssignmentForm(instance=assignment, club=club, team=team, season=season)
 
@@ -1417,7 +1431,7 @@ class TeamDetailView(ClubStaffRequiredMixin, DetailView):
             roster=roster,
             staff=staff,
             can_manage=can_manage,
-            roster_form=TeamMembershipForm(club=club, team=team, season=season) if can_manage and season else None,
+            roster_form=TeamMembershipForm(club=club, team=team, season=season, can_override=can_override_numbers) if can_manage and season else None,
             staff_form=StaffAssignmentForm(club=club, team=team, season=season) if can_manage and season else None,
             team_photo=team_photo,
             team_photo_form=TeamPhotoForm(instance=team_photo) if can_manage and season else None,
@@ -1461,7 +1475,16 @@ class TeamRosterAddView(TeamManagerRequiredMixin, FormView):
         # instance carries team/season *before* validation runs -- TeamMembership.clean()
         # (validate_club_scope) needs self.team_id set to check season/position are the
         # same club's, and form_valid() runs only after that validation already passed.
-        return super().get_form_kwargs() | {"club": self.request.club, "team": self.get_team(), "season": self.get_season(), "instance": TeamMembership(team=self.get_team(), season=self.get_season())}
+        return super().get_form_kwargs() | {
+            "club": self.request.club,
+            "team": self.get_team(),
+            "season": self.get_season(),
+            "instance": TeamMembership(team=self.get_team(), season=self.get_season()),
+            # Server-side enforcement of who may actually use override_conflict --
+            # see TeamMembershipForm's own docstring on why this isn't just a
+            # template-level hide.
+            "can_override": can_manage_members(self.request.user, self.request.club),
+        }
 
     def team_detail_url(self):
         return f"{reverse('management:team_detail', args=[self.kwargs['pk']])}?season={self.kwargs['season_pk']}"
@@ -1499,7 +1522,13 @@ class TeamRosterUpdateView(TeamManagerRequiredMixin, FormView):
 
     def get_form_kwargs(self):
         membership = self.get_object()
-        return super().get_form_kwargs() | {"instance": membership, "club": self.request.club, "team": membership.team, "season": membership.season}
+        return super().get_form_kwargs() | {
+            "instance": membership,
+            "club": self.request.club,
+            "team": membership.team,
+            "season": membership.season,
+            "can_override": can_manage_members(self.request.user, self.request.club),
+        }
 
     def team_detail_url(self):
         return f"{reverse('management:team_detail', args=[self.kwargs['pk']])}?season={self.get_object().season_id}"
@@ -2506,9 +2535,12 @@ class NumberListView(ClubStaffRequiredMixin, TemplateView):
         previous = Season.objects.filter(club=pool.club, start_date__lt=season.start_date).order_by("-start_date").first()
 
         reservations = {reservation.number: reservation for reservation in NumberReservation.objects.filter(pool=pool).select_related("reserved_by")}
+        # Kept as memberships (not pre-formatted strings, unlike the previous-season/
+        # pending dicts below) until after the conflict check -- has_unresolved_conflict
+        # needs the actual Member rows to weigh the age-gap exception, not display text.
         placed_this_season = {}
         for membership in TeamMembership.objects.filter(team__pool=pool, season=season).exclude(jersey_number=None).select_related("member", "team"):
-            placed_this_season.setdefault(membership.jersey_number, []).append(f"{membership.member} ({membership.team.short_name or membership.team.name})")
+            placed_this_season.setdefault(membership.jersey_number, []).append(membership)
         placed_previous_season = {}
         if previous is not None:
             for membership in TeamMembership.objects.filter(team__pool=pool, season=previous).exclude(jersey_number=None).select_related("member", "team"):
@@ -2523,7 +2555,13 @@ class NumberListView(ClubStaffRequiredMixin, TemplateView):
             if reservation is not None:
                 tiles.append({"number": number, "state": "reserved", "holders": [], "note": reservation.note, "reservation": reservation})
             elif number in placed_this_season:
-                tiles.append({"number": number, "state": "taken", "holders": placed_this_season[number], "note": "", "reservation": None})
+                memberships = placed_this_season[number]
+                # A genuine conflict (issue #6) only ever comes from an admin's
+                # override_conflict on TeamMembershipForm -- is_number_available
+                # already blocks everything else, age-gap-exempt shares included.
+                state = "conflict" if has_unresolved_conflict([membership.member for membership in memberships]) else "taken"
+                holders = [f"{membership.member} ({membership.team.short_name or membership.team.name})" for membership in memberships]
+                tiles.append({"number": number, "state": state, "holders": holders, "note": "", "reservation": None})
             elif number in pending_this_season:
                 tiles.append({"number": number, "state": "pending", "holders": pending_this_season[number], "note": "", "reservation": None})
             elif number in placed_previous_season:
@@ -6434,85 +6472,85 @@ class EvaluationMatrixView(EvaluationChecklistMixin, EvaluationManagerRequiredMi
 
 
 class EvaluationWalkthroughView(EvaluationChecklistMixin, EvaluationManagerRequiredMixin, View):
-    """Step through every player due a fresh look under this checklist, one
-    at a time -- evaluations.services.walkthrough_queue's own "re-confirm,
-    not first-timers" population. Deliberately stateless: submitting an
-    evaluation is enough to drop that player out of the queue (their newest
-    evaluation is now after the cutoff), so re-fetching the queue after each
-    save naturally serves up whoever's next -- there's no session/progress
-    row to maintain, and refreshing or navigating away loses nothing."""
+    """One player at a time, for discussion -- not data entry. Originally a
+    fill-in-the-form queue; redesigned once it became clear the actual need
+    is reviewing a player's history to decide whether to move them up (or
+    not), the way a coaching staff would around a table: their current
+    team(s), this season's attendance, their full run of past answers on
+    this checklist (a trendline for a numeric question), and the running
+    discussion notes left about them in past sessions. See
+    evaluations.services.checklist_players/player_evaluation_history/
+    player_notes.
+
+    ``?since=YYYY-MM-DD`` narrows the player list to "who's had a new
+    evaluation since my last walkthrough" instead of everyone ever
+    evaluated -- entered once per session, not a fixed setting, since what
+    counts as "since last time" is whatever date the last session actually
+    happened on.
+
+    Nothing here writes a PlayerEvaluation -- a "New evaluation" link is
+    offered for once the discussion actually produces a fresh score, going
+    through the ordinary EvaluationCreateView flow like any other. POST
+    here only ever adds a discussion note."""
 
     template_name = "management/evaluation_walkthrough.html"
 
-    def next_player(self, cutoff_date, skip_ids=()):
-        queue = list(walkthrough_queue(self.checklist, cutoff_date=cutoff_date, exclude_player_ids=skip_ids))
-        if not queue:
-            return None, 0
-        return Member.objects.get(pk=queue[0]["player_id"]), len(queue)
+    def get_since(self):
+        raw = self.request.GET.get("since") or self.request.POST.get("since")
+        if not raw:
+            return None
+        try:
+            return date.fromisoformat(raw)
+        except ValueError:
+            return None
 
-    def blocked_reason(self):
-        if not self.checklist.is_active:
-            return "archived"
-        if current_rubric_form(self.checklist) is None:
-            return "no_rubric"
-        if current_season(self.request.club) is None:
-            return "no_season"
-        return None
+    def get_player(self, players):
+        selected = self.request.GET.get("player") or self.request.POST.get("player_pk")
+        if selected:
+            match = next((candidate for candidate in players if str(candidate.pk) == selected), None)
+            if match is not None:
+                return match
+        return players[0] if players else None
 
-    def skip_ids_from(self, raw):
-        return [value for value in raw.split(",") if value]
+    def build_context(self):
+        since = self.get_since()
+        players = checklist_players(self.checklist, since=since)
+        player = self.get_player(players)
+        context = {"checklist": self.checklist, "players": players, "player": player, "since": since}
+
+        if player is not None:
+            index = players.index(player)
+            season = current_season(self.request.club)
+            context.update(
+                previous_player=players[index - 1] if index > 0 else None,
+                next_player=players[index + 1] if index + 1 < len(players) else None,
+                season=season,
+                memberships=list(TeamMembership.objects.filter(member=player, season=season).select_related("team")) if season else [],
+                attendance_sparkline=member_attendance_sparkline(player, season) if season else [],
+                attendance_counts=member_attendance_counts(player, season) if season else None,
+                history=player_evaluation_history(self.checklist, player),
+                notes=player_notes(self.checklist, player),
+            )
+
+        return context
 
     def get(self, request, *args, **kwargs):
-        reason = self.blocked_reason()
-        if reason:
-            return render(request, self.template_name, {"checklist": self.checklist, "blocked_reason": reason})
-
-        start_form = EvaluationWalkthroughStartForm(request.GET or None)
-        skip_ids = self.skip_ids_from(request.GET.get("skip", ""))
-        context = {"checklist": self.checklist, "start_form": start_form, "skip_param": ",".join(skip_ids)}
-        if start_form.is_bound and start_form.is_valid():
-            cutoff_date = start_form.cleaned_data["cutoff_date"]
-            player, remaining = self.next_player(cutoff_date, skip_ids)
-            context.update(cutoff_date=cutoff_date, player=player, remaining=remaining)
-            if player is not None:
-                context["form"] = build_form(current_rubric_form(self.checklist))
-                context["skip_url"] = f"{reverse('management:evaluation_walkthrough', args=[self.checklist.slug])}?cutoff_date={cutoff_date}&skip={','.join([*skip_ids, str(player.pk)])}"
-        return render(request, self.template_name, context)
+        return render(request, self.template_name, self.build_context())
 
     def post(self, request, *args, **kwargs):
-        reason = self.blocked_reason()
-        cutoff_date = request.POST.get("cutoff_date", "")
-        redirect_url = f"{reverse('management:evaluation_walkthrough', args=[self.checklist.slug])}?cutoff_date={cutoff_date}"
-        if reason:
-            return redirect(redirect_url)
-
         player = get_object_or_404(Member, pk=request.POST.get("player_pk"))
-        rubric = current_rubric_form(self.checklist)
-        evaluator = Member.objects.filter(user=request.user).first()
-        try:
-            submit_evaluation(club=request.club, checklist=self.checklist, player=player, season=current_season(request.club), evaluator=evaluator, data=request.POST, files=request.FILES)
-        except EvaluationSubmissionError:
-            bound_form = build_form(rubric, data=request.POST, files=request.FILES)
-            bound_form.is_valid()
-            skip_ids = self.skip_ids_from(request.POST.get("skip", ""))
-            _next_player, remaining = self.next_player(cutoff_date, skip_ids)
-            skip_url = f"{reverse('management:evaluation_walkthrough', args=[self.checklist.slug])}?cutoff_date={cutoff_date}&skip={','.join([*skip_ids, str(player.pk)])}"
-            context = {
-                "checklist": self.checklist,
-                "start_form": EvaluationWalkthroughStartForm(initial={"cutoff_date": cutoff_date}),
-                "cutoff_date": cutoff_date,
-                "player": player,
-                "remaining": remaining,
-                "form": bound_form,
-                "skip_param": ",".join(skip_ids),
-                "skip_url": skip_url,
-            }
-            return render(request, self.template_name, context)
+        note = request.POST.get("note", "").strip()
+        if note:
+            author = Member.objects.filter(user=request.user).first()
+            add_evaluation_note(club=request.club, checklist=self.checklist, player=player, author=author, note=note)
+            notify(request, f"s|{_('Note added')}|{_('Your note about “%(player)s” was saved.') % {'player': player}}")
+        else:
+            notify(request, f"e|{_('Nothing to save')}|{_('Write something before adding a note.')}")
 
-        notify(request, f"s|{_('Evaluation saved')}|{_('Evaluation for “%(member)s” saved.') % {'member': player}}")
-        # Skip list resets after a save -- it's a "not right now" queue for
-        # this sitting, not a permanent exclusion; anyone still overdue
-        # after this cutoff will simply be offered again next time.
+        redirect_url = f"{reverse('management:evaluation_walkthrough', args=[self.checklist.slug])}?player={player.pk}"
+        since_raw = request.POST.get("since", "")
+        if since_raw:
+            redirect_url += f"&since={since_raw}"
         return redirect(redirect_url)
 
 

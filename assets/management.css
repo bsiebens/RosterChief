@@ -89,6 +89,10 @@
 
     --color-danger-bg: #fdecec;
     --color-danger-border: #f5c9ce;
+    /* Fixed, not tenant-brand-colored -- unlike --color-club-dark (the "taken" tile's own
+       colour), a conflict tile needs to read as "wrong" on every club's palette, including
+       one whose brand colour already sits near red. Used only by .number-tile-conflict. */
+    --color-conflict: #dc2626;
 
     --color-info: #14b8e8;
     --color-info-bg: #eaf7fc;
@@ -422,6 +426,49 @@
     .btn-square {
         padding-inline: 0;
         width: 2.25rem;
+    }
+
+    /* A segmented-control sub-nav (the checklist-scoped evaluations pages'
+       Questions/Statistics/Results/Walkthrough row) -- daisyUI-shaped class names
+       (.tabs/.tabs-boxed/.tab/.tab-active), hand-rolled same as everything else in this
+       stylesheet since daisyUI's own CSS isn't loaded here (see this file's header
+       comment). A light track with a white raised pill for the active tab, not an
+       underline -- keeps the same "the selected one is the only light/filled control"
+       vocabulary the season/all-time toggle above already uses. */
+    .tabs-boxed {
+        display: inline-flex;
+        gap: 0.25rem;
+        background: var(--color-rule);
+        padding: 0.25rem;
+        border-radius: var(--radius-box);
+    }
+
+    .tab {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0.4rem 0.9rem;
+        border-radius: calc(var(--radius-box) - 0.25rem);
+        font-family: var(--font-display);
+        font-weight: 800;
+        font-size: 0.75rem;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--color-muted);
+        text-decoration: none;
+        transition:
+            background 0.15s ease,
+            color 0.15s ease;
+    }
+
+    .tab:hover {
+        color: var(--color-ink);
+    }
+
+    .tab-active {
+        background: #fff;
+        color: var(--color-ink);
+        box-shadow: 0 1px 2px rgba(11, 18, 32, 0.12);
     }
 
     /* The design's own D-series badges/chips (D8's "Draft"/status pills aside) mostly run
@@ -1559,6 +1606,16 @@
     .number-tile-reserved {
         background: var(--color-violet);
         border-color: var(--color-violet);
+        color: #fff;
+    }
+
+    /* An admin-overridden duplicate (management.forms.TeamMembershipForm's
+       override_conflict field) -- two people holding the same number this season with no
+       age-gap exemption between them. Distinct from -taken on purpose: this is a state to
+       go resolve, not a normal placement. */
+    .number-tile-conflict {
+        background: var(--color-conflict);
+        border-color: var(--color-conflict);
         color: #fff;
     }
 

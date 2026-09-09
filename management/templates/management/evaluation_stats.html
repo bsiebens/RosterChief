@@ -26,9 +26,15 @@
                 <div class="mt-1 font-display text-[22px] leading-none font-extrabold text-ink">{{ unique_evaluators }}</div>
             </div>
         </div>
+        {% comment %}
+            btn-active isn't a real style in this app's custom .btn CSS (only daisyUI defines
+            it) -- both pills used to render identically dark. The selected one stands out by
+            being the only solid/filled button (btn-primary); the other is outlined, same
+            selected-vs-not vocabulary every other toggle in the app already uses.
+        {% endcomment %}
         <div class="join">
-            <a class="btn btn-sm join-item {% if not show_all_seasons %}btn-active{% endif %}" href="?">{% if season %}{{ season }}{% else %}{% trans "Current season" %}{% endif %}</a>
-            <a class="btn btn-sm join-item {% if show_all_seasons %}btn-active{% endif %}" href="?season=all">{% trans "All-time" %}</a>
+            <a class="btn btn-sm join-item {% if not show_all_seasons %}btn-primary{% else %}btn-outline{% endif %}" href="?">{% if season %}{{ season }}{% else %}{% trans "Current season" %}{% endif %}</a>
+            <a class="btn btn-sm join-item {% if show_all_seasons %}btn-primary{% else %}btn-outline{% endif %}" href="?season=all">{% trans "All-time" %}</a>
         </div>
     </div>
 
@@ -70,8 +76,9 @@
                         {% for option, count in row.distribution %}
                             <div class="flex items-center gap-2 text-sm">
                                 <span class="w-32 shrink-0 truncate">{{ option }}</span>
-                                <div class="bg-base-200 h-2 flex-1 overflow-hidden rounded">
-                                    <div class="bg-primary h-2" style="width: {% widthratio count row.response_count 100 %}%"></div>
+                                {# bg-primary/bg-base-200 (daisyUI theme utilities) don't exist here -- this stylesheet hand-rolls the daisyUI-shaped vocabulary itself, without daisyUI's own CSS loaded (see assets/management.css's own header comment). Plain custom tokens instead, same ones .btn-primary/.progress already use. #}
+                                <div class="h-2 flex-1 overflow-hidden rounded" style="background: var(--color-rule)">
+                                    <div class="h-2" style="width: {% widthratio count row.response_count 100 %}%; background: var(--color-club)"></div>
                                 </div>
                                 <span class="w-8 shrink-0 text-right font-mono text-xs">{{ count }}</span>
                             </div>

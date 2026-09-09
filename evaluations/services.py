@@ -21,20 +21,35 @@ from decimal import Decimal, InvalidOperation
 
 from django.conf import settings
 from django.db import transaction
-from django.db.models import Max
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 from formbuilder.models import Answer, Field, Form, FormSend, Submission
 from formbuilder.services.form_factory import build_form
+from members.models import Member
 
-from .models import EvaluationChecklist, PlayerEvaluation
+from .models import EvaluationChecklist, EvaluationNote, PlayerEvaluation
 
 #: Field types a per-question statistic can be numerically summarized for --
 #: everything else (text/textarea/email/date/file) only gets a response count
 #: and a feed of recent answers, since there's nothing to average or bucket.
 NUMERIC_FIELD_TYPES = {Field.FieldType.NUMBER}
 DISTRIBUTION_FIELD_TYPES = {Field.FieldType.CHOICE, Field.FieldType.MULTICHOICE, Field.FieldType.CHECKBOX}
+
+
+def _as_decimal(value):
+    """``Answer.value`` is a JSONField (it also stores choice/text/list
+    answers), so a NUMBER answer arrives as whatever JSON-compatible form it
+    was stored in (a string, most often -- see Answer's own docstring on why
+    a Decimal can't be stored directly). None for blank/non-numeric junk
+    rather than raising -- a stray bad value shouldn't take down a whole
+    stats page or trendline over one bad point."""
+    if value in (None, ""):
+        return None
+    try:
+        return Decimal(str(value))
+    except InvalidOperation:
+        return None
 
 
 class EvaluationRubricNotConfigured(Exception):
@@ -174,17 +189,10 @@ def question_stats(checklist: EvaluationChecklist, *, season=None):
 
         if field.field_type in NUMERIC_FIELD_TYPES:
             row["kind"] = "numeric"
-            # Computed in Python, not a DB Avg/Min/Max -- Answer.value is a
-            # JSONField (it also stores choice/text/list answers), stored as
-            # a JSON string for a Decimal (see Answer's own docstring), so
-            # there's no numeric column an aggregate could operate on
-            # portably across sqlite/postgres.
-            numbers = []
-            for value in answers.exclude(value="").values_list("value", flat=True):
-                try:
-                    numbers.append(Decimal(str(value)))
-                except InvalidOperation:
-                    continue
+            # Computed in Python, not a DB Avg/Min/Max -- see _as_decimal's own
+            # docstring on why there's no numeric column an aggregate could
+            # operate on portably across sqlite/postgres.
+            numbers = [number for number in (_as_decimal(value) for value in answers.values_list("value", flat=True)) if number is not None]
             if numbers:
                 row.update(average=sum(numbers) / len(numbers), minimum=min(numbers), maximum=max(numbers))
             else:
@@ -212,7 +220,7 @@ def results_matrix(checklist: EvaluationChecklist, *, season=None):
     """One row per player who's ever been evaluated against ``checklist``,
     each showing their *latest* answer per current-rubric question -- the
     "overview of the latest results per question" helper. Same population
-    source as the walkthrough queue below: there's no team/group tied to a
+    source as checklist_players below: there's no team/group tied to a
     checklist, so "who's in scope" is defined entirely by who's already been
     evaluated against it at least once.
     """
@@ -238,37 +246,100 @@ def results_matrix(checklist: EvaluationChecklist, *, season=None):
     return {"fields": fields, "rows": rows}
 
 
-def walkthrough_queue(checklist: EvaluationChecklist, *, cutoff_date, exclude_player_ids=()):
-    """Members due a fresh look under ``checklist``: everyone with at least
-    one evaluation against it whose *newest* one predates ``cutoff_date``,
-    most-overdue first. Scoped strictly to this checklist's own evaluations
-    -- a player moving up a level (say U8 -> U10) getting a fresh U10
-    evaluation doesn't retroactively resolve a stale U8 entry for them; in
-    practice nobody keeps filing new U8 evaluations for a promoted player,
-    so their U8 entry just goes untouched rather than being actively
-    removed. No team/roster bookkeeping needed either way; archiving a
-    checklist (EvaluationChecklist.is_active) is the deliberate way to stop
-    offering its walkthrough at all.
+def _local_midnight(date: datetime.date) -> datetime.datetime:
+    """``date`` as a midnight-local datetime, aware if the project uses
+    timezone-aware datetimes -- built explicitly rather than handing
+    Django's ORM the bare date, which would otherwise coerce it itself
+    (with a RuntimeWarning) using this exact same rule, just implicitly."""
+    value = datetime.datetime.combine(date, datetime.time.min)
+    return timezone.make_aware(value) if settings.USE_TZ else value
 
-    Deliberately excludes anyone with zero evaluations on this checklist --
-    the walkthrough is a re-confirm queue, not a way to find first-timers.
-    Those are added the ordinary way, from the player's own member page.
 
-    ``exclude_player_ids`` is a per-run "not right now" list -- the view
-    threads it through the page as skipped players are passed over, so the
-    same overdue player isn't served up again and again in one sitting
-    without needing any state persisted server-side.
+def checklist_players(checklist: EvaluationChecklist, *, since: datetime.date | None = None) -> list[Member]:
+    """Every player ever evaluated against ``checklist``, alphabetically --
+    the population the player-review browser (management.views.
+    EvaluationWalkthroughView) steps through, one at a time, for a coach to
+    actually discuss and decide on rather than fill in a form. Same
+    population source as results_matrix: there's no team/group tied to a
+    checklist, so "who's in scope" is defined entirely by who's already been
+    evaluated against it at least once. A player never evaluated on this
+    checklist isn't included -- their first evaluation is added the ordinary
+    way, from their own member page.
+
+    ``since``, if given, narrows that down to players with at least one
+    evaluation entered on or after that date -- "who's new since my last
+    walkthrough", for picking up a review session where it left off rather
+    than re-browsing everyone from scratch every time.
     """
-    # Built explicitly as a midnight-local datetime, aware if the project
-    # uses timezone-aware datetimes -- rather than handing Django's ORM the
-    # bare date, which would otherwise coerce it itself (with a
-    # RuntimeWarning) using this exact same "local midnight" rule, just
-    # implicitly.
-    cutoff = datetime.datetime.combine(cutoff_date, datetime.time.min)
-    if settings.USE_TZ:
-        cutoff = timezone.make_aware(cutoff)
+    evaluations = PlayerEvaluation.objects.filter(checklist=checklist)
+    if since is not None:
+        evaluations = evaluations.filter(created__gte=_local_midnight(since))
+    player_ids = evaluations.values_list("player_id", flat=True).distinct()
+    return list(Member.objects.filter(pk__in=player_ids).order_by("first_name", "last_name"))
 
-    queryset = PlayerEvaluation.objects.filter(checklist=checklist)
-    if exclude_player_ids:
-        queryset = queryset.exclude(player_id__in=exclude_player_ids)
-    return queryset.values("player_id", "player__first_name", "player__last_name").annotate(latest=Max("created")).filter(latest__lt=cutoff).order_by("latest")
+
+def player_evaluation_history(checklist: EvaluationChecklist, player: Member):
+    """Everything ``player`` has ever been scored on this checklist, broken
+    down per current-rubric question -- the data a player-review card is
+    built from. Matched to the *current* version's Fields by ``key`` (stable
+    across versions, same reasoning as question_stats), so a rubric edit
+    doesn't sever a player's history under an older version.
+
+    Each question comes back with ``entries`` (every answer given, most
+    recent first, each paired with the PlayerEvaluation it belongs to),
+    ``chart_id`` (a stable per-question DOM id the template hangs a chart
+    canvas + its ``json_script`` data off), and for a numeric question, a
+    chronological ``trend`` of ``{"date": <formatted label>, "value": <float>}``
+    points -- pre-formatted rather than raw datetimes/Decimals so the
+    template can hand it straight to Chart.js via ``json_script`` with no
+    client-side date parsing or timezone handling to get wrong. Dates are
+    plain category labels, not a true time scale, on purpose: evaluations
+    happen at irregular, sparse intervals, and evenly spacing them by
+    occurrence (like every other chart in this app already does for months)
+    reads clearer than compressing a multi-month gap between two points.
+    """
+    form = current_rubric_form(checklist)
+    evaluations = list(PlayerEvaluation.objects.filter(checklist=checklist, player=player).select_related("season", "submission__member").order_by("submission__submitted_at"))
+    if form is None or not evaluations:
+        return {"evaluations": list(reversed(evaluations)), "questions": []}
+
+    answers_by_evaluation = {evaluation.pk: {answer.field.key: answer.value for answer in evaluation.submission.answers.select_related("field")} for evaluation in evaluations}
+
+    questions = []
+    for field in form.fields.filter(is_active=True).order_by("order"):
+        entries = []
+        for evaluation in evaluations:
+            value = answers_by_evaluation[evaluation.pk].get(field.key)
+            if value in (None, ""):
+                continue
+            entries.append({"evaluation": evaluation, "value": value})
+
+        question = {"field": field, "chart_id": f"trend-{field.pk}", "entries": list(reversed(entries))}
+        if field.field_type in NUMERIC_FIELD_TYPES:
+            question["kind"] = "numeric"
+            trend = []
+            for entry in entries:
+                number = _as_decimal(entry["value"])
+                if number is not None:
+                    trend.append({"date": entry["evaluation"].submission.submitted_at.strftime("%d %b %Y"), "value": float(number)})
+            question["trend"] = trend
+        elif field.field_type in DISTRIBUTION_FIELD_TYPES:
+            question["kind"] = "distribution"
+        else:
+            question["kind"] = "text"
+        questions.append(question)
+
+    return {"evaluations": list(reversed(evaluations)), "questions": questions}
+
+
+def player_notes(checklist: EvaluationChecklist, player: Member):
+    """Every discussion note left about ``player`` in the context of
+    ``checklist``, most recent first -- the running log a player-review
+    card shows alongside their evaluation history, so a note from a
+    walkthrough session a month ago ("keep an eye on positioning") is still
+    there the next time someone checks in on them."""
+    return list(EvaluationNote.objects.filter(checklist=checklist, player=player).select_related("author").order_by("-created"))
+
+
+def add_evaluation_note(*, club, checklist: EvaluationChecklist, player: Member, author: Member | None, note: str) -> EvaluationNote:
+    return EvaluationNote.objects.create(club=club, checklist=checklist, player=player, author=author, note=note)

@@ -1152,9 +1152,9 @@ EvaluationChecklist(ClubScopedModel)    # one named, independently-versioned rub
   slug          SlugField (slug_source = "name")
   description   TextField (blank)
   is_active     BooleanField (default True)   # retire without deleting history
-  order         PositiveIntegerField
   form          FK formbuilder.Form (PROTECT, null=True)   # current version
-  Meta: UniqueConstraint(fields=["club", "slug"])
+  Meta: UniqueConstraint(fields=["club", "slug"]); ordering = ["name"] -- alphabetical
+        everywhere a club picks between checklists, deliberately no manual order field
 
 PlayerEvaluation(ClubScopedModel)       # the "this was about whom, which checklist/season" envelope
   player      FK members.Member (CASCADE, related_name="evaluations_received")
@@ -1197,17 +1197,27 @@ and what the statistics/results-matrix/walkthrough views group and filter by.
 - **Results matrix** (`evaluations.services.results_matrix`) — one row per player ever
   evaluated against a checklist, one column per current question, each cell that player's
   *latest* answer: a way to spot who's missing a score at a glance.
-- **Walkthrough** (`evaluations.services.walkthrough_queue`) — a re-confirm queue, not a way
-  to find first-timers: everyone with at least one evaluation on a checklist whose *newest*
-  one predates an evaluator-chosen cutoff date, most-overdue first. Deliberately stateless
-  (no session/progress row) — submitting an evaluation is itself what drops a player out of
-  the next fetch of the queue. A per-run "skip for now" list (threaded through the page, not
-  persisted) keeps an overdue player from being re-offered repeatedly in one sitting. Scoped
-  strictly to one checklist's own evaluations: a player moving up a level (e.g. U8 → U10)
-  getting a fresh U10 evaluation doesn't retroactively resolve a stale U8 entry for them — in
-  practice nobody keeps filing new U8 evaluations for a promoted player, so their U8 entry
-  just goes untouched; archiving a checklist is the deliberate way to stop offering its
-  walkthrough at all.
+- **Walkthrough** (`evaluations.services.checklist_players`/`player_evaluation_history`) — a
+  player-review browser, not a data-entry queue. Originally a fill-in-the-form cutoff-date
+  queue; redesigned once it became clear the actual need is reviewing history to decide
+  whether to move a player up (or not), the way a coaching staff would around a table: one
+  player at a time (alphabetical, prev/next — the nav links show the player's name, not just
+  "Previous"/"Next"), their current team(s) and this season's attendance, and every past
+  answer on this checklist per question — a Chart.js trendline for a numeric one, so a change
+  over time is visible at a glance, not just the latest number. `checklist_players` takes an
+  optional `since` date to narrow the browser to "who's had a new evaluation since my last
+  walkthrough" instead of everyone ever evaluated. Nothing on the page writes a
+  `PlayerEvaluation`; a "New evaluation" link hands off to the ordinary create flow for
+  whenever the discussion actually produces a fresh score.
+- **Discussion notes** (`EvaluationNote`, `evaluations.services.add_evaluation_note`/
+  `player_notes`) — free text about a player, in the context of one checklist, captured from
+  the walkthrough card ("transfer candidate", "work on positioning"). Deliberately not tied to
+  any single `PlayerEvaluation`: a running log across repeated walkthrough sessions, meant to
+  still read back sensibly a month later regardless of how many more evaluations land in
+  between — an evaluation's answers are a snapshot at one point in time, a note is commentary
+  that survives past it. `author` is `SET_NULL` (same reasoning as `Submission.member`, the
+  evaluator on an evaluation): the note and the fact someone left it should outlive them
+  leaving the club.
 - **Submission plumbing, not a real audience broadcast.** `formbuilder.Submission.send` is a
   mandatory FK to a `FormSend`, so `evaluations.services._evaluation_send_for` gets/creates
   one shadow `FormSend` per rubric `Form` — deliberately `club_wide=False` with no teams/

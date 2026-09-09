@@ -36,7 +36,6 @@ class EvaluationChecklist(ClubScopedModel):
     slug = models.SlugField(_("slug"), blank=True)
     description = models.TextField(_("description"), blank=True, help_text=_("Optional notes for whoever picks a checklist -- e.g. which age group or squad it's meant for."))
     is_active = models.BooleanField(_("is active?"), default=True, help_text=_("Whether this checklist can still be picked for a new evaluation. Existing evaluations against it are unaffected."))
-    order = models.PositiveIntegerField(_("order"), default=0)
     form = models.ForeignKey(Form, on_delete=models.PROTECT, related_name="evaluation_checklists_for", null=True, blank=True, verbose_name=_("form"))
 
     slug_source = "name"
@@ -44,7 +43,7 @@ class EvaluationChecklist(ClubScopedModel):
     class Meta:
         verbose_name = _("evaluation checklist")
         verbose_name_plural = _("evaluation checklists")
-        ordering = ["order", "name"]
+        ordering = ["name"]
         constraints = [
             models.UniqueConstraint(fields=["club", "slug"], name="unique_evaluation_checklist_slug_per_club"),
         ]
@@ -110,3 +109,34 @@ class PlayerEvaluation(ClubScopedModel):
         validate_club_scope(self, self.club_id, member_fields=("player",), same_club_fields=("checklist",))
         if self.submission_id and self.submission.send.club_id != self.club_id:
             raise ValidationError({"submission": _("Must belong to the same club.")})
+
+
+class EvaluationNote(ClubScopedModel):
+    """A free-text discussion note about one player, in the context of one
+    checklist -- captured during a walkthrough session ("transfer
+    candidate", "work on positioning"), not tied to any single
+    PlayerEvaluation. Deliberately separate from PlayerEvaluation's own
+    structured rubric answers: this is the running log a coaching staff
+    builds up across repeated walkthrough sessions, meant to still read back
+    sensibly a month later regardless of how many more evaluations land in
+    between -- an evaluation's answers are a snapshot at one point in time,
+    a note is commentary that survives past it."""
+
+    player = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="evaluation_notes", verbose_name=_("player"))
+    checklist = models.ForeignKey(EvaluationChecklist, on_delete=models.CASCADE, related_name="notes", verbose_name=_("checklist"))
+    #: SET_NULL, not PROTECT/CASCADE -- same reasoning as formbuilder.Submission.member
+    #: (the evaluator on a Submission): whoever wrote the note may later leave the
+    #: club, but the note itself -- and that someone left it -- should still show.
+    author = models.ForeignKey(Member, on_delete=models.SET_NULL, related_name="evaluation_notes_authored", null=True, blank=True, verbose_name=_("author"))
+    note = models.TextField(_("note"))
+
+    class Meta:
+        verbose_name = _("evaluation note")
+        verbose_name_plural = _("evaluation notes")
+        ordering = ["-created"]
+
+    def __str__(self):
+        return f"{self.player} — {self.checklist} ({self.created:%Y-%m-%d})"
+
+    def clean(self):
+        validate_club_scope(self, self.club_id, member_fields=("player",), same_club_fields=("checklist",))

@@ -216,12 +216,24 @@ class TeamMembershipForm(forms.ModelForm):
     """Add/edit one roster entry -- team and season come from the view (the URL
     already identifies both), never from the form itself."""
 
+    #: Issue #6: during the transition period, historical numbers weren't always
+    #: tracked accurately, so a straight "reject any pool conflict" is sometimes
+    #: too strict. Only ever offered to a caller the view has already confirmed
+    #: holds can_manage_members (see __init__'s own docstring below) -- removed
+    #: from self.fields entirely otherwise, not just hidden, so a raw POST can't
+    #: grant itself the override by adding the field back in.
+    override_conflict = forms.BooleanField(
+        required=False,
+        label=_("Assign anyway (number already taken in this pool)"),
+        help_text=_("Only for correcting historical data. Shows up as a conflict on the Numbers page until resolved."),
+    )
+
     class Meta:
         model = TeamMembership
         fields = ["member", "position", "jersey_number", "is_captain", "is_alternate_captain"]
         widgets = {"member": forms.Select(attrs={"data-searchable": "true", "data-search-placeholder": _("Type a name to search...")})}
 
-    def __init__(self, *args, club=None, team=None, season=None, **kwargs):
+    def __init__(self, *args, club=None, team=None, season=None, can_override=False, **kwargs):
         super().__init__(*args, **kwargs)
         self.team = team
         self.season = season
@@ -242,6 +254,8 @@ class TeamMembershipForm(forms.ModelForm):
         # roster spot here is still expected to pick one; only the Sign-up page's
         # own placement skips it.
         self.fields["position"].required = True
+        if not can_override:
+            del self.fields["override_conflict"]
 
     def clean(self):
         cleaned = super().clean()
@@ -253,9 +267,13 @@ class TeamMembershipForm(forms.ModelForm):
         jersey_number = cleaned.get("jersey_number")
         if jersey_number is not None and self.team is not None and self.season is not None:
             if self.team.pool_id is not None:
-                member = cleaned.get("member") or getattr(self.instance, "member", None)
-                if not is_number_available(self.team.pool, self.season, jersey_number, for_member=member):
-                    self.add_error("jersey_number", _("This number is already taken in this team's number pool this season."))
+                # override_conflict only ever bypasses the pool check -- never the
+                # same-team one below, which is a hard unique_jersey_number_per_
+                # team_per_season DB constraint no override could save past anyway.
+                if not cleaned.get("override_conflict"):
+                    member = cleaned.get("member") or getattr(self.instance, "member", None)
+                    if not is_number_available(self.team.pool, self.season, jersey_number, for_member=member):
+                        self.add_error("jersey_number", _("This number is already taken in this team's number pool this season."))
             elif TeamMembership.objects.filter(team=self.team, season=self.season, jersey_number=jersey_number).exclude(pk=self.instance.pk).exists():
                 self.add_error("jersey_number", _("Another player on this team already has this jersey number this season."))
         return cleaned
@@ -1855,22 +1873,11 @@ class EvaluationChecklistForm(forms.ModelForm):
 
     class Meta:
         model = EvaluationChecklist
-        fields = ["name", "description", "is_active", "order"]
+        fields = ["name", "description", "is_active"]
         widgets = {
             "name": forms.TextInput(attrs={"class": "input input-bordered w-full", "placeholder": _("e.g. U8")}),
             "description": forms.Textarea(attrs={"class": "textarea textarea-bordered w-full", "rows": 2, "placeholder": _("Optional -- which age group or squad this is for")}),
-            "order": forms.NumberInput(attrs={"class": "input input-bordered w-24"}),
         }
-
-
-class EvaluationWalkthroughStartForm(forms.Form):
-    """Picks the cutoff date for one run of the "go through by name" helper
-    -- evaluations.services.walkthrough_queue's own docstring covers why this
-    is entered per run rather than a fixed club setting: every member whose
-    newest evaluation on this checklist predates the date entered here is
-    due another look."""
-
-    cutoff_date = forms.DateField(label=_("Show players last evaluated before"), widget=forms.DateInput(attrs={"class": "input input-bordered w-full", "type": "date"}))
 
 
 class FormBuilderFieldForm(forms.ModelForm):
