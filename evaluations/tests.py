@@ -9,13 +9,15 @@ from club.models import Club, ClubMembership, Season
 from formbuilder.models import Answer, Field, Form, FormSend, Submission
 from members.models import Member
 
-from .models import EvaluationChecklist, PlayerEvaluation
+from .models import EvaluationChecklist, EvaluationNote, PlayerEvaluation
 from .services import (
     EvaluationRubricNotConfigured,
     EvaluationSubmissionError,
+    add_evaluation_note,
     checklist_players,
     current_rubric_form,
     player_evaluation_history,
+    player_notes,
     question_stats,
     results_matrix,
     start_new_rubric_version,
@@ -315,6 +317,29 @@ class ChecklistPlayersTests(EvaluationsTestCase):
 
         self.assertEqual(checklist_players(u10), [])
 
+    def test_since_only_includes_players_with_a_new_evaluation_on_or_after_that_date(self):
+        checklist = self.build_rubric(fields=[("skill", Field.FieldType.NUMBER, {"required": True})])
+        coach = self.make_member("coach-since@example.com")
+        old_player = self.make_member("p-old@example.com")
+        new_player = self.make_member("p-new@example.com")
+        old_evaluation = submit_evaluation(club=self.club, checklist=checklist, player=old_player, season=self.season, evaluator=coach, data={"skill": "5"})
+        PlayerEvaluation.objects.filter(pk=old_evaluation.pk).update(created=timezone.now() - datetime.timedelta(days=30))
+        submit_evaluation(club=self.club, checklist=checklist, player=new_player, season=self.season, evaluator=coach, data={"skill": "7"})
+
+        players = checklist_players(checklist, since=timezone.localdate() - datetime.timedelta(days=7))
+
+        self.assertEqual([player.pk for player in players], [new_player.pk])
+
+    def test_since_is_inclusive_of_the_given_date(self):
+        checklist = self.build_rubric(fields=[("skill", Field.FieldType.NUMBER, {"required": True})])
+        coach = self.make_member("coach-since2@example.com")
+        player = self.make_member("p-since2@example.com")
+        submit_evaluation(club=self.club, checklist=checklist, player=player, season=self.season, evaluator=coach, data={"skill": "5"})
+
+        players = checklist_players(checklist, since=timezone.localdate())
+
+        self.assertEqual([candidate.pk for candidate in players], [player.pk])
+
 
 class PlayerEvaluationHistoryTests(EvaluationsTestCase):
     def test_no_evaluations_yet_returns_an_empty_history(self):
@@ -373,3 +398,66 @@ class PlayerEvaluationHistoryTests(EvaluationsTestCase):
 
         self.assertEqual(question["kind"], "distribution")
         self.assertNotIn("trend", question)
+
+
+class EvaluationNoteModelTests(EvaluationsTestCase):
+    def test_str(self):
+        checklist = self.make_checklist("U8")
+        player = self.make_member("p-note-str@example.com")
+        note = EvaluationNote.objects.create(club=self.club, checklist=checklist, player=player, note="Transfer candidate")
+
+        self.assertIn(str(player), str(note))
+        self.assertIn("U8", str(note))
+
+    def test_clean_rejects_a_player_from_another_club(self):
+        checklist = self.make_checklist("U8")
+        outsider = self.make_member("outsider-note@example.com", club=self.other_club)
+        note = EvaluationNote(club=self.club, checklist=checklist, player=outsider, note="x")
+
+        with self.assertRaises(ValidationError):
+            note.clean()
+
+    def test_clean_rejects_a_checklist_from_another_club(self):
+        other_checklist = self.make_checklist("U8", club=self.other_club)
+        player = self.make_member("p-note-club@example.com")
+        note = EvaluationNote(club=self.club, checklist=other_checklist, player=player, note="x")
+
+        with self.assertRaises(ValidationError):
+            note.clean()
+
+    def test_author_can_be_null_and_survives_the_authors_own_deletion(self):
+        checklist = self.make_checklist("U8")
+        player = self.make_member("p-note-author@example.com")
+        author = self.make_member("author-note@example.com")
+        note = add_evaluation_note(club=self.club, checklist=checklist, player=player, author=author, note="x")
+
+        author.delete()
+        note.refresh_from_db()
+
+        self.assertIsNone(note.author)
+
+
+class PlayerNotesTests(EvaluationsTestCase):
+    def test_most_recent_first(self):
+        checklist = self.make_checklist("U8")
+        player = self.make_member("p-notes-order@example.com")
+        older = add_evaluation_note(club=self.club, checklist=checklist, player=player, author=None, note="older")
+        EvaluationNote.objects.filter(pk=older.pk).update(created=timezone.now() - datetime.timedelta(days=10))
+        newer = add_evaluation_note(club=self.club, checklist=checklist, player=player, author=None, note="newer")
+
+        notes = player_notes(checklist, player)
+
+        self.assertEqual([note.pk for note in notes], [newer.pk, older.pk])
+
+    def test_scoped_to_the_checklist_and_player(self):
+        checklist = self.make_checklist("U8")
+        other_checklist = self.make_checklist("U10")
+        player = self.make_member("p-notes-scope@example.com")
+        other_player = self.make_member("p-notes-scope2@example.com")
+        add_evaluation_note(club=self.club, checklist=other_checklist, player=player, author=None, note="wrong checklist")
+        add_evaluation_note(club=self.club, checklist=checklist, player=other_player, author=None, note="wrong player")
+        mine = add_evaluation_note(club=self.club, checklist=checklist, player=player, author=None, note="mine")
+
+        notes = player_notes(checklist, player)
+
+        self.assertEqual([note.pk for note in notes], [mine.pk])

@@ -22,28 +22,48 @@
 {% block panel %}
     {% include "management/_evaluation_checklist_tabs.html" with active_tab="walkthrough" %}
 
-    {% if not players %}
-        <div class="card card-body">
-            <p class="text-sm text-muted">{% trans "Nobody's been evaluated against this checklist yet. Start one from a player's own member page." %}</p>
-        </div>
-    {% else %}
-        <div class="card mb-4 card-body">
-            <form method="get" class="flex flex-wrap items-center gap-2">
-                {% if previous_player %}
-                    <a class="btn btn-outline btn-sm gap-1" href="?player={{ previous_player.pk }}" title="{{ previous_player.get_full_name }}">{% lucide "chevron-left" size=14 %} {% trans "Previous" %}</a>
-                {% endif %}
-                <select name="player" class="select w-full max-w-xs" onchange="this.form.submit()">
-                    {% for candidate in players %}
-                        <option value="{{ candidate.pk }}" {% if candidate.pk == player.pk %}selected{% endif %}>{{ candidate.get_full_name }}</option>
-                    {% endfor %}
-                </select>
-                <noscript><button class="btn btn-outline btn-sm" type="submit">{% trans "Go" %}</button></noscript>
-                {% if next_player %}
-                    <a class="btn btn-outline btn-sm gap-1" href="?player={{ next_player.pk }}" title="{{ next_player.get_full_name }}">{% trans "Next" %} {% lucide "chevron-right" size=14 %}</a>
+    <div class="card mb-4 card-body">
+        <div class="flex flex-wrap items-center justify-between gap-4">
+            <form method="get" class="flex flex-wrap items-end gap-2">
+                <div class="max-w-xs">
+                    <label class="label-text text-xs text-muted uppercase" for="id_since">{% trans "Show players with a new evaluation since" %}</label>
+                    <input type="date" id="id_since" name="since" class="input input-bordered w-full" value="{{ since|date:'Y-m-d' }}">
+                </div>
+                <button class="btn btn-outline gap-1.5" type="submit">{% lucide "filter" size=14 %} {% trans "Filter" %}</button>
+                {% if since %}
+                    <a class="btn btn-ghost" href="?">{% trans "Show everyone" %}</a>
                 {% endif %}
             </form>
-        </div>
 
+            {% if players %}
+                <form method="get" class="flex flex-wrap items-center gap-2">
+                    {% if since %}<input type="hidden" name="since" value="{{ since|date:'Y-m-d' }}">{% endif %}
+                    <select name="player" class="select w-48" onchange="this.form.submit()">
+                        {% for candidate in players %}
+                            <option value="{{ candidate.pk }}" {% if candidate.pk == player.pk %}selected{% endif %}>{{ candidate.get_full_name }}</option>
+                        {% endfor %}
+                    </select>
+                    <noscript><button class="btn btn-outline btn-sm" type="submit">{% trans "Go" %}</button></noscript>
+                    {% if previous_player %}
+                        <a class="btn btn-outline gap-1.5" href="?player={{ previous_player.pk }}{% if since %}&since={{ since|date:'Y-m-d' }}{% endif %}">{% lucide "chevron-left" size=14 %} {% trans "Previous" %} {{ previous_player.get_full_name }}</a>
+                    {% endif %}
+                    {% if next_player %}
+                        <a class="btn btn-outline gap-1.5" href="?player={{ next_player.pk }}{% if since %}&since={{ since|date:'Y-m-d' }}{% endif %}">{% trans "Next" %} {{ next_player.get_full_name }} {% lucide "chevron-right" size=14 %}</a>
+                    {% endif %}
+                </form>
+            {% endif %}
+        </div>
+    </div>
+
+    {% if not players %}
+        <div class="card card-body">
+            {% if since %}
+                <p class="text-sm text-muted">{% blocktrans with date=since|date:"d M Y" %}Nobody's had a new evaluation on this checklist since {{ date }}.{% endblocktrans %}</p>
+            {% else %}
+                <p class="text-sm text-muted">{% trans "Nobody's been evaluated against this checklist yet. Start one from a player's own member page." %}</p>
+            {% endif %}
+        </div>
+    {% else %}
         <div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
             <div class="flex flex-col gap-4 lg:col-span-1">
                 <div class="card card-body items-center text-center">
@@ -98,6 +118,32 @@
                         {% endif %}
                     </div>
                 {% endif %}
+
+                <div class="card card-body">
+                    <h2 class="card-title">{% lucide "message-square-text" size=18 %} {% trans "Discussion notes" %}</h2>
+                    <p class="text-xs text-muted">{% trans "Not tied to a single evaluation -- a running log across walkthrough sessions (e.g. \"transfer candidate\", \"work on positioning\")." %}</p>
+
+                    <form method="post" class="mt-2 flex flex-col gap-2">
+                        {% csrf_token %}
+                        <input type="hidden" name="player_pk" value="{{ player.pk }}">
+                        {% if since %}<input type="hidden" name="since" value="{{ since|date:'Y-m-d' }}">{% endif %}
+                        <textarea name="note" class="textarea textarea-bordered w-full" rows="2" placeholder="{% trans 'Add a note…' %}"></textarea>
+                        <button class="btn btn-outline btn-sm gap-1.5 self-start" type="submit">{% lucide "plus" size=14 %} {% trans "Add note" %}</button>
+                    </form>
+
+                    {% if notes %}
+                        <div class="mt-3 flex flex-col gap-2">
+                            {% for note in notes %}
+                                <div class="border-b border-rule pb-2 text-sm last:border-0">
+                                    <p class="whitespace-pre-line text-ink">{{ note.note }}</p>
+                                    <p class="mt-1 text-xs text-muted">{{ note.created|date:"d M Y" }} · {{ note.author|default:"—" }}</p>
+                                </div>
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        <p class="mt-2 text-sm text-dim">{% trans "No notes yet." %}</p>
+                    {% endif %}
+                </div>
             </div>
 
             <div class="flex flex-col gap-4 lg:col-span-2">
