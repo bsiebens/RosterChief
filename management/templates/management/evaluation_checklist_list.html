@@ -41,14 +41,16 @@
                         <td class="font-mono text-xs tabular-nums">{{ checklist.evaluation_count }}</td>
                         <td class="text-right whitespace-nowrap">
                             {% if is_club_admin %}
-                                <a class="btn btn-outline btn-sm" href="{% url 'management:evaluation_rubric' checklist.slug %}">{% trans "Questions" %}</a>
+                                <a class="btn btn-outline btn-sm gap-1.5" href="{% url 'management:evaluation_rubric' checklist.slug %}">{% lucide "list-checks" size=14 %} {% trans "Questions" %}</a>
                             {% endif %}
-                            <a class="btn btn-outline btn-sm" href="{% url 'management:evaluation_stats' checklist.slug %}">{% trans "Statistics" %}</a>
-                            <a class="btn btn-outline btn-sm" href="{% url 'management:evaluation_walkthrough' checklist.slug %}">{% trans "Walkthrough" %}</a>
+                            <a class="btn btn-outline btn-sm gap-1.5" href="{% url 'management:evaluation_stats' checklist.slug %}">{% lucide "bar-chart-3" size=14 %} {% trans "Statistics" %}</a>
+                            <a class="btn btn-outline btn-sm gap-1.5" href="{% url 'management:evaluation_walkthrough' checklist.slug %}">{% lucide "users-round" size=14 %} {% trans "Walkthrough" %}</a>
                             {% if is_club_admin %}
                                 <form method="post" action="{% url 'management:evaluation_checklist_archive' checklist.slug %}" class="inline">
                                     {% csrf_token %}
-                                    <button class="btn btn-outline btn-sm" type="submit">{% if checklist.is_active %}{% trans "Archive" %}{% else %}{% trans "Reactivate" %}{% endif %}</button>
+                                    <button class="btn btn-outline btn-sm gap-1.5" type="submit">
+                                        {% if checklist.is_active %}{% lucide "archive" size=14 %} {% trans "Archive" %}{% else %}{% lucide "archive-restore" size=14 %} {% trans "Reactivate" %}{% endif %}
+                                    </button>
                                 </form>
                             {% endif %}
                         </td>

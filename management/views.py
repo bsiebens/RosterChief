@@ -68,7 +68,18 @@ from controlpanel.messages import notify
 from controlpanel.mixins import RedirectOnInvalidMixin
 from controlpanel.services.statistics import club_attention, club_charts, club_statistics, unrostered_members
 from evaluations.models import EvaluationChecklist, PlayerEvaluation
-from evaluations.services import EvaluationRubricNotConfigured, EvaluationSubmissionError, active_checklists, current_rubric_form, question_stats, results_matrix, start_new_rubric_version, submit_evaluation, walkthrough_queue
+from evaluations.services import (
+    EvaluationRubricNotConfigured,
+    EvaluationSubmissionError,
+    active_checklists,
+    checklist_players,
+    current_rubric_form,
+    player_evaluation_history,
+    question_stats,
+    results_matrix,
+    start_new_rubric_version,
+    submit_evaluation,
+)
 from events.models import Attendance, Event, EventOfficial, EventReferee, EventSeries, EventTask, Location, OfficialSignup, Opponent, RefereeSignup
 from events.services.attendance import member_attendance_counts, member_attendance_sparkline, player_attendance_rankings, players_who_missed_recent_practices, team_attendance_rate, team_no_shows
 from events.services.calendar import add_months, agenda_groups, month_bounds, month_grid, season_grid, week_bounds, week_grid
@@ -131,7 +142,6 @@ from .forms import (
     ClubSettingsForm,
     DiscountForm,
     EvaluationChecklistForm,
-    EvaluationWalkthroughStartForm,
     EventForm,
     EventOfficialFeeForm,
     EventRefereeFeeForm,
@@ -6459,87 +6469,49 @@ class EvaluationMatrixView(EvaluationChecklistMixin, EvaluationManagerRequiredMi
         return super().get_context_data(checklist=self.checklist, fields=matrix["fields"], rows=rows, **kwargs)
 
 
-class EvaluationWalkthroughView(EvaluationChecklistMixin, EvaluationManagerRequiredMixin, View):
-    """Step through every player due a fresh look under this checklist, one
-    at a time -- evaluations.services.walkthrough_queue's own "re-confirm,
-    not first-timers" population. Deliberately stateless: submitting an
-    evaluation is enough to drop that player out of the queue (their newest
-    evaluation is now after the cutoff), so re-fetching the queue after each
-    save naturally serves up whoever's next -- there's no session/progress
-    row to maintain, and refreshing or navigating away loses nothing."""
+class EvaluationWalkthroughView(EvaluationChecklistMixin, EvaluationManagerRequiredMixin, TemplateView):
+    """One player at a time, for discussion -- not data entry. Originally a
+    fill-in-the-form queue; redesigned once it became clear the actual need
+    is reviewing a player's history to decide whether to move them up (or
+    not), the way a coaching staff would around a table: their current
+    team(s), this season's attendance, and their full run of past answers on
+    this checklist -- a trendline for a numeric question, so a change over
+    time is visible at a glance, not just the latest number. See
+    evaluations.services.checklist_players/player_evaluation_history.
+
+    Nothing here writes a PlayerEvaluation -- a "New evaluation" link is
+    offered for once the discussion actually produces a fresh score, going
+    through the ordinary EvaluationCreateView flow like any other."""
 
     template_name = "management/evaluation_walkthrough.html"
 
-    def next_player(self, cutoff_date, skip_ids=()):
-        queue = list(walkthrough_queue(self.checklist, cutoff_date=cutoff_date, exclude_player_ids=skip_ids))
-        if not queue:
-            return None, 0
-        return Member.objects.get(pk=queue[0]["player_id"]), len(queue)
+    def get_player(self, players):
+        selected = self.request.GET.get("player")
+        if selected:
+            match = next((candidate for candidate in players if str(candidate.pk) == selected), None)
+            if match is not None:
+                return match
+        return players[0] if players else None
 
-    def blocked_reason(self):
-        if not self.checklist.is_active:
-            return "archived"
-        if current_rubric_form(self.checklist) is None:
-            return "no_rubric"
-        if current_season(self.request.club) is None:
-            return "no_season"
-        return None
+    def get_context_data(self, **kwargs):
+        players = checklist_players(self.checklist)
+        player = self.get_player(players)
+        context = {"checklist": self.checklist, "players": players, "player": player}
 
-    def skip_ids_from(self, raw):
-        return [value for value in raw.split(",") if value]
+        if player is not None:
+            index = players.index(player)
+            season = current_season(self.request.club)
+            context.update(
+                previous_player=players[index - 1] if index > 0 else None,
+                next_player=players[index + 1] if index + 1 < len(players) else None,
+                season=season,
+                memberships=list(TeamMembership.objects.filter(member=player, season=season).select_related("team")) if season else [],
+                attendance_sparkline=member_attendance_sparkline(player, season) if season else [],
+                attendance_counts=member_attendance_counts(player, season) if season else None,
+                history=player_evaluation_history(self.checklist, player),
+            )
 
-    def get(self, request, *args, **kwargs):
-        reason = self.blocked_reason()
-        if reason:
-            return render(request, self.template_name, {"checklist": self.checklist, "blocked_reason": reason})
-
-        start_form = EvaluationWalkthroughStartForm(request.GET or None)
-        skip_ids = self.skip_ids_from(request.GET.get("skip", ""))
-        context = {"checklist": self.checklist, "start_form": start_form, "skip_param": ",".join(skip_ids)}
-        if start_form.is_bound and start_form.is_valid():
-            cutoff_date = start_form.cleaned_data["cutoff_date"]
-            player, remaining = self.next_player(cutoff_date, skip_ids)
-            context.update(cutoff_date=cutoff_date, player=player, remaining=remaining)
-            if player is not None:
-                context["form"] = build_form(current_rubric_form(self.checklist))
-                context["skip_url"] = f"{reverse('management:evaluation_walkthrough', args=[self.checklist.slug])}?cutoff_date={cutoff_date}&skip={','.join([*skip_ids, str(player.pk)])}"
-        return render(request, self.template_name, context)
-
-    def post(self, request, *args, **kwargs):
-        reason = self.blocked_reason()
-        cutoff_date = request.POST.get("cutoff_date", "")
-        redirect_url = f"{reverse('management:evaluation_walkthrough', args=[self.checklist.slug])}?cutoff_date={cutoff_date}"
-        if reason:
-            return redirect(redirect_url)
-
-        player = get_object_or_404(Member, pk=request.POST.get("player_pk"))
-        rubric = current_rubric_form(self.checklist)
-        evaluator = Member.objects.filter(user=request.user).first()
-        try:
-            submit_evaluation(club=request.club, checklist=self.checklist, player=player, season=current_season(request.club), evaluator=evaluator, data=request.POST, files=request.FILES)
-        except EvaluationSubmissionError:
-            bound_form = build_form(rubric, data=request.POST, files=request.FILES)
-            bound_form.is_valid()
-            skip_ids = self.skip_ids_from(request.POST.get("skip", ""))
-            _next_player, remaining = self.next_player(cutoff_date, skip_ids)
-            skip_url = f"{reverse('management:evaluation_walkthrough', args=[self.checklist.slug])}?cutoff_date={cutoff_date}&skip={','.join([*skip_ids, str(player.pk)])}"
-            context = {
-                "checklist": self.checklist,
-                "start_form": EvaluationWalkthroughStartForm(initial={"cutoff_date": cutoff_date}),
-                "cutoff_date": cutoff_date,
-                "player": player,
-                "remaining": remaining,
-                "form": bound_form,
-                "skip_param": ",".join(skip_ids),
-                "skip_url": skip_url,
-            }
-            return render(request, self.template_name, context)
-
-        notify(request, f"s|{_('Evaluation saved')}|{_('Evaluation for “%(member)s” saved.') % {'member': player}}")
-        # Skip list resets after a save -- it's a "not right now" queue for
-        # this sitting, not a permanent exclusion; anyone still overdue
-        # after this cutoff will simply be offered again next time.
-        return redirect(redirect_url)
+        return super().get_context_data(**context, **kwargs)
 
 
 class EvaluationCreateView(EvaluationManagerRequiredMixin, View):

@@ -36,7 +36,6 @@ class EvaluationChecklist(ClubScopedModel):
     slug = models.SlugField(_("slug"), blank=True)
     description = models.TextField(_("description"), blank=True, help_text=_("Optional notes for whoever picks a checklist -- e.g. which age group or squad it's meant for."))
     is_active = models.BooleanField(_("is active?"), default=True, help_text=_("Whether this checklist can still be picked for a new evaluation. Existing evaluations against it are unaffected."))
-    order = models.PositiveIntegerField(_("order"), default=0)
     form = models.ForeignKey(Form, on_delete=models.PROTECT, related_name="evaluation_checklists_for", null=True, blank=True, verbose_name=_("form"))
 
     slug_source = "name"
@@ -44,7 +43,7 @@ class EvaluationChecklist(ClubScopedModel):
     class Meta:
         verbose_name = _("evaluation checklist")
         verbose_name_plural = _("evaluation checklists")
-        ordering = ["order", "name"]
+        ordering = ["name"]
         constraints = [
             models.UniqueConstraint(fields=["club", "slug"], name="unique_evaluation_checklist_slug_per_club"),
         ]

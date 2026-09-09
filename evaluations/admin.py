@@ -5,7 +5,7 @@ from .models import EvaluationChecklist, PlayerEvaluation
 
 @admin.register(EvaluationChecklist)
 class EvaluationChecklistAdmin(admin.ModelAdmin):
-    list_display = ["name", "club", "is_active", "order", "form"]
+    list_display = ["name", "club", "is_active", "form"]
     list_filter = ["club", "is_active"]
     search_fields = ["name", "club__name"]
     prepopulated_fields = {"slug": ["name"]}

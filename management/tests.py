@@ -8541,7 +8541,7 @@ class EvaluationChecklistCreateViewTests(EvaluationManagementTestBase):
     def test_admin_can_create_a_checklist_and_lands_on_its_rubric_editor(self):
         self.client.force_login(self.admin_user)
 
-        response = self.club_post("evaluation_checklist_create", {"name": "U8", "description": "", "is_active": "on", "order": "0"})
+        response = self.club_post("evaluation_checklist_create", {"name": "U8", "description": "", "is_active": "on"})
 
         checklist = EvaluationChecklist.objects.get(club=self.club, name="U8")
         self.assertRedirects(response, reverse("management:evaluation_rubric", args=[checklist.slug]))
@@ -8549,7 +8549,7 @@ class EvaluationChecklistCreateViewTests(EvaluationManagementTestBase):
     def test_evaluation_manager_gets_403(self):
         self.client.force_login(self.eval_manager_user)
 
-        response = self.club_post("evaluation_checklist_create", {"name": "U8", "description": "", "is_active": "on", "order": "0"})
+        response = self.club_post("evaluation_checklist_create", {"name": "U8", "description": "", "is_active": "on"})
 
         self.assertEqual(response.status_code, 403)
 
@@ -8616,58 +8616,99 @@ class EvaluationMatrixViewTests(EvaluationManagementTestBase):
 
 
 class EvaluationWalkthroughViewTests(EvaluationManagementTestBase):
-    def _backdate(self, evaluation, days):
-        PlayerEvaluation.objects.filter(pk=evaluation.pk).update(created=timezone.now() - datetime.timedelta(days=days))
+    """The player-review browser -- see management.views.
+    EvaluationWalkthroughView's own docstring for why this reads history
+    instead of taking new answers (issue-tracked redesign, no ticket in this
+    repo's own tracker, just the conversation that produced it)."""
 
-    def test_shows_a_player_whose_evaluation_predates_the_cutoff(self):
+    def test_empty_state_when_nobody_has_been_evaluated_yet(self):
         checklist = self.make_rubric("U8")
-        self.client.force_login(self.eval_manager_user)
-        self.club_post("evaluation_create_for_checklist", {"ball-control": "5"}, self.player.pk, checklist.slug)
-        self._backdate(PlayerEvaluation.objects.get(club=self.club, player=self.player, checklist=checklist), days=10)
-
-        today = datetime.date.today().isoformat()
-        response = self.club_get("evaluation_walkthrough", checklist.slug, params={"cutoff_date": today})
-
-        self.assertContains(response, self.player.get_full_name())
-
-    def test_nobody_shown_when_nothing_predates_the_cutoff(self):
-        checklist = self.make_rubric("U8")
-        self.client.force_login(self.eval_manager_user)
-        self.club_post("evaluation_create_for_checklist", {"ball-control": "5"}, self.player.pk, checklist.slug)
-
-        yesterday = (datetime.date.today() - datetime.timedelta(days=1)).isoformat()
-        response = self.club_get("evaluation_walkthrough", checklist.slug, params={"cutoff_date": yesterday})
-
-        self.assertContains(response, "Nobody")
-
-    def test_submitting_saves_and_the_player_drops_out_of_the_queue(self):
-        checklist = self.make_rubric("U8")
-        self.client.force_login(self.eval_manager_user)
-        self.club_post("evaluation_create_for_checklist", {"ball-control": "5"}, self.player.pk, checklist.slug)
-        self._backdate(PlayerEvaluation.objects.get(club=self.club, player=self.player, checklist=checklist), days=10)
-
-        today = datetime.date.today().isoformat()
-        response = self.club_post(
-            "evaluation_walkthrough",
-            {"cutoff_date": today, "player_pk": str(self.player.pk), "skip": "", "ball-control": "8"},
-            checklist.slug,
-        )
-
-        self.assertRedirects(response, f"{reverse('management:evaluation_walkthrough', args=[checklist.slug])}?cutoff_date={today}")
-        self.assertEqual(PlayerEvaluation.objects.filter(club=self.club, player=self.player, checklist=checklist).count(), 2)
-
-        follow_up = self.club_get("evaluation_walkthrough", checklist.slug, params={"cutoff_date": today})
-        self.assertContains(follow_up, "Nobody")
-
-    def test_archived_checklist_shows_a_blocked_message(self):
-        checklist = self.make_rubric("U8")
-        checklist.is_active = False
-        checklist.save(update_fields=["is_active"])
         self.client.force_login(self.eval_manager_user)
 
         response = self.club_get("evaluation_walkthrough", checklist.slug)
 
+        self.assertContains(response, "Nobody")
+
+    def test_defaults_to_the_first_player_alphabetically(self):
+        checklist = self.make_rubric("U8")
+        other_player = Member.objects.create(first_name="Aaron", last_name="Aardvark")
+        ClubMembership.objects.create(club=self.club, member=other_player, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        self.client.force_login(self.eval_manager_user)
+        self.club_post("evaluation_create_for_checklist", {"ball-control": "5"}, self.player.pk, checklist.slug)
+        self.club_post("evaluation_create_for_checklist", {"ball-control": "6"}, other_player.pk, checklist.slug)
+
+        response = self.club_get("evaluation_walkthrough", checklist.slug)
+
+        self.assertEqual(response.context["player"], other_player)
+
+    def test_player_query_param_selects_a_specific_player(self):
+        checklist = self.make_rubric("U8")
+        other_player = Member.objects.create(first_name="Zoe", last_name="Zephyr")
+        ClubMembership.objects.create(club=self.club, member=other_player, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        self.client.force_login(self.eval_manager_user)
+        self.club_post("evaluation_create_for_checklist", {"ball-control": "5"}, self.player.pk, checklist.slug)
+        self.club_post("evaluation_create_for_checklist", {"ball-control": "6"}, other_player.pk, checklist.slug)
+
+        response = self.club_get("evaluation_walkthrough", checklist.slug, params={"player": str(other_player.pk)})
+
+        self.assertEqual(response.context["player"], other_player)
+        self.assertIsNone(response.context["next_player"])
+        self.assertEqual(response.context["previous_player"], self.player)
+
+    def test_shows_the_players_current_team_and_full_history_not_just_the_latest(self):
+        checklist = self.make_rubric("U8")
+        self.client.force_login(self.eval_manager_user)
+        self.club_post("evaluation_create_for_checklist", {"ball-control": "5"}, self.player.pk, checklist.slug)
+        self.club_post("evaluation_create_for_checklist", {"ball-control": "8"}, self.player.pk, checklist.slug)
+
+        response = self.club_get("evaluation_walkthrough", checklist.slug)
+
+        # eval_team's own short_name ("EVL") -- the template prefers it over the full name.
+        self.assertContains(response, "EVL")
+        history = response.context["history"]
+        self.assertEqual(len(history["questions"]), 1)
+        entries = history["questions"][0]["entries"]
+        self.assertEqual(len(entries), 2)
+        self.assertEqual({entry["value"] for entry in entries}, {"5", "8"})
+
+    def test_a_numeric_question_gets_a_trend_once_there_are_two_points(self):
+        checklist = self.make_rubric("U8")
+        self.client.force_login(self.eval_manager_user)
+        self.club_post("evaluation_create_for_checklist", {"ball-control": "5"}, self.player.pk, checklist.slug)
+
+        response = self.club_get("evaluation_walkthrough", checklist.slug)
+        question = response.context["history"]["questions"][0]
+        self.assertEqual(question["kind"], "numeric")
+        self.assertEqual(len(question["trend"]), 1)
+        # Not enough points for a trendline yet -- the template skips the chart, but the
+        # single value still shows in the entries list (asserted above), just no canvas.
+        # (The page's own <script> always references the [data-trend-canvas] selector,
+        # so the assertion checks for the actual <canvas> tag, not that bare string.)
+        self.assertNotContains(response, "<canvas data-trend-canvas")
+
+        self.club_post("evaluation_create_for_checklist", {"ball-control": "8"}, self.player.pk, checklist.slug)
+        response = self.club_get("evaluation_walkthrough", checklist.slug)
+
+        self.assertContains(response, "<canvas data-trend-canvas")
+        self.assertEqual(response.context["history"]["questions"][0]["trend"][-1]["value"], 8.0)
+
+    def test_new_evaluation_link_hidden_for_an_archived_checklist(self):
+        checklist = self.make_rubric("U8")
+        self.client.force_login(self.eval_manager_user)
+        self.club_post("evaluation_create_for_checklist", {"ball-control": "5"}, self.player.pk, checklist.slug)
+        checklist.is_active = False
+        checklist.save(update_fields=["is_active"])
+
+        response = self.club_get("evaluation_walkthrough", checklist.slug)
+
+        self.assertNotContains(response, reverse("management:evaluation_create_for_checklist", args=[self.player.pk, checklist.slug]))
         self.assertContains(response, "archived")
+
+    def test_plain_staff_gets_403(self):
+        checklist = self.make_rubric("U8")
+        self.client.force_login(self.make_plain_staff())
+
+        self.assertEqual(self.club_get("evaluation_walkthrough", checklist.slug).status_code, 403)
 
 
 class EvaluationDetailViewTests(EvaluationManagementTestBase):
