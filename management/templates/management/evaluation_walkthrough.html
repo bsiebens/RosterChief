@@ -1,11 +1,18 @@
 {% extends "management/base.html" %}
-{% load i18n lucide ui %}
+{% load i18n lucide static %}
+
+{% comment %}
+    One player at a time, for discussion -- not data entry. See
+    management.views.EvaluationWalkthroughView's own docstring for why this
+    replaced the original fill-in-the-form queue: a coaching staff reviewing
+    someone for a possible move needs their history, not another blank form.
+{% endcomment %}
 
 {% block panel_title %}{% blocktrans with name=checklist.name %}{{ name }} walkthrough{% endblocktrans %}{% endblock panel_title %}
 {% block heading %}{% blocktrans with name=checklist.name %}{{ name }} walkthrough{% endblocktrans %}{% endblock heading %}
 
 {% block topbar_context %}
-    {% if player %}<span class="badge badge-neutral">{% blocktrans count counter=remaining %}{{ counter }} left{% plural %}{{ counter }} left{% endblocktrans %}</span>{% endif %}
+    {% if players %}<span class="badge badge-neutral">{% blocktrans count counter=players|length %}{{ counter }} player{% plural %}{{ counter }} players{% endblocktrans %}</span>{% endif %}
 {% endblock topbar_context %}
 
 {% block actions %}
@@ -15,66 +22,165 @@
 {% block panel %}
     {% include "management/_evaluation_checklist_tabs.html" with active_tab="walkthrough" %}
 
-    {% if blocked_reason %}
-        <div class="alert alert-warning">
-            {% lucide "triangle-alert" size=18 %}
-            {% if blocked_reason == "archived" %}
-                <span>{% trans "This checklist is archived, so it can no longer be filled in." %}</span>
-            {% elif blocked_reason == "no_rubric" %}
-                <span>{% trans "This checklist has no criteria yet -- add some on the Questions tab first." %}</span>
-            {% else %}
-                <span>{% trans "There's no current season configured for this club, so there's nowhere to file an evaluation yet." %}</span>
-            {% endif %}
+    {% if not players %}
+        <div class="card card-body">
+            <p class="text-sm text-muted">{% trans "Nobody's been evaluated against this checklist yet. Start one from a player's own member page." %}</p>
         </div>
     {% else %}
         <div class="card mb-4 card-body">
-            <h2 class="card-title">{% lucide "calendar-clock" size=18 %} {% trans "Who's due a fresh look?" %}</h2>
-            <p class="text-sm text-muted">{% trans "Shows players already evaluated on this checklist whose newest evaluation is older than the date below, most overdue first. Players never evaluated on this checklist aren't included -- start theirs from their own member page." %}</p>
-            <form method="get" class="mt-2 flex flex-wrap items-end gap-3">
-                {% for field in start_form %}
-                    <div class="max-w-xs">{% form_field field %}</div>
-                {% endfor %}
-                <button class="btn btn-primary gap-2" type="submit">{% lucide "play" size=16 %} {% trans "Go" %}</button>
+            <form method="get" class="flex flex-wrap items-center gap-2">
+                {% if previous_player %}
+                    <a class="btn btn-outline btn-sm gap-1" href="?player={{ previous_player.pk }}" title="{{ previous_player.get_full_name }}">{% lucide "chevron-left" size=14 %} {% trans "Previous" %}</a>
+                {% endif %}
+                <select name="player" class="select w-full max-w-xs" onchange="this.form.submit()">
+                    {% for candidate in players %}
+                        <option value="{{ candidate.pk }}" {% if candidate.pk == player.pk %}selected{% endif %}>{{ candidate.get_full_name }}</option>
+                    {% endfor %}
+                </select>
+                <noscript><button class="btn btn-outline btn-sm" type="submit">{% trans "Go" %}</button></noscript>
+                {% if next_player %}
+                    <a class="btn btn-outline btn-sm gap-1" href="?player={{ next_player.pk }}" title="{{ next_player.get_full_name }}">{% trans "Next" %} {% lucide "chevron-right" size=14 %}</a>
+                {% endif %}
             </form>
         </div>
 
-        {% if cutoff_date %}
-            {% if not player %}
-                <div class="card card-body">
-                    <p class="text-sm text-muted">{% trans "Nobody's due a re-check before that date." %}</p>
-                </div>
-            {% else %}
-                <div class="card card-body">
-                    <div class="flex flex-wrap items-center justify-between gap-2">
-                        <h2 class="card-title">{{ player.get_full_name }}</h2>
-                        <a class="btn btn-outline btn-sm gap-2" href="{{ skip_url }}">{% trans "Skip for now" %} {% lucide "skip-forward" size=14 %}</a>
-                    </div>
-
-                    <form method="post" enctype="multipart/form-data" class="mt-2">
-                        {% csrf_token %}
-                        <input type="hidden" name="cutoff_date" value="{{ cutoff_date|date:'Y-m-d' }}">
-                        <input type="hidden" name="player_pk" value="{{ player.pk }}">
-                        <input type="hidden" name="skip" value="{{ skip_param }}">
-
-                        {% for error in form.non_field_errors %}
-                            <div class="alert alert-error mb-4">
-                                {% lucide "circle-x" size=18 %}
-                                <span>{{ error }}</span>
-                            </div>
-                        {% endfor %}
-
-                        <div class="flex flex-col gap-4">
-                            {% for bound_field in form %}
-                                {% form_field bound_field %}
+        <div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
+            <div class="flex flex-col gap-4 lg:col-span-1">
+                <div class="card card-body items-center text-center">
+                    <span class="avatar avatar-placeholder">
+                        <div class="h-16 w-16 rounded-full text-xl">{{ player.first_name|slice:":1" }}{{ player.last_name|slice:":1" }}</div>
+                    </span>
+                    <h2 class="mt-2 font-display text-lg font-extrabold text-ink">{{ player.get_full_name }}</h2>
+                    {% if memberships %}
+                        <div class="mt-1 flex flex-wrap justify-center gap-1">
+                            {% for membership in memberships %}
+                                <span class="badge badge-neutral">{{ membership.team.short_name|default:membership.team.name }}{% if membership.jersey_number %} · #{{ membership.jersey_number }}{% endif %}</span>
                             {% endfor %}
                         </div>
-
-                        <div class="mt-4 flex justify-start gap-2">
-                            <button class="btn btn-primary gap-2" type="submit">{% lucide "save" size=16 %} {% trans "Save and next" %}</button>
-                        </div>
-                    </form>
+                    {% else %}
+                        <p class="mt-1 text-xs text-muted">{% trans "Not on a team roster this season." %}</p>
+                    {% endif %}
+                    <div class="mt-3 flex w-full flex-col gap-2">
+                        <a class="btn btn-outline btn-sm gap-1.5" href="{% url 'management:member_detail' player.pk %}">{% lucide "external-link" size=14 %} {% trans "Full profile" %}</a>
+                        {% if checklist.is_active %}
+                            <a class="btn btn-primary btn-sm gap-1.5" href="{% url 'management:evaluation_create_for_checklist' player.pk checklist.slug %}">{% lucide "plus" size=14 %} {% trans "New evaluation" %}</a>
+                        {% else %}
+                            <p class="text-xs text-dim">{% trans "This checklist is archived -- reactivate it to record a new evaluation." %}</p>
+                        {% endif %}
+                    </div>
                 </div>
-            {% endif %}
-        {% endif %}
+
+                {% if season %}
+                    <div class="card card-body">
+                        <h2 class="card-title">{% lucide "calendar-check" size=18 %} {% trans "Attendance this season" %}</h2>
+                        {% if not attendance_sparkline %}
+                            <p class="text-sm text-muted">{% trans "No events yet this season." %}</p>
+                        {% else %}
+                            <div class="attendance-sparkline">
+                                {% for bar in attendance_sparkline %}
+                                    <span class="attendance-bar attendance-bar-{{ bar.state }}" title="{{ bar.event.title }} — {{ bar.event.start|date:"j M" }}"></span>
+                                {% endfor %}
+                            </div>
+                            <div class="mt-3 flex">
+                                <div class="flex-1">
+                                    <div class="font-display text-xl leading-none font-extrabold text-ok tabular-nums">{{ attendance_counts.present }}</div>
+                                    <div class="mt-1 font-display text-[10px] font-bold tracking-[.1em] text-muted uppercase">{% trans "Present" %}</div>
+                                </div>
+                                <div class="flex-1">
+                                    <div class="font-display text-xl leading-none font-extrabold text-club tabular-nums">{{ attendance_counts.absent }}</div>
+                                    <div class="mt-1 font-display text-[10px] font-bold tracking-[.1em] text-muted uppercase">{% trans "Absent" %}</div>
+                                </div>
+                                <div class="flex-1">
+                                    <div class="font-display text-xl leading-none font-extrabold text-dim tabular-nums">{{ attendance_counts.no_reply }}</div>
+                                    <div class="mt-1 font-display text-[10px] font-bold tracking-[.1em] text-muted uppercase">{% trans "No reply" %}</div>
+                                </div>
+                            </div>
+                        {% endif %}
+                    </div>
+                {% endif %}
+            </div>
+
+            <div class="flex flex-col gap-4 lg:col-span-2">
+                {% for question in history.questions %}
+                    <div class="card card-body">
+                        <div class="flex flex-wrap items-center justify-between gap-2">
+                            <h3 class="card-title text-base">{{ question.field.label }}</h3>
+                            <span class="badge badge-neutral">{% blocktrans count counter=question.entries|length %}{{ counter }} evaluation{% plural %}{{ counter }} evaluations{% endblocktrans %}</span>
+                        </div>
+
+                        {% if not question.entries %}
+                            <p class="mt-2 text-sm text-dim">{% trans "Never answered for this player." %}</p>
+                        {% else %}
+                            {% if question.kind == "numeric" and question.trend|length > 1 %}
+                                {{ question.trend|json_script:question.chart_id }}
+                                <div class="mt-2 h-40">
+                                    <canvas data-trend-canvas data-chart-id="{{ question.chart_id }}"></canvas>
+                                </div>
+                            {% endif %}
+                            <div class="mt-2 flex flex-col gap-1">
+                                {% for entry in question.entries %}
+                                    <div class="flex items-center justify-between gap-2 border-b border-rule pb-1 text-sm last:border-0">
+                                        <span class="text-muted">{{ entry.evaluation.submission.submitted_at|date:"d M Y" }} · {{ entry.evaluation.submission.member|default:"—" }}</span>
+                                        <span class="font-semibold text-ink">{{ entry.value }}</span>
+                                    </div>
+                                {% endfor %}
+                            </div>
+                        {% endif %}
+                    </div>
+                {% empty %}
+                    <div class="card card-body">
+                        <p class="text-sm text-muted">{% trans "This checklist has no criteria yet." %}</p>
+                    </div>
+                {% endfor %}
+            </div>
+        </div>
     {% endif %}
 {% endblock panel %}
+
+{% block extra_body %}
+    <script src="{% static 'js/chart.js' %}"></script>
+    <script>
+        (() => {
+            const canvases = document.querySelectorAll("[data-trend-canvas]");
+            if (!canvases.length) return;
+
+            // The club's own accent, resolved (Chart.js paints to a canvas, so it needs
+            // the computed colour, not the CSS variable reference) -- same idiom as
+            // home.html's own charts.
+            const clubColor = getComputedStyle(document.documentElement).getPropertyValue("--color-club").trim() || "#E4002B";
+            const ink = "#3A4658";
+            const grid = "#EEF0F3";
+
+            canvases.forEach((canvas) => {
+                const points = JSON.parse(document.getElementById(canvas.dataset.chartId).textContent);
+                new Chart(canvas, {
+                    type: "line",
+                    data: {
+                        labels: points.map((point) => point.date),
+                        datasets: [{
+                            data: points.map((point) => point.value),
+                            borderColor: clubColor,
+                            backgroundColor: clubColor,
+                            borderWidth: 2,
+                            pointRadius: 4,
+                            pointHoverRadius: 6,
+                            tension: 0,
+                            fill: false,
+                        }],
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        // Single series -- the card's own title already names it, so no
+                        // legend box (dataviz convention: a legend is for >=2 series).
+                        plugins: {legend: {display: false}, tooltip: {mode: "nearest", intersect: false}},
+                        scales: {
+                            x: {ticks: {color: ink, font: {family: "Barlow"}}, grid: {display: false}},
+                            y: {ticks: {color: ink}, grid: {color: grid}},
+                        },
+                    },
+                });
+            });
+        })();
+    </script>
+{% endblock extra_body %}

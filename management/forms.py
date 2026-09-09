@@ -1873,22 +1873,11 @@ class EvaluationChecklistForm(forms.ModelForm):
 
     class Meta:
         model = EvaluationChecklist
-        fields = ["name", "description", "is_active", "order"]
+        fields = ["name", "description", "is_active"]
         widgets = {
             "name": forms.TextInput(attrs={"class": "input input-bordered w-full", "placeholder": _("e.g. U8")}),
             "description": forms.Textarea(attrs={"class": "textarea textarea-bordered w-full", "rows": 2, "placeholder": _("Optional -- which age group or squad this is for")}),
-            "order": forms.NumberInput(attrs={"class": "input input-bordered w-24"}),
         }
-
-
-class EvaluationWalkthroughStartForm(forms.Form):
-    """Picks the cutoff date for one run of the "go through by name" helper
-    -- evaluations.services.walkthrough_queue's own docstring covers why this
-    is entered per run rather than a fixed club setting: every member whose
-    newest evaluation on this checklist predates the date entered here is
-    due another look."""
-
-    cutoff_date = forms.DateField(label=_("Show players last evaluated before"), widget=forms.DateInput(attrs={"class": "input input-bordered w-full", "type": "date"}))
 
 
 class FormBuilderFieldForm(forms.ModelForm):
