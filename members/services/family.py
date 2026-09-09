@@ -19,6 +19,10 @@ def find_member_by_email(email):
     return Member.objects.filter(user__email__iexact=email).first()
 
 
+def families_of_club(club):
+    return Family.objects.filter(memberships__member__member_of__club=club).distinct()
+
+
 def family_contacts(member):
     """Every parent/guardian on record in any family ``member`` belongs to
     (almost always exactly one) -- each as {"member", "email", "role_label"},

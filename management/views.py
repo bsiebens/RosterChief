@@ -101,7 +101,7 @@ from formbuilder.services.reporting import form_report
 from members.forms import ClaimRejectForm, ClaimReviewForm
 from members.models import Family, FamilyMembership, Group, GroupMembership, Member, ParentClaim
 from members.services.claims import ClaimError, approve_claim, children_awaiting_a_parent, reject_claim, send_claim_approved_email, suggested_children
-from members.services.family import add_child_to_family, add_parent_to_family, attach_to_family, claim_label_for, detach_from_family, family_contacts, find_member_by_email, get_or_create_login_user, grant_login, register_family
+from members.services.family import add_child_to_family, add_parent_to_family, attach_to_family, claim_label_for, detach_from_family, families_of_club, family_contacts, find_member_by_email, get_or_create_login_user, grant_login, register_family
 from news.models import News, NewsPhoto
 from news.services import dispatch_notify_editors_of_pending_review, dispatch_send_publish_notification, render_body_html
 from notifications.models import Notification
@@ -132,7 +132,7 @@ from teams.models import NumberPool, NumberReservation, OfficialLevel, OfficialP
 from teams.services import eligible_roster_members, place_member_on_team
 from teams.services.numbers import has_unresolved_conflict
 
-from .bulk_import import build_member_import_template, parse_member_import_rows, read_member_import_workbook
+from .bulk_import import build_member_import_template, family_choice_field_name, match_candidate_families, parse_member_import_rows, read_member_import_workbook
 from .email_previews import EMAIL_PREVIEWS, EMAIL_PREVIEWS_BY_KEY, render_preview
 from .forms import (
     AddChildForm,
@@ -911,6 +911,7 @@ class MemberImportView(MemberAdminRequiredMixin, View):
                 "valid_count": sum(1 for result in results if result["member"] is not None),
                 "skipped_count": sum(1 for result in results if result["member"] is None),
                 "season": current_season(request.club),
+                "family_groups": match_candidate_families(results, request.club),
             },
         )
 
@@ -952,15 +953,24 @@ class MemberImportConfirmView(MemberAdminRequiredMixin, View):
                 if family_group:
                     family = families_by_group.get(family_group)
                     if family is None:
-                        family = Family.objects.create()
+                        # "new" (the default, and whatever an unrecognized/tampered
+                        # value falls back to) creates a fresh family, same as
+                        # before this chooser existed. A chosen pk is re-scoped to
+                        # this club rather than trusted outright -- request.POST is
+                        # client input, and families_of_club is what stands between
+                        # this and attaching a member onto another club's family.
+                        chosen_pk = request.POST.get(family_choice_field_name(family_group), "new")
+                        family = families_of_club(request.club).filter(pk=chosen_pk).first() if chosen_pk != "new" else None
+                        if family is None:
+                            family = Family.objects.create()
                         families_by_group[family_group] = family
-                    FamilyMembership.objects.create(family=family, member=member, role=family_role)
+                    attach_to_family(member, role=family_role, family=family)
                 elif family_role == FamilyMembership.FamilyRole.CHILD:
                     # A child with no family_group: nobody is on file for them yet.
                     # A family of their own is what makes that state visible -- it's
                     # what members.services.claims.families_awaiting_a_parent looks
                     # for, and what an approved claim adds the parent to.
-                    FamilyMembership.objects.create(family=Family.objects.create(), member=member, role=family_role)
+                    attach_to_family(member, role=family_role)
 
                 if season is not None:
                     ClubMembership.objects.create(club=request.club, member=member, season=season, signed_up_at=timezone.localdate(), **result["membership_kwargs"])
@@ -1937,10 +1947,6 @@ class StubListMixin:
 
     def get_context_data(self, **kwargs):
         return super().get_context_data(page_title=self.page_title, **kwargs)
-
-
-def families_of_club(club):
-    return Family.objects.filter(memberships__member__member_of__club=club).distinct()
 
 
 class FamilyListView(ClubStaffRequiredMixin, ListView):

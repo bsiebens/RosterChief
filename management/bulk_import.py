@@ -16,6 +16,7 @@ from openpyxl.worksheet.datavalidation import DataValidation
 
 from club.models import ClubMembership
 from members.models import FamilyMembership, Member
+from members.services.family import families_of_club
 
 from .forms import MemberForm
 
@@ -165,6 +166,49 @@ def parse_member_import_rows(rows, club):
         )
 
     return results
+
+
+def family_choice_field_name(family_group):
+    """The <input name="..."> a family_group's create-new/link-existing choice is
+    submitted under -- built from the group's own text so the preview form and
+    MemberImportConfirmView.post agree on it without any id to carry between the
+    two requests (nothing but the raw rows survives in the session)."""
+    return f"family_choice__{family_group}"
+
+
+def match_candidate_families(results, club):
+    """Existing families in ``club`` that a row's family_group might actually be --
+    grouped and returned in the shape member_import_preview.html renders a
+    create-new/link-existing choice from: one dict per distinct family_group,
+    each candidate carrying the family and its current members for display.
+
+    Family has no name of its own to match on (see Family.__str__) and nothing in
+    the file is a stable id for a household, so this leans on the one signal a
+    spreadsheet row and an existing Family both have: a shared last name. A
+    household with two different surnames (blended families) still matches on
+    whichever one recurs -- worth surfacing as a *suggestion* even if imperfect,
+    since linking is always the admin's explicit choice, never automatic.
+    """
+    last_names_by_group = {}
+    for result in results:
+        group = result["family_group"]
+        last_name = result["raw"].get("last_name", "").strip()
+        if group and last_name:
+            last_names_by_group.setdefault(group, set()).add(last_name)
+
+    if not last_names_by_group:
+        return []
+
+    all_last_names = {name for names in last_names_by_group.values() for name in names}
+    candidate_families = list(families_of_club(club).filter(memberships__member__last_name__in=all_last_names).distinct().prefetch_related("memberships__member"))
+
+    groups = []
+    for group, last_names in sorted(last_names_by_group.items()):
+        candidates = [family for family in candidate_families if any(membership.member.last_name in last_names for membership in family.memberships.all())]
+        if candidates:
+            groups.append({"family_group": group, "field_name": family_choice_field_name(group), "candidates": candidates})
+
+    return groups
 
 
 def _parse_membership_fields(raw):

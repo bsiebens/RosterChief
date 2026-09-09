@@ -90,9 +90,12 @@
     --color-danger-bg: #fdecec;
     --color-danger-border: #f5c9ce;
     /* Fixed, not tenant-brand-colored -- unlike --color-club-dark (the "taken" tile's own
-       colour), a conflict tile needs to read as "wrong" on every club's palette, including
-       one whose brand colour already sits near red. Used only by .number-tile-conflict. */
-    --color-conflict: #dc2626;
+       colour), a conflict tile needs to read as "wrong" on every club's palette. Black
+       rather than red: it can't blend into a club's own brand colour the way red could
+       (including a club whose brand colour is already reddish), and it reads as the most
+       urgent tile on the grid next to the other states' saturated hues. Used only by
+       .number-tile-conflict. */
+    --color-conflict: #000000;
 
     --color-info: #14b8e8;
     --color-info-bg: #eaf7fc;

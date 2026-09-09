@@ -37,7 +37,7 @@ from formbuilder.models import Answer, FormSend, Submission
 from formbuilder.models import Field as FormBuilderField
 from formbuilder.models import Form as FormBuilderForm
 from formbuilder.services.notifications import notify_form_send
-from management.bulk_import import TEMPLATE_COLUMNS
+from management.bulk_import import TEMPLATE_COLUMNS, family_choice_field_name
 from management.email_previews import EMAIL_PREVIEWS
 from management.pdf import PDFExportError, _tint_with_white, referee_form_colors, render_pdf
 from management.pdf_previews import PDF_PREVIEWS
@@ -2263,8 +2263,8 @@ class FamilyManagementTests(ManagementTestBase):
 
     def make_existing_family(self):
         # A family only counts as "of this club" once at least one of its members
-        # has actually signed up (families_of_club, management/views.py) -- exactly
-        # what registering the first child through this app already does.
+        # has actually signed up (families_of_club, members/services/family.py) --
+        # exactly what registering the first child through this app already does.
         family = Family.objects.create()
         first_kid = Member.objects.create(first_name="First", last_name="Kid")
         FamilyMembership.objects.create(family=family, member=first_kid, role=FamilyMembership.FamilyRole.CHILD)
@@ -4895,6 +4895,81 @@ class MemberBulkImportTests(ManagementTestBase):
 
         member = Member.objects.get(email="solo@example.com")
         self.assertFalse(FamilyMembership.objects.filter(member=member).exists())
+
+    def make_existing_club_family(self, last_name="Doe"):
+        family = Family.objects.create()
+        member = Member.objects.create(first_name="Existing", last_name=last_name)
+        FamilyMembership.objects.create(family=family, member=member, role=FamilyMembership.FamilyRole.PARENT)
+        ClubMembership.objects.create(club=self.club, member=member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        return family
+
+    def test_preview_surfaces_a_matching_existing_family_by_last_name(self):
+        existing_family = self.make_existing_club_family(last_name="Doe")
+        upload = make_import_workbook([["Jamie", "Doe", "2014-03-02", "", "", "", "", "", "", "Doe family", "child"]])
+
+        response = self.club_post("member_import", {"file": upload})
+
+        family_groups = response.context["family_groups"]
+        self.assertEqual(len(family_groups), 1)
+        self.assertEqual(family_groups[0]["family_group"], "Doe family")
+        self.assertEqual(list(family_groups[0]["candidates"]), [existing_family])
+        self.assertEqual(family_groups[0]["field_name"], family_choice_field_name("Doe family"))
+
+    def test_preview_does_not_suggest_a_family_with_no_matching_last_name(self):
+        self.make_existing_club_family(last_name="Doe")
+        upload = make_import_workbook([["Jamie", "Nomatch", "2014-03-02", "", "", "", "", "", "", "Nomatch family", "child"]])
+
+        response = self.club_post("member_import", {"file": upload})
+
+        self.assertEqual(response.context["family_groups"], [])
+
+    def test_confirm_links_to_the_chosen_existing_family_instead_of_creating_a_new_one(self):
+        existing_family = self.make_existing_club_family(last_name="Doe")
+        upload = make_import_workbook(
+            [
+                ["Taylor", "Doe", "", "taylor.doe2@example.com", "", "", "", "", "", "Doe family", "parent"],
+                ["Jamie", "Doe", "2014-03-02", "", "", "", "", "", "", "Doe family", "child"],
+            ]
+        )
+        self.club_post("member_import", {"file": upload})
+
+        self.club_post("member_import_confirm", {family_choice_field_name("Doe family"): str(existing_family.pk)})
+
+        parent = Member.objects.get(email="taylor.doe2@example.com")
+        child = Member.objects.get(first_name="Jamie", last_name="Doe")
+        self.assertEqual(FamilyMembership.objects.get(member=parent).family, existing_family)
+        self.assertEqual(FamilyMembership.objects.get(member=child).family, existing_family)
+        self.assertEqual(existing_family.memberships.count(), 3)
+
+    def test_confirm_without_a_choice_still_creates_a_new_family_even_with_a_match(self):
+        # A suggested match is never applied on its own -- linking is always the
+        # admin's explicit choice, made in the confirm screen's family-matches modal.
+        existing_family = self.make_existing_club_family(last_name="Doe")
+        upload = make_import_workbook([["Jamie", "Doe", "2014-03-02", "", "", "", "", "", "", "Doe family", "child"]])
+        self.club_post("member_import", {"file": upload})
+
+        self.club_post("member_import_confirm", {})
+
+        child = Member.objects.get(first_name="Jamie", last_name="Doe")
+        self.assertNotEqual(FamilyMembership.objects.get(member=child).family, existing_family)
+
+    def test_confirm_ignores_a_chosen_family_from_another_club(self):
+        other_club = Club.objects.create(name="Other Club", slug="other-club")
+        other_season = make_season(other_club)
+        other_family = Family.objects.create()
+        other_member = Member.objects.create(first_name="Other", last_name="Doe")
+        FamilyMembership.objects.create(family=other_family, member=other_member, role=FamilyMembership.FamilyRole.PARENT)
+        ClubMembership.objects.create(club=other_club, member=other_member, season=other_season, status=ClubMembership.StatusChoices.ACTIVE)
+
+        upload = make_import_workbook([["Jamie", "Doe", "2014-03-02", "", "", "", "", "", "", "Doe family", "child"]])
+        self.club_post("member_import", {"file": upload})
+
+        self.club_post("member_import_confirm", {family_choice_field_name("Doe family"): str(other_family.pk)})
+
+        child = Member.objects.get(first_name="Jamie", last_name="Doe")
+        family = FamilyMembership.objects.get(member=child).family
+        self.assertNotEqual(family, other_family)
+        self.assertEqual(family.memberships.count(), 1)
 
 
 class NewsManagementTests(ManagementTestBase):
@@ -9691,7 +9766,7 @@ class ManagementListPaginationTests(ManagementTestBase):
 
         self.assertContains(response, "q=Match&amp;page=2")
 
-    def test_family_list_pagination_is_wired_and_shows_a_page_count(self):
+    def test_family_list_pagination_is_wired_and_shows_page_numbers(self):
         for i in range(3):
             family = Family.objects.create()
             member = Member.objects.create(first_name=f"Fam{i}", last_name="Ily")
@@ -9702,7 +9777,8 @@ class ManagementListPaginationTests(ManagementTestBase):
             response = self.club_get("family_list")
 
         self.assertTrue(response.context["is_paginated"])
-        self.assertContains(response, "Page 1 of 2")
+        self.assertContains(response, '<span class="btn btn-sm join-item btn-active">1</span>')
+        self.assertContains(response, "?page=2")
 
     def test_event_team_group_news_lists_are_all_wired_for_pagination(self):
         # A lighter "is it wired" check for the remaining four -- MemberListView

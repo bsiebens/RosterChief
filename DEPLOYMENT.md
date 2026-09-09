@@ -23,6 +23,14 @@ git push -u origin feature/whatever-youre-building
 gh pr create --base development                 # squash-merge once test is green
 ```
 
+**Small, self-contained fixes may be pushed to `development` directly**, skipping the branch/PR
+ceremony — `deploy/configure-branch-protection.sh` leaves `enforce_admins` off there (`main`
+keeps it on: even the repo owner goes through a release/hotfix PR to reach production). Still
+prefer a PR for anything that benefits from CI running *before* it lands rather than after —
+this is a deliberate convenience for a solo maintainer, not a reason to skip judgment. Note
+GitHub's `enforce_admins` is all-or-nothing: turning it off to skip the PR requirement also
+lets an admin force-push or delete `development`, not just commit to it directly.
+
 **Cutting a release** (branched from `development`, feature-frozen while `development` keeps
 moving underneath it):
 
@@ -33,9 +41,15 @@ git checkout -b release/0.5.0
 git push -u origin release/0.5.0
 gh pr create --base main --title "Release 0.5.0"       # merge with a real merge commit —
                                                           # this is the point that ships
-gh pr create --base development --title "Back-merge 0.5.0"  # so development has whatever
-                                                          # changed on the release branch
 ```
+
+**No back-merge into `development` after a release.** A release branch is never anything
+`development` doesn't already have, plus the version bump — every change on it landed on
+`development` first, via the ordinary `feature/*`/`fix/*` flow. There's nothing to bring back;
+`development`'s own `pyproject.toml` just stays at whatever it last was until the *next*
+release branch re-bumps it, which is cosmetic (nothing reads it except that footer) and costs
+nothing. Back-merging anyway would only buy a second `test`+`build` CI run for a
+one-line diff — pure waste, not safety.
 
 The `main` merge triggers the workflow: it reads `0.5.0` back out of `pyproject.toml`, tags the
 merge commit `v0.5.0`, pushes that tag, and opens a GitHub Release with auto-generated notes.
@@ -43,15 +57,24 @@ merge commit `v0.5.0`, pushes that tag, and opens a GitHub Release with auto-gen
 explicit, reviewed version number, not a floating branch tag (see "Deploying a specific
 version" below).
 
-**Hotfixing production** — same shape, branched from `main` instead of `development`:
+**Hotfixing production** — branched from `main` instead of `development`, and **this one still
+needs the back-merge**:
 
 ```bash
 git checkout main && git pull
 git checkout -b hotfix/0.5.1
 # fix it, bump pyproject.toml to 0.5.1, commit, push
-gh pr create --base main --title "Hotfix 0.5.1"          # ships immediately on merge
-gh pr create --base development --title "Back-merge 0.5.1"  # so it isn't lost on the next release
+gh pr create --base main --title "Hotfix 0.5.1"              # ships immediately on merge
+gh pr create --base development --title "Back-merge 0.5.1"    # the fix itself may not be on
+                                                                # development yet -- see below
 ```
+
+Unlike a release, a hotfix branch can carry a real code change `development` has never seen —
+that's the whole reason it exists as its own category (urgent, can't wait for the normal
+`feature/*` → `development` → release cycle). Skipping this back-merge risks the fix quietly
+regressing the next time a release ships, since nothing about the ordinary flow would ever
+reapply it. If a hotfix turns out to be nothing but a version bump and metadata (rare), the
+back-merge PR will just be empty and harmless to skip by hand — but default to doing it.
 
 **Why `development` was fast-forwarded to match `main` before any of this started:** it had
 sat unmaintained (46 commits behind, zero commits of its own — the two branches shared a
