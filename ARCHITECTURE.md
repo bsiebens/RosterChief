@@ -1201,11 +1201,23 @@ and what the statistics/results-matrix/walkthrough views group and filter by.
   player-review browser, not a data-entry queue. Originally a fill-in-the-form cutoff-date
   queue; redesigned once it became clear the actual need is reviewing history to decide
   whether to move a player up (or not), the way a coaching staff would around a table: one
-  player at a time (alphabetical, prev/next), their current team(s) and this season's
-  attendance, and every past answer on this checklist per question — a Chart.js trendline for
-  a numeric one, so a change over time is visible at a glance, not just the latest number.
-  Nothing on the page writes a `PlayerEvaluation`; a "New evaluation" link hands off to the
-  ordinary create flow for whenever the discussion actually produces a fresh score.
+  player at a time (alphabetical, prev/next — the nav links show the player's name, not just
+  "Previous"/"Next"), their current team(s) and this season's attendance, and every past
+  answer on this checklist per question — a Chart.js trendline for a numeric one, so a change
+  over time is visible at a glance, not just the latest number. `checklist_players` takes an
+  optional `since` date to narrow the browser to "who's had a new evaluation since my last
+  walkthrough" instead of everyone ever evaluated. Nothing on the page writes a
+  `PlayerEvaluation`; a "New evaluation" link hands off to the ordinary create flow for
+  whenever the discussion actually produces a fresh score.
+- **Discussion notes** (`EvaluationNote`, `evaluations.services.add_evaluation_note`/
+  `player_notes`) — free text about a player, in the context of one checklist, captured from
+  the walkthrough card ("transfer candidate", "work on positioning"). Deliberately not tied to
+  any single `PlayerEvaluation`: a running log across repeated walkthrough sessions, meant to
+  still read back sensibly a month later regardless of how many more evaluations land in
+  between — an evaluation's answers are a snapshot at one point in time, a note is commentary
+  that survives past it. `author` is `SET_NULL` (same reasoning as `Submission.member`, the
+  evaluator on an evaluation): the note and the fact someone left it should outlive them
+  leaving the club.
 - **Submission plumbing, not a real audience broadcast.** `formbuilder.Submission.send` is a
   mandatory FK to a `FormSend`, so `evaluations.services._evaluation_send_for` gets/creates
   one shadow `FormSend` per rubric `Form` — deliberately `club_wide=False` with no teams/

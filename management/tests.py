@@ -25,7 +25,7 @@ from bugs.models import BugNote, BugReport
 from club.models import Club, ClubMembership, ClubRole, DuesInvoice, EvaluationManager, FeePayment, MemberRequirementStatus, OnboardingRequirement, Season, ShopManager, Sponsor
 from club.services.invoicing import DuesInvoicePDFError, create_or_resend_invoice
 from club.services.onboarding import mark_complete
-from evaluations.models import EvaluationChecklist, PlayerEvaluation
+from evaluations.models import EvaluationChecklist, EvaluationNote, PlayerEvaluation
 from evaluations.services import current_rubric_form
 from events.models import Attendance, Competition, Event, EventReferee, EventSeries, EventTask, EventTaskClaim, Location, Opponent, RefereeSignup
 from events.services.calendar import week_bounds
@@ -8691,6 +8691,74 @@ class EvaluationWalkthroughViewTests(EvaluationManagementTestBase):
 
         self.assertContains(response, "<canvas data-trend-canvas")
         self.assertEqual(response.context["history"]["questions"][0]["trend"][-1]["value"], 8.0)
+
+    def test_previous_and_next_links_show_the_players_name(self):
+        checklist = self.make_rubric("U8")
+        other_player = Member.objects.create(first_name="Zoe", last_name="Zephyr")
+        ClubMembership.objects.create(club=self.club, member=other_player, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        self.client.force_login(self.eval_manager_user)
+        self.club_post("evaluation_create_for_checklist", {"ball-control": "5"}, self.player.pk, checklist.slug)
+        self.club_post("evaluation_create_for_checklist", {"ball-control": "6"}, other_player.pk, checklist.slug)
+
+        response = self.club_get("evaluation_walkthrough", checklist.slug, params={"player": str(other_player.pk)})
+
+        self.assertContains(response, self.player.get_full_name())
+
+    def test_since_narrows_the_player_list_to_new_evaluations_only(self):
+        checklist = self.make_rubric("U8")
+        stale_player = Member.objects.create(first_name="Sam", last_name="Stale")
+        ClubMembership.objects.create(club=self.club, member=stale_player, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        self.client.force_login(self.eval_manager_user)
+        self.club_post("evaluation_create_for_checklist", {"ball-control": "5"}, stale_player.pk, checklist.slug)
+        PlayerEvaluation.objects.filter(club=self.club, player=stale_player, checklist=checklist).update(created=timezone.now() - datetime.timedelta(days=30))
+        self.club_post("evaluation_create_for_checklist", {"ball-control": "8"}, self.player.pk, checklist.slug)
+
+        since = (datetime.date.today() - datetime.timedelta(days=7)).isoformat()
+        response = self.club_get("evaluation_walkthrough", checklist.slug, params={"since": since})
+
+        self.assertEqual(response.context["players"], [self.player])
+
+    def test_show_everyone_link_clears_the_since_filter(self):
+        checklist = self.make_rubric("U8")
+        self.client.force_login(self.eval_manager_user)
+        self.club_post("evaluation_create_for_checklist", {"ball-control": "5"}, self.player.pk, checklist.slug)
+
+        response = self.club_get("evaluation_walkthrough", checklist.slug, params={"since": "2020-01-01"})
+
+        self.assertContains(response, "Show everyone")
+
+    def test_adding_a_note_is_saved_and_shown(self):
+        checklist = self.make_rubric("U8")
+        self.client.force_login(self.eval_manager_user)
+        self.club_post("evaluation_create_for_checklist", {"ball-control": "5"}, self.player.pk, checklist.slug)
+
+        response = self.club_post("evaluation_walkthrough", {"player_pk": str(self.player.pk), "note": "Transfer candidate"}, checklist.slug)
+
+        self.assertRedirects(response, f"{reverse('management:evaluation_walkthrough', args=[checklist.slug])}?player={self.player.pk}")
+        note = EvaluationNote.objects.get(club=self.club, checklist=checklist, player=self.player)
+        self.assertEqual(note.note, "Transfer candidate")
+        self.assertEqual(note.author, self.eval_manager_member)
+
+        follow_up = self.club_get("evaluation_walkthrough", checklist.slug)
+        self.assertContains(follow_up, "Transfer candidate")
+
+    def test_a_blank_note_is_not_saved(self):
+        checklist = self.make_rubric("U8")
+        self.client.force_login(self.eval_manager_user)
+        self.club_post("evaluation_create_for_checklist", {"ball-control": "5"}, self.player.pk, checklist.slug)
+
+        self.club_post("evaluation_walkthrough", {"player_pk": str(self.player.pk), "note": "   "}, checklist.slug)
+
+        self.assertFalse(EvaluationNote.objects.filter(club=self.club, player=self.player).exists())
+
+    def test_note_redirect_preserves_the_since_filter(self):
+        checklist = self.make_rubric("U8")
+        self.client.force_login(self.eval_manager_user)
+        self.club_post("evaluation_create_for_checklist", {"ball-control": "5"}, self.player.pk, checklist.slug)
+
+        response = self.club_post("evaluation_walkthrough", {"player_pk": str(self.player.pk), "note": "x", "since": "2020-01-01"}, checklist.slug)
+
+        self.assertRedirects(response, f"{reverse('management:evaluation_walkthrough', args=[checklist.slug])}?player={self.player.pk}&since=2020-01-01")
 
     def test_new_evaluation_link_hidden_for_an_archived_checklist(self):
         checklist = self.make_rubric("U8")

@@ -16,16 +16,19 @@ fill-in UI renders (formbuilder.services.form_factory.build_form) -- and
 persists Submission/Answer rows directly.
 """
 
+import datetime
 from decimal import Decimal, InvalidOperation
 
+from django.conf import settings
 from django.db import transaction
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 from formbuilder.models import Answer, Field, Form, FormSend, Submission
 from formbuilder.services.form_factory import build_form
 from members.models import Member
 
-from .models import EvaluationChecklist, PlayerEvaluation
+from .models import EvaluationChecklist, EvaluationNote, PlayerEvaluation
 
 #: Field types a per-question statistic can be numerically summarized for --
 #: everything else (text/textarea/email/date/file) only gets a response count
@@ -243,7 +246,16 @@ def results_matrix(checklist: EvaluationChecklist, *, season=None):
     return {"fields": fields, "rows": rows}
 
 
-def checklist_players(checklist: EvaluationChecklist) -> list[Member]:
+def _local_midnight(date: datetime.date) -> datetime.datetime:
+    """``date`` as a midnight-local datetime, aware if the project uses
+    timezone-aware datetimes -- built explicitly rather than handing
+    Django's ORM the bare date, which would otherwise coerce it itself
+    (with a RuntimeWarning) using this exact same rule, just implicitly."""
+    value = datetime.datetime.combine(date, datetime.time.min)
+    return timezone.make_aware(value) if settings.USE_TZ else value
+
+
+def checklist_players(checklist: EvaluationChecklist, *, since: datetime.date | None = None) -> list[Member]:
     """Every player ever evaluated against ``checklist``, alphabetically --
     the population the player-review browser (management.views.
     EvaluationWalkthroughView) steps through, one at a time, for a coach to
@@ -252,8 +264,17 @@ def checklist_players(checklist: EvaluationChecklist) -> list[Member]:
     checklist, so "who's in scope" is defined entirely by who's already been
     evaluated against it at least once. A player never evaluated on this
     checklist isn't included -- their first evaluation is added the ordinary
-    way, from their own member page."""
-    player_ids = PlayerEvaluation.objects.filter(checklist=checklist).values_list("player_id", flat=True).distinct()
+    way, from their own member page.
+
+    ``since``, if given, narrows that down to players with at least one
+    evaluation entered on or after that date -- "who's new since my last
+    walkthrough", for picking up a review session where it left off rather
+    than re-browsing everyone from scratch every time.
+    """
+    evaluations = PlayerEvaluation.objects.filter(checklist=checklist)
+    if since is not None:
+        evaluations = evaluations.filter(created__gte=_local_midnight(since))
+    player_ids = evaluations.values_list("player_id", flat=True).distinct()
     return list(Member.objects.filter(pk__in=player_ids).order_by("first_name", "last_name"))
 
 
@@ -309,3 +330,16 @@ def player_evaluation_history(checklist: EvaluationChecklist, player: Member):
         questions.append(question)
 
     return {"evaluations": list(reversed(evaluations)), "questions": questions}
+
+
+def player_notes(checklist: EvaluationChecklist, player: Member):
+    """Every discussion note left about ``player`` in the context of
+    ``checklist``, most recent first -- the running log a player-review
+    card shows alongside their evaluation history, so a note from a
+    walkthrough session a month ago ("keep an eye on positioning") is still
+    there the next time someone checks in on them."""
+    return list(EvaluationNote.objects.filter(checklist=checklist, player=player).select_related("author").order_by("-created"))
+
+
+def add_evaluation_note(*, club, checklist: EvaluationChecklist, player: Member, author: Member | None, note: str) -> EvaluationNote:
+    return EvaluationNote.objects.create(club=club, checklist=checklist, player=player, author=author, note=note)

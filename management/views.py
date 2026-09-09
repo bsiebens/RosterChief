@@ -72,9 +72,11 @@ from evaluations.services import (
     EvaluationRubricNotConfigured,
     EvaluationSubmissionError,
     active_checklists,
+    add_evaluation_note,
     checklist_players,
     current_rubric_form,
     player_evaluation_history,
+    player_notes,
     question_stats,
     results_matrix,
     start_new_rubric_version,
@@ -6469,34 +6471,52 @@ class EvaluationMatrixView(EvaluationChecklistMixin, EvaluationManagerRequiredMi
         return super().get_context_data(checklist=self.checklist, fields=matrix["fields"], rows=rows, **kwargs)
 
 
-class EvaluationWalkthroughView(EvaluationChecklistMixin, EvaluationManagerRequiredMixin, TemplateView):
+class EvaluationWalkthroughView(EvaluationChecklistMixin, EvaluationManagerRequiredMixin, View):
     """One player at a time, for discussion -- not data entry. Originally a
     fill-in-the-form queue; redesigned once it became clear the actual need
     is reviewing a player's history to decide whether to move them up (or
     not), the way a coaching staff would around a table: their current
-    team(s), this season's attendance, and their full run of past answers on
-    this checklist -- a trendline for a numeric question, so a change over
-    time is visible at a glance, not just the latest number. See
-    evaluations.services.checklist_players/player_evaluation_history.
+    team(s), this season's attendance, their full run of past answers on
+    this checklist (a trendline for a numeric question), and the running
+    discussion notes left about them in past sessions. See
+    evaluations.services.checklist_players/player_evaluation_history/
+    player_notes.
+
+    ``?since=YYYY-MM-DD`` narrows the player list to "who's had a new
+    evaluation since my last walkthrough" instead of everyone ever
+    evaluated -- entered once per session, not a fixed setting, since what
+    counts as "since last time" is whatever date the last session actually
+    happened on.
 
     Nothing here writes a PlayerEvaluation -- a "New evaluation" link is
     offered for once the discussion actually produces a fresh score, going
-    through the ordinary EvaluationCreateView flow like any other."""
+    through the ordinary EvaluationCreateView flow like any other. POST
+    here only ever adds a discussion note."""
 
     template_name = "management/evaluation_walkthrough.html"
 
+    def get_since(self):
+        raw = self.request.GET.get("since") or self.request.POST.get("since")
+        if not raw:
+            return None
+        try:
+            return date.fromisoformat(raw)
+        except ValueError:
+            return None
+
     def get_player(self, players):
-        selected = self.request.GET.get("player")
+        selected = self.request.GET.get("player") or self.request.POST.get("player_pk")
         if selected:
             match = next((candidate for candidate in players if str(candidate.pk) == selected), None)
             if match is not None:
                 return match
         return players[0] if players else None
 
-    def get_context_data(self, **kwargs):
-        players = checklist_players(self.checklist)
+    def build_context(self):
+        since = self.get_since()
+        players = checklist_players(self.checklist, since=since)
         player = self.get_player(players)
-        context = {"checklist": self.checklist, "players": players, "player": player}
+        context = {"checklist": self.checklist, "players": players, "player": player, "since": since}
 
         if player is not None:
             index = players.index(player)
@@ -6509,9 +6529,29 @@ class EvaluationWalkthroughView(EvaluationChecklistMixin, EvaluationManagerRequi
                 attendance_sparkline=member_attendance_sparkline(player, season) if season else [],
                 attendance_counts=member_attendance_counts(player, season) if season else None,
                 history=player_evaluation_history(self.checklist, player),
+                notes=player_notes(self.checklist, player),
             )
 
-        return super().get_context_data(**context, **kwargs)
+        return context
+
+    def get(self, request, *args, **kwargs):
+        return render(request, self.template_name, self.build_context())
+
+    def post(self, request, *args, **kwargs):
+        player = get_object_or_404(Member, pk=request.POST.get("player_pk"))
+        note = request.POST.get("note", "").strip()
+        if note:
+            author = Member.objects.filter(user=request.user).first()
+            add_evaluation_note(club=request.club, checklist=self.checklist, player=player, author=author, note=note)
+            notify(request, f"s|{_('Note added')}|{_('Your note about “%(player)s” was saved.') % {'player': player}}")
+        else:
+            notify(request, f"e|{_('Nothing to save')}|{_('Write something before adding a note.')}")
+
+        redirect_url = f"{reverse('management:evaluation_walkthrough', args=[self.checklist.slug])}?player={player.pk}"
+        since_raw = request.POST.get("since", "")
+        if since_raw:
+            redirect_url += f"&since={since_raw}"
+        return redirect(redirect_url)
 
 
 class EvaluationCreateView(EvaluationManagerRequiredMixin, View):
