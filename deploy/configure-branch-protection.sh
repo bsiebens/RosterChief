@@ -31,7 +31,7 @@ protect() {
         --method PUT \
         -H "Accept: application/vnd.github+json" \
         "repos/${REPO}/branches/${branch}/protection" \
-        -f "required_status_checks[strict]=true" \
+        -F "required_status_checks[strict]=true" \
         -f "required_status_checks[contexts][]=${CHECK}" \
         -F "enforce_admins=true" \
         -F "required_pull_request_reviews[required_approving_review_count]=0" \
@@ -47,13 +47,31 @@ protect main false          # release/hotfix -> main merges as a real merge comm
 protect development true    # feature -> development merges squashed (or rebased)
 
 say "Protecting the v* tag pattern (release tags build-and-push.yml pushes)"
-if output=$(gh api --method POST -H "Accept: application/vnd.github+json" "repos/${REPO}/tags/protection" -f "pattern=v*" 2>&1); then
-    echo "$output"
-elif echo "$output" | grep -qi "already exists"; then
-    echo "    (already protected)"
+# The legacy `POST .../tags/protection` endpoint 404s on current GitHub -- tag protection now
+# lives under the same Rulesets system as branch protection. Creation isn't blocked (the
+# release step needs to create fresh v* tags); deletion and force-updating an existing one are.
+existing_id=$(gh api "repos/${REPO}/rulesets?targets=tag" --jq '.[] | select(.name == "Protect release tags") | .id' 2>/dev/null || true)
+if [ -n "$existing_id" ]; then
+    echo "    (already exists, ruleset id ${existing_id} -- edit it directly if it needs to change)"
 else
-    echo "$output" >&2
-    echo "WARNING: tag protection setup failed -- check https://github.com/${REPO}/settings/tag_protection manually." >&2
+    gh api \
+        --method POST \
+        -H "Accept: application/vnd.github+json" \
+        "repos/${REPO}/rulesets" \
+        --input - <<'JSON'
+{
+  "name": "Protect release tags",
+  "target": "tag",
+  "enforcement": "active",
+  "conditions": {
+    "ref_name": { "include": ["refs/tags/v*"], "exclude": [] }
+  },
+  "rules": [
+    { "type": "deletion" },
+    { "type": "non_fast_forward" }
+  ]
+}
+JSON
 fi
 
 cat <<EOF
