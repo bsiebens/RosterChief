@@ -89,6 +89,10 @@
 
     --color-danger-bg: #fdecec;
     --color-danger-border: #f5c9ce;
+    /* Fixed, not tenant-brand-colored -- unlike --color-club-dark (the "taken" tile's own
+       colour), a conflict tile needs to read as "wrong" on every club's palette, including
+       one whose brand colour already sits near red. Used only by .number-tile-conflict. */
+    --color-conflict: #dc2626;
 
     --color-info: #14b8e8;
     --color-info-bg: #eaf7fc;
@@ -1559,6 +1563,16 @@
     .number-tile-reserved {
         background: var(--color-violet);
         border-color: var(--color-violet);
+        color: #fff;
+    }
+
+    /* An admin-overridden duplicate (management.forms.TeamMembershipForm's
+       override_conflict field) -- two people holding the same number this season with no
+       age-gap exemption between them. Distinct from -taken on purpose: this is a state to
+       go resolve, not a normal placement. */
+    .number-tile-conflict {
+        background: var(--color-conflict);
+        border-color: var(--color-conflict);
         color: #fff;
     }
 
