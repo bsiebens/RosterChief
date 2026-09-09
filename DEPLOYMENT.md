@@ -4,6 +4,74 @@ One server today, several later, with no code changes in between — only enviro
 variables. This document is the runbook and, more usefully, the list of things that are
 specific to *this* app and will bite you if you treat it as a generic Django deploy.
 
+## Branching & release model (git flow)
+
+Two long-lived branches, both on GitHub, both protected (`deploy/configure-branch-protection.sh`):
+
+| Branch | Role | Updated by | Builds/deploys |
+|---|---|---|---|
+| `development` | Integration — where feature branches land | `feature/*`/`fix/*` PRs, squash-merged | `.github/workflows/build-and-push.yml` pushes `:development`, then auto-deploys the throwaway dev/test instance (`deploy-dev` job) |
+| `main` | Production | `release/*`/`hotfix/*` PRs, **merge commit** (not squash) | Same workflow also tags `vX.Y.Z` (read from `pyproject.toml`), pushes that tag, and cuts a GitHub Release. Deploying it to production stays a human's call — `deploy/deploy-prod.sh`, which already refuses anything but `main` |
+
+**Day to day:**
+
+```bash
+git checkout development && git pull
+git checkout -b feature/whatever-youre-building
+# ... work, commit ...
+git push -u origin feature/whatever-youre-building
+gh pr create --base development                 # squash-merge once test is green
+```
+
+**Cutting a release** (branched from `development`, feature-frozen while `development` keeps
+moving underneath it):
+
+```bash
+git checkout development && git pull
+git checkout -b release/0.5.0
+# bump pyproject.toml's version to 0.5.0, update anything release-specific, commit
+git push -u origin release/0.5.0
+gh pr create --base main --title "Release 0.5.0"       # merge with a real merge commit —
+                                                          # this is the point that ships
+gh pr create --base development --title "Back-merge 0.5.0"  # so development has whatever
+                                                          # changed on the release branch
+```
+
+The `main` merge triggers the workflow: it reads `0.5.0` back out of `pyproject.toml`, tags the
+merge commit `v0.5.0`, pushes that tag, and opens a GitHub Release with auto-generated notes.
+`deploy/deploy-prod.sh` should then be pointed at `IMAGE_TAG=v0.5.0` for that deploy — an
+explicit, reviewed version number, not a floating branch tag (see "Deploying a specific
+version" below).
+
+**Hotfixing production** — same shape, branched from `main` instead of `development`:
+
+```bash
+git checkout main && git pull
+git checkout -b hotfix/0.5.1
+# fix it, bump pyproject.toml to 0.5.1, commit, push
+gh pr create --base main --title "Hotfix 0.5.1"          # ships immediately on merge
+gh pr create --base development --title "Back-merge 0.5.1"  # so it isn't lost on the next release
+```
+
+**Why `development` was fast-forwarded to match `main` before any of this started:** it had
+sat unmaintained (46 commits behind, zero commits of its own — the two branches shared a
+common ancestor, not a real fork) while `main` served as the de facto trunk. Retrofitting git
+flow onto that would have meant reconciling two diverged CI setups for no benefit; both
+branches now start the new rules from the same point.
+
+**GitHub can't enforce "squash into development, merge-commit into main" as a hard setting** —
+the three merge-button methods (squash/merge/rebase) are a repo-wide toggle
+(Settings → General → Pull Requests: leave squash and merge commits both enabled, rebase off,
+so there's no third inconsistent option), not something scoped per target branch. The closest
+real, enforceable lever is `development`'s own "require linear history" branch protection
+rule, which GitHub *does* apply per-branch and which hard-blocks a merge-commit button from
+even being offered there. `main` deliberately leaves that rule off, so a release/hotfix PR can
+land as a real merge commit — see `deploy/configure-branch-protection.sh`.
+
+**Required check on both branches: the `test` job** (lint + full suite) — nothing else is
+required (see that script's own comment on why zero required approvals is the right default
+for a solo maintainer, and where to change it once that stops being true).
+
 ## The five things that make this deployment unusual
 
 **1. You need a wildcard TLS certificate, and that forces DNS-01.**
@@ -449,9 +517,9 @@ Once the server has the repo cloned at `/home/bernard/RosterChief` and its two e
 place, `deploy/deploy-dev.sh` does a full deploy over SSH:
 
 ```bash
-deploy/deploy-dev.sh            # deploy the current branch
-BRANCH=main deploy/deploy-dev.sh
-deploy/deploy-dev.sh --push     # push the branch first, then deploy
+deploy/deploy-dev.sh                    # deploy the current branch
+BRANCH=development deploy/deploy-dev.sh # what CI itself deploys automatically -- see below
+deploy/deploy-dev.sh --push             # push the branch first, then deploy
 ```
 
 It runs from your machine and does the work on the server in one SSH session: fetch the pushed
@@ -468,32 +536,36 @@ rather than typing them every deploy.
 #### Where the image comes from
 
 The app image is **not** built on the server. `.github/workflows/build-and-push.yml` (workflow
-`CI`) builds it on GitHub's own runners on every push to `main` and pushes it to
-`ghcr.io/bsiebens/rosterchief`, tagged `:<branch>` and `:<branch>-<short-sha>`. The server only
-ever `docker compose pull`s — see "Sizing the server" below for why building on a small box is
+`CI`) builds it on GitHub's own runners on every push to `development` or `main` and pushes it
+to `ghcr.io/bsiebens/rosterchief`, tagged `:<branch>` and `:<branch>-<short-sha>` — plus, on
+`main` only, `:vX.Y.Z` (see "Branching & release model" above). The server only ever
+`docker compose pull`s — see "Sizing the server" below for why building on a small box is
 what you're avoiding by doing this.
 
-**Nothing reaches the registry untested.** The same workflow runs three jobs in order:
+**Nothing reaches the registry untested.** The same workflow runs jobs in order:
 
 1. `test` — `ruff check` + the full suite (`uv run python manage.py test`). Runs on every push
-   *and* every pull request, not just `main`.
-2. `build` — only on a push to `main`, and only once `test` has passed (`needs: test`). Builds
-   the image once locally (not pushed yet), boots it, and curls its own `/healthz` before
-   building-and-pushing the real, published tags — catching a broken entrypoint or a missing
-   static file that no unit test would ever see.
+   *and* every pull request, against any branch.
+2. `build` — only on a push to `development` or `main`, and only once `test` has passed
+   (`needs: test`). Builds the image once locally (not pushed yet), boots it, and curls its own
+   `/healthz` before building-and-pushing the real, published tags — catching a broken
+   entrypoint or a missing static file that no unit test would ever see. On `main` specifically,
+   it also tags/pushes the release's `vX.Y.Z` git tag and cuts a GitHub Release.
 3. `deploy-dev` — opt-in (see below), redeploys the throwaway dev/test instance automatically
-   once `build` succeeds.
+   once `build` succeeds **on `development`** — a `main` push (a release/hotfix landing) also
+   triggers `build`, but this job explicitly checks the ref and does nothing for it, since
+   deploying `development`'s image in response to a `main` release would be wrong, not just
+   redundant.
 
 A separate workflow, `.github/workflows/test-postgres.yml`, runs the identical suite against a
 real `postgres:17` service container (compose.yaml's own major version) on a daily schedule
-plus every push to `main` — the everyday `test` job above runs against the same in-memory
-sqlite `rosterchief/test_runner.py` uses locally, which is fast but isn't what production
-actually runs on.
+plus every push to `development`/`main` — the everyday `test` job above runs against the same
+in-memory sqlite `rosterchief/test_runner.py` uses locally, which is fast but isn't what
+production actually runs on.
 
-**Make `test` a required check.** None of the above blocks a merge to `main` on its own —
-GitHub only enforces that once `test` is added as a required status check under the repo's
-Settings → Branches → branch protection rule for `main`. This is a one-time setting, not
-something a workflow file can turn on for itself.
+**`test` is a required status check on both `development` and `main`** —
+`deploy/configure-branch-protection.sh` sets this (and the rest of branch protection) from the
+command line; see "Branching & release model" above for what it configures and why.
 
 **Auto-deploying the dev instance.** The `deploy-dev` job runs `deploy/deploy-dev.sh` over SSH
 the same way a person would, and is skipped entirely unless these repo secrets are set
@@ -506,20 +578,34 @@ the same way a person would, and is skipped entirely unless these repo secrets a
 | `DEV_SSH_KEY` | a private key authorized on that box, scoped to deploys only |
 | `DEV_REMOTE_DIR` | the checkout path there, e.g. `/home/bernard/RosterChief` |
 
+Worth tightening later: these currently live as plain repo secrets, readable by any workflow
+run regardless of which branch triggered it. Moving them into a GitHub **Environment** named
+`development` (Settings → Environments), and adding `environment: development` to the
+`deploy-dev` job, scopes them so only a run deploying to that environment can read them —
+free, and a real reduction in blast radius if a workflow file is ever compromised via a
+malicious PR (repo secrets are available to `pull_request_target`/workflow-dispatch runs in a
+way branch-restricted environment secrets are not). Not done here only because it's a UI step
+this document can describe but not perform for you.
+
 Production is deliberately **not** wired to auto-deploy — `deploy/deploy-prod.sh` stays a
-human's call, with its own backup-before-migrate and refuse-non-`main` guardrails intact.
+human's call, with its own backup-before-migrate and refuse-non-`main` guardrails intact. If
+that ever changes, gate it behind a `production` Environment with **required reviewers** —
+the one GitHub feature that makes "auto-deploy to prod" mean "one click to approve", not "one
+merge to prod."
 
 **Deploying a specific version**: `deploy/deploy-dev.sh` always pulls `:$BRANCH` (latest for
-that branch). To pin an exact build instead — for a rollback, or to test one commit without
-moving the branch — set `IMAGE_TAG` before pulling by hand on the server:
+that branch) — fine for the dev instance, which is meant to track `development`'s tip. For a
+real production deploy, pin the release tag explicitly rather than a floating branch tag:
 
 ```bash
-IMAGE_TAG=main-a1b2c3d docker compose -f compose.behind-proxy.yaml pull web
-IMAGE_TAG=main-a1b2c3d docker compose -f compose.behind-proxy.yaml up -d --no-deps web
+IMAGE_TAG=v0.5.0 docker compose pull web
+IMAGE_TAG=v0.5.0 docker compose up -d --no-deps web
 ```
 
-(short SHAs come from the GitHub Actions run, or `git log --oneline`). Setting `IMAGE_TAG` in
-the server's `.env` instead makes it the new default for future plain `docker compose pull`s.
+`:main-<short-sha>` still works for pinning an exact commit that hasn't been tagged as a
+release (or for the dev/test box, `:development-<short-sha>`) — short SHAs come from the
+GitHub Actions run, or `git log --oneline`. Setting `IMAGE_TAG` in the server's `.env` instead
+makes it the new default for future plain `docker compose pull`s.
 
 First-time setup on the server, once:
 
@@ -840,14 +926,17 @@ not healthy, and a load balancer must not keep feeding it traffic.
 
 ## Rollback
 
-Images are the unit of rollback: `.github/workflows/build-and-push.yml` tags every build both
-`:main` (mutable, "latest") and `:main-<short-sha>` (immutable), so any prior build is one tag
-away — find the short SHA from the GitHub Actions run or `git log --oneline`:
+Images are the unit of rollback. For production, that's the release tag:
+`.github/workflows/build-and-push.yml` tags every `main` build both `:vX.Y.Z` (the release —
+see "Branching & release model") and `:main-<short-sha>` (immutable, for a commit that hasn't
+been released), so rolling back is pointing `IMAGE_TAG` at the previous release:
 
 ```bash
-IMAGE_TAG=main-a1b2c3d docker compose pull web
-IMAGE_TAG=main-a1b2c3d docker compose up -d --no-deps web
+IMAGE_TAG=v0.4.2 docker compose pull web
+IMAGE_TAG=v0.4.2 docker compose up -d --no-deps web
 ```
+
+Prior releases are listed under the repo's GitHub Releases page, or `git tag --list 'v*'`.
 
 Setting `IMAGE_TAG` in the server's `.env` instead makes it the default for future plain
 `docker compose pull`s — remember to unset it (or set it back to `main`) once you're done, or

@@ -1,7 +1,16 @@
 # Test -> build -> push, strictly in that order. `test` (lint + the full suite) runs on
-# every push and every pull request; `build` only runs on a push to main, and only once
-# `test` has passed -- see the `needs:`/`if:` on each job below. A red run on a branch never
-# produces an image, and nothing reaches ghcr.io that hasn't been linted and tested first.
+# every push and every pull request; `build` only runs on a push to `development` or `main`,
+# and only once `test` has passed -- see the `needs:`/`if:` on each job below. A red run on a
+# branch never produces an image, and nothing reaches ghcr.io that hasn't been linted and
+# tested first.
+#
+# Branch roles (git flow -- see DEPLOYMENT.md's "Branching & release model"):
+#   development  the integration branch. Every push here builds+pushes `:development` and
+#                auto-deploys the throwaway dev/test instance (the `deploy-dev` job).
+#   main         production. Only ever updated by a `release/*`/`hotfix/*` PR merge -- each
+#                one IS a release, so a push here also tags `vX.Y.Z` (read from
+#                pyproject.toml), pushes that tag, and cuts a GitHub Release. Deploying it to
+#                production stays a human's call (deploy/deploy-prod.sh), on purpose.
 #
 # The image itself is still built on GitHub's own runners (native x86_64, plenty of RAM)
 # rather than on the small deploy VPS -- see DEPLOYMENT.md's "Sizing the server" section:
@@ -13,7 +22,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, development]
   pull_request:
   workflow_dispatch:
 
@@ -25,9 +34,8 @@ env:
 
 jobs:
   test:
-    # Every push and every PR -- this is the one job a branch-protection rule on main should
-    # require (see DEPLOYMENT.md/the hardening plan for that one-time repo-settings step;
-    # nothing here can flip it on for you).
+    # Every push and every PR -- this is the required status check on both `main` and
+    # `development` (see DEPLOYMENT.md/deploy/configure-branch-protection.sh).
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -53,15 +61,19 @@ jobs:
   build:
     needs: test
     # PRs stop at `test` above -- a branch that hasn't merged has no business publishing an
-    # image. `workflow_dispatch` is exempt from the ref check so it can still be used to
-    # force a rebuild of main by hand.
-    if: github.event_name != 'pull_request' && (github.event_name != 'push' || github.ref == 'refs/heads/main')
+    # image. Pushes only build from the two long-lived branches; a `release/*`/`hotfix/*`
+    # branch is exercised by `test` alone until it merges (its own PR into `main` re-runs
+    # `test` on the merge; the image that ships is the one `main` builds once it lands).
+    # `workflow_dispatch` is exempt from the ref check so it can still force a rebuild by hand.
+    if: github.event_name != 'pull_request' && (github.event_name != 'push' || contains(fromJSON('["refs/heads/main", "refs/heads/development"]'), github.ref))
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write  # only main's push actually tags/releases -- see the two steps below
       packages: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # `git tag`/`git push` below need real history, not the default shallow clone
 
       - uses: docker/setup-buildx-action@v3
 
@@ -71,9 +83,22 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Tags each push as both :<branch> ("latest for this branch", what deploy scripts pull
-      # by default) and :<branch>-<short-sha> (immutable, for pinning/rollback -- see
-      # DEPLOYMENT.md's "Deploying a specific version").
+      # main only: every push to main is a release/hotfix merge landing, so the version
+      # already sitting in pyproject.toml (bumped on the release/hotfix branch itself, as
+      # part of that PR) is this release's real version -- read it once here rather than
+      # duplicating it in a tag name someone has to remember to type by hand.
+      - id: version
+        if: github.ref == 'refs/heads/main'
+        run: |
+          VERSION=$(grep -m1 '^version = ' pyproject.toml | sed -E 's/version = "(.*)"/\1/')
+          echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
+
+      # Tags each push as `:<branch>` ("latest for this branch" -- `:development` is what
+      # deploy-dev.sh pulls, `:main` is still a valid rollback/pin target) and
+      # `:<branch>-<short-sha>` (immutable, for pinning an exact build -- see DEPLOYMENT.md's
+      # "Deploying a specific version"). On main only, also `:vX.Y.Z` -- the tag
+      # deploy-prod.sh should actually be pointed at for a real release, not a floating
+      # branch tag (`enable=` skips this line entirely off main, where steps.version never ran).
       - id: meta
         uses: docker/metadata-action@v5
         with:
@@ -81,6 +106,7 @@ jobs:
           tags: |
             type=ref,event=branch
             type=sha,prefix={{branch}}-,format=short
+            type=raw,value=${{ steps.version.outputs.tag }},enable=${{ steps.version.outputs.tag != '' }}
 
       # Built once, locally (push: false, load: true means "hand it to the local docker
       # daemon", not "publish it"), and smoke-tested below before anything is actually
@@ -129,22 +155,39 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # main only, and only once: tags this commit vX.Y.Z and cuts a GitHub Release from it.
+      # Idempotent -- re-running the workflow (workflow_dispatch, a retry) against a version
+      # already tagged skips both rather than failing the job over it.
+      - name: Tag the release and publish GitHub Release notes
+        if: steps.version.outputs.tag != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists -- pyproject.toml's version wasn't bumped for this merge, or this run is a retry. Skipping."
+            exit 0
+          fi
+          git tag "$TAG"
+          git push origin "$TAG"
+          gh release create "$TAG" --target main --generate-notes --title "$TAG"
+
   deploy-dev:
     needs: build
-    # Opt-in: the actual deploy step below skips entirely until DEV_SSH_HOST is configured
-    # (Settings -> Secrets and variables -> Actions on the repo -- not something this
-    # workflow file can set for you). deploy/deploy-prod.sh stays a human's deliberate call
-    # either way; this is only ever wired to the throwaway dev instance
-    # deploy/deploy-dev.sh already targets.
+    # Only a push to development actually deploys anything -- `build` above also runs on
+    # main, and this job must not react to that (deploying development's image in response to
+    # a main-branch release would be wrong, not just redundant). Opt-in beyond that: the
+    # deploy step itself skips until DEV_SSH_HOST is configured (Settings -> Secrets and
+    # variables -> Actions -- not something this workflow file can set for you).
     #
     # The secrets check used to live in this job's own `if:` -- GitHub Actions rejects
     # `secrets` in ANY `if:` conditional, job-level or step-level alike
     # ("Unrecognized named-value: 'secrets'"), and that isn't just a skipped job, it fails
     # the *entire workflow file* as invalid before any job (including `test`/`build` above)
-    # ever runs. So the job always runs -- one cheap checkout -- and the deploy step itself
-    # always runs too; whether it actually does anything is a plain shell `if` on its own
-    # env var, inside `run:`, where `secrets`-derived values are just strings.
-    if: ${{ github.event_name == 'push' }}
+    # ever runs. So the job always runs when the ref matches -- one cheap checkout -- and the
+    # deploy step itself always runs too; whether it actually does anything is a plain shell
+    # `if` on its own env var, inside `run:`, where `secrets`-derived values are just strings.
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/development' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -158,7 +201,7 @@ jobs:
           SSH_HOST: ${{ secrets.DEV_SSH_HOST }}
           SSH_USER: ${{ secrets.DEV_SSH_USER }}
           REMOTE_DIR: ${{ secrets.DEV_REMOTE_DIR }}
-          BRANCH: main
+          BRANCH: development
         run: |
           if [ -z "$SSH_HOST" ]; then
             echo "DEV_SSH_HOST not configured (Settings -> Secrets and variables -> Actions) -- skipping dev deploy."

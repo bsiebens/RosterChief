@@ -15,7 +15,7 @@ on:
     # never contends with anything production actually depends on.
     - cron: "0 5 * * *"
   push:
-    branches: [main]
+    branches: [main, development]
   workflow_dispatch:
 
 jobs:
