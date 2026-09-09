@@ -12,7 +12,7 @@ from registration.models import RegistrationBatch, RegistrationDetails
 
 from .api import build_roster
 from .models import NumberPool, NumberReservation, OfficialLevel, OfficialProfile, Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
-from .services.numbers import available_numbers, is_number_available, member_current_number, numbers_taken
+from .services.numbers import available_numbers, has_unresolved_conflict, is_number_available, member_current_number, numbers_taken
 from .services.roster import place_member_on_team
 
 
@@ -726,6 +726,36 @@ class NumbersServiceTests(TeamsTestCase):
         TeamMembership.objects.create(team=self.team, member=self.member, season=two_seasons_ago, jersey_number=5)
 
         self.assertIsNone(member_current_number(self.member, self.pool, self.season))
+
+    def test_has_unresolved_conflict_is_false_for_a_single_holder(self):
+        self.assertFalse(has_unresolved_conflict([self.member]))
+
+    def test_has_unresolved_conflict_is_false_for_an_age_gap_exempt_pair(self):
+        self.member.date_of_birth = datetime.date(2010, 1, 1)
+        younger = Member.objects.create(first_name="Kid", last_name="Rookie", date_of_birth=datetime.date(2016, 6, 1))
+
+        self.assertFalse(has_unresolved_conflict([self.member, younger]))
+
+    def test_has_unresolved_conflict_is_true_without_an_age_gap(self):
+        self.member.date_of_birth = datetime.date(2010, 1, 1)
+        close_in_age = Member.objects.create(first_name="Close", last_name="Peer", date_of_birth=datetime.date(2012, 1, 1))
+
+        self.assertTrue(has_unresolved_conflict([self.member, close_in_age]))
+
+    def test_has_unresolved_conflict_is_true_with_missing_dates_of_birth(self):
+        # Conservative, same as is_number_available -- an unverifiable gap isn't assumed.
+        other = Member.objects.create(first_name="No", last_name="Birthday")
+
+        self.assertTrue(has_unresolved_conflict([self.member, other]))
+
+    def test_has_unresolved_conflict_checks_every_pair_not_just_the_first(self):
+        # Three holders: member/exempt is fine, but exempt/third isn't -- the
+        # whole group is a conflict the moment any one pair fails the check.
+        self.member.date_of_birth = datetime.date(2010, 1, 1)
+        exempt = Member.objects.create(first_name="Kid", last_name="Rookie", date_of_birth=datetime.date(2016, 6, 1))
+        third = Member.objects.create(first_name="Close", last_name="Peer", date_of_birth=datetime.date(2017, 1, 1))
+
+        self.assertTrue(has_unresolved_conflict([self.member, exempt, third]))
 
 
 class PlaceMemberOnTeamTests(TeamsTestCase):

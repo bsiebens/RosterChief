@@ -787,6 +787,112 @@ class TeamRosterStaffTests(ManagementTestBase):
         self.assertEqual(response.status_code, 302)
         self.assertFalse(TeamMembership.objects.filter(team=self.team, season=self.season, member=other_player).exists())
 
+    def test_an_admin_can_override_a_pool_conflict(self):
+        # Issue #6: during the transition period, historical numbers weren't
+        # always tracked accurately -- an admin/MEMBER_ADMIN may knowingly force
+        # a pool duplicate through rather than being hard-blocked by it.
+        pool = NumberPool.objects.create(club=self.club, name="Youth", min_number=1, max_number=99)
+        self.team.pool = pool
+        self.team.save()
+        self.other_team.pool = pool
+        self.other_team.save()
+        other_player = Member.objects.create(first_name="Olly", last_name="Other")
+        ClubMembership.objects.create(club=self.club, member=other_player, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        TeamMembership.objects.create(team=self.other_team, season=self.season, member=self.player, position=self.player_position, jersey_number=7)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post(
+            "team_roster_add",
+            {"member": str(other_player.pk), "position": str(self.player_position.pk), "jersey_number": "7", "override_conflict": "on"},
+            self.team.pk,
+            self.season.pk,
+        )
+
+        self.assertRedirects(response, f"{reverse('management:team_detail', args=[self.team.pk])}?season={self.season.pk}")
+        membership = TeamMembership.objects.get(team=self.team, season=self.season, member=other_player)
+        self.assertEqual(membership.jersey_number, 7)
+
+    def test_a_member_admin_can_also_override_on_edit(self):
+        pool = NumberPool.objects.create(club=self.club, name="Youth", min_number=1, max_number=99)
+        self.team.pool = pool
+        self.team.save()
+        self.other_team.pool = pool
+        self.other_team.save()
+        other_player = Member.objects.create(first_name="Olly", last_name="Other")
+        ClubMembership.objects.create(club=self.club, member=other_player, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        TeamMembership.objects.create(team=self.other_team, season=self.season, member=self.player, position=self.player_position, jersey_number=7)
+        editable = TeamMembership.objects.create(team=self.team, season=self.season, member=other_player, position=self.player_position, jersey_number=8)
+        # TeamManagerRequiredMixin (the view's own gate) needs a manager of
+        # *this* team specifically -- MEMBER_ADMIN alone wouldn't reach the
+        # view at all, so this fixture holds both: a coach who also happens to
+        # be a club-wide MEMBER_ADMIN, isolating that it's the latter role
+        # unlocking override_conflict, not the team-manager standing itself.
+        member_admin_user = self.make_team_coach(self.team, "member-admin-override@example.com")
+        member_admin_member = Member.objects.get(user=member_admin_user)
+        # make_team_coach doesn't create a ClubMembership (its own StaffAssignment is
+        # enough for TeamManagerRequiredMixin) -- ClubRole needs one to already exist
+        # to update, same as the ClubMembership-creates-a-default-ClubRole pattern
+        # every other MEMBER_ADMIN fixture in this file relies on.
+        ClubMembership.objects.create(club=self.club, member=member_admin_member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        ClubRole.objects.filter(club=self.club, member=member_admin_member).update(role=ClubRole.Roles.MEMBER_ADMIN)
+        enrol_mfa(member_admin_user)
+        self.client.force_login(member_admin_user)
+
+        response = self.club_post(
+            "team_roster_update",
+            {"member": str(other_player.pk), "position": str(self.player_position.pk), "jersey_number": "7", "override_conflict": "on"},
+            self.team.pk,
+            editable.pk,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        editable.refresh_from_db()
+        self.assertEqual(editable.jersey_number, 7)
+
+    def test_a_plain_team_coach_cannot_override_even_if_they_post_the_field(self):
+        # Server-side enforcement, not just a hidden checkbox: override_conflict
+        # isn't even in the form's fields unless can_manage_members is true, so
+        # a hand-crafted POST from a coach who lacks it is silently ignored --
+        # the conflict is still rejected exactly as if the field were absent.
+        pool = NumberPool.objects.create(club=self.club, name="Youth", min_number=1, max_number=99)
+        self.team.pool = pool
+        self.team.save()
+        self.other_team.pool = pool
+        self.other_team.save()
+        other_player = Member.objects.create(first_name="Olly", last_name="Other")
+        ClubMembership.objects.create(club=self.club, member=other_player, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        TeamMembership.objects.create(team=self.other_team, season=self.season, member=self.player, position=self.player_position, jersey_number=7)
+        self.client.force_login(self.team_coach)
+
+        response = self.club_post(
+            "team_roster_add",
+            {"member": str(other_player.pk), "position": str(self.player_position.pk), "jersey_number": "7", "override_conflict": "on"},
+            self.team.pk,
+            self.season.pk,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(TeamMembership.objects.filter(team=self.team, season=self.season, member=other_player).exists())
+
+    def test_override_does_not_bypass_the_same_team_duplicate_check(self):
+        # override_conflict only ever applies to the cross-team pool check --
+        # a same-team duplicate is a hard unique_jersey_number_per_team_per_season
+        # DB constraint no override could save past anyway.
+        other_player = Member.objects.create(first_name="Olly", last_name="Other")
+        ClubMembership.objects.create(club=self.club, member=other_player, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        TeamMembership.objects.create(team=self.team, season=self.season, member=self.player, position=self.player_position, jersey_number=7)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post(
+            "team_roster_add",
+            {"member": str(other_player.pk), "position": str(self.player_position.pk), "jersey_number": "7", "override_conflict": "on"},
+            self.team.pk,
+            self.season.pk,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(TeamMembership.objects.filter(team=self.team, season=self.season, member=other_player).exists())
+
     def test_the_roster_edit_form_is_prefilled_from_a_pending_requested_number(self):
         batch = RegistrationBatch.objects.create(club=self.club, season=self.season, contact_first_name="Pat", contact_last_name="Parent", contact_email="pat@example.com")
         membership = ClubMembership.objects.get(club=self.club, member=self.player, season=self.season)
@@ -1869,6 +1975,41 @@ class NumberListViewTests(ManagementTestBase):
         tiles = {tile["number"]: tile for tile in response.context["tiles"]}
         self.assertEqual(tiles[3]["state"], "taken")
         self.assertEqual(tiles[3]["holders"], [f"{self.member} ({self.team.short_name})"])
+
+    def test_two_holders_with_no_age_gap_data_is_a_conflict(self):
+        # Issue #6: only reachable via TeamMembershipForm's override_conflict --
+        # is_number_available already blocks this pair at submit time, so two
+        # real holders on the same number this season means an admin knowingly
+        # forced it through. Missing date_of_birth on both sides means the age
+        # gap can't be verified either, so it's conservatively not exempt.
+        # Different teams sharing the pool, not the same team -- two holders
+        # on one team is a hard unique_jersey_number_per_team_per_season DB
+        # constraint, never actually reachable regardless of override.
+        other_team = Team.objects.create(club=self.club, name="Second Team", short_name="2nd", pool=self.pool)
+        other_member = Member.objects.create(first_name="Jack", last_name="Roe")
+        TeamMembership.objects.create(team=self.team, member=self.member, season=self.season, jersey_number=3)
+        TeamMembership.objects.create(team=other_team, member=other_member, season=self.season, jersey_number=3)
+
+        response = self.club_get("number_list")
+
+        tiles = {tile["number"]: tile for tile in response.context["tiles"]}
+        self.assertEqual(tiles[3]["state"], "conflict")
+        self.assertCountEqual(tiles[3]["holders"], [f"{self.member} ({self.team.short_name})", f"{other_member} ({other_team.short_name})"])
+
+    def test_two_holders_with_a_five_year_age_gap_stay_taken_not_conflict(self):
+        # The one legitimate way to share a number -- teams.services.numbers'
+        # own age-gap exception -- must not be flagged as something to resolve.
+        other_team = Team.objects.create(club=self.club, name="Second Team", short_name="2nd", pool=self.pool)
+        self.member.date_of_birth = datetime.date(2010, 1, 1)
+        self.member.save()
+        younger_member = Member.objects.create(first_name="Jack", last_name="Roe", date_of_birth=datetime.date(2018, 1, 1))
+        TeamMembership.objects.create(team=self.team, member=self.member, season=self.season, jersey_number=3)
+        TeamMembership.objects.create(team=other_team, member=younger_member, season=self.season, jersey_number=3)
+
+        response = self.club_get("number_list")
+
+        tiles = {tile["number"]: tile for tile in response.context["tiles"]}
+        self.assertEqual(tiles[3]["state"], "taken")
 
     def test_a_number_placed_last_season_only_is_previous(self):
         previous_season = Season.objects.create(club=self.club, start_date=self.season.start_date - datetime.timedelta(days=365), end_date=self.season.start_date - datetime.timedelta(days=1))

@@ -117,6 +117,7 @@ from shop.services.stats import order_kpis, quantity_sold_by_product, quantity_s
 from shop.services.vouchers import delete_manual_consumption, record_manual_consumption, voucher_history
 from teams.models import NumberPool, NumberReservation, OfficialLevel, OfficialProfile, Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
 from teams.services import eligible_roster_members, place_member_on_team
+from teams.services.numbers import has_unresolved_conflict
 
 from .bulk_import import build_member_import_template, parse_member_import_rows, read_member_import_workbook
 from .email_previews import EMAIL_PREVIEWS, EMAIL_PREVIEWS_BY_KEY, render_preview
@@ -1398,9 +1399,10 @@ class TeamDetailView(ClubStaffRequiredMixin, DetailView):
                 # editing the field afterwards can't be silently overwritten
                 # by revisiting this page.
                 requested_numbers = dict(RegistrationDetails.objects.filter(membership__club=club, membership__season=season, requested_team=team).exclude(requested_jersey_number=None).values_list("membership__member_id", "requested_jersey_number"))
+                can_override_numbers = can_manage_members(self.request.user, club)
                 for membership in roster:
                     initial = {"jersey_number": requested_numbers[membership.member_id]} if membership.jersey_number is None and membership.member_id in requested_numbers else None
-                    membership.edit_form = TeamMembershipForm(instance=membership, club=club, team=team, season=season, initial=initial)
+                    membership.edit_form = TeamMembershipForm(instance=membership, club=club, team=team, season=season, can_override=can_override_numbers, initial=initial)
                 for assignment in staff:
                     assignment.edit_form = StaffAssignmentForm(instance=assignment, club=club, team=team, season=season)
 
@@ -1417,7 +1419,7 @@ class TeamDetailView(ClubStaffRequiredMixin, DetailView):
             roster=roster,
             staff=staff,
             can_manage=can_manage,
-            roster_form=TeamMembershipForm(club=club, team=team, season=season) if can_manage and season else None,
+            roster_form=TeamMembershipForm(club=club, team=team, season=season, can_override=can_override_numbers) if can_manage and season else None,
             staff_form=StaffAssignmentForm(club=club, team=team, season=season) if can_manage and season else None,
             team_photo=team_photo,
             team_photo_form=TeamPhotoForm(instance=team_photo) if can_manage and season else None,
@@ -1461,7 +1463,16 @@ class TeamRosterAddView(TeamManagerRequiredMixin, FormView):
         # instance carries team/season *before* validation runs -- TeamMembership.clean()
         # (validate_club_scope) needs self.team_id set to check season/position are the
         # same club's, and form_valid() runs only after that validation already passed.
-        return super().get_form_kwargs() | {"club": self.request.club, "team": self.get_team(), "season": self.get_season(), "instance": TeamMembership(team=self.get_team(), season=self.get_season())}
+        return super().get_form_kwargs() | {
+            "club": self.request.club,
+            "team": self.get_team(),
+            "season": self.get_season(),
+            "instance": TeamMembership(team=self.get_team(), season=self.get_season()),
+            # Server-side enforcement of who may actually use override_conflict --
+            # see TeamMembershipForm's own docstring on why this isn't just a
+            # template-level hide.
+            "can_override": can_manage_members(self.request.user, self.request.club),
+        }
 
     def team_detail_url(self):
         return f"{reverse('management:team_detail', args=[self.kwargs['pk']])}?season={self.kwargs['season_pk']}"
@@ -1499,7 +1510,13 @@ class TeamRosterUpdateView(TeamManagerRequiredMixin, FormView):
 
     def get_form_kwargs(self):
         membership = self.get_object()
-        return super().get_form_kwargs() | {"instance": membership, "club": self.request.club, "team": membership.team, "season": membership.season}
+        return super().get_form_kwargs() | {
+            "instance": membership,
+            "club": self.request.club,
+            "team": membership.team,
+            "season": membership.season,
+            "can_override": can_manage_members(self.request.user, self.request.club),
+        }
 
     def team_detail_url(self):
         return f"{reverse('management:team_detail', args=[self.kwargs['pk']])}?season={self.get_object().season_id}"
@@ -2506,9 +2523,12 @@ class NumberListView(ClubStaffRequiredMixin, TemplateView):
         previous = Season.objects.filter(club=pool.club, start_date__lt=season.start_date).order_by("-start_date").first()
 
         reservations = {reservation.number: reservation for reservation in NumberReservation.objects.filter(pool=pool).select_related("reserved_by")}
+        # Kept as memberships (not pre-formatted strings, unlike the previous-season/
+        # pending dicts below) until after the conflict check -- has_unresolved_conflict
+        # needs the actual Member rows to weigh the age-gap exception, not display text.
         placed_this_season = {}
         for membership in TeamMembership.objects.filter(team__pool=pool, season=season).exclude(jersey_number=None).select_related("member", "team"):
-            placed_this_season.setdefault(membership.jersey_number, []).append(f"{membership.member} ({membership.team.short_name or membership.team.name})")
+            placed_this_season.setdefault(membership.jersey_number, []).append(membership)
         placed_previous_season = {}
         if previous is not None:
             for membership in TeamMembership.objects.filter(team__pool=pool, season=previous).exclude(jersey_number=None).select_related("member", "team"):
@@ -2523,7 +2543,13 @@ class NumberListView(ClubStaffRequiredMixin, TemplateView):
             if reservation is not None:
                 tiles.append({"number": number, "state": "reserved", "holders": [], "note": reservation.note, "reservation": reservation})
             elif number in placed_this_season:
-                tiles.append({"number": number, "state": "taken", "holders": placed_this_season[number], "note": "", "reservation": None})
+                memberships = placed_this_season[number]
+                # A genuine conflict (issue #6) only ever comes from an admin's
+                # override_conflict on TeamMembershipForm -- is_number_available
+                # already blocks everything else, age-gap-exempt shares included.
+                state = "conflict" if has_unresolved_conflict([membership.member for membership in memberships]) else "taken"
+                holders = [f"{membership.member} ({membership.team.short_name or membership.team.name})" for membership in memberships]
+                tiles.append({"number": number, "state": state, "holders": holders, "note": "", "reservation": None})
             elif number in pending_this_season:
                 tiles.append({"number": number, "state": "pending", "holders": pending_this_season[number], "note": "", "reservation": None})
             elif number in placed_previous_season:
