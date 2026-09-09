@@ -81,11 +81,13 @@
             <a class="btn btn-outline gap-2" href="{% url 'management:member_import' %}">{% lucide "arrow-left" size=16 %} {% trans "Back" %}</a>
             {% if valid_count %}
                 {% if family_groups %}
-                    {# The radios below carry form="member_import_confirm_form" rather than living inside that
-                       <form> themselves: a <dialog> is easiest to place as a sibling in the DOM, and a <form>
-                       cannot be nested inside another one (a form="dialog" close button needs its own form) --
-                       the browser would silently close member_import_confirm_form as soon as it hit a second
-                       <form> start tag, and every choice here would stop submitting with it. #}
+                    {% comment %}
+                        The radios below carry form="member_import_confirm_form" rather than living inside that
+                        <form> themselves: a <dialog> is easiest to place as a sibling in the DOM, and a <form>
+                        cannot be nested inside another one (a form="dialog" close button needs its own form) --
+                        the browser would silently close member_import_confirm_form as soon as it hit a second
+                        <form> start tag, and every choice here would stop submitting with it.
+                    {% endcomment %}
                     <dialog id="family_matches_modal" class="modal">
                         <div class="modal-box max-w-2xl">
                             <h3 class="text-lg font-bold">{% trans "Matching families found" %}</h3>
