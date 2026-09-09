@@ -37,15 +37,18 @@
             {% endfor %}
 
             <div class="m-card overflow-hidden">
-                {% for field in form %}
+                {% for bound_field, criterion in rows %}
+                    {% ifchanged criterion.section %}
+                        {% if criterion.section %}<div class="px-3.5 py-2 text-xs font-bold text-muted uppercase">{{ criterion.section }}</div>{% endif %}
+                    {% endifchanged %}
                     {% if not forloop.first %}<div class="h-px bg-rule"></div>{% endif %}
                     <div class="p-3.5">
-                        <label class="mb-1 block text-xs text-muted" for="{{ field.id_for_label }}">
-                            {{ field.label }}{% if field.field.required %} *{% endif %}
+                        <label class="mb-1 block text-xs text-muted" for="{{ bound_field.id_for_label }}">
+                            {{ bound_field.label }}{% if bound_field.field.required %} *{% endif %}
                         </label>
-                        {{ field }}
-                        {% if field.help_text %}<p class="mt-1 text-xs text-muted">{{ field.help_text }}</p>{% endif %}
-                        {% for error in field.errors %}<p class="mt-1 text-xs text-club">{{ error }}</p>{% endfor %}
+                        {{ bound_field }}
+                        {% if bound_field.help_text %}<p class="mt-1 text-xs text-muted">{{ bound_field.help_text }}</p>{% endif %}
+                        {% for error in bound_field.errors %}<p class="mt-1 text-xs text-club">{{ error }}</p>{% endfor %}
                     </div>
                 {% endfor %}
             </div>

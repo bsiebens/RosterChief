@@ -25,6 +25,15 @@
         <div class="card overflow-x-auto">
             <table class="table">
                 <thead>
+                    {% if column_groups %}
+                        <tr>
+                            <th class="sticky left-0 bg-base-100"></th>
+                            {% for group in column_groups %}
+                                <th colspan="{{ group.colspan }}" class="text-center text-xs text-muted uppercase">{{ group.label }}</th>
+                            {% endfor %}
+                            <th></th>
+                        </tr>
+                    {% endif %}
                     <tr>
                         <th class="sticky left-0 bg-base-100">{% trans "Player" %}</th>
                         {% for field in fields %}
