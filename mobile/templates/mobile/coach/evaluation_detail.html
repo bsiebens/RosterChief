@@ -25,6 +25,9 @@
 {% block content %}
     <div class="m-card overflow-hidden">
         {% for row in rows %}
+            {% ifchanged row.field.section %}
+                {% if row.field.section %}<div class="px-3.5 py-2 text-xs font-bold text-muted uppercase">{{ row.field.section }}</div>{% endif %}
+            {% endifchanged %}
             {% if not forloop.first %}<div class="h-px bg-rule"></div>{% endif %}
             <div class="p-3.5">
                 <div class="mb-1 text-xs text-muted">{{ row.field.label }}</div>

@@ -24,7 +24,10 @@
         {% endfor %}
 
         <div class="card mb-4 card-body gap-4">
-            {% for bound_field in form %}
+            {% for bound_field, field in rows %}
+                {% ifchanged field.section %}
+                    {% if field.section %}<h3 class="font-display text-xs font-extrabold tracking-wide text-muted uppercase first:mt-0">{{ field.section }}</h3>{% endif %}
+                {% endifchanged %}
                 {% form_field bound_field %}
             {% endfor %}
         </div>

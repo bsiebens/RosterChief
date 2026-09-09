@@ -913,6 +913,9 @@ Field(UUIDModel)                      # a form's field definition (club implied 
                                      choice | multichoice | checkbox | file)
   required   BooleanField
   help_text  CharField (blank)
+  section    CharField (blank)      # optional heading; groups consecutive fields sharing
+                                     # the same value for display -- no ordering/model of
+                                     # its own, never consulted outside rendering
   order      PositiveSmallIntegerField
   is_active  BooleanField (default=True)   # soft-retire instead of deleting (see below)
   options    JSONField (default=list) # choices for choice/multichoice: [{value,label}]
@@ -1185,6 +1188,12 @@ and what the statistics/results-matrix/walkthrough views group and filter by.
   evaluation still renders with the questions it was actually scored against. `Field.key` is
   copied verbatim across versions, which is what lets statistics match a question across a
   checklist's whole version history rather than just its current one.
+- **Optional sections.** Each criterion row in the rubric editor has an optional "Section"
+  text input (`formbuilder.Field.section`); repeating the same text on consecutive rows
+  groups them under one heading everywhere the rubric is rendered (fill-in form, stats,
+  results matrix, walkthrough) via `{% ifchanged %}` on that value — no separate section
+  model or ordering, and no effect on scoring/versioning. Blank (the default) renders
+  exactly as before.
 - **Multiple named checklists per club**, each independently versioned (e.g. "U8", "U10") —
   picked manually per evaluation (no team/age-group mapping; that's a documented, deliberate
   simplification, revisit if clubs ask for auto-selection). With exactly one active,

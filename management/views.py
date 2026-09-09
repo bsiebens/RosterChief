@@ -79,6 +79,7 @@ from evaluations.services import (
     player_notes,
     question_stats,
     results_matrix,
+    rubric_field_rows,
     start_new_rubric_version,
     submit_evaluation,
 )
@@ -6375,6 +6376,7 @@ class EvaluationRubricView(EvaluationChecklistMixin, FeatureRequiredMixin, View)
             return []
         return [
             {
+                "section": field.section,
                 "label": field.label,
                 "field_type": field.field_type,
                 "required": field.required,
@@ -6423,6 +6425,7 @@ class EvaluationRubricView(EvaluationChecklistMixin, FeatureRequiredMixin, View)
                     field_type=row["field_type"] or FormBuilderField.FieldType.NUMBER,
                     required=row["required"],
                     help_text=row.get("help_text", ""),
+                    section=row.get("section", ""),
                     options=row["options"],
                     order=index,
                 )
@@ -6474,7 +6477,14 @@ class EvaluationMatrixView(EvaluationChecklistMixin, EvaluationManagerRequiredMi
     def get_context_data(self, **kwargs):
         matrix = results_matrix(self.checklist)
         rows = [{"player": row["player"], "evaluation": row["evaluation"], "cells": [_format_answer_value(value) for value in row["values"]]} for row in matrix["rows"]]
-        return super().get_context_data(checklist=self.checklist, fields=matrix["fields"], rows=rows, **kwargs)
+        # A spanning header row above the field labels, one <th colspan> per
+        # run of consecutive fields sharing a section -- omitted entirely
+        # (empty list) when this checklist never sets one, so an unsectioned
+        # matrix's <thead> renders exactly as before.
+        column_groups = []
+        if any(field.section for field in matrix["fields"]):
+            column_groups = [{"label": section, "colspan": len(list(fields_in_group))} for section, fields_in_group in groupby(matrix["fields"], key=lambda field: field.section)]
+        return super().get_context_data(checklist=self.checklist, fields=matrix["fields"], rows=rows, column_groups=column_groups, **kwargs)
 
 
 class EvaluationWalkthroughView(EvaluationChecklistMixin, EvaluationManagerRequiredMixin, View):
@@ -6617,7 +6627,9 @@ class EvaluationCreateView(EvaluationManagerRequiredMixin, View):
 
         if current_season(request.club) is None:
             return self.render_blocked(member, "no_season")
-        return render(request, self.template_name, {"member": member, "checklist": checklist, "form": build_form(current_rubric_form(checklist))})
+        rubric = current_rubric_form(checklist)
+        bound_form = build_form(rubric)
+        return render(request, self.template_name, {"member": member, "checklist": checklist, "form": bound_form, "rows": rubric_field_rows(rubric, bound_form)})
 
     def post(self, request, *args, **kwargs):
         member = self.get_member()
@@ -6647,7 +6659,7 @@ class EvaluationCreateView(EvaluationManagerRequiredMixin, View):
             # pass on this identical Form/data pair, so nothing to duplicate.
             bound_form = build_form(rubric, data=request.POST, files=request.FILES)
             bound_form.is_valid()
-            return render(request, self.template_name, {"member": member, "checklist": checklist, "form": bound_form})
+            return render(request, self.template_name, {"member": member, "checklist": checklist, "form": bound_form, "rows": rubric_field_rows(rubric, bound_form)})
 
         notify(request, f"s|{_('Evaluation saved')}|{_('Evaluation for “%(member)s” saved.') % {'member': member}}")
         return redirect("management:member_detail", pk=member.pk)

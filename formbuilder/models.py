@@ -59,6 +59,17 @@ class Field(UUIDModel):
     field_type = models.CharField(_("field type"), max_length=255, choices=FieldType.choices, default=FieldType.TEXT)
     required = models.BooleanField(_("required?"), default=True)
     help_text = models.TextField(_("help text"), blank=True)
+    #: Purely a display grouping -- fields are grouped for rendering by runs of
+    #: consecutive fields (in `order`) sharing the same section value, not by a
+    #: separate section model/ordering. Blank means ungrouped. Never consulted
+    #: by form_factory/submission/reporting -- every Field stays answerable
+    #: regardless of section.
+    section = models.CharField(
+        _("section"),
+        max_length=255,
+        blank=True,
+        help_text=_('Optional heading to group this question under when reviewing or filling in the form -- e.g. "Technical skills". Leave blank to keep it ungrouped, or repeat the same heading on consecutive questions to group them together.'),
+    )
     order = models.PositiveIntegerField(_("order"), default=0)
     is_active = models.BooleanField(_("is active?"), default=True)
     options = models.JSONField(_("options"), blank=True, null=True)

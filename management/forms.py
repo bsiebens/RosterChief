@@ -1813,6 +1813,7 @@ class RubricCriterionForm(forms.Form):
     just editable inline here since there's no per-row save step to visit
     separately."""
 
+    section = forms.CharField(label=_("Section"), max_length=255, required=False, widget=forms.TextInput(attrs={"class": "input input-bordered w-full", "placeholder": _("e.g. Technical skills")}))
     label = forms.CharField(label=_("Criterion"), max_length=255, required=False, widget=forms.TextInput(attrs={"class": "input input-bordered w-full", "placeholder": _("e.g. Ball control")}))
     field_type = forms.ChoiceField(label=_("Type"), choices=RUBRIC_FIELD_TYPES, required=False, initial=FormBuilderField.FieldType.NUMBER, widget=forms.Select(attrs={"class": "select select-bordered w-full"}))
     required = forms.BooleanField(label=_("Required"), required=False, initial=True)

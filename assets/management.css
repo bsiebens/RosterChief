@@ -431,6 +431,32 @@
         width: 2.25rem;
     }
 
+    /* .join/.join-item aren't real daisyUI (see file banner) -- without this the
+       pager's chevron-only buttons (an <svg>, no text baseline) and its number
+       buttons (text) fall back to the browser's default inline baseline alignment
+       against each other and end up a couple pixels out of line. Flex + stretch
+       centers every join-item on the same row regardless of its content, and
+       squaring off the inner corners makes the group read as one connected
+       control instead of separate pill buttons with gaps between them. */
+    .join {
+        display: inline-flex;
+        align-items: stretch;
+    }
+
+    .join-item {
+        border-radius: 0;
+    }
+
+    .join-item:first-child {
+        border-top-left-radius: var(--radius-box);
+        border-bottom-left-radius: var(--radius-box);
+    }
+
+    .join-item:last-child {
+        border-top-right-radius: var(--radius-box);
+        border-bottom-right-radius: var(--radius-box);
+    }
+
     /* A segmented-control sub-nav (the checklist-scoped evaluations pages'
        Questions/Statistics/Results/Walkthrough row) -- daisyUI-shaped class names
        (.tabs/.tabs-boxed/.tab/.tab-active), hand-rolled same as everything else in this
