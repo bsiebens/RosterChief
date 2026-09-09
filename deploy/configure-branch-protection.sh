@@ -12,6 +12,15 @@
 # per-branch lever for "squash/rebase merges only" -- there is no separate "default merge
 # method per branch" setting, so this is enforced here, not just by convention.
 #
+# `enforce_admins` differs per branch, on purpose: `main` keeps it on (even the repo owner goes
+# through a release/hotfix PR to reach production); `development` turns it off, so a small,
+# self-contained fix can be pushed directly rather than round-tripping through a PR that would
+# only ever be self-merged anyway. GitHub's `enforce_admins` is all-or-nothing, though -- there
+# is no "admins skip the PR requirement but still can't force-push" middle ground in classic
+# branch protection, so turning it off for development also lets an admin force-push/delete it.
+# Accepted here as low-risk on a solo-maintained branch; revisit (Rulesets' per-rule bypass
+# actors support this distinction properly) if that stops being true.
+#
 # Re-run any time to reset drift back to these settings -- every `gh api` call below is a PUT
 # (full replace) or an idempotent POST, not an incremental patch.
 set -Eeuo pipefail
@@ -25,15 +34,15 @@ gh auth status >/dev/null 2>&1 || { echo "ERROR: run 'gh auth login' first, with
 say() { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 
 protect() {
-    local branch="$1" linear_history="$2"
-    say "Protecting ${branch} (required_linear_history=${linear_history})"
+    local branch="$1" linear_history="$2" enforce_admins="$3"
+    say "Protecting ${branch} (required_linear_history=${linear_history}, enforce_admins=${enforce_admins})"
     gh api \
         --method PUT \
         -H "Accept: application/vnd.github+json" \
         "repos/${REPO}/branches/${branch}/protection" \
         -F "required_status_checks[strict]=true" \
         -f "required_status_checks[contexts][]=${CHECK}" \
-        -F "enforce_admins=true" \
+        -F "enforce_admins=${enforce_admins}" \
         -F "required_pull_request_reviews[required_approving_review_count]=0" \
         -F "required_pull_request_reviews[dismiss_stale_reviews]=true" \
         -F "restrictions=null" \
@@ -43,8 +52,10 @@ protect() {
         -F "required_conversation_resolution=true"
 }
 
-protect main false          # release/hotfix -> main merges as a real merge commit
-protect development true    # feature -> development merges squashed (or rebased)
+protect main false true            # release/hotfix -> main merges as a real merge commit; even
+                                    # the repo owner goes through that PR, no bypass
+protect development true false     # feature -> development merges squashed (or rebased); the
+                                    # repo owner may also push small fixes directly
 
 say "Protecting the v* tag pattern (release tags build-and-push.yml pushes)"
 # The legacy `POST .../tags/protection` endpoint 404s on current GitHub -- tag protection now
@@ -82,6 +93,7 @@ silently coerces (e.g. required_approving_review_count: 0 is accepted but worth 
   https://github.com/${REPO}/settings/branches
   https://github.com/${REPO}/settings/tag_protection
 
-Once a second contributor joins, bump required_approving_review_count above via the UI (or
-re-run this script after editing it) -- 0 is a solo-maintainer default, not a permanent choice.
+Once a second contributor joins, bump required_approving_review_count above and flip
+development's enforce_admins back to true via the UI (or re-run this script after editing it)
+-- both are solo-maintainer defaults, not permanent choices.
 EOF
