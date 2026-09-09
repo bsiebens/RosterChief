@@ -80,7 +80,47 @@
         <div class="mt-2 flex items-center gap-2 pt-2">
             <a class="btn btn-outline gap-2" href="{% url 'management:member_import' %}">{% lucide "arrow-left" size=16 %} {% trans "Back" %}</a>
             {% if valid_count %}
-                <form method="post" action="{% url 'management:member_import_confirm' %}">
+                {% if family_groups %}
+                    {# The radios below carry form="member_import_confirm_form" rather than living inside that
+                       <form> themselves: a <dialog> is easiest to place as a sibling in the DOM, and a <form>
+                       cannot be nested inside another one (a form="dialog" close button needs its own form) --
+                       the browser would silently close member_import_confirm_form as soon as it hit a second
+                       <form> start tag, and every choice here would stop submitting with it. #}
+                    <dialog id="family_matches_modal" class="modal">
+                        <div class="modal-box max-w-2xl">
+                            <h3 class="text-lg font-bold">{% trans "Matching families found" %}</h3>
+                            <p class="py-2 text-sm text-muted">{% trans "These family names in the file look like families already in the club. Link each one to the existing family, or leave it to create a new one." %}</p>
+                            <div class="flex flex-col gap-3">
+                                {% for group in family_groups %}
+                                    <fieldset class="rounded-lg border border-line p-3">
+                                        <legend class="flex items-center gap-1 px-1 text-sm font-semibold">{% lucide "users" size=14 %} {{ group.family_group }}</legend>
+                                        <div class="flex flex-col gap-1">
+                                            <label class="flex items-center gap-2 text-sm">
+                                                <input type="radio" name="{{ group.field_name }}" value="new" class="radio radio-sm" form="member_import_confirm_form" checked>
+                                                {% trans "Create a new family" %}
+                                            </label>
+                                            {% for candidate in group.candidates %}
+                                                <label class="flex items-center gap-2 text-sm">
+                                                    <input type="radio" name="{{ group.field_name }}" value="{{ candidate.pk }}" class="radio radio-sm" form="member_import_confirm_form">
+                                                    {% blocktrans with family=candidate %}Link to the existing {{ family }} family{% endblocktrans %}
+                                                </label>
+                                            {% endfor %}
+                                        </div>
+                                    </fieldset>
+                                {% endfor %}
+                            </div>
+                            <div class="modal-action">
+                                <form method="dialog"><button class="btn btn-primary">{% trans "Done" %}</button></form>
+                            </div>
+                        </div>
+                        <form method="dialog" class="modal-backdrop"><button>{% trans "close" %}</button></form>
+                    </dialog>
+                    <button type="button" class="btn btn-outline gap-2" onclick="family_matches_modal.showModal()">
+                        {% lucide "users" size=16 %}
+                        {% blocktrans count counter=family_groups|length %}Review {{ counter }} matching family{% plural %}Review {{ counter }} matching families{% endblocktrans %}
+                    </button>
+                {% endif %}
+                <form method="post" action="{% url 'management:member_import_confirm' %}" id="member_import_confirm_form" class="contents">
                     {% csrf_token %}
                     <button class="btn btn-primary gap-2" type="submit">{% lucide "check" size=16 %} {% blocktrans %}Confirm import ({{ valid_count }}){% endblocktrans %}</button>
                 </form>

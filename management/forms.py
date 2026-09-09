@@ -17,7 +17,7 @@ from formbuilder.models import Field as FormBuilderField
 from formbuilder.models import Form as FormBuilderForm
 from formbuilder.models import FormSend
 from members.models import Family, FamilyMembership, Group, Member
-from members.services.family import find_member_by_email
+from members.services.family import families_of_club, find_member_by_email
 from news.models import News
 from registration.models import RegistrationDetails
 from registration.services.pricing import available_registration_products
@@ -963,10 +963,7 @@ class AttachToFamilyForm(forms.Form):
 
     def __init__(self, *args, club=None, member=None, **kwargs):
         super().__init__(*args, **kwargs)
-        # Same scoping query as management.views.families_of_club -- inlined rather
-        # than imported, since that function lives in views.py, which imports this
-        # module (a module-level import back here would be circular).
-        queryset = Family.objects.filter(memberships__member__member_of__club=club).distinct()
+        queryset = families_of_club(club)
         if member is not None:
             # Already a member of it -- offering it again would be a no-op re-add.
             queryset = queryset.exclude(memberships__member=member)
