@@ -9691,7 +9691,7 @@ class ManagementListPaginationTests(ManagementTestBase):
 
         self.assertContains(response, "q=Match&amp;page=2")
 
-    def test_family_list_pagination_is_wired_and_shows_a_page_count(self):
+    def test_family_list_pagination_is_wired_and_shows_page_numbers(self):
         for i in range(3):
             family = Family.objects.create()
             member = Member.objects.create(first_name=f"Fam{i}", last_name="Ily")
@@ -9702,7 +9702,8 @@ class ManagementListPaginationTests(ManagementTestBase):
             response = self.club_get("family_list")
 
         self.assertTrue(response.context["is_paginated"])
-        self.assertContains(response, "Page 1 of 2")
+        self.assertContains(response, '<span class="btn btn-sm join-item btn-active">1</span>')
+        self.assertContains(response, "?page=2")
 
     def test_event_team_group_news_lists_are_all_wired_for_pagination(self):
         # A lighter "is it wired" check for the remaining four -- MemberListView
