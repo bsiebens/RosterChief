@@ -32,6 +32,11 @@ urlpatterns = [
     # stranger create one, and the claim queue would be the first thing to suffer.
     path("accounts/signup/", signup_closed, name="account_signup"),
     path("accounts/", include("allauth.urls")),
+    # Gives the "set_language" name the marketing site's language switcher posts to
+    # (django.views.i18n.set_language) -- not i18n_patterns()-wrapped, since this is a
+    # multi-tenant, subdomain-routed project and a /en/ or /nl/ URL prefix on every
+    # path would fight that everywhere else.
+    path("i18n/", include("django.conf.urls.i18n")),
     path("", include("members.urls")),
     path("register/", include("registration.urls")),
     path("control/", include("controlpanel.urls")),

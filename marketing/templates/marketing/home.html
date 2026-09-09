@@ -1,5 +1,5 @@
 {% load i18n static lucide %}<!DOCTYPE html>
-<html lang="en">
+<html lang="{{ LANGUAGE_CODE }}">
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -54,6 +54,13 @@
                     <a class="font-display text-[15px] font-bold tracking-[.08em] text-on-dark uppercase hover:text-white" href="#product">{% trans "Product" %}</a>
                     <a class="font-display text-[15px] font-bold tracking-[.08em] text-on-dark uppercase hover:text-white" href="#features">{% trans "Features" %}</a>
                     <a class="font-display text-[15px] font-bold tracking-[.08em] text-on-dark uppercase hover:text-white" href="#pricing">{% trans "Pricing" %}</a>
+                    <form class="flex items-center gap-1.5 font-mono text-xs" action="{% url 'set_language' %}" method="post">
+                        {% csrf_token %}
+                        <input type="hidden" name="next" value="{{ request.path }}">
+                        <button class="{% if LANGUAGE_CODE == 'en' %}font-semibold text-white{% else %}text-on-dark-dim hover:text-white{% endif %}" type="submit" name="language" value="en" {% if LANGUAGE_CODE == 'en' %}aria-current="true"{% endif %}>EN</button>
+                        <span class="text-on-dark-dim">·</span>
+                        <button class="{% if LANGUAGE_CODE == 'nl' %}font-semibold text-white{% else %}text-on-dark-dim hover:text-white{% endif %}" type="submit" name="language" value="nl" {% if LANGUAGE_CODE == 'nl' %}aria-current="true"{% endif %}>NL</button>
+                    </form>
                     <a class="btn btn-primary rounded-lg px-4 py-[9px] text-[15px]" href="#contact">{% trans "Book a demo" %}</a>
                 </nav>
             </div>

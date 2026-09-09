@@ -1,0 +1,752 @@
+# Dutch translation of the RosterChief marketing site (marketing app only --
+# see rosterchief/settings.py's LANGUAGES comment for why the rest of the
+# project has no .po files yet).
+msgid ""
+msgstr ""
+"Project-Id-Version: RosterChief\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-09-09 20:26+0200\n"
+"PO-Revision-Date: 2026-09-09 20:26+0200\n"
+"Last-Translator: RosterChief\n"
+"Language-Team: Dutch\n"
+"Language: nl\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+#: forms.py:26
+msgid "Your name"
+msgstr "Je naam"
+
+#: forms.py:27 templates/marketing/email/contact_notification.txt:6
+msgid "Email"
+msgstr "E-mail"
+
+#: forms.py:28 templates/marketing/email/contact_notification.txt:1
+#: templates/marketing/home.html:291
+msgid "Club"
+msgstr "Club"
+
+#: forms.py:29
+msgid "Members, roughly"
+msgstr "Aantal leden, ruwweg"
+
+#: forms.py:30
+msgid "Your role"
+msgstr "Jouw functie"
+
+#: forms.py:32
+msgid "What is hurting most right now?"
+msgstr "Wat knelt er nu het meest?"
+
+#: forms.py:34
+msgid ""
+"We chase attendance in six WhatsApp groups and the licence list lives in one "
+"person's inbox."
+msgstr "We jagen aanwezigheid na in zes WhatsApp-groepen en de lijst met licenties leeft in de mailbox van één persoon."
+
+#: forms.py:60 forms.py:68 forms.py:70
+msgid "Something went wrong. Please try again."
+msgstr "Er ging iets mis. Probeer het opnieuw."
+
+#: models.py:23
+msgid "Board / secretary"
+msgstr "Bestuur / secretaris"
+
+#: models.py:24
+msgid "Treasurer"
+msgstr "Penningmeester"
+
+#: models.py:25
+msgid "Coach / team manager"
+msgstr "Coach / teammanager"
+
+#: models.py:26
+msgid "Federation"
+msgstr "Federatie"
+
+#: models.py:27
+msgid "Something else"
+msgstr "Iets anders"
+
+#: models.py:29
+msgid "name"
+msgstr "naam"
+
+#: models.py:30
+msgid "email"
+msgstr "e-mail"
+
+#: models.py:31
+msgid "club"
+msgstr "club"
+
+#: models.py:32
+msgid "members"
+msgstr "leden"
+
+#: models.py:33
+msgid "role"
+msgstr "functie"
+
+#: models.py:34
+msgid "message"
+msgstr "bericht"
+
+#: models.py:39
+msgid "plan interest"
+msgstr "interesse in plan"
+
+#: models.py:41
+msgid "IP address"
+msgstr "IP-adres"
+
+#: models.py:42
+msgid "user agent"
+msgstr "user agent"
+
+#: models.py:45
+msgid "contact request"
+msgstr "contactaanvraag"
+
+#: models.py:46
+msgid "contact requests"
+msgstr "contactaanvragen"
+
+#: templates/marketing/email/contact_notification.txt:2
+msgid "Members"
+msgstr "Leden"
+
+#: templates/marketing/email/contact_notification.txt:3
+msgid "Role"
+msgstr "Functie"
+
+#: templates/marketing/email/contact_notification.txt:4
+msgid "Came from"
+msgstr "Kwam van"
+
+#: templates/marketing/email/contact_notification.txt:5
+msgid "Name"
+msgstr "Naam"
+
+#: templates/marketing/home.html:7
+msgid ""
+"One platform for the people who keep a sports club moving: members and dues "
+"for the board, attendance and line-ups for coaches, news and calendar for "
+"every family."
+msgstr "Eén platform voor iedereen die een sportclub draaiende houdt: leden en lidgeld voor het bestuur, aanwezigheid en opstellingen voor coaches, nieuws en kalender voor elk gezin."
+
+#: templates/marketing/home.html:8 templates/marketing/home.html:12
+msgid "RosterChief — club management for real seasons"
+msgstr "RosterChief — clubbeheer voor echte seizoenen"
+
+#: templates/marketing/home.html:54 templates/marketing/home.html:478
+msgid "Product"
+msgstr "Product"
+
+#: templates/marketing/home.html:55
+msgid "Features"
+msgstr "Functies"
+
+#: templates/marketing/home.html:56 templates/marketing/home.html:262
+#: templates/marketing/home.html:479
+msgid "Pricing"
+msgstr "Prijzen"
+
+#: templates/marketing/home.html:64 templates/marketing/home.html:78
+#: templates/marketing/home.html:308 templates/marketing/home.html:419
+msgid "Book a demo"
+msgstr "Boek een demo"
+
+#: templates/marketing/home.html:74
+msgid "Club management for real seasons"
+msgstr "Clubbeheer voor echte seizoenen"
+
+#: templates/marketing/home.html:75
+msgid "Run the club, not the spreadsheet"
+msgstr "Bestuur de club, niet het spreadsheet"
+
+#: templates/marketing/home.html:76
+msgid ""
+"One platform for the people who keep a sports club moving. Members and dues "
+"for the board. Attendance and line-ups for coaches. News, calendar and one "
+"tap to answer for every family."
+msgstr "Eén platform voor iedereen die een sportclub draaiende houdt. Leden en lidgeld voor het bestuur. Aanwezigheid en opstellingen voor coaches. Nieuws, kalender en één tik om te antwoorden voor elk gezin."
+
+#: templates/marketing/home.html:79
+msgid "See pricing"
+msgstr "Bekijk de prijzen"
+
+#: templates/marketing/home.html:82
+msgid "Free demo, no member limit"
+msgstr "Gratis demo, geen ledenlimiet"
+
+#: templates/marketing/home.html:82 templates/marketing/home.html:233
+msgid "Your colours, your crest"
+msgstr "Jouw kleuren, jouw logo"
+
+#: templates/marketing/home.html:82
+msgid "Data stays in the EU"
+msgstr "Data blijft in de EU"
+
+#: templates/marketing/home.html:89
+msgid "Surfaces, one system"
+msgstr "Omgevingen, één systeem"
+
+#: templates/marketing/home.html:93
+msgid "App for coaches & families"
+msgstr "App voor coaches & gezinnen"
+
+#: templates/marketing/home.html:97
+msgid "Group chats to chase"
+msgstr "Groepschats om na te jagen"
+
+#: templates/marketing/home.html:101
+msgid "The problem it removes"
+msgstr "Het probleem dat verdwijnt"
+
+#: templates/marketing/home.html:102
+msgid ""
+"A coach asks who is coming on Saturday. Nineteen families answer across "
+"three channels. Someone still shows up in the wrong kit, and the treasurer "
+"finds out in November that two licences were never paid."
+msgstr "Een coach vraagt wie er zaterdag komt. Negentien gezinnen antwoorden via drie verschillende kanalen. Toch komt iemand nog in de verkeerde uitrusting opdagen, en ontdekt de penningmeester in november dat twee licenties nooit betaald zijn."
+
+#: templates/marketing/home.html:104
+msgid ""
+"RosterChief asks once, in the app, and everyone sees the same answer — "
+"including the invoice."
+msgstr "RosterChief vraagt het één keer, in de app, en iedereen ziet hetzelfde antwoord — inclusief de factuur."
+
+#: templates/marketing/home.html:113
+msgid "Built around who is actually doing the work"
+msgstr "Gebouwd rond wie het werk echt doet"
+
+#: templates/marketing/home.html:114
+msgid "Four surfaces, one truth"
+msgstr "Vier omgevingen, één waarheid"
+
+#: templates/marketing/home.html:115
+msgid ""
+"A board member, a coach and a parent need completely different screens and "
+"exactly the same data. So we built each surface for its job — and one shared "
+"record underneath."
+msgstr "Een bestuurslid, een coach en een ouder hebben compleet verschillende schermen nodig, maar exact dezelfde gegevens. Daarom bouwden we elke omgeving voor haar eigen taak — met daaronder één gedeeld dossier."
+
+#: templates/marketing/home.html:122
+msgid "DESKTOP · BOARD & OFFICE"
+msgstr "DESKTOP · BESTUUR & SECRETARIAAT"
+
+#: templates/marketing/home.html:123
+msgid "Club management"
+msgstr "Clubbeheer"
+
+#: templates/marketing/home.html:124
+msgid ""
+"Members, sign-up intake, teams and staff, the season calendar, dues and "
+"reminders, news and the public site. Everything the secretary currently "
+"keeps in four files."
+msgstr "Leden, inschrijvingen, teams en staf, de seizoenskalender, lidgelden en herinneringen, nieuws en de publieke website. Alles wat de secretaris nu in vier verschillende bestanden bijhoudt."
+
+#: templates/marketing/home.html:130
+msgid "MOBILE · COACHES & MANAGERS"
+msgstr "MOBIEL · COACHES & TEAMMANAGERS"
+
+#: templates/marketing/home.html:131
+msgid "Coach mode"
+msgstr "Coach-modus"
+
+#: templates/marketing/home.html:132
+msgid ""
+"Check attendance on the bench, build the line-up, add an event, post to your "
+"own team. Works with cold hands and a bad rink signal."
+msgstr "Vink aanwezigheid af op de bank, stel de opstelling samen, voeg een evenement toe, post naar je eigen team. Werkt met koude handen en een slecht signaal in de ijshal."
+
+#: templates/marketing/home.html:138
+msgid "MOBILE · EVERY MEMBER"
+msgstr "MOBIEL · ELK LID"
+
+#: templates/marketing/home.html:139
+msgid "Member mode"
+msgstr "Lid-modus"
+
+#: templates/marketing/home.html:140
+msgid ""
+"News, calendar, dues and one tap to answer — for yourself and for everyone "
+"in your household. Adult players and parents use the same app."
+msgstr "Nieuws, kalender, lidgeld en één tik om te antwoorden — voor jezelf en voor iedereen in je gezin. Volwassen spelers en ouders gebruiken dezelfde app."
+
+#: templates/marketing/home.html:146
+msgid "DESKTOP · US"
+msgstr "DESKTOP · WIJ"
+
+#: templates/marketing/home.html:147
+msgid "We run the rest"
+msgstr "Wij regelen de rest"
+
+#: templates/marketing/home.html:148
+msgid ""
+"Provisioning, updates, backups and support happen on our side. Nobody at "
+"your club has to be the person who maintains the system."
+msgstr "Inrichting, updates, back-ups en ondersteuning gebeuren bij ons. Niemand bij jouw club hoeft de persoon te zijn die het systeem onderhoudt."
+
+#: templates/marketing/home.html:155
+msgid "One install, two hats"
+msgstr "Eén installatie, twee petten"
+
+#: templates/marketing/home.html:156
+msgid "Your coach is also somebody's parent"
+msgstr "Jouw coach is ook iemands ouder"
+
+#: templates/marketing/home.html:157
+msgid ""
+"Half the people running a club are also members of it. RosterChief treats "
+"that as normal: one account, one app, a switch in the header. No second "
+"login, no second app to install, no forgetting which one holds the line-up."
+msgstr "De helft van de mensen die een club runnen, zijn er ook lid van. RosterChief behandelt dat als normaal: één account, één app, een schakelaar bovenaan. Geen tweede login, geen tweede app om te installeren, nooit meer vergeten welke app de opstelling bijhoudt."
+
+#: templates/marketing/home.html:159
+msgid "Coach of U16"
+msgstr "Coach van U16"
+
+#: templates/marketing/home.html:160
+msgid "Parent of two"
+msgstr "Ouder van twee"
+
+#: templates/marketing/home.html:161
+msgid "Div 4 player"
+msgstr "Speler reeks 4"
+
+#: templates/marketing/home.html:162
+msgid "One account"
+msgstr "Eén account"
+
+#: templates/marketing/home.html:170
+msgid "Your club here"
+msgstr "Jouw club hier"
+
+#: templates/marketing/home.html:173
+msgid "Member"
+msgstr "Lid"
+
+#: templates/marketing/home.html:174
+msgid "Coach"
+msgstr "Coach"
+
+#: templates/marketing/home.html:179
+msgid "Next up · Sat"
+msgstr "Volgende · Za"
+
+#: templates/marketing/home.html:182
+msgid "In"
+msgstr "Aanwezig"
+
+#: templates/marketing/home.html:183
+msgid "Out"
+msgstr "Afwezig"
+
+#: templates/marketing/home.html:187
+msgid "Needs your answer"
+msgstr "Wacht op jouw antwoord"
+
+#: templates/marketing/home.html:201
+msgid "What you get"
+msgstr "Wat je krijgt"
+
+#: templates/marketing/home.html:202
+msgid "Everything a season needs"
+msgstr "Alles wat een seizoen nodig heeft"
+
+#: templates/marketing/home.html:208
+msgid "Members & households"
+msgstr "Leden & gezinnen"
+
+#: templates/marketing/home.html:209
+msgid ""
+"One record per person, linked into households. Siblings, payers, licence "
+"numbers, medical consent and who is allowed to answer for whom."
+msgstr "Eén dossier per persoon, gekoppeld per gezin. Broers en zussen, betalers, licentienummers, medische toestemming en wie voor wie mag antwoorden."
+
+#: templates/marketing/home.html:213
+msgid "Attendance that closes"
+msgstr "Aanwezigheid die wordt afgesloten"
+
+#: templates/marketing/home.html:214
+msgid ""
+"Ask once. Families answer in a tap, replies close on a deadline, and the "
+"coach sees the count on the bench — online or not."
+msgstr "Vraag het één keer. Gezinnen antwoorden met één tik, antwoorden sluiten op een deadline, en de coach ziet het aantal op de bank — online of niet."
+
+#: templates/marketing/home.html:218
+msgid "Line-ups & selection"
+msgstr "Opstellingen & selectie"
+
+#: templates/marketing/home.html:219
+msgid ""
+"Build units from who actually said yes, publish to the selected players "
+"only, and keep the sheet with the game record."
+msgstr "Stel linies samen op basis van wie effectief ja zei, publiceer enkel naar de geselecteerde spelers, en bewaar het blad bij het wedstrijdverslag."
+
+#: templates/marketing/home.html:223
+msgid "Dues without chasing"
+msgstr "Lidgeld zonder achtervolgen"
+
+#: templates/marketing/home.html:224
+msgid ""
+"Fee plans, instalments and sibling discounts. Invoices go out per household "
+"by mail, reminders escalate on a ladder you set, and the treasurer marks off "
+"payments as they land."
+msgstr "Tariefplannen, betaalschijven en gezinskortingen. Facturen gaan per gezin met de post, herinneringen escaleren volgens een ladder die je zelf instelt, en de penningmeester vinkt betalingen af zodra ze binnenkomen."
+
+#: templates/marketing/home.html:228
+msgid "News & public site"
+msgstr "Nieuws & publieke website"
+
+#: templates/marketing/home.html:229
+msgid ""
+"Write once, choose the audience: one team, the whole club, or the public "
+"website. Coaches can post to their own team from the app."
+msgstr "Schrijf één keer, kies het publiek: één team, de hele club, of de publieke website. Coaches kunnen vanuit de app posten naar hun eigen team."
+
+#: templates/marketing/home.html:234
+msgid ""
+"Upload the logo, set two colours, done — app, website and invoices follow. "
+"Type and layout stay fixed so every screen stays readable."
+msgstr "Upload het logo, stel twee kleuren in, klaar — app, website en facturen volgen automatisch. Lettertype en lay-out blijven vast zodat elk scherm leesbaar blijft."
+
+#: templates/marketing/home.html:240
+msgid "Season calendar"
+msgstr "Seizoenskalender"
+
+#: templates/marketing/home.html:241
+msgid ""
+"Plan recurring practices across your ice slots, see conflicts before you "
+"generate 32 events, publish to apps and site together."
+msgstr "Plan terugkerende trainingen over je ijsuren, zie conflicten voordat je 32 evenementen aanmaakt, publiceer tegelijk naar de apps en de website."
+
+#: templates/marketing/home.html:244
+msgid "Sign-up intake"
+msgstr "Inschrijvingen"
+
+#: templates/marketing/home.html:245
+msgid ""
+"New members apply, you see what is missing at a glance, and one click "
+"approves, places them in a team and issues the invoice."
+msgstr "Nieuwe leden schrijven zich in, je ziet in één oogopslag wat ontbreekt, en met één klik keur je goed, plaats je hen in een team en maak je de factuur op."
+
+#: templates/marketing/home.html:248
+msgid "Roles & rights"
+msgstr "Rollen & rechten"
+
+#: templates/marketing/home.html:249
+msgid ""
+"A coach sees their team. A treasurer sees money. A secretary sees everyone. "
+"Nobody has to be handed the whole database."
+msgstr "Een coach ziet zijn team. Een penningmeester ziet het geld. Een secretaris ziet iedereen. Niemand hoeft de volledige database in handen te krijgen."
+
+#: templates/marketing/home.html:252
+msgid "Coming next"
+msgstr "Binnenkort"
+
+#: templates/marketing/home.html:253
+msgid ""
+"Club shop, season renewal in the app, and federation licence sync. On the "
+"roadmap, not in the price."
+msgstr "Clubshop, seizoensverlenging in de app, en synchronisatie van federatielicenties. Op de routekaart, niet in de prijs."
+
+#: templates/marketing/home.html:263
+msgid "One price, one season, no surprises"
+msgstr "Eén prijs, één seizoen, geen verrassingen"
+
+#: templates/marketing/home.html:264
+msgid ""
+"One price covers every surface and every role. Coaches, board members and "
+"families never pay separately, and nothing is metered — not events, not "
+"messages, not storage."
+msgstr "Eén prijs dekt elke omgeving en elke rol. Coaches, bestuursleden en gezinnen betalen nooit apart, en niets wordt afgerekend per gebruik — geen evenementen, geen berichten, geen opslag."
+
+#: templates/marketing/home.html:264
+#, python-format
+msgid "All prices exclude 21%% VAT."
+msgstr "Alle prijzen zijn exclusief 21%% btw."
+
+#: templates/marketing/home.html:270
+msgid "Free demo"
+msgstr "Gratis demo"
+
+#: templates/marketing/home.html:271
+msgid "Your real club, your real season"
+msgstr "Jouw echte club, jouw echte seizoen"
+
+#: templates/marketing/home.html:274
+msgid "Free"
+msgstr "Gratis"
+
+#: templates/marketing/home.html:276
+msgid "no member limit · no card needed · nothing to invoice"
+msgstr "geen ledenlimiet · geen kaart nodig · niets te factureren"
+
+#: templates/marketing/home.html:279
+msgid "Members, teams and calendar"
+msgstr "Leden, teams en kalender"
+
+#: templates/marketing/home.html:280
+msgid "Attendance and line-ups"
+msgstr "Aanwezigheid en opstellingen"
+
+#: templates/marketing/home.html:281
+msgid "Member and coach app"
+msgstr "Lid- en coach-app"
+
+#: templates/marketing/home.html:282
+msgid "News to teams and club"
+msgstr "Nieuws naar teams en club"
+
+#: templates/marketing/home.html:283
+msgid "Invoicing and dues"
+msgstr "Facturatie en lidgeld"
+
+#: templates/marketing/home.html:284
+msgid "We import your members to start"
+msgstr "Wij importeren je leden om te starten"
+
+#: templates/marketing/home.html:286
+msgid "Try it free"
+msgstr "Probeer gratis"
+
+#: templates/marketing/home.html:292
+msgid "Everything, flat, for the season"
+msgstr "Alles, aan een vaste prijs, voor het seizoen"
+
+#: templates/marketing/home.html:296
+msgid "/ season, excl. VAT"
+msgstr "/ seizoen, excl. btw"
+
+#: templates/marketing/home.html:298
+#, python-format
+msgid "up to 250 members · billed once per season · excl. 21%% VAT"
+msgstr "tot 250 leden · eenmalig gefactureerd per seizoen · excl. 21%% btw"
+
+#: templates/marketing/home.html:301
+msgid "Everything in the demo, for good"
+msgstr "Alles uit de demo, definitief"
+
+#: templates/marketing/home.html:302
+msgid "Invoicing, instalments, reminders"
+msgstr "Facturatie, betaalschijven, herinneringen"
+
+#: templates/marketing/home.html:303
+msgid "Sign-up intake and approval"
+msgstr "Inschrijvingen en goedkeuring"
+
+#: templates/marketing/home.html:304
+msgid "Public website on your own domain"
+msgstr "Publieke website op je eigen domein"
+
+#: templates/marketing/home.html:305
+msgid "Your colours, crest and wordmark"
+msgstr "Jouw kleuren, logo en naamstijl"
+
+#: templates/marketing/home.html:306
+msgid "Roles, rights and audit log"
+msgstr "Rollen, rechten en logboek"
+
+#: templates/marketing/home.html:313
+msgid "Large club"
+msgstr "Grote club"
+
+#: templates/marketing/home.html:314
+msgid "More than 250 members"
+msgstr "Meer dan 250 leden"
+
+#: templates/marketing/home.html:317
+msgid "Custom"
+msgstr "Op maat"
+
+#: templates/marketing/home.html:319
+#, python-format
+msgid "quoted on your roster size · excl. 21%% VAT"
+msgstr "prijs op basis van je ledenaantal · excl. 21%% btw"
+
+#: templates/marketing/home.html:322
+msgid "Everything in Club, no ceiling"
+msgstr "Alles uit Club, zonder plafond"
+
+#: templates/marketing/home.html:323
+msgid "Migration from your current system"
+msgstr "Migratie vanuit je huidige systeem"
+
+#: templates/marketing/home.html:324
+msgid "Onboarding for your board and coaches"
+msgstr "Onboarding voor je bestuur en coaches"
+
+#: templates/marketing/home.html:325
+msgid "A named contact, not a ticket queue"
+msgstr "Eén vast aanspreekpunt, geen ticketwachtrij"
+
+#: templates/marketing/home.html:327
+msgid "Ask for a quote"
+msgstr "Vraag een offerte"
+
+#: templates/marketing/home.html:334
+msgid "Optional add-on"
+msgstr "Optionele extra"
+
+#: templates/marketing/home.html:337
+msgid "We build your public website"
+msgstr "Wij bouwen je publieke website"
+
+#: templates/marketing/home.html:338
+msgid ""
+"Every Club plan includes a public site that fills itself from your news, "
+"teams and calendar. If you would rather not lay it out yourself, we design "
+"and build it with you — your photography, your structure, your tone — and "
+"hand it over running on your own domain."
+msgstr "Elk Club-plan bevat een publieke website die zichzelf vult vanuit je nieuws, teams en kalender. Wil je die liever niet zelf uitwerken, dan ontwerpen en bouwen wij ze samen met jou — jouw fotografie, jouw structuur, jouw toon — en leveren we ze werkend op op je eigen domein."
+
+#: templates/marketing/home.html:340
+msgid "Home, teams, calendar, news and join pages"
+msgstr "Home, teams, kalender, nieuws en inschrijfpagina's"
+
+#: templates/marketing/home.html:341
+msgid "Your crest, colours and photography applied"
+msgstr "Jouw logo, kleuren en fotografie toegepast"
+
+#: templates/marketing/home.html:342
+msgid "Domain, mail and redirects set up for you"
+msgstr "Domein, mail en doorverwijzingen voor je ingesteld"
+
+#: templates/marketing/home.html:343
+msgid "Two rounds of changes before it goes live"
+msgstr "Twee rondes aanpassingen voor ze live gaat"
+
+#: templates/marketing/home.html:349
+msgid "one-off, from, excl. VAT"
+msgstr "eenmalig, vanaf, excl. btw"
+
+#: templates/marketing/home.html:351
+msgid "quoted after a look at what you have"
+msgstr "prijs na een blik op wat je al hebt"
+
+#: templates/marketing/home.html:351
+#, python-format
+msgid "excl. 21%% VAT · no monthly fee on top of your plan"
+msgstr "excl. 21%% btw · geen maandelijkse kost bovenop je plan"
+
+#: templates/marketing/home.html:352
+msgid "Ask about a site"
+msgstr "Vraag naar een website"
+
+#: templates/marketing/home.html:358
+msgid "What counts as a member?"
+msgstr "Wat telt als een lid?"
+
+#: templates/marketing/home.html:359
+msgid ""
+"Anyone on a roster this season. Staff, board and parents are free, and a "
+"player in two teams counts once — so the 250 line is further away than it "
+"looks."
+msgstr "Iedereen op een rooster dit seizoen. Staf, bestuur en ouders zijn gratis, en een speler in twee teams telt maar één keer — de grens van 250 ligt dus verder weg dan ze lijkt."
+
+#: templates/marketing/home.html:362
+msgid "Moving in mid-season?"
+msgstr "Overstappen tijdens het seizoen?"
+
+#: templates/marketing/home.html:363
+msgid ""
+"We pro-rate to the months left, and we import your member list and calendar "
+"for you."
+msgstr "We rekenen pro rata voor de resterende maanden, en importeren je ledenlijst en kalender voor je."
+
+#: templates/marketing/home.html:366
+msgid "Any extra fees?"
+msgstr "Extra kosten?"
+
+#: templates/marketing/home.html:367
+msgid ""
+"None beyond VAT. Members pay the club by bank transfer as they always have — "
+"RosterChief issues the invoices and tracks what is still open."
+msgstr "Geen, buiten btw. Leden betalen de club via overschrijving zoals altijd — RosterChief maakt de facturen op en houdt bij wat nog openstaat."
+
+#: templates/marketing/home.html:370
+msgid "Where is our data?"
+msgstr "Waar staan onze gegevens?"
+
+#: templates/marketing/home.html:371
+msgid ""
+"In the EU, exportable at any time, and yours. Leaving takes one click and a "
+"CSV."
+msgstr "In de EU, op elk moment exporteerbaar, en van jou. Vertrekken kost één klik en een CSV-bestand."
+
+#: templates/marketing/home.html:380 templates/marketing/home.html:480
+msgid "Contact"
+msgstr "Contact"
+
+#: templates/marketing/home.html:381
+msgid "Tell us about your club"
+msgstr "Vertel ons over je club"
+
+#: templates/marketing/home.html:382
+msgid ""
+"A demo is a real conversation about how your season actually runs — where "
+"the spreadsheets are, who chases the answers, what breaks in November. Half "
+"an hour, no slides."
+msgstr "Een demo is een echt gesprek over hoe je seizoen er in de praktijk uitziet — waar de spreadsheets zitten, wie de antwoorden najaagt, wat er in november misloopt. Een half uur, zonder slides."
+
+#: templates/marketing/home.html:387
+msgid "EMAIL"
+msgstr "E-MAIL"
+
+#: templates/marketing/home.html:394
+msgid "REPLY TIME"
+msgstr "REACTIETIJD"
+
+#: templates/marketing/home.html:395
+msgid "Within two working days"
+msgstr "Binnen twee werkdagen"
+
+#: templates/marketing/home.html:401
+msgid "BASED IN"
+msgstr "GEVESTIGD IN"
+
+#: templates/marketing/home.html:402
+msgid "Mechelen, Belgium"
+msgstr "Mechelen, België"
+
+#: templates/marketing/home.html:412
+msgid "Thanks — that's with Bernard"
+msgstr "Bedankt — Bernard heeft het ontvangen"
+
+#: templates/marketing/home.html:414
+msgid "Nothing landed? Write to"
+msgstr "Niets ontvangen? Schrijf naar"
+
+#: templates/marketing/home.html:414
+msgid "directly."
+msgstr "rechtstreeks."
+
+#: templates/marketing/home.html:462
+msgid "Send"
+msgstr "Verstuur"
+
+#: templates/marketing/home.html:463
+msgid ""
+"Goes straight to Bernard. No newsletter, no third parties, no follow-up "
+"sequence."
+msgstr "Gaat rechtstreeks naar Bernard. Geen nieuwsbrief, geen derde partijen, geen opvolgreeks."
+
+#: templates/marketing/home.html:476
+msgid "Club management, built in Belgium"
+msgstr "Clubbeheer, gebouwd in België"
+
+#: views.py:34
+msgid ""
+"We've sent your message straight to Bernard — you'll hear back within two "
+"working days."
+msgstr "We hebben je bericht rechtstreeks naar Bernard gestuurd — je hoort binnen twee werkdagen iets terug."
+
+#: views.py:64
+#, python-format
+msgid "RosterChief demo request — %(club)s"
+msgstr "RosterChief demo-aanvraag — %(club)s"

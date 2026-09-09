@@ -113,6 +113,10 @@ MIDDLEWARE = [
     # app server.
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
+    # Must sit here -- Django's contract is "after SessionMiddleware, before
+    # CommonMiddleware" -- so request.LANGUAGE_CODE is resolved before anything else
+    # runs. See LANGUAGES above for what it's allowed to resolve to.
+    "django.middleware.locale.LocaleMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
@@ -212,6 +216,12 @@ TEMPLATES = [
         "OPTIONS": {
             "context_processors": [
                 "django.template.context_processors.request",
+                # LANGUAGE_CODE/LANGUAGES/LANGUAGE_BIDI in every template's context, for
+                # the marketing site's language switcher (marketing/templates/marketing/
+                # home.html) -- nothing else currently reads these, but they're cheap and
+                # exactly the variables {% get_current_language %} would otherwise require
+                # loading i18n's tag library to compute by hand.
+                "django.template.context_processors.i18n",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
                 "rosterchief.context_processors.version",
@@ -275,6 +285,18 @@ AUTH_PASSWORD_VALIDATORS = [
 # https://docs.djangoproject.com/en/6.0/topics/i18n/
 
 LANGUAGE_CODE = "en-us"
+
+#: The only two languages LocaleMiddleware will ever negotiate to (via the visitor's
+#: Accept-Language header, a `django_language` cookie set by the marketing site's language
+#: switcher, or LANGUAGE_CODE above as the final fallback) -- see marketing/templates/
+#: marketing/home.html for the switcher itself. Dutch translations exist so far only for
+#: the marketing app (marketing/locale/nl/) -- everything else in the project is written
+#: translation-ready (CLAUDE.md's i18n rule) but not yet translated, so it simply renders
+#: in English regardless of which of these two is active until its own .po catches up.
+LANGUAGES = [
+    ("en", "English"),
+    ("nl", "Nederlands"),
+]
 
 TIME_ZONE = config("DJANGO_TIME_ZONE", default="Europe/Brussels", cast=str)
 

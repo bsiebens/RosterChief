@@ -69,7 +69,9 @@ class MarketingHomeViewTests(TestCase):
         response = self.client.get(reverse("root"))
 
         self.assertContains(response, "Thanks")
-        self.assertNotContains(response, "<form")
+        # Not "<form" -- the header's language switcher is also a <form>, and it's
+        # always present. Check for the contact form specifically instead.
+        self.assertNotContains(response, 'name="ts"')
 
     def test_a_second_get_no_longer_shows_the_success_state(self):
         data = {**VALID_DATA, "ts": fresh_timestamp_token()}
@@ -78,7 +80,7 @@ class MarketingHomeViewTests(TestCase):
 
         response = self.client.get(reverse("root"))
 
-        self.assertContains(response, "<form")
+        self.assertContains(response, 'name="ts"')
 
     def test_honeypot_rejects_the_submission(self):
         data = {**VALID_DATA, "ts": fresh_timestamp_token(), "website": "https://spam.example"}
