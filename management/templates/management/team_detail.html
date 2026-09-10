@@ -5,6 +5,7 @@
 
 {% block topbar_context %}
     <span class="badge badge-outline">{{ team.short_name }}</span>
+    {% if team.age_group_label %}<span class="badge badge-outline">{{ team.age_group_label }}</span>{% endif %}
     {% if seasons %}
         <form method="get" class="flex items-center gap-2">
             <select name="season" class="select w-auto">
@@ -82,6 +83,7 @@
                     <div class="mt-2 flex gap-5 text-sm text-on-dark">
                         <span>{% blocktrans count counter=roster|length %}{{ counter }} player{% plural %}{{ counter }} players{% endblocktrans %}</span>
                         <span>{% blocktrans count counter=staff|length %}{{ counter }} staff member{% plural %}{{ counter }} staff members{% endblocktrans %}</span>
+                        {% if team.feeds_into %}<span>{% blocktrans with name=team.feeds_into.name %}Feeds into {{ name }}{% endblocktrans %}</span>{% endif %}
                     </div>
                 </div>
                 {% if can_manage %}

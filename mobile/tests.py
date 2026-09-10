@@ -5761,11 +5761,10 @@ class CoachAddPlayerViewTests(TestCase):
         self.assertEqual(list(candidates), [returning])
         self.assertNotIn(new_signup, candidates)
 
-    def test_suggested_filter_includes_players_from_the_closest_younger_team(self):
-        # self.team is "U16" (see setUpTestData) -- a "U14" sibling is the
-        # closest smaller age-group number, so its *current*-season roster
-        # counts as "coming up" candidates.
-        u14 = Team.objects.create(club=self.club, name="U14", short_name="U14")
+    def test_suggested_filter_includes_players_from_a_team_that_feeds_into_this_one(self):
+        # Team.feeds_into is explicit and admin-set (issue #17) -- no longer
+        # inferred from team naming.
+        u14 = Team.objects.create(club=self.club, name="U14", short_name="U14", feeds_into=self.team)
         coming_up = self.make_eligible_member(first_name="Coming", last_name="Up")
         TeamMembership.objects.create(team=u14, member=coming_up, season=self.season)
         not_a_candidate = self.make_eligible_member(first_name="Not", last_name="Candidate")
@@ -5777,8 +5776,28 @@ class CoachAddPlayerViewTests(TestCase):
         self.assertIn(coming_up, candidates)
         self.assertNotIn(not_a_candidate, candidates)
 
-    def test_suggested_filter_picks_the_closest_younger_team_not_any_smaller_one(self):
-        u14 = Team.objects.create(club=self.club, name="U14", short_name="U14")
+    def test_suggested_filter_includes_every_team_that_feeds_into_this_one(self):
+        # Two parallel U13 sides can both feed the same U14 team -- feeds_into
+        # is many-to-one, so both should contribute candidates, not just one
+        # guessed "closest" team.
+        feeder_a = Team.objects.create(club=self.club, name="U13 A", short_name="U13A", feeds_into=self.team)
+        feeder_b = Team.objects.create(club=self.club, name="U13 B", short_name="U13B", feeds_into=self.team)
+        from_a = self.make_eligible_member(first_name="From", last_name="A")
+        TeamMembership.objects.create(team=feeder_a, member=from_a, season=self.season)
+        from_b = self.make_eligible_member(first_name="From", last_name="B")
+        TeamMembership.objects.create(team=feeder_b, member=from_b, season=self.season)
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mobile:coach_add_player") + "?filter=suggested", HTTP_HOST="ajax-united.rosterchief.app")
+
+        candidates = response.context["candidates"]
+        self.assertIn(from_a, candidates)
+        self.assertIn(from_b, candidates)
+
+    def test_suggested_filter_ignores_a_team_that_does_not_feed_into_this_one(self):
+        # A "younger-looking" team's roster only counts if feeds_into is
+        # actually set -- there's no numeric-adjacency guess anymore.
+        u14 = Team.objects.create(club=self.club, name="U14", short_name="U14", feeds_into=self.team)
         u12 = Team.objects.create(club=self.club, name="U12", short_name="U12")
         from_u14 = self.make_eligible_member(first_name="From", last_name="U14")
         TeamMembership.objects.create(team=u14, member=from_u14, season=self.season)
@@ -5792,10 +5811,7 @@ class CoachAddPlayerViewTests(TestCase):
         self.assertIn(from_u14, candidates)
         self.assertNotIn(from_u12, candidates)
 
-    def test_suggested_filter_matches_nothing_extra_without_a_u_number(self):
-        self.team.name = "First Team"
-        self.team.short_name = "1st"
-        self.team.save()
+    def test_suggested_filter_matches_nothing_extra_without_a_feeds_into_relationship(self):
         sibling = Team.objects.create(club=self.club, name="Reserves", short_name="Res")
         member = self.make_eligible_member(first_name="Reserve", last_name="Player")
         TeamMembership.objects.create(team=sibling, member=member, season=self.season)
@@ -5807,7 +5823,7 @@ class CoachAddPlayerViewTests(TestCase):
 
     def test_suggested_filter_does_not_duplicate_a_player_matching_both_sources(self):
         previous_season = Season.objects.create(club=self.club, start_date=self.season.start_date - datetime.timedelta(days=365), end_date=self.season.start_date - datetime.timedelta(days=1))
-        u14 = Team.objects.create(club=self.club, name="U14", short_name="U14")
+        u14 = Team.objects.create(club=self.club, name="U14", short_name="U14", feeds_into=self.team)
         both = self.make_eligible_member(first_name="Both", last_name="Sources")
         TeamMembership.objects.create(team=self.team, member=both, season=previous_season)
         TeamMembership.objects.create(team=u14, member=both, season=self.season)

@@ -16,6 +16,7 @@
                 <tr>
                     <th>{% trans "Name" %}</th>
                     <th>{% trans "Short name" %}</th>
+                    <th>{% trans "Age group" %}</th>
                     <th>{% trans "Players" %}</th>
                     <th>{% trans "Staff" %}</th>
                     <th></th>
@@ -26,6 +27,7 @@
                     <tr>
                         <td><a class="link link-hover font-semibold" href="{% url 'management:team_detail' team.pk %}">{{ team.name }}</a></td>
                         <td class="font-mono text-xs text-muted">{{ team.short_name }}</td>
+                        <td class="font-mono text-xs text-muted">{{ team.age_group_label|default:"—" }}</td>
                         <td class="font-mono text-xs tabular-nums">{{ team.player_count }}</td>
                         <td class="font-mono text-xs tabular-nums">{{ team.staff_count }}</td>
                         <td class="text-right">
@@ -39,7 +41,7 @@
                     </tr>
                 {% empty %}
                     <tr>
-                        <td colspan="5" class="text-center text-muted">{% trans "No teams yet." %}</td>
+                        <td colspan="6" class="text-center text-muted">{% trans "No teams yet." %}</td>
                     </tr>
                 {% endfor %}
             </tbody>

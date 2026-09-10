@@ -559,6 +559,36 @@ class TeamManagementTests(ManagementTestBase):
 
         self.assertNotContains(response, "Rival Pool")
 
+    def test_creating_a_team_with_an_age_range(self):
+        response = self.club_post("team_create", {"name": "U15", "short_name": "U15", "referee_management": "club", "age_min": "14", "age_max": "15"})
+
+        team = Team.objects.get(club=self.club, name="U15")
+        self.assertRedirects(response, reverse("management:team_detail", args=[team.pk]))
+        self.assertEqual(team.age_group_label, "U14-U15")
+
+    def test_setting_which_team_this_one_feeds_into(self):
+        older_team = Team.objects.create(club=self.club, name="U16", short_name="U16")
+
+        self.club_post("team_create", {"name": "U15", "short_name": "U15", "referee_management": "club", "feeds_into": str(older_team.pk)})
+
+        team = Team.objects.get(club=self.club, name="U15")
+        self.assertEqual(team.feeds_into, older_team)
+
+    def test_the_feeds_into_dropdown_only_offers_this_clubs_teams(self):
+        other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
+        Team.objects.create(club=other_club, name="Rival U16", short_name="RU16")
+
+        response = self.club_get("team_create")
+
+        self.assertNotContains(response, "Rival U16")
+
+    def test_the_feeds_into_dropdown_excludes_the_team_itself(self):
+        team = Team.objects.create(club=self.club, name="U16", short_name="U16")
+
+        response = self.club_get("team_update", team.pk)
+
+        self.assertNotIn(team, response.context["form"].fields["feeds_into"].queryset)
+
     def test_deleting_a_team(self):
         team = Team.objects.create(club=self.club, name="U16", short_name="U16")
 

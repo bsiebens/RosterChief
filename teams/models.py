@@ -77,6 +77,29 @@ class Team(ClubScopedModel):
         verbose_name=_("number pool"),
         help_text=_("Jersey numbers are checked for clashes against every other team sharing this pool, not just this one. Left blank, this team's numbers are only checked against itself, as before."),
     )
+    #: Purely descriptive -- unlike a bare "U14" (ambiguous: does that mean
+    #: "born this year" or "under 14 as of some cutoff"?), an explicit range
+    #: says exactly who plays here. Both blank means a senior/open team with
+    #: no age restriction; equal (age_min == age_max) is a single-age team.
+    #: Not used for anything programmatic -- see feeds_into below for that.
+    age_min = models.PositiveSmallIntegerField(_("minimum age"), null=True, blank=True)
+    age_max = models.PositiveSmallIntegerField(_("maximum age"), null=True, blank=True)
+    #: Which team this one's players typically graduate to next season --
+    #: an explicit, admin-set relationship rather than something inferred
+    #: from age_min/age_max or team naming. Several teams can share the same
+    #: feeds_into target (e.g. two parallel U13 sides both feeding one U14
+    #: team), so this lives on the *feeder* side, read back via the reverse
+    #: relation (mobile.coach_views.CoachAddPlayerView's "Suggested" filter:
+    #: active_team.feeder_teams.all()) rather than the other way around.
+    feeds_into = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="feeder_teams",
+        verbose_name=_("feeds into"),
+        help_text=_("The team this one's players typically graduate to next season -- used to suggest call-ups from here when adding players to that team."),
+    )
 
     class Meta:
         verbose_name = _("team")
@@ -89,10 +112,24 @@ class Team(ClubScopedModel):
     def __str__(self):
         return self.name
 
+    @property
+    def age_group_label(self):
+        """ "U13-U14"/"U14"-style display string, or "" for a team with no
+        age range set (a senior/open team)."""
+        if self.age_min is None and self.age_max is None:
+            return ""
+        if self.age_min == self.age_max or self.age_min is None or self.age_max is None:
+            return f"U{self.age_max or self.age_min}"
+        return f"U{self.age_min}-U{self.age_max}"
+
     def clean(self):
         club_id = self.club_id
         if club_id is not None:
-            validate_club_scope(self, club_id, same_club_fields=("pool",))
+            validate_club_scope(self, club_id, same_club_fields=("pool", "feeds_into"))
+        if self.feeds_into_id is not None and self.feeds_into_id == self.pk:
+            raise ValidationError({"feeds_into": _("A team can't feed into itself.")})
+        if self.age_min is not None and self.age_max is not None and self.age_min > self.age_max:
+            raise ValidationError({"age_max": _("Must be greater than or equal to the minimum age.")})
 
 
 def team_photo_path(instance, filename):

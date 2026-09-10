@@ -554,10 +554,14 @@ ClubMembership(ClubScopedModel)      # -> carries `club`
 
 ```
 Team(ClubScopedModel)              # -> carries `club`
-  season      FK Season (PROTECT, related_name="teams")
   name        CharField           # "U12 A"
-  age_group   CharField (choices, optional)
-  Meta: unique_together (season, name); ordering = ["season", "name"]
+  age_min, age_max  PositiveSmallIntegerField (both optional; both blank = senior/open team) -- purely
+                    descriptive (`age_group_label` property: "U13-U14"/"U14"), never compared programmatically
+  feeds_into  FK "self" (SET_NULL, optional, related_name="feeder_teams") -- explicit, admin-set;
+                    several teams can share one feeds_into target, so it's read back via the reverse
+                    relation, not stored the other way around. Drives the "Suggested" call-ups filter
+                    on the mobile Add Player screen (issue #17 -- replaced a team-name regex guess).
+  Meta: unique_together (club, name)
 
 TeamMembership(UUIDModel)          # roster entry — through model, club/season implied by team
   team        FK Team (CASCADE, related_name="roster")
