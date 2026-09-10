@@ -13821,6 +13821,51 @@ class FormManagementTests(ManagementTestBase):
         self.assertRedirects(response, reverse("management:formsend_responses", args=[form_obj.pk, send.pk]))
         self.assertTrue(Notification.objects.filter(member=member).exists())
 
+    def test_a_non_admin_can_make_a_send_public_without_picking_an_audience(self):
+        # is_public doesn't need a claimed team/group audience to justify
+        # itself -- it isn't addressed to anyone in particular (mirrors the
+        # existing admin bypass one check up).
+        form_obj = self.make_form()
+        self.client.force_login(self.editor)
+        data = {
+            "teams": [],
+            "groups": [],
+            "invited_members": [],
+            "excluded_members": [],
+            "opens_at": "",
+            "closes_at": "",
+            "max_submissions_per_user": "",
+            "is_active": "on",
+            "is_public": "on",
+        }
+
+        response = self.club_post("formsend_create", data, form_obj.pk)
+
+        send = FormSend.objects.get(form=form_obj)
+        self.assertTrue(send.is_public)
+        self.assertRedirects(response, reverse("management:formsend_responses", args=[form_obj.pk, send.pk]))
+
+    def test_a_non_admin_still_needs_an_audience_without_is_public(self):
+        # Regression check -- the existing requirement (management/forms.py's
+        # FormSendAudienceFormMixin) must still hold when is_public is off.
+        form_obj = self.make_form()
+        self.client.force_login(self.editor)
+        data = {
+            "teams": [],
+            "groups": [],
+            "invited_members": [],
+            "excluded_members": [],
+            "opens_at": "",
+            "closes_at": "",
+            "max_submissions_per_user": "",
+            "is_active": "on",
+        }
+
+        response = self.club_post("formsend_create", data, form_obj.pk)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(FormSend.objects.filter(form=form_obj).exists())
+
     def test_a_send_from_another_club_404s(self):
         other_club = Club.objects.create(name="Rival FC", slug="rival-fc-forms-2")
         other_form = FormBuilderForm.objects.create(club=other_club, title="Other")

@@ -1,14 +1,20 @@
 {% load static lucide ui i18n %}
 {% comment %}
-    Standalone shell for the public registration page -- same "does NOT
-    extend templates/_base.html or _club_base.html, does not load
+    Standalone shell for a public, unauthenticated, club-scoped page -- same
+    "does NOT extend templates/_base.html or _club_base.html, does not load
     assets/app.css or daisyUI" approach as management/templates/management/
-    base.html, so a club's own registration page looks like the rest of the
+    base.html, so a club's own public pages look like the rest of the
     platform (management.css's Barlow/Barlow Condensed/IBM Plex Mono type
     system, --color-ink/-paper/-club tokens) instead of the older generic
     daisyUI chrome members/templates/members/parent_claim.html still uses.
     No sidebar/nav/notification bell here (unauthenticated, single page) --
     just a branded header, centered card content, and a footer.
+
+    Lives under registration/ (its first user) but isn't registration-
+    specific -- formbuilder/templates/formbuilder/public_form.html (public
+    form-fill links) extends this directly too rather than duplicating it,
+    overriding brand_href below since the crest shouldn't link back into
+    registration's own flow from there.
 
     --tenant-club/--tenant-club-dark/--tenant-club-content mirror management/
     base.html's own per-request override from Club.secondary_color exactly,
@@ -38,7 +44,12 @@
 
     <body class="flex min-h-screen flex-col bg-paper font-sans text-slate">
         <header class="flex h-16 shrink-0 items-center gap-2.5 border-b border-line bg-white px-5 sm:px-7">
-            <a class="flex items-center gap-2.5" href="{% url "registration:register" %}">
+            {% comment %}
+                Overridden by formbuilder/templates/formbuilder/public_form.html, the one other
+                app sharing this shell (see this file's own top comment) -- the crest shouldn't
+                link back into registration's own flow from an unrelated public page.
+            {% endcomment %}
+            <a class="flex items-center gap-2.5" href="{% block brand_href %}{% url "registration:register" %}{% endblock brand_href %}">
                 {% if club.logo %}
                     <img class="crest h-[30px] w-7 shrink-0 object-cover" src="{{ club.logo.url }}" alt="">
                 {% else %}

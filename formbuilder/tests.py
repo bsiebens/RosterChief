@@ -2,12 +2,14 @@ import datetime
 from datetime import timedelta
 
 from django import forms
+from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
 from django.db import IntegrityError
 from django.db.models import ProtectedError
-from django.test import TestCase
+from django.test import TestCase, override_settings
+from django.urls import reverse
 from django.utils import timezone
 
 from club.models import Club, ClubMembership, Season
@@ -121,6 +123,16 @@ class ModelTests(FormbuilderTestBase):
         with self.assertRaises(ValidationError) as ctx:
             send.full_clean()
         self.assertIn("form", ctx.exception.error_dict)
+
+    def test_is_public_defaults_to_false(self):
+        self.assertFalse(self.send.is_public)
+
+    def test_public_token_is_generated_and_unique(self):
+        other_send = FormSend.objects.create(club=self.club, form=self.form)
+
+        self.assertTrue(self.send.public_token)
+        self.assertTrue(other_send.public_token)
+        self.assertNotEqual(self.send.public_token, other_send.public_token)
 
 
 class FormSlugTests(FormbuilderTestBase):
@@ -720,3 +732,120 @@ class SendFormRemindersTests(FormbuilderTestBase):
         call_command("send_form_reminders")
 
         self.assertFalse(Notification.objects.exists())
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "rival-fc.rosterchief.app", "testserver"])
+class PublicFormFillViewTests(TestCase):
+    """formbuilder:fill -- the public, unauthenticated form-fill page
+    (formbuilder.views.PublicFormFillView). Mirrors registration.tests.
+    RegistrationViewTests' own "public, club-scoped" test shape."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        cls.form = Form.objects.create(club=cls.club, title="Volunteer interest", login_required=False)
+        cls.name = Field.objects.create(form=cls.form, key="name", label="Name", field_type=Field.FieldType.TEXT, required=True, order=1)
+        cls.send = FormSend.objects.create(club=cls.club, form=cls.form, is_public=True)
+
+    def _url(self, token=None):
+        return reverse("formbuilder:fill", args=[token or self.send.public_token])
+
+    def test_get_renders_the_form(self):
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Volunteer interest")
+        self.assertContains(response, "Name")
+
+    def test_404_on_the_base_domain(self):
+        response = self.client.get(self._url(), HTTP_HOST="rosterchief.app")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_404_for_a_non_public_send(self):
+        private_send = FormSend.objects.create(club=self.club, form=self.form, is_public=False)
+
+        response = self.client.get(self._url(private_send.public_token), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_404_for_a_token_belonging_to_another_club(self):
+        other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
+        other_form = Form.objects.create(club=other_club, title="Other", login_required=False)
+        other_send = FormSend.objects.create(club=other_club, form=other_form, is_public=True)
+
+        response = self.client.get(self._url(other_send.public_token), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_404_for_an_unknown_token(self):
+        response = self.client.get(self._url("not-a-real-token"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_anonymous_post_creates_a_submission_with_no_member(self):
+        response = self.client.post(self._url(), {"name": "Jane Doe"}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        submission = Submission.objects.get(send=self.send)
+        self.assertIsNone(submission.member)
+        self.assertEqual(submission.answers.get(field=self.name).value, "Jane Doe")
+        self.assertRedirects(response, self._url(), fetch_redirect_response=False)
+
+    def test_anonymous_post_is_rejected_when_the_form_requires_login(self):
+        self.form.login_required = True
+        self.form.save()
+
+        response = self.client.post(self._url(), {"name": "Jane Doe"}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Submission.objects.exists())
+
+    def test_a_logged_in_visitor_in_the_audience_is_linked_to_their_own_member(self):
+        user = get_user_model().objects.create_user(email="visitor@example.com", password="pw-secret-123")
+        member = Member.objects.create(user=user, first_name="Vera", last_name="Visitor")
+        self.send.invited_members.add(member)
+        self.client.force_login(user)
+
+        self.client.post(self._url(), {"name": "Vera Visitor"}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        submission = Submission.objects.get(send=self.send)
+        self.assertEqual(submission.member, member)
+
+    def test_a_logged_in_visitor_outside_the_audience_is_still_rejected(self):
+        # is_public only ever waives the audience check for a genuine
+        # stranger (member=None) -- formbuilder.services.submission.
+        # submit_form's own _check_open still runs the usual audience check
+        # for any *resolved* member, public link or not. A send with no
+        # configured audience at all (this one: no teams/groups/club_wide/
+        # invited_members) resolves to an empty audience, so even a real
+        # club member who happens to be logged in is turned away, same as
+        # if they'd reached this send any other way.
+        user = get_user_model().objects.create_user(email="outsider@example.com", password="pw-secret-123")
+        Member.objects.create(user=user, first_name="Otto", last_name="Outsider")
+        self.client.force_login(user)
+
+        response = self.client.post(self._url(), {"name": "Otto Outsider"}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Submission.objects.exists())
+
+    def test_a_scoped_audience_does_not_block_an_anonymous_public_submission(self):
+        # is_public is independent of teams/groups/club_wide -- a send aimed
+        # at a specific team still accepts a public, anonymous submission
+        # (submit_form's own audience check only ever runs for a resolved
+        # member -- see SubmitFormTests.test_anonymous_submission_allowed_
+        # when_login_not_required for the service-layer half of this).
+        team = Team.objects.create(club=self.club, name="U16", short_name="U16")
+        self.send.teams.add(team)
+
+        response = self.client.post(self._url(), {"name": "Jane Doe"}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertTrue(Submission.objects.filter(send=self.send).exists())
+        self.assertRedirects(response, self._url(), fetch_redirect_response=False)
+
+    def test_invalid_post_reshows_the_form_with_field_errors(self):
+        response = self.client.post(self._url(), {"name": ""}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Submission.objects.exists())
+        self.assertTrue(response.context["form"].errors)

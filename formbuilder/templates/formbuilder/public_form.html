@@ -1,0 +1,38 @@
+{% extends "registration/_base.html" %}
+{% load i18n lucide ui %}
+
+{% comment %}
+    Public, unauthenticated form-fill page -- linkable from wherever a club
+    shares it (their own site, email, social...), same shape as
+    registration/register.html. Reached by FormSend.public_token; see
+    formbuilder.views.PublicFormFillView.
+{% endcomment %}
+
+{% block page_title %}{{ send.form.title }}{% endblock page_title %}
+
+{% block brand_href %}{% url "formbuilder:fill" send.public_token %}{% endblock brand_href %}
+
+{% block content %}
+    <div class="mb-5">
+        <h1 class="font-display text-3xl font-extrabold text-ink uppercase">{{ send.form.title }}</h1>
+        {% if send.form.description %}
+            <p class="mt-1 text-sm text-muted">{{ send.form.description|linebreaksbr }}</p>
+        {% endif %}
+    </div>
+
+    <form method="post" enctype="multipart/form-data" class="flex flex-col gap-4">
+        {% csrf_token %}
+
+        {% for error in form.non_field_errors %}
+            <div class="alert alert-error" role="alert">{% lucide "circle-x" size=18 %} <span>{{ error }}</span></div>
+        {% endfor %}
+
+        <div class="card card-body">
+            {% for field in form %}
+                {% form_field field %}
+            {% endfor %}
+        </div>
+
+        <button class="btn btn-primary gap-2 self-start" type="submit">{% lucide "send" size=16 %} {% trans "Submit" %}</button>
+    </form>
+{% endblock content %}
