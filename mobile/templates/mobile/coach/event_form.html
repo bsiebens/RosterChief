@@ -34,20 +34,20 @@
             {% csrf_token %}
             {{ shared_form.teams }}
 
-            <div class="grid grid-cols-2 gap-2">
-                <label class="flex min-h-12 items-center justify-center rounded-lg border border-line bg-white px-1 text-center font-display text-xs font-extrabold tracking-wide text-muted uppercase has-checked:border-ink has-checked:bg-ink has-checked:text-white">
+            <div class="grid grid-cols-2 gap-3">
+                <label class="flex min-h-16 items-center justify-center rounded-lg border border-line bg-white px-2 text-center font-display text-sm font-extrabold tracking-wide text-muted uppercase has-checked:border-ink has-checked:bg-ink has-checked:text-white">
                     <input class="sr-only" type="radio" name="kind" value="training" x-model="kind">
                     {% trans "Practice" %}
                 </label>
-                <label class="flex min-h-12 items-center justify-center rounded-lg border border-line bg-white px-1 text-center font-display text-xs font-extrabold tracking-wide text-muted uppercase has-checked:border-ink has-checked:bg-ink has-checked:text-white">
+                <label class="flex min-h-16 items-center justify-center rounded-lg border border-line bg-white px-2 text-center font-display text-sm font-extrabold tracking-wide text-muted uppercase has-checked:border-ink has-checked:bg-ink has-checked:text-white">
                     <input class="sr-only" type="radio" name="kind" value="game" x-model="kind">
                     {% trans "Game" %}
                 </label>
-                <label class="flex min-h-12 items-center justify-center rounded-lg border border-line bg-white px-1 text-center font-display text-xs font-extrabold tracking-wide text-muted uppercase has-checked:border-ink has-checked:bg-ink has-checked:text-white">
+                <label class="flex min-h-16 items-center justify-center rounded-lg border border-line bg-white px-2 text-center font-display text-sm font-extrabold tracking-wide text-muted uppercase has-checked:border-ink has-checked:bg-ink has-checked:text-white">
                     <input class="sr-only" type="radio" name="kind" value="tournament" x-model="kind">
                     {% trans "Tournament" %}
                 </label>
-                <label class="flex min-h-12 items-center justify-center rounded-lg border border-line bg-white px-1 text-center font-display text-xs font-extrabold tracking-wide text-muted uppercase has-checked:border-ink has-checked:bg-ink has-checked:text-white">
+                <label class="flex min-h-16 items-center justify-center rounded-lg border border-line bg-white px-2 text-center font-display text-sm font-extrabold tracking-wide text-muted uppercase has-checked:border-ink has-checked:bg-ink has-checked:text-white">
                     <input class="sr-only" type="radio" name="kind" value="meeting" x-model="kind">
                     {% trans "Meeting" %}
                 </label>

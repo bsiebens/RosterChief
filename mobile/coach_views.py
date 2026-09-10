@@ -725,28 +725,46 @@ class CoachEventDetailView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
         return super().get_context_data(
             event=event,
             tasks=tasks,
-            task_form=_styled_task_form(),
             **kwargs,
         )
 
 
-class CoachEventTaskCreateView(CoachScopeMixin, LoginRequiredMixin, View):
-    """Mirrors management.views.EventTaskCreateView -- see EventTaskForm's
-    own docstring for why event/created_by come from the view, never the
-    form."""
+class CoachEventTaskCreateView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
+    """Add a task to an event -- its own screen (mobile/coach/task_form.html),
+    same shape as every other coach "add X" flow (New event, Add player, ...),
+    not an inline form that pushes the rest of the task list down underneath
+    it (issue #18 feedback on the first cut of this screen). Re-renders with
+    field errors on an invalid submission rather than management.views.
+    EventTaskCreateView's own notify-and-redirect -- a standalone screen has
+    room to show them inline; event/created_by still come from the view,
+    never the form, same as the desktop version."""
 
-    def post(self, request, *args, **kwargs):
+    template_name = "mobile/coach/task_form.html"
+    screen_title = _("Add task")
+    active_tab = "coach_schedule"
+
+    def get_event(self):
         if self.active_team is None:
             raise Http404
+        return get_object_or_404(Event, pk=self.kwargs["pk"], club=self.request.club, teams=self.active_team)
+
+    def get(self, request, *args, **kwargs):
+        if not self.can_manage_active_team:
+            return HttpResponseRedirect(reverse("mobile:coach_event_detail", kwargs={"pk": self.kwargs["pk"]}))
+        return self.render_to_response(self.get_context_data(**kwargs))
+
+    def get_context_data(self, **kwargs):
+        kwargs.setdefault("task_form", _styled_task_form())
+        return super().get_context_data(event=self.get_event(), **kwargs)
+
+    def post(self, request, *args, **kwargs):
         if not self.can_manage_active_team:
             return HttpResponseForbidden()
 
-        event = get_object_or_404(Event, pk=kwargs["pk"], club=request.club, teams=self.active_team)
-        form = EventTaskForm(request.POST)
+        event = self.get_event()
+        form = _styled_task_form(request.POST)
         if not form.is_valid():
-            for error in form.errors.values():
-                notify(request, f"e|{_('Could not add task')}|{' '.join(error)}")
-            return HttpResponseRedirect(reverse("mobile:coach_event_detail", kwargs={"pk": event.pk}))
+            return self.render_to_response(self.get_context_data(task_form=form))
 
         task = form.save(commit=False)
         task.event = event

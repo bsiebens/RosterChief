@@ -5912,6 +5912,32 @@ class CoachEventTaskViewsTests(TestCase):
 
         self.assertEqual(response.status_code, 302)
 
+    def test_get_requires_login(self):
+        response = self.client.get(reverse("mobile:coach_event_task_create", args=[self.event.pk]), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 302)
+
+    def test_get_redirects_a_non_managing_staffer_to_the_event_hub(self):
+        physio_position = Position.objects.create(club=self.club, name="Physio", short_name="PHY", staff_position=True, management_position=False)
+        physio_user = User.objects.create_user(email="physio-tasks-get@example.com", password="pw-secret-123")
+        physio_member = Member.objects.create(first_name="Pat", last_name="Physio", user=physio_user)
+        StaffAssignment.objects.create(team=self.team, member=physio_member, season=self.season, position=physio_position)
+        self.client.force_login(physio_user)
+
+        response = self.client.get(reverse("mobile:coach_event_task_create", args=[self.event.pk]), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertRedirects(response, reverse("mobile:coach_event_detail", args=[self.event.pk]), fetch_redirect_response=False)
+
+    def test_get_renders_the_add_task_screen(self):
+        # Issue #18 feedback: its own screen, not a form that pops up inline
+        # underneath the rest of the task list.
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mobile:coach_event_task_create", args=[self.event.pk]), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Add task")
+
     def test_non_managing_staff_cannot_create_a_task(self):
         physio_position = Position.objects.create(club=self.club, name="Physio", short_name="PHY", staff_position=True, management_position=False)
         physio_user = User.objects.create_user(email="physio-tasks@example.com", password="pw-secret-123")
@@ -5934,6 +5960,15 @@ class CoachEventTaskViewsTests(TestCase):
         self.assertEqual(task.needed_quantity, 2)
         self.assertEqual(task.created_by, self.member)
         self.assertRedirects(response, reverse("mobile:coach_event_detail", args=[self.event.pk]), fetch_redirect_response=False)
+
+    def test_invalid_post_reshows_the_form_with_errors(self):
+        self.client.force_login(self.user)
+
+        response = self.client.post(reverse("mobile:coach_event_task_create", args=[self.event.pk]), {"title": "", "needed_quantity": "1"}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(EventTask.objects.filter(event=self.event).exists())
+        self.assertTrue(response.context["task_form"].errors)
 
     def test_a_task_created_for_an_event_from_another_team_404s(self):
         other_team = Team.objects.create(club=self.club, name="U14", short_name="U14")
