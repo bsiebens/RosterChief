@@ -15,6 +15,11 @@
         {% csrf_token %}
         {{ formset.management_form }}
 
+        <div class="alert alert-info mb-4">
+            {% lucide "info" size=16 %}
+            <span>{% trans "For a checkbox criterion, a ticked \"Req.\" forces the coach to tick the box to submit the evaluation. Untick \"Req.\" if an unticked answer should be allowed." %}</span>
+        </div>
+
         <div class="card mb-4 card-body">
             <h2 class="card-title">{% lucide "list-checks" size=18 %} {% trans "Criteria" %}</h2>
             <p class="text-sm text-muted">{% trans "What coaches score a player against. Saving creates a new version of the rubric -- evaluations already filled in keep showing exactly what they were scored against, unaffected by this edit." %}</p>

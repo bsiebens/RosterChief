@@ -9777,7 +9777,7 @@ class ManagementListPaginationTests(ManagementTestBase):
             response = self.club_get("family_list")
 
         self.assertTrue(response.context["is_paginated"])
-        self.assertContains(response, '<span class="btn btn-sm join-item btn-active">1</span>')
+        self.assertContains(response, '<span class="btn btn-sm join-item btn-primary">1</span>')
         self.assertContains(response, "?page=2")
 
     def test_event_team_group_news_lists_are_all_wired_for_pagination(self):

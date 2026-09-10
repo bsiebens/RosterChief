@@ -26,6 +26,19 @@ check alone can't see which app's user menu sent someone there.
 
 The control panel's own pages deliberately do *not* use this: controlpanel/base.html
 hardcodes itself, so no branding bug can ever dress the platform panel up as a club.
+
+club/views.py's root() feeds this the same way: an anonymous *desktop* visitor is
+bounced straight to login (not to /manage/, which can't yet tell whether they'll
+turn out to have management access -- see RootViewTests.test_an_anonymous_desktop_
+visitor_is_bounced_to_login_and_not_straight_to_manage), but it sets
+management_context on its way there, exactly like ClubStaffRequiredMixin does for
+a real /manage/ visit. That covers the *entire* rest of the auth flow -- MFA,
+passkeys, recovery codes, whatever allauth chains next -- not just the first
+screen, since every one of those screens is a different path under /accounts/ and
+only the session flag survives the trip between them. If root() re-decides after
+login that this visitor has no management access after all, it pops the flag
+again before falling back to the mobile app, so a plain member never gets stuck
+with the management skin on their later /accounts/ screens.
 """
 
 PLATFORM_BASE_TEMPLATE = "controlpanel/_auth_base.html"
