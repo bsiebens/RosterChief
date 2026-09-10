@@ -5546,6 +5546,450 @@ class CoachCreateEventViewTests(TestCase):
 
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class CoachEditEventViewTests(TestCase):
+    """Issue #18 -- edit a single Event's own fields. Reuses CoachCreateEvent
+    ViewTests' own fixture shape."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        today = timezone.localdate()
+        cls.season = Season.objects.create(club=cls.club, start_date=today - datetime.timedelta(days=30), end_date=today + datetime.timedelta(days=300))
+        cls.user = User.objects.create_user(email="coach-edit@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Sam", last_name="Coach", user=cls.user)
+        cls.team = Team.objects.create(club=cls.club, name="U16", short_name="U16")
+        cls.position = Position.objects.create(club=cls.club, name="Head coach", short_name="HC", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=cls.team, member=cls.member, season=cls.season, position=cls.position)
+        cls.event = Event.objects.create(club=cls.club, title="Practice", kind=Event.EventKind.TRAINING, start=timezone.now() + datetime.timedelta(days=1))
+        cls.event.teams.add(cls.team)
+
+    def _post(self, **overrides):
+        start = timezone.localtime(self.event.start).strftime("%Y-%m-%dT%H:%M")
+        data = {"kind": "training", "title": "Updated practice", "start": start, "teams": [str(self.team.pk)], "max_referees": "2"}
+        data.update(overrides)
+        return self.client.post(reverse("mobile:coach_edit_event", args=[self.event.pk]), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+    def test_requires_login(self):
+        response = self.client.get(reverse("mobile:coach_edit_event", args=[self.event.pk]), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 302)
+
+    def test_get_redirects_a_non_managing_staffer(self):
+        physio_position = Position.objects.create(club=self.club, name="Physio", short_name="PHY", staff_position=True, management_position=False)
+        physio_user = User.objects.create_user(email="physio-edit@example.com", password="pw-secret-123")
+        physio_member = Member.objects.create(first_name="Pat", last_name="Physio", user=physio_user)
+        StaffAssignment.objects.create(team=self.team, member=physio_member, season=self.season, position=physio_position)
+        self.client.force_login(physio_user)
+
+        response = self.client.get(reverse("mobile:coach_edit_event", args=[self.event.pk]), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertRedirects(response, reverse("mobile:coach_today"), fetch_redirect_response=False)
+
+    def test_non_managing_staff_cannot_post(self):
+        physio_position = Position.objects.create(club=self.club, name="Physio", short_name="PHY", staff_position=True, management_position=False)
+        physio_user = User.objects.create_user(email="physio-edit2@example.com", password="pw-secret-123")
+        physio_member = Member.objects.create(first_name="Pat", last_name="Physio", user=physio_user)
+        StaffAssignment.objects.create(team=self.team, member=physio_member, season=self.season, position=physio_position)
+        self.client.force_login(physio_user)
+
+        response = self._post()
+
+        self.assertEqual(response.status_code, 403)
+        self.event.refresh_from_db()
+        self.assertEqual(self.event.title, "Practice")
+
+    def test_an_event_from_another_team_404s(self):
+        other_team = Team.objects.create(club=self.club, name="U14", short_name="U14")
+        other_event = Event.objects.create(club=self.club, title="Other", kind=Event.EventKind.TRAINING, start=timezone.now() + datetime.timedelta(days=1))
+        other_event.teams.add(other_team)
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mobile:coach_edit_event", args=[other_event.pk]), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_get_prefills_the_form_from_the_existing_event(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mobile:coach_edit_event", args=[self.event.pk]), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.context["form"].initial.get("title"), "Practice")
+        self.assertContains(response, "Edit event")
+
+    def test_valid_post_updates_the_event_and_redirects_to_the_detail_hub(self):
+        self.client.force_login(self.user)
+
+        response = self._post(title="Updated practice")
+
+        self.event.refresh_from_db()
+        self.assertEqual(self.event.title, "Updated practice")
+        self.assertRedirects(response, reverse("mobile:coach_event_detail", args=[self.event.pk]), fetch_redirect_response=False)
+
+    def test_editing_a_game_offers_score_and_live_fields(self):
+        self.event.kind = Event.EventKind.GAME
+        self.event.save()
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mobile:coach_edit_event", args=[self.event.pk]), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertIn("score_for", response.context["form"].fields)
+        self.assertIn("score_against", response.context["form"].fields)
+        self.assertIn("is_live", response.context["form"].fields)
+
+    def test_can_record_a_score_for_a_game(self):
+        self.event.kind = Event.EventKind.GAME
+        self.event.save()
+        self.client.force_login(self.user)
+
+        self._post(kind="game", title="Away Game", score_for="3", score_against="1", is_live="on")
+
+        self.event.refresh_from_db()
+        self.assertEqual(self.event.score_for, 3)
+        self.assertEqual(self.event.score_against, 1)
+        self.assertTrue(self.event.is_live)
+
+    def test_create_view_never_offers_score_fields(self):
+        # editing=False on the create flow -- see CoachCreateEventViewTests'
+        # own docstring for why the add form leaves these off entirely.
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mobile:coach_create_event"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertNotIn("score_for", response.context["form"].fields)
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class CoachEditEventSeriesViewTests(TestCase):
+    """Issue #18 -- edit an EventSeries' own recurrence pattern."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        today = timezone.localdate()
+        cls.season = Season.objects.create(club=cls.club, start_date=today - datetime.timedelta(days=30), end_date=today + datetime.timedelta(days=300))
+        cls.user = User.objects.create_user(email="coach-series@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Sam", last_name="Coach", user=cls.user)
+        cls.team = Team.objects.create(club=cls.club, name="U16", short_name="U16")
+        cls.position = Position.objects.create(club=cls.club, name="Head coach", short_name="HC", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=cls.team, member=cls.member, season=cls.season, position=cls.position)
+
+    def setUp(self):
+        self.series = EventSeries.objects.create(club=self.club, title="Weekly Practice", kind=Event.EventKind.TRAINING, rrule="FREQ=WEEKLY;BYDAY=MO", dtstart=timezone.now() + datetime.timedelta(days=1))
+        self.series.teams.add(self.team)
+
+    def _post(self, **overrides):
+        dtstart = timezone.localtime(self.series.dtstart).strftime("%Y-%m-%dT%H:%M")
+        data = {"kind": "training", "title": "Updated series", "dtstart": dtstart, "teams": [str(self.team.pk)], "frequency": "weekly", "interval": "1", "weekdays": ["MO"], "duration_hours": "1", "duration_minutes": "0"}
+        data.update(overrides)
+        return self.client.post(reverse("mobile:coach_edit_event_series", args=[self.series.pk]), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+    def test_requires_login(self):
+        response = self.client.get(reverse("mobile:coach_edit_event_series", args=[self.series.pk]), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 302)
+
+    def test_get_redirects_a_non_managing_staffer(self):
+        physio_position = Position.objects.create(club=self.club, name="Physio", short_name="PHY", staff_position=True, management_position=False)
+        physio_user = User.objects.create_user(email="physio-series@example.com", password="pw-secret-123")
+        physio_member = Member.objects.create(first_name="Pat", last_name="Physio", user=physio_user)
+        StaffAssignment.objects.create(team=self.team, member=physio_member, season=self.season, position=physio_position)
+        self.client.force_login(physio_user)
+
+        response = self.client.get(reverse("mobile:coach_edit_event_series", args=[self.series.pk]), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertRedirects(response, reverse("mobile:coach_today"), fetch_redirect_response=False)
+
+    def test_a_series_from_another_team_404s(self):
+        other_team = Team.objects.create(club=self.club, name="U14", short_name="U14")
+        other_series = EventSeries.objects.create(club=self.club, title="Other Series", kind=Event.EventKind.TRAINING, rrule="FREQ=WEEKLY;BYDAY=MO", dtstart=timezone.now() + datetime.timedelta(days=1))
+        other_series.teams.add(other_team)
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mobile:coach_edit_event_series", args=[other_series.pk]), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_valid_post_updates_the_series_and_regenerates_occurrences(self):
+        self.assertEqual(self.series.occurrences.count(), 0)
+        self.client.force_login(self.user)
+
+        response = self._post(title="Updated series")
+
+        self.series.refresh_from_db()
+        self.assertEqual(self.series.title, "Updated series")
+        # generate_occurrences() firing -- same as CoachCreateEventViewTests'
+        # own recurring-post coverage confirms for the create path.
+        self.assertGreater(self.series.occurrences.count(), 0)
+        self.assertRedirects(response, reverse("mobile:coach_today"), fetch_redirect_response=False)
+
+    def test_a_changed_pattern_propagates_to_a_non_detached_occurrence(self):
+        occurrence = Event.objects.create(club=self.club, series=self.series, title="Weekly Practice", kind=Event.EventKind.TRAINING, start=self.series.dtstart)
+        occurrence.teams.add(self.team)
+        self.client.force_login(self.user)
+
+        self._post(title="Renamed series")
+
+        occurrence.refresh_from_db()
+        self.assertEqual(occurrence.title, "Renamed series")
+
+    def test_a_detached_occurrence_is_not_touched_by_a_pattern_change(self):
+        occurrence = Event.objects.create(club=self.club, series=self.series, detached=True, title="Weekly Practice", kind=Event.EventKind.TRAINING, start=self.series.dtstart)
+        occurrence.teams.add(self.team)
+        self.client.force_login(self.user)
+
+        self._post(title="Renamed series")
+
+        occurrence.refresh_from_db()
+        self.assertEqual(occurrence.title, "Weekly Practice")
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class CoachEventDetachViewTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        today = timezone.localdate()
+        cls.season = Season.objects.create(club=cls.club, start_date=today - datetime.timedelta(days=30), end_date=today + datetime.timedelta(days=300))
+        cls.user = User.objects.create_user(email="coach-detach@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Sam", last_name="Coach", user=cls.user)
+        cls.team = Team.objects.create(club=cls.club, name="U16", short_name="U16")
+        cls.position = Position.objects.create(club=cls.club, name="Head coach", short_name="HC", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=cls.team, member=cls.member, season=cls.season, position=cls.position)
+        cls.series = EventSeries.objects.create(club=cls.club, title="Weekly Practice", kind=Event.EventKind.TRAINING, rrule="FREQ=WEEKLY;BYDAY=MO", dtstart=timezone.now() + datetime.timedelta(days=1))
+
+    def setUp(self):
+        self.event = Event.objects.create(club=self.club, series=self.series, title="Weekly Practice", kind=Event.EventKind.TRAINING, start=timezone.now() + datetime.timedelta(days=1))
+        self.event.teams.add(self.team)
+
+    def test_requires_login(self):
+        response = self.client.post(reverse("mobile:coach_event_detach", args=[self.event.pk]), {}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 302)
+
+    def test_non_managing_staff_cannot_post(self):
+        physio_position = Position.objects.create(club=self.club, name="Physio", short_name="PHY", staff_position=True, management_position=False)
+        physio_user = User.objects.create_user(email="physio-detach@example.com", password="pw-secret-123")
+        physio_member = Member.objects.create(first_name="Pat", last_name="Physio", user=physio_user)
+        StaffAssignment.objects.create(team=self.team, member=physio_member, season=self.season, position=physio_position)
+        self.client.force_login(physio_user)
+
+        response = self.client.post(reverse("mobile:coach_event_detach", args=[self.event.pk]), {}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 403)
+        self.event.refresh_from_db()
+        self.assertFalse(self.event.detached)
+
+    def test_detach_flips_the_flag_and_redirects_to_the_event(self):
+        self.client.force_login(self.user)
+
+        response = self.client.post(reverse("mobile:coach_event_detach", args=[self.event.pk]), {}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.event.refresh_from_db()
+        self.assertTrue(self.event.detached)
+        self.assertRedirects(response, reverse("mobile:coach_event_detail", args=[self.event.pk]), fetch_redirect_response=False)
+
+    def test_a_detached_event_is_no_longer_touched_by_a_series_edit(self):
+        self.client.force_login(self.user)
+        self.client.post(reverse("mobile:coach_event_detach", args=[self.event.pk]), {}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        dtstart = timezone.localtime(self.series.dtstart).strftime("%Y-%m-%dT%H:%M")
+        self.client.post(
+            reverse("mobile:coach_edit_event_series", args=[self.series.pk]),
+            {"kind": "training", "title": "Renamed series", "dtstart": dtstart, "teams": [str(self.team.pk)], "frequency": "weekly", "interval": "1", "weekdays": ["MO"], "duration_hours": "1", "duration_minutes": "0"},
+            HTTP_HOST="ajax-united.rosterchief.app",
+        )
+
+        self.event.refresh_from_db()
+        self.assertEqual(self.event.title, "Weekly Practice")
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class CoachEventDetailViewTests(TestCase):
+    """Issue #18 -- the coach-facing event hub: series info/detach, and the
+    task list (add/edit/delete are their own views, tested separately
+    below)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        today = timezone.localdate()
+        cls.season = Season.objects.create(club=cls.club, start_date=today - datetime.timedelta(days=30), end_date=today + datetime.timedelta(days=300))
+        cls.user = User.objects.create_user(email="coach-detail@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Sam", last_name="Coach", user=cls.user)
+        cls.team = Team.objects.create(club=cls.club, name="U16", short_name="U16")
+        cls.position = Position.objects.create(club=cls.club, name="Head coach", short_name="HC", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=cls.team, member=cls.member, season=cls.season, position=cls.position)
+
+    def setUp(self):
+        self.event = Event.objects.create(club=self.club, title="Practice", kind=Event.EventKind.TRAINING, start=timezone.now() + datetime.timedelta(days=1))
+        self.event.teams.add(self.team)
+
+    def test_requires_login(self):
+        response = self.client.get(reverse("mobile:coach_event_detail", args=[self.event.pk]), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 302)
+
+    def test_an_event_from_another_team_404s(self):
+        other_team = Team.objects.create(club=self.club, name="U14", short_name="U14")
+        other_event = Event.objects.create(club=self.club, title="Other", kind=Event.EventKind.TRAINING, start=timezone.now() + datetime.timedelta(days=1))
+        other_event.teams.add(other_team)
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mobile:coach_event_detail", args=[other_event.pk]), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_shows_series_membership_and_detach_action(self):
+        series = EventSeries.objects.create(club=self.club, title="Weekly Practice", kind=Event.EventKind.TRAINING, rrule="FREQ=WEEKLY;BYDAY=MO", dtstart=timezone.now())
+        self.event.series = series
+        self.event.save()
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mobile:coach_event_detail", args=[self.event.pk]), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, "Weekly Practice")
+        self.assertContains(response, reverse("mobile:coach_event_detach", args=[self.event.pk]))
+
+    def test_a_detached_event_shows_no_detach_action(self):
+        series = EventSeries.objects.create(club=self.club, title="Weekly Practice", kind=Event.EventKind.TRAINING, rrule="FREQ=WEEKLY;BYDAY=MO", dtstart=timezone.now())
+        self.event.series = series
+        self.event.detached = True
+        self.event.save()
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mobile:coach_event_detail", args=[self.event.pk]), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertNotContains(response, reverse("mobile:coach_event_detach", args=[self.event.pk]))
+
+    def test_tasks_show_their_claim_progress(self):
+        from events.models import EventTaskClaim
+
+        task = EventTask.objects.create(event=self.event, title="Bring fruit", needed_quantity=2)
+        claimer = Member.objects.create(first_name="Parent", last_name="One")
+        EventTaskClaim.objects.create(task=task, member=claimer)
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mobile:coach_event_detail", args=[self.event.pk]), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, "Bring fruit")
+        self.assertContains(response, "1 / 2")
+
+    def test_edit_and_add_task_controls_are_hidden_for_a_non_managing_staffer(self):
+        physio_position = Position.objects.create(club=self.club, name="Physio", short_name="PHY", staff_position=True, management_position=False)
+        physio_user = User.objects.create_user(email="physio-detail@example.com", password="pw-secret-123")
+        physio_member = Member.objects.create(first_name="Pat", last_name="Physio", user=physio_user)
+        StaffAssignment.objects.create(team=self.team, member=physio_member, season=self.season, position=physio_position)
+        self.client.force_login(physio_user)
+
+        response = self.client.get(reverse("mobile:coach_event_detail", args=[self.event.pk]), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, reverse("mobile:coach_edit_event", args=[self.event.pk]))
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class CoachEventTaskViewsTests(TestCase):
+    """Issue #18 -- add/edit/delete tasks from the coach event hub, mirroring
+    management.views.EventTaskCreateView/UpdateView/DeleteView."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        today = timezone.localdate()
+        cls.season = Season.objects.create(club=cls.club, start_date=today - datetime.timedelta(days=30), end_date=today + datetime.timedelta(days=300))
+        cls.user = User.objects.create_user(email="coach-tasks@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Sam", last_name="Coach", user=cls.user)
+        cls.team = Team.objects.create(club=cls.club, name="U16", short_name="U16")
+        cls.position = Position.objects.create(club=cls.club, name="Head coach", short_name="HC", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=cls.team, member=cls.member, season=cls.season, position=cls.position)
+
+    def setUp(self):
+        self.event = Event.objects.create(club=self.club, title="Practice", kind=Event.EventKind.TRAINING, start=timezone.now() + datetime.timedelta(days=1))
+        self.event.teams.add(self.team)
+
+    def test_create_requires_login(self):
+        response = self.client.post(reverse("mobile:coach_event_task_create", args=[self.event.pk]), {}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 302)
+
+    def test_non_managing_staff_cannot_create_a_task(self):
+        physio_position = Position.objects.create(club=self.club, name="Physio", short_name="PHY", staff_position=True, management_position=False)
+        physio_user = User.objects.create_user(email="physio-tasks@example.com", password="pw-secret-123")
+        physio_member = Member.objects.create(first_name="Pat", last_name="Physio", user=physio_user)
+        StaffAssignment.objects.create(team=self.team, member=physio_member, season=self.season, position=physio_position)
+        self.client.force_login(physio_user)
+
+        response = self.client.post(reverse("mobile:coach_event_task_create", args=[self.event.pk]), {"title": "Bring fruit", "needed_quantity": "1"}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(EventTask.objects.filter(event=self.event).exists())
+
+    def test_valid_post_creates_a_task(self):
+        self.client.force_login(self.user)
+
+        response = self.client.post(reverse("mobile:coach_event_task_create", args=[self.event.pk]), {"title": "Bring fruit", "description": "Oranges please", "needed_quantity": "2"}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        task = EventTask.objects.get(event=self.event)
+        self.assertEqual(task.title, "Bring fruit")
+        self.assertEqual(task.needed_quantity, 2)
+        self.assertEqual(task.created_by, self.member)
+        self.assertRedirects(response, reverse("mobile:coach_event_detail", args=[self.event.pk]), fetch_redirect_response=False)
+
+    def test_a_task_created_for_an_event_from_another_team_404s(self):
+        other_team = Team.objects.create(club=self.club, name="U14", short_name="U14")
+        other_event = Event.objects.create(club=self.club, title="Other", kind=Event.EventKind.TRAINING, start=timezone.now() + datetime.timedelta(days=1))
+        other_event.teams.add(other_team)
+        self.client.force_login(self.user)
+
+        response = self.client.post(reverse("mobile:coach_event_task_create", args=[other_event.pk]), {"title": "Bring fruit", "needed_quantity": "1"}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_valid_post_updates_a_task(self):
+        task = EventTask.objects.create(event=self.event, title="Bring fruit", needed_quantity=1)
+        self.client.force_login(self.user)
+
+        response = self.client.post(reverse("mobile:coach_event_task_update", args=[self.event.pk, task.pk]), {"title": "Bring oranges", "needed_quantity": "3"}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        task.refresh_from_db()
+        self.assertEqual(task.title, "Bring oranges")
+        self.assertEqual(task.needed_quantity, 3)
+        self.assertRedirects(response, reverse("mobile:coach_event_detail", args=[self.event.pk]), fetch_redirect_response=False)
+
+    def test_a_task_from_another_event_404s_on_update(self):
+        other_event = Event.objects.create(club=self.club, title="Other", kind=Event.EventKind.TRAINING, start=timezone.now() + datetime.timedelta(days=1))
+        other_event.teams.add(self.team)
+        task = EventTask.objects.create(event=other_event, title="Bring fruit", needed_quantity=1)
+        self.client.force_login(self.user)
+
+        response = self.client.post(reverse("mobile:coach_event_task_update", args=[self.event.pk, task.pk]), {"title": "Hijacked", "needed_quantity": "1"}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_valid_post_deletes_a_task(self):
+        task = EventTask.objects.create(event=self.event, title="Bring fruit", needed_quantity=1)
+        self.client.force_login(self.user)
+
+        response = self.client.post(reverse("mobile:coach_event_task_delete", args=[self.event.pk, task.pk]), {}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertFalse(EventTask.objects.filter(pk=task.pk).exists())
+        self.assertRedirects(response, reverse("mobile:coach_event_detail", args=[self.event.pk]), fetch_redirect_response=False)
+
+    def test_non_managing_staff_cannot_delete_a_task(self):
+        task = EventTask.objects.create(event=self.event, title="Bring fruit", needed_quantity=1)
+        physio_position = Position.objects.create(club=self.club, name="Physio", short_name="PHY", staff_position=True, management_position=False)
+        physio_user = User.objects.create_user(email="physio-tasks2@example.com", password="pw-secret-123")
+        physio_member = Member.objects.create(first_name="Pat", last_name="Physio", user=physio_user)
+        StaffAssignment.objects.create(team=self.team, member=physio_member, season=self.season, position=physio_position)
+        self.client.force_login(physio_user)
+
+        response = self.client.post(reverse("mobile:coach_event_task_delete", args=[self.event.pk, task.pk]), {}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(EventTask.objects.filter(pk=task.pk).exists())
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
 class CoachCreateNewsViewTests(TestCase):
     """C5 -- reuses management.forms.NewsForm, re-scoped to the coach's own
     managed team(s); see CoachCreateNewsView's own docstring for what's

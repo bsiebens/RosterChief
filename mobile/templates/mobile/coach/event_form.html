@@ -15,9 +15,11 @@
 
 {% block content %}
     <div class="-mx-4 -mt-5 flex items-center gap-3 border-b border-line bg-white px-4 py-3">
-        <a class="font-display text-sm font-extrabold tracking-wide text-muted uppercase" href="{% url "mobile:coach_today" %}">{% trans "Cancel" %}</a>
-        <span class="min-w-0 flex-1 truncate text-center font-display text-lg font-extrabold text-ink uppercase">{% trans "New event" %}</span>
-        <button class="font-display text-sm font-extrabold tracking-wide text-club uppercase" type="submit" form="coach-event-form">{% trans "Create" %}</button>
+        <a class="font-display text-sm font-extrabold tracking-wide text-muted uppercase" href="{% if lock_recurring == "series" %}{% url "mobile:coach_schedule" %}{% elif update_view %}{% url "mobile:coach_event_detail" event.pk %}{% else %}{% url "mobile:coach_today" %}{% endif %}">{% trans "Cancel" %}</a>
+        <span class="min-w-0 flex-1 truncate text-center font-display text-lg font-extrabold text-ink uppercase">
+            {% if lock_recurring == "series" %}{% trans "Edit series" %}{% elif update_view %}{% trans "Edit event" %}{% else %}{% trans "New event" %}{% endif %}
+        </span>
+        <button class="font-display text-sm font-extrabold tracking-wide text-club uppercase" type="submit" form="coach-event-form">{% if update_view %}{% trans "Save" %}{% else %}{% trans "Create" %}{% endif %}</button>
     </div>
 
     {% for error in form.non_field_errors %}
@@ -27,8 +29,8 @@
         <div class="m-card border border-danger-border bg-danger-bg p-3 text-sm text-club-dark"><p>{{ error }}</p></div>
     {% endfor %}
 
-    <div x-data="{ kind: '{{ shared_form.kind.value|default:"training" }}', isRecurring: {% if is_recurring %}true{% else %}false{% endif %}, showLocationModal: false, showOpponentModal: false }">
-        <form id="coach-event-form" class="flex flex-col gap-4" method="post" action="{% url "mobile:coach_create_event" %}" hx-boost="false">
+    <div x-data="{ kind: '{{ shared_form.kind.value|default:"training" }}', isRecurring: {% if lock_recurring == "series" %}true{% elif lock_recurring == "single" %}false{% elif is_recurring %}true{% else %}false{% endif %}, showLocationModal: false, showOpponentModal: false }">
+        <form id="coach-event-form" class="flex flex-col gap-4" method="post" action="{% if lock_recurring == "series" %}{% url "mobile:coach_edit_event_series" series.pk %}{% elif update_view %}{% url "mobile:coach_edit_event" event.pk %}{% else %}{% url "mobile:coach_create_event" %}{% endif %}" hx-boost="false">
             {% csrf_token %}
             {{ shared_form.teams }}
 
@@ -53,10 +55,12 @@
             {% for error in form.kind.errors %}<p class="text-xs text-club-dark">{{ error }}</p>{% endfor %}
             {% for error in series_form.kind.errors %}<p class="text-xs text-club-dark">{{ error }}</p>{% endfor %}
 
-            <div class="m-card flex items-center justify-between p-4">
-                <span class="text-sm font-semibold text-ink">{% trans "This repeats" %}</span>
-                <input class="h-5 w-5 shrink-0 accent-ink" type="checkbox" name="is_recurring" x-model="isRecurring">
-            </div>
+            {% if not lock_recurring %}
+                <div class="m-card flex items-center justify-between p-4">
+                    <span class="text-sm font-semibold text-ink">{% trans "This repeats" %}</span>
+                    <input class="h-5 w-5 shrink-0 accent-ink" type="checkbox" name="is_recurring" x-model="isRecurring">
+                </div>
+            {% endif %}
 
             <div class="m-card flex flex-col p-4">
                 <div>
@@ -119,6 +123,29 @@
                             <span class="block text-xs text-muted">{% trans "A friendly game doesn't count towards the standings." %}</span>
                         </span>
                     </label>
+                    {% if "score_for" in form.fields %}
+                        {% comment %}
+                            Score/live status only exist to record once a game has actually
+                            been created -- editing=False (the create flow) leaves them off
+                            the form entirely (management/forms.py's EventForm.__init__).
+                        {% endcomment %}
+                        <div class="my-3 h-px bg-rule"></div>
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="mb-1 block text-xs font-semibold text-muted" for="{{ form.score_for.id_for_label }}">{% trans "Score for" %}</label>
+                                {{ form.score_for }}
+                            </div>
+                            <div>
+                                <label class="mb-1 block text-xs font-semibold text-muted" for="{{ form.score_against.id_for_label }}">{% trans "Score against" %}</label>
+                                {{ form.score_against }}
+                            </div>
+                        </div>
+                        <div class="my-3 h-px bg-rule"></div>
+                        <label class="flex items-center gap-3" for="{{ form.is_live.id_for_label }}">
+                            {{ form.is_live }}
+                            <span class="text-sm font-semibold text-ink">{% trans "Live now" %}</span>
+                        </label>
+                    {% endif %}
                 </div>
             </div>
 
