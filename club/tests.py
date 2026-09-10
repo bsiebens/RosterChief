@@ -1500,6 +1500,32 @@ class MobileBrandingTests(TestCase):
         self.assertTemplateUsed(response, "mobile/_auth_base.html")
         self.assertContains(response, "Ajax United")
 
+    def test_the_login_screen_carries_the_full_app_chrome_not_a_bare_card(self):
+        # Issue #16: mobile/_auth_base.html now carries the same header and
+        # bottom tab-bar as mobile/base.html's own pages (duplicated, not
+        # {% extends %}-ed -- see that file's own comment for why a real
+        # extends hit a block-name collision with allauth's own contract),
+        # not just a crest and a "Back to the app" link.
+        self.client.get(reverse("mobile:home"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        response = self.client.get(reverse("account_login"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertTemplateUsed(response, "mobile/_auth_base.html")
+        self.assertContains(response, 'class="tab-bar sticky bottom-0 z-20"')
+        self.assertContains(response, 'class="app-header sticky top-0 z-20"')
+
+    def test_the_login_form_itself_stays_unboosted_inside_the_boosted_shell(self):
+        # <body> is hx-boost="true" now, for the header/tab-bar's own real
+        # navigation -- but the allauth-rendered form must opt back out, same
+        # "a real navigation for a write action is a fine trade" reasoning as
+        # mobile/_hero_rsvp.html's own RSVP forms.
+        self.client.get(reverse("mobile:home"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        response = self.client.get(reverse("account_login"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, 'hx-boost="true"')
+        self.assertContains(response, 'hx-boost="false"')
+
 
 @override_settings(
     ROSTERCHIEF_BASE_DOMAIN="rosterchief.app",

@@ -71,16 +71,31 @@
         {% endif %}
 
         {% if going_attendance %}
-            <div class="m-card p-4">
-                <p class="font-display text-xs font-extrabold text-muted uppercase tracking-wide">{% blocktrans with date=going_attendance.event.start|date:"D d M" %}Next up &middot; {{ date }}{% endblocktrans %}</p>
-                <p class="mt-1 font-display text-xl leading-none font-extrabold text-ink uppercase">{{ going_attendance.event.title }}</p>
-                <div class="mt-3 flex flex-wrap gap-4 font-mono text-xs text-muted">
-                    <span>{% blocktrans with time=going_attendance.event.start|date:"H:i" %}{{ time }} face-off{% endblocktrans %}</span>
-                    {% if going_attendance.event.location %}<span>{{ going_attendance.event.location.name }}</span>{% endif %}
-                </div>
-                <div class="mt-3 flex items-center justify-between">
-                    <span class="text-xs text-muted">{{ going_attendance.member.first_name }}</span>
-                    <span class="pill pill-ok">{{ going_attendance.get_status_display }}</span>
+            {% comment %}
+                Same dark, photo-backed hero treatment as hero_attendance above -- this is the
+                same "next up" moment, just already answered, so a static status pill takes the
+                RSVP buttons' place instead of demoting it to a flat list-style card.
+            {% endcomment %}
+            <div class="m-card-dark relative overflow-hidden">
+                {% if club.event_background %}
+                    <img class="absolute inset-0 h-full w-full object-cover grayscale" src="{{ club.event_background.url }}" alt="">
+                {% endif %}
+                <div class="absolute inset-0" style="background: linear-gradient(180deg, rgba(11,18,32,.45) 0%, rgba(11,18,32,.82) 55%, rgba(11,18,32,.97) 100%)"></div>
+                <div class="relative z-10">
+                    <div class="p-4 pb-0">
+                        <p class="font-display text-xs font-extrabold text-info uppercase tracking-wide">{% blocktrans with date=going_attendance.event.start|date:"D d M" %}Next up &middot; {{ date }}{% endblocktrans %}</p>
+                        <p class="mt-1 font-display text-2xl leading-none font-extrabold uppercase">{{ going_attendance.event.title }}</p>
+                    </div>
+                    <div class="p-4">
+                        <div class="flex flex-wrap gap-4 font-mono text-xs text-white">
+                            <span>{% blocktrans with time=going_attendance.event.start|date:"H:i" %}{{ time }} face-off{% endblocktrans %}</span>
+                            {% if going_attendance.event.location %}<span>{{ going_attendance.event.location.name }}</span>{% endif %}
+                        </div>
+                        <div class="mt-3 flex items-center justify-between">
+                            <span class="font-display text-xs font-extrabold text-on-dark-dim uppercase tracking-wide">{{ going_attendance.member.first_name }}</span>
+                            <span class="pill pill-ok">{{ going_attendance.get_status_display }}</span>
+                        </div>
+                    </div>
                 </div>
             </div>
         {% endif %}

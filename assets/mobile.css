@@ -1005,6 +1005,18 @@
         border-color: var(--color-club);
     }
 
+    /* A native datetime-local control's own intrinsic minimum width (several
+       stacked segments) otherwise wins over `width: 100%`/w-full on a narrow
+       screen, pushing its box -- and whatever flex/grid ancestor stretches to
+       fit it -- past the card it's meant to sit inside (mobile/coach/event_
+       form.html's date/time fields, reused from management.forms.EventForm/
+       EventSeriesForm). Plain element-type selector, not scoped to .input, so
+       it also covers _INPUT_CLASSES' raw-Tailwind fields on the coach screens,
+       which don't use the .input class at all. */
+    input[type="datetime-local"] {
+        min-width: 0;
+    }
+
     .textarea {
         height: auto;
         min-height: 6rem;

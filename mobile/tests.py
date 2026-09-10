@@ -2517,6 +2517,21 @@ class MeViewTests(TestCase):
 
         self.assertNotContains(response, reverse("mobile:reregister"))
 
+    def test_change_password_and_2fa_links_are_boosted_not_a_full_reload(self):
+        # Issue #16: these used to force a real navigation (hx-boost="false")
+        # out of the boosted app shell -- now that mobile/_auth_base.html
+        # shares mobile/base.html's own chrome, there's no shell mismatch to
+        # guard against, so the link itself can boost like any other in-app
+        # navigation.
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, f'href="{reverse("account_change_password")}">')
+        self.assertContains(response, f'href="{reverse("mfa_index")}">')
+        self.assertNotContains(response, f'href="{reverse("account_change_password")}" hx-boost="false"')
+        self.assertNotContains(response, f'href="{reverse("mfa_index")}" hx-boost="false"')
+
     def test_payments_pill_holds_back_an_unconfirmed_registrations_balance(self):
         # Same filter PaymentsView/HomeView apply to open_dues_rows -- this
         # badge must not claim more is owed than Payments & dues itself shows.
@@ -5259,6 +5274,25 @@ class CoachCreateEventViewTests(TestCase):
         self.assertNotIn("groups", response.context["form"].fields)
         self.assertNotIn("club_wide", response.context["form"].fields)
 
+    def test_location_picker_shows_the_city_when_it_differs_from_the_name(self):
+        # Same label as management.forms._location_label's own desktop
+        # picker -- "Name — City" unless the two are identical.
+        Location.objects.create(club=self.club, name="Main Field", address="1 St", city="Springfield", zip_code="1000", country="BE")
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mobile:coach_create_event"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, "Main Field — Springfield")
+
+    def test_location_picker_shows_just_the_name_when_it_matches_the_city(self):
+        Location.objects.create(club=self.club, name="Springfield", address="1 St", city="Springfield", zip_code="1000", country="BE")
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mobile:coach_create_event"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, ">Springfield<")
+        self.assertNotContains(response, "Springfield — Springfield")
+
     def test_can_set_opponent_and_competition_for_a_game(self):
         opponent = Opponent.objects.create(club=self.club, name="Rival FC")
         flag = get_waffle_flag_model().objects.create(name="regional-league")
@@ -5356,14 +5390,14 @@ class CoachCreateEventViewTests(TestCase):
         pool = response.context["form"].fields["excluded_members"].queryset
         self.assertIn(on_roster, pool)
 
-    def test_invited_and_excluded_members_actually_render_as_checkboxes(self):
+    def test_invited_and_excluded_members_actually_render_as_options(self):
         # Regression: swapping a ModelMultipleChoiceField's widget *after*
         # setting its queryset silently drops the choices the queryset-setter
-        # already pushed onto the old widget -- the checkbox list would
-        # render completely empty despite the queryset (and POST handling)
-        # being correct, so a plain queryset-only assertion (like the two
-        # tests above) can't catch this. See _scope_shared_fields' own
-        # comment for the mechanism.
+        # already pushed onto the old widget -- the <select> would render
+        # completely empty despite the queryset (and POST handling) being
+        # correct, so a plain queryset-only assertion (like the two tests
+        # above) can't catch this. See _scope_shared_fields' own comment for
+        # the mechanism.
         on_roster = Member.objects.create(first_name="On", last_name="Roster")
         TeamMembership.objects.create(team=self.team, member=on_roster, season=self.season)
         off_roster = Member.objects.create(first_name="Off", last_name="Roster")
@@ -5374,6 +5408,23 @@ class CoachCreateEventViewTests(TestCase):
 
         self.assertContains(response, "On Roster")
         self.assertContains(response, "Off Roster")
+
+    def test_invited_and_excluded_members_use_the_searchable_widget_not_a_checkbox_wall(self):
+        Member.objects.create(first_name="Anyone", last_name="AtAll")
+        rostered = Member.objects.create(first_name="On", last_name="Roster")
+        TeamMembership.objects.create(team=self.team, member=rostered, season=self.season)
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mobile:coach_create_event"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        form = response.context["form"]
+        self.assertIsInstance(form.fields["invited_members"].widget, forms.SelectMultiple)
+        self.assertNotIsInstance(form.fields["invited_members"].widget, forms.CheckboxSelectMultiple)
+        self.assertIsInstance(form.fields["excluded_members"].widget, forms.SelectMultiple)
+        self.assertNotIsInstance(form.fields["excluded_members"].widget, forms.CheckboxSelectMultiple)
+        # Both fields' widgets, not the page as a whole (is_recurring and the
+        # weekday grid render real checkboxes elsewhere on this same screen).
+        self.assertContains(response, 'data-searchable="true"', count=2)
 
     def test_can_invite_an_extra_member_and_exclude_a_roster_member(self):
         rostered = Member.objects.create(first_name="Rostered", last_name="Player")
@@ -5681,6 +5732,21 @@ class CoachAddPlayerViewTests(TestCase):
         candidates = response.context["candidates"]
         self.assertIn(unrostered, candidates)
         self.assertNotIn(on_other_team, candidates)
+
+    def test_no_team_filter_also_excludes_a_staff_only_member(self):
+        # A coach/manager with a StaffAssignment but no playing TeamMembership
+        # isn't "unassigned" in the sense this filter means -- they shouldn't
+        # be offered up as an add-as-player candidate.
+        staff_only = self.make_eligible_member(first_name="Staff", last_name="Only")
+        StaffAssignment.objects.create(team=self.team, member=staff_only, season=self.season, position=self.position)
+        unrostered = self.make_eligible_member(first_name="No", last_name="Team")
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mobile:coach_add_player") + "?filter=no_team", HTTP_HOST="ajax-united.rosterchief.app")
+
+        candidates = response.context["candidates"]
+        self.assertIn(unrostered, candidates)
+        self.assertNotIn(staff_only, candidates)
 
     def test_suggested_filter_matches_last_seasons_roster(self):
         previous_season = Season.objects.create(club=self.club, start_date=self.season.start_date - datetime.timedelta(days=365), end_date=self.season.start_date - datetime.timedelta(days=1))

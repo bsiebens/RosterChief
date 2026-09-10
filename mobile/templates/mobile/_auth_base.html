@@ -1,19 +1,44 @@
 {% load static lucide ui i18n %}
 
 {% comment %}
-    Standalone shell for allauth screens (login, logout, password reset, MFA, passkeys,
-    recovery codes) rendered whenever the request path is under /app/ (see
-    club/context_processors.py: MOBILE_BASE_TEMPLATE). Without this, a member hitting
-    /accounts/login/ on a club subdomain fell back to _club_base.html's old daisyUI
-    chain -- the club's *public* skin, nothing like the app they were about to land in.
-    Same reasoning and structure as management/_auth_base.html and
-    controlpanel/_auth_base.html (its own forks of this same problem), themed with
-    assets/mobile.css and this club's own colours, matching mobile/base.html.
+    Standalone shell for allauth screens (login, logout, password reset/change, MFA,
+    passkeys, recovery codes) rendered whenever the request path is under /app/, or
+    the mobile_context session flag is set (see club/context_processors.py:
+    MOBILE_BASE_TEMPLATE) -- PersonScopeMixin/CoachScopeMixin set that flag
+    (mobile/mixins.py, mobile/coach_mixins.py) before an unauthenticated /app/ visit
+    redirects to login, so the whole auth chain that follows stays on this skin too.
 
-    Block names match what templates/allauth/layouts/base.html and templates/403.html/
-    maintenance.html target (head_title, extra_head, main, extra_body) -- same contract
-    as the other two _auth_base.html forks, so none of those shared templates need to
-    know this one exists.
+    Issue #16's "embed password change and 2FA screens fully in the app" asked for
+    more than borrowed colours: these screens should carry the *same* persistent
+    header and tab bar as every other mobile screen, reachable by a boosted (AJAX)
+    navigation from mobile/me.html rather than a full page reload.
+
+    This duplicates mobile/base.html's header/tab-bar markup rather than {% extends
+    "mobile/base.html" %}-ing it -- a real attempt at that hit a genuine Django
+    limitation: base.html's own {% block content %} and allauth's own {% block
+    content %} (nested inside allauth/layouts/base.html's {% block main %}, which is
+    what base_template actually needs to expose) share the same block *name* across
+    one {% extends %} chain, and Django resolves a block name to whichever template
+    in the whole chain is most derived, full stop -- regardless of which ancestor
+    "meant" it for something else, and regardless of nesting depth. Since login.html's
+    own {% block content %} doesn't call {{ block.super }}, it wins outright and
+    silently discards everything base.html's content slot and this file would
+    otherwise have contributed, including the {% block main %} anchor allauth needs
+    to fill. Same reasoning management/_auth_base.html and controlpanel/_auth_base.html
+    already settled on for their own skins -- a standalone shell, not a real
+    {% extends %} of the app's own base, is the only sound way to share chrome with an
+    allauth screen. Keep this file's header/tab-bar in sync with mobile/base.html's own
+    by hand.
+
+    {% block main %} is the contract templates/allauth/layouts/base.html and this
+    file's own siblings target (head_title, extra_head, main, extra_body). It's
+    wrapped in its own hx-boost="false", even though <body> is hx-boost="true" for
+    the header/tab-bar's own real navigation -- boosting a write-action form that JS
+    also drives (WebAuthn's hidden mfa_login form, submitted programmatically once
+    the browser's credential API resolves) is exactly the failure mode mobile/_hero_
+    rsvp.html's own comment already documents hitting once, htmx and the form's own
+    JS both trying to own the same submit. A real navigation for login/password-
+    change/MFA submission is the same fine, standard trade that comment settled on.
 {% endcomment %}
 <!DOCTYPE html>
 <html lang="{{ LANGUAGE_CODE|default:"en" }}">
@@ -21,6 +46,9 @@
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
         <meta name="theme-color" content="{{ club.primary_color|default:"#101e36" }}">
+        <meta name="apple-mobile-web-app-capable" content="yes">
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+        <meta name="mobile-web-app-capable" content="yes">
 
         <title>
             {% block head_title %}{% endblock head_title %} &middot; {{ club.name }}
@@ -44,42 +72,68 @@
         {% block extra_head %}{% endblock extra_head %}
     </head>
 
-    <body class="scrollbar-hide flex min-h-screen flex-col items-center gap-10 bg-navy px-4 py-14 font-sans text-slate">
-        <div class="flex w-full max-w-md items-center justify-between gap-4">
-            <a class="flex min-w-0 items-center gap-2.5" href="{% url 'mobile:home' %}">
-                {% if club.logo %}
-                    <img class="app-crest" src="{{ club.logo.url }}" alt="">
-                {% else %}
-                    <span class="app-crest app-crest-fallback">{{ club.initials }}</span>
-                {% endif %}
-                <span class="min-w-0 truncate font-display text-lg font-extrabold tracking-[.08em] text-white uppercase">{{ club.name }}</span>
-            </a>
-            <a class="flex shrink-0 items-center gap-1.5 font-mono text-xs text-on-dark-dim hover:text-white" href="{% url 'mobile:home' %}">
-                {% lucide "arrow-left" size=14 %} {% trans "Back to the app" %}
-            </a>
-        </div>
+    <body class="scrollbar-hide flex min-h-screen flex-col bg-paper font-sans text-slate" hx-boost="true" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' data-csrftoken="{{ csrf_token }}">
+        {% comment %} Same header as mobile/base.html, minus the notification bell/role-switcher -- neither means anything reached anonymously (login) or applies universally (a coach mid-MFA-setup is still just "the account", not scoped to either mode). Both links still point back into the real app. {% endcomment %}
+        <header class="app-header sticky top-0 z-20">
+            <div class="flex min-h-11 items-center gap-2.5">
+                <a class="flex items-center gap-2.5" href="{% url "mobile:home" %}">
+                    {% if club.logo %}
+                        <img class="app-crest" src="{{ club.logo.url }}" alt="">
+                    {% else %}
+                        <span class="app-crest app-crest-fallback">{{ club.initials }}</span>
+                    {% endif %}
+                    <span class="min-w-0">
+                        <span class="block truncate font-display text-[19px] leading-none font-extrabold text-white uppercase">{{ club.name }}</span>
+                    </span>
+                </a>
+            </div>
+        </header>
 
-        <main class="flex w-full max-w-md flex-1 flex-col justify-center gap-4">
-            {% if messages %}
-                <div class="flex flex-col gap-2">
-                    {% for message in messages %}
-                        {% with alert=message|as_alert %}
-                            <div class="alert {{ alert.css }}" role="alert">
-                                {% lucide alert.icon size=18 %}
-                                <div>
-                                    <div class="font-display text-sm font-bold tracking-wide uppercase">{{ alert.title }}</div>
-                                    <div class="text-sm">{{ alert.body }}</div>
+        <main class="flex-1">
+            <div class="flex flex-col gap-4 px-4 py-4">
+                {% if messages %}
+                    <div class="-mx-4 -mt-4 flex flex-col">
+                        {% for message in messages %}
+                            {% with alert=message|as_alert %}
+                                <div class="m-flash {{ alert.css }} {% if not forloop.first %}border-t-2 border-white{% endif %}" role="alert">
+                                    {% lucide alert.icon size=18 %}
+                                    <div>
+                                        <div class="font-display text-sm font-bold tracking-wide uppercase">{{ alert.title }}</div>
+                                        <div class="text-sm">{{ alert.body }}</div>
+                                    </div>
                                 </div>
-                            </div>
-                        {% endwith %}
-                    {% endfor %}
-                </div>
-            {% endif %}
+                            {% endwith %}
+                        {% endfor %}
+                    </div>
+                {% endif %}
 
-            {% block main %}{% endblock main %}
+                <div hx-boost="false">
+                    {% block main %}{% endblock main %}
+                </div>
+            </div>
         </main>
 
-        <p class="font-mono text-[11px] text-on-dark-faint">&copy; {% now "Y" %} RosterChief</p>
+        <nav class="tab-bar sticky bottom-0 z-20">
+            <a class="tab-bar-item" href="{% url "mobile:home" %}">
+                {% lucide "house" size=21 %}
+                <span class="tab-bar-label">{% trans "Home" %}</span>
+            </a>
+            <a class="tab-bar-item" href="{% url "mobile:calendar" %}">
+                {% lucide "calendar" size=21 %}
+                <span class="tab-bar-label">{% trans "Calendar" %}</span>
+            </a>
+            <a class="tab-bar-item" href="{% url "mobile:news_list" %}">
+                {% lucide "newspaper" size=21 %}
+                <span class="tab-bar-label">{% trans "News" %}</span>
+            </a>
+            <a class="tab-bar-item" href="{% url "mobile:me" %}">
+                {% lucide "user" size=21 %}
+                <span class="tab-bar-label">{% trans "Me" %}</span>
+            </a>
+        </nav>
+
+        <script src="{% static "js/htmx.js" %}" defer></script>
+        <script src="{% static "js/mobile-app.js" %}" defer></script>
 
         {% comment %}
             Same data-otp enhancement as management/_auth_base.html and

@@ -33,19 +33,19 @@
             {{ shared_form.teams }}
 
             <div class="grid grid-cols-2 gap-2">
-                <label class="flex h-12 items-center justify-center rounded-lg border border-line bg-white font-display text-xs font-extrabold tracking-wide text-muted uppercase has-checked:border-ink has-checked:bg-ink has-checked:text-white">
+                <label class="flex min-h-12 items-center justify-center rounded-lg border border-line bg-white px-1 text-center font-display text-xs font-extrabold tracking-wide text-muted uppercase has-checked:border-ink has-checked:bg-ink has-checked:text-white">
                     <input class="sr-only" type="radio" name="kind" value="training" x-model="kind">
                     {% trans "Practice" %}
                 </label>
-                <label class="flex h-12 items-center justify-center rounded-lg border border-line bg-white font-display text-xs font-extrabold tracking-wide text-muted uppercase has-checked:border-ink has-checked:bg-ink has-checked:text-white">
+                <label class="flex min-h-12 items-center justify-center rounded-lg border border-line bg-white px-1 text-center font-display text-xs font-extrabold tracking-wide text-muted uppercase has-checked:border-ink has-checked:bg-ink has-checked:text-white">
                     <input class="sr-only" type="radio" name="kind" value="game" x-model="kind">
                     {% trans "Game" %}
                 </label>
-                <label class="flex h-12 items-center justify-center rounded-lg border border-line bg-white font-display text-xs font-extrabold tracking-wide text-muted uppercase has-checked:border-ink has-checked:bg-ink has-checked:text-white">
+                <label class="flex min-h-12 items-center justify-center rounded-lg border border-line bg-white px-1 text-center font-display text-xs font-extrabold tracking-wide text-muted uppercase has-checked:border-ink has-checked:bg-ink has-checked:text-white">
                     <input class="sr-only" type="radio" name="kind" value="tournament" x-model="kind">
                     {% trans "Tournament" %}
                 </label>
-                <label class="flex h-12 items-center justify-center rounded-lg border border-line bg-white font-display text-xs font-extrabold tracking-wide text-muted uppercase has-checked:border-ink has-checked:bg-ink has-checked:text-white">
+                <label class="flex min-h-12 items-center justify-center rounded-lg border border-line bg-white px-1 text-center font-display text-xs font-extrabold tracking-wide text-muted uppercase has-checked:border-ink has-checked:bg-ink has-checked:text-white">
                     <input class="sr-only" type="radio" name="kind" value="meeting" x-model="kind">
                     {% trans "Meeting" %}
                 </label>
@@ -162,7 +162,7 @@
                     <label class="mb-1 block text-xs font-semibold text-muted">{% trans "On (weekly only)" %}</label>
                     <div class="grid grid-cols-4 gap-2">
                         {% for checkbox in series_form.weekdays %}
-                            <label class="flex h-9 items-center justify-center rounded-lg border border-line bg-white text-xs font-semibold text-ink has-checked:border-ink has-checked:bg-ink has-checked:text-white">
+                            <label class="flex min-h-9 items-center justify-center rounded-lg border border-line bg-white px-1 text-center text-xs font-semibold text-ink has-checked:border-ink has-checked:bg-ink has-checked:text-white">
                                 {{ checkbox.tag }} {{ checkbox.choice_label }}
                             </label>
                         {% endfor %}
@@ -194,23 +194,15 @@
                 {% if shared_form.excluded_members.field.queryset.exists %}
                     <div class="mb-3">
                         <div class="mb-1 text-xs font-semibold text-muted">{% trans "Exclude from the roster" %}</div>
-                        <div class="flex flex-col gap-2">
-                            {% for checkbox in shared_form.excluded_members %}
-                                <label class="flex items-center gap-2 text-sm text-ink">{{ checkbox.tag }} {{ checkbox.choice_label }}</label>
-                            {% endfor %}
-                        </div>
+                        {{ shared_form.excluded_members }}
                     </div>
                 {% endif %}
 
                 {% if shared_form.invited_members.field.queryset.exists %}
-                    <details>
-                        <summary class="cursor-pointer text-xs font-semibold text-muted">{% trans "Add someone not on the roster" %}</summary>
-                        <div class="mt-2 flex flex-col gap-2">
-                            {% for checkbox in shared_form.invited_members %}
-                                <label class="flex items-center gap-2 text-sm text-ink">{{ checkbox.tag }} {{ checkbox.choice_label }}</label>
-                            {% endfor %}
-                        </div>
-                    </details>
+                    <div>
+                        <div class="mb-1 text-xs font-semibold text-muted">{% trans "Add someone not on the roster" %}</div>
+                        {{ shared_form.invited_members }}
+                    </div>
                 {% endif %}
             </div>
 

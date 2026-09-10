@@ -258,4 +258,16 @@
     window.enhanceSearchableSelect = enhance;
 
     document.querySelectorAll("select[data-searchable]").forEach(enhance);
+
+    // The mobile app's coach shell boosts same-shell navigation (hx-boost="true"
+    // on <body>, mobile/coach/base.html), which swaps in a whole new screen's
+    // markup without a real page load -- the sweep above only ever runs once, so
+    // a select that arrives via a boosted swap (e.g. navigating to the New Event
+    // screen) would otherwise never get enhanced. Harmless where htmx isn't in
+    // play at all: the event just never fires. enhance()'s own
+    // data-searchable-ready guard makes re-sweeping the whole document safe even
+    // where the swap target isn't known precisely.
+    document.body.addEventListener("htmx:afterSettle", () => {
+        document.querySelectorAll("select[data-searchable]").forEach(enhance);
+    });
 })();

@@ -32,7 +32,7 @@ from events.services.lineup import UNAVAILABLE_STATUSES, cancel_scheduled_publis
 from events.services.notifications import dispatch_notify_new_event
 from events.services.officials import needs_official_management, officials_enabled_for
 from events.services.referees import needs_referee_management
-from management.forms import EventForm, EventSeriesForm, LocationForm, NewsForm, NewsPhotoUploadForm, OpponentForm
+from management.forms import EventForm, EventSeriesForm, LocationForm, NewsForm, NewsPhotoUploadForm, OpponentForm, _location_label
 from members.models import Member
 from members.services.family import claim_label_for
 from news.models import News, NewsPhoto
@@ -83,6 +83,7 @@ class _OpponentPickerForm(forms.Form):
 def _location_picker(club, selected=None):
     picker = _LocationPickerForm(initial={"location": selected})
     picker.fields["location"].queryset = Location.objects.filter(club=club).order_by("name")
+    picker.fields["location"].label_from_instance = _location_label
     return picker
 
 
@@ -438,9 +439,14 @@ class CoachCreateEventView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
         if "club_wide" in form.fields:
             del form.fields["club_wide"]
         invited_pool, excluded_pool = self._member_pools()
-        form.fields["invited_members"].widget = forms.CheckboxSelectMultiple()
+        # Same data-searchable typeahead widget as the desktop EventForm
+        # (management.forms._AUDIENCE_WIDGETS) -- a checkbox per eligible
+        # club member doesn't scale, and searchable-select.js is already
+        # loaded on mobile (coach/base.html) and already styled by
+        # assets/mobile.css.
+        form.fields["invited_members"].widget = forms.SelectMultiple(attrs={"data-searchable": "true", "data-search-placeholder": _("Type a name to search...")})
         form.fields["invited_members"].queryset = invited_pool
-        form.fields["excluded_members"].widget = forms.CheckboxSelectMultiple()
+        form.fields["excluded_members"].widget = forms.SelectMultiple(attrs={"data-searchable": "true", "data-search-placeholder": _("Type a name to search...")})
         form.fields["excluded_members"].queryset = excluded_pool
         # location/opponent stay on the form (scope_audience_fields already
         # scoped both to this club) so a submitted value still validates and
@@ -792,7 +798,11 @@ class CoachAddPlayerView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
             pool = self._candidate_pool(season)
 
             if filter_param == "no_team":
-                pool = pool.exclude(team_memberships__season=season)
+                # Staff-only members (a coach/manager with no playing TeamMembership
+                # of their own) aren't "unassigned" in the sense this filter means --
+                # exclude them the same way TeamMembership is excluded, so they don't
+                # show up as add-as-player candidates.
+                pool = pool.exclude(team_memberships__season=season).exclude(staff_assignments__season=season)
             elif filter_param == "suggested":
                 suggested_ids = set()
                 previous_season = Season.before(self.request.club, season)
