@@ -110,22 +110,19 @@
                         </td>
                         <td class="text-right">
                             <div class="flex justify-end gap-1">
+                                {% if send.is_public %}
+                                    {% url "formbuilder:fill" send.public_token as public_path %}
+                                    {% trans "Copy link" as copy_link_label %}
+                                    {% trans "Copied" as copied_label %}
+                                    <button type="button" class="btn btn-outline btn-sm" onclick="navigator.clipboard.writeText('{{ request.scheme }}://{{ request.get_host }}{{ public_path|escapejs }}'); const l=this.querySelector('[data-copy-label]'); window.clearTimeout(this._resetTimer); l.textContent='{{ copied_label|escapejs }}'; this.classList.add('text-ok'); this._resetTimer=window.setTimeout(()=>{ l.textContent='{{ copy_link_label|escapejs }}'; this.classList.remove('text-ok'); }, 1500)">
+                                        {% lucide "copy" size=12 %} <span data-copy-label>{{ copy_link_label }}</span>
+                                    </button>
+                                {% endif %}
                                 <a class="btn btn-outline btn-sm" href="{% url 'management:formsend_update' form.pk send.pk %}">{% lucide "pencil" size=12 %} {% trans "Edit" %}</a>
                                 <a class="btn btn-outline btn-sm" href="{% url 'management:formsend_responses' form.pk send.pk %}">{% trans "Responses" %}</a>
                             </div>
                         </td>
                     </tr>
-                    {% if send.is_public %}
-                        {% url "formbuilder:fill" send.public_token as public_path %}
-                        <tr>
-                            <td colspan="5" class="!pt-0">
-                                <div class="flex items-center gap-2 rounded-md bg-subhead px-2.5 py-1.5">
-                                    {% lucide "link" size=12 class="shrink-0 text-info" %}
-                                    <input class="input h-auto flex-1 truncate border-0 bg-transparent p-0 font-mono text-xs text-muted" type="text" readonly value="{{ request.scheme }}://{{ request.get_host }}{{ public_path }}" onclick="this.select()" title="{{ request.scheme }}://{{ request.get_host }}{{ public_path }}">
-                                </div>
-                            </td>
-                        </tr>
-                    {% endif %}
                 {% empty %}
                     <tr>
                         <td colspan="5" class="text-center text-dim">{% trans "This form hasn't been sent yet." %}</td>
