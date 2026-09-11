@@ -6,7 +6,6 @@ mobile/coach_mixins.py's CoachScopeMixin for the shared scaffolding.
 """
 
 import datetime
-import re
 
 from django import forms
 from django.contrib.auth.mixins import LoginRequiredMixin
@@ -24,15 +23,15 @@ from waffle import flag_is_active
 from club.models import ClubMembership, Season
 from club.services.access import can_add_news, can_manage_evaluations, current_season
 from controlpanel.messages import notify
-from events.models import Attendance, Event, EventSeries, Lineup, LineupSelection, Location, Opponent
-from events.services import generate_occurrences
+from events.models import Attendance, Event, EventSeries, EventTask, Lineup, LineupSelection, Location, Opponent
+from events.services import detach_occurrence, generate_occurrences, propagate_series
 from events.services.attendance import member_attendance_counts, player_attendance_rankings, record_check_in
 from events.services.calendar import agenda_groups
 from events.services.lineup import UNAVAILABLE_STATUSES, cancel_scheduled_publish, publish_lineup, schedule_lineup_publish, toggle_selection
 from events.services.notifications import dispatch_notify_new_event
 from events.services.officials import needs_official_management, officials_enabled_for
 from events.services.referees import needs_referee_management
-from management.forms import EventForm, EventSeriesForm, LocationForm, NewsForm, NewsPhotoUploadForm, OpponentForm
+from management.forms import EventForm, EventSeriesForm, EventTaskForm, LocationForm, NewsForm, NewsPhotoUploadForm, OpponentForm, _location_label
 from members.models import Member
 from members.services.family import claim_label_for
 from news.models import News, NewsPhoto
@@ -83,6 +82,7 @@ class _OpponentPickerForm(forms.Form):
 def _location_picker(club, selected=None):
     picker = _LocationPickerForm(initial={"location": selected})
     picker.fields["location"].queryset = Location.objects.filter(club=club).order_by("name")
+    picker.fields["location"].label_from_instance = _location_label
     return picker
 
 
@@ -106,6 +106,14 @@ def _styled_opponent_form(data=None):
     # one later from there if it matters.
     del form.fields["logo"]
     form.fields["name"].widget.attrs["class"] = _INPUT_CLASSES
+    return form
+
+
+def _styled_task_form(data=None, instance=None):
+    form = EventTaskForm(data, instance=instance)
+    form.fields["title"].widget.attrs["class"] = _INPUT_CLASSES
+    form.fields["description"].widget.attrs["class"] = _TEXTAREA_CLASSES
+    form.fields["needed_quantity"].widget.attrs["class"] = _INPUT_CLASSES
     return form
 
 
@@ -320,7 +328,7 @@ class CoachAttendanceView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
         title = _("Attendance saved")
         body = _("%(count)d players checked in.") % {"count": checked_in}
         notify(request, f"s|{title}|{body}")
-        return HttpResponseRedirect(reverse("mobile:coach_today"))
+        return HttpResponseRedirect(reverse("mobile:coach_attendance", kwargs={"event_id": event.pk}))
 
 
 class CoachAttendanceRemindSilentView(CoachScopeMixin, LoginRequiredMixin, View):
@@ -392,10 +400,24 @@ class CoachCreateEventView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
     screen_title = _("New event")
     active_tab = "coach_today"
 
+    #: False here, True on CoachEditEventView -- passed straight through to
+    #: EventForm(editing=...), which is what actually adds score_for/
+    #: score_against/is_live to the form (management/forms.py) when relevant.
+    editing = False
+
     def get(self, request, *args, **kwargs):
         if not self.can_manage_active_team:
             return HttpResponseRedirect(reverse("mobile:coach_today"))
         return super().get(request, *args, **kwargs)
+
+    def get_event_instance(self):
+        # kind=training, not Event.kind's own model default (OTHER) -- Practice
+        # is the tile picker's first/most common option, and OTHER isn't even
+        # one of the four tiles COACH_EVENT_KINDS offers below.
+        return Event(club=self.request.club, created_by=self.me, kind=Event.EventKind.TRAINING)
+
+    def get_series_instance(self):
+        return EventSeries(club=self.request.club, kind=Event.EventKind.TRAINING)
 
     def _member_pools(self):
         season = current_season(self.request.club)
@@ -438,9 +460,14 @@ class CoachCreateEventView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
         if "club_wide" in form.fields:
             del form.fields["club_wide"]
         invited_pool, excluded_pool = self._member_pools()
-        form.fields["invited_members"].widget = forms.CheckboxSelectMultiple()
+        # Same data-searchable typeahead widget as the desktop EventForm
+        # (management.forms._AUDIENCE_WIDGETS) -- a checkbox per eligible
+        # club member doesn't scale, and searchable-select.js is already
+        # loaded on mobile (coach/base.html) and already styled by
+        # assets/mobile.css.
+        form.fields["invited_members"].widget = forms.SelectMultiple(attrs={"data-searchable": "true", "data-search-placeholder": _("Type a name to search...")})
         form.fields["invited_members"].queryset = invited_pool
-        form.fields["excluded_members"].widget = forms.CheckboxSelectMultiple()
+        form.fields["excluded_members"].widget = forms.SelectMultiple(attrs={"data-searchable": "true", "data-search-placeholder": _("Type a name to search...")})
         form.fields["excluded_members"].queryset = excluded_pool
         # location/opponent stay on the form (scope_audience_fields already
         # scoped both to this club) so a submitted value still validates and
@@ -454,11 +481,7 @@ class CoachCreateEventView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
             form.fields["title"].widget.attrs["class"] = _INPUT_CLASSES
 
     def build_event_form(self, data=None):
-        # kind=training, not Event.kind's own model default (OTHER) -- Practice
-        # is the tile picker's first/most common option, and OTHER isn't even
-        # one of the four tiles COACH_EVENT_KINDS offers below.
-        instance = Event(club=self.request.club, created_by=self.me, kind=Event.EventKind.TRAINING)
-        form = EventForm(data, club=self.request.club, user=self.request.user, editing=False, instance=instance)
+        form = EventForm(data, club=self.request.club, user=self.request.user, editing=self.editing, instance=self.get_event_instance())
         # Narrowed to the four kinds the tile picker actually offers -- social/
         # other don't get their own tile, and this keeps a tampered request from
         # setting one anyway (the desktop form still offers the full list).
@@ -472,11 +495,17 @@ class CoachCreateEventView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
         # flag isn't on for this club, same as the desktop form.
         if "max_officials" in form.fields:
             form.fields["max_officials"].widget.attrs["class"] = _INPUT_CLASSES
+        # score_for/score_against/is_live only exist when editing=True (a
+        # game/tournament that's only just being scheduled has nothing to
+        # record yet -- same reasoning EventForm.__init__ itself documents).
+        if "score_for" in form.fields:
+            form.fields["score_for"].widget.attrs["class"] = _INPUT_CLASSES
+            form.fields["score_against"].widget.attrs["class"] = _INPUT_CLASSES
+            form.fields["is_live"].widget.attrs["class"] = "h-5 w-5 shrink-0 accent-ink"
         return form
 
     def build_series_form(self, data=None):
-        instance = EventSeries(club=self.request.club, kind=Event.EventKind.TRAINING)
-        form = EventSeriesForm(data, club=self.request.club, user=self.request.user, instance=instance)
+        form = EventSeriesForm(data, club=self.request.club, user=self.request.user, instance=self.get_series_instance())
         # The raw-RRULE escape hatch is a desktop-only affordance -- the
         # friendly frequency/interval/weekdays fields below cover the common
         # weekly/monthly cases this screen is for.
@@ -547,6 +576,237 @@ class CoachCreateEventView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
         # series' occurrences aren't wired to this.
         dispatch_notify_new_event(str(event.pk))
         return HttpResponseRedirect(reverse("mobile:coach_today"))
+
+
+class CoachEditEventView(CoachCreateEventView):
+    """C4 continued (issue #18) -- edit a single Event's own fields. Reuses
+    every bit of CoachCreateEventView's form-building machinery (kind tile
+    choices, teams/audience scoping, field styling) via get_event_instance()/
+    editing=True, which is what makes EventForm add score_for/score_against/
+    is_live (management/forms.py), same as management.views.EventUpdateView.
+
+    Never touches EventSeries -- series_form only gets built here because
+    mobile/coach/event_form.html unconditionally references it (the "This
+    repeats" toggle is hidden via lock_recurring, see the template), not
+    because this screen can switch a single event into a series or back.
+    Editing a recurring series' own pattern is CoachEditEventSeriesView,
+    reached from the event detail hub instead.
+    """
+
+    screen_title = _("Edit event")
+    editing = True
+
+    def get_event_instance(self):
+        # Cached: build_event_form() and get_context_data() each call this
+        # once per request -- without caching that's two identical fetches.
+        if not hasattr(self, "_event_instance"):
+            if self.active_team is None:
+                raise Http404
+            self._event_instance = get_object_or_404(Event, pk=self.kwargs["pk"], club=self.request.club, teams=self.active_team)
+        return self._event_instance
+
+    def get(self, request, *args, **kwargs):
+        if not self.can_manage_active_team:
+            return HttpResponseRedirect(reverse("mobile:coach_today"))
+        return self.render_to_response(self.get_context_data(**kwargs))
+
+    def get_context_data(self, **kwargs):
+        return super().get_context_data(update_view=True, lock_recurring="single", event=self.get_event_instance(), **kwargs)
+
+    def post(self, request, *args, **kwargs):
+        if not self.can_manage_active_team:
+            return HttpResponseForbidden()
+
+        form = self.build_event_form(request.POST)
+        if not form.is_valid():
+            return self.render_to_response(self.get_context_data(form=form))
+
+        event = form.save()
+        notify(request, f"s|{_('Event updated')}|" + _("“%(event)s” has been updated.") % {"event": event})
+        return HttpResponseRedirect(reverse("mobile:coach_event_detail", kwargs={"pk": event.pk}))
+
+
+class CoachEditEventSeriesView(CoachCreateEventView):
+    """Edit an EventSeries' own recurrence pattern -- same form-building
+    machinery, but the ``series_form`` side of it (get_series_instance()
+    against an existing series). ``form`` (single-event fields) is still
+    built here purely because the shared template references it
+    unconditionally; this screen never renders or submits it (lock_recurring
+    hides the toggle and locks it onto the series side, see the template).
+
+    propagate_series()+generate_occurrences() on save mirror management.
+    views.EventSeriesUpdateView.form_valid exactly: push the changed
+    template to future non-detached occurrences, then fill in any further-
+    out dates the (possibly changed) pattern now implies. Occurrences that no
+    longer match a changed pattern are NOT auto-removed -- same desktop
+    reasoning, left as a manual per-occurrence cleanup.
+    """
+
+    screen_title = _("Edit series")
+
+    def get_series_instance(self):
+        if not hasattr(self, "_series_instance"):
+            if self.active_team is None:
+                raise Http404
+            self._series_instance = get_object_or_404(EventSeries, pk=self.kwargs["pk"], club=self.request.club, teams=self.active_team)
+        return self._series_instance
+
+    def get(self, request, *args, **kwargs):
+        if not self.can_manage_active_team:
+            return HttpResponseRedirect(reverse("mobile:coach_today"))
+        return self.render_to_response(self.get_context_data(**kwargs))
+
+    def get_context_data(self, **kwargs):
+        return super().get_context_data(update_view=True, lock_recurring="series", series=self.get_series_instance(), **kwargs)
+
+    def post(self, request, *args, **kwargs):
+        if not self.can_manage_active_team:
+            return HttpResponseForbidden()
+
+        series_form = self.build_series_form(request.POST)
+        if not series_form.is_valid():
+            return self.render_to_response(self.get_context_data(series_form=series_form))
+
+        series = series_form.save()
+        propagate_series(series)
+        generate_occurrences(series)
+        notify(request, f"s|{_('Series updated')}|" + _("“%(series)s” has been updated.") % {"series": series})
+        return HttpResponseRedirect(reverse("mobile:coach_today"))
+
+
+class CoachEventDetachView(CoachScopeMixin, LoginRequiredMixin, View):
+    """Stop this occurrence from being touched by future series-wide edits --
+    mirrors management.views.EventDetachView exactly. Surfaced on the event
+    detail hub whenever event.series_id and not event.detached, since
+    editing a still-attached occurrence directly (CoachEditEventView) would
+    otherwise be silently overwritten by the next CoachEditEventSeriesView
+    save."""
+
+    def post(self, request, *args, **kwargs):
+        if self.active_team is None:
+            raise Http404
+        if not self.can_manage_active_team:
+            return HttpResponseForbidden()
+
+        event = get_object_or_404(Event, pk=kwargs["pk"], club=request.club, teams=self.active_team)
+        detach_occurrence(event)
+        notify(request, f"s|{_('Detached from series')}|" + _("“%(event)s” is now edited independently and won't be touched by future series-wide changes.") % {"event": event})
+        return HttpResponseRedirect(reverse("mobile:coach_event_detail", kwargs={"pk": event.pk}))
+
+
+class CoachEventDetailView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
+    """Issue #18 -- the coach-facing event hub CoachScheduleView's own
+    docstring already points at ("rather than mobile:event_detail, the
+    Member-shell RSVP page a coach browsing their own team's schedule has no
+    use for"): series membership/detach, and full task management (add/edit/
+    delete -- mobile.views.EventTaskRespondView only ever claims/unclaims one,
+    same read-only gap this whole issue is about). Attendance/line-up stay
+    their own screens, reached from Schedule directly, same as today.
+    """
+
+    template_name = "mobile/coach/event_detail.html"
+    screen_title = _("Event")
+    active_tab = "coach_schedule"
+
+    def get_event(self):
+        if self.active_team is None:
+            raise Http404
+        return get_object_or_404(Event.objects.select_related("location", "opponent", "series"), pk=self.kwargs["pk"], club=self.request.club, teams=self.active_team)
+
+    def get_context_data(self, **kwargs):
+        event = self.get_event()
+
+        tasks = list(event.tasks.prefetch_related("claims__member").order_by("created_at"))
+        for task in tasks:
+            task.claim_labels = [claim_label_for(claim.member) for claim in task.claims.all()]
+            task.is_full = len(task.claim_labels) >= task.needed_quantity
+            task.edit_form = _styled_task_form(instance=task)
+
+        return super().get_context_data(
+            event=event,
+            tasks=tasks,
+            **kwargs,
+        )
+
+
+class CoachEventTaskCreateView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
+    """Add a task to an event -- its own screen (mobile/coach/task_form.html),
+    same shape as every other coach "add X" flow (New event, Add player, ...),
+    not an inline form that pushes the rest of the task list down underneath
+    it (issue #18 feedback on the first cut of this screen). Re-renders with
+    field errors on an invalid submission rather than management.views.
+    EventTaskCreateView's own notify-and-redirect -- a standalone screen has
+    room to show them inline; event/created_by still come from the view,
+    never the form, same as the desktop version."""
+
+    template_name = "mobile/coach/task_form.html"
+    screen_title = _("Add task")
+    active_tab = "coach_schedule"
+
+    def get_event(self):
+        if self.active_team is None:
+            raise Http404
+        return get_object_or_404(Event, pk=self.kwargs["pk"], club=self.request.club, teams=self.active_team)
+
+    def get(self, request, *args, **kwargs):
+        if not self.can_manage_active_team:
+            return HttpResponseRedirect(reverse("mobile:coach_event_detail", kwargs={"pk": self.kwargs["pk"]}))
+        return self.render_to_response(self.get_context_data(**kwargs))
+
+    def get_context_data(self, **kwargs):
+        kwargs.setdefault("task_form", _styled_task_form())
+        return super().get_context_data(event=self.get_event(), **kwargs)
+
+    def post(self, request, *args, **kwargs):
+        if not self.can_manage_active_team:
+            return HttpResponseForbidden()
+
+        event = self.get_event()
+        form = _styled_task_form(request.POST)
+        if not form.is_valid():
+            return self.render_to_response(self.get_context_data(task_form=form))
+
+        task = form.save(commit=False)
+        task.event = event
+        task.created_by = self.me
+        task.save()
+        notify(request, f"s|{_('Task added')}|" + _("“%(title)s” was added to this event.") % {"title": task.title})
+        return HttpResponseRedirect(reverse("mobile:coach_event_detail", kwargs={"pk": event.pk}))
+
+
+class CoachEventTaskUpdateView(CoachScopeMixin, LoginRequiredMixin, View):
+    def post(self, request, *args, **kwargs):
+        if self.active_team is None:
+            raise Http404
+        if not self.can_manage_active_team:
+            return HttpResponseForbidden()
+
+        event = get_object_or_404(Event, pk=kwargs["pk"], club=request.club, teams=self.active_team)
+        task = get_object_or_404(EventTask, pk=kwargs["task_pk"], event=event)
+        form = EventTaskForm(request.POST, instance=task)
+        if not form.is_valid():
+            for error in form.errors.values():
+                notify(request, f"e|{_('Could not update task')}|{' '.join(error)}")
+            return HttpResponseRedirect(reverse("mobile:coach_event_detail", kwargs={"pk": event.pk}))
+
+        form.save()
+        notify(request, f"s|{_('Task updated')}|" + _("“%(title)s” was updated.") % {"title": task.title})
+        return HttpResponseRedirect(reverse("mobile:coach_event_detail", kwargs={"pk": event.pk}))
+
+
+class CoachEventTaskDeleteView(CoachScopeMixin, LoginRequiredMixin, View):
+    def post(self, request, *args, **kwargs):
+        if self.active_team is None:
+            raise Http404
+        if not self.can_manage_active_team:
+            return HttpResponseForbidden()
+
+        event = get_object_or_404(Event, pk=kwargs["pk"], club=request.club, teams=self.active_team)
+        task = get_object_or_404(EventTask, pk=kwargs["task_pk"], event=event)
+        title = task.title
+        task.delete()
+        notify(request, f"w|{_('Task deleted')}|" + _("“%(title)s” was removed from this event.") % {"title": title})
+        return HttpResponseRedirect(reverse("mobile:coach_event_detail", kwargs={"pk": event.pk}))
 
 
 class CoachLocationCreateView(CoachScopeMixin, LoginRequiredMixin, View):
@@ -725,14 +985,14 @@ class CoachAddPlayerView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
     already on this team+season -- the same two rules TeamMembershipForm
     applies internally, just reused directly rather than through the form.
     "Suggested" is two real, computed sources unioned together: whoever was
-    on this team last season, plus whoever's on the closest younger team
-    *this* season (see _feeder_team -- a guess from team naming, since
-    neither Club nor Team carries a real age-group field to link them
-    properly). "Age eligible" from the mock still isn't built -- there's no
-    birth-date cutoff to compare against, and faking that filter would just
-    mean it silently matched nothing. A plain first/last-name search (?q=)
-    narrows the pool further, ANDed with whichever filter chip is active --
-    useful once a club's eligible-member pool outgrows a single screenful.
+    on this team last season, plus whoever's on any team that feeds into
+    this one *this* season (Team.feeds_into -- an explicit, admin-set
+    relationship, not a guess from team naming). "Age eligible" from the
+    mock still isn't built -- there's no birth-date cutoff to compare
+    against, and faking that filter would just mean it silently matched
+    nothing. A plain first/last-name search (?q=) narrows the pool further,
+    ANDed with whichever filter chip is active -- useful once a club's
+    eligible-member pool outgrows a single screenful.
     """
 
     template_name = "mobile/coach/add_player.html"
@@ -743,35 +1003,10 @@ class CoachAddPlayerView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
     #: param at all) means "All".
     FILTERS = {"suggested", "no_team"}
 
-    #: Matches a "U<number>" youth age-group marker in a team's name/short
-    #: name (e.g. "U14", "u16 boys") -- the only age-group signal available
-    #: anywhere on Team today.
-    AGE_GROUP_RE = re.compile(r"u(\d+)", re.IGNORECASE)
-
     def get(self, request, *args, **kwargs):
         if not self.can_manage_active_team:
             return HttpResponseRedirect(reverse("mobile:coach_today"))
         return super().get(request, *args, **kwargs)
-
-    def _age_group(self, team):
-        match = self.AGE_GROUP_RE.search(team.name) or self.AGE_GROUP_RE.search(team.short_name)
-        return int(match.group(1)) if match else None
-
-    def _feeder_team(self):
-        """The club's own team with the closest smaller age-group number
-        than the active team's, if either carries one -- a guess (see this
-        view's own docstring), so it silently returns None for a club that
-        doesn't name teams "U<N>"."""
-        active_age = self._age_group(self.active_team)
-        if active_age is None:
-            return None
-
-        feeder, feeder_age = None, None
-        for team in Team.objects.filter(club=self.request.club).exclude(pk=self.active_team.pk):
-            age = self._age_group(team)
-            if age is not None and age < active_age and (feeder_age is None or age > feeder_age):
-                feeder, feeder_age = team, age
-        return feeder
 
     def _candidate_pool(self, season):
         taken = TeamMembership.objects.filter(team=self.active_team, season=season).values_list("member_id", flat=True)
@@ -792,15 +1027,17 @@ class CoachAddPlayerView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
             pool = self._candidate_pool(season)
 
             if filter_param == "no_team":
-                pool = pool.exclude(team_memberships__season=season)
+                # Staff-only members (a coach/manager with no playing TeamMembership
+                # of their own) aren't "unassigned" in the sense this filter means --
+                # exclude them the same way TeamMembership is excluded, so they don't
+                # show up as add-as-player candidates.
+                pool = pool.exclude(team_memberships__season=season).exclude(staff_assignments__season=season)
             elif filter_param == "suggested":
                 suggested_ids = set()
                 previous_season = Season.before(self.request.club, season)
                 if previous_season is not None:
                     suggested_ids.update(pool.filter(team_memberships__team=self.active_team, team_memberships__season=previous_season).values_list("pk", flat=True))
-                feeder_team = self._feeder_team()
-                if feeder_team is not None:
-                    suggested_ids.update(pool.filter(team_memberships__team=feeder_team, team_memberships__season=season).values_list("pk", flat=True))
+                suggested_ids.update(pool.filter(team_memberships__team__in=self.active_team.feeder_teams.all(), team_memberships__season=season).values_list("pk", flat=True))
                 pool = pool.filter(pk__in=suggested_ids)
 
             if search_query:

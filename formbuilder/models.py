@@ -1,3 +1,5 @@
+import secrets
+
 from django.core.exceptions import ValidationError
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import models
@@ -8,6 +10,10 @@ from club.models import Season
 from members.models import Group, Member
 from rosterchief.base import ClubScopedModel, UUIDModel, unique_slugify, validate_club_scope
 from teams.models import Team
+
+
+def _generate_public_token() -> str:
+    return secrets.token_urlsafe(32)
 
 
 class Form(ClubScopedModel):
@@ -117,6 +123,21 @@ class FormSend(ClubScopedModel):
     #: This occasion's own on/off switch, independent of opens_at/closes_at --
     #: e.g. pause collection right now without touching the dates.
     is_active = models.BooleanField(_("is active?"), default=True)
+
+    #: Opt-in, off by default -- a send never becomes link-shareable by
+    #: accident. Independent of teams/groups/club_wide: a send can notify its
+    #: usual audience *and* be shared publicly at the same time, since
+    #: formbuilder.services.submission.submit_form's own audience check only
+    #: ever runs for a resolved member (formbuilder.views.PublicFormFillView
+    #: is the only place that ever looks this send up by public_token, and
+    #: only when is_public is set -- see that view's own get_send()). Actual
+    #: anonymous-submission eligibility still comes from Form.login_required,
+    #: not from this flag; is_public only controls whether a link exists.
+    is_public = models.BooleanField(_("public"), default=False, help_text=_("Anyone with the link can submit, no club login needed -- only takes effect if the form itself doesn't require sign-in."))
+    #: Same pattern as registration.models.RegistrationBatch.status_token and
+    #: mobile.models.CalendarFeedToken -- always generated (simpler than a
+    #: nullable field), only ever looked up when is_public is True.
+    public_token = models.CharField(_("public token"), max_length=64, unique=True, editable=False, default=_generate_public_token)
 
     reminder_sent_at = models.DateTimeField(
         _("reminder sent at"),

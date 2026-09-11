@@ -8,7 +8,11 @@
     (page_obj/paginator/is_paginated); renders nothing on an unpaginated page.
 
     Previous, page numbers and Next all sit in one daisyUI `.join` group so
-    they read as a single connected control. The elided_page_range filter
+    they read as a single connected control. The current page renders as a
+    solid btn-primary pill against btn-outline siblings -- same
+    selected-vs-not vocabulary as the season toggle on evaluation_stats.html
+    -- since this app's custom .btn CSS doesn't define daisyUI's btn-active.
+    The elided_page_range filter
     (management/templatetags/pagination.py) wraps Django's
     paginator.get_elided_page_range -- template dotted lookups can't take
     arguments, so a plain `paginator.get_elided_page_range(page_obj.number)`
@@ -30,9 +34,9 @@
                 {% if page_num == paginator.ELLIPSIS %}
                     <span class="btn btn-sm join-item btn-disabled">{{ page_num }}</span>
                 {% elif page_num == page_obj.number %}
-                    <span class="btn btn-sm join-item btn-active">{{ page_num }}</span>
+                    <span class="btn btn-sm join-item btn-primary">{{ page_num }}</span>
                 {% else %}
-                    <a href="{% querystring page=page_num %}" class="btn btn-sm join-item">{{ page_num }}</a>
+                    <a href="{% querystring page=page_num %}" class="btn btn-sm join-item btn-outline">{{ page_num }}</a>
                 {% endif %}
             {% endfor %}
             {% if page_obj.has_next %}

@@ -1,0 +1,39 @@
+{% extends "mobile/coach/base.html" %}
+{% load i18n %}
+
+{% comment %}
+    Issue #18 feedback: "Add task" is its own screen -- matching every other
+    coach "add X" flow (New event, Add player, ...) -- rather than an inline
+    form that pushed the rest of the task list down underneath it.
+{% endcomment %}
+
+{% block content %}
+    <div class="-mx-4 -mt-5 flex items-center gap-3 border-b border-line bg-white px-4 py-3">
+        <a class="font-display text-sm font-extrabold tracking-wide text-muted uppercase" href="{% url "mobile:coach_event_detail" event.pk %}">{% trans "Cancel" %}</a>
+        <span class="min-w-0 flex-1 truncate text-center font-display text-lg font-extrabold text-ink uppercase">{% trans "Add task" %}</span>
+        <button class="font-display text-sm font-extrabold tracking-wide text-club uppercase" type="submit" form="coach-task-form">{% trans "Save" %}</button>
+    </div>
+
+    {% for error in task_form.non_field_errors %}
+        <div class="m-card border border-danger-border bg-danger-bg p-3 text-sm text-club-dark"><p>{{ error }}</p></div>
+    {% endfor %}
+
+    <form id="coach-task-form" class="m-card flex flex-col gap-3 p-4" method="post" action="{% url "mobile:coach_event_task_create" event.pk %}" hx-boost="false">
+        {% csrf_token %}
+        <div>
+            <label class="mb-1 block text-xs font-semibold text-muted" for="{{ task_form.title.id_for_label }}">{% trans "Title" %}</label>
+            {{ task_form.title }}
+            {% for error in task_form.title.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
+        </div>
+        <div>
+            <label class="mb-1 block text-xs font-semibold text-muted" for="{{ task_form.description.id_for_label }}">{% trans "Description" %}</label>
+            {{ task_form.description }}
+            {% for error in task_form.description.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
+        </div>
+        <div>
+            <label class="mb-1 block text-xs font-semibold text-muted" for="{{ task_form.needed_quantity.id_for_label }}">{% trans "Needed" %}</label>
+            {{ task_form.needed_quantity }}
+            {% for error in task_form.needed_quantity.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
+        </div>
+    </form>
+{% endblock content %}

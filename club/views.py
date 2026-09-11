@@ -25,15 +25,26 @@ def root(request):
       re-entered and can make the real call. A desktop visitor without management
       access falls back to the mobile PWA too -- there's nothing else on desktop for
       them to land on.
+
+    Since this is the ordinary way of reaching a club subdomain on desktop at all,
+    the anonymous branch also sets session["management_context"] before bouncing to
+    login -- same flag ClubStaffRequiredMixin.dispatch sets for a real /manage/
+    visit (club/mixins.py), read by club/context_processors.py's branding() to skin
+    login, MFA, passkeys and everything else allauth chains next. If it turns out
+    there's no management access after all, the flag is popped again right here
+    before falling back to the mobile app, so that guess doesn't outlive this
+    request and stick the management skin onto a plain member's session.
     """
     if request.club is None:
         return redirect("controlpanel:dashboard")
 
     if not is_mobile_or_tablet(request):
         if not request.user.is_authenticated:
+            request.session["management_context"] = True
             return redirect_to_login(request.get_full_path())
         if has_management_access(request.user, request.club):
             return redirect("management:home")
+        request.session.pop("management_context", None)
 
     return redirect("mobile:home")
 

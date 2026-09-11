@@ -1,0 +1,22 @@
+{% load i18n %}
+{% comment %}
+    Segmented switcher across a single event's three coach screens: Details
+    (CoachEventDetailView -- info + tasks), Attendance (CoachAttendanceView)
+    and, for a game/tournament, Line-up (CoachLineupView). Each stays its own
+    view/model (event_detail's tasks, Attendance, Lineup/LineupSelection all
+    have their own POST handling) but this makes them read as tabs of one
+    screen rather than three disconnected pages -- feedback after issue #18
+    shipped. Reuses .role-switcher/-item/-item-active-ice, the same
+    dark-header segmented-pill component coach/base.html's own Member/
+    Manager switcher uses, rather than inventing a second tab-bar look.
+    active_screen: "details", "attendance" or "lineup". The Line-up tab
+    itself decides whether it applies (event.kind), not each include site --
+    so every screen can include this unconditionally.
+{% endcomment %}
+<div class="role-switcher">
+    <a class="role-switcher-item {% if active_screen == "details" %}role-switcher-item-active-ice{% endif %}" href="{% url "mobile:coach_event_detail" event.pk %}">{% trans "Details" %}</a>
+    <a class="role-switcher-item {% if active_screen == "attendance" %}role-switcher-item-active-ice{% endif %}" href="{% url "mobile:coach_attendance" event.pk %}">{% trans "Attendance" %}</a>
+    {% if event.kind == "game" or event.kind == "tournament" %}
+        <a class="role-switcher-item {% if active_screen == "lineup" %}role-switcher-item-active-ice{% endif %}" href="{% url "mobile:coach_lineup" event.pk %}">{% trans "Line-up" %}</a>
+    {% endif %}
+</div>

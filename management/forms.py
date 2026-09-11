@@ -42,12 +42,17 @@ class MemberForm(forms.ModelForm):
 class TeamForm(forms.ModelForm):
     class Meta:
         model = Team
-        fields = ["name", "short_name", "referee_management", "pool"]
+        fields = ["name", "short_name", "referee_management", "pool", "age_min", "age_max", "feeds_into"]
 
     def __init__(self, *args, club=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields["pool"].queryset = NumberPool.objects.filter(club=club)
         self.fields["pool"].empty_label = _("— none —")
+        feeds_into_queryset = Team.objects.filter(club=club)
+        if self.instance.pk:
+            feeds_into_queryset = feeds_into_queryset.exclude(pk=self.instance.pk)
+        self.fields["feeds_into"].queryset = feeds_into_queryset
+        self.fields["feeds_into"].empty_label = _("— none —")
 
 
 class NumberReservationForm(forms.ModelForm):
@@ -1928,6 +1933,10 @@ class FormSendAudienceFormMixin:
     def clean_audience_requires_a_claim_for_non_admins(self, cleaned):
         if is_club_admin(self.user, self.club):
             return
+        # A public send doesn't need a claimed team/group audience to
+        # justify itself -- it isn't addressed to anyone in particular.
+        if cleaned.get("is_public"):
+            return
         teams = cleaned.get("teams")
         groups = cleaned.get("groups")
         if not (teams is not None and teams.exists()) and not (groups is not None and groups.exists()):
@@ -1945,7 +1954,7 @@ class FormSendAudienceFormMixin:
 class FormSendForm(FormSendAudienceFormMixin, forms.ModelForm):
     class Meta:
         model = FormSend
-        fields = ["teams", "groups", "club_wide", "invited_members", "excluded_members", "opens_at", "closes_at", "max_submissions_per_user", "is_active"]
+        fields = ["teams", "groups", "club_wide", "invited_members", "excluded_members", "opens_at", "closes_at", "max_submissions_per_user", "is_active", "is_public"]
         widgets = {
             "opens_at": forms.DateTimeInput(attrs={"type": "datetime-local"}),
             "closes_at": forms.DateTimeInput(attrs={"type": "datetime-local"}),

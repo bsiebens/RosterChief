@@ -1411,6 +1411,58 @@ class ManagementBrandingTests(TestCase):
 
         self.assertTemplateUsed(response, "management/_auth_base.html")
 
+    def test_the_login_screen_gets_the_management_skin_when_reached_via_the_desktop_root_redirect(self):
+        # club/views.py's root() bounces an anonymous desktop visitor to login
+        # (RootViewTests covers the redirect itself) and sets management_context on
+        # the way there -- this is the ordinary way of reaching a club subdomain on
+        # desktop at all, so it should never show the old public-site chrome.
+        root_response = self.client.get("/", HTTP_HOST="ajax-united.rosterchief.app", HTTP_USER_AGENT=RootViewTests.DESKTOP_UA)
+
+        response = self.client.get(root_response.get("Location"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertTemplateUsed(response, "management/_auth_base.html")
+        self.assertContains(response, "Ajax United")
+
+    def test_the_mfa_screen_also_gets_the_management_skin_after_the_desktop_root_redirect(self):
+        # The flag set by root() must survive past the password form itself: MFA
+        # (and whatever allauth chains after it -- passkeys, recovery codes) is a
+        # *different* path under /accounts/, reached only via a redirect chain, not
+        # by revisiting root().
+        self.client.get("/", HTTP_HOST="ajax-united.rosterchief.app", HTTP_USER_AGENT=RootViewTests.DESKTOP_UA)
+
+        response = self.client.post(f"{reverse('account_login')}?next=/", {"login": "staff@example.com", "password": "pw-secret-123"}, HTTP_HOST="ajax-united.rosterchief.app")
+        self.assertRedirects(response, reverse("mfa_authenticate"), fetch_redirect_response=False)
+
+        mfa_response = self.client.get(reverse("mfa_authenticate"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertTemplateUsed(mfa_response, "management/_auth_base.html")
+
+    def test_a_bookmarked_login_screen_stays_club_branded(self):
+        # Only actually going through root() sets the flag -- a login link/bookmark
+        # hit directly (allauth's own login redirect, an emailed link, ...) is still
+        # an ambiguous case and keeps the old default.
+        response = self.client.get(reverse("account_login"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertTemplateUsed(response, "_club_base.html")
+        self.assertTemplateNotUsed(response, "management/_auth_base.html")
+
+    def test_a_member_without_management_access_is_not_left_management_branded(self):
+        # root() guesses management for any anonymous desktop visitor, but corrects
+        # itself once it knows better: a plain member who signs in from that same
+        # screen and turns out to have no management access must not be left with
+        # the management skin stuck on their later /accounts/ screens.
+        member_user = get_user_model().objects.create_user(email="member-desktop@example.com", password="pw-secret-123")
+        Member.objects.create(user=member_user, first_name="Mo", last_name="Member")
+
+        self.client.get("/", HTTP_HOST="ajax-united.rosterchief.app", HTTP_USER_AGENT=RootViewTests.DESKTOP_UA)
+        self.client.force_login(member_user)
+        self.client.get("/", HTTP_HOST="ajax-united.rosterchief.app", HTTP_USER_AGENT=RootViewTests.DESKTOP_UA)
+
+        response = self.client.get(reverse("account_logout"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertTemplateUsed(response, "_club_base.html")
+        self.assertTemplateNotUsed(response, "management/_auth_base.html")
+
 
 @override_settings(
     ROSTERCHIEF_BASE_DOMAIN="rosterchief.app",
@@ -1447,6 +1499,32 @@ class MobileBrandingTests(TestCase):
 
         self.assertTemplateUsed(response, "mobile/_auth_base.html")
         self.assertContains(response, "Ajax United")
+
+    def test_the_login_screen_carries_the_full_app_chrome_not_a_bare_card(self):
+        # Issue #16: mobile/_auth_base.html now carries the same header and
+        # bottom tab-bar as mobile/base.html's own pages (duplicated, not
+        # {% extends %}-ed -- see that file's own comment for why a real
+        # extends hit a block-name collision with allauth's own contract),
+        # not just a crest and a "Back to the app" link.
+        self.client.get(reverse("mobile:home"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        response = self.client.get(reverse("account_login"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertTemplateUsed(response, "mobile/_auth_base.html")
+        self.assertContains(response, 'class="tab-bar sticky bottom-0 z-20"')
+        self.assertContains(response, 'class="app-header sticky top-0 z-20"')
+
+    def test_the_login_form_itself_stays_unboosted_inside_the_boosted_shell(self):
+        # <body> is hx-boost="true" now, for the header/tab-bar's own real
+        # navigation -- but the allauth-rendered form must opt back out, same
+        # "a real navigation for a write action is a fine trade" reasoning as
+        # mobile/_hero_rsvp.html's own RSVP forms.
+        self.client.get(reverse("mobile:home"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        response = self.client.get(reverse("account_login"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, 'hx-boost="true"')
+        self.assertContains(response, 'hx-boost="false"')
 
 
 @override_settings(

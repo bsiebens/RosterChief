@@ -51,6 +51,55 @@ class TeamModelTests(TeamsTestCase):
     def test_referee_management_defaults_to_club(self):
         self.assertEqual(self.team.referee_management, Team.RefereeManagement.CLUB)
 
+    def test_age_group_label_is_blank_with_no_range_set(self):
+        self.assertEqual(self.team.age_group_label, "")
+
+    def test_age_group_label_for_a_single_age(self):
+        self.team.age_min = 14
+        self.team.age_max = 14
+
+        self.assertEqual(self.team.age_group_label, "U14")
+
+    def test_age_group_label_for_a_range(self):
+        self.team.age_min = 13
+        self.team.age_max = 14
+
+        self.assertEqual(self.team.age_group_label, "U13-U14")
+
+    def test_age_max_must_not_be_below_age_min(self):
+        self.team.age_min = 14
+        self.team.age_max = 13
+
+        with self.assertRaises(ValidationError):
+            self.team.clean()
+
+    def test_a_team_can_feed_into_another(self):
+        older_team = Team.objects.create(club=self.club, name="U14", short_name="U14")
+        younger_team = Team.objects.create(club=self.club, name="U13", short_name="U13", feeds_into=older_team)
+
+        self.assertIn(younger_team, older_team.feeder_teams.all())
+
+    def test_several_teams_can_feed_into_the_same_team(self):
+        older_team = Team.objects.create(club=self.club, name="U14", short_name="U14")
+        feeder_a = Team.objects.create(club=self.club, name="U13 A", short_name="U13A", feeds_into=older_team)
+        feeder_b = Team.objects.create(club=self.club, name="U13 B", short_name="U13B", feeds_into=older_team)
+
+        self.assertCountEqual(older_team.feeder_teams.all(), [feeder_a, feeder_b])
+
+    def test_a_team_cannot_feed_into_itself(self):
+        self.team.feeds_into_id = self.team.pk
+
+        with self.assertRaises(ValidationError):
+            self.team.clean()
+
+    def test_feeds_into_must_be_in_the_same_club(self):
+        other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
+        other_team = Team.objects.create(club=other_club, name="Rival U14", short_name="RU14")
+        self.team.feeds_into = other_team
+
+        with self.assertRaises(ValidationError):
+            self.team.clean()
+
 
 class PositionModelTests(TeamsTestCase):
     def test_str_returns_name(self):

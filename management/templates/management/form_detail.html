@@ -101,12 +101,26 @@
                         </td>
                         <td class="font-mono text-xs tabular-nums">{{ send.submission_count }}</td>
                         <td>
-                            <span class="badge badge-sm {% if send.is_active %}badge-success{% else %}badge-neutral{% endif %}">
-                                {% if send.is_active %}{% trans "Open" %}{% else %}{% trans "Closed" %}{% endif %}
-                            </span>
+                            <div class="flex flex-wrap items-center gap-1">
+                                <span class="badge badge-sm {% if send.is_active %}badge-success{% else %}badge-neutral{% endif %}">
+                                    {% if send.is_active %}{% trans "Open" %}{% else %}{% trans "Closed" %}{% endif %}
+                                </span>
+                                {% if send.is_public %}<span class="badge badge-sm badge-info" title="{% trans "Has a public, no-login link -- see Edit." %}">{% lucide "link" size=11 %} {% trans "Public" %}</span>{% endif %}
+                            </div>
                         </td>
                         <td class="text-right">
-                            <a class="btn btn-outline btn-sm" href="{% url 'management:formsend_responses' form.pk send.pk %}">{% trans "Responses" %}</a>
+                            <div class="flex justify-end gap-1">
+                                {% if send.is_public %}
+                                    {% url "formbuilder:fill" send.public_token as public_path %}
+                                    {% trans "Copy link" as copy_link_label %}
+                                    {% trans "Copied" as copied_label %}
+                                    <button type="button" class="btn btn-outline btn-sm" onclick="navigator.clipboard.writeText('{{ request.scheme }}://{{ request.get_host }}{{ public_path|escapejs }}'); const l=this.querySelector('[data-copy-label]'); window.clearTimeout(this._resetTimer); l.textContent='{{ copied_label|escapejs }}'; this.classList.add('text-ok'); this._resetTimer=window.setTimeout(()=>{ l.textContent='{{ copy_link_label|escapejs }}'; this.classList.remove('text-ok'); }, 1500)">
+                                        {% lucide "copy" size=12 %} <span data-copy-label>{{ copy_link_label }}</span>
+                                    </button>
+                                {% endif %}
+                                <a class="btn btn-outline btn-sm" href="{% url 'management:formsend_update' form.pk send.pk %}">{% lucide "pencil" size=12 %} {% trans "Edit" %}</a>
+                                <a class="btn btn-outline btn-sm" href="{% url 'management:formsend_responses' form.pk send.pk %}">{% trans "Responses" %}</a>
+                            </div>
                         </td>
                     </tr>
                 {% empty %}
