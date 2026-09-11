@@ -1,22 +1,19 @@
 {% load i18n lucide %}
-<div class="flex items-center gap-2 p-3.5">
-    <a class="flex min-w-0 flex-1 items-center gap-3" href="{% if event.kind == "game" or event.kind == "tournament" %}{% url "mobile:coach_lineup" event.pk %}{% else %}{% url "mobile:coach_attendance" event.pk %}{% endif %}">
-        <div class="w-9.5 shrink-0 text-center">
-            <div class="font-mono text-[10px] tracking-wide text-muted uppercase">{{ event.start|date:"D" }}</div>
-            <div class="font-display text-2xl leading-none font-extrabold text-ink">{{ event.start|date:"d" }}</div>
+{# Whole row opens the event hub -- Details/Attendance/Line-up are one tap apart from
+   there via _event_tabs.html, so this no longer needs its own separate gear-icon
+   target the way it did before that tab switcher existed. #}
+<a class="flex items-center gap-3 p-3.5" href="{% url "mobile:coach_event_detail" event.pk %}">
+    <div class="w-9.5 shrink-0 text-center">
+        <div class="font-mono text-[10px] tracking-wide text-muted uppercase">{{ event.start|date:"D" }}</div>
+        <div class="font-display text-2xl leading-none font-extrabold text-ink">{{ event.start|date:"d" }}</div>
+    </div>
+    <div class="w-[3px] shrink-0 self-stretch rounded-full {% if event.kind == "game" %}bg-club{% elif event.kind == "training" %}bg-info{% else %}bg-warn{% endif %}"></div>
+    <div class="min-w-0 flex-1">
+        <div class="flex items-center gap-1 text-sm font-semibold text-ink">
+            {% if event.is_friendly %}<span class="shrink-0" title="{% trans 'Friendly' %}" aria-label="{% trans 'Friendly' %}">{% lucide "handshake" size=13 stroke_width=2.4 class="text-dim" %}</span>{% endif %}
+            <span class="truncate">{{ event.title }}</span>
         </div>
-        <div class="w-[3px] shrink-0 self-stretch rounded-full {% if event.kind == "game" %}bg-club{% elif event.kind == "training" %}bg-info{% else %}bg-warn{% endif %}"></div>
-        <div class="min-w-0 flex-1">
-            <div class="flex items-center gap-1 text-sm font-semibold text-ink">
-                {% if event.is_friendly %}<span class="shrink-0" title="{% trans 'Friendly' %}" aria-label="{% trans 'Friendly' %}">{% lucide "handshake" size=13 stroke_width=2.4 class="text-dim" %}</span>{% endif %}
-                <span class="truncate">{{ event.title }}</span>
-            </div>
-            <div class="truncate text-xs text-muted">{{ event.start|date:"H:i" }}{% if event.location %} &middot; {{ event.location.name }}{% endif %}</div>
-        </div>
-        <span class="pill {% if event.kind == "game" %}pill-danger{% elif event.kind == "training" %}pill-info{% else %}pill-neutral{% endif %} shrink-0">{{ event.get_kind_display }}</span>
-    </a>
-    {# Edit/tasks live on the hub (issue #18), one step further than the quick-action link above -- kept as a small separate target rather than nested inside it (an <a> can't nest another <a>). #}
-    <a class="flex h-9 w-9 shrink-0 items-center justify-center text-dim" href="{% url "mobile:coach_event_detail" event.pk %}" aria-label="{% trans "Manage event" %}">
-        {% lucide "settings" size=16 %}
-    </a>
-</div>
+        <div class="truncate text-xs text-muted">{{ event.start|date:"H:i" }}{% if event.location %} &middot; {{ event.location.name }}{% endif %}</div>
+    </div>
+    <span class="pill {% if event.kind == "game" %}pill-danger{% elif event.kind == "training" %}pill-info{% else %}pill-neutral{% endif %} shrink-0">{{ event.get_kind_display }}</span>
+</a>
