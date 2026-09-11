@@ -113,7 +113,7 @@ def _styled_task_form(data=None, instance=None):
     form = EventTaskForm(data, instance=instance)
     form.fields["title"].widget.attrs["class"] = _INPUT_CLASSES
     form.fields["description"].widget.attrs["class"] = _TEXTAREA_CLASSES
-    form.fields["needed_quantity"].widget.attrs["class"] = "h-9 w-16 rounded-lg border border-stroke bg-paper px-2 text-center text-[15px] text-ink focus:border-ink focus:outline-none"
+    form.fields["needed_quantity"].widget.attrs["class"] = _INPUT_CLASSES
     return form
 
 
