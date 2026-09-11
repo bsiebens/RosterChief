@@ -104,6 +104,10 @@ INSTALLED_APPS = [
 WAFFLE_FLAG_MODEL = "features.Flag"
 
 MIDDLEWARE = [
+    # First, so total_ms below covers every other middleware's own cost too, not just
+    # the view. A no-op passthrough unless PERFORMANCE_LOGGING_ENABLED -- see
+    # rosterchief/perf_logging.py's own docstring.
+    "rosterchief.middleware.PerformanceLoggingMiddleware",
     "django.middleware.security.SecurityMiddleware",
     # Directly after SecurityMiddleware, per WhiteNoise's contract. It serves the collected
     # static files from the app itself, so no shared volume or CDN is needed to add a second
@@ -251,6 +255,17 @@ DATABASES = {
 # a page like the control panel dashboard that fires 15-20+ queries pays that setup cost
 # on each one. Harmless for the SQLite dev default (no real connection to persist).
 DATABASES["default"]["CONN_MAX_AGE"] = config("DJANGO_DB_CONN_MAX_AGE", default=60, cast=int)
+
+
+# Request-level performance tracing (rosterchief/perf_logging.py, rosterchief/middleware.py)
+#
+# Off by default -- not meant to run permanently, just flipped on for a deployment while
+# diagnosing a genuinely slow page (no django-debug-toolbar in production), then off again.
+# THRESHOLD only logs requests slower than this; SLOW_QUERIES caps how many individual
+# query lines a slow request logs (the slowest ones, not every query it ran).
+PERFORMANCE_LOGGING_ENABLED = config("DJANGO_PERFORMANCE_LOGGING", default=False, cast=bool)
+PERFORMANCE_LOGGING_THRESHOLD_MS = config("DJANGO_PERFORMANCE_LOGGING_THRESHOLD_MS", default=300, cast=int)
+PERFORMANCE_LOGGING_SLOW_QUERIES = config("DJANGO_PERFORMANCE_LOGGING_SLOW_QUERIES", default=5, cast=int)
 
 
 # Password validation
