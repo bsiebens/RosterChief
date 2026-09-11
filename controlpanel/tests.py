@@ -619,6 +619,32 @@ class StatisticsTests(TestCase):
         self.assertEqual(club.team_count, 1)
         self.assertEqual(club.admin_count, 0)
 
+    def test_totals_stay_correct_with_several_rows_per_relation(self):
+        # A single row per relation (the test above) leaves each count essentially
+        # untested at any real scale. This isn't a regression test for the 114s-hang
+        # bug clubs_with_totals's own docstring describes -- distinct=True gets the
+        # right number back either way, a multi-join annotate() and this
+        # subquery-per-count approach just differ in how much work Postgres does to
+        # get there, which isn't something a row-count assertion can see. It does
+        # confirm the subquery rewrite didn't accidentally change what gets counted.
+        for i in range(5):
+            member = Member.objects.create(first_name=f"Member{i}", last_name="Test")
+            ClubMembership.objects.create(club=self.club, member=member, season=self.season, kind=ClubMembership.Kind.MEMBER)
+        for i in range(4):
+            Team.objects.create(club=self.club, name=f"Team {i}", short_name=f"T{i}")
+        for i in range(3):
+            Event.objects.create(club=self.club, title=f"Event {i}", kind=Event.EventKind.TRAINING, start=timezone.now())
+        for i in range(2):
+            admin_member = Member.objects.create(first_name=f"Admin{i}", last_name="Test", user=get_user_model().objects.create_user(email=f"admin{i}@example.com", password="pw-secret-123"))
+            ClubRole.objects.create(club=self.club, member=admin_member, role=ClubRole.Roles.ADMIN)
+
+        club = clubs_with_totals().get(pk=self.club.pk)
+
+        self.assertEqual(club.member_count, 5)
+        self.assertEqual(club.team_count, 4)
+        self.assertEqual(club.event_count, 3)
+        self.assertEqual(club.admin_count, 2)
+
     def test_club_statistics_count_members_teams_and_money(self):
         ClubMembership.objects.create(club=self.club, member=self.member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
         team = Team.objects.create(club=self.club, name="First", short_name="1st")

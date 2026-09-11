@@ -45,16 +45,28 @@ MONTHS_OF_HISTORY = 12
 
 
 def clubs_with_totals(queryset=None):
-    """Clubs annotated with headline counts (one query, no N+1)."""
+    """Clubs annotated with headline counts.
+
+    One independent subquery per count (see ``_subquery``'s own docstring), not a
+    single annotate() with four Count(..., distinct=True) across four different
+    relations. distinct=True still gets the final numbers right either way -- this
+    isn't a correctness bug -- but getting there means joining clubmemberships,
+    teams, events and clubroles together first and only *then* collapsing, so
+    Postgres builds and discards a join of (memberships x teams x events x admins)
+    intermediate rows before it ever gets to count anything. Measured hanging 114s
+    in production for a club with enough history for that product to cost real
+    time -- same one-subquery-per-count pattern clubs_with_health() already uses
+    below.
+    """
     clubs = Club.objects.all() if queryset is None else queryset
     return clubs.annotate(
         # Members only: a guardian is attached to the club as a parent of a member,
         # not as one, so counting them would overstate every club's size (and the
         # onboarding funnel's "with members" step).
-        member_count=Count("clubmemberships__member", filter=Q(clubmemberships__kind=ClubMembership.Kind.MEMBER), distinct=True),
-        team_count=Count("teams", distinct=True),
-        event_count=Count("events", distinct=True),
-        admin_count=Count("clubroles", filter=Q(clubroles__role=ClubRole.Roles.ADMIN), distinct=True),
+        member_count=_subquery(ClubMembership.objects.filter(kind=ClubMembership.Kind.MEMBER), Count("member", distinct=True), IntegerField()),
+        team_count=_subquery(Team.objects.all(), Count("pk"), IntegerField()),
+        event_count=_subquery(Event.objects.all(), Count("pk"), IntegerField()),
+        admin_count=_subquery(ClubRole.objects.filter(role=ClubRole.Roles.ADMIN), Count("pk"), IntegerField()),
     )
 
 
