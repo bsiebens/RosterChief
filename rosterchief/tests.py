@@ -5,6 +5,7 @@ import requests
 from django.core import mail as django_mail
 from django.core.cache import cache
 from django.core.mail import EmailMessage, EmailMultiAlternatives
+from django.db import connection
 from django.db.utils import OperationalError
 from django.test import SimpleTestCase, TestCase, override_settings
 from django.urls import Resolver404, clear_url_caches, resolve, reverse
@@ -240,3 +241,123 @@ class ResendEmailBackendTests(SimpleTestCase):
 
         self.assertEqual(sent, 0)
         post.assert_not_called()
+
+
+class PerformanceLoggingMiddlewareTests(SimpleTestCase):
+    """rosterchief/middleware.py + rosterchief/perf_logging.py -- opt-in request
+    tracing built to diagnose the control panel dashboard's slow loads without
+    installing django-debug-toolbar in production."""
+
+    databases = {"default"}
+
+    @override_settings(PERFORMANCE_LOGGING_ENABLED=False)
+    def test_disabled_by_default_logs_nothing(self):
+        with self.assertNoLogs("rosterchief.performance", level="WARNING"):
+            self.client.get(reverse("healthz"))
+
+    @override_settings(PERFORMANCE_LOGGING_ENABLED=True, PERFORMANCE_LOGGING_THRESHOLD_MS=0)
+    def test_enabled_and_over_threshold_logs_a_slow_request(self):
+        with self.assertLogs("rosterchief.performance", level="WARNING") as captured:
+            self.client.get(reverse("healthz"))
+
+        self.assertIn("slow_request", captured.output[0])
+        self.assertIn("path=/healthz", captured.output[0])
+        self.assertIn("db_queries=", captured.output[0])
+
+    @override_settings(PERFORMANCE_LOGGING_ENABLED=True, PERFORMANCE_LOGGING_THRESHOLD_MS=10_000)
+    def test_under_threshold_logs_nothing(self):
+        with self.assertNoLogs("rosterchief.performance", level="WARNING"):
+            self.client.get(reverse("healthz"))
+
+
+class PerfLoggingQueryTrackingTests(TestCase):
+    """query_execute_wrapper + start_tracking/stop_tracking, exercised directly
+    rather than through a full request -- see PerformanceLoggingMiddlewareTests
+    for the request-level behaviour."""
+
+    def test_a_no_op_outside_a_tracked_block(self):
+        from django.contrib.auth import get_user_model
+
+        from .perf_logging import query_execute_wrapper, stop_tracking
+
+        with connection.execute_wrapper(query_execute_wrapper):
+            get_user_model().objects.count()
+
+        # Nothing was tracking (start_tracking() was never called), so this must
+        # not have accumulated anything to leak into a later, real request.
+        queries, template_ms = stop_tracking()
+        self.assertEqual(queries, [])
+        self.assertEqual(template_ms, 0.0)
+
+    def test_records_each_query_inside_a_tracked_block(self):
+        from django.contrib.auth import get_user_model
+
+        from .perf_logging import query_execute_wrapper, start_tracking, stop_tracking
+
+        start_tracking()
+        with connection.execute_wrapper(query_execute_wrapper):
+            get_user_model().objects.count()
+            get_user_model().objects.count()
+        queries, _template_ms = stop_tracking()
+
+        self.assertEqual(len(queries), 2)
+        for elapsed, sql in queries:
+            self.assertGreaterEqual(elapsed, 0)
+            self.assertIn("SELECT", sql.upper())
+
+
+class PerfLoggingTemplateTimingTests(SimpleTestCase):
+    """Template.render is patched once, at import time, only when
+    PERFORMANCE_LOGGING_ENABLED -- these call the patched function directly rather
+    than depending on import-time settings, since that patch either did or didn't
+    already happen before the test suite started."""
+
+    def test_a_top_level_render_adds_to_the_total(self):
+        from django.template import Context
+        from django.template import Template as DjangoTemplate
+
+        from .perf_logging import _timed_template_render, start_tracking, stop_tracking
+
+        template = DjangoTemplate("hello {{ name }}")
+
+        start_tracking()
+        _timed_template_render(template, Context({"name": "one"}))
+        _queries, template_ms = stop_tracking()
+
+        self.assertGreater(template_ms, 0)
+
+    def test_a_nested_render_does_not_add_to_the_total(self):
+        # Simulates being called from inside an outer Template.render (an
+        # {% include %}/{% extends %}'d template's own render() call nests inside
+        # its parent's) -- depth already > 0 on entry, same as it would be there.
+        # The outer call's own elapsed time already covers this one; counting both
+        # would double-count every nested template.
+        from django.template import Context
+        from django.template import Template as DjangoTemplate
+
+        from .perf_logging import _state, _timed_template_render, start_tracking, stop_tracking
+
+        template = DjangoTemplate("hello {{ name }}")
+
+        start_tracking()
+        _state.template_depth = 1
+        _timed_template_render(template, Context({"name": "inner"}))
+        _queries, template_ms = stop_tracking()
+
+        self.assertEqual(template_ms, 0.0)
+
+    def test_depth_returns_to_zero_after_a_top_level_render(self):
+        from django.template import Context
+        from django.template import Template as DjangoTemplate
+
+        from .perf_logging import _state, _timed_template_render, start_tracking
+
+        template = DjangoTemplate("hello {{ name }}")
+
+        start_tracking()
+        _timed_template_render(template, Context({"name": "one"}))
+
+        # Checked before stop_tracking() (which would reset it to 0 regardless) --
+        # a leaked depth counter here would corrupt every later render in the same
+        # request, silently dropping or double-counting its time.
+        self.assertEqual(_state.template_depth, 0)
