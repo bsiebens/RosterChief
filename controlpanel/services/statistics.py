@@ -381,20 +381,28 @@ def signup_split(club=None, months=MONTHS_OF_HISTORY):
     club's very first signup as a renewal.
 
     Each member's earliest season is resolved once up front rather than per row: the same
-    question asked inside a loop is one query per membership.
+    question asked inside a loop is one query per membership. That lookup is scoped to
+    only the members who actually signed up within the window below -- their true earliest
+    season can predate the window, so it still needs its own unbounded-by-date query, but
+    keyed on member_id__in it stays a small, indexed lookup instead of scanning the club's
+    entire membership history (every season, every member) on every call.
     """
     start = (timezone.now() - relativedelta(months=months)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
     memberships = ClubMembership.objects.filter(kind=ClubMembership.Kind.MEMBER) if club is None else ClubMembership.objects.filter(club=club, kind=ClubMembership.Kind.MEMBER)
 
+    windowed = list(memberships.filter(signed_up_at__isnull=False, signed_up_at__gte=start).values_list("club_id", "member_id", "season__start_date", "signed_up_at"))
+    member_ids = {member_id for _club_id, member_id, _season_start, _signed_up_at in windowed}
+
     first_season = {}
-    for club_id, member_id, season_start in memberships.values_list("club_id", "member_id", "season__start_date"):
-        key = (club_id, member_id)
-        if key not in first_season or season_start < first_season[key]:
-            first_season[key] = season_start
+    if member_ids:
+        for club_id, member_id, season_start in memberships.filter(member_id__in=member_ids).values_list("club_id", "member_id", "season__start_date"):
+            key = (club_id, member_id)
+            if key not in first_season or season_start < first_season[key]:
+                first_season[key] = season_start
 
     counts = defaultdict(lambda: {"new": 0, "returning": 0})
-    for club_id, member_id, season_start, signed_up_at in memberships.filter(signed_up_at__isnull=False, signed_up_at__gte=start).values_list("club_id", "member_id", "season__start_date", "signed_up_at"):
+    for club_id, member_id, season_start, signed_up_at in windowed:
         kind = "new" if season_start == first_season[(club_id, member_id)] else "returning"
         counts[signed_up_at.strftime("%Y-%m")][kind] += 1
 
@@ -432,18 +440,27 @@ def unrostered_members(club, season):
 
 def fee_aging(club):
     """Unpaid orders bucketed by age. "€2,400 overdue past 60 days" drives a phone call;
-    "€2,400 outstanding" does not."""
+    "€2,400 outstanding" does not.
+
+    All three buckets are resolved in a single aggregate() call (one query, each bucket its
+    own Count/Sum(filter=...) pair) rather than a query per bucket per number -- this used to
+    be 6 round trips (a _money() aggregate plus a count() per bucket) on every dashboard load.
+    """
     now = timezone.now()
     owed = Order.objects.filter(club=club, payment_status__in=OWED_STATUSES)
+    bucket_defs = [(_("0-30 days"), 0, 30), (_("30-60 days"), 30, 60), (_("60+ days"), 60, None)]
 
-    buckets = []
-    for label, older_than, newer_than in ((_("0-30 days"), 0, 30), (_("30-60 days"), 30, 60), (_("60+ days"), 60, None)):
-        rows = owed.filter(created__lte=now - timedelta(days=older_than))
+    aggregate_kwargs = {}
+    for index, (_label, older_than, newer_than) in enumerate(bucket_defs):
+        bucket_filter = Q(created__lte=now - timedelta(days=older_than))
         if newer_than is not None:
-            rows = rows.filter(created__gt=now - timedelta(days=newer_than))
-        buckets.append({"label": label, "total": _money(rows), "count": rows.count(), "overdue": newer_than is None})
+            bucket_filter &= Q(created__gt=now - timedelta(days=newer_than))
+        aggregate_kwargs[f"total_{index}"] = Coalesce(Sum("total", filter=bucket_filter), Value(ZERO), output_field=DecimalField())
+        aggregate_kwargs[f"count_{index}"] = Count("id", filter=bucket_filter)
 
-    return buckets
+    totals = owed.aggregate(**aggregate_kwargs)
+
+    return [{"label": label, "total": totals[f"total_{index}"], "count": totals[f"count_{index}"], "overdue": newer_than is None} for index, (label, older_than, newer_than) in enumerate(bucket_defs)]
 
 
 def attendance_rates(club, season):
@@ -476,13 +493,20 @@ def club_attention(club):
     season = Season.covering(club, timezone.localdate())
     memberships = ClubMembership.objects.filter(club=club, kind=ClubMembership.Kind.MEMBER)
 
+    # Both counts below share the same memberships queryset -- one aggregate() instead of
+    # two separate .count() round trips.
+    membership_filters = {"pending_approvals": Count("id", filter=Q(status=ClubMembership.StatusChoices.PENDING))}
+    if season:
+        membership_filters["unpaid_members"] = Count("id", filter=Q(season=season, fee_status=ClubMembership.FeeStatus.UNPAID))
+    membership_counts = memberships.aggregate(**membership_filters)
+
     return {
         "season": season,
         "no_season": season is None,
         "outstanding": _money(Order.objects.filter(club=club, payment_status__in=OWED_STATUSES)),
         "aging": fee_aging(club),
-        "unpaid_members": memberships.filter(season=season, fee_status=ClubMembership.FeeStatus.UNPAID).count() if season else 0,
-        "pending_approvals": memberships.filter(status=ClubMembership.StatusChoices.PENDING).count(),
+        "unpaid_members": membership_counts.get("unpaid_members", 0),
+        "pending_approvals": membership_counts["pending_approvals"],
         "teams_without_manager": teams_without_a_manager(club, season).count(),
         "unrostered": unrostered_members(club, season).count(),
         "new_members": new_members(club, season).count(),
@@ -495,23 +519,24 @@ def club_charts(club):
     season = Season.covering(club, timezone.localdate())
     memberships = ClubMembership.objects.filter(club=club, season=season, kind=ClubMembership.Kind.MEMBER) if season else ClubMembership.objects.none()
 
+    # Fee status this season, in the order a treasurer cares about -- one aggregate() for
+    # all four counts instead of a separate .count() per status.
+    fee_statuses = [(ClubMembership.FeeStatus.PAID, _("Paid")), (ClubMembership.FeeStatus.PARTIALLY_PAID, _("Partial")), (ClubMembership.FeeStatus.UNPAID, _("Unpaid")), (ClubMembership.FeeStatus.WAIVED, _("Waived"))]
+    fee_counts = memberships.aggregate(**{f"status_{index}": Count("id", filter=Q(fee_status=status)) for index, (status, _label) in enumerate(fee_statuses)})
+
     return {
         "signups": signup_split(club),
-        # Fee status this season, in the order a treasurer cares about.
-        "fees": [
-            {"label": label, "value": memberships.filter(fee_status=status).count()}
-            for status, label in (
-                (ClubMembership.FeeStatus.PAID, _("Paid")),
-                (ClubMembership.FeeStatus.PARTIALLY_PAID, _("Partial")),
-                (ClubMembership.FeeStatus.UNPAID, _("Unpaid")),
-                (ClubMembership.FeeStatus.WAIVED, _("Waived")),
-            )
-        ],
+        "fees": [{"label": label, "value": fee_counts[f"status_{index}"]} for index, (status, label) in enumerate(fee_statuses)],
     }
 
 
 def club_statistics(club):
-    """Stat groups for one club. Add new groups here as the domain grows."""
+    """Stat groups for one club. Add new groups here as the domain grows.
+
+    Each group below that draws several numbers from the *same* base queryset resolves
+    them in one aggregate() call rather than one .count()/.aggregate() per number -- this
+    used to be ~13 round trips for a page that renders once per dashboard load.
+    """
     season = Season.covering(club, timezone.localdate())
     now = timezone.now()
 
@@ -519,15 +544,39 @@ def club_statistics(club):
     events = Event.objects.filter(club=club)
     orders = Order.objects.filter(club=club)
 
+    member_filters = {
+        "total": Count("member", distinct=True),
+        "pending": Count("id", filter=Q(status=ClubMembership.StatusChoices.PENDING)),
+        "lapsed": Count("id", filter=Q(status=ClubMembership.StatusChoices.LAPSED)),
+    }
+    if season:
+        member_filters["active_this_season"] = Count("id", filter=Q(season=season, status=ClubMembership.StatusChoices.ACTIVE))
+    member_counts = memberships.aggregate(**member_filters)
+
+    event_filters = {"upcoming": Count("id", filter=Q(start__gte=now))}
+    if season:
+        event_filters["this_season"] = Count("id", filter=Q(season=season) | Q(season__isnull=True, start__date__gte=season.start_date, start__date__lte=season.end_date))
+    event_counts = events.aggregate(**event_filters)
+
+    # "count", not "total" -- an aggregate() kwarg named "total" shadows Order's own
+    # `total` field before Sum("total") below gets to resolve it, raising FieldError
+    # ("'total' is an aggregate").
+    order_counts = orders.aggregate(
+        count=Count("id"),
+        revenue=Coalesce(Sum("total", filter=Q(payment_status__in=PAID_STATUSES)), Value(ZERO), output_field=DecimalField()),
+        outstanding=Coalesce(Sum("total", filter=Q(payment_status__in=OWED_STATUSES)), Value(ZERO), output_field=DecimalField()),
+        unpaid_count=Count("id", filter=Q(payment_status__in=OWED_STATUSES)),
+    )
+
     return [
         {
             "title": _("Members"),
             "icon": "users",
             "stats": [
-                (_("Members"), memberships.values("member").distinct().count()),
-                (_("Active this season"), memberships.filter(season=season, status=ClubMembership.StatusChoices.ACTIVE).count() if season else 0),
-                (_("Pending"), memberships.filter(status=ClubMembership.StatusChoices.PENDING).count()),
-                (_("Lapsed"), memberships.filter(status=ClubMembership.StatusChoices.LAPSED).count()),
+                (_("Members"), member_counts["total"]),
+                (_("Active this season"), member_counts.get("active_this_season", 0)),
+                (_("Pending"), member_counts["pending"]),
+                (_("Lapsed"), member_counts["lapsed"]),
             ],
         },
         {
@@ -543,22 +592,22 @@ def club_statistics(club):
             "title": _("Events"),
             "icon": "calendar-days",
             "stats": [
-                (_("Upcoming"), events.filter(start__gte=now).count()),
-                (_("This season"), events.filter(Q(season=season) | Q(season__isnull=True, start__date__gte=season.start_date, start__date__lte=season.end_date)).count() if season else 0),
+                (_("Upcoming"), event_counts["upcoming"]),
+                (_("This season"), event_counts.get("this_season", 0)),
             ],
         },
         {
             "title": _("Shop"),
             "icon": "shopping-cart",
             "stats": [
-                (_("Orders"), orders.count()),
-                (_("Revenue"), _money(orders.filter(payment_status__in=PAID_STATUSES))),
-                (_("Outstanding"), _money(orders.filter(payment_status__in=OWED_STATUSES))),
+                (_("Orders"), order_counts["count"]),
+                (_("Revenue"), order_counts["revenue"]),
+                (_("Outstanding"), order_counts["outstanding"]),
                 # Same order set as "Outstanding" above (OWED_STATUSES), just a
                 # count instead of a total -- "Open carts" (never-checked-out
                 # Cart rows) measured the wrong thing entirely for a club admin
                 # deciding whether anyone needs chasing.
-                (_("Orders unpaid"), orders.filter(payment_status__in=OWED_STATUSES).count()),
+                (_("Orders unpaid"), order_counts["unpaid_count"]),
             ],
         },
     ]
