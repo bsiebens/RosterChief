@@ -247,6 +247,10 @@ TEST_RUNNER = "rosterchief.test_runner.RosterChiefTestRunner"
 DATABASES = {
     "default": config("DJANGO_DATABASE_URL", default="sqlite:///db.sqlite3", cast=db_url),
 }
+# Without this, every request opens a fresh Postgres connection (TCP + auth) from scratch --
+# a page like the control panel dashboard that fires 15-20+ queries pays that setup cost
+# on each one. Harmless for the SQLite dev default (no real connection to persist).
+DATABASES["default"]["CONN_MAX_AGE"] = config("DJANGO_DB_CONN_MAX_AGE", default=60, cast=int)
 
 
 # Password validation
