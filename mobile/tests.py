@@ -4566,7 +4566,8 @@ class CoachAddStaffViewTests(TestCase):
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
 class CoachScheduleViewTests(TestCase):
     """Bottom-tab "Schedule" -- every upcoming event for the active team,
-    each row routed to the coach-relevant action for its kind."""
+    each row opening that event's hub (Details/Attendance/Line-up are all
+    one tap away from there via _event_tabs.html)."""
 
     @classmethod
     def setUpTestData(cls):
@@ -4587,32 +4588,32 @@ class CoachScheduleViewTests(TestCase):
 
         self.assertEqual(response.status_code, 302)
 
-    def test_game_row_links_to_lineup(self):
+    def test_game_row_links_to_the_event_hub(self):
         game = Event.objects.create(club=self.club, title="Big game", kind=Event.EventKind.GAME, start=timezone.now() + datetime.timedelta(days=2))
         game.teams.add(self.team)
         self.client.force_login(self.user)
 
         response = self._get()
 
-        self.assertContains(response, reverse("mobile:coach_lineup", kwargs={"event_id": game.pk}))
+        self.assertContains(response, reverse("mobile:coach_event_detail", kwargs={"pk": game.pk}))
 
-    def test_tournament_row_links_to_lineup(self):
+    def test_tournament_row_links_to_the_event_hub(self):
         tournament = Event.objects.create(club=self.club, title="Regional Cup", kind=Event.EventKind.TOURNAMENT, start=timezone.now() + datetime.timedelta(days=2))
         tournament.teams.add(self.team)
         self.client.force_login(self.user)
 
         response = self._get()
 
-        self.assertContains(response, reverse("mobile:coach_lineup", kwargs={"event_id": tournament.pk}))
+        self.assertContains(response, reverse("mobile:coach_event_detail", kwargs={"pk": tournament.pk}))
 
-    def test_training_row_links_to_attendance(self):
+    def test_training_row_links_to_the_event_hub(self):
         practice = Event.objects.create(club=self.club, title="Practice", kind=Event.EventKind.TRAINING, start=timezone.now() + datetime.timedelta(days=2))
         practice.teams.add(self.team)
         self.client.force_login(self.user)
 
         response = self._get()
 
-        self.assertContains(response, reverse("mobile:coach_attendance", kwargs={"event_id": practice.pk}))
+        self.assertContains(response, reverse("mobile:coach_event_detail", kwargs={"pk": practice.pk}))
 
     def test_shows_a_friendly_indicator_for_a_friendly_game(self):
         game = Event.objects.create(club=self.club, title="Big game", kind=Event.EventKind.GAME, start=timezone.now() + datetime.timedelta(days=2), is_friendly=True)
@@ -4745,7 +4746,7 @@ class CoachAttendanceViewTests(TestCase):
             HTTP_HOST="ajax-united.rosterchief.app",
         )
 
-        self.assertRedirects(response, reverse("mobile:coach_today"), fetch_redirect_response=False)
+        self.assertRedirects(response, reverse("mobile:coach_attendance", kwargs={"event_id": self.event.pk}), fetch_redirect_response=False)
         self.attendance.refresh_from_db()
         self.assertTrue(self.attendance.showed_up)
 

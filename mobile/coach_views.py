@@ -328,7 +328,7 @@ class CoachAttendanceView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
         title = _("Attendance saved")
         body = _("%(count)d players checked in.") % {"count": checked_in}
         notify(request, f"s|{title}|{body}")
-        return HttpResponseRedirect(reverse("mobile:coach_today"))
+        return HttpResponseRedirect(reverse("mobile:coach_attendance", kwargs={"event_id": event.pk}))
 
 
 class CoachAttendanceRemindSilentView(CoachScopeMixin, LoginRequiredMixin, View):
