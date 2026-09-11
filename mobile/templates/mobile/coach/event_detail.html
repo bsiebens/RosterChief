@@ -45,7 +45,7 @@
             {% if event.score_for is not None or event.score_against is not None %}
                 <div class="flex items-center gap-2">
                     {% lucide "trophy" size=15 class="shrink-0 text-dim" %}
-                    {% blocktrans with us=event.score_for|default:"–" them=event.score_against|default:"–" %}{{ us }} – {{ them }}{% endblocktrans %}
+                    {% blocktrans with us=event.score_for|default:"–" them=event.score_against|default:"–" %}Score: {{ us }} – {{ them }}{% endblocktrans %}
                     {% if event.is_live %}<span class="pill pill-danger">{% trans "Live" %}</span>{% endif %}
                 </div>
             {% endif %}

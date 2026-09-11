@@ -38,13 +38,12 @@
             <span class="pill pill-warn shrink-0">{% trans "Scheduled" %}</span>
         {% endif %}
     </div>
-    <div class="mt-1 text-xs text-on-dark">{{ event.start|date:"D d M H:i" }}</div>
     {% include "mobile/coach/_event_tabs.html" with active_screen="lineup" %}
 {% endblock header_extra %}
 
 {% block content %}
     {% if task_rows or needs_referees or needs_officials %}
-        <div class="m-card-dark mb-3 p-3">
+        <div class="m-card-dark p-3">
             <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-ice uppercase">{% trans "Tasks & officiating" %}</div>
             <div class="flex flex-wrap gap-1.5">
                 {% for task in task_rows %}
