@@ -48,9 +48,6 @@
 
         {% if session_event %}
             <div class="m-card-dark overflow-hidden">
-                {# Whole header+title/location area links to the event hub -- buttons below stay
-                   their own sibling links (same "row link + separate target" pattern as
-                   mobile/coach/_schedule_row.html's gear icon) rather than nesting links. #}
                 <a class="block" href="{% url "mobile:coach_event_detail" session_event.pk %}">
                     <div class="flex items-center justify-between px-4 py-2.5">
                         <span class="font-display text-xs font-extrabold text-ice uppercase tracking-wide">
