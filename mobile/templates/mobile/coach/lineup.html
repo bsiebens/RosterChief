@@ -39,6 +39,7 @@
         {% endif %}
     </div>
     <div class="mt-1 text-xs text-on-dark">{{ event.title }} &middot; {{ event.start|date:"D d M H:i" }}</div>
+    {% include "mobile/coach/_event_tabs.html" with active_screen="lineup" %}
 {% endblock header_extra %}
 
 {% block content %}

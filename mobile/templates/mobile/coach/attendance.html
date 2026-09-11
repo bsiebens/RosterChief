@@ -22,6 +22,9 @@
             <span class="font-mono text-sm text-on-dark">{{ checked_in_count }}/{{ total_count }}</span>
         </div>
         <div class="mt-1 text-xs text-on-dark-dim">{{ event.title }} &middot; {{ event.start|date:"D d M H:i" }}</div>
+        {% if event.kind == "game" or event.kind == "tournament" %}
+            {% include "mobile/coach/_event_tabs.html" with active_screen="attendance" %}
+        {% endif %}
         <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-steel">
             <div class="h-full bg-ice" style="width: {% widthratio checked_in_count total_count|default:1 100 %}%"></div>
         </div>

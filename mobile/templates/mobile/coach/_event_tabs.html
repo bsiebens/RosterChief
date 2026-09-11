@@ -1,0 +1,16 @@
+{% load i18n %}
+{% comment %}
+    Segmented switcher between a game/tournament's two "on the day" screens --
+    Attendance (CoachAttendanceView) and Line-up (CoachLineupView) are kept as
+    separate views (different models, different POST handling: Attendance vs.
+    Lineup/LineupSelection) rather than unified into one, but this makes them
+    read as tabs of one screen instead of two disconnected pages -- feedback
+    after issue #18 shipped. Reuses .role-switcher/-item/-item-active-ice, the
+    same dark-header segmented-pill component coach/base.html's own Member/
+    Manager switcher uses, rather than inventing a second tab-bar look.
+    active_screen: "attendance" or "lineup".
+{% endcomment %}
+<div class="role-switcher">
+    <a class="role-switcher-item {% if active_screen == "attendance" %}role-switcher-item-active-ice{% endif %}" href="{% url "mobile:coach_attendance" event.pk %}">{% trans "Attendance" %}</a>
+    <a class="role-switcher-item {% if active_screen == "lineup" %}role-switcher-item-active-ice{% endif %}" href="{% url "mobile:coach_lineup" event.pk %}">{% trans "Line-up" %}</a>
+</div>
