@@ -1933,6 +1933,10 @@ class FormSendAudienceFormMixin:
     def clean_audience_requires_a_claim_for_non_admins(self, cleaned):
         if is_club_admin(self.user, self.club):
             return
+        # A public send doesn't need a claimed team/group audience to
+        # justify itself -- it isn't addressed to anyone in particular.
+        if cleaned.get("is_public"):
+            return
         teams = cleaned.get("teams")
         groups = cleaned.get("groups")
         if not (teams is not None and teams.exists()) and not (groups is not None and groups.exists()):
@@ -1950,7 +1954,7 @@ class FormSendAudienceFormMixin:
 class FormSendForm(FormSendAudienceFormMixin, forms.ModelForm):
     class Meta:
         model = FormSend
-        fields = ["teams", "groups", "club_wide", "invited_members", "excluded_members", "opens_at", "closes_at", "max_submissions_per_user", "is_active"]
+        fields = ["teams", "groups", "club_wide", "invited_members", "excluded_members", "opens_at", "closes_at", "max_submissions_per_user", "is_active", "is_public"]
         widgets = {
             "opens_at": forms.DateTimeInput(attrs={"type": "datetime-local"}),
             "closes_at": forms.DateTimeInput(attrs={"type": "datetime-local"}),
