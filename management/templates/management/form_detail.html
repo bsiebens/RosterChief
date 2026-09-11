@@ -115,6 +115,16 @@
                             </div>
                         </td>
                     </tr>
+                    {% if send.is_public %}
+                        <tr>
+                            <td colspan="5" class="!pt-0">
+                                <div class="alert alert-info items-center">
+                                    {% lucide "link" size=14 class="shrink-0" %}
+                                    <input class="input flex-1 border-0 bg-transparent font-mono text-xs" type="text" readonly value="{{ request.scheme }}://{{ request.get_host }}{% url "formbuilder:fill" send.public_token %}" onclick="this.select()">
+                                </div>
+                            </td>
+                        </tr>
+                    {% endif %}
                 {% empty %}
                     <tr>
                         <td colspan="5" class="text-center text-dim">{% trans "This form hasn't been sent yet." %}</td>
