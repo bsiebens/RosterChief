@@ -116,11 +116,12 @@
                         </td>
                     </tr>
                     {% if send.is_public %}
+                        {% url "formbuilder:fill" send.public_token as public_path %}
                         <tr>
                             <td colspan="5" class="!pt-0">
-                                <div class="alert alert-info items-center">
-                                    {% lucide "link" size=14 class="shrink-0" %}
-                                    <input class="input flex-1 border-0 bg-transparent font-mono text-xs" type="text" readonly value="{{ request.scheme }}://{{ request.get_host }}{% url "formbuilder:fill" send.public_token %}" onclick="this.select()">
+                                <div class="flex items-center gap-2 rounded-md bg-subhead px-2.5 py-1.5">
+                                    {% lucide "link" size=12 class="shrink-0 text-info" %}
+                                    <input class="input h-auto flex-1 truncate border-0 bg-transparent p-0 font-mono text-xs text-muted" type="text" readonly value="{{ request.scheme }}://{{ request.get_host }}{{ public_path }}" onclick="this.select()" title="{{ request.scheme }}://{{ request.get_host }}{{ public_path }}">
                                 </div>
                             </td>
                         </tr>
