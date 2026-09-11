@@ -1,7 +1,4 @@
 {% load i18n lucide %}
-{# Whole row opens the event hub -- Details/Attendance/Line-up are one tap apart from
-   there via _event_tabs.html, so this no longer needs its own separate gear-icon
-   target the way it did before that tab switcher existed. #}
 <a class="flex items-center gap-3 p-3.5" href="{% url "mobile:coach_event_detail" event.pk %}">
     <div class="w-9.5 shrink-0 text-center">
         <div class="font-mono text-[10px] tracking-wide text-muted uppercase">{{ event.start|date:"D" }}</div>
