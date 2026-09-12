@@ -46,7 +46,7 @@ from .services.platform_admins import (
     revoke_platform_access,
     set_platform_access,
 )
-from .services.statistics import club_attention, club_charts, club_statistics, clubs_with_health, dashboard_snapshot, flags_for_club
+from .services.statistics import club_attention, club_charts, club_statistics, clubs_with_health, dashboard_snapshot, flags_for_club, invalidate_dashboard_snapshot
 
 Flag = get_waffle_flag_model()
 Switch = get_waffle_switch_model()
@@ -263,6 +263,7 @@ class ClubArchiveView(PlatformStaffRequiredMixin, View):
     def post(self, request, pk):
         club = get_object_or_404(Club, pk=pk)
         club.archive()
+        invalidate_dashboard_snapshot()
         notify(request, f"w|Club archived|Club “{club}” archived. Its subdomain no longer resolves.")
         return redirect("controlpanel:club_detail", pk=club.pk)
 
@@ -271,6 +272,7 @@ class ClubRestoreView(PlatformStaffRequiredMixin, View):
     def post(self, request, pk):
         club = get_object_or_404(Club, pk=pk)
         club.restore()
+        invalidate_dashboard_snapshot()
         notify(request, f"s|Club restored|Club “{club}” restored.")
         return redirect("controlpanel:club_detail", pk=club.pk)
 
@@ -303,6 +305,7 @@ class ClubDeleteView(PlatformSuperuserRequiredMixin, TemplateView):
         name = club.name
         try:
             delete_club(club)
+            invalidate_dashboard_snapshot()
         except ClubDeletionBlocked:
             # Belt and suspenders: the confirm page's own preview already runs this
             # same resolution and would normally have caught this, but data can
