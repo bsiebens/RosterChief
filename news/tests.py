@@ -281,7 +281,7 @@ class SendPublishNotificationTests(TestCase):
         # same parent -- one Notification/one email for the family, not two.
         parent_user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
         parent = Member.objects.create(first_name="Pat", last_name="Parent", email="parent@example.com", user=parent_user)
-        family = Family.objects.create(name="Parent family")
+        family = Family.objects.create(club=self.club, name="Parent family")
         FamilyMembership.objects.create(family=family, member=parent, role=FamilyMembership.FamilyRole.PARENT)
         child_a = Member.objects.create(first_name="Ana", last_name="Parent")
         child_b = Member.objects.create(first_name="Ben", last_name="Parent")
@@ -298,8 +298,8 @@ class SendPublishNotificationTests(TestCase):
         self.assertEqual(mail.outbox[0].to, ["parent@example.com"])
 
     def test_children_with_different_guardians_are_each_notified(self):
-        family_one = Family.objects.create(name="First family")
-        family_two = Family.objects.create(name="Second family")
+        family_one = Family.objects.create(club=self.club, name="First family")
+        family_two = Family.objects.create(club=self.club, name="Second family")
         for family_name, family in (("one", family_one), ("two", family_two)):
             parent_user = User.objects.create_user(email=f"parent-{family_name}@example.com", password="pw-secret-123")
             parent = Member.objects.create(first_name=f"Parent{family_name}", last_name="Adult", email=f"parent-{family_name}@example.com", user=parent_user)

@@ -718,7 +718,7 @@ class CoachEventDetailView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
 
         tasks = list(event.tasks.prefetch_related("claims__member").order_by("created_at"))
         for task in tasks:
-            task.claim_labels = [claim_label_for(claim.member) for claim in task.claims.all()]
+            task.claim_labels = [claim_label_for(claim.member, event.club) for claim in task.claims.all()]
             task.is_full = len(task.claim_labels) >= task.needed_quantity
             task.edit_form = _styled_task_form(instance=task)
 
@@ -1215,7 +1215,7 @@ class CoachLineupView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
         Home/Calendar screen."""
         task_rows = list(event.tasks.prefetch_related("claims__member"))
         for task in task_rows:
-            task.claim_labels = [claim_label_for(claim.member) for claim in task.claims.all()]
+            task.claim_labels = [claim_label_for(claim.member, event.club) for claim in task.claims.all()]
             task.is_full = len(task.claim_labels) >= task.needed_quantity
 
         needs_referees = needs_referee_management(event)
@@ -1370,7 +1370,7 @@ class CoachRosterMemberView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
         return super().get_context_data(
             membership=membership,
             member=member,
-            guardians=member.guardians,
+            guardians=member.guardians(self.request.club),
             attendance_counts=member_attendance_counts(member, membership.season),
             # Gates the "Evaluations" row below -- a club-wide grant (see
             # mobile.coach_evaluation_views.EvaluationAccessMixin), not

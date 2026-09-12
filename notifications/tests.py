@@ -19,55 +19,58 @@ class RecipientEmailsTests(TestCase):
     """notifications.services.recipient_emails -- the member's own email if
     they hold a login, plus every parent/guardian's, always."""
 
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+
     def test_a_member_with_a_login_gets_their_own_email(self):
         user = User.objects.create_user(email="jamie@example.com", password="pw-secret-123")
         member = Member.objects.create(user=user, first_name="Jamie", last_name="Doe", email="jamie@example.com")
 
-        self.assertEqual(recipient_emails(member), ["jamie@example.com"])
+        self.assertEqual(recipient_emails(member, self.club), ["jamie@example.com"])
 
     def test_a_member_with_no_login_gets_nothing_from_themselves(self):
-        # Roster-imported, never signed up -- see members.models.ParentClaim's
-        # own docstring for why this is routine, not an edge case.
+        # Roster-imported, never given a login -- routine, not an edge case.
         member = Member.objects.create(first_name="Jamie", last_name="Doe", email="jamie@example.com")
 
-        self.assertEqual(recipient_emails(member), [])
+        self.assertEqual(recipient_emails(member, self.club), [])
 
     def test_guardians_are_always_included_even_with_the_childs_own_login(self):
         user = User.objects.create_user(email="jamie@example.com", password="pw-secret-123")
-        family = Family.objects.create()
+        family = Family.objects.create(club=self.club)
         child = Member.objects.create(user=user, first_name="Jamie", last_name="Doe", email="jamie@example.com")
         parent = Member.objects.create(first_name="Alex", last_name="Doe", email="alex@example.com")
         FamilyMembership.objects.create(family=family, member=child, role=FamilyMembership.FamilyRole.CHILD)
         FamilyMembership.objects.create(family=family, member=parent, role=FamilyMembership.FamilyRole.PARENT)
 
-        emails = recipient_emails(child)
+        emails = recipient_emails(child, self.club)
 
         self.assertIn("jamie@example.com", emails)
         self.assertIn("alex@example.com", emails)
 
     def test_a_child_with_no_login_still_reaches_their_guardian(self):
-        family = Family.objects.create()
+        family = Family.objects.create(club=self.club)
         child = Member.objects.create(first_name="Jamie", last_name="Doe")
         parent = Member.objects.create(first_name="Alex", last_name="Doe", email="alex@example.com")
         FamilyMembership.objects.create(family=family, member=child, role=FamilyMembership.FamilyRole.CHILD)
         FamilyMembership.objects.create(family=family, member=parent, role=FamilyMembership.FamilyRole.PARENT)
 
-        self.assertEqual(recipient_emails(child), ["alex@example.com"])
+        self.assertEqual(recipient_emails(child, self.club), ["alex@example.com"])
 
     def test_duplicate_addresses_are_deduplicated(self):
         user = User.objects.create_user(email="shared@example.com", password="pw-secret-123")
-        family = Family.objects.create()
+        family = Family.objects.create(club=self.club)
         child = Member.objects.create(user=user, first_name="Jamie", last_name="Doe", email="shared@example.com")
         parent = Member.objects.create(first_name="Alex", last_name="Doe", email="shared@example.com")
         FamilyMembership.objects.create(family=family, member=child, role=FamilyMembership.FamilyRole.CHILD)
         FamilyMembership.objects.create(family=family, member=parent, role=FamilyMembership.FamilyRole.PARENT)
 
-        self.assertEqual(recipient_emails(child), ["shared@example.com"])
+        self.assertEqual(recipient_emails(child, self.club), ["shared@example.com"])
 
     def test_empty_when_nobody_is_reachable(self):
         member = Member.objects.create(first_name="Jamie", last_name="Doe")
 
-        self.assertEqual(recipient_emails(member), [])
+        self.assertEqual(recipient_emails(member, self.club), [])
 
 
 class NotifyMembersTests(TestCase):

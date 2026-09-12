@@ -25,8 +25,8 @@ from bugs.models import BugNote, BugReport
 from club.models import Club, ClubMembership, ClubRole, DuesInvoice, EvaluationManager, FeePayment, MemberRequirementStatus, OnboardingRequirement, Season, ShopManager, Sponsor
 from club.services.invoicing import DuesInvoicePDFError, create_or_resend_invoice
 from club.services.onboarding import mark_complete
-from evaluations.models import EvaluationChecklist, EvaluationNote, PlayerEvaluation
-from evaluations.services import current_rubric_form
+from evaluations.models import EvaluationChecklist, EvaluationNote, EvaluationOutcome, EvaluationSession, PlayerEvaluation
+from evaluations.services import add_evaluation_note, current_rubric_form, start_session
 from events.models import Attendance, Competition, Event, EventReferee, EventSeries, EventTask, EventTaskClaim, Location, Opponent, RefereeSignup
 from events.services.calendar import week_bounds
 from events.services.notifications import notify_new_event
@@ -43,8 +43,7 @@ from management.pdf import PDFExportError, _tint_with_white, referee_form_colors
 from management.pdf_previews import PDF_PREVIEWS
 from management.recurrence_ui import build_rrule, describe_rrule, parse_rrule
 from management.shop_export import build_production_export, stash_production_export
-from members.models import Family, FamilyMembership, Group, GroupMembership, Member, ParentClaim
-from members.services.claims import children_awaiting_a_parent
+from members.models import Family, FamilyMembership, Group, GroupMembership, Member
 from news.models import News, NewsPhoto
 from news.services import _notify_editors_of_pending_review_by_id, _send_and_mark_notified
 from notifications.models import Notification
@@ -1841,7 +1840,7 @@ class RefereeLevelManagementTests(ManagementTestBase):
         level = RefereeLevel.objects.create(club=self.club, name="Regional")
         member = Member.objects.create(first_name="Ref", last_name="Eree")
         ClubMembership.objects.create(club=self.club, member=member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
-        RefereeProfile.objects.create(member=member, level=level, valid_until=timezone.localdate() + datetime.timedelta(days=30))
+        RefereeProfile.objects.create(club=self.club, member=member, level=level, valid_until=timezone.localdate() + datetime.timedelta(days=30))
         self.client.force_login(self.admin_user)
 
         response = self.club_post("referee_level_delete", {}, level.pk)
@@ -1886,7 +1885,7 @@ class RefereeListViewTests(ManagementTestBase):
         self.client.force_login(self.admin_user)
 
     def test_lists_a_valid_referee_with_level_and_teams(self):
-        RefereeProfile.objects.create(member=self.member, level=self.level, valid_until=timezone.localdate() + datetime.timedelta(days=30))
+        RefereeProfile.objects.create(club=self.club, member=self.member, level=self.level, valid_until=timezone.localdate() + datetime.timedelta(days=30))
 
         response = self.club_get("referee_list")
 
@@ -1896,21 +1895,21 @@ class RefereeListViewTests(ManagementTestBase):
         self.assertContains(response, "Valid")
 
     def test_shows_expired_status(self):
-        RefereeProfile.objects.create(member=self.member, level=self.level, valid_until=timezone.localdate() - datetime.timedelta(days=1))
+        RefereeProfile.objects.create(club=self.club, member=self.member, level=self.level, valid_until=timezone.localdate() - datetime.timedelta(days=1))
 
         response = self.club_get("referee_list")
 
         self.assertContains(response, "Expired")
 
     def test_shows_no_level_status(self):
-        RefereeProfile.objects.create(member=self.member, valid_until=timezone.localdate() + datetime.timedelta(days=30))
+        RefereeProfile.objects.create(club=self.club, member=self.member, valid_until=timezone.localdate() + datetime.timedelta(days=30))
 
         response = self.club_get("referee_list")
 
         self.assertContains(response, "No level")
 
     def test_shows_no_validity_set_status(self):
-        RefereeProfile.objects.create(member=self.member, level=self.level)
+        RefereeProfile.objects.create(club=self.club, member=self.member, level=self.level)
 
         response = self.club_get("referee_list")
 
@@ -1929,7 +1928,7 @@ class RefereeListViewTests(ManagementTestBase):
         coach_member = Member.objects.create(user=coach_user, first_name="Cara", last_name="Coach")
         coach_position = Position.objects.create(club=self.club, name="Head Coach", short_name="HC", staff_position=True, management_position=True)
         StaffAssignment.objects.create(team=self.team, member=coach_member, season=self.season, position=coach_position)
-        RefereeProfile.objects.create(member=self.member, level=self.level, valid_until=timezone.localdate() + datetime.timedelta(days=30))
+        RefereeProfile.objects.create(club=self.club, member=self.member, level=self.level, valid_until=timezone.localdate() + datetime.timedelta(days=30))
         # Give the coach visibility into self.member too (members_visible_to
         # scopes a non-admin to teams they're staffed on).
         player_position = Position.objects.create(club=self.club, name="Forward", short_name="FW")
@@ -2295,7 +2294,7 @@ class FamilyManagementTests(ManagementTestBase):
         # A family only counts as "of this club" once at least one of its members
         # has actually signed up (families_of_club, members/services/family.py) --
         # exactly what registering the first child through this app already does.
-        family = Family.objects.create()
+        family = Family.objects.create(club=self.club)
         first_kid = Member.objects.create(first_name="First", last_name="Kid")
         FamilyMembership.objects.create(family=family, member=first_kid, role=FamilyMembership.FamilyRole.CHILD)
         ClubMembership.objects.create(club=self.club, member=first_kid, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
@@ -2317,393 +2316,6 @@ class FamilyManagementTests(ManagementTestBase):
         self.club_post("family_add_parent", {"email": "new.parent@example.com", "first_name": "", "last_name": ""}, family.pk)
 
         self.assertEqual(family.guardians.count(), 1)
-
-
-class ParentClaimViewTests(ManagementTestBase):
-    """The public claim form and the admin review queue -- see
-    members.services.claims; the service-level guarantees live in
-    members.tests.ParentClaimTests."""
-
-    @classmethod
-    def setUpTestData(cls):
-        super().setUpTestData()
-        cls.child = Member.objects.create(first_name="Jamie", last_name="Doe", date_of_birth=datetime.date(2014, 3, 2))
-        ClubMembership.objects.create(club=cls.club, member=cls.child, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
-        family = Family.objects.create()
-        FamilyMembership.objects.create(family=family, member=cls.child, role=FamilyMembership.FamilyRole.CHILD)
-
-    def claim_payload(self, **overrides):
-        payload = {
-            "parent_first_name": "Taylor",
-            "parent_last_name": "Doe",
-            "parent_email": "taylor.doe@example.com",
-            "child_first_name": "Jamie",
-            "child_last_name": "Doe",
-            "child_date_of_birth": "2014-03-02",
-        }
-        payload.update(overrides)
-        return payload
-
-    def submit(self, *, follow=False, **overrides):
-        return self.client.post(reverse("members:parent_claim"), self.claim_payload(**overrides), HTTP_HOST="ajax-united.rosterchief.app", follow=follow)
-
-    def test_the_claim_form_is_reachable_without_signing_in(self):
-        response = self.client.get(reverse("members:parent_claim"), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertEqual(response.status_code, 200)
-
-    def test_submitting_records_a_pending_claim_and_redirects_back_with_a_flash(self):
-        response = self.submit()
-
-        # fetch_redirect_response=False: assertRedirects' own probe GET would
-        # otherwise consume the one-shot flash before the assertion below gets to see it.
-        self.assertRedirects(response, reverse("members:parent_claim"), fetch_redirect_response=False)
-        self.assertEqual(ParentClaim.objects.filter(club=self.club, status=ParentClaim.Status.PENDING).count(), 1)
-        page = self.client.get(reverse("members:parent_claim"), HTTP_HOST="ajax-united.rosterchief.app")
-        self.assertContains(page, "Request received")
-
-    def test_an_unmatched_claim_flashes_the_same_message_as_a_matched_one(self):
-        # The page must not tell an anonymous submitter which children exist.
-        matched = self.submit(follow=True)
-        unmatched = self.submit(child_first_name="Nobody", child_last_name="Here", parent_email="other@example.com", follow=True)
-
-        self.assertEqual([str(m) for m in matched.context["messages"]], [str(m) for m in unmatched.context["messages"]])
-
-    def test_the_flash_mentions_the_clubs_contact_email_when_set(self):
-        self.club.contact_email = "info@ajax-united.example.com"
-        self.club.save(update_fields=["contact_email"])
-
-        response = self.submit(follow=True)
-
-        self.assertContains(response, "info@ajax-united.example.com")
-
-    def test_submitting_creates_no_account(self):
-        # A public form that made a User per submission would be a spam magnet;
-        # the account is created on approval, once a human has vouched for it.
-        self.submit()
-
-        self.assertFalse(User.objects.filter(email="taylor.doe@example.com").exists())
-
-    def test_open_signup_is_closed(self):
-        response = self.client.get(reverse("account_signup"), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertEqual(response.status_code, 403)
-
-    def test_the_queue_is_admin_only(self):
-        coach_user = User.objects.create_user(email="coach-claims@example.com", password="pw-secret-123")
-        coach_member = Member.objects.create(user=coach_user, first_name="Cara", last_name="Coach")
-        team = Team.objects.create(club=self.club, name="First Team", short_name="1st")
-        position = Position.objects.create(club=self.club, name="Head Coach", short_name="HC", staff_position=True, management_position=True)
-        StaffAssignment.objects.create(team=team, member=coach_member, season=self.season, position=position)
-        self.client.force_login(coach_user)
-
-        self.assertEqual(self.club_get("parent_claim_list").status_code, 403)
-
-    def test_the_queue_lists_a_pending_claim_and_the_unclaimed_child(self):
-        self.submit()
-        self.client.force_login(self.admin_user)
-
-        response = self.club_get("parent_claim_list")
-
-        self.assertContains(response, "taylor.doe@example.com")
-        self.assertContains(response, "Jamie Doe")
-
-    def test_the_child_dropdown_matches_the_height_of_the_buttons_beside_it(self):
-        # Regression: ClaimReviewForm.child used to hardcode its own class=
-        # attrs, which rendered a second class="..." on the <select> alongside
-        # the one templatetags/field.html builds (including the size modifier)
-        # -- the two never merge, so select-sm silently never reached the page
-        # and the dropdown stood taller than the btn-sm/input-sm around it.
-        self.submit()
-        self.client.force_login(self.admin_user)
-
-        response = self.club_get("parent_claim_list")
-
-        self.assertContains(response, "select-sm")
-        html = response.content.decode()
-        select_tag = html[html.index("<select") : html.index(">", html.index("<select"))]
-        self.assertEqual(select_tag.count('class="'), 1)
-
-    def test_approving_links_the_parent_as_a_guardian(self):
-        self.submit()
-        claim = ParentClaim.objects.get(club=self.club)
-        self.client.force_login(self.admin_user)
-
-        self.club_post("parent_claim_approve", {"child": str(self.child.pk)}, claim.pk)
-
-        parent = Member.objects.get(user__email="taylor.doe@example.com")
-        self.assertEqual(ClubMembership.objects.get(club=self.club, member=parent).kind, ClubMembership.Kind.GUARDIAN)
-        claim.refresh_from_db()
-        self.assertEqual(claim.status, ParentClaim.Status.APPROVED)
-
-    def test_approving_emails_the_parent_a_working_set_password_link(self):
-        self.submit()
-        claim = ParentClaim.objects.get(club=self.club)
-        self.client.force_login(self.admin_user)
-
-        self.club_post("parent_claim_approve", {"child": str(self.child.pk)}, claim.pk)
-
-        self.assertEqual(len(mail.outbox), 1)
-        sent = mail.outbox[0]
-        self.assertEqual(sent.to, ["taylor.doe@example.com"])
-        self.assertIn("Jamie", sent.body)
-
-        [reset_path] = [line for line in sent.body.splitlines() if "/accounts/password/reset/key/" in line]
-        parent = Member.objects.get(user__email="taylor.doe@example.com")
-        self.assertFalse(parent.user.has_usable_password())
-        response = self.client.get(reset_path.strip(), HTTP_HOST="ajax-united.rosterchief.app", follow=True)
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "password1")
-
-    def test_the_email_carries_an_html_alternative_alongside_the_plain_text(self):
-        self.submit()
-        claim = ParentClaim.objects.get(club=self.club)
-        self.client.force_login(self.admin_user)
-
-        self.club_post("parent_claim_approve", {"child": str(self.child.pk)}, claim.pk)
-
-        sent = mail.outbox[0]
-        [(html_body, mimetype)] = sent.alternatives
-        self.assertEqual(mimetype, "text/html")
-        self.assertIn("Jamie", html_body)
-        self.assertIn(self.club.name, html_body)
-        [reset_path] = [line for line in sent.body.splitlines() if "/accounts/password/reset/key/" in line]
-        self.assertIn(reset_path.strip(), html_body)
-
-    def test_the_initials_badge_text_contrasts_against_the_fallback_colour(self):
-        # self.club has no secondary_color set, so the badge falls back to
-        # #ec4899 -- white text on that (the old hardcoded default) reads
-        # far worse than black (contrast_color("#ec4899") == "#000000"), see
-        # club/templatetags/club_email.py::contrast_color.
-        self.submit()
-        claim = ParentClaim.objects.get(club=self.club)
-        self.client.force_login(self.admin_user)
-
-        self.club_post("parent_claim_approve", {"child": str(self.child.pk)}, claim.pk)
-
-        [(html_body, _mimetype)] = mail.outbox[0].alternatives
-        self.assertIn("background-color:#ec4899", html_body)
-        self.assertIn("color:#000000", html_body)
-
-    def test_the_email_mentions_the_clubs_contact_email_when_set(self):
-        self.club.contact_email = "info@ajax-united.example.com"
-        self.club.save(update_fields=["contact_email"])
-        self.submit()
-        claim = ParentClaim.objects.get(club=self.club)
-        self.client.force_login(self.admin_user)
-
-        self.club_post("parent_claim_approve", {"child": str(self.child.pk)}, claim.pk)
-
-        self.assertIn("info@ajax-united.example.com", mail.outbox[0].body)
-
-    def test_a_send_failure_still_leaves_the_claim_linked(self):
-        self.submit()
-        claim = ParentClaim.objects.get(club=self.club)
-        self.client.force_login(self.admin_user)
-
-        with mock.patch("members.services.claims.EmailMultiAlternatives.send", side_effect=OSError("smtp down")):
-            response = self.club_post("parent_claim_approve", {"child": str(self.child.pk)}, claim.pk)
-
-        self.assertRedirects(response, reverse("management:parent_claim_list"))
-        claim.refresh_from_db()
-        self.assertEqual(claim.status, ParentClaim.Status.APPROVED)
-        self.assertTrue(Member.objects.filter(user__email="taylor.doe@example.com").exists())
-
-    def test_approving_without_choosing_a_child_changes_nothing(self):
-        self.submit()
-        claim = ParentClaim.objects.get(club=self.club)
-        self.client.force_login(self.admin_user)
-
-        self.club_post("parent_claim_approve", {}, claim.pk)
-
-        claim.refresh_from_db()
-        self.assertTrue(claim.is_pending)
-        self.assertFalse(User.objects.filter(email="taylor.doe@example.com").exists())
-
-    def test_a_child_who_already_has_a_parent_cannot_be_chosen(self):
-        # The shortlist is only ever children with nobody on file, so approving
-        # can never quietly re-parent a child who already has one.
-        other_child = Member.objects.create(first_name="Sam", last_name="Roe", date_of_birth=datetime.date(2013, 1, 1))
-        ClubMembership.objects.create(club=self.club, member=other_child, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
-        family = Family.objects.create()
-        FamilyMembership.objects.create(family=family, member=other_child, role=FamilyMembership.FamilyRole.CHILD)
-        existing_parent = Member.objects.create(first_name="Existing", last_name="Roe")
-        FamilyMembership.objects.create(family=family, member=existing_parent, role=FamilyMembership.FamilyRole.PARENT)
-        self.submit()
-        claim = ParentClaim.objects.get(club=self.club)
-        self.client.force_login(self.admin_user)
-
-        self.club_post("parent_claim_approve", {"child": str(other_child.pk)}, claim.pk)
-
-        claim.refresh_from_db()
-        self.assertTrue(claim.is_pending)
-
-    def test_rejecting_records_the_reason_and_links_nobody(self):
-        self.submit()
-        claim = ParentClaim.objects.get(club=self.club)
-        self.client.force_login(self.admin_user)
-
-        self.club_post("parent_claim_reject", {"note": "Not on our records."}, claim.pk)
-
-        claim.refresh_from_db()
-        self.assertEqual(claim.status, ParentClaim.Status.REJECTED)
-        self.assertFalse(User.objects.filter(email="taylor.doe@example.com").exists())
-
-    def test_the_parent_sees_their_child_after_approval(self):
-        self.submit()
-        claim = ParentClaim.objects.get(club=self.club)
-        self.client.force_login(self.admin_user)
-        self.club_post("parent_claim_approve", {"child": str(self.child.pk)}, claim.pk)
-
-        self.client.force_login(User.objects.get(email="taylor.doe@example.com"))
-        response = self.client.get(reverse("members:my_family"), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertContains(response, "Jamie Doe")
-
-    def test_the_child_dropdown_is_searchable_and_the_top_match_is_preselected(self):
-        self.submit()
-        self.client.force_login(self.admin_user)
-
-        response = self.club_get("parent_claim_list")
-
-        self.assertContains(response, 'data-searchable="true"')
-        html = response.content.decode()
-        select_tag = html[html.index("<select") : html.index("</select>", html.index("<select"))]
-        self.assertIn(f'value="{self.child.pk}" selected', select_tag)
-
-    def test_a_reject_modal_exists_for_each_pending_claim(self):
-        self.submit()
-        claim = ParentClaim.objects.get(club=self.club)
-        self.client.force_login(self.admin_user)
-
-        response = self.club_get("parent_claim_list")
-
-        self.assertContains(response, f'id="claim_reject_modal_{claim.pk}"')
-        self.assertContains(response, f"document.getElementById('claim_reject_modal_{claim.pk}').showModal()")
-
-    def test_the_history_section_shows_a_claim_reviewed_this_season(self):
-        self.submit()
-        claim = ParentClaim.objects.get(club=self.club)
-        self.client.force_login(self.admin_user)
-        self.club_post("parent_claim_approve", {"child": str(self.child.pk)}, claim.pk)
-
-        response = self.club_get("parent_claim_list")
-
-        self.assertContains(response, "Already dealt with")
-        self.assertContains(response, "taylor.doe@example.com")
-
-    def test_the_history_section_hides_a_claim_reviewed_last_season(self):
-        self.submit()
-        claim = ParentClaim.objects.get(club=self.club)
-        self.client.force_login(self.admin_user)
-        self.club_post("parent_claim_approve", {"child": str(self.child.pk)}, claim.pk)
-        claim.refresh_from_db()
-        claim.reviewed_at = timezone.make_aware(datetime.datetime.combine(self.season.start_date - datetime.timedelta(days=1), datetime.time()))
-        claim.save(update_fields=["reviewed_at"])
-
-        response = self.club_get("parent_claim_list")
-
-        self.assertNotContains(response, "Already dealt with")
-
-    def test_the_history_section_is_empty_without_a_current_season(self):
-        self.submit()
-        claim = ParentClaim.objects.get(club=self.club)
-        self.client.force_login(self.admin_user)
-        self.club_post("parent_claim_approve", {"child": str(self.child.pk)}, claim.pk)
-        # Push the season into the future rather than deleting it -- ClubMembership.season
-        # is PROTECT, and the club being between seasons is the scenario under test,
-        # not the absence of any Season row at all.
-        future_start = timezone.localdate() + datetime.timedelta(days=100)
-        self.season.start_date = future_start
-        self.season.end_date = future_start + datetime.timedelta(days=300)
-        self.season.save(update_fields=["start_date", "end_date"])
-
-        response = self.club_get("parent_claim_list")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertNotContains(response, "Already dealt with")
-
-    def test_a_signed_in_parent_sees_locked_read_only_fields_instead_of_blank_inputs(self):
-        # Re-typing name/email risks a typo forking off a second account -- the
-        # fields are shown read-only rather than editable-but-pre-filled.
-        user = User.objects.create_user(email="already.parent@example.com", password="pw-secret-123")
-        Member.objects.create(user=user, first_name="Already", last_name="Parent")
-        self.client.force_login(user)
-
-        response = self.client.get(reverse("members:parent_claim"), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertContains(response, "Submitting as")
-        self.assertContains(response, "Already Parent")
-        self.assertContains(response, "already.parent@example.com")
-        self.assertNotContains(response, 'name="parent_first_name"')
-        self.assertNotContains(response, 'name="parent_last_name"')
-        self.assertNotContains(response, 'name="parent_email"')
-
-    def test_a_signed_in_parents_claim_reuses_their_account_and_ignores_posted_parent_fields(self):
-        user = User.objects.create_user(email="already.parent@example.com", password="pw-secret-123")
-        Member.objects.create(user=user, first_name="Already", last_name="Parent")
-        self.client.force_login(user)
-
-        response = self.client.post(
-            reverse("members:parent_claim"),
-            {
-                # Even if a tampered request smuggled these in, the fields don't
-                # exist on the locked form and the view never reads POST for them.
-                "parent_first_name": "Someone",
-                "parent_last_name": "Else",
-                "parent_email": "not-me@example.com",
-                "child_first_name": "Jamie",
-                "child_last_name": "Doe",
-                "child_date_of_birth": "2014-03-02",
-            },
-            HTTP_HOST="ajax-united.rosterchief.app",
-        )
-
-        self.assertEqual(response.status_code, 302)
-        claim = ParentClaim.objects.get(club=self.club, child_first_name="Jamie")
-        self.assertEqual(claim.submitted_by_user, user)
-        self.assertEqual(claim.parent_first_name, "Already")
-        self.assertEqual(claim.parent_last_name, "Parent")
-        self.assertEqual(claim.parent_email, "already.parent@example.com")
-        self.assertFalse(User.objects.filter(email="not-me@example.com").exists())
-
-    def test_an_anonymous_submission_has_no_linked_user(self):
-        self.submit()
-
-        claim = ParentClaim.objects.get(club=self.club)
-
-        self.assertIsNone(claim.submitted_by_user)
-
-    def test_a_second_claim_from_a_signed_in_parent_merges_the_new_child_into_their_existing_family(self):
-        self.submit()
-        first_claim = ParentClaim.objects.get(club=self.club)
-        self.client.force_login(self.admin_user)
-        self.club_post("parent_claim_approve", {"child": str(self.child.pk)}, first_claim.pk)
-
-        parent_user = User.objects.get(email="taylor.doe@example.com")
-        second_child = Member.objects.create(first_name="Robin", last_name="Doe", date_of_birth=datetime.date(2016, 5, 1))
-        ClubMembership.objects.create(club=self.club, member=second_child, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
-        second_family = Family.objects.create()
-        FamilyMembership.objects.create(family=second_family, member=second_child, role=FamilyMembership.FamilyRole.CHILD)
-
-        self.client.force_login(parent_user)
-        self.client.post(
-            reverse("members:parent_claim"),
-            {"child_first_name": "Robin", "child_last_name": "Doe", "child_date_of_birth": "2016-05-01"},
-            HTTP_HOST="ajax-united.rosterchief.app",
-        )
-        second_claim = ParentClaim.objects.get(club=self.club, child_first_name="Robin")
-
-        self.client.force_login(self.admin_user)
-        self.club_post("parent_claim_approve", {"child": str(second_child.pk)}, second_claim.pk)
-
-        # One account, one household with both children -- not a parent split
-        # across two Family rows, and not a duplicate User/Member.
-        self.assertEqual(User.objects.filter(email="taylor.doe@example.com").count(), 1)
-        parent = Member.objects.get(user=parent_user)
-        family = FamilyMembership.objects.get(member=parent).family
-        self.assertCountEqual(family.children, [self.child, second_child])
-        self.assertFalse(Family.objects.filter(pk=second_family.pk).exists())
 
 
 class GuardianViewTests(ManagementTestBase):
@@ -2804,7 +2416,7 @@ class MemberListFamilyColumnTests(ManagementTestBase):
         self.client.force_login(self.admin_user)
 
     def make_family(self, parent_name, child_name):
-        family = Family.objects.create()
+        family = Family.objects.create(club=self.club)
         parent = Member.objects.create(first_name=parent_name, last_name="Guardian")
         child = Member.objects.create(first_name=child_name, last_name="Kid")
         FamilyMembership.objects.create(family=family, member=parent, role=FamilyMembership.FamilyRole.PARENT)
@@ -2845,7 +2457,7 @@ class MemberListFamilyColumnTests(ManagementTestBase):
 
     def test_a_member_in_two_families_shows_both_on_the_member_list(self):
         family, parent, _child = self.make_family("Pat", "Cody")
-        other_family = Family.objects.create()
+        other_family = Family.objects.create(club=self.club)
         FamilyMembership.objects.create(family=other_family, member=parent, role=FamilyMembership.FamilyRole.OTHER)
 
         response = self.club_get("member_list")
@@ -2859,7 +2471,7 @@ class MemberListFamilyColumnTests(ManagementTestBase):
         other_season = make_season(other_club)
         other_member = Member.objects.create(first_name="Other", last_name="Kid")
         ClubMembership.objects.create(club=other_club, member=other_member, season=other_season, status=ClubMembership.StatusChoices.ACTIVE)
-        other_family = Family.objects.create()
+        other_family = Family.objects.create(club=other_club)
         FamilyMembership.objects.create(family=other_family, member=other_member, role=FamilyMembership.FamilyRole.CHILD)
 
         response = self.club_get("member_list")
@@ -2927,7 +2539,7 @@ class MemberGrantLoginTests(ManagementTestBase):
     @classmethod
     def setUpTestData(cls):
         super().setUpTestData()
-        cls.family = Family.objects.create()
+        cls.family = Family.objects.create(club=cls.club)
         cls.child = Member.objects.create(first_name="Cody", last_name="Kid")
         FamilyMembership.objects.create(family=cls.family, member=cls.child, role=FamilyMembership.FamilyRole.CHILD)
         ClubMembership.objects.create(club=cls.club, member=cls.child, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
@@ -3037,7 +2649,7 @@ class MemberRefereeEligibilityTests(ManagementTestBase):
 
     def test_admin_can_update_an_existing_profile(self):
         other_level = RefereeLevel.objects.create(club=self.club, name="National")
-        profile = RefereeProfile.objects.create(member=self.member, level=self.level, valid_until=self.future_date)
+        profile = RefereeProfile.objects.create(club=self.club, member=self.member, level=self.level, valid_until=self.future_date)
         self.client.force_login(self.admin_user)
 
         self.club_post("member_referee_eligibility_update", {"level": str(other_level.pk), "valid_until": self.future_date.isoformat()}, self.member.pk)
@@ -3046,7 +2658,7 @@ class MemberRefereeEligibilityTests(ManagementTestBase):
         self.assertEqual(profile.level, other_level)
 
     def test_admin_can_clear_the_level_to_make_someone_ineligible(self):
-        profile = RefereeProfile.objects.create(member=self.member, level=self.level, valid_until=self.future_date)
+        profile = RefereeProfile.objects.create(club=self.club, member=self.member, level=self.level, valid_until=self.future_date)
         self.client.force_login(self.admin_user)
 
         self.club_post("member_referee_eligibility_update", {"level": "", "valid_until": self.future_date.isoformat()}, self.member.pk)
@@ -3056,7 +2668,7 @@ class MemberRefereeEligibilityTests(ManagementTestBase):
         self.assertFalse(profile.is_eligible)
 
     def test_member_page_shows_eligible_teams_when_valid(self):
-        RefereeProfile.objects.create(member=self.member, level=self.level, valid_until=self.future_date)
+        RefereeProfile.objects.create(club=self.club, member=self.member, level=self.level, valid_until=self.future_date)
         self.client.force_login(self.admin_user)
 
         response = self.club_get("member_detail", self.member.pk)
@@ -3064,7 +2676,7 @@ class MemberRefereeEligibilityTests(ManagementTestBase):
         self.assertContains(response, "First Team")
 
     def test_member_page_shows_a_warning_once_expired(self):
-        RefereeProfile.objects.create(member=self.member, level=self.level, valid_until=timezone.localdate() - datetime.timedelta(days=1))
+        RefereeProfile.objects.create(club=self.club, member=self.member, level=self.level, valid_until=timezone.localdate() - datetime.timedelta(days=1))
         self.client.force_login(self.admin_user)
 
         response = self.club_get("member_detail", self.member.pk)
@@ -3073,7 +2685,7 @@ class MemberRefereeEligibilityTests(ManagementTestBase):
         self.assertNotContains(response, "First Team")
 
     def test_team_page_lists_eligible_referees(self):
-        RefereeProfile.objects.create(member=self.member, level=self.level, valid_until=self.future_date)
+        RefereeProfile.objects.create(club=self.club, member=self.member, level=self.level, valid_until=self.future_date)
         self.client.force_login(self.admin_user)
 
         response = self.club_get("team_detail", self.team.pk)
@@ -3086,7 +2698,7 @@ class MemberRefereeEligibilityTests(ManagementTestBase):
         # show up here -- see RefereeLevel.eligible_team_ids.
         national = RefereeLevel.objects.create(club=self.club, name="National", inherits_from=self.level)
         national_ref = Member.objects.create(first_name="Nat", last_name="Ional")
-        RefereeProfile.objects.create(member=national_ref, level=national, valid_until=self.future_date)
+        RefereeProfile.objects.create(club=self.club, member=national_ref, level=national, valid_until=self.future_date)
         self.client.force_login(self.admin_user)
 
         response = self.club_get("team_detail", self.team.pk)
@@ -3097,7 +2709,7 @@ class MemberRefereeEligibilityTests(ManagementTestBase):
         # "Ref Eree" alone also matches the (unrelated) add-player/assign-staff
         # dropdowns, which list every active club member regardless of referee
         # status -- assert on the eligible-referees panel's own empty state.
-        RefereeProfile.objects.create(member=self.member, level=self.level, valid_until=timezone.localdate() - datetime.timedelta(days=1))
+        RefereeProfile.objects.create(club=self.club, member=self.member, level=self.level, valid_until=timezone.localdate() - datetime.timedelta(days=1))
         self.client.force_login(self.admin_user)
 
         response = self.club_get("team_detail", self.team.pk)
@@ -3105,7 +2717,7 @@ class MemberRefereeEligibilityTests(ManagementTestBase):
         self.assertContains(response, "No one yet.")
 
     def test_team_page_shows_a_federation_note_instead_of_eligible_referees(self):
-        RefereeProfile.objects.create(member=self.member, level=self.level, valid_until=self.future_date)
+        RefereeProfile.objects.create(club=self.club, member=self.member, level=self.level, valid_until=self.future_date)
         self.team.referee_management = Team.RefereeManagement.FEDERATION
         self.team.save(update_fields=["referee_management"])
         self.client.force_login(self.admin_user)
@@ -3164,7 +2776,7 @@ class MemberFamilyAttachDetachTests(ManagementTestBase):
         self.assertIn(self.standalone, family.guardians)
 
     def test_attaching_to_an_existing_family(self):
-        family = Family.objects.create()
+        family = Family.objects.create(club=self.club)
         kid = Member.objects.create(first_name="Existing", last_name="Kid")
         ClubMembership.objects.create(club=self.club, member=kid, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
         FamilyMembership.objects.create(family=family, member=kid, role=FamilyMembership.FamilyRole.CHILD)
@@ -3175,7 +2787,7 @@ class MemberFamilyAttachDetachTests(ManagementTestBase):
         self.assertEqual(Family.objects.filter(memberships__member=self.standalone).count(), 1)
 
     def test_detaching_from_family_removes_it_when_left_empty(self):
-        family = Family.objects.create()
+        family = Family.objects.create(club=self.club)
         FamilyMembership.objects.create(family=family, member=self.standalone, role=FamilyMembership.FamilyRole.CHILD)
 
         response = self.club_post("member_detach_family", {}, self.standalone.pk, family.pk)
@@ -3185,7 +2797,7 @@ class MemberFamilyAttachDetachTests(ManagementTestBase):
         self.assertFalse(Family.objects.filter(pk=family.pk).exists())
 
     def test_detaching_from_family_keeps_it_when_others_remain(self):
-        family = Family.objects.create()
+        family = Family.objects.create(club=self.club)
         sibling = Member.objects.create(first_name="Sibling", last_name="Kid")
         ClubMembership.objects.create(club=self.club, member=sibling, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
         FamilyMembership.objects.create(family=family, member=self.standalone, role=FamilyMembership.FamilyRole.CHILD)
@@ -3197,8 +2809,8 @@ class MemberFamilyAttachDetachTests(ManagementTestBase):
         self.assertIn(sibling, family.children)
 
     def test_detaching_from_one_family_keeps_membership_in_another(self):
-        family = Family.objects.create()
-        other_family = Family.objects.create()
+        family = Family.objects.create(club=self.club)
+        other_family = Family.objects.create(club=self.club)
         FamilyMembership.objects.create(family=family, member=self.standalone, role=FamilyMembership.FamilyRole.CHILD)
         FamilyMembership.objects.create(family=other_family, member=self.standalone, role=FamilyMembership.FamilyRole.OTHER)
 
@@ -3208,7 +2820,7 @@ class MemberFamilyAttachDetachTests(ManagementTestBase):
         self.assertTrue(FamilyMembership.objects.filter(member=self.standalone, family=other_family).exists())
 
     def test_a_member_can_join_a_second_family(self):
-        family = Family.objects.create()
+        family = Family.objects.create(club=self.club)
         FamilyMembership.objects.create(family=family, member=self.standalone, role=FamilyMembership.FamilyRole.CHILD)
 
         response = self.club_post("member_attach_family", {"role": FamilyMembership.FamilyRole.OTHER, "family": ""}, self.standalone.pk)
@@ -3218,8 +2830,8 @@ class MemberFamilyAttachDetachTests(ManagementTestBase):
         self.assertTrue(FamilyMembership.objects.filter(member=self.standalone, family=family).exists())
 
     def test_member_detail_shows_a_card_per_family(self):
-        family = Family.objects.create()
-        other_family = Family.objects.create()
+        family = Family.objects.create(club=self.club)
+        other_family = Family.objects.create(club=self.club)
         FamilyMembership.objects.create(family=family, member=self.standalone, role=FamilyMembership.FamilyRole.CHILD)
         FamilyMembership.objects.create(family=other_family, member=self.standalone, role=FamilyMembership.FamilyRole.OTHER)
 
@@ -3232,7 +2844,7 @@ class MemberFamilyAttachDetachTests(ManagementTestBase):
         self.assertContains(response, "Add to family")
 
     def test_attach_form_excludes_families_already_joined(self):
-        family = Family.objects.create()
+        family = Family.objects.create(club=self.club)
         FamilyMembership.objects.create(family=family, member=self.standalone, role=FamilyMembership.FamilyRole.CHILD)
 
         response = self.club_get("member_detail", self.standalone.pk)
@@ -3240,7 +2852,7 @@ class MemberFamilyAttachDetachTests(ManagementTestBase):
         self.assertNotIn(family, response.context["attach_to_family_form"].fields["family"].queryset)
 
     def test_a_childs_page_shows_their_guardians_phone_numbers(self):
-        family = Family.objects.create()
+        family = Family.objects.create(club=self.club)
         parent = Member.objects.create(first_name="Pat", last_name="Parent", phone="+32470000001", emergency_phone="+32470000002")
         FamilyMembership.objects.create(family=family, member=self.standalone, role=FamilyMembership.FamilyRole.CHILD)
         FamilyMembership.objects.create(family=family, member=parent, role=FamilyMembership.FamilyRole.PARENT)
@@ -3260,7 +2872,7 @@ class MemberFamilyAttachDetachTests(ManagementTestBase):
         self.assertNotContains(response, "Parent/guardian contact")
 
     def test_a_guardian_with_no_phone_numbers_gets_no_dial_buttons(self):
-        family = Family.objects.create()
+        family = Family.objects.create(club=self.club)
         parent = Member.objects.create(first_name="Pat", last_name="Parent")
         FamilyMembership.objects.create(family=family, member=self.standalone, role=FamilyMembership.FamilyRole.CHILD)
         FamilyMembership.objects.create(family=family, member=parent, role=FamilyMembership.FamilyRole.PARENT)
@@ -3289,7 +2901,7 @@ class MemberDeleteTests(ManagementTestBase):
         self.assertFalse(Member.objects.filter(pk=self.member.pk).exists())
 
     def test_deleting_the_last_member_of_a_family_cleans_it_up(self):
-        family = Family.objects.create()
+        family = Family.objects.create(club=self.club)
         FamilyMembership.objects.create(family=family, member=self.member, role=FamilyMembership.FamilyRole.CHILD)
 
         self.club_post("member_delete", {}, self.member.pk)
@@ -3412,7 +3024,7 @@ class FamilyDetailViewTests(ManagementTestBase):
     @classmethod
     def setUpTestData(cls):
         super().setUpTestData()
-        cls.family = Family.objects.create()
+        cls.family = Family.objects.create(club=cls.club)
         cls.parent = Member.objects.create(first_name="Pat", last_name="Guardian")
         cls.child = Member.objects.create(first_name="Cody", last_name="Kid")
         FamilyMembership.objects.create(family=cls.family, member=cls.parent, role=FamilyMembership.FamilyRole.PARENT)
@@ -3433,7 +3045,7 @@ class FamilyDetailViewTests(ManagementTestBase):
 
     def test_a_family_from_another_club_404s(self):
         other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
-        other_family = Family.objects.create()
+        other_family = Family.objects.create(club=other_club)
         other_member = Member.objects.create(first_name="Other", last_name="Kid")
         other_season = make_season(other_club)
         ClubMembership.objects.create(club=other_club, member=other_member, season=other_season, status=ClubMembership.StatusChoices.ACTIVE)
@@ -3495,7 +3107,7 @@ class FamilyMembershipRoleUpdateTests(ManagementTestBase):
     @classmethod
     def setUpTestData(cls):
         super().setUpTestData()
-        cls.family = Family.objects.create()
+        cls.family = Family.objects.create(club=cls.club)
         cls.member = Member.objects.create(first_name="Cody", last_name="Kid")
         cls.membership = FamilyMembership.objects.create(family=cls.family, member=cls.member, role=FamilyMembership.FamilyRole.CHILD)
         ClubMembership.objects.create(club=cls.club, member=cls.member, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
@@ -3512,7 +3124,7 @@ class FamilyMembershipRoleUpdateTests(ManagementTestBase):
         self.assertEqual(self.membership.role, FamilyMembership.FamilyRole.GUARDIAN)
 
     def test_only_changes_the_role_in_the_targeted_family(self):
-        other_family = Family.objects.create()
+        other_family = Family.objects.create(club=self.club)
         other_membership = FamilyMembership.objects.create(family=other_family, member=self.member, role=FamilyMembership.FamilyRole.OTHER)
 
         self.club_post("family_membership_role_update", {"role": FamilyMembership.FamilyRole.PARENT}, self.family.pk, self.member.pk)
@@ -3546,7 +3158,7 @@ class FamilyMembershipRoleUpdateTests(ManagementTestBase):
     def test_a_family_from_another_club_404s(self):
         other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
         other_season = make_season(other_club)
-        other_family = Family.objects.create()
+        other_family = Family.objects.create(club=other_club)
         other_member = Member.objects.create(first_name="Other", last_name="Kid")
         ClubMembership.objects.create(club=other_club, member=other_member, season=other_season, status=ClubMembership.StatusChoices.ACTIVE)
         FamilyMembership.objects.create(family=other_family, member=other_member, role=FamilyMembership.FamilyRole.CHILD)
@@ -3559,7 +3171,7 @@ class FamilyMembershipRoleUpdateTests(ManagementTestBase):
         # Same member, a different role in a second family -- the "others" bucket
         # used to read person.family_memberships.first(), which could silently show
         # a role from the wrong family. This is exactly that scenario.
-        other_family = Family.objects.create()
+        other_family = Family.objects.create(club=self.club)
         FamilyMembership.objects.create(family=other_family, member=self.member, role=FamilyMembership.FamilyRole.OTHER)
 
         this_family_response = self.club_get("family_detail", self.family.pk)
@@ -3724,7 +3336,7 @@ class MembershipListViewTests(ManagementTestBase):
     def test_search_matches_by_family_surname(self):
         # Searching "Smith" should find a family member even when their own name
         # isn't Smith -- e.g. a parent with a different surname than their kid.
-        family = Family.objects.create()
+        family = Family.objects.create(club=self.club)
         smith_kid = self.make_membership("Junior", "Smith")
         FamilyMembership.objects.create(family=family, member=smith_kid.member, role=FamilyMembership.FamilyRole.CHILD)
         other_parent = self.make_membership("Alex", "Jones")
@@ -3739,7 +3351,7 @@ class MembershipListViewTests(ManagementTestBase):
         self.assertNotIn(unrelated.pk, ids)
 
     def test_search_matches_an_explicit_family_name(self):
-        family = Family.objects.create(name="The Andersons")
+        family = Family.objects.create(club=self.club, name="The Andersons")
         membership = self.make_membership("Pat", "Vandermeer")
         FamilyMembership.objects.create(family=family, member=membership.member, role=FamilyMembership.FamilyRole.PARENT)
         unrelated = self.make_membership("Nobody", "Related")
@@ -3751,8 +3363,8 @@ class MembershipListViewTests(ManagementTestBase):
         self.assertNotIn(unrelated.pk, ids)
 
     def test_family_column_shows_every_family_a_member_belongs_to(self):
-        family = Family.objects.create()
-        other_family = Family.objects.create()
+        family = Family.objects.create(club=self.club)
+        other_family = Family.objects.create(club=self.club)
         membership = self.make_membership("Multi", "Family")
         FamilyMembership.objects.create(family=family, member=membership.member, role=FamilyMembership.FamilyRole.CHILD)
         FamilyMembership.objects.create(family=other_family, member=membership.member, role=FamilyMembership.FamilyRole.OTHER)
@@ -3805,7 +3417,7 @@ class MembershipListViewTests(ManagementTestBase):
     def test_a_parents_email_is_shown_and_labelled_parent(self):
         child = Member.objects.create(first_name="Cam", last_name="Childless")
         parent = Member.objects.create(first_name="Pia", last_name="Parent", email="pia@example.com")
-        family = Family.objects.create()
+        family = Family.objects.create(club=self.club)
         FamilyMembership.objects.create(family=family, member=child, role=FamilyMembership.FamilyRole.CHILD)
         FamilyMembership.objects.create(family=family, member=parent, role=FamilyMembership.FamilyRole.PARENT)
         ClubMembership.objects.create(club=self.club, member=child, season=self.season)
@@ -3818,7 +3430,7 @@ class MembershipListViewTests(ManagementTestBase):
     def test_a_guardians_email_is_shown_and_labelled_guardian(self):
         child = Member.objects.create(first_name="Cam", last_name="Childless")
         guardian = Member.objects.create(first_name="Gia", last_name="Guardian", email="gia@example.com")
-        family = Family.objects.create()
+        family = Family.objects.create(club=self.club)
         FamilyMembership.objects.create(family=family, member=child, role=FamilyMembership.FamilyRole.CHILD)
         FamilyMembership.objects.create(family=family, member=guardian, role=FamilyMembership.FamilyRole.GUARDIAN)
         ClubMembership.objects.create(club=self.club, member=child, season=self.season)
@@ -3832,7 +3444,7 @@ class MembershipListViewTests(ManagementTestBase):
         child = Member.objects.create(first_name="Cam", last_name="Childless")
         parent_one = Member.objects.create(first_name="Bernard", last_name="One", email="bernard@example.com")
         parent_two = Member.objects.create(first_name="Charlotte", last_name="Two", email="charlotte@example.com")
-        family = Family.objects.create()
+        family = Family.objects.create(club=self.club)
         FamilyMembership.objects.create(family=family, member=child, role=FamilyMembership.FamilyRole.CHILD)
         FamilyMembership.objects.create(family=family, member=parent_one, role=FamilyMembership.FamilyRole.PARENT)
         FamilyMembership.objects.create(family=family, member=parent_two, role=FamilyMembership.FamilyRole.PARENT)
@@ -4297,7 +3909,7 @@ class MembershipSendInvoicesTests(ManagementTestBase):
     def test_falls_back_to_a_guardians_email(self):
         self.member.email = ""
         self.member.save(update_fields=["email"])
-        family = Family.objects.create()
+        family = Family.objects.create(club=self.club)
         parent = Member.objects.create(first_name="Pat", last_name="Doe", email="pat@example.com")
         FamilyMembership.objects.create(family=family, member=self.member, role=FamilyMembership.FamilyRole.CHILD)
         FamilyMembership.objects.create(family=family, member=parent, role=FamilyMembership.FamilyRole.PARENT)
@@ -4859,15 +4471,16 @@ class MemberBulkImportTests(ManagementTestBase):
 
     def test_a_lone_child_row_gets_a_family_of_its_own(self):
         # The migration case: children arrive with no parents on file. A family of
-        # one is what makes "nobody responsible for this child" visible -- see
-        # members.services.claims.families_awaiting_a_parent.
+        # one is what makes "nobody responsible for this child" visible -- an
+        # admin can add a parent to it later from the family's own page.
         upload = make_import_workbook([["Jamie", "Lonechild", "2014-03-02", "", "", "", "", "", "", "", "child", ""]])
         self.club_post("member_import", {"file": upload})
 
         self.club_post("member_import_confirm", {})
 
         child = Member.objects.get(first_name="Jamie", last_name="Lonechild")
-        self.assertIn(child, children_awaiting_a_parent(self.club))
+        family = FamilyMembership.objects.get(member=child).family
+        self.assertEqual(family.memberships.count(), 1)
 
     def test_a_lone_parent_row_is_still_an_error(self):
         # Only `child` is meaningful without a family_group; a parent with nobody
@@ -4927,7 +4540,7 @@ class MemberBulkImportTests(ManagementTestBase):
         self.assertFalse(FamilyMembership.objects.filter(member=member).exists())
 
     def make_existing_club_family(self, last_name="Doe"):
-        family = Family.objects.create()
+        family = Family.objects.create(club=self.club)
         member = Member.objects.create(first_name="Existing", last_name=last_name)
         FamilyMembership.objects.create(family=family, member=member, role=FamilyMembership.FamilyRole.PARENT)
         ClubMembership.objects.create(club=self.club, member=member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
@@ -4986,7 +4599,7 @@ class MemberBulkImportTests(ManagementTestBase):
     def test_confirm_ignores_a_chosen_family_from_another_club(self):
         other_club = Club.objects.create(name="Other Club", slug="other-club")
         other_season = make_season(other_club)
-        other_family = Family.objects.create()
+        other_family = Family.objects.create(club=other_club)
         other_member = Member.objects.create(first_name="Other", last_name="Doe")
         FamilyMembership.objects.create(family=other_family, member=other_member, role=FamilyMembership.FamilyRole.PARENT)
         ClubMembership.objects.create(club=other_club, member=other_member, season=other_season, status=ClubMembership.StatusChoices.ACTIVE)
@@ -7344,7 +6957,7 @@ class EventRefereeManagementTests(ManagementTestBase):
         cls.level.teams.add(cls.team)
         cls.referee = Member.objects.create(first_name="Ref", last_name="Eree")
         ClubMembership.objects.create(club=cls.club, member=cls.referee, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
-        RefereeProfile.objects.create(member=cls.referee, level=cls.level, valid_until=timezone.localdate() + datetime.timedelta(days=30))
+        RefereeProfile.objects.create(club=cls.club, member=cls.referee, level=cls.level, valid_until=timezone.localdate() + datetime.timedelta(days=30))
 
         cls.coach_position = Position.objects.create(club=cls.club, name="Head Coach", short_name="HC", staff_position=True, management_position=True)
         # Manages this team, which still isn't enough to touch referees -- that's
@@ -7455,7 +7068,7 @@ class EventRefereeManagementTests(ManagementTestBase):
     def test_cannot_assign_beyond_max_referees(self):
         game = self.make_game(max_referees=1)
         second_referee = Member.objects.create(first_name="Second", last_name="Ref")
-        RefereeProfile.objects.create(member=second_referee, level=self.level, valid_until=timezone.localdate() + datetime.timedelta(days=30))
+        RefereeProfile.objects.create(club=self.club, member=second_referee, level=self.level, valid_until=timezone.localdate() + datetime.timedelta(days=30))
         self.client.force_login(self.admin_user)
         self.club_post("event_referee_assign", {"member": str(self.referee.pk)}, game.pk)
 
@@ -7807,7 +7420,7 @@ class RefereeManagementDashboardTests(ManagementTestBase):
         cls.level.teams.add(cls.team)
         cls.referee = Member.objects.create(first_name="Ref", last_name="Eree")
         ClubMembership.objects.create(club=cls.club, member=cls.referee, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
-        RefereeProfile.objects.create(member=cls.referee, level=cls.level, valid_until=timezone.localdate() + datetime.timedelta(days=30))
+        RefereeProfile.objects.create(club=cls.club, member=cls.referee, level=cls.level, valid_until=timezone.localdate() + datetime.timedelta(days=30))
 
     def make_coach(self, team, email="coach-refdash@example.com"):
         coach_user = User.objects.create_user(email=email, password="pw-secret-123")
@@ -8883,6 +8496,152 @@ class EvaluationWalkthroughViewTests(EvaluationManagementTestBase):
 
         self.assertEqual(self.club_get("evaluation_walkthrough", checklist.slug).status_code, 403)
 
+    def test_starting_a_meeting_shows_the_outcome_form(self):
+        checklist = self.make_rubric("U8")
+        self.client.force_login(self.eval_manager_user)
+        self.club_post("evaluation_create_for_checklist", {"ball-control": "5"}, self.player.pk, checklist.slug)
+
+        self.club_post("evaluation_walkthrough", {"action": "start_session", "player_pk": str(self.player.pk)}, checklist.slug)
+
+        session = EvaluationSession.objects.get(club=self.club, checklist=checklist)
+        self.assertTrue(session.is_open)
+        self.assertEqual(session.started_by, self.eval_manager_member)
+
+        response = self.club_get("evaluation_walkthrough", checklist.slug)
+        self.assertContains(response, "Save outcome")
+        self.assertContains(response, "End meeting")
+
+    def test_no_outcome_form_without_a_meeting(self):
+        checklist = self.make_rubric("U8")
+        self.client.force_login(self.eval_manager_user)
+        self.club_post("evaluation_create_for_checklist", {"ball-control": "5"}, self.player.pk, checklist.slug)
+
+        response = self.club_get("evaluation_walkthrough", checklist.slug)
+
+        self.assertNotContains(response, "Save outcome")
+        self.assertContains(response, "Start meeting")
+
+    def test_saving_an_outcome_requires_an_open_meeting(self):
+        checklist = self.make_rubric("U8")
+        self.client.force_login(self.eval_manager_user)
+        self.club_post("evaluation_create_for_checklist", {"ball-control": "5"}, self.player.pk, checklist.slug)
+
+        self.club_post("evaluation_walkthrough", {"action": "outcome", "player_pk": str(self.player.pk), "decision": "Promote"}, checklist.slug)
+
+        self.assertFalse(EvaluationOutcome.objects.filter(player=self.player).exists())
+
+    def test_saving_an_outcome_during_a_meeting(self):
+        checklist = self.make_rubric("U8")
+        self.client.force_login(self.eval_manager_user)
+        self.club_post("evaluation_create_for_checklist", {"ball-control": "5"}, self.player.pk, checklist.slug)
+        self.club_post("evaluation_walkthrough", {"action": "start_session", "player_pk": str(self.player.pk)}, checklist.slug)
+
+        self.club_post("evaluation_walkthrough", {"action": "outcome", "player_pk": str(self.player.pk), "decision": "Move up to U10"}, checklist.slug)
+
+        outcome = EvaluationOutcome.objects.get(player=self.player)
+        self.assertEqual(outcome.decision, "Move up to U10")
+        self.assertEqual(outcome.recorded_by, self.eval_manager_member)
+
+        response = self.club_get("evaluation_walkthrough", checklist.slug)
+        self.assertContains(response, "Move up to U10")
+
+    def test_a_blank_outcome_is_not_saved(self):
+        checklist = self.make_rubric("U8")
+        self.client.force_login(self.eval_manager_user)
+        self.club_post("evaluation_create_for_checklist", {"ball-control": "5"}, self.player.pk, checklist.slug)
+        self.club_post("evaluation_walkthrough", {"action": "start_session", "player_pk": str(self.player.pk)}, checklist.slug)
+
+        self.club_post("evaluation_walkthrough", {"action": "outcome", "player_pk": str(self.player.pk), "decision": "   "}, checklist.slug)
+
+        self.assertFalse(EvaluationOutcome.objects.filter(player=self.player).exists())
+
+    def test_ending_a_meeting_closes_it_and_offers_the_pdf_link(self):
+        checklist = self.make_rubric("U8")
+        self.client.force_login(self.eval_manager_user)
+        self.club_post("evaluation_create_for_checklist", {"ball-control": "5"}, self.player.pk, checklist.slug)
+        self.club_post("evaluation_walkthrough", {"action": "start_session", "player_pk": str(self.player.pk)}, checklist.slug)
+        session = EvaluationSession.objects.get(club=self.club, checklist=checklist)
+
+        self.club_post("evaluation_walkthrough", {"action": "end_session", "player_pk": str(self.player.pk)}, checklist.slug)
+
+        session.refresh_from_db()
+        self.assertFalse(session.is_open)
+
+        response = self.club_get("evaluation_walkthrough", checklist.slug)
+        self.assertContains(response, "Start meeting")
+        self.assertContains(response, reverse("management:evaluation_session_outcomes_pdf", args=[session.pk]))
+
+    def test_starting_a_second_meeting_reuses_the_open_one(self):
+        checklist = self.make_rubric("U8")
+        self.client.force_login(self.eval_manager_user)
+        self.club_post("evaluation_create_for_checklist", {"ball-control": "5"}, self.player.pk, checklist.slug)
+
+        self.club_post("evaluation_walkthrough", {"action": "start_session", "player_pk": str(self.player.pk)}, checklist.slug)
+        self.club_post("evaluation_walkthrough", {"action": "start_session", "player_pk": str(self.player.pk)}, checklist.slug)
+
+        self.assertEqual(EvaluationSession.objects.filter(checklist=checklist).count(), 1)
+
+
+class EvaluationSessionOutcomesPdfTests(EvaluationManagementTestBase):
+    def setUp(self):
+        super().setUp()
+        self.client.force_login(self.eval_manager_user)
+
+    def test_downloads_as_a_pdf(self):
+        checklist = self.make_rubric("U8")
+        session = start_session(club=self.club, checklist=checklist, started_by=self.eval_manager_member)
+
+        with mock.patch("management.views.evaluation_outcomes_pdf", return_value=b"%PDF-fake") as renderer:
+            response = self.club_get("evaluation_session_outcomes_pdf", session.pk)
+
+        self.assertEqual(response["Content-Type"], "application/pdf")
+        self.assertIn(".pdf", response["Content-Disposition"])
+        self.assertEqual(response.content, b"%PDF-fake")
+        renderer.assert_called_once()
+
+    def test_only_carries_the_outcome_decision_not_evaluation_scores_or_notes(self):
+        checklist = self.make_rubric("U8")
+        self.club_post("evaluation_create_for_checklist", {"ball-control": "5"}, self.player.pk, checklist.slug)
+        session = start_session(club=self.club, checklist=checklist, started_by=self.eval_manager_member)
+        EvaluationOutcome.objects.create(club=self.club, session=session, player=self.player, decision="Move up to U10", recorded_by=self.eval_manager_member)
+        add_evaluation_note(club=self.club, checklist=checklist, player=self.player, author=self.eval_manager_member, note="Private discussion note")
+
+        with mock.patch("management.views.evaluation_outcomes_pdf", return_value=b"%PDF-fake") as renderer:
+            self.club_get("evaluation_session_outcomes_pdf", session.pk)
+
+        context = renderer.call_args[0][0]
+        rendered_decisions = [row.decision for row in context["rows"]]
+        self.assertEqual(rendered_decisions, ["Move up to U10"])
+        self.assertNotIn("Private discussion note", str(context))
+        self.assertNotIn("5", str([row.decision for row in context["rows"]]))
+
+    def test_a_missing_pdf_library_is_reported_rather_than_a_500(self):
+        checklist = self.make_rubric("U8")
+        session = start_session(club=self.club, checklist=checklist, started_by=None)
+
+        with mock.patch("management.views.evaluation_outcomes_pdf", side_effect=PDFExportError("PDF rendering needs the native pango/cairo libraries.")):
+            response = self.club_get("evaluation_session_outcomes_pdf", session.pk)
+
+        self.assertRedirects(response, reverse("management:evaluation_walkthrough", args=[checklist.slug]))
+
+    def test_a_session_from_another_club_404s(self):
+        other_club = Club.objects.create(name="Rival FC", slug="rival-fc-eval")
+        other_checklist = EvaluationChecklist.objects.create(club=other_club, name="U8")
+        other_session = EvaluationSession.objects.create(club=other_club, checklist=other_checklist)
+
+        response = self.club_get("evaluation_session_outcomes_pdf", other_session.pk)
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_plain_staff_gets_403(self):
+        checklist = self.make_rubric("U8")
+        session = start_session(club=self.club, checklist=checklist, started_by=None)
+        self.client.force_login(self.make_plain_staff())
+
+        response = self.club_get("evaluation_session_outcomes_pdf", session.pk)
+
+        self.assertEqual(response.status_code, 403)
+
 
 class EvaluationDetailViewTests(EvaluationManagementTestBase):
     def test_shows_the_answers_against_the_rubric_that_was_actually_scored(self):
@@ -9147,7 +8906,7 @@ class MemberListKindFilterTests(ManagementTestBase):
     @classmethod
     def setUpTestData(cls):
         super().setUpTestData()
-        cls.family = Family.objects.create()
+        cls.family = Family.objects.create(club=cls.club)
         cls.parent = Member.objects.create(first_name="Pat", last_name="Guardian")
         cls.child = Member.objects.create(first_name="Cody", last_name="Kid")
         FamilyMembership.objects.create(family=cls.family, member=cls.parent, role=FamilyMembership.FamilyRole.PARENT)
@@ -9351,7 +9110,7 @@ class FamilyListViewTests(ManagementTestBase):
     @classmethod
     def setUpTestData(cls):
         super().setUpTestData()
-        cls.family = Family.objects.create(name="The Smiths")
+        cls.family = Family.objects.create(club=cls.club, name="The Smiths")
         cls.parent = Member.objects.create(first_name="Pat", last_name="Smith")
         cls.child = Member.objects.create(first_name="Cody", last_name="Smith")
         FamilyMembership.objects.create(family=cls.family, member=cls.parent, role=FamilyMembership.FamilyRole.PARENT)
@@ -9379,7 +9138,7 @@ class FamilyListViewTests(ManagementTestBase):
     def test_a_family_from_another_club_is_excluded(self):
         other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
         other_season = make_season(other_club)
-        other_family = Family.objects.create()
+        other_family = Family.objects.create(club=other_club)
         other_member = Member.objects.create(first_name="Other", last_name="Kid")
         ClubMembership.objects.create(club=other_club, member=other_member, season=other_season, status=ClubMembership.StatusChoices.ACTIVE)
         FamilyMembership.objects.create(family=other_family, member=other_member, role=FamilyMembership.FamilyRole.CHILD)
@@ -9451,9 +9210,9 @@ class FamilyListViewTests(ManagementTestBase):
 
 
 class SidebarCounterTests(ManagementTestBase):
-    """The nav's admin-only badges -- pending parent claims, upcoming
-    club-managed games nobody's down to referee yet, and the Sign-up queue.
-    See management.context_processors.sidebar_counters."""
+    """The nav's admin-only badges -- upcoming club-managed games nobody's
+    down to referee yet, and the Sign-up queue. See
+    management.context_processors.sidebar_counters."""
 
     def setUp(self):
         # The fixture admin's own ClubMembership (ManagementTestBase.setUpTestData)
@@ -9461,17 +9220,6 @@ class SidebarCounterTests(ManagementTestBase):
         # signup_queue_count's own rule, which would otherwise put a baseline 1 on
         # every count below regardless of what each test itself sets up.
         ClubMembership.objects.filter(club=self.club, member=self.admin_member, season=self.season).update(fee_status=ClubMembership.FeeStatus.PAID)
-
-    def make_pending_claim(self):
-        return ParentClaim.objects.create(
-            club=self.club,
-            parent_first_name="Pat",
-            parent_last_name="Parent",
-            parent_email="pat-claim@example.com",
-            child_first_name="Cody",
-            child_last_name="Child",
-            child_date_of_birth=datetime.date(2015, 1, 1),
-        )
 
     def make_home_game(self, referee=None):
         team = Team.objects.create(club=self.club, name="First Team", short_name="1st")
@@ -9487,18 +9235,15 @@ class SidebarCounterTests(ManagementTestBase):
 
         response = self.club_get("home")
 
-        self.assertEqual(response.context["pending_parent_claims_count"], 0)
         self.assertEqual(response.context["games_missing_referees_count"], 0)
         self.assertEqual(response.context["signup_pending_count"], 0)
 
-    def test_counts_reflect_a_pending_claim_and_an_unrefereed_game(self):
-        self.make_pending_claim()
+    def test_counts_reflect_an_unrefereed_game(self):
         self.make_home_game()
         self.client.force_login(self.admin_user)
 
         response = self.club_get("home")
 
-        self.assertEqual(response.context["pending_parent_claims_count"], 1)
         self.assertEqual(response.context["games_missing_referees_count"], 1)
 
     def test_signup_count_reflects_a_pending_membership(self):
@@ -9585,16 +9330,6 @@ class SidebarCounterTests(ManagementTestBase):
 
         self.assertEqual(response.context["games_missing_referees_count"], 1)
 
-    def test_an_already_reviewed_claim_does_not_count(self):
-        claim = self.make_pending_claim()
-        claim.status = ParentClaim.Status.APPROVED
-        claim.save(update_fields=["status"])
-        self.client.force_login(self.admin_user)
-
-        response = self.club_get("home")
-
-        self.assertEqual(response.context["pending_parent_claims_count"], 0)
-
     def test_a_fully_staffed_game_does_not_crowd_out_the_next_limit_window(self):
         # Regression: the badge used to slice to the next `limit` games BEFORE
         # dropping fully-staffed ones, while RefereeManagementDashboardView's own
@@ -9636,10 +9371,8 @@ class SidebarCounterTests(ManagementTestBase):
 
         response = self.club_get("home")
 
-        self.assertIsNone(response.context["pending_parent_claims_count"])
         self.assertIsNone(response.context["games_missing_referees_count"])
         self.assertIsNone(response.context["signup_pending_count"])
-        self.assertNotContains(response, reverse("management:parent_claim_list"))
         self.assertNotContains(response, reverse("management:referee_management"))
         self.assertNotContains(response, reverse("management:signup_list"))
 
@@ -9798,7 +9531,7 @@ class ManagementListPaginationTests(ManagementTestBase):
 
     def test_family_list_pagination_is_wired_and_shows_page_numbers(self):
         for i in range(3):
-            family = Family.objects.create()
+            family = Family.objects.create(club=self.club)
             member = Member.objects.create(first_name=f"Fam{i}", last_name="Ily")
             FamilyMembership.objects.create(family=family, member=member, role=FamilyMembership.FamilyRole.CHILD)
             ClubMembership.objects.create(club=self.club, member=member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
@@ -11594,7 +11327,7 @@ class OrderManagementTests(ShopTestBase):
     def test_search_matches_by_family_name(self):
         parent = Member.objects.create(first_name="Priya", last_name="Family")
         child = Member.objects.create(first_name="Cy", last_name="Family")
-        family = Family.objects.create(name="Family")
+        family = Family.objects.create(club=self.club, name="Family")
         FamilyMembership.objects.create(family=family, member=parent, role=FamilyMembership.FamilyRole.PARENT)
         FamilyMembership.objects.create(family=family, member=child, role=FamilyMembership.FamilyRole.CHILD)
         order = Order.objects.create(club=self.club, purchaser=child, payment_status=Order.PaymentStatus.PENDING, total=Decimal("10.00"))
@@ -12062,7 +11795,7 @@ class OrderAddPaymentTests(ShopTestBase):
     def test_a_voucher_issued_to_a_family_member_is_selectable(self):
         order = self.make_order()
         parent = Member.objects.create(first_name="Pat", last_name="Orderer")
-        family = Family.objects.create(name="Orderer family")
+        family = Family.objects.create(club=self.club, name="Orderer family")
         FamilyMembership.objects.create(family=family, member=self.purchaser, role=FamilyMembership.FamilyRole.CHILD)
         FamilyMembership.objects.create(family=family, member=parent, role=FamilyMembership.FamilyRole.PARENT)
         voucher = self.make_voucher(amount=Decimal("30.00"), issued_to=parent)
@@ -12745,7 +12478,7 @@ class InvoiceListViewTests(ShopTestBase):
     def test_search_matches_by_family_name(self):
         parent = Member.objects.create(first_name="Priya", last_name="Family", email="priya@example.com")
         child = Member.objects.create(first_name="Cy", last_name="Family")
-        family = Family.objects.create(name="Family")
+        family = Family.objects.create(club=self.club, name="Family")
         FamilyMembership.objects.create(family=family, member=parent, role=FamilyMembership.FamilyRole.PARENT)
         FamilyMembership.objects.create(family=family, member=child, role=FamilyMembership.FamilyRole.CHILD)
         invoice = self.make_dues_invoice(child, recipient_email=parent.email, sent_to_guardian=True)

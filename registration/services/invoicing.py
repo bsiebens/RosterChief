@@ -219,15 +219,19 @@ def batch_invoice_pdf(batch) -> bytes:
     return render_pdf(html)
 
 
-def _search_registration_details(details, search):
+def _search_registration_details(details, search, club):
     """Same shape as management.views.InvoiceListView's own
     _search_by_member_or_family, duplicated rather than imported -- that one
-    lives on a view class in a higher-level app this one must not depend on."""
+    lives on a view class in a higher-level app this one must not depend on.
+
+    ``club`` scopes the family match: membership__member is global, so
+    without it a match could come from another club's family
+    (2026-09-12 leak)."""
     return (
         details.filter(membership__member__first_name__icontains=search)
         | details.filter(membership__member__last_name__icontains=search)
-        | details.filter(membership__member__family_memberships__family__name__icontains=search)
-        | details.filter(membership__member__family_memberships__family__memberships__member__last_name__icontains=search)
+        | details.filter(membership__member__family_memberships__family__club=club, membership__member__family_memberships__family__name__icontains=search)
+        | details.filter(membership__member__family_memberships__family__club=club, membership__member__family_memberships__family__memberships__member__last_name__icontains=search)
     ).distinct()
 
 
@@ -245,7 +249,7 @@ def registrations_awaiting_confirmation(club, search=""):
         .select_related("membership__member", "batch", "product_variant__product")
     )
     if search:
-        details = _search_registration_details(details, search)
+        details = _search_registration_details(details, search, club)
 
     by_batch = {}
     for detail in details:

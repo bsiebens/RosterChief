@@ -26,9 +26,9 @@ REQUEST_TIMEOUT = 10
 
 def send_message(message, *, exempt: bool = False, fail_silently: bool = False) -> bool:
     """The one choke point every automated send in the app goes through instead of
-    calling ``message.send()`` directly -- club/services/invoicing.py, members/
-    services/claims.py, billing/services/reminders.py, and notifications/services.py
-    all route through this, as does authentication.adapters.RosterChiefAccountAdapter
+    calling ``message.send()`` directly -- club/services/invoicing.py,
+    billing/services/reminders.py, and notifications/services.py all route
+    through this, as does authentication.adapters.RosterChiefAccountAdapter
     for allauth's own mail -- so the control panel's "pause automated email" switch
     (features.models.EmailSuppression) actually silences everything at once instead
     of each call site needing its own check.

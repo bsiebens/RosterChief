@@ -366,58 +366,58 @@ class RefereeProfileModelTests(TeamsTestCase):
         cls.level.teams.add(cls.team)
 
     def test_str(self):
-        profile = RefereeProfile.objects.create(member=self.member)
+        profile = RefereeProfile.objects.create(club=self.club, member=self.member)
         self.assertEqual(str(profile), "Jane Doe (referee)")
 
     def test_member_is_one_to_one(self):
-        RefereeProfile.objects.create(member=self.member)
+        RefereeProfile.objects.create(club=self.club, member=self.member)
 
         with self.assertRaises(IntegrityError):
-            RefereeProfile.objects.create(member=self.member)
+            RefereeProfile.objects.create(club=self.club, member=self.member)
 
     def test_no_level_is_never_eligible_even_with_a_future_validity(self):
-        profile = RefereeProfile.objects.create(member=self.member, valid_until=datetime.date(2099, 1, 1))
+        profile = RefereeProfile.objects.create(club=self.club, member=self.member, valid_until=datetime.date(2099, 1, 1))
         self.assertTrue(profile.is_currently_valid)  # the date itself is fine...
         self.assertFalse(profile.is_eligible)  # ...but there's no level, so not eligible
         self.assertEqual(list(profile.eligible_teams), [])
 
     def test_no_validity_set_is_not_currently_valid_or_eligible(self):
-        profile = RefereeProfile.objects.create(member=self.member, level=self.level)
+        profile = RefereeProfile.objects.create(club=self.club, member=self.member, level=self.level)
         self.assertFalse(profile.is_currently_valid)
         self.assertFalse(profile.is_eligible)
         self.assertEqual(list(profile.eligible_teams), [])
 
     def test_valid_until_today_is_currently_valid_and_eligible(self):
-        profile = RefereeProfile.objects.create(member=self.member, level=self.level, valid_until=timezone.localdate())
+        profile = RefereeProfile.objects.create(club=self.club, member=self.member, level=self.level, valid_until=timezone.localdate())
         self.assertTrue(profile.is_currently_valid)
         self.assertTrue(profile.is_eligible)
 
     def test_valid_until_in_the_past_is_not_currently_valid_or_eligible(self):
-        profile = RefereeProfile.objects.create(member=self.member, level=self.level, valid_until=timezone.localdate() - datetime.timedelta(days=1))
+        profile = RefereeProfile.objects.create(club=self.club, member=self.member, level=self.level, valid_until=timezone.localdate() - datetime.timedelta(days=1))
         self.assertFalse(profile.is_currently_valid)
         self.assertFalse(profile.is_eligible)
         self.assertEqual(list(profile.eligible_teams), [])
 
     def test_eligible_teams_come_from_the_level_when_eligible(self):
-        profile = RefereeProfile.objects.create(member=self.member, level=self.level, valid_until=timezone.localdate() + datetime.timedelta(days=1))
+        profile = RefereeProfile.objects.create(club=self.club, member=self.member, level=self.level, valid_until=timezone.localdate() + datetime.timedelta(days=1))
         self.assertEqual(list(profile.eligible_teams), [self.team])
 
     def test_eligible_teams_include_what_the_level_inherits(self):
         other_team = Team.objects.create(club=self.club, name="Second Team", short_name="2nd")
         national = RefereeLevel.objects.create(club=self.club, name="National", inherits_from=self.level)
         national.teams.add(other_team)
-        profile = RefereeProfile.objects.create(member=self.member, level=national, valid_until=timezone.localdate() + datetime.timedelta(days=1))
+        profile = RefereeProfile.objects.create(club=self.club, member=self.member, level=national, valid_until=timezone.localdate() + datetime.timedelta(days=1))
 
         self.assertEqual(set(profile.eligible_teams), {self.team, other_team})
 
     def test_deleting_a_referenced_level_is_protected(self):
-        RefereeProfile.objects.create(member=self.member, level=self.level, valid_until=timezone.localdate())
+        RefereeProfile.objects.create(club=self.club, member=self.member, level=self.level, valid_until=timezone.localdate())
 
         with self.assertRaises(ProtectedError):
             self.level.delete()
 
     def test_deleting_the_member_deletes_the_profile(self):
-        profile = RefereeProfile.objects.create(member=self.member)
+        profile = RefereeProfile.objects.create(club=self.club, member=self.member)
 
         self.member.delete()
 
@@ -482,42 +482,42 @@ class OfficialProfileModelTests(TeamsTestCase):
         cls.level.teams.add(cls.team)
 
     def test_str(self):
-        profile = OfficialProfile.objects.create(member=self.member)
+        profile = OfficialProfile.objects.create(club=self.club, member=self.member)
         self.assertEqual(str(profile), "Jane Doe (official)")
 
     def test_member_is_one_to_one(self):
-        OfficialProfile.objects.create(member=self.member)
+        OfficialProfile.objects.create(club=self.club, member=self.member)
 
         with self.assertRaises(IntegrityError):
-            OfficialProfile.objects.create(member=self.member)
+            OfficialProfile.objects.create(club=self.club, member=self.member)
 
     def test_no_level_is_never_eligible(self):
-        profile = OfficialProfile.objects.create(member=self.member, valid_until=datetime.date(2099, 1, 1))
+        profile = OfficialProfile.objects.create(club=self.club, member=self.member, valid_until=datetime.date(2099, 1, 1))
         self.assertFalse(profile.is_eligible)
         self.assertEqual(list(profile.eligible_teams), [])
 
     def test_valid_until_in_the_past_is_not_eligible(self):
-        profile = OfficialProfile.objects.create(member=self.member, level=self.level, valid_until=timezone.localdate() - datetime.timedelta(days=1))
+        profile = OfficialProfile.objects.create(club=self.club, member=self.member, level=self.level, valid_until=timezone.localdate() - datetime.timedelta(days=1))
         self.assertFalse(profile.is_eligible)
 
     def test_eligible_teams_come_from_the_level_when_eligible(self):
-        profile = OfficialProfile.objects.create(member=self.member, level=self.level, valid_until=timezone.localdate() + datetime.timedelta(days=1))
+        profile = OfficialProfile.objects.create(club=self.club, member=self.member, level=self.level, valid_until=timezone.localdate() + datetime.timedelta(days=1))
         self.assertEqual(list(profile.eligible_teams), [self.team])
 
     def test_deleting_a_referenced_level_is_protected(self):
-        OfficialProfile.objects.create(member=self.member, level=self.level, valid_until=timezone.localdate())
+        OfficialProfile.objects.create(club=self.club, member=self.member, level=self.level, valid_until=timezone.localdate())
 
         with self.assertRaises(ProtectedError):
             self.level.delete()
 
     def test_a_member_can_hold_both_a_referee_and_an_official_profile(self):
         referee_level = RefereeLevel.objects.create(club=self.club, name="Referee level")
-        RefereeProfile.objects.create(member=self.member, level=referee_level)
+        RefereeProfile.objects.create(club=self.club, member=self.member, level=referee_level)
 
-        official_profile = OfficialProfile.objects.create(member=self.member, level=self.level)
+        official_profile = OfficialProfile.objects.create(club=self.club, member=self.member, level=self.level)
 
-        self.assertEqual(self.member.referee_profile.level, referee_level)
-        self.assertEqual(self.member.official_profile, official_profile)
+        self.assertEqual(self.member.referee_profiles.get(club=self.club).level, referee_level)
+        self.assertEqual(self.member.official_profiles.get(club=self.club), official_profile)
 
 
 class RosterApiTests(TeamsTestCase):

@@ -18,7 +18,7 @@ from .models import Notification
 from .signals import notifications_created
 
 
-def recipient_emails(member) -> list[str]:
+def recipient_emails(member, club) -> list[str]:
     """The member's own email if they hold a login, plus every parent/guardian's,
     always -- a child with their own account doesn't opt their parents out of
     also being told. De-duplicated, order-stable. Empty means nobody reachable
@@ -27,7 +27,7 @@ def recipient_emails(member) -> list[str]:
     if member.user_id and member.contact_email:
         seen.add(member.contact_email)
         emails.append(member.contact_email)
-    for guardian in member.guardians.order_by("last_name", "first_name"):
+    for guardian in member.guardians(club).order_by("last_name", "first_name"):
         email = guardian.contact_email
         if email and email not in seen:
             seen.add(email)
@@ -51,8 +51,7 @@ def _send_email(notification: Notification, emails: list[str], attachments=None)
         except OSError:
             # Never fatal -- the Notification row (and whichever other addresses
             # in this same batch do go out) stands either way, same reasoning as
-            # every other branded send in this app (see e.g.
-            # members.services.claims.send_claim_approved_email).
+            # every other branded send in this app.
             continue
 
 
@@ -82,7 +81,7 @@ def notify_members(members, *, club, title: str, body: str, source=None, send_em
     if send_email:
         sent = []
         for notification, member in zip(notifications, members, strict=True):
-            emails = recipient_emails(member)
+            emails = recipient_emails(member, club)
             if emails:
                 _send_email(notification, emails, attachments=attachments)
                 notification.sent_at = timezone.now()

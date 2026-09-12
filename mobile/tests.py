@@ -131,7 +131,7 @@ class MobileShellTests(TestCase):
         self.assertNotContains(response, reverse("mobile:coach_today"))
 
     def test_person_switcher_lists_managed_children_alongside_me(self):
-        family = Family.objects.create(name="Bakker")
+        family = Family.objects.create(club=self.club, name="Bakker")
         FamilyMembership.objects.create(family=family, member=self.member, role=FamilyMembership.FamilyRole.PARENT)
         child = Member.objects.create(first_name="Noor", last_name="Bakker")
         FamilyMembership.objects.create(family=family, member=child, role=FamilyMembership.FamilyRole.CHILD)
@@ -143,7 +143,7 @@ class MobileShellTests(TestCase):
         self.assertContains(response, "Noor")
 
     def test_scope_person_switches_via_the_as_query_param(self):
-        family = Family.objects.create(name="Bakker")
+        family = Family.objects.create(club=self.club, name="Bakker")
         FamilyMembership.objects.create(family=family, member=self.member, role=FamilyMembership.FamilyRole.PARENT)
         child = Member.objects.create(first_name="Noor", last_name="Bakker")
         FamilyMembership.objects.create(family=family, member=child, role=FamilyMembership.FamilyRole.CHILD)
@@ -173,7 +173,7 @@ class MobileShellTests(TestCase):
         self.assertNotContains(response, 'href="?as=all"')
 
     def test_all_chip_appears_and_is_selected_by_default_with_a_child(self):
-        family = Family.objects.create(name="Bakker")
+        family = Family.objects.create(club=self.club, name="Bakker")
         FamilyMembership.objects.create(family=family, member=self.member, role=FamilyMembership.FamilyRole.PARENT)
         child = Member.objects.create(first_name="Noor", last_name="Bakker")
         FamilyMembership.objects.create(family=family, member=child, role=FamilyMembership.FamilyRole.CHILD)
@@ -788,7 +788,7 @@ class HomeViewTests(TestCase):
         # (no team membership -> empty team_ids for `people`) should still see
         # news about a child's team -- news isn't a per-person action like
         # RSVP/dues, so it's keyed off every managed person, not just scope.
-        family = Family.objects.create(name="Bakker")
+        family = Family.objects.create(club=self.club, name="Bakker")
         FamilyMembership.objects.create(family=family, member=self.member, role=FamilyMembership.FamilyRole.PARENT)
         child = Member.objects.create(first_name="Noor", last_name="Bakker")
         FamilyMembership.objects.create(family=family, member=child, role=FamilyMembership.FamilyRole.CHILD)
@@ -890,7 +890,7 @@ class HomeViewTests(TestCase):
         self.assertContains(response, "Active Co")
 
     def add_child(self, first_name="Noor"):
-        family = Family.objects.create(name="Bakker")
+        family = Family.objects.create(club=self.club, name="Bakker")
         FamilyMembership.objects.create(family=family, member=self.member, role=FamilyMembership.FamilyRole.PARENT)
         child = Member.objects.create(first_name=first_name, last_name="Bakker")
         FamilyMembership.objects.create(family=family, member=child, role=FamilyMembership.FamilyRole.CHILD)
@@ -1015,7 +1015,7 @@ class EventDetailRsvpTests(TestCase):
         # working once a second managed person makes "All" the default scope
         # (scope_person is None in that case, so the old implicit fallback alone
         # would no longer resolve who's RSVPing).
-        family = Family.objects.create(name="Bakker")
+        family = Family.objects.create(club=self.club, name="Bakker")
         FamilyMembership.objects.create(family=family, member=self.member, role=FamilyMembership.FamilyRole.PARENT)
         child = Member.objects.create(first_name="Noor", last_name="Bakker")
         FamilyMembership.objects.create(family=family, member=child, role=FamilyMembership.FamilyRole.CHILD)
@@ -1285,7 +1285,7 @@ class CalendarViewTests(TestCase):
         return {row["event"] for row in rows}
 
     def add_child(self, first_name="Noor"):
-        family = Family.objects.create(name="Bakker")
+        family = Family.objects.create(club=self.club, name="Bakker")
         FamilyMembership.objects.create(family=family, member=self.member, role=FamilyMembership.FamilyRole.PARENT)
         child = Member.objects.create(first_name=first_name, last_name="Bakker")
         FamilyMembership.objects.create(family=family, member=child, role=FamilyMembership.FamilyRole.CHILD)
@@ -1512,7 +1512,7 @@ class CalendarRefereeSignupTests(TestCase):
         cls.team = Team.objects.create(club=cls.club, name="U16", short_name="U16")
         cls.level = RefereeLevel.objects.create(club=cls.club, name="Regional")
         cls.level.teams.add(cls.team)
-        RefereeProfile.objects.create(member=cls.member, level=cls.level, valid_until=today + datetime.timedelta(days=30))
+        RefereeProfile.objects.create(club=cls.club, member=cls.member, level=cls.level, valid_until=today + datetime.timedelta(days=30))
 
         cls.game = Event.objects.create(club=cls.club, title="Home game", kind=Event.EventKind.GAME, location=cls.home_ground, start=timezone.now() + datetime.timedelta(days=1))
         cls.game.teams.add(cls.team)  # triggers sync_referee_invites via events/signals.py
@@ -1561,12 +1561,12 @@ class CalendarRefereeSignupTests(TestCase):
         self.assertNotContains(response, "Reply needed")
 
     def test_a_managed_childs_invite_shows_up_and_names_them(self):
-        family = Family.objects.create(name="Eree")
+        family = Family.objects.create(club=self.club, name="Eree")
         FamilyMembership.objects.create(family=family, member=self.member, role=FamilyMembership.FamilyRole.PARENT)
         child = Member.objects.create(first_name="Kid", last_name="Eree")
         FamilyMembership.objects.create(family=family, member=child, role=FamilyMembership.FamilyRole.CHILD)
         ClubMembership.objects.create(club=self.club, member=child, season=self.season)
-        RefereeProfile.objects.create(member=child, level=self.level, valid_until=timezone.localdate() + datetime.timedelta(days=30))
+        RefereeProfile.objects.create(club=self.club, member=child, level=self.level, valid_until=timezone.localdate() + datetime.timedelta(days=30))
         other_game = Event.objects.create(club=self.club, title="Second game", kind=Event.EventKind.GAME, location=self.home_ground, start=timezone.now() + datetime.timedelta(days=2))
         other_game.teams.add(self.team)
         self.client.force_login(self.user)
@@ -1603,7 +1603,7 @@ class CalendarOfficialSignupTests(TestCase):
         cls.team = Team.objects.create(club=cls.club, name="U16", short_name="U16")
         cls.level = OfficialLevel.objects.create(club=cls.club, name="Table official")
         cls.level.teams.add(cls.team)
-        OfficialProfile.objects.create(member=cls.member, level=cls.level, valid_until=today + datetime.timedelta(days=30))
+        OfficialProfile.objects.create(club=cls.club, member=cls.member, level=cls.level, valid_until=today + datetime.timedelta(days=30))
 
         cls.game = Event.objects.create(club=cls.club, title="Home game", kind=Event.EventKind.GAME, location=cls.home_ground, start=timezone.now() + datetime.timedelta(days=1))
 
@@ -1687,7 +1687,7 @@ class RefereeSignupRespondViewTests(TestCase):
         cls.team = Team.objects.create(club=cls.club, name="U16", short_name="U16")
         cls.level = RefereeLevel.objects.create(club=cls.club, name="Regional")
         cls.level.teams.add(cls.team)
-        RefereeProfile.objects.create(member=cls.member, level=cls.level, valid_until=today + datetime.timedelta(days=30))
+        RefereeProfile.objects.create(club=cls.club, member=cls.member, level=cls.level, valid_until=today + datetime.timedelta(days=30))
 
         cls.game = Event.objects.create(club=cls.club, title="Home game", kind=Event.EventKind.GAME, location=cls.home_ground, start=timezone.now() + datetime.timedelta(days=1))
         cls.game.teams.add(cls.team)
@@ -1749,12 +1749,12 @@ class RefereeSignupRespondViewTests(TestCase):
         self.assertEqual(response.status_code, 404)
 
     def test_a_parent_can_respond_on_behalf_of_a_managed_child(self):
-        family = Family.objects.create(name="Eree")
+        family = Family.objects.create(club=self.club, name="Eree")
         FamilyMembership.objects.create(family=family, member=self.member, role=FamilyMembership.FamilyRole.PARENT)
         child = Member.objects.create(first_name="Kid", last_name="Eree")
         FamilyMembership.objects.create(family=family, member=child, role=FamilyMembership.FamilyRole.CHILD)
         ClubMembership.objects.create(club=self.club, member=child, season=self.season)
-        RefereeProfile.objects.create(member=child, level=self.level, valid_until=timezone.localdate() + datetime.timedelta(days=30))
+        RefereeProfile.objects.create(club=self.club, member=child, level=self.level, valid_until=timezone.localdate() + datetime.timedelta(days=30))
         child_signup = RefereeSignup.objects.create(event=self.game, member=child, status=RefereeSignup.Status.INVITED)
         self.client.force_login(self.user)
 
@@ -1827,7 +1827,7 @@ class EventDetailScreenTests(TestCase):
         # a NO_RESPONSE Attendance row via events/signals.py -- no need to create one by hand.
         TeamMembership.objects.create(team=self.team, member=self.member, season=self.season, position=self.position, jersey_number=17)
 
-        family = Family.objects.create(name="Bakker")
+        family = Family.objects.create(club=self.club, name="Bakker")
         FamilyMembership.objects.create(family=family, member=self.member, role=FamilyMembership.FamilyRole.PARENT)
         not_invited_child = Member.objects.create(first_name="Noor", last_name="Bakker")
         FamilyMembership.objects.create(family=family, member=not_invited_child, role=FamilyMembership.FamilyRole.CHILD)
@@ -2024,7 +2024,7 @@ class EventDetailScreenTests(TestCase):
         self.assertNotContains(response, "Refereeing")
 
     def test_a_managed_childs_referee_invite_shows_up_too(self):
-        family = Family.objects.create(name="Bakker")
+        family = Family.objects.create(club=self.club, name="Bakker")
         FamilyMembership.objects.create(family=family, member=self.member, role=FamilyMembership.FamilyRole.PARENT)
         child = Member.objects.create(first_name="Noor", last_name="Bakker")
         FamilyMembership.objects.create(family=family, member=child, role=FamilyMembership.FamilyRole.CHILD)
@@ -2105,7 +2105,7 @@ class NotificationsViewTests(TestCase):
         cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", email="parent@example.com", user=cls.user)
         ClubMembership.objects.create(club=cls.club, member=cls.member, season=cls.season)
 
-        cls.family = Family.objects.create(name="Bakker")
+        cls.family = Family.objects.create(club=cls.club, name="Bakker")
         FamilyMembership.objects.create(family=cls.family, member=cls.member, role=FamilyMembership.FamilyRole.PARENT)
         cls.child = Member.objects.create(first_name="Noor", last_name="Bakker")
         FamilyMembership.objects.create(family=cls.family, member=cls.child, role=FamilyMembership.FamilyRole.CHILD)
@@ -2480,7 +2480,7 @@ class MeViewTests(TestCase):
         cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", email="parent@example.com", user=cls.user)
         ClubMembership.objects.create(club=cls.club, member=cls.member, season=cls.season)
 
-        cls.family = Family.objects.create(name="Bakker")
+        cls.family = Family.objects.create(club=cls.club, name="Bakker")
         FamilyMembership.objects.create(family=cls.family, member=cls.member, role=FamilyMembership.FamilyRole.PARENT)
         cls.child = Member.objects.create(first_name="Noor", last_name="Bakker")
         FamilyMembership.objects.create(family=cls.family, member=cls.child, role=FamilyMembership.FamilyRole.CHILD)
@@ -2859,7 +2859,7 @@ class PaymentsViewTests(TestCase):
         # numbers add up" check a family naturally tries against the total.
         self.membership.fee_amount = Decimal("150.00")
         self.membership.save()
-        family = Family.objects.create()
+        family = Family.objects.create(club=self.club)
         child = Member.objects.create(first_name="Nora", last_name="Bakker")
         FamilyMembership.objects.create(family=family, member=self.member, role=FamilyMembership.FamilyRole.PARENT)
         FamilyMembership.objects.create(family=family, member=child, role=FamilyMembership.FamilyRole.CHILD)
@@ -3071,7 +3071,7 @@ class EditProfileViewTests(TestCase):
         cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", email="lars@example.com", user=cls.user)
         ClubMembership.objects.create(club=cls.club, member=cls.member, season=cls.season)
 
-        cls.family = Family.objects.create(name="Bakker")
+        cls.family = Family.objects.create(club=cls.club, name="Bakker")
         FamilyMembership.objects.create(family=cls.family, member=cls.member, role=FamilyMembership.FamilyRole.PARENT)
         cls.child = Member.objects.create(first_name="Noor", last_name="Bakker")
         FamilyMembership.objects.create(family=cls.family, member=cls.child, role=FamilyMembership.FamilyRole.CHILD)
@@ -3197,7 +3197,7 @@ class ReRegisterViewTests(TestCase):
         cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", email="lars@example.com", user=cls.user)
         ClubMembership.objects.create(club=cls.club, member=cls.member, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
 
-        cls.family = Family.objects.create(name="Bakker")
+        cls.family = Family.objects.create(club=cls.club, name="Bakker")
         FamilyMembership.objects.create(family=cls.family, member=cls.member, role=FamilyMembership.FamilyRole.PARENT)
         cls.child = Member.objects.create(first_name="Noor", last_name="Bakker")
         FamilyMembership.objects.create(family=cls.family, member=cls.child, role=FamilyMembership.FamilyRole.CHILD)
@@ -3624,7 +3624,7 @@ class CalendarFeedViewTests(TestCase):
         self.assertEqual(summaries, {"Confirmed", "Declined", "No reply yet"})
 
     def test_includes_events_for_managed_children_with_their_name_in_the_summary(self):
-        family = Family.objects.create(name="Bakker")
+        family = Family.objects.create(club=self.club, name="Bakker")
         FamilyMembership.objects.create(family=family, member=self.member, role=FamilyMembership.FamilyRole.PARENT)
         child = Member.objects.create(first_name="Noor", last_name="Bakker")
         FamilyMembership.objects.create(family=family, member=child, role=FamilyMembership.FamilyRole.CHILD)
@@ -4184,7 +4184,7 @@ class CoachRosterMemberViewTests(TestCase):
         self.assertContains(response, f"tel:{self.player.emergency_phone.as_international}")
 
     def test_shows_a_guardians_call_buttons_for_a_child(self):
-        family = Family.objects.create(name="Player family")
+        family = Family.objects.create(club=self.club, name="Player family")
         guardian = Member.objects.create(first_name="Gail", last_name="Guardian", phone="+32471112222")
         FamilyMembership.objects.create(family=family, member=guardian, role=FamilyMembership.FamilyRole.PARENT)
         FamilyMembership.objects.create(family=family, member=self.player, role=FamilyMembership.FamilyRole.CHILD)
@@ -6886,7 +6886,7 @@ class ShopProductDetailViewTests(TestCase):
         self.assertEqual(item.personalization_name, "")
 
     def test_add_to_cart_with_a_beneficiary(self):
-        family = Family.objects.create(name="Bakker")
+        family = Family.objects.create(club=self.club, name="Bakker")
         FamilyMembership.objects.create(family=family, member=self.member, role=FamilyMembership.FamilyRole.PARENT)
         child = Member.objects.create(first_name="Noor", last_name="Bakker")
         FamilyMembership.objects.create(family=family, member=child, role=FamilyMembership.FamilyRole.CHILD)
@@ -7163,7 +7163,7 @@ class ShopOrdersViewTests(TestCase):
         self.assertEqual(orders[0].purchaser, self.member)
 
     def test_includes_orders_placed_for_managed_children(self):
-        family = Family.objects.create(name="Bakker")
+        family = Family.objects.create(club=self.club, name="Bakker")
         FamilyMembership.objects.create(family=family, member=self.member, role=FamilyMembership.FamilyRole.PARENT)
         child = Member.objects.create(first_name="Noor", last_name="Bakker")
         FamilyMembership.objects.create(family=family, member=child, role=FamilyMembership.FamilyRole.CHILD)
@@ -7305,7 +7305,7 @@ class HomeFormsCardTests(TestCase):
         return self.client.get(reverse("mobile:home"), HTTP_HOST="ajax-united.rosterchief.app")
 
     def add_child(self, first_name="Noor"):
-        family = Family.objects.create(name="Bakker")
+        family = Family.objects.create(club=self.club, name="Bakker")
         FamilyMembership.objects.create(family=family, member=self.member, role=FamilyMembership.FamilyRole.PARENT)
         child = Member.objects.create(first_name=first_name, last_name="Bakker")
         FamilyMembership.objects.create(family=family, member=child, role=FamilyMembership.FamilyRole.CHILD)

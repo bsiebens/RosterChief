@@ -112,14 +112,15 @@ class MemberRefereeEligibilityForm(forms.ModelForm):
         widgets = {"valid_until": forms.DateInput(attrs={"type": "date"})}
 
     def __init__(self, *args, club=None, member=None, **kwargs):
-        instance = RefereeProfile.objects.filter(member=member).first() if member is not None else None
+        instance = RefereeProfile.objects.filter(member=member, club=club).first() if member is not None else None
         super().__init__(*args, instance=instance, **kwargs)
         # UUIDModel PKs get their default at construction time (not at save()),
         # so a brand-new instance already has a non-None pk -- "is this new"
-        # can't be read off self.instance.pk. Setting member here (rather than
-        # in save()) means it's already correct before validation runs too.
+        # can't be read off self.instance.pk. Setting member/club here (rather
+        # than in save()) means they're already correct before validation runs too.
         if instance is None:
             self.instance.member = member
+            self.instance.club = club
         self.fields["level"].queryset = RefereeLevel.objects.filter(club=club)
         self.fields["level"].required = False
         self.fields["level"].empty_label = _("— no level (not eligible) —")
@@ -172,10 +173,11 @@ class MemberOfficialEligibilityForm(forms.ModelForm):
         widgets = {"valid_until": forms.DateInput(attrs={"type": "date"})}
 
     def __init__(self, *args, club=None, member=None, **kwargs):
-        instance = OfficialProfile.objects.filter(member=member).first() if member is not None else None
+        instance = OfficialProfile.objects.filter(member=member, club=club).first() if member is not None else None
         super().__init__(*args, instance=instance, **kwargs)
         if instance is None:
             self.instance.member = member
+            self.instance.club = club
         self.fields["level"].queryset = OfficialLevel.objects.filter(club=club)
         self.fields["level"].required = False
         self.fields["level"].empty_label = _("— no level (not eligible) —")
@@ -1659,7 +1661,7 @@ class AddPaymentForm(forms.Form):
         self.order = order
         super().__init__(*args, **kwargs)
         if club is not None and order is not None:
-            eligible = {order.purchaser.pk, *order.purchaser.family_members.values_list("pk", flat=True)}
+            eligible = {order.purchaser.pk, *order.purchaser.family_members(club).values_list("pk", flat=True)}
             self.fields["voucher"].queryset = Voucher.objects.filter(club=club, is_active=True, expiry_date__gte=timezone.localdate(), consumed_amount__lt=F("amount")).filter(Q(issued_to__isnull=True) | Q(issued_to__in=eligible))
 
     def clean(self):

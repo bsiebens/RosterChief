@@ -87,7 +87,7 @@ def _notify_audience(news_item):
     return members.distinct()
 
 
-def _dedupe_by_recipients(members):
+def _dedupe_by_recipients(members, club):
     """Collapses siblings (or anyone else sharing a guardian) down to one
     notification each, keyed on where the email would actually land -- not
     family membership itself, since a blended family's kids don't
@@ -103,7 +103,7 @@ def _dedupe_by_recipients(members):
     seen_emails = set()
     representatives = []
     for member in members:
-        emails = recipient_emails(member)
+        emails = recipient_emails(member, club)
         if emails and any(email in seen_emails for email in emails):
             continue
         representatives.append(member)
@@ -134,7 +134,7 @@ def send_publish_notification(news_item):
         # no way to find or tap into from the app.
         return []
 
-    members = _dedupe_by_recipients(_notify_audience(news_item))
+    members = _dedupe_by_recipients(_notify_audience(news_item), news_item.club)
     if not members:
         return []
 

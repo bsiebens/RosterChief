@@ -27,14 +27,7 @@
                     {% if signup_pending_count %}<span class="badge badge-error badge-xs ml-auto">{{ signup_pending_count }}</span>{% endif %}
                 </a>
             {% endif %}
-            {% if can_manage_members %}
-                {# Membership dues/fee tracking (management:membership_list) lives under Finance, not here -- see that section below. #}
-                <!--
-                <a class="nav-subitem flex items-center gap-2 {% if nav == 'parent_claim_list' %}active{% endif %}" href="{% url 'management:parent_claim_list' %}">{% trans "Parent claims" %}
-                    {% if pending_parent_claims_count %}<span class="badge badge-error badge-xs">{{ pending_parent_claims_count }}</span>{% endif %}
-                </a>
-                -->
-            {% endif %}
+            {# Membership dues/fee tracking (management:membership_list) lives under Finance, not here -- see that section below. #}
             <a class="nav-subitem {% if nav == 'family_list' %}active{% endif %}" href="{% url 'management:family_list' %}">{% trans "Households" %}</a>
             {% if can_manage_members %}
                 <a class="nav-subitem {% if nav == 'group_list' %}active{% endif %}" href="{% url 'management:group_list' %}">{% trans "Groups" %}</a>
