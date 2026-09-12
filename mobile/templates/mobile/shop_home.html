@@ -25,7 +25,7 @@
             <a class="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-line" href="{% url "mobile:shop_cart" %}" aria-label="{% trans "Cart" %}">
                 {% lucide "shopping-cart" size=18 class="text-ink" %}
                 {% if cart_item_count %}
-                    <span class="absolute -top-1.5 -right-1.5 flex h-[19px] min-w-[19px] items-center justify-center rounded-full bg-club px-1 font-mono text-[11px] font-bold text-white">
+                    <span class="absolute -top-1.5 -right-1.5 flex h-[19px] min-w-[19px] items-center justify-center rounded-full bg-club px-1 font-mono text-[11px] font-bold text-club-content">
                         {% if cart_item_count > 9 %}9+{% else %}{{ cart_item_count }}{% endif %}
                     </span>
                 {% endif %}

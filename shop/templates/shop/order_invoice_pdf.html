@@ -1,4 +1,4 @@
-{% load i18n %}
+{% load i18n club_email %}
 
 {% comment %}
     Rendered by WeasyPrint, not a browser -- same convention as club/templates/
@@ -45,7 +45,7 @@
                 width: 16mm;
                 border-radius: 2mm;
                 background: {{ club.secondary_color|default:"#4f46e5" }};
-                color: #fff;
+                color: {{ club.secondary_color|default:"#4f46e5"|contrast_color }};
                 display: flex;
                 align-items: center;
                 justify-content: center;

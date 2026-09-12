@@ -50,7 +50,7 @@ class Club(UUIDModel):
     contact_email = models.EmailField(
         _("contact email"),
         blank=True,
-        help_text=_("The club's public address, shown to people the club writes to or asks to get in touch -- e.g. a parent claiming a child. Falls back to nothing being shown at all, so it's worth setting."),
+        help_text=_("The club's public address, shown to people the club writes to or asks to get in touch. Falls back to nothing being shown at all, so it's worth setting."),
     )
     website = models.URLField(_("website"), blank=True, help_text=_("The club's own site, if it has one -- shown alongside its RosterChief pages, not used for anything else yet."))
 
@@ -142,6 +142,21 @@ class Club(UUIDModel):
 
     def __str__(self):
         return self.name
+
+    def clean(self):
+        # Blocked outright, not just discouraged: a handful of hand-authored CSS
+        # components (button/badge/avatar fills) still assume there's *some*
+        # visible edge between the club's colour and the app's own white
+        # backgrounds, which pure white erases regardless of how correct the
+        # text-contrast math is. Lift this once every such surface has been
+        # audited -- see the 2026-09-12 white-secondary-colour bug reports.
+        errors = {}
+        if self.primary_color.lower() == "#ffffff":
+            errors["primary_color"] = _("White can't be used as the primary colour yet -- it breaks the contrast of several buttons and badges. Pick a different shade for now.")
+        if self.secondary_color.lower() == "#ffffff":
+            errors["secondary_color"] = _("White can't be used as the secondary colour yet -- it breaks the contrast of several buttons and badges. Pick a different shade for now.")
+        if errors:
+            raise ValidationError(errors)
 
     def save(self, *args, **kwargs):
         if not self.slug:
@@ -610,7 +625,7 @@ class ClubRole(ClubScopedModel):
         ADMIN = "admin", _("admin")
         MEMBER = "member", _("member")
         EDITOR = "editor", _("editor")
-        #: Full read/write on people (members, families, groups, parent claims,
+        #: Full read/write on people (members, families, groups,
         #: teams, referee setup, onboarding requirements) without Finance/Shop,
         #: Club identity, Sponsors, or the ability to grant/revoke ClubRole itself
         #: -- see club.services.access.can_manage_members and

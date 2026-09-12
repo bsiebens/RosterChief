@@ -6,7 +6,7 @@
         <p class="text-sm text-muted">{% trans "Subscribe this link in your phone or computer's calendar app to see everyone you manage's schedule alongside your own. It includes every event they're invited to, not just the ones they've replied to." %}</p>
 
         <div class="card p-4.5">
-            <a class="btn btn-primary" href="{{ webcal_url }}" hx-boost="false">{% trans "Add to calendar" %}</a>
+            <a class="btn btn-primary w-full" href="{{ webcal_url }}" hx-boost="false">{% trans "Add to calendar" %}</a>
             <p class="mt-2 text-xs text-dim">{% trans "Opens directly in Apple/macOS Calendar. On Android or a desktop calendar app, copy the link below and add it as a new calendar by URL." %}</p>
 
             <div class="mt-4" x-data="{ copied: false }">
@@ -27,7 +27,7 @@
             <p class="text-xs text-muted">{% trans "If you've shared this link and want to take it back, reset it -- the old one stops working immediately and you'll need to re-subscribe with the new one." %}</p>
             <form class="mt-3" method="post" action="{% url "mobile:calendar_feed_settings" %}" hx-boost="false">
                 {% csrf_token %}
-                <button type="submit" class="btn btn-outline">{% trans "Reset my calendar link" %}</button>
+                <button type="submit" class="btn btn-outline w-full">{% trans "Reset my calendar link" %}</button>
             </form>
         </div>
     </div>

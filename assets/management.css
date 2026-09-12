@@ -343,7 +343,12 @@
 
     .btn-primary {
         background: var(--color-club);
-        color: #fff;
+        color: var(--color-club-content);
+        /* Fixed, not club-derived: a club's colour can land close to the page
+           background (white, or near it) -- this keeps the button's own shape
+           visible regardless, on top of the text-contrast fix above. Same
+           border colour .btn-outline already uses for the same reason. */
+        border-color: var(--color-stroke);
     }
 
     .btn-success {
@@ -1219,7 +1224,7 @@
 
     .menu li a.menu-active {
         background: var(--color-club);
-        color: #fff;
+        color: var(--color-club-content);
     }
 }
 
@@ -2243,7 +2248,7 @@
         border-radius: 0.25rem;
         padding: 0.1875rem 0.4375rem;
         background: var(--color-club);
-        color: #fff;
+        color: var(--color-club-content);
         font-family: var(--font-display);
         font-size: 0.625rem;
         font-weight: 800;

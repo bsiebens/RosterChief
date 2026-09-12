@@ -79,7 +79,7 @@
                                     <input type="hidden" name="selected_{{ row.member.pk }}" :value="state">
                                     <div class="flex h-9 w-24 shrink-0 overflow-hidden rounded-lg">
                                         <button type="button" class="flex-1 font-display text-xs font-extrabold tracking-wide uppercase" :class="state === 'true' ? 'bg-ok text-white' : 'bg-steel text-on-dark-dim'" @click="state = 'true'">{% trans "Yes" %}</button>
-                                        <button type="button" class="flex-1 font-display text-xs font-extrabold tracking-wide uppercase" :class="state === 'false' ? 'bg-club text-white' : 'bg-steel text-on-dark-dim'" @click="state = 'false'">{% trans "No" %}</button>
+                                        <button type="button" class="flex-1 font-display text-xs font-extrabold tracking-wide uppercase" :class="state === 'false' ? 'bg-club text-club-content' : 'bg-steel text-on-dark-dim'" @click="state = 'false'">{% trans "No" %}</button>
                                     </div>
                                 {% elif row.selected %}
                                     <span class="pill pill-ok shrink-0">{% trans "Yes" %}</span>

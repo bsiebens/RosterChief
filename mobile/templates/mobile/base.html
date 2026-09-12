@@ -88,7 +88,7 @@
                 <a class="relative flex h-11 w-11 shrink-0 items-center justify-center" href="{% url "mobile:notifications" %}" aria-label="{% trans "Notifications" %}">
                     {% lucide "bell" size=21 class="text-white" %}
                     {% if unread_notification_count %}
-                        <span class="absolute -top-1 -right-1 flex h-[19px] min-w-[19px] items-center justify-center rounded-full bg-club px-1 font-mono text-[11px] font-bold text-white" style="border: 2px solid var(--color-navy)">
+                        <span class="absolute -top-1 -right-1 flex h-[19px] min-w-[19px] items-center justify-center rounded-full bg-club px-1 font-mono text-[11px] font-bold text-club-content" style="border: 2px solid var(--color-navy)">
                             {% if unread_notification_count > 9 %}9+{% else %}{{ unread_notification_count }}{% endif %}
                         </span>
                     {% endif %}
