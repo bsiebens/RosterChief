@@ -2,6 +2,7 @@ import datetime
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
+from django.db import IntegrityError
 from django.test import TestCase
 from django.utils import timezone
 
@@ -9,18 +10,24 @@ from club.models import Club, ClubMembership, Season
 from formbuilder.models import Answer, Field, Form, FormSend, Submission
 from members.models import Member
 
-from .models import EvaluationChecklist, EvaluationNote, PlayerEvaluation
+from .models import EvaluationChecklist, EvaluationNote, EvaluationOutcome, EvaluationSession, PlayerEvaluation
 from .services import (
     EvaluationRubricNotConfigured,
     EvaluationSubmissionError,
+    active_session,
     add_evaluation_note,
     checklist_players,
     current_rubric_form,
+    end_session,
+    latest_session,
     player_evaluation_history,
     player_notes,
     question_stats,
+    record_outcome,
     results_matrix,
+    session_outcome_rows,
     start_new_rubric_version,
+    start_session,
     submit_evaluation,
 )
 
@@ -461,3 +468,161 @@ class PlayerNotesTests(EvaluationsTestCase):
         notes = player_notes(checklist, player)
 
         self.assertEqual([note.pk for note in notes], [mine.pk])
+
+
+class EvaluationSessionModelTests(EvaluationsTestCase):
+    def test_is_open_reflects_ended_at(self):
+        checklist = self.make_checklist("U8")
+        session = EvaluationSession.objects.create(club=self.club, checklist=checklist)
+
+        self.assertTrue(session.is_open)
+
+        session.ended_at = timezone.now()
+        session.save(update_fields=["ended_at"])
+
+        self.assertFalse(session.is_open)
+
+    def test_only_one_open_session_per_checklist(self):
+        checklist = self.make_checklist("U8")
+        EvaluationSession.objects.create(club=self.club, checklist=checklist)
+
+        with self.assertRaises(IntegrityError):
+            EvaluationSession.objects.create(club=self.club, checklist=checklist)
+
+    def test_a_second_open_session_is_fine_once_the_first_is_closed(self):
+        checklist = self.make_checklist("U8")
+        first = EvaluationSession.objects.create(club=self.club, checklist=checklist, ended_at=timezone.now())
+
+        second = EvaluationSession.objects.create(club=self.club, checklist=checklist)
+
+        self.assertNotEqual(first.pk, second.pk)
+
+    def test_clean_rejects_a_checklist_from_another_club(self):
+        other_checklist = self.make_checklist("U8", club=self.other_club)
+        session = EvaluationSession(club=self.club, checklist=other_checklist)
+
+        with self.assertRaises(ValidationError):
+            session.clean()
+
+
+class SessionLifecycleServiceTests(EvaluationsTestCase):
+    def test_start_session_creates_one(self):
+        checklist = self.make_checklist("U8")
+        author = self.make_member("starter@example.com")
+
+        session = start_session(club=self.club, checklist=checklist, started_by=author)
+
+        self.assertTrue(session.is_open)
+        self.assertEqual(session.started_by, author)
+
+    def test_start_session_is_idempotent_while_one_is_open(self):
+        checklist = self.make_checklist("U8")
+        first = start_session(club=self.club, checklist=checklist, started_by=None)
+
+        second = start_session(club=self.club, checklist=checklist, started_by=None)
+
+        self.assertEqual(first.pk, second.pk)
+        self.assertEqual(EvaluationSession.objects.filter(checklist=checklist).count(), 1)
+
+    def test_end_session_sets_ended_at(self):
+        checklist = self.make_checklist("U8")
+        session = start_session(club=self.club, checklist=checklist, started_by=None)
+
+        ended = end_session(session)
+
+        self.assertIsNotNone(ended.ended_at)
+        self.assertFalse(active_session(checklist))
+
+    def test_ending_an_already_ended_session_is_a_no_op(self):
+        checklist = self.make_checklist("U8")
+        session = start_session(club=self.club, checklist=checklist, started_by=None)
+        end_session(session)
+        first_ended_at = EvaluationSession.objects.get(pk=session.pk).ended_at
+
+        end_session(EvaluationSession.objects.get(pk=session.pk))
+
+        self.assertEqual(EvaluationSession.objects.get(pk=session.pk).ended_at, first_ended_at)
+
+    def test_active_session_is_none_once_ended(self):
+        checklist = self.make_checklist("U8")
+        session = start_session(club=self.club, checklist=checklist, started_by=None)
+
+        self.assertEqual(active_session(checklist), session)
+
+        end_session(session)
+
+        self.assertIsNone(active_session(checklist))
+
+    def test_latest_session_returns_the_most_recent_regardless_of_open_state(self):
+        checklist = self.make_checklist("U8")
+        older = start_session(club=self.club, checklist=checklist, started_by=None)
+        end_session(older)
+        EvaluationSession.objects.filter(pk=older.pk).update(started_at=timezone.now() - datetime.timedelta(days=7))
+        newer = start_session(club=self.club, checklist=checklist, started_by=None)
+
+        self.assertEqual(latest_session(checklist), newer)
+
+
+class RecordOutcomeTests(EvaluationsTestCase):
+    def test_creates_an_outcome(self):
+        checklist = self.make_checklist("U8")
+        player = self.make_member("outcome-player@example.com")
+        session = start_session(club=self.club, checklist=checklist, started_by=None)
+
+        outcome = record_outcome(club=self.club, session=session, player=player, decision="Move up to U10", recorded_by=None)
+
+        self.assertEqual(outcome.decision, "Move up to U10")
+        self.assertEqual(EvaluationOutcome.objects.filter(session=session, player=player).count(), 1)
+
+    def test_saving_again_edits_in_place_rather_than_logging(self):
+        checklist = self.make_checklist("U8")
+        player = self.make_member("outcome-edit@example.com")
+        session = start_session(club=self.club, checklist=checklist, started_by=None)
+        record_outcome(club=self.club, session=session, player=player, decision="First take", recorded_by=None)
+
+        updated = record_outcome(club=self.club, session=session, player=player, decision="Actually, keep on U8", recorded_by=None)
+
+        self.assertEqual(EvaluationOutcome.objects.filter(session=session, player=player).count(), 1)
+        self.assertEqual(updated.decision, "Actually, keep on U8")
+
+    def test_the_same_player_can_have_separate_outcomes_in_different_sessions(self):
+        checklist = self.make_checklist("U8")
+        player = self.make_member("outcome-multi-session@example.com")
+        first_session = start_session(club=self.club, checklist=checklist, started_by=None)
+        record_outcome(club=self.club, session=first_session, player=player, decision="Kept", recorded_by=None)
+        end_session(first_session)
+        second_session = start_session(club=self.club, checklist=checklist, started_by=None)
+
+        record_outcome(club=self.club, session=second_session, player=player, decision="Promoted", recorded_by=None)
+
+        self.assertEqual(EvaluationOutcome.objects.filter(player=player).count(), 2)
+
+
+class SessionOutcomeRowsTests(EvaluationsTestCase):
+    def test_alphabetical_by_player(self):
+        checklist = self.make_checklist("U8")
+        zed = self.make_member("zed@example.com")
+        Member.objects.filter(pk=zed.pk).update(first_name="Zed", last_name="Zephyr")
+        ann = self.make_member("ann@example.com")
+        Member.objects.filter(pk=ann.pk).update(first_name="Ann", last_name="Aardvark")
+        session = start_session(club=self.club, checklist=checklist, started_by=None)
+        record_outcome(club=self.club, session=session, player=zed, decision="x", recorded_by=None)
+        record_outcome(club=self.club, session=session, player=ann, decision="y", recorded_by=None)
+
+        rows = session_outcome_rows(session)
+
+        self.assertEqual([row.player_id for row in rows], [ann.pk, zed.pk])
+
+    def test_only_this_sessions_outcomes(self):
+        checklist = self.make_checklist("U8")
+        player = self.make_member("scoped-outcome@example.com")
+        session = start_session(club=self.club, checklist=checklist, started_by=None)
+        record_outcome(club=self.club, session=session, player=player, decision="in scope", recorded_by=None)
+        end_session(session)
+        other_session = start_session(club=self.club, checklist=checklist, started_by=None)
+        other_player = self.make_member("other-session-player@example.com")
+        record_outcome(club=self.club, session=other_session, player=other_player, decision="not in scope", recorded_by=None)
+
+        rows = session_outcome_rows(session)
+
+        self.assertEqual([row.player_id for row in rows], [player.pk])

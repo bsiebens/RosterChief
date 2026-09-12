@@ -31,7 +31,7 @@
                 </div>
                 <button class="btn btn-outline gap-1.5" type="submit">{% lucide "filter" size=14 %} {% trans "Filter" %}</button>
                 {% if since %}
-                    <a class="btn btn-ghost" href="?">{% trans "Show everyone" %}</a>
+                    <a class="btn btn-outline gap-1.5" href="?">{% lucide "x" size=14 %} {% trans "Show everyone" %}</a>
                 {% endif %}
             </form>
 
@@ -51,6 +51,39 @@
                         <a class="btn btn-outline gap-1.5" href="?player={{ next_player.pk }}{% if since %}&since={{ since|date:'Y-m-d' }}{% endif %}">{% trans "Next" %} {{ next_player.get_full_name }} {% lucide "chevron-right" size=14 %}</a>
                     {% endif %}
                 </form>
+            {% endif %}
+        </div>
+
+        <div class="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-rule pt-3">
+            {% if session %}
+                <div class="flex flex-wrap items-center gap-2 text-sm">
+                    <span class="badge badge-warning">{% trans "Meeting in progress" %}</span>
+                    <span class="text-muted">{% blocktrans with time=session.started_at|date:"d M Y, H:i" %}Started {{ time }}{% endblocktrans %}</span>
+                </div>
+                <div class="flex flex-wrap items-center gap-2">
+                    <a class="btn btn-outline btn-sm gap-1.5" href="{% url 'management:evaluation_session_outcomes_pdf' session.pk %}">{% lucide "file-down" size=14 %} {% trans "Download outcomes PDF" %}</a>
+                    <form method="post">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="end_session">
+                        {% if player %}<input type="hidden" name="player_pk" value="{{ player.pk }}">{% endif %}
+                        {% if since %}<input type="hidden" name="since" value="{{ since|date:'Y-m-d' }}">{% endif %}
+                        <button class="btn btn-primary btn-sm gap-1.5" type="submit">{% lucide "square" size=14 %} {% trans "End meeting" %}</button>
+                    </form>
+                </div>
+            {% else %}
+                <p class="text-sm text-muted">{% trans "No meeting in progress." %}</p>
+                <div class="flex flex-wrap items-center gap-2">
+                    {% if latest_session %}
+                        <a class="btn btn-outline btn-sm gap-1.5" href="{% url 'management:evaluation_session_outcomes_pdf' latest_session.pk %}">{% lucide "file-down" size=14 %} {% blocktrans with date=latest_session.started_at|date:"d M Y" %}Last meeting's PDF ({{ date }}){% endblocktrans %}</a>
+                    {% endif %}
+                    <form method="post">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="start_session">
+                        {% if player %}<input type="hidden" name="player_pk" value="{{ player.pk }}">{% endif %}
+                        {% if since %}<input type="hidden" name="since" value="{{ since|date:'Y-m-d' }}">{% endif %}
+                        <button class="btn btn-primary btn-sm gap-1.5" type="submit">{% lucide "play" size=14 %} {% trans "Start meeting" %}</button>
+                    </form>
+                </div>
             {% endif %}
         </div>
     </div>
@@ -147,6 +180,24 @@
             </div>
 
             <div class="flex flex-col gap-4 lg:col-span-2">
+                <div class="card card-body">
+                    <h2 class="card-title">{% lucide "flag" size=18 %} {% trans "Outcome decision" %}</h2>
+                    <p class="text-xs text-muted">{% trans "What the meeting decides about this player -- exported to the outcomes PDF once the meeting ends. The discussion notes stay separate and private." %}</p>
+                    {% if session %}
+                        <form method="post" class="mt-2 flex flex-col gap-2">
+                            {% csrf_token %}
+                            <input type="hidden" name="action" value="outcome">
+                            <input type="hidden" name="player_pk" value="{{ player.pk }}">
+                            {% if since %}<input type="hidden" name="since" value="{{ since|date:'Y-m-d' }}">{% endif %}
+                            <textarea name="decision" class="textarea textarea-bordered w-full" rows="2" placeholder="{% trans 'e.g. Move up to U14 for next season' %}">{{ outcome.decision|default:"" }}</textarea>
+                            <button class="btn btn-primary btn-sm gap-1.5 self-start" type="submit">{% lucide "check" size=14 %} {% trans "Save outcome" %}</button>
+                        </form>
+                        {% if outcome %}<p class="mt-2 text-xs text-muted">{% blocktrans with time=outcome.modified|date:"d M Y, H:i" %}Last saved {{ time }}{% endblocktrans %}</p>{% endif %}
+                    {% else %}
+                        <p class="mt-2 text-sm text-dim">{% trans "Start a meeting above to record an outcome decision for this player." %}</p>
+                    {% endif %}
+                </div>
+
                 {% for question in history.questions %}
                     {% ifchanged question.field.section %}
                         {% if question.field.section %}<h3 class="mt-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase first:mt-0">{{ question.field.section }}</h3>{% endif %}

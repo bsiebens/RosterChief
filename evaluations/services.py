@@ -28,7 +28,7 @@ from formbuilder.models import Answer, Field, Form, FormSend, Submission
 from formbuilder.services.form_factory import build_form
 from members.models import Member
 
-from .models import EvaluationChecklist, EvaluationNote, PlayerEvaluation
+from .models import EvaluationChecklist, EvaluationNote, EvaluationOutcome, EvaluationSession, PlayerEvaluation
 
 #: Field types a per-question statistic can be numerically summarized for --
 #: everything else (text/textarea/email/date/file) only gets a response count
@@ -356,3 +356,50 @@ def player_notes(checklist: EvaluationChecklist, player: Member):
 
 def add_evaluation_note(*, club, checklist: EvaluationChecklist, player: Member, author: Member | None, note: str) -> EvaluationNote:
     return EvaluationNote.objects.create(club=club, checklist=checklist, player=player, author=author, note=note)
+
+
+def active_session(checklist: EvaluationChecklist) -> EvaluationSession | None:
+    """``checklist``'s currently open meeting, if one is in progress."""
+    return EvaluationSession.objects.filter(checklist=checklist, ended_at__isnull=True).first()
+
+
+def latest_session(checklist: EvaluationChecklist) -> EvaluationSession | None:
+    """The most recent meeting for ``checklist``, open or already ended --
+    what a "download the outcomes PDF from last time" link stays pointed at
+    once a meeting wraps up, until a new one starts."""
+    return EvaluationSession.objects.filter(checklist=checklist).order_by("-started_at").first()
+
+
+def start_session(*, club, checklist: EvaluationChecklist, started_by: Member | None) -> EvaluationSession:
+    """Begin a new meeting for ``checklist`` -- returns the existing open one
+    rather than raising if there already is one, so a double-submit (two
+    tabs, a slow double click) can't trip
+    one_open_evaluation_session_per_checklist."""
+    existing = active_session(checklist)
+    if existing is not None:
+        return existing
+    return EvaluationSession.objects.create(club=club, checklist=checklist, started_by=started_by)
+
+
+def end_session(session: EvaluationSession) -> EvaluationSession:
+    if session.is_open:
+        session.ended_at = timezone.now()
+        session.save(update_fields=["ended_at", "modified"])
+    return session
+
+
+def record_outcome(*, club, session: EvaluationSession, player: Member, decision: str, recorded_by: Member | None) -> EvaluationOutcome:
+    """Save this meeting's decision on ``player`` -- edited in place if one
+    was already recorded for them in this same session, rather than
+    accumulating a log (see EvaluationOutcome's own docstring)."""
+    outcome, _created = EvaluationOutcome.objects.update_or_create(session=session, player=player, defaults={"club": club, "decision": decision, "recorded_by": recorded_by})
+    return outcome
+
+
+def session_outcome_rows(session: EvaluationSession):
+    """Every player discussed in ``session``, alphabetically, each with just
+    their recorded decision -- what evaluation_outcomes_pdf.html renders.
+    Deliberately the only thing this reads off EvaluationOutcome: no
+    PlayerEvaluation answers, no EvaluationNote log -- see EvaluationOutcome's
+    own docstring for why those stay separate."""
+    return list(session.outcomes.select_related("player").order_by("player__last_name", "player__first_name"))

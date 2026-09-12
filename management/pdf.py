@@ -81,3 +81,8 @@ def event_referee_form_pdf(context: dict) -> bytes:
 def event_official_form_pdf(context: dict) -> bytes:
     html = render_to_string("management/event_official_form_pdf.html", context)
     return render_pdf(html)
+
+
+def evaluation_outcomes_pdf(context: dict) -> bytes:
+    html = render_to_string("management/evaluation_outcomes_pdf.html", context)
+    return render_pdf(html)

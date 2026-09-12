@@ -140,3 +140,75 @@ class EvaluationNote(ClubScopedModel):
 
     def clean(self):
         validate_club_scope(self, self.club_id, member_fields=("player",), same_club_fields=("checklist",))
+
+
+class EvaluationSession(ClubScopedModel):
+    """One evaluation meeting for a single checklist -- started when a
+    coaching staff sits down to walk through players together, ended when
+    the meeting wraps up. Exists purely so EvaluationOutcome has something to
+    attach to: PlayerEvaluation and EvaluationNote both predate this and
+    don't need it, since they're per-player facts recorded any time, with no
+    "which meeting" to group them by. A re-evaluation weeks later is just
+    another PlayerEvaluation, with no session at all.
+
+    At most one open (``ended_at`` unset) session per checklist at a time --
+    starting a second one before the first ends would fork the meeting's own
+    outcome notes across two rows with no way to tell which is current (see
+    the constraint below and evaluations.services.start_session, which
+    returns the existing open session rather than erroring)."""
+
+    checklist = models.ForeignKey(EvaluationChecklist, on_delete=models.CASCADE, related_name="sessions", verbose_name=_("checklist"))
+    started_at = models.DateTimeField(_("started at"), auto_now_add=True)
+    ended_at = models.DateTimeField(_("ended at"), null=True, blank=True)
+    #: SET_NULL, not PROTECT/CASCADE -- same reasoning as EvaluationNote.author:
+    #: whoever ran the meeting may later leave the club, but the session (and
+    #: its outcomes) should still show.
+    started_by = models.ForeignKey(Member, on_delete=models.SET_NULL, related_name="+", null=True, blank=True, verbose_name=_("started by"))
+
+    class Meta:
+        verbose_name = _("evaluation session")
+        verbose_name_plural = _("evaluation sessions")
+        ordering = ["-started_at"]
+        constraints = [
+            models.UniqueConstraint(fields=["checklist"], condition=models.Q(ended_at__isnull=True), name="one_open_evaluation_session_per_checklist"),
+        ]
+
+    def __str__(self):
+        return f"{self.checklist} — {self.started_at:%Y-%m-%d %H:%M}"
+
+    @property
+    def is_open(self) -> bool:
+        return self.ended_at is None
+
+    def clean(self):
+        validate_club_scope(self, self.club_id, same_club_fields=("checklist",))
+
+
+class EvaluationOutcome(ClubScopedModel):
+    """The meeting's actual decision on one player -- promoted, released,
+    needs another look, whatever the coaching staff agreed -- kept in its own
+    model, separate from EvaluationNote's private running discussion log, so
+    exporting "what we decided" (evaluations.services.session_outcome_rows,
+    management's evaluation_outcomes_pdf.html) can never accidentally pull
+    the informal notes in alongside it. One row per (session, player): edited
+    in place while the meeting is still open, not a log of every edit."""
+
+    session = models.ForeignKey(EvaluationSession, on_delete=models.CASCADE, related_name="outcomes", verbose_name=_("session"))
+    player = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="evaluation_outcomes", verbose_name=_("player"))
+    decision = models.TextField(_("decision"))
+    #: SET_NULL -- same reasoning as EvaluationNote.author.
+    recorded_by = models.ForeignKey(Member, on_delete=models.SET_NULL, related_name="+", null=True, blank=True, verbose_name=_("recorded by"))
+
+    class Meta:
+        verbose_name = _("evaluation outcome")
+        verbose_name_plural = _("evaluation outcomes")
+        ordering = ["player__last_name", "player__first_name"]
+        constraints = [
+            models.UniqueConstraint(fields=["session", "player"], name="unique_outcome_per_session_per_player"),
+        ]
+
+    def __str__(self):
+        return f"{self.player} — {self.session}"
+
+    def clean(self):
+        validate_club_scope(self, self.club_id, member_fields=("player",), same_club_fields=("session",))
