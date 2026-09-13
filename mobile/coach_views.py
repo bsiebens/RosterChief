@@ -1181,15 +1181,20 @@ class CoachLineupView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
         attendance.player_attendance_rankings``, one query for the whole
         team rather than one per row) -- a player saying "yes" to this game
         doesn't tell a coach how reliably they actually show up, and that's
-        exactly the judgment call a line-up screen exists for. Riders with
-        too little history (rankings' own ``minimum_responses`` floor) get
-        no rate rather than a misleading 0%/100% from one data point."""
+        exactly the judgment call a line-up screen exists for. Shown from a
+        player's very first response (``minimum_responses=1``) rather than
+        rankings' own default-3 floor: that floor exists to keep a
+        comparative leaderboard (management's own team ranking board) from
+        unfairly burying someone on one data point, but here there's no
+        ranking at all, just one player's own number -- a coach picking a
+        line-up for game 2 needs whatever signal game 1 gave, not silence
+        until game 4."""
         season = current_season(self.request.club)
         memberships_by_member = {}
         rates_by_member = {}
         if season is not None:
             memberships_by_member = {tm.member_id: tm for tm in TeamMembership.objects.filter(team=self.active_team, season=season).select_related("position")}
-            rates_by_member = {row["member"].pk: row["rate"] for row in player_attendance_rankings(self.active_team, season)}
+            rates_by_member = {row["member"].pk: row["rate"] for row in player_attendance_rankings(self.active_team, season, minimum_responses=1)}
 
         selected_ids = set(LineupSelection.objects.filter(lineup=lineup).values_list("member_id", flat=True))
         available = Attendance.objects.filter(event=event).exclude(status__in=UNAVAILABLE_STATUSES).select_related("member").order_by("member__last_name", "member__first_name")

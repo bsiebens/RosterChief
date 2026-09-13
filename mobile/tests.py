@@ -6480,16 +6480,33 @@ class CoachLineupViewTests(TestCase):
 
         self.assertNotContains(response, "Referees:")
 
-    def test_a_player_with_too_little_history_shows_no_turnout_rate(self):
-        # self.player has exactly one Attendance row (for the upcoming game
-        # itself, not even a past one) -- well under player_attendance_rankings'
-        # own minimum_responses floor, so no rate should be attached.
+    def test_a_player_with_no_past_response_shows_no_turnout_rate(self):
+        # self.player has exactly one Attendance row, but it's for the upcoming
+        # game itself, not a past one -- zero qualifying responses, so no rate
+        # should be attached even at this screen's own minimum_responses=1
+        # (see CoachLineupView._categories's own docstring for why this screen
+        # uses 1, not rankings' default-3 floor).
         self.client.force_login(self.user)
 
         response = self.client.get(reverse("mobile:coach_lineup", kwargs={"event_id": self.event.pk}), HTTP_HOST="ajax-united.rosterchief.app")
 
         self.assertIsNone(response.context["categories"][0]["rows"][0]["attendance_rate"])
         self.assertNotContains(response, "turnout")
+
+    def test_a_player_with_a_single_response_shows_a_turnout_rate(self):
+        # Deliberately shown from the very first response here, unlike the
+        # team ranking board's comparative leaderboard (which keeps rankings'
+        # own default-3 floor) -- a coach picking a line-up for game 2 needs
+        # whatever signal game 1 gave, not silence until game 4.
+        past_practice = Event.objects.create(club=self.club, title="Practice", kind=Event.EventKind.TRAINING, season=self.season, start=timezone.now() - datetime.timedelta(days=1))
+        past_practice.teams.add(self.team)
+        Attendance.objects.update_or_create(event=past_practice, member=self.player, defaults={"status": Attendance.AttendanceStatus.PRESENT})
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mobile:coach_lineup", kwargs={"event_id": self.event.pk}), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.context["categories"][0]["rows"][0]["attendance_rate"], 100)
+        self.assertContains(response, "100% turnout")
 
     def test_a_player_with_enough_history_shows_a_turnout_rate(self):
         for index, status in enumerate([Attendance.AttendanceStatus.PRESENT, Attendance.AttendanceStatus.PRESENT, Attendance.AttendanceStatus.ABSENT]):
