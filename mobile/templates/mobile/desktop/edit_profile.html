@@ -6,7 +6,7 @@
 {% endblock header_extra %}
 
 {% block content %}
-    <form id="edit-profile-form" method="post" class="mx-auto flex w-full max-w-[640px] flex-col gap-4" hx-boost="false">
+    <form id="edit-profile-form" method="post" enctype="multipart/form-data" class="mx-auto flex w-full max-w-[640px] flex-col gap-4" hx-boost="false">
         {% csrf_token %}
 
         {% if open_requirement_names %}
@@ -14,6 +14,21 @@
                 {% blocktrans count counter=open_requirement_names|length with names=open_requirement_summary %}{{ counter }} requirement still open: {{ names }}{% plural %}{{ counter }} requirements still open: {{ names }}{% endblocktrans %}
             </div>
         {% endif %}
+
+        <div class="card">
+            <div class="border-b border-line px-4.5 py-3.5"><span class="card-title">{% trans "Photo" %}</span></div>
+            <div class="flex items-center gap-3 border-b border-rule p-4.5">
+                {% include "mobile/_avatar.html" with person=member size_class="h-16 w-16" text_class="text-2xl" %}
+                <div class="min-w-0 flex-1">
+                    {{ form.photo }}
+                    {% for error in form.photo.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
+                </div>
+            </div>
+            <label class="flex items-center gap-2.5 p-4.5 text-[15px] text-ink">
+                {{ form.photo_public_consent }}
+                {{ form.photo_public_consent.label }}
+            </label>
+        </div>
 
         <div class="card">
             <div class="border-b border-line px-4.5 py-3.5"><span class="card-title">{% trans "Identity" %}</span></div>

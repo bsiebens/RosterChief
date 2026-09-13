@@ -238,9 +238,7 @@
                                 {% for row in group.rows %}
                                     <tr data-status="{{ group.value }}">
                                         <td class="w-px">
-                                            <span class="avatar avatar-placeholder shrink-0">
-                                                <div class="h-7 w-7 rounded-full text-xs">{{ row.member.first_name|slice:":1" }}{{ row.member.last_name|slice:":1" }}</div>
-                                            </span>
+                                            {% include "management/_avatar.html" with person=row.member size_class="h-7 w-7" %}
                                         </td>
                                         <td class="font-semibold text-ink">{{ row.member }}</td>
                                         <td>

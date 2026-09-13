@@ -35,8 +35,9 @@ User = get_user_model()
 class MemberForm(forms.ModelForm):
     class Meta:
         model = Member
-        fields = ["first_name", "last_name", "date_of_birth", "email", "phone", "emergency_phone"]
+        fields = ["first_name", "last_name", "date_of_birth", "email", "phone", "emergency_phone", "photo", "photo_public_consent"]
         widgets = {"date_of_birth": forms.DateInput(attrs={"type": "date"})}
+        labels = {"photo_public_consent": _("Show this photo on the club's public website")}
 
 
 class TeamForm(forms.ModelForm):

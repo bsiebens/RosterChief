@@ -100,9 +100,7 @@
         <div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
             <div class="flex flex-col gap-4 lg:col-span-1">
                 <div class="card card-body items-center text-center">
-                    <span class="avatar avatar-placeholder">
-                        <div class="h-16 w-16 rounded-full text-xl">{{ player.first_name|slice:":1" }}{{ player.last_name|slice:":1" }}</div>
-                    </span>
+                    {% include "management/_avatar.html" with person=player size_class="h-16 w-16" text_class="text-xl" %}
                     <h2 class="mt-2 font-display text-lg font-extrabold text-ink">{{ player.get_full_name }}</h2>
                     {% if memberships %}
                         <div class="mt-1 flex flex-wrap justify-center gap-1">

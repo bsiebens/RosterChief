@@ -1063,7 +1063,7 @@ class MemberUpdateView(MemberAdminRequiredMixin, View):
     def post(self, request, pk):
         member = self.get_member()
         membership = self.get_membership(member)
-        form = MemberForm(request.POST, instance=member)
+        form = MemberForm(request.POST, request.FILES, instance=member)
         membership_form = ClubMembershipForm(request.POST, instance=membership) if membership else None
 
         if form.is_valid() and (membership_form is None or membership_form.is_valid()):

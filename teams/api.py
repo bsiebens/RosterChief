@@ -36,6 +36,7 @@ class PlayerOut(Schema):
     is_captain: bool
     is_alternate_captain: bool
     license: str | None
+    photo_url: str | None
 
 
 class PositionGroupOut(Schema):
@@ -48,6 +49,7 @@ class StaffMemberOut(Schema):
     first_name: str
     last_name: str
     position: str
+    photo_url: str | None
 
 
 class RosterOut(Schema):
@@ -62,7 +64,14 @@ def _to_team_out(team, request, photo=None) -> TeamOut:
     return TeamOut(id=team.pk, name=team.name, short_name=team.short_name, photo_url=photo_url)
 
 
-def _to_player_out(membership, license_by_member_id) -> PlayerOut:
+def _photo_url(member, request) -> str | None:
+    """``member.public_photo``'s URL, absolute like TeamOut's own photo_url --
+    a relative /media/... path is useless to a club's separately-hosted public
+    website. None whenever public_photo is (no photo, or consent's still off)."""
+    return request.build_absolute_uri(member.public_photo.url) if member.public_photo else None
+
+
+def _to_player_out(membership, license_by_member_id, request) -> PlayerOut:
     return PlayerOut(
         id=membership.member_id,
         first_name=membership.member.first_name,
@@ -71,6 +80,7 @@ def _to_player_out(membership, license_by_member_id) -> PlayerOut:
         is_captain=membership.is_captain,
         is_alternate_captain=membership.is_alternate_captain,
         license=license_by_member_id.get(membership.member_id) or None,
+        photo_url=_photo_url(membership.member, request),
     )
 
 
@@ -102,8 +112,8 @@ def build_roster(team, request) -> RosterOut:
     # position yet (position_id is None -- see the nulls_last comment above)
     # groups together under an empty "" label rather than crashing on
     # m.position.name; it's the caller's job to label that group, not this API's.
-    players = [PositionGroupOut(position=position_name or "", players=[_to_player_out(m, license_by_member_id) for m in members]) for position_name, members in groupby(memberships, key=lambda m: m.position.name if m.position_id else None)]
-    staff = [StaffMemberOut(id=assignment.member_id, first_name=assignment.member.first_name, last_name=assignment.member.last_name, position=assignment.position.name) for assignment in assignments]
+    players = [PositionGroupOut(position=position_name or "", players=[_to_player_out(m, license_by_member_id, request) for m in members]) for position_name, members in groupby(memberships, key=lambda m: m.position.name if m.position_id else None)]
+    staff = [StaffMemberOut(id=assignment.member_id, first_name=assignment.member.first_name, last_name=assignment.member.last_name, position=assignment.position.name, photo_url=_photo_url(assignment.member, request)) for assignment in assignments]
 
     return RosterOut(team=_to_team_out(team, request, photo=photo), season=season.name, players=players, staff=staff)
 

@@ -6,6 +6,14 @@ from phonenumber_field.modelfields import PhoneNumberField
 from rosterchief.base import ClubScopedModel, UUIDModel
 
 
+def member_photo_path(instance, filename):
+    # Keyed off the member's own id, not e.g. a club slug -- Member is the one
+    # global model in this codebase (shared across every club a person
+    # belongs to), so there's no single club to scope the path by. Same
+    # "stable id, not a name/slug" reasoning as news_photo_path/team_photo_path.
+    return f"members/{instance.pk}/{filename}"
+
+
 class Family(ClubScopedModel):
     """Club-scoped: a household's registration is with one club, and a person
     who belongs to more than one club (e.g. a coach who's also a parent
@@ -54,6 +62,16 @@ class Member(UUIDModel):
     phone = PhoneNumberField(_("phone number"), null=True, blank=True)
     emergency_phone = PhoneNumberField(_("emergency phone number"), null=True, blank=True)
 
+    photo = models.ImageField(_("photo"), upload_to=member_photo_path, blank=True)
+    #: Gates only the *public* surfaces (a club's public website/API roster) --
+    #: someone already inside the club (coach roster, staff lists, the app's
+    #: own "People I manage" rows) sees the photo regardless, same as they
+    #: already see this member's name. Off by default: a photo uploaded for
+    #: in-app use (e.g. a parent picking their own kid out of a roster list)
+    #: shouldn't become world-visible without a separate, explicit opt-in --
+    #: this matters most for underage players.
+    photo_public_consent = models.BooleanField(_("show this photo on the public website/API"), default=False)
+
     class Meta:
         verbose_name = _("member")
         verbose_name_plural = _("members")
@@ -68,6 +86,14 @@ class Member(UUIDModel):
 
     def get_short_name(self):
         return self.first_name
+
+    @property
+    def public_photo(self):
+        """``self.photo``, but only once ``photo_public_consent`` says it can
+        leave the club's own app/staff views -- the one gate every public
+        surface (teams.api's roster endpoints, a club's public website) must
+        go through, so consent can't be forgotten at a new call site."""
+        return self.photo if self.photo and self.photo_public_consent else None
 
     @property
     def contact_email(self):

@@ -5,6 +5,7 @@ from pathlib import Path
 
 from allauth.mfa.models import Authenticator
 from django.contrib.admin.sites import AdminSite
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db import IntegrityError
@@ -69,6 +70,18 @@ class MemberModelTests(TestCase):
 
         with self.assertRaises(IntegrityError):
             Member.objects.create(user=user, first_name="Second", last_name="Member")
+
+    def test_public_photo_is_none_without_a_photo(self):
+        member = Member.objects.create(first_name="No", last_name="Photo", photo_public_consent=True)
+        self.assertIsNone(member.public_photo)
+
+    def test_public_photo_is_none_without_consent(self):
+        member = Member.objects.create(first_name="Not", last_name="Consenting", photo=SimpleUploadedFile("photo.jpg", b"fake-image-bytes", content_type="image/jpeg"))
+        self.assertIsNone(member.public_photo)
+
+    def test_public_photo_is_the_photo_once_consent_is_given(self):
+        member = Member.objects.create(first_name="Consents", last_name="Fully", photo=SimpleUploadedFile("photo.jpg", b"fake-image-bytes", content_type="image/jpeg"), photo_public_consent=True)
+        self.assertEqual(member.public_photo, member.photo)
 
 
 class FamilyNameOptionalTests(TestCase):

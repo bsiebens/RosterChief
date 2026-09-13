@@ -1204,12 +1204,13 @@ class RegistrationInvoicePdfView(PersonScopeMixin, LoginRequiredMixin, View):
 class EditProfileView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
     """M6 -- design_handoff_rosterchief_platform/README.md's M6 section,
     "Edit personal info". The design mock also shows a "National register
-    no.", an "Address", an "Allergies / notes" field and two "Consent"
-    toggles (photos on club channels / share contact with team parents) --
-    none of those exist on ``members.models.Member``, so (per this build's
-    "no schema changes for a screen-building pass" rule) they're simply not
-    part of this screen; MemberProfileForm (mobile/forms.py) only covers the
-    fields the model actually has.
+    no.", an "Address", an "Allergies / notes" field and a "share contact
+    with team parents" consent toggle -- none of those exist on
+    ``members.models.Member``, so they're simply not part of this screen;
+    MemberProfileForm (mobile/forms.py) only covers the fields the model
+    actually has. The mock's other consent toggle, "photos on club
+    channels", now does have a backing field (``photo_public_consent``,
+    gating ``Member.public_photo``) and is part of the form.
 
     Two more mock rows *do* have real backing data, both rendered read-only
     (never editable here -- family links and staff document review each live
@@ -1253,7 +1254,7 @@ class EditProfileView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
 
     def post(self, request, *args, **kwargs):
         member = self._target_member()
-        form = MemberProfileForm(request.POST, instance=member)
+        form = MemberProfileForm(request.POST, request.FILES, instance=member)
         if form.is_valid():
             form.save()
             title = _("Saved")

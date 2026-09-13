@@ -287,7 +287,7 @@ class TeamsApiTests(ApiTestBase):
 
         staff = self.api_get(f"/teams/{self.team.pk}/roster/").json()["staff"]
 
-        self.assertEqual(staff, [{"id": str(dana.pk), "first_name": "Dana", "last_name": "Dean", "position": "Head Coach"}])
+        self.assertEqual(staff, [{"id": str(dana.pk), "first_name": "Dana", "last_name": "Dean", "position": "Head Coach", "photo_url": None}])
 
     def test_roster_is_current_season_only(self):
         other_season = Season.objects.create(club=self.club, start_date=datetime.date(2000, 1, 1), end_date=datetime.date(2000, 12, 31))
