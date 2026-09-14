@@ -813,13 +813,15 @@ class TournamentRegistrationViewTests(TournamentsTestCase):
         self.assertFalse(TournamentRegistration.objects.exists())
         self.assertEqual(len(mail.outbox), 0)
 
-    def test_post_with_no_players_rerenders_with_errors_and_creates_nothing(self):
+    def test_post_with_no_players_still_creates_a_pending_registration(self):
         data = self.contact_data() | self.formset_management()
 
         response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
 
-        self.assertEqual(response.status_code, 200)
-        self.assertFalse(TournamentRegistration.objects.exists())
+        registration = TournamentRegistration.objects.get()
+        self.assertEqual(registration.status, TournamentRegistration.Status.PENDING)
+        self.assertFalse(registration.players.exists())
+        self.assertRedirects(response, reverse("tournaments:registration_status", kwargs={"tournament_slug": self.tournament.slug, "token": registration.status_token}))
 
     def test_a_tournament_in_progress_404s(self):
         self.tournament.status = Tournament.Status.IN_PROGRESS
@@ -973,13 +975,13 @@ class TournamentRegistrationStatusViewTests(TournamentsTestCase):
         self.assertEqual(player.first_name, "Robin")
         self.assertEqual(player.jersey_number, 11)
 
-    def test_updating_the_roster_with_no_players_rerenders_with_an_error(self):
+    def test_updating_the_roster_with_no_players_clears_it(self):
         data = self.formset_management(total=0)
 
         response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
 
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(self.registration.players.count(), 1)  # unchanged
+        self.assertRedirects(response, self._url())
+        self.assertEqual(self.registration.players.count(), 0)
 
     def test_cannot_update_the_roster_once_approved(self):
         self.registration.status = TournamentRegistration.Status.APPROVED

@@ -41,8 +41,10 @@ class TournamentRegistrationForm(forms.ModelForm):
 class TournamentRegistrationPlayerRowForm(forms.Form):
     """One row of the roster submitted alongside a ``TournamentRegistration`` --
     same "entirely optional at the field level, a blank row is simply
-    skipped" idiom as ``registration.forms.RegistrationEntryRowForm``; the
-    formset itself (below) requires at least one non-blank row."""
+    skipped" idiom as ``registration.forms.RegistrationEntryRowForm``. The
+    roster itself is optional too (a team may register before its roster is
+    finalized, and add players later via TournamentRegistrationStatusView) --
+    the formset below doesn't require any non-blank row."""
 
     first_name = forms.CharField(label=_("First name"), max_length=150, required=False)
     last_name = forms.CharField(label=_("Last name"), max_length=150, required=False)
@@ -65,13 +67,6 @@ class TournamentRegistrationPlayerRowForm(forms.Form):
 class BaseTournamentRegistrationPlayerFormSet(forms.BaseFormSet):
     def non_blank_forms(self):
         return [form for form in self.forms if form.cleaned_data and form.has_a_person()]
-
-    def clean(self):
-        super().clean()
-        if any(self.errors):
-            return
-        if not self.non_blank_forms():
-            raise ValidationError(_("Add at least one player to the roster."))
 
 
 TournamentRegistrationPlayerFormSet = forms.formset_factory(TournamentRegistrationPlayerRowForm, formset=BaseTournamentRegistrationPlayerFormSet, extra=1)
