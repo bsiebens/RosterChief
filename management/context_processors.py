@@ -283,7 +283,7 @@ _TOP_SECTION = {
     "invoice_list": "finance",
     "form_list": "settings",
     "evaluation_checklist_list": "settings",
-    "tournament_list": "settings",
+    "tournament_list": "tournaments",
     "club_settings": "settings",
     "onboarding_requirement_list": "settings",
     "role_list": "settings",
@@ -292,7 +292,7 @@ _TOP_SECTION = {
     "referee_level_list": "settings",
     "referee_management": "calendar",
     "official_level_list": "settings",
-    "dressing_room_list": "settings",
+    "dressing_room_list": "tournaments",
 }
 
 

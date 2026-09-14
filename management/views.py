@@ -7755,11 +7755,11 @@ class TournamentDressingRoomReleaseView(TournamentsManagerRequiredMixin, View):
 class DressingRoomListView(TournamentsManagerRequiredMixin, TemplateView):
     """A club's own physical dressing rooms -- persists across tournaments
     and seasons (``DressingRoom`` is club-scoped, not tournament-scoped, see
-    its own docstring), so it gets a Settings-area screen of its own rather
-    than living inside any one tournament's own pages -- nothing else would
-    ever build this screen otherwise. Mirrors
-    ``onboarding_requirement_list.html``'s plain list + modal-form CRUD
-    shape."""
+    its own docstring), so it gets a screen of its own (under the
+    "Tournaments" nav section, alongside "All tournaments") rather than
+    living inside any one tournament's own pages -- nothing else would ever
+    build this screen otherwise. Mirrors ``onboarding_requirement_list.html``'s
+    plain list + modal-form CRUD shape."""
 
     template_name = "management/dressing_room_list.html"
 

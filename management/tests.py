@@ -13739,6 +13739,14 @@ class TournamentListViewTests(ManagementTestBase):
 
         self.assertEqual(response.status_code, 404)
 
+    def test_lights_up_its_own_top_level_nav_section_not_settings(self):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_list")
+
+        self.assertEqual(response.context["nav_section"], "tournaments")
+
     def test_lists_this_clubs_tournaments(self):
         self.activate_flag()
         self.client.force_login(self.admin_user)
@@ -14537,8 +14545,9 @@ class TournamentTaskManagementTests(ManagementTestBase):
 class DressingRoomManagementTests(ManagementTestBase):
     """management:dressing_room_list and its CRUD -- DressingRoom is
     club-scoped (persists across tournaments/seasons, see the model's own
-    docstring), so this lives under Settings rather than inside any one
-    tournament's own pages."""
+    docstring), so this lives under the "Tournaments" nav section's own
+    "Dressing rooms" sub-item rather than inside any one tournament's own
+    pages."""
 
     def setUp(self):
         super().setUp()
@@ -14569,6 +14578,14 @@ class DressingRoomManagementTests(ManagementTestBase):
         response = self.club_get("dressing_room_list")
 
         self.assertEqual(response.status_code, 403)
+
+    def test_list_lights_up_the_tournaments_nav_section_not_settings(self):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("dressing_room_list")
+
+        self.assertEqual(response.context["nav_section"], "tournaments")
 
     def test_create_update_delete_a_dressing_room(self):
         self.activate_flag()

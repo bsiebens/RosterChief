@@ -1,9 +1,10 @@
 {% load i18n lucide %}
 
 {% comment %}
-    The two-level sidebar (design_handoff_rosterchief_platform/README.md, D1/D2): seven
-    top-level sections -- Overview/Members/Teams/Calendar/News/Finance/Settings -- each
-    except News expanding into sub-items while it (or a sub-item) is active. `nav`/
+    The two-level sidebar (design_handoff_rosterchief_platform/README.md, D1/D2): the
+    original seven top-level sections -- Overview/Members/Teams/Calendar/News/Finance/
+    Settings -- plus Tournaments (tournaments_enabled, admin-only), each expanding into
+    sub-items while it (or a sub-item) is active, except News which has none. `nav`/
     `nav_section` come from management.context_processors.active_nav_section.
 
     Admin-only sub-items are hidden here for plain staff -- the views are gated
@@ -73,6 +74,18 @@
     {% endif %}
 </div>
 
+{% if tournaments_enabled and is_club_admin %}
+    <div>
+        <a class="nav-item {% if nav_section == 'tournaments' %}active{% endif %}" href="{% url 'management:tournament_list' %}">{% lucide "trophy" size=17 %} {% trans "Tournaments" %}</a>
+        {% if nav_section == 'tournaments' %}
+            <div class="flex flex-col">
+                <a class="nav-subitem {% if nav == 'tournament_list' %}active{% endif %}" href="{% url 'management:tournament_list' %}">{% trans "All tournaments" %}</a>
+                <a class="nav-subitem {% if nav == 'dressing_room_list' %}active{% endif %}" href="{% url 'management:dressing_room_list' %}">{% trans "Dressing rooms" %}</a>
+            </div>
+        {% endif %}
+    </div>
+{% endif %}
+
 <a class="nav-item {% if nav_section == 'news' %}active{% endif %}" href="{% url 'management:news_list' %}">{% lucide "newspaper" size=17 %} {% trans "News" %}</a>
 
 {% if is_club_admin %}
@@ -127,10 +140,6 @@
                     {% endif %}
                     {% if evaluations_enabled %}
                         <a class="nav-subitem {% if nav == 'evaluation_checklist_list' %}active{% endif %}" href="{% url 'management:evaluation_checklist_list' %}">{% trans "Evaluations" %}</a>
-                    {% endif %}
-                    {% if tournaments_enabled %}
-                        <a class="nav-subitem {% if nav == 'tournament_list' %}active{% endif %}" href="{% url 'management:tournament_list' %}">{% trans "Tournaments" %}</a>
-                        <a class="nav-subitem {% if nav == 'dressing_room_list' %}active{% endif %}" href="{% url 'management:dressing_room_list' %}">{% trans "Dressing rooms" %}</a>
                     {% endif %}
                 {% endif %}
             </div>
