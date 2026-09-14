@@ -138,12 +138,13 @@ from shop.services.vouchers import delete_manual_consumption, record_manual_cons
 from teams.models import NumberPool, NumberReservation, OfficialLevel, OfficialProfile, Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
 from teams.services import eligible_roster_members, place_member_on_team
 from teams.services.numbers import has_unresolved_conflict
-from tournaments.forms import DressingRoomAssignmentForm, DressingRoomForm, TournamentFieldForm, TournamentForm, TournamentRosterEntryForm, TournamentStageForm, TournamentTaskForm, TournamentTeamForm
+from tournaments.forms import DressingRoomAssignmentForm, DressingRoomForm, TournamentFieldForm, TournamentForm, TournamentRosterEntryForm, TournamentStageForm, TournamentTaskForm, TournamentTaskGenerateForm, TournamentTeamForm
 from tournaments.models import DressingRoom, DressingRoomAssignment, Match, Tournament, TournamentField, TournamentRegistration, TournamentRosterEntry, TournamentStage, TournamentTask, TournamentTeam
 from tournaments.services.dressing_rooms import DressingRoomAssignmentError, assign_dressing_room, release_dressing_room
 from tournaments.services.notifications import send_registration_decision_email
 from tournaments.services.registration import RegistrationDecisionError, TeamWithdrawalError, approve_registration, create_manual_team, reject_registration, withdraw_team
 from tournaments.services.scheduling import SchedulingError, record_result, reschedule_match
+from tournaments.services.tasks import generate_task_shifts
 
 from .bulk_import import build_member_import_template, family_choice_field_name, match_candidate_families, parse_member_import_rows, read_member_import_workbook
 from .email_previews import EMAIL_PREVIEWS, EMAIL_PREVIEWS_BY_KEY, render_preview
@@ -7855,7 +7856,7 @@ class TournamentTaskListView(TournamentsManagerRequiredMixin, TemplateView):
             task.claim_labels = [claim_label_for(claim.member, tournament.club) for claim in task.claims.all()]
             task.is_full = len(task.claim_labels) >= task.needed_quantity
             task.edit_form = TournamentTaskForm(instance=task)
-        return super().get_context_data(tournament=tournament, tasks=tasks, task_form=TournamentTaskForm(), active_tab="tasks", **kwargs)
+        return super().get_context_data(tournament=tournament, tasks=tasks, task_form=TournamentTaskForm(), generate_form=TournamentTaskGenerateForm(tournament=tournament), active_tab="tasks", **kwargs)
 
 
 class TournamentTaskCreateView(TournamentsManagerRequiredMixin, View):
@@ -7872,6 +7873,38 @@ class TournamentTaskCreateView(TournamentsManagerRequiredMixin, View):
         task.created_by = Member.objects.filter(user=request.user).first()
         task.save()
         notify(request, f"s|{_('Task added')}|" + _("“%(title)s” was added to this tournament.") % {"title": task.title})
+        return redirect("management:tournament_task_list", tournament_pk=tournament.pk)
+
+
+class TournamentTaskGenerateView(TournamentsManagerRequiredMixin, View):
+    """The Tasks tab's own "Generate shifts" action --
+    tournaments.services.tasks.generate_task_shifts for a whole run of
+    same-length shifts at once, alongside TournamentTaskCreateView's single
+    ad-hoc one above."""
+
+    def post(self, request, tournament_pk):
+        tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
+        form = TournamentTaskGenerateForm(request.POST, tournament=tournament)
+        if not form.is_valid():
+            for error in form.errors.values():
+                notify(request, f"e|{_('Could not generate shifts')}|{' '.join(error)}")
+            return redirect("management:tournament_task_list", tournament_pk=tournament.pk)
+
+        tasks = generate_task_shifts(
+            tournament,
+            title=form.cleaned_data["title"],
+            location_label=form.location_label_value(),
+            starts_at=form.cleaned_data["starts_at"],
+            ends_at=form.cleaned_data["ends_at"],
+            shift_minutes=form.cleaned_data["shift_minutes"],
+            needed_quantity=form.cleaned_data["needed_quantity"],
+            created_by=Member.objects.filter(user=request.user).first(),
+        )
+        if not tasks:
+            notify(request, f"w|{_('No shifts generated')}|{_('The window is shorter than one shift -- widen it or shorten the shift length.')}")
+        else:
+            body = ngettext("%(count)d shift was added to this tournament.", "%(count)d shifts were added to this tournament.", len(tasks)) % {"count": len(tasks)}
+            notify(request, f"s|{_('Shifts generated')}|{body}")
         return redirect("management:tournament_task_list", tournament_pk=tournament.pk)
 
 

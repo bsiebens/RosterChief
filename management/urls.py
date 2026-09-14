@@ -179,6 +179,7 @@ urlpatterns = [
     path("tournaments/<uuid:tournament_pk>/stages/<uuid:stage_pk>/delete/", views.TournamentStageDeleteView.as_view(), name="tournament_stage_delete"),
     path("tournaments/<uuid:tournament_pk>/tasks/", views.TournamentTaskListView.as_view(), name="tournament_task_list"),
     path("tournaments/<uuid:tournament_pk>/tasks/create/", views.TournamentTaskCreateView.as_view(), name="tournament_task_create"),
+    path("tournaments/<uuid:tournament_pk>/tasks/generate/", views.TournamentTaskGenerateView.as_view(), name="tournament_task_generate"),
     path("tournaments/<uuid:tournament_pk>/tasks/<uuid:task_pk>/update/", views.TournamentTaskUpdateView.as_view(), name="tournament_task_update"),
     path("tournaments/<uuid:tournament_pk>/tasks/<uuid:task_pk>/delete/", views.TournamentTaskDeleteView.as_view(), name="tournament_task_delete"),
     path("tournaments/<uuid:tournament_pk>/dressing-rooms/", views.TournamentDressingRoomsView.as_view(), name="tournament_dressing_room_list"),

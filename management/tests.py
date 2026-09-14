@@ -14688,45 +14688,74 @@ class TournamentFieldStageCrudTests(ManagementTestBase):
         self.assertEqual(self.club_post("tournament_field_update", {"name": "Hack"}, self.tournament.pk, other_field.pk).status_code, 404)
         self.assertEqual(self.club_post("tournament_field_delete", {}, self.tournament.pk, other_field.pk).status_code, 404)
 
-    def test_create_a_stage_with_valid_json_config(self):
+    def test_create_a_round_robin_stage_with_default_standings(self):
         self.activate_flag()
         self.client.force_login(self.admin_user)
 
         response = self.club_post(
             "tournament_stage_create",
-            {"name": "Group Stage", "sequence": 0, "format": TournamentStage.Format.ROUND_ROBIN, "config": '{"rounds": 1}', "standings_config": "{}"},
+            {"name": "Group Stage", "sequence": 0, "format": TournamentStage.Format.ROUND_ROBIN},
             self.tournament.pk,
         )
 
         self.assertRedirects(response, reverse("management:tournament_field_stage_list", args=[self.tournament.pk]))
         stage = TournamentStage.objects.get(tournament=self.tournament, name="Group Stage")
-        self.assertEqual(stage.config, {"rounds": 1})
+        self.assertEqual(stage.config, {})
+        self.assertEqual(stage.standings_config, {"points": {"win": 3, "draw": 1, "loss": 0}, "tiebreakers": ["goal_diff", "goals_for"]})
 
-    def test_invalid_json_config_is_rejected_without_a_500(self):
+    def test_a_swiss_stage_requires_a_round_count(self):
         self.activate_flag()
         self.client.force_login(self.admin_user)
 
         response = self.club_post(
             "tournament_stage_create",
-            {"name": "Group Stage", "sequence": 0, "format": TournamentStage.Format.ROUND_ROBIN, "config": "{not json}", "standings_config": "{}"},
+            {"name": "Swiss Stage", "sequence": 0, "format": TournamentStage.Format.SWISS},
             self.tournament.pk,
         )
 
         self.assertRedirects(response, reverse("management:tournament_field_stage_list", args=[self.tournament.pk]))
-        self.assertFalse(TournamentStage.objects.filter(tournament=self.tournament, name="Group Stage").exists())
+        self.assertFalse(TournamentStage.objects.filter(tournament=self.tournament, name="Swiss Stage").exists())
 
-    def test_a_json_array_config_is_rejected(self):
+    def test_a_swiss_stage_with_a_round_count_stores_it_in_config(self):
         self.activate_flag()
         self.client.force_login(self.admin_user)
 
         response = self.club_post(
             "tournament_stage_create",
-            {"name": "Group Stage", "sequence": 0, "format": TournamentStage.Format.ROUND_ROBIN, "config": "[1, 2]", "standings_config": "{}"},
+            {"name": "Swiss Stage", "sequence": 0, "format": TournamentStage.Format.SWISS, "rounds": "5"},
             self.tournament.pk,
         )
 
         self.assertRedirects(response, reverse("management:tournament_field_stage_list", args=[self.tournament.pk]))
-        self.assertFalse(TournamentStage.objects.filter(tournament=self.tournament, name="Group Stage").exists())
+        stage = TournamentStage.objects.get(tournament=self.tournament, name="Swiss Stage")
+        self.assertEqual(stage.config, {"rounds": 5})
+
+    def test_a_groups_stage_requires_a_group_count(self):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post(
+            "tournament_stage_create",
+            {"name": "Groups Stage", "sequence": 0, "format": TournamentStage.Format.GROUPS},
+            self.tournament.pk,
+        )
+
+        self.assertRedirects(response, reverse("management:tournament_field_stage_list", args=[self.tournament.pk]))
+        self.assertFalse(TournamentStage.objects.filter(tournament=self.tournament, name="Groups Stage").exists())
+
+    def test_custom_points_and_tiebreakers_are_stored(self):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post(
+            "tournament_stage_create",
+            {"name": "Group Stage", "sequence": 0, "format": TournamentStage.Format.ROUND_ROBIN, "points_win": "2", "points_draw": "1", "points_loss": "0", "tiebreaker_1": "head_to_head", "tiebreaker_2": ""},
+            self.tournament.pk,
+        )
+
+        self.assertRedirects(response, reverse("management:tournament_field_stage_list", args=[self.tournament.pk]))
+        stage = TournamentStage.objects.get(tournament=self.tournament, name="Group Stage")
+        self.assertEqual(stage.standings_config, {"points": {"win": 2, "draw": 1, "loss": 0}, "tiebreakers": ["head_to_head"]})
 
     def test_update_and_delete_a_stage(self):
         self.activate_flag()
@@ -14735,7 +14764,7 @@ class TournamentFieldStageCrudTests(ManagementTestBase):
 
         response = self.club_post(
             "tournament_stage_update",
-            {"name": "Group Stage A", "sequence": 1, "format": TournamentStage.Format.ROUND_ROBIN, "config": "{}", "standings_config": "{}"},
+            {"name": "Group Stage A", "sequence": 1, "format": TournamentStage.Format.ROUND_ROBIN},
             self.tournament.pk,
             stage.pk,
         )
@@ -14900,6 +14929,63 @@ class TournamentTaskManagementTests(ManagementTestBase):
 
         self.assertEqual(self.club_post("tournament_task_update", {"title": "Hack"}, self.tournament.pk, other_task.pk).status_code, 404)
         self.assertEqual(self.club_post("tournament_task_delete", {}, self.tournament.pk, other_task.pk).status_code, 404)
+
+    def test_generate_shifts_creates_one_task_per_slice(self):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post(
+            "tournament_task_generate",
+            {"title": "Gate duty", "location_field": "", "location_label": "Entrance", "starts_at": "2026-09-20T09:00", "ends_at": "2026-09-20T10:30", "shift_minutes": 30, "needed_quantity": 2},
+            self.tournament.pk,
+        )
+
+        self.assertRedirects(response, reverse("management:tournament_task_list", args=[self.tournament.pk]))
+        tasks = list(TournamentTask.objects.filter(tournament=self.tournament, title="Gate duty").order_by("starts_at"))
+        self.assertEqual(len(tasks), 3)
+        self.assertTrue(all(task.location_label == "Entrance" for task in tasks))
+        self.assertTrue(all(task.needed_quantity == 2 for task in tasks))
+        self.assertTrue(all(task.created_by == self.admin_member for task in tasks))
+
+    def test_generate_shifts_can_use_a_tournament_field_as_the_location(self):
+        self.activate_flag()
+        field = TournamentField.objects.create(tournament=self.tournament, name="Rink 2")
+        self.client.force_login(self.admin_user)
+
+        self.club_post(
+            "tournament_task_generate",
+            {"title": "Scorekeeper", "location_field": str(field.pk), "location_label": "", "starts_at": "2026-09-20T09:00", "ends_at": "2026-09-20T09:30", "shift_minutes": 30, "needed_quantity": 1},
+            self.tournament.pk,
+        )
+
+        task = TournamentTask.objects.get(tournament=self.tournament, title="Scorekeeper")
+        self.assertEqual(task.location_label, "Rink 2")
+
+    def test_generate_shifts_an_end_before_the_start_creates_nothing(self):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post(
+            "tournament_task_generate",
+            {"title": "Bad window", "location_field": "", "location_label": "", "starts_at": "2026-09-20T10:00", "ends_at": "2026-09-20T09:00", "shift_minutes": 30, "needed_quantity": 1},
+            self.tournament.pk,
+        )
+
+        self.assertRedirects(response, reverse("management:tournament_task_list", args=[self.tournament.pk]))
+        self.assertFalse(TournamentTask.objects.filter(tournament=self.tournament, title="Bad window").exists())
+
+    def test_generate_shifts_a_window_shorter_than_one_shift_creates_nothing(self):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post(
+            "tournament_task_generate",
+            {"title": "Too short", "location_field": "", "location_label": "", "starts_at": "2026-09-20T09:00", "ends_at": "2026-09-20T09:10", "shift_minutes": 30, "needed_quantity": 1},
+            self.tournament.pk,
+        )
+
+        self.assertRedirects(response, reverse("management:tournament_task_list", args=[self.tournament.pk]))
+        self.assertFalse(TournamentTask.objects.filter(tournament=self.tournament, title="Too short").exists())
 
 
 class DressingRoomManagementTests(ManagementTestBase):

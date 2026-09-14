@@ -90,16 +90,52 @@
 
     {% trans "Add stage" as add_stage_title %}
     {% url 'management:tournament_stage_create' tournament.pk as stage_create_url %}
-    {% include "controlpanel/_modal_form.html" with modal_id="stage_create_modal" title=add_stage_title form=stage_form action_url=stage_create_url submit_label=add_label submit_icon="plus" box_class="max-w-2xl" %}
+    {% include "controlpanel/_modal_form.html" with modal_id="stage_create_modal" title=add_stage_title form=stage_form action_url=stage_create_url submit_label=add_label submit_icon="plus" box_class="max-w-2xl" two_columns=True %}
 
     {% trans "Edit stage" as edit_stage_title %}
     {% trans "Delete stage" as delete_stage_title %}
     {% for stage in stages %}
         {% url 'management:tournament_stage_update' tournament.pk stage.pk as stage_update_url %}
-        {% include "controlpanel/_modal_form.html" with modal_id=stage.pk|dom_id:"stage_update_modal" title=edit_stage_title form=stage.edit_form action_url=stage_update_url submit_icon="check" box_class="max-w-2xl" %}
+        {% include "controlpanel/_modal_form.html" with modal_id=stage.pk|dom_id:"stage_update_modal" title=edit_stage_title form=stage.edit_form action_url=stage_update_url submit_icon="check" box_class="max-w-2xl" two_columns=True %}
 
         {% url 'management:tournament_stage_delete' tournament.pk stage.pk as stage_delete_url %}
         {% blocktrans with name=stage.name asvar delete_stage_body %}Delete “{{ name }}”? Any matches already generated for this stage are removed too. This cannot be undone.{% endblocktrans %}
         {% include "controlpanel/_confirm_modal.html" with modal_id=stage.pk|dom_id:"stage_delete_modal" title=delete_stage_title body=delete_stage_body action_url=stage_delete_url submit_label=delete_label %}
     {% endfor %}
 {% endblock panel %}
+
+{% block extra_body %}
+    <script>
+        // Each stage modal (one "Add stage" + one per existing stage's "Edit")
+        // carries its own full copy of the same field names, so a plain
+        // getElementById("id_rounds") would only ever find the FIRST modal's
+        // copy on the page -- scoped to each modal's own <dialog> via
+        // closest()/querySelector() instead, same reasoning as _player_row.html's
+        // own per-row scoping, just one dialog "row" instead of one formset row.
+        // Shows/hides rounds (Swiss)/num_groups (Groups) by format, and hides
+        // the whole points/tiebreakers block for the two elimination formats
+        // (single_elim/double_elim), which have no standings table to configure.
+        document.querySelectorAll('select[name="format"]').forEach((formatSelect) => {
+            const dialog = formatSelect.closest("dialog");
+            if (!dialog) return;
+
+            const wrapperFor = (name) => {
+                const el = dialog.querySelector(`[name="${name}"]`);
+                return el ? el.closest(".form-control") : null;
+            };
+            const roundsWrap = wrapperFor("rounds");
+            const groupsWrap = wrapperFor("num_groups");
+            const standingsWraps = ["points_win", "points_draw", "points_loss", "tiebreaker_1", "tiebreaker_2"].map(wrapperFor);
+
+            const sync = () => {
+                const format = formatSelect.value;
+                if (roundsWrap) roundsWrap.classList.toggle("hidden", format !== "swiss");
+                if (groupsWrap) groupsWrap.classList.toggle("hidden", format !== "groups");
+                const showStandings = format !== "single_elim" && format !== "double_elim";
+                standingsWraps.forEach((wrap) => { if (wrap) wrap.classList.toggle("hidden", !showStandings); });
+            };
+            formatSelect.addEventListener("change", sync);
+            sync();
+        });
+    </script>
+{% endblock extra_body %}

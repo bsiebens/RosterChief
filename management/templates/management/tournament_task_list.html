@@ -22,6 +22,7 @@
 {% endblock topbar_context %}
 
 {% block actions %}
+    <button class="btn btn-outline gap-2" type="button" onclick="document.getElementById('task_generate_modal').showModal()">{% lucide "layers" size=16 %} {% trans "Generate shifts" %}</button>
     <button class="btn btn-primary gap-2" type="button" onclick="document.getElementById('task_create_modal').showModal()">{% lucide "plus" size=16 %} {% trans "Add task" %}</button>
 {% endblock actions %}
 
@@ -74,6 +75,12 @@
     {% trans "Add" as add_task_submit_label %}
     {% url 'management:tournament_task_create' tournament.pk as task_create_url %}
     {% include "controlpanel/_modal_form.html" with modal_id="task_create_modal" title=add_task_title form=task_form action_url=task_create_url submit_label=add_task_submit_label submit_icon="plus" %}
+
+    {% trans "Generate shifts" as generate_shifts_title %}
+    {% trans "Generate" as generate_shifts_submit_label %}
+    {% url 'management:tournament_task_generate' tournament.pk as task_generate_url %}
+    {% blocktrans asvar generate_shifts_blurb %}Fills a whole window with same-length shifts back to back -- e.g. 09:00-12:00 in 30-minute slices makes 6 tasks, each needing the same number of people.{% endblocktrans %}
+    {% include "controlpanel/_modal_form.html" with modal_id="task_generate_modal" title=generate_shifts_title form=generate_form action_url=task_generate_url submit_label=generate_shifts_submit_label submit_icon="layers" blurb=generate_shifts_blurb two_columns=True %}
 
     {% trans "Edit task" as edit_task_title %}
     {% trans "Delete task" as delete_task_title %}

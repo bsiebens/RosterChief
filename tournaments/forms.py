@@ -285,40 +285,100 @@ class TournamentFieldForm(forms.ModelForm):
         return instance
 
 
+#: Every key tournaments.services.scheduling.compute_standings' own
+#: _break_ties actually understands -- "head_to_head" is a special case
+#: (a completed-matches mini-table among just the tied teams), the rest
+#: read straight off compute_standings' own per-team row dict. Kept here
+#: (not on the model) since it's purely a TournamentStageForm concern --
+#: the scheduler itself just reads whatever list of strings it's given.
+TIEBREAKER_CHOICES = [
+    ("goal_diff", _("Goal difference")),
+    ("goals_for", _("Goals scored")),
+    ("goals_against", _("Goals conceded")),
+    ("won", _("Wins")),
+    ("head_to_head", _("Head-to-head")),
+]
+
+
 class TournamentStageForm(forms.ModelForm):
-    """Create/edit one stage. ``config``/``standings_config`` are free-form
-    JSON on the model (format-specific parameters, points/tie-break rules --
-    see ``TournamentStage``'s own docstring); for this first pass they're a
-    plain Textarea with a basic "is this valid JSON object" check rather than
-    a dynamic per-format field UI, matching the model's own "enum + flexible
-    JSON" idiom. ``tournament`` comes from the view, never the form."""
+    """Create/edit one stage. ``config``/``standings_config`` used to be
+    free-form JSON textareas here -- unreadable to anyone who didn't already
+    know tournaments.services.scheduling's own internal key names by heart.
+    Replaced with the small number of fields the scheduler actually reads
+    from them (``rounds``/``num_groups`` from ``config`` --
+    ``generate_next_swiss_round``/``generate_stage_matches`` are the only
+    two readers; ``points``/``tiebreakers`` from ``standings_config`` --
+    ``compute_standings`` the only reader), shown or hidden by the selected
+    ``format`` via a bit of inline JS on the template side (tournament_field_
+    stage_list.html) -- this form itself always validates/saves all of them
+    regardless of which are currently visible, same as any other
+    conditionally-shown field elsewhere in this app.
+
+    This is still a known simplification, not the full flexibility raw JSON
+    offered (only two tiebreakers, no seeding method / best-of / anything
+    else a future format might want) -- a club that needs more can still
+    reach for the Django admin's raw JSON widget on this one stage, same
+    "structured UI covers the common case, admin covers the rest" idiom
+    ``TournamentFieldForm``'s own ``availability`` editor already uses.
+    ``tournament`` comes from the view, never the form."""
+
+    rounds = forms.IntegerField(label=_("Number of rounds"), required=False, min_value=1, help_text=_("Swiss format only."))
+    num_groups = forms.IntegerField(label=_("Number of groups"), required=False, min_value=1, help_text=_("Groups format only."))
+    points_win = forms.IntegerField(label=_("Points for a win"), required=False, min_value=0, initial=3)
+    points_draw = forms.IntegerField(label=_("Points for a draw"), required=False, min_value=0, initial=1)
+    points_loss = forms.IntegerField(label=_("Points for a loss"), required=False, min_value=0, initial=0)
+    tiebreaker_1 = forms.ChoiceField(label=_("1st tiebreaker"), required=False, choices=TIEBREAKER_CHOICES, initial="goal_diff")
+    tiebreaker_2 = forms.ChoiceField(label=_("2nd tiebreaker"), required=False, choices=[("", "—"), *TIEBREAKER_CHOICES], initial="goals_for")
 
     class Meta:
         model = TournamentStage
-        fields = ["name", "sequence", "format", "config", "standings_config"]
-        widgets = {
-            "config": forms.Textarea(attrs={"rows": 4}),
-            "standings_config": forms.Textarea(attrs={"rows": 4}),
+        fields = ["name", "sequence", "format"]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        config = self.instance.config or {}
+        standings = self.instance.standings_config or {}
+        points = standings.get("points", {})
+        tiebreakers = standings.get("tiebreakers", [])
+        self.fields["rounds"].initial = config.get("rounds")
+        self.fields["num_groups"].initial = config.get("num_groups")
+        self.fields["points_win"].initial = points.get("win", 3)
+        self.fields["points_draw"].initial = points.get("draw", 1)
+        self.fields["points_loss"].initial = points.get("loss", 0)
+        self.fields["tiebreaker_1"].initial = tiebreakers[0] if len(tiebreakers) > 0 else "goal_diff"
+        self.fields["tiebreaker_2"].initial = tiebreakers[1] if len(tiebreakers) > 1 else "goals_for"
+
+    def clean(self):
+        cleaned = super().clean()
+        if cleaned.get("format") == TournamentStage.Format.SWISS and not cleaned.get("rounds"):
+            self.add_error("rounds", _("Required for a Swiss stage."))
+        if cleaned.get("format") == TournamentStage.Format.GROUPS and not cleaned.get("num_groups"):
+            self.add_error("num_groups", _("Required for a groups stage."))
+        return cleaned
+
+    def save(self, commit=True):
+        instance = super().save(commit=False)
+
+        config = {}
+        if self.cleaned_data.get("rounds"):
+            config["rounds"] = self.cleaned_data["rounds"]
+        if self.cleaned_data.get("num_groups"):
+            config["num_groups"] = self.cleaned_data["num_groups"]
+        instance.config = config
+
+        tiebreakers = [value for value in (self.cleaned_data.get("tiebreaker_1"), self.cleaned_data.get("tiebreaker_2")) if value]
+        instance.standings_config = {
+            "points": {
+                "win": self.cleaned_data.get("points_win") if self.cleaned_data.get("points_win") is not None else 3,
+                "draw": self.cleaned_data.get("points_draw") if self.cleaned_data.get("points_draw") is not None else 1,
+                "loss": self.cleaned_data.get("points_loss") if self.cleaned_data.get("points_loss") is not None else 0,
+            },
+            "tiebreakers": tiebreakers or ["goal_diff", "goals_for"],
         }
 
-    def _clean_json_object(self, name):
-        # forms.JSONField (the model field's auto-generated form field) has
-        # already parsed the raw text and rejected malformed JSON by the time
-        # this runs -- this only adds the extra "must be an object" check,
-        # since config/standings_config are both documented as JSON *objects*
-        # (a bare list or string would silently break the scheduler).
-        value = self.cleaned_data.get(name)
-        if value is None:
-            return {}
-        if not isinstance(value, dict):
-            raise ValidationError(_('Enter a JSON object, e.g. {"key": "value"}.'))
-        return value
-
-    def clean_config(self):
-        return self._clean_json_object("config")
-
-    def clean_standings_config(self):
-        return self._clean_json_object("standings_config")
+        if commit:
+            instance.save()
+        return instance
 
 
 class TournamentTaskForm(forms.ModelForm):
@@ -337,6 +397,50 @@ class TournamentTaskForm(forms.ModelForm):
             "ends_at": forms.DateTimeInput(attrs={"type": "datetime-local"}),
             "needed_quantity": forms.NumberInput(attrs={"min": "1"}),
         }
+
+
+class TournamentTaskGenerateForm(forms.Form):
+    """The Tasks tab's own "Generate shifts" action -- alongside the single
+    ad-hoc TournamentTaskForm above, this bulk-creates a whole run of
+    same-length shifts covering one window (e.g. "Gate duty, 09:00-12:00,
+    30 minutes each" -> 6 tasks) instead of filling in that same form over
+    and over by hand. The actual slicing is
+    ``tournaments.services.tasks.generate_task_shifts``, not this form's own
+    ``save()`` -- there isn't one, same "form validates, a service function
+    does the real work" split ``TournamentTeamForm`` already uses.
+
+    ``location_field`` is a convenience picker over this tournament's own
+    ``TournamentField`` list (just a name to stamp onto every generated
+    shift's ``location_label`` -- see ``TournamentField``'s own docstring
+    for why that's not a real FK relationship) -- ``location_label`` stays
+    available as a free-text fallback for a location that isn't one of the
+    tournament's playing fields (an entrance, a kiosk) or for a tournament
+    with no fields set up yet."""
+
+    title = forms.CharField(label=_("Title"), max_length=255)
+    location_field = forms.ModelChoiceField(queryset=TournamentField.objects.none(), required=False, label=_("Field"), empty_label=_("— other / general —"))
+    location_label = forms.CharField(label=_("Location (if not a field above)"), max_length=255, required=False)
+    starts_at = forms.DateTimeField(label=_("Starts at"), widget=forms.DateTimeInput(attrs={"type": "datetime-local"}))
+    ends_at = forms.DateTimeField(label=_("Ends at"), widget=forms.DateTimeInput(attrs={"type": "datetime-local"}))
+    shift_minutes = forms.IntegerField(label=_("Shift length (minutes)"), min_value=5, initial=30)
+    needed_quantity = forms.IntegerField(label=_("People needed per shift"), min_value=1, initial=1)
+
+    def __init__(self, *args, tournament=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["location_field"].queryset = TournamentField.objects.filter(tournament=tournament)
+
+    def clean(self):
+        cleaned = super().clean()
+        start, end = cleaned.get("starts_at"), cleaned.get("ends_at")
+        if start and end and end <= start:
+            self.add_error("ends_at", _("Must be after the start time."))
+        return cleaned
+
+    def location_label_value(self) -> str:
+        field = self.cleaned_data.get("location_field")
+        if field is not None:
+            return field.name
+        return self.cleaned_data.get("location_label") or ""
 
 
 class DressingRoomForm(forms.ModelForm):

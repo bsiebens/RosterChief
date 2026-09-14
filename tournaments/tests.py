@@ -57,7 +57,7 @@ from .services.scheduling import (
     snake_seed_groups,
     validate_placement,
 )
-from .services.tasks import TaskClaimError, claim_task, unclaim_task
+from .services.tasks import TaskClaimError, claim_task, generate_task_shifts, unclaim_task
 
 
 class TournamentsTestCase(TestCase):
@@ -2555,6 +2555,61 @@ class ClaimTaskServiceTests(TournamentsTestCase):
         claim_task(self.task, other_member)  # should not raise
 
         self.assertEqual(self.task.claims.count(), 1)
+
+
+class GenerateTaskShiftsServiceTests(TournamentsTestCase):
+    def setUp(self):
+        self.window_start = timezone.now() + datetime.timedelta(days=1)
+
+    def test_slices_an_evenly_divisible_window_into_equal_shifts(self):
+        tasks = generate_task_shifts(
+            self.tournament,
+            title="Gate duty",
+            location_label="Entrance",
+            starts_at=self.window_start,
+            ends_at=self.window_start + datetime.timedelta(hours=3),
+            shift_minutes=30,
+            needed_quantity=2,
+        )
+
+        self.assertEqual(len(tasks), 6)
+        self.assertEqual(tasks[0].starts_at, self.window_start)
+        self.assertEqual(tasks[0].ends_at, self.window_start + datetime.timedelta(minutes=30))
+        self.assertEqual(tasks[-1].ends_at, self.window_start + datetime.timedelta(hours=3))
+        self.assertTrue(all(task.title == "Gate duty" for task in tasks))
+        self.assertTrue(all(task.location_label == "Entrance" for task in tasks))
+        self.assertTrue(all(task.needed_quantity == 2 for task in tasks))
+        self.assertEqual(TournamentTask.objects.filter(tournament=self.tournament).count(), 6)
+
+    def test_a_final_partial_slice_is_dropped_not_shortened(self):
+        # 100 minutes / 30-minute shifts -- 3 full shifts (90 min), the
+        # trailing 10 minutes isn't enough for a 4th and is simply dropped.
+        tasks = generate_task_shifts(
+            self.tournament,
+            title="Gate duty",
+            location_label="",
+            starts_at=self.window_start,
+            ends_at=self.window_start + datetime.timedelta(minutes=100),
+            shift_minutes=30,
+            needed_quantity=1,
+        )
+
+        self.assertEqual(len(tasks), 3)
+        self.assertEqual(tasks[-1].ends_at, self.window_start + datetime.timedelta(minutes=90))
+
+    def test_a_window_shorter_than_one_shift_creates_nothing(self):
+        tasks = generate_task_shifts(
+            self.tournament,
+            title="Gate duty",
+            location_label="",
+            starts_at=self.window_start,
+            ends_at=self.window_start + datetime.timedelta(minutes=10),
+            shift_minutes=30,
+            needed_quantity=1,
+        )
+
+        self.assertEqual(tasks, [])
+        self.assertFalse(TournamentTask.objects.filter(tournament=self.tournament).exists())
 
 
 class AssignDressingRoomServiceTests(TournamentsTestCase):
