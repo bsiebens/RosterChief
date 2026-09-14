@@ -844,7 +844,8 @@
 
     .input-error,
     .select-error,
-    .textarea-error {
+    .textarea-error,
+    .file-input-error {
         border-color: var(--color-club);
         color: var(--color-club-dark);
     }
