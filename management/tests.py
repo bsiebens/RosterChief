@@ -58,7 +58,7 @@ from shop.services.invoices import ShopInvoicePDFError, create_invoice_for_order
 from shop.services.notifications import _notify_order_ready_for_pickup_by_id
 from teams.models import NumberPool, NumberReservation, Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
 from teams.services import eligible_roster_members
-from tournaments.models import DressingRoom, DressingRoomAssignment, Match, Tournament, TournamentField, TournamentRegistration, TournamentRegistrationPlayer, TournamentStage, TournamentTask, TournamentTaskClaim, TournamentTeam
+from tournaments.models import DressingRoom, DressingRoomAssignment, Match, Tournament, TournamentField, TournamentRegistration, TournamentRegistrationPlayer, TournamentRosterEntry, TournamentStage, TournamentTask, TournamentTaskClaim, TournamentTeam
 from tournaments.services.dressing_rooms import assign_dressing_room
 from tournaments.services.registration import approve_registration, reject_registration
 from tournaments.services.scheduling import generate_stage_matches
@@ -14131,6 +14131,136 @@ class TournamentTeamListTests(ManagementTestBase):
 
         team.refresh_from_db()
         self.assertEqual(team.payment_status, TournamentTeam.PaymentStatus.UNPAID)
+
+
+class TournamentTeamRosterTests(ManagementTestBase):
+    """management:tournament_team_roster and its create/update/delete/lunch
+    actions -- the "always editable" roster screen (TournamentTeamRosterView's
+    own docstring), deliberately NOT gated on the tournament's own status
+    (unlike the public registration status page, which stops once the
+    tournament starts) -- every test below runs against an already-COMPLETED
+    tournament specifically to prove that."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        today = timezone.localdate()
+        cls.tournament = Tournament.objects.create(club=cls.club, name="Fall Classic", season=cls.season, start_date=today - datetime.timedelta(days=10), end_date=today - datetime.timedelta(days=8), status=Tournament.Status.COMPLETED)
+        cls.team = TournamentTeam.objects.create(club=cls.club, tournament=cls.tournament, foreign_name="Visiting FC")
+
+    def setUp(self):
+        super().setUp()
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def activate_flag(self):
+        flag, _created = get_waffle_flag_model().objects.get_or_create(name="tournaments")
+        flag.clubs.add(self.club)
+
+    def test_roster_404s_when_the_flag_is_not_active(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_team_roster", self.tournament.pk, self.team.pk)
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_create_adds_a_foreign_entry_even_on_a_completed_tournament(self):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post(
+            "tournament_roster_entry_create",
+            {"foreign_first_name": "Sam", "foreign_last_name": "Striker", "role": "player", "position_label": "Forward", "jersey_number": "9"},
+            self.tournament.pk,
+            self.team.pk,
+        )
+
+        self.assertRedirects(response, reverse("management:tournament_team_roster", args=[self.tournament.pk, self.team.pk]))
+        entry = TournamentRosterEntry.objects.get(tournament_team=self.team)
+        self.assertEqual(entry.display_name, "Sam Striker")
+        self.assertEqual(entry.position_label, "Forward")
+
+    def test_create_without_a_name_fails_validation(self):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+
+        self.club_post("tournament_roster_entry_create", {"role": "player", "position_label": "Forward"}, self.tournament.pk, self.team.pk)
+
+        self.assertFalse(TournamentRosterEntry.objects.filter(tournament_team=self.team).exists())
+
+    def test_update_edits_an_existing_entry_even_on_a_completed_tournament(self):
+        self.activate_flag()
+        entry = TournamentRosterEntry.objects.create(tournament_team=self.team, foreign_first_name="Sam", foreign_last_name="Striker", position_label="Forward")
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post(
+            "tournament_roster_entry_update",
+            {"foreign_first_name": "Sam", "foreign_last_name": "Striker", "role": "player", "position_label": "Midfielder", "license_number": "LIC-9"},
+            self.tournament.pk,
+            self.team.pk,
+            entry.pk,
+        )
+
+        self.assertRedirects(response, reverse("management:tournament_team_roster", args=[self.tournament.pk, self.team.pk]))
+        entry.refresh_from_db()
+        self.assertEqual(entry.position_label, "Midfielder")
+        self.assertEqual(entry.license_number, "LIC-9")
+
+    def test_update_rejects_a_staff_role_with_a_date_of_birth(self):
+        self.activate_flag()
+        entry = TournamentRosterEntry.objects.create(tournament_team=self.team, foreign_first_name="Cam", foreign_last_name="Coach", position_label="Coach")
+        self.client.force_login(self.admin_user)
+
+        self.club_post(
+            "tournament_roster_entry_update",
+            {"foreign_first_name": "Cam", "foreign_last_name": "Coach", "role": "staff", "position_label": "Coach", "date_of_birth": "1980-01-01"},
+            self.tournament.pk,
+            self.team.pk,
+            entry.pk,
+        )
+
+        entry.refresh_from_db()
+        self.assertIsNone(entry.date_of_birth)
+
+    def test_a_member_backed_entry_keeps_its_name_on_update(self):
+        self.activate_flag()
+        member = Member.objects.create(first_name="Jane", last_name="Doe")
+        entry = TournamentRosterEntry.objects.create(tournament_team=self.team, member=member, position_label="Forward")
+        self.client.force_login(self.admin_user)
+
+        # No foreign_first_name/foreign_last_name in the POST at all -- the
+        # form drops those fields entirely for a member-backed row (see
+        # TournamentRosterEntryForm.__init__), so this can't accidentally
+        # blank the name out.
+        self.club_post("tournament_roster_entry_update", {"role": "player", "position_label": "Winger"}, self.tournament.pk, self.team.pk, entry.pk)
+
+        entry.refresh_from_db()
+        self.assertEqual(entry.member, member)
+        self.assertEqual(entry.position_label, "Winger")
+
+    def test_delete_removes_the_entry_even_on_a_completed_tournament(self):
+        self.activate_flag()
+        entry = TournamentRosterEntry.objects.create(tournament_team=self.team, foreign_first_name="Sam", foreign_last_name="Striker")
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("tournament_roster_entry_delete", {}, self.tournament.pk, self.team.pk, entry.pk)
+
+        self.assertRedirects(response, reverse("management:tournament_team_roster", args=[self.tournament.pk, self.team.pk]))
+        self.assertFalse(TournamentRosterEntry.objects.filter(pk=entry.pk).exists())
+
+    def test_lunch_update_stores_only_valid_tournament_days(self):
+        self.activate_flag()
+        self.tournament.lunch_mode = Tournament.LunchMode.OPTIONAL
+        self.tournament.save()
+        entry = TournamentRosterEntry.objects.create(tournament_team=self.team, foreign_first_name="Sam", foreign_last_name="Striker")
+        self.client.force_login(self.admin_user)
+        day_one = (self.tournament.start_date).isoformat()
+
+        response = self.club_post("tournament_roster_entry_lunch_update", {"lunch_days": [day_one, "2099-01-01"]}, self.tournament.pk, self.team.pk, entry.pk)
+
+        self.assertRedirects(response, reverse("management:tournament_team_roster", args=[self.tournament.pk, self.team.pk]))
+        entry.refresh_from_db()
+        self.assertEqual(entry.lunch_days, [day_one])
 
 
 class TournamentScheduleTests(ManagementTestBase):

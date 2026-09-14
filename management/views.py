@@ -138,8 +138,8 @@ from shop.services.vouchers import delete_manual_consumption, record_manual_cons
 from teams.models import NumberPool, NumberReservation, OfficialLevel, OfficialProfile, Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
 from teams.services import eligible_roster_members, place_member_on_team
 from teams.services.numbers import has_unresolved_conflict
-from tournaments.forms import DressingRoomAssignmentForm, DressingRoomForm, TournamentFieldForm, TournamentForm, TournamentStageForm, TournamentTaskForm, TournamentTeamForm
-from tournaments.models import DressingRoom, DressingRoomAssignment, Match, Tournament, TournamentField, TournamentRegistration, TournamentStage, TournamentTask, TournamentTeam
+from tournaments.forms import DressingRoomAssignmentForm, DressingRoomForm, TournamentFieldForm, TournamentForm, TournamentRosterEntryForm, TournamentStageForm, TournamentTaskForm, TournamentTeamForm
+from tournaments.models import DressingRoom, DressingRoomAssignment, Match, Tournament, TournamentField, TournamentRegistration, TournamentRosterEntry, TournamentStage, TournamentTask, TournamentTeam
 from tournaments.services.dressing_rooms import DressingRoomAssignmentError, assign_dressing_room, release_dressing_room
 from tournaments.services.notifications import send_registration_decision_email
 from tournaments.services.registration import RegistrationDecisionError, TeamWithdrawalError, approve_registration, create_manual_team, reject_registration, withdraw_team
@@ -7479,6 +7479,98 @@ class TournamentTeamCreateView(TournamentsManagerRequiredMixin, View):
 
         notify(request, f"s|{_('Team added')}|" + _("“%(name)s” was added to the tournament.") % {"name": team.display_name})
         return redirect("management:tournament_team_list", tournament_pk=tournament.pk)
+
+
+class TournamentTeamRosterView(TournamentsManagerRequiredMixin, TemplateView):
+    """One team's own roster -- always editable by staff here, regardless of
+    the tournament's own status (unlike the public status page, which stops
+    once the tournament starts -- see TournamentRegistrationStatusView).
+    This is where a club-team row's DOB/license/dietary/lunch actually get
+    filled in: TeamMembership (what its roster is snapshotted from on
+    approval, see snapshot_club_team_roster) has no such fields to copy from
+    in the first place, so this screen is the only place they're ever set
+    for a club team. Modal-form CRUD, same pattern
+    tournament_field_stage_list.html's fields/stages lists already use."""
+
+    template_name = "management/tournament_team_roster.html"
+
+    def get_context_data(self, **kwargs):
+        tournament = get_object_or_404(Tournament, pk=self.kwargs["tournament_pk"], club=self.request.club)
+        team = get_object_or_404(TournamentTeam, pk=self.kwargs["team_pk"], tournament=tournament)
+        entries = list(team.roster_entries.select_related("member"))
+        for entry in entries:
+            entry.edit_form = TournamentRosterEntryForm(instance=entry, tournament=tournament)
+        return super().get_context_data(
+            tournament=tournament,
+            team=team,
+            entries=entries,
+            entry_form=TournamentRosterEntryForm(tournament=tournament),
+            active_tab="teams",
+            **kwargs,
+        )
+
+
+class TournamentRosterEntryCreateView(TournamentsManagerRequiredMixin, View):
+    def post(self, request, tournament_pk, team_pk):
+        tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
+        team = get_object_or_404(TournamentTeam, pk=team_pk, tournament=tournament)
+        form = TournamentRosterEntryForm(request.POST, tournament=tournament)
+        if not form.is_valid():
+            for error in form.errors.values():
+                notify(request, f"e|{_('Could not add roster entry')}|{' '.join(error)}")
+            return redirect("management:tournament_team_roster", tournament_pk=tournament.pk, team_pk=team.pk)
+
+        entry = form.save(commit=False)
+        entry.tournament_team = team
+        entry.save()
+        notify(request, f"s|{_('Roster entry added')}|" + _("“%(name)s” was added to the roster.") % {"name": entry.display_name})
+        return redirect("management:tournament_team_roster", tournament_pk=tournament.pk, team_pk=team.pk)
+
+
+class TournamentRosterEntryUpdateView(TournamentsManagerRequiredMixin, View):
+    def post(self, request, tournament_pk, team_pk, entry_pk):
+        tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
+        team = get_object_or_404(TournamentTeam, pk=team_pk, tournament=tournament)
+        entry = get_object_or_404(TournamentRosterEntry, pk=entry_pk, tournament_team=team)
+        form = TournamentRosterEntryForm(request.POST, instance=entry, tournament=tournament)
+        if not form.is_valid():
+            for error in form.errors.values():
+                notify(request, f"e|{_('Could not update roster entry')}|{' '.join(error)}")
+            return redirect("management:tournament_team_roster", tournament_pk=tournament.pk, team_pk=team.pk)
+
+        form.save()
+        notify(request, f"s|{_('Roster entry updated')}|" + _("“%(name)s” updated.") % {"name": entry.display_name})
+        return redirect("management:tournament_team_roster", tournament_pk=tournament.pk, team_pk=team.pk)
+
+
+class TournamentRosterEntryDeleteView(TournamentsManagerRequiredMixin, View):
+    def post(self, request, tournament_pk, team_pk, entry_pk):
+        tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
+        team = get_object_or_404(TournamentTeam, pk=team_pk, tournament=tournament)
+        entry = get_object_or_404(TournamentRosterEntry, pk=entry_pk, tournament_team=team)
+        name = entry.display_name
+        entry.delete()
+        notify(request, f"w|{_('Roster entry removed')}|" + _("“%(name)s” was removed from the roster.") % {"name": name})
+        return redirect("management:tournament_team_roster", tournament_pk=tournament.pk, team_pk=team.pk)
+
+
+class TournamentRosterEntryLunchUpdateView(TournamentsManagerRequiredMixin, View):
+    """The roster screen's own inline lunch-days checkbox row -- only
+    reachable/meaningful while ``lunch_mode`` is OPTIONAL (NONE/MANDATORY
+    are both fully determined already, see ``TournamentRosterEntryForm.save()``);
+    posted days are clamped to the tournament's own ``date_range()`` so a
+    stale/tampered form can't set a day outside it."""
+
+    def post(self, request, tournament_pk, team_pk, entry_pk):
+        tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
+        team = get_object_or_404(TournamentTeam, pk=team_pk, tournament=tournament)
+        entry = get_object_or_404(TournamentRosterEntry, pk=entry_pk, tournament_team=team)
+
+        valid_days = {day.isoformat() for day in tournament.date_range()}
+        entry.lunch_days = [day for day in request.POST.getlist("lunch_days") if day in valid_days]
+        entry.save(update_fields=["lunch_days"])
+        notify(request, f"s|{_('Lunch days updated')}|" + _("“%(name)s” updated.") % {"name": entry.display_name})
+        return redirect("management:tournament_team_roster", tournament_pk=tournament.pk, team_pk=team.pk)
 
 
 class TournamentScheduleView(TournamentsManagerRequiredMixin, TemplateView):

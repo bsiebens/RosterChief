@@ -41,6 +41,7 @@
                 <tr>
                     <th>{% trans "Team" %}</th>
                     <th>{% trans "Payment" %}</th>
+                    <th></th>
                 </tr>
             </thead>
             <tbody>
@@ -69,10 +70,13 @@
                                 </select>
                             </form>
                         </td>
+                        <td class="text-right">
+                            <a class="btn btn-outline btn-sm gap-1.5" href="{% url 'management:tournament_team_roster' tournament.pk team.pk %}">{% lucide "users" size=14 %} {% trans "Roster" %}</a>
+                        </td>
                     </tr>
                 {% empty %}
                     <tr>
-                        <td colspan="2" class="py-6 text-center text-muted">{% trans "No teams yet." %}</td>
+                        <td colspan="3" class="py-6 text-center text-muted">{% trans "No teams yet." %}</td>
                     </tr>
                 {% endfor %}
             </tbody>

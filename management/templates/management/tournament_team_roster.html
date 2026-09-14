@@ -1,0 +1,104 @@
+{% extends "management/base.html" %}
+{% load i18n lucide ui %}
+
+{% comment %}
+    One TournamentTeam's own roster -- always editable here regardless of the
+    tournament's own status (TournamentTeamRosterView's own docstring
+    explains why: it's the only place a club-team row's DOB/license/dietary/
+    lunch ever get filled in, since TeamMembership has nothing to snapshot
+    them from). Modal-form CRUD, same controlpanel/_modal_form.html +
+    _confirm_modal.html pattern tournament_field_stage_list.html's fields/
+    stages lists already use.
+
+    Context: tournament, team, entries (each with .edit_form), entry_form.
+{% endcomment %}
+
+{% block panel_title %}{{ team.display_name }}{% endblock panel_title %}
+{% block heading %}{{ team.display_name }}{% endblock heading %}
+
+{% block topbar_context %}
+    <span class="font-mono text-[13px] text-muted">{% trans "Roster" %}</span>
+{% endblock topbar_context %}
+
+{% block actions %}
+    <a class="btn btn-outline gap-2" href="{% url 'management:tournament_team_list' tournament.pk %}">{% lucide "arrow-left" size=16 %} {% trans "Back to teams" %}</a>
+    <button class="btn btn-primary gap-2" type="button" onclick="document.getElementById('entry_create_modal').showModal()">{% lucide "plus" size=16 %} {% trans "Add to roster" %}</button>
+{% endblock actions %}
+
+{% block panel %}
+    <div class="card overflow-hidden">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>{% trans "Name" %}</th>
+                    <th>{% trans "Role" %}</th>
+                    <th>{% trans "Jersey" %}</th>
+                    <th>{% trans "Position" %}</th>
+                    <th>{% trans "Date of birth" %}</th>
+                    <th>{% trans "License" %}</th>
+                    <th>{% trans "Dietary" %}</th>
+                    {% if tournament.lunch_mode == "optional" %}
+                        <th>{% trans "Lunch days" %}</th>
+                    {% elif tournament.lunch_mode == "mandatory" %}
+                        <th>{% trans "Lunch" %}</th>
+                    {% endif %}
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for entry in entries %}
+                    <tr>
+                        <td class="font-semibold text-ink">{{ entry.display_name }}</td>
+                        <td><span class="badge badge-sm {% if entry.role == "staff" %}badge-neutral{% else %}badge-outline{% endif %}">{{ entry.get_role_display }}</span></td>
+                        <td class="font-mono text-xs tabular-nums text-muted">{{ entry.jersey_number|default:"—" }}</td>
+                        <td class="text-sm text-muted">{{ entry.position_label|default:"—" }}</td>
+                        <td class="font-mono text-xs text-muted">{{ entry.date_of_birth|date:"j M Y"|default:"—" }}</td>
+                        <td class="font-mono text-xs text-muted">{{ entry.license_number|default:"—" }}</td>
+                        <td class="max-w-40 truncate text-sm text-muted" title="{{ entry.dietary_restrictions }}">{{ entry.dietary_restrictions|default:"—" }}</td>
+                        {% if tournament.lunch_mode == "optional" %}
+                            <td>
+                                <form method="post" action="{% url 'management:tournament_roster_entry_lunch_update' tournament.pk team.pk entry.pk %}" class="flex flex-wrap items-center gap-2">
+                                    {% csrf_token %}
+                                    {% for day in tournament.date_range %}
+                                        <label class="flex items-center gap-1 text-xs text-muted">
+                                            <input type="checkbox" class="checkbox" name="lunch_days" value="{{ day|date:"Y-m-d" }}" {% if day|date:"Y-m-d" in entry.lunch_days %}checked{% endif %}>
+                                            {{ day|date:"D" }}
+                                        </label>
+                                    {% endfor %}
+                                    <button class="btn btn-outline btn-xs" type="submit">{% lucide "save" size=11 %}</button>
+                                </form>
+                            </td>
+                        {% elif tournament.lunch_mode == "mandatory" %}
+                            <td class="font-mono text-xs tabular-nums text-muted">{{ entry.lunch_days|length }} / {{ tournament.date_range|length }}</td>
+                        {% endif %}
+                        <td class="text-right whitespace-nowrap">
+                            <button class="btn btn-outline btn-xs" type="button" onclick="document.getElementById('{{ entry.pk|dom_id:"entry_update_modal" }}').showModal()">{% lucide "pencil" size=12 %} {% trans "Edit" %}</button>
+                            <button class="btn btn-outline btn-xs btn-error" type="button" onclick="document.getElementById('{{ entry.pk|dom_id:"entry_delete_modal" }}').showModal()">{% lucide "trash-2" size=12 %} {% trans "Delete" %}</button>
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="{% if tournament.lunch_mode == "none" %}8{% else %}9{% endif %}" class="py-6 text-center text-muted">{% trans "No one on the roster yet." %}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    {% trans "Add to roster" as add_entry_title %}
+    {% trans "Add" as add_label %}
+    {% url 'management:tournament_roster_entry_create' tournament.pk team.pk as entry_create_url %}
+    {% include "controlpanel/_modal_form.html" with modal_id="entry_create_modal" title=add_entry_title form=entry_form action_url=entry_create_url submit_label=add_label submit_icon="plus" box_class="max-w-2xl" %}
+
+    {% trans "Edit roster entry" as edit_entry_title %}
+    {% trans "Delete roster entry" as delete_entry_title %}
+    {% trans "Delete" as delete_label %}
+    {% for entry in entries %}
+        {% url 'management:tournament_roster_entry_update' tournament.pk team.pk entry.pk as entry_update_url %}
+        {% include "controlpanel/_modal_form.html" with modal_id=entry.pk|dom_id:"entry_update_modal" title=edit_entry_title form=entry.edit_form action_url=entry_update_url submit_icon="check" box_class="max-w-2xl" %}
+
+        {% url 'management:tournament_roster_entry_delete' tournament.pk team.pk entry.pk as entry_delete_url %}
+        {% blocktrans with name=entry.display_name asvar delete_entry_body %}Remove “{{ name }}” from the roster? This cannot be undone.{% endblocktrans %}
+        {% include "controlpanel/_confirm_modal.html" with modal_id=entry.pk|dom_id:"entry_delete_modal" title=delete_entry_title body=delete_entry_body action_url=entry_delete_url submit_label=delete_label %}
+    {% endfor %}
+{% endblock panel %}
