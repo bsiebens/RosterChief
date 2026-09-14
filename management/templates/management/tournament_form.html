@@ -13,6 +13,30 @@
 {% block panel %}
     {% if update_view %}
         {% include "management/_tournament_tabs.html" with tournament=object active_tab="settings" %}
+
+        {% url "tournaments:detail" object.slug as public_path %}
+        <div class="card card-body mb-4">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+                <div class="min-w-0">
+                    <div class="flex items-center gap-1.5 text-xs font-semibold tracking-wide text-muted uppercase">
+                        {% lucide "globe" size=13 %} {% trans "Public page" %}
+                    </div>
+                    <div class="truncate font-mono text-sm text-ink">{{ request.scheme }}://{{ request.get_host }}{{ public_path }}</div>
+                </div>
+                <div class="flex shrink-0 gap-1.5">
+                    {% trans "Copy link" as copy_link_label %}
+                    {% trans "Copied" as copied_label %}
+                    <button type="button" class="btn btn-outline btn-sm gap-1.5" onclick="navigator.clipboard.writeText('{{ request.scheme }}://{{ request.get_host }}{{ public_path|escapejs }}'); const l=this.querySelector('[data-copy-label]'); window.clearTimeout(this._resetTimer); l.textContent='{{ copied_label|escapejs }}'; this.classList.add('text-ok'); this._resetTimer=window.setTimeout(()=>{ l.textContent='{{ copy_link_label|escapejs }}'; this.classList.remove('text-ok'); }, 1500)">
+                        {% lucide "copy" size=14 %} <span data-copy-label>{{ copy_link_label }}</span>
+                    </button>
+                    <a class="btn btn-outline btn-sm gap-1.5" href="{{ public_path }}" target="_blank" rel="noopener">{% lucide "external-link" size=14 %} {% trans "View" %}</a>
+                </div>
+            </div>
+            {# Reachable regardless of status -- a not-yet-published/draft tournament's link still works for whoever has it, so staff can preview or share ahead of announcing it. See TournamentDetailView's own docstring. #}
+            {% if object.status == "draft" %}
+                <div class="alert alert-warning mt-3 py-2 text-sm">{% trans "Still a draft -- not on the public tournament list yet, but this link already works if you want to check how it looks or share it early." %}</div>
+            {% endif %}
+        </div>
     {% endif %}
 
     <div class="card card-body">

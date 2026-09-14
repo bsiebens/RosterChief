@@ -12,6 +12,22 @@
     <a class="btn btn-primary gap-2" href="{% url 'management:tournament_create' %}">{% lucide "plus" size=16 %} {% trans "New tournament" %}</a>
 {% endblock actions %}
 
+{% block filter_strip %}
+    <div class="flex flex-wrap items-center gap-3 border-b border-line bg-white px-7 py-2.5">
+        <form method="get" id="tournament-filters" class="flex flex-wrap items-center gap-2">
+            <select name="season" class="select w-auto" onchange="this.form.submit()">
+                <option value="">{% trans "Any season" %}</option>
+                {% for season in seasons %}
+                    <option value="{{ season.pk }}" {% if selected_season == season.pk|stringformat:"s" %}selected{% endif %}>{% blocktrans with season=season %}Season {{ season }}{% endblocktrans %}</option>
+                {% endfor %}
+            </select>
+            {% if selected_season %}
+                <a class="btn btn-outline gap-2" href="{% querystring season=None %}">{% lucide "x" size=14 %} {% trans "Clear filter" %}</a>
+            {% endif %}
+        </form>
+    </div>
+{% endblock filter_strip %}
+
 {% block panel %}
     <div class="card overflow-hidden">
         <table class="table">
@@ -30,10 +46,10 @@
                         <td>
                             <a class="link link-hover font-semibold" href="{% url 'management:tournament_schedule' tournament.pk %}">{{ tournament.name }}</a>
                         </td>
-                        <td class="text-sm text-muted">{{ tournament.season }}</td>
+                        <td class="text-sm text-muted">{% blocktrans with season=tournament.season %}Season {{ season }}{% endblocktrans %}</td>
                         <td class="font-mono text-xs tabular-nums text-muted">{{ tournament.start_date|date:"j M Y" }} &ndash; {{ tournament.end_date|date:"j M Y" }}</td>
                         <td>
-                            <span class="badge badge-sm {% if tournament.status == "completed" %}badge-success{% elif tournament.status == "cancelled" %}badge-error{% elif tournament.status == "in_progress" %}badge-info{% else %}badge-outline{% endif %}">{{ tournament.get_status_display }}</span>
+                            <span class="badge badge-sm {% if tournament.status == "completed" %}badge-success{% elif tournament.status == "cancelled" %}badge-error{% elif tournament.status == "in_progress" %}badge-warning{% elif tournament.status == "published" %}badge-info{% else %}badge-neutral{% endif %}">{{ tournament.get_status_display }}</span>
                         </td>
                         <td class="text-right whitespace-nowrap">
                             <a class="btn btn-outline btn-sm gap-1.5" href="{% url 'management:tournament_registration_queue' tournament.pk %}">

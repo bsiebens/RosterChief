@@ -7290,13 +7290,24 @@ class TournamentListView(TournamentsManagerRequiredMixin, ListView):
     """Every tournament this club has ever run -- the "Tournaments" nav
     entry's own landing page. Create/settings now have real screens
     (TournamentCreateView/TournamentUpdateView below), closing the
-    "Django admin only" gap this docstring used to describe."""
+    "Django admin only" gap this docstring used to describe.
+
+    Filterable by season (a club running its home tournament every year
+    quickly accumulates one row per season) -- same GET-param filter-strip
+    shape as MemberListView's own team/status filters."""
 
     template_name = "management/tournament_list.html"
     context_object_name = "tournaments"
 
     def get_queryset(self):
-        return Tournament.objects.filter(club=self.request.club).annotate(pending_registration_count=Count("registrations", filter=Q(registrations__status=TournamentRegistration.Status.PENDING)))
+        self.selected_season = self.request.GET.get("season", "")
+        tournaments = Tournament.objects.filter(club=self.request.club).annotate(pending_registration_count=Count("registrations", filter=Q(registrations__status=TournamentRegistration.Status.PENDING)))
+        if self.selected_season:
+            tournaments = tournaments.filter(season_id=self.selected_season)
+        return tournaments
+
+    def get_context_data(self, **kwargs):
+        return super().get_context_data(selected_season=self.selected_season, seasons=Season.objects.filter(club=self.request.club).order_by("-start_date"), **kwargs)
 
 
 class TournamentRegistrationQueueView(TournamentsManagerRequiredMixin, TemplateView):

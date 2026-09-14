@@ -13777,6 +13777,26 @@ class TournamentListViewTests(ManagementTestBase):
 
         self.assertEqual(response.context["tournaments"][0].pending_registration_count, 1)
 
+    def test_can_filter_by_season(self):
+        self.activate_flag()
+        other_season = Season.objects.create(club=self.club, start_date=self.season.start_date.replace(year=self.season.start_date.year - 1), end_date=self.season.start_date)
+        other_tournament = Tournament.objects.create(club=self.club, name="Winter Cup", season=other_season, start_date=other_season.start_date, end_date=other_season.start_date)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_list", params={"season": self.season.pk})
+
+        self.assertEqual(list(response.context["tournaments"]), [self.tournament])
+        self.assertNotIn(other_tournament, response.context["tournaments"])
+
+    def test_no_season_filter_shows_every_season(self):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_list")
+
+        self.assertEqual(response.context["selected_season"], "")
+        self.assertIn(self.tournament, response.context["tournaments"])
+
 
 class TournamentRegistrationQueueTests(ManagementTestBase):
     """management:tournament_registration_queue and its approve/reject
@@ -14225,6 +14245,33 @@ class TournamentCreateUpdateTests(ManagementTestBase):
         self.assertEqual(tournament.name, "Fall Classic 2026")
         messages = [str(message) for message in get_messages(response.wsgi_request)]
         self.assertTrue(any("updated" in message for message in messages))
+
+    def test_settings_page_shows_the_public_link(self):
+        self.activate_flag()
+        tournament = Tournament.objects.create(club=self.club, name="Fall Classic", season=self.season, start_date=timezone.localdate(), end_date=timezone.localdate())
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_settings", tournament.pk)
+
+        self.assertContains(response, reverse("tournaments:detail", args=[tournament.slug]))
+
+    def test_settings_page_flags_a_draft_tournaments_link_as_not_yet_public(self):
+        self.activate_flag()
+        tournament = Tournament.objects.create(club=self.club, name="Fall Classic", season=self.season, start_date=timezone.localdate(), end_date=timezone.localdate(), status=Tournament.Status.DRAFT)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_settings", tournament.pk)
+
+        self.assertContains(response, "Still a draft")
+
+    def test_settings_page_does_not_flag_a_published_tournaments_link(self):
+        self.activate_flag()
+        tournament = Tournament.objects.create(club=self.club, name="Fall Classic", season=self.season, start_date=timezone.localdate(), end_date=timezone.localdate(), status=Tournament.Status.PUBLISHED)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_settings", tournament.pk)
+
+        self.assertNotContains(response, "Still a draft")
 
 
 class TournamentFieldStageCrudTests(ManagementTestBase):
