@@ -14128,7 +14128,6 @@ class TournamentCreateUpdateTests(ManagementTestBase):
         today = timezone.localdate()
         data = {
             "name": "Fall Classic",
-            "season": self.season.pk,
             "start_date": today.isoformat(),
             "end_date": (today + datetime.timedelta(days=2)).isoformat(),
             "status": Tournament.Status.DRAFT,
@@ -14162,17 +14161,27 @@ class TournamentCreateUpdateTests(ManagementTestBase):
         self.assertRedirects(response, reverse("management:tournament_settings", args=[tournament.pk]))
         self.assertEqual(tournament.season, self.season)
 
-    def test_another_clubs_season_is_not_an_accepted_choice(self):
+    def test_dates_outside_every_season_are_rejected_with_a_clear_error(self):
         self.activate_flag()
-        other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
-        other_season = make_season(other_club)
         self.client.force_login(self.admin_user)
+        far_future = self.season.end_date + datetime.timedelta(days=30)
 
-        response = self.club_post("tournament_create", self.valid_data(season=other_season.pk))
+        response = self.club_post("tournament_create", self.valid_data(start_date=far_future.isoformat(), end_date=(far_future + datetime.timedelta(days=2)).isoformat()))
 
         self.assertEqual(response.status_code, 200)
         self.assertFalse(Tournament.objects.filter(club=self.club, name="Fall Classic").exists())
-        self.assertIn("season", response.context["form"].errors)
+        self.assertTrue(response.context["form"].non_field_errors())
+
+    def test_another_clubs_season_is_never_matched(self):
+        self.activate_flag()
+        other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
+        make_season(other_club)  # covers the same dates, but belongs to a different club entirely
+        self.client.force_login(self.admin_user)
+
+        self.club_post("tournament_create", self.valid_data())
+
+        tournament = Tournament.objects.get(club=self.club, name="Fall Classic")
+        self.assertEqual(tournament.season, self.season)
 
     def test_end_date_before_start_date_is_rejected(self):
         self.activate_flag()

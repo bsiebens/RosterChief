@@ -95,12 +95,25 @@ class TournamentForm(forms.ModelForm):
     """Create/edit a tournament itself -- closes the "admin-only" gap
     TournamentListView used to describe in its own docstring. ``club`` is
     never a form field (set by the view, same as ``TeamForm``'s own
-    club-scoped fields in ``management.forms``); ``season``/``event`` are
-    both scoped to the given club in ``__init__`` the same way."""
+    club-scoped fields in ``management.forms``); ``event`` is scoped to the
+    given club in ``__init__`` the same way.
+
+    ``season`` isn't a form field at all -- picking one by hand duplicated
+    the start/end dates already on the form and, for a club with no season
+    covering "today" (a fresh club, a demo, a tournament scheduled between
+    two seasons), left the picker with nothing valid to select at all (a
+    required field an admin physically cannot fill in). ``clean()`` resolves
+    it from the date range instead: whichever of this club's seasons
+    contains both ``start_date`` and ``end_date``. No match raises a
+    validation error rather than silently leaving the tournament unassigned
+    -- ``Tournament.season`` is a required, PROTECTed FK (the approval flow
+    reads a club team's *that season's* roster off it), so there has to be
+    a real one.
+    """
 
     class Meta:
         model = Tournament
-        fields = ["name", "season", "start_date", "end_date", "status", "description", "event"]
+        fields = ["name", "status", "start_date", "end_date", "description", "event"]
         widgets = {
             "start_date": forms.DateInput(attrs={"type": "date"}),
             "end_date": forms.DateInput(attrs={"type": "date"}),
@@ -109,7 +122,7 @@ class TournamentForm(forms.ModelForm):
 
     def __init__(self, *args, club=None, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields["season"].queryset = Season.objects.filter(club=club)
+        self._club = club
         # An Event already claimed by some other Tournament is excluded --
         # except this form's own instance's current event, so editing a
         # tournament without touching this field doesn't spuriously drop it
@@ -124,6 +137,12 @@ class TournamentForm(forms.ModelForm):
         start, end = cleaned.get("start_date"), cleaned.get("end_date")
         if start and end and end < start:
             self.add_error("end_date", _("Must be on or after the start date."))
+        elif start and end:
+            season = Season.objects.filter(club=self._club, start_date__lte=start, end_date__gte=end).first()
+            if season is None:
+                self.add_error(None, _("No season on this club covers that date range. Add a season that includes these dates first."))
+            else:
+                self.instance.season = season
         return cleaned
 
 
