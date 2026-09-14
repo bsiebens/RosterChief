@@ -14,18 +14,20 @@
     tournament has no registrations/schedule/etc. to browse yet), with
     "Settings" itself picked out as the active one.
 
-    Header actions mirror club_settings.html (a real Save button, submitting
-    the form by id rather than sitting at the bottom of an increasingly tall
-    stack of cards) plus a Back button in the evaluation_stats/matrix/
+    Header carries just a Back button, in the evaluation_stats/matrix/
     walkthrough.html "All checklists" mould -- back to the tournament
-    overview when editing, the tournament list when creating.
+    overview when editing, the tournament list when creating. Save stays
+    down with a Cancel button below the last card, member_form.html/
+    event_form.html's own convention, rather than up in the header --
+    this is a straightforward settings form, not the identity/branding
+    editor with its own live preview club_settings.html's header Save
+    is built for.
 {% endcomment %}
 
 {% block heading %}{% if update_view %}{{ object.name }}{% else %}{% trans "New tournament" %}{% endif %}{% endblock heading %}
 
 {% block actions %}
     <a class="btn btn-outline gap-2" href="{% if update_view %}{% url "management:tournament_field_stage_list" object.pk %}{% else %}{% url "management:tournament_list" %}{% endif %}">{% lucide "arrow-left" size=16 %} {% trans "Back" %}</a>
-    <button class="btn btn-primary gap-2" type="submit" form="tournament-settings-form">{% lucide "save" size=16 %} {% trans "Save" %}</button>
 {% endblock actions %}
 
 {% block panel %}
@@ -57,7 +59,7 @@
         </div>
     {% endif %}
 
-    <form id="tournament-settings-form" method="post" class="flex flex-col gap-4">
+    <form method="post" class="flex flex-col gap-4">
         {% csrf_token %}
 
         {% for error in form.non_field_errors %}
@@ -109,6 +111,11 @@
                 <div class="card-title">{% lucide "file-text" size=16 %} {% trans "Description" %}</div>
                 {% form_field form.description textarea_height="h-40" %}
             </div>
+        </div>
+
+        <div class="flex items-center gap-2">
+            <a class="btn btn-outline gap-2" href="{% if update_view %}{% url "management:tournament_field_stage_list" object.pk %}{% else %}{% url "management:tournament_list" %}{% endif %}">{% lucide "arrow-left" size=16 %} {% trans "Cancel" %}</a>
+            <button class="btn btn-primary gap-2" type="submit">{% lucide "save" size=16 %} {% trans "Save" %}</button>
         </div>
     </form>
 {% endblock panel %}

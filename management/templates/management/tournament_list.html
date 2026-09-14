@@ -52,6 +52,12 @@
                             <span class="badge badge-sm {% if tournament.status == "completed" %}badge-success{% elif tournament.status == "cancelled" %}badge-error{% elif tournament.status == "in_progress" %}badge-warning{% elif tournament.status == "published" %}badge-info{% else %}badge-neutral{% endif %}">{{ tournament.get_status_display }}</span>
                         </td>
                         <td class="text-right whitespace-nowrap">
+                            {% url "tournaments:detail" tournament.slug as public_path %}
+                            {% trans "Copy link" as copy_link_label %}
+                            {% trans "Copied" as copied_label %}
+                            <button type="button" class="btn btn-outline btn-sm gap-1.5" onclick="navigator.clipboard.writeText('{{ request.scheme }}://{{ request.get_host }}{{ public_path|escapejs }}'); const l=this.querySelector('[data-copy-label]'); window.clearTimeout(this._resetTimer); l.textContent='{{ copied_label|escapejs }}'; this.classList.add('text-ok'); this._resetTimer=window.setTimeout(()=>{ l.textContent='{{ copy_link_label|escapejs }}'; this.classList.remove('text-ok'); }, 1500)">
+                                {% lucide "copy" size=14 %} <span data-copy-label>{{ copy_link_label }}</span>
+                            </button>
                             <a class="btn btn-outline btn-sm gap-1.5" href="{% url 'management:tournament_registration_queue' tournament.pk %}">
                                 {% lucide "clipboard-list" size=14 %} {% trans "Registrations" %}
                                 {% if tournament.pending_registration_count %}<span class="badge badge-error badge-xs">{{ tournament.pending_registration_count }}</span>{% endif %}
