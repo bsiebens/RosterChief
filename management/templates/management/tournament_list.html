@@ -1,0 +1,50 @@
+{% extends "management/base.html" %}
+{% load i18n lucide %}
+
+{% block panel_title %}{% trans "Tournaments" %}{% endblock panel_title %}
+{% block heading %}{% trans "Tournaments" %}{% endblock heading %}
+
+{% block topbar_context %}
+    <span class="badge badge-neutral">{% blocktrans count counter=tournaments|length %}{{ counter }} tournament{% plural %}{{ counter }} tournaments{% endblocktrans %}</span>
+{% endblock topbar_context %}
+
+{% block panel %}
+    <div class="card overflow-hidden">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>{% trans "Name" %}</th>
+                    <th>{% trans "Season" %}</th>
+                    <th>{% trans "Dates" %}</th>
+                    <th>{% trans "Status" %}</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for tournament in tournaments %}
+                    <tr>
+                        <td>
+                            <a class="link link-hover font-semibold" href="{% url 'management:tournament_schedule' tournament.pk %}">{{ tournament.name }}</a>
+                        </td>
+                        <td class="text-sm text-muted">{{ tournament.season }}</td>
+                        <td class="font-mono text-xs tabular-nums text-muted">{{ tournament.start_date|date:"j M Y" }} &ndash; {{ tournament.end_date|date:"j M Y" }}</td>
+                        <td>
+                            <span class="badge badge-sm {% if tournament.status == "completed" %}badge-success{% elif tournament.status == "cancelled" %}badge-error{% elif tournament.status == "in_progress" %}badge-info{% else %}badge-outline{% endif %}">{{ tournament.get_status_display }}</span>
+                        </td>
+                        <td class="text-right whitespace-nowrap">
+                            <a class="btn btn-outline btn-sm gap-1.5" href="{% url 'management:tournament_registration_queue' tournament.pk %}">
+                                {% lucide "clipboard-list" size=14 %} {% trans "Registrations" %}
+                                {% if tournament.pending_registration_count %}<span class="badge badge-error badge-xs">{{ tournament.pending_registration_count }}</span>{% endif %}
+                            </a>
+                            <a class="btn btn-outline btn-sm gap-1.5" href="{% url 'management:tournament_schedule' tournament.pk %}">{% lucide "calendar-days" size=14 %} {% trans "Schedule" %}</a>
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="5" class="text-center text-dim">{% trans "No tournaments yet -- create one from the Django admin for now." %}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+{% endblock panel %}

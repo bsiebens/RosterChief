@@ -240,6 +240,26 @@ class TournamentTeamModelTests(TournamentsTestCase):
 
         self.assertEqual(self.tournament.teams.count(), 2)
 
+    def test_slug_is_generated_from_display_name(self):
+        entry = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Guest FC")
+
+        self.assertEqual(entry.slug, "guest-fc")
+
+    def test_same_slug_allowed_in_a_different_tournament(self):
+        TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Guest FC")
+        other_tournament = Tournament.objects.create(club=self.club, name="Winter Cup", season=self.season, start_date=self.tournament.start_date, end_date=self.tournament.end_date)
+
+        other_entry = TournamentTeam.objects.create(club=self.club, tournament=other_tournament, foreign_name="Guest FC")
+
+        self.assertEqual(other_entry.slug, "guest-fc")
+
+    def test_slug_is_unique_within_the_same_tournament(self):
+        TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Guest FC")
+
+        second = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Guest FC")
+
+        self.assertEqual(second.slug, "guest-fc-2")
+
     def test_clean_rejects_a_team_from_another_club(self):
         other = make_club(name="Rival FC", slug="rival-fc")
         other_team = Team.objects.create(club=other, name="Rival Team", short_name="RT")

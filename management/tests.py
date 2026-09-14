@@ -13712,6 +13712,63 @@ class BugListViewTests(ManagementTestBase):
         self.assertEqual(content.count("Fixed on"), 1)
 
 
+class TournamentListViewTests(ManagementTestBase):
+    """management:tournament_list -- the "Tournaments" nav entry's own
+    landing page."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        today = timezone.localdate()
+        cls.tournament = Tournament.objects.create(club=cls.club, name="Fall Classic", season=cls.season, start_date=today, end_date=today + datetime.timedelta(days=2))
+
+    def setUp(self):
+        super().setUp()
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def activate_flag(self):
+        flag, _created = get_waffle_flag_model().objects.get_or_create(name="tournaments")
+        flag.clubs.add(self.club)
+
+    def test_404s_when_the_flag_is_not_active(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_list")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_lists_this_clubs_tournaments(self):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_list")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(self.tournament, response.context["tournaments"])
+
+    def test_does_not_list_another_clubs_tournament(self):
+        self.activate_flag()
+        other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
+        other_season = make_season(other_club)
+        Tournament.objects.create(club=other_club, name="Rival Cup", season=other_season, start_date=timezone.localdate(), end_date=timezone.localdate())
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_list")
+
+        self.assertEqual(list(response.context["tournaments"]), [self.tournament])
+
+    def test_pending_registration_count_is_annotated(self):
+        self.activate_flag()
+        TournamentRegistration.objects.create(tournament=self.tournament, foreign_name="Visiting Vipers")
+        TournamentRegistration.objects.create(tournament=self.tournament, foreign_name="Rejected FC", status=TournamentRegistration.Status.REJECTED)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_list")
+
+        self.assertEqual(response.context["tournaments"][0].pending_registration_count, 1)
+
+
 class TournamentRegistrationQueueTests(ManagementTestBase):
     """management:tournament_registration_queue and its approve/reject
     actions -- gated by the "tournaments" waffle flag the same way

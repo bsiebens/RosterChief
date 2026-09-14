@@ -7284,6 +7284,21 @@ class BugListView(ClubStaffRequiredMixin, FormView):
         return reverse("management:bug_list")
 
 
+class TournamentListView(TournamentsManagerRequiredMixin, ListView):
+    """Every tournament this club has ever run -- the "Tournaments" nav
+    entry's own landing page, and so far the only way in without already
+    holding a direct link (creating a tournament itself is still Django
+    admin only; a real create/settings screen is later work, same
+    "screen-building catches up to the schema in passes" reasoning
+    ``EvaluationChecklistListView`` documents for its own add/archive split)."""
+
+    template_name = "management/tournament_list.html"
+    context_object_name = "tournaments"
+
+    def get_queryset(self):
+        return Tournament.objects.filter(club=self.request.club).annotate(pending_registration_count=Count("registrations", filter=Q(registrations__status=TournamentRegistration.Status.PENDING)))
+
+
 class TournamentRegistrationQueueView(TournamentsManagerRequiredMixin, TemplateView):
     """One tournament's registration review queue -- pending submissions shown
     most prominently (oldest-first, same "the queue's own priority order"

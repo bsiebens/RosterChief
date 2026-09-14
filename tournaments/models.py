@@ -16,7 +16,7 @@ from django.db import models
 from django.db.models import Q
 from django.utils.translation import gettext_lazy as _
 
-from rosterchief.base import ClubScopedModel, UUIDModel, validate_club_scope
+from rosterchief.base import ClubScopedModel, UUIDModel, unique_slugify, validate_club_scope
 
 
 def _generate_status_token() -> str:
@@ -352,6 +352,13 @@ class TournamentTeam(ClubScopedModel):
 
     tournament = models.ForeignKey(Tournament, on_delete=models.CASCADE, related_name="teams", verbose_name=_("tournament"))
     registration = models.OneToOneField(TournamentRegistration, on_delete=models.SET_NULL, null=True, blank=True, related_name="tournament_team", verbose_name=_("registration"))
+    #: A plain public link, not a secret token -- a team's own slate of
+    #: matches is public information by design (see the design spec's
+    #: public-site section), unlike TournamentRegistration.status_token
+    #: which gates contact details. Scoped per-tournament, not per-club (see
+    #: this model's own save() override) -- a name collision with a team in
+    #: some other tournament shouldn't force an unnecessary "-2" suffix.
+    slug = models.SlugField(_("slug"), max_length=255, blank=True)
 
     team = models.ForeignKey("teams.Team", on_delete=models.SET_NULL, null=True, blank=True, related_name="tournament_entries", verbose_name=_("team"))
     foreign_name = models.CharField(_("team name"), max_length=255, blank=True)
@@ -375,10 +382,19 @@ class TournamentTeam(ClubScopedModel):
                 name="tournament_team_team_xor_foreign_name",
             ),
             models.UniqueConstraint(fields=["tournament", "team"], condition=Q(team__isnull=False), name="unique_real_team_per_tournament"),
+            models.UniqueConstraint(fields=["tournament", "slug"], name="unique_tournament_team_slug_per_tournament"),
         ]
 
     def __str__(self):
         return self.display_name
+
+    def save(self, *args, **kwargs):
+        # Deliberately not ClubScopedModel's own slug_source mechanism --
+        # that always scopes uniqueness by club, and this needs per-tournament
+        # scoping instead (see the slug field's own docstring).
+        if not self.slug:
+            self.slug = unique_slugify(self, self.display_name, scope={"tournament_id": self.tournament_id})
+        super().save(*args, **kwargs)
 
     def clean(self):
         if self.team_id is not None:

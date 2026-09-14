@@ -202,6 +202,13 @@ _NAV_SECTIONS = {
     "evaluation_matrix": "evaluation_checklist_list",
     "evaluation_walkthrough": "evaluation_checklist_list",
     "evaluation_detail": "member_list",
+    "tournament_list": "tournament_list",
+    "tournament_registration_queue": "tournament_list",
+    "tournament_registration_approve": "tournament_list",
+    "tournament_registration_reject": "tournament_list",
+    "tournament_schedule": "tournament_list",
+    "match_reschedule": "tournament_list",
+    "match_result": "tournament_list",
     "evaluation_create": "member_list",
     "evaluation_create_for_checklist": "member_list",
     "club_settings": "club_settings",
@@ -256,6 +263,7 @@ _TOP_SECTION = {
     "invoice_list": "finance",
     "form_list": "settings",
     "evaluation_checklist_list": "settings",
+    "tournament_list": "settings",
     "club_settings": "settings",
     "onboarding_requirement_list": "settings",
     "role_list": "settings",
@@ -340,7 +348,7 @@ def feature_sections(request):
     is_club_admin check those all already require."""
     club = getattr(request, "club", None)
     if club is None or not request.user.is_authenticated:
-        return {"shop_enabled": False, "forms_enabled": False, "rbihf_enabled": False, "officials_enabled": False, "evaluations_enabled": False}
+        return {"shop_enabled": False, "forms_enabled": False, "rbihf_enabled": False, "officials_enabled": False, "evaluations_enabled": False, "tournaments_enabled": False}
 
     return {
         "shop_enabled": flag_is_active(request, "shop"),
@@ -348,6 +356,7 @@ def feature_sections(request):
         "rbihf_enabled": flag_is_active(request, "RBIHF"),
         "officials_enabled": flag_is_active(request, "officials"),
         "evaluations_enabled": flag_is_active(request, "evaluations"),
+        "tournaments_enabled": flag_is_active(request, "tournaments"),
     }
 
 

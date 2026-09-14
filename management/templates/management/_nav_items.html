@@ -128,6 +128,9 @@
                     {% if evaluations_enabled %}
                         <a class="nav-subitem {% if nav == 'evaluation_checklist_list' %}active{% endif %}" href="{% url 'management:evaluation_checklist_list' %}">{% trans "Evaluations" %}</a>
                     {% endif %}
+                    {% if tournaments_enabled %}
+                        <a class="nav-subitem {% if nav == 'tournament_list' %}active{% endif %}" href="{% url 'management:tournament_list' %}">{% trans "Tournaments" %}</a>
+                    {% endif %}
                 {% endif %}
             </div>
         {% endif %}
