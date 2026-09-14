@@ -1,0 +1,19 @@
+{% load i18n %}{% blocktrans with name=contact_name %}Hello {{ name }},{% endblocktrans %}
+
+{% if registration.status == "approved" %}
+{% blocktrans with team=registration.foreign_name tournament=tournament.name club=club.name %}Good news -- {{ club }} has approved {{ team }}'s entry into {{ tournament }}. You're now on the schedule.{% endblocktrans %}
+{% else %}
+{% blocktrans with team=registration.foreign_name tournament=tournament.name club=club.name %}{{ club }} has reviewed {{ team }}'s entry into {{ tournament }} and won't be able to include it this time.{% endblocktrans %}
+{% if registration.rejection_reason %}
+{% blocktrans with reason=registration.rejection_reason %}Reason given: {{ reason }}{% endblocktrans %}
+{% endif %}
+{% endif %}
+
+{% trans "Check its status here:" %}
+{{ status_url }}
+{% blocktrans %}That link is for you alone — please don't forward it.{% endblocktrans %}
+
+{% if club.contact_email %}
+{% blocktrans with email=club.contact_email %}Something not right? Reply to this note or write to {{ email }}.{% endblocktrans %}
+{% endif %}
+{% blocktrans with club=club.name %}— {{ club }}{% endblocktrans %}

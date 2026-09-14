@@ -1,0 +1,63 @@
+{% extends "email/_base.html" %}
+{% load i18n club_email %}
+
+{% comment %}
+    HTML sibling of decision.txt -- same content, same context (club,
+    tournament, registration, contact_name, status_url), covering both the
+    approved and rejected outcomes with one template (registration.status
+    picks the wording), just laid out for an inbox instead of a terminal.
+    Kept in lockstep with the .txt version by hand.
+{% endcomment %}
+
+{% block title %}{% if registration.status == "approved" %}{% blocktrans with tournament=tournament.name %}You're in: {{ tournament }}{% endblocktrans %}{% else %}{% blocktrans with tournament=tournament.name %}About your entry into {{ tournament }}{% endblocktrans %}{% endif %}{% endblock title %}
+
+{% block preheader %}{% if registration.status == "approved" %}{% blocktrans with team=registration.foreign_name tournament=tournament.name %}{{ team }} is now on the schedule for {{ tournament }}.{% endblocktrans %}{% else %}{% blocktrans with team=registration.foreign_name tournament=tournament.name %}An update on {{ team }}'s entry into {{ tournament }}.{% endblocktrans %}{% endif %}{% endblock preheader %}
+
+{% block header %}
+    {% absolute_media_url club.logo as logo_url %}
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+        <tr>
+            <td valign="middle">
+                {% if club.logo %}
+                    <img src="{{ logo_url }}" alt="{{ club.name }}" width="48" height="48" style="display:block; width:48px; height:48px; border-radius:24px; object-fit:contain; background-color:#f3f4f6;">
+                {% else %}
+                    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="48" style="width:48px;">
+                        <tr>
+                            <td align="center" valign="middle" width="48" height="48" bgcolor="{{ club.secondary_color|default:"#ec4899" }}" style="width:48px; height:48px; border-radius:24px; background-color:{{ club.secondary_color|default:"#ec4899" }}; color:{{ club.secondary_color|default:"#ec4899"|contrast_color }}; font-family: Arial, Helvetica, sans-serif; font-size:16px; font-weight:bold;">
+                                {{ club.initials }}
+                            </td>
+                        </tr>
+                    </table>
+                {% endif %}
+            </td>
+            <td style="padding-left:14px;" valign="middle">
+                <span style="font-family: Arial, Helvetica, sans-serif; font-size:18px; font-weight:bold; color:#111827;">{{ club.name }}</span>
+            </td>
+        </tr>
+    </table>
+{% endblock header %}
+
+{% block content %}
+    <p style="margin:0 0 16px 0;">{% blocktrans with name=contact_name %}Hello {{ name }},{% endblocktrans %}</p>
+
+    {% if registration.status == "approved" %}
+        <p style="margin:0 0 20px 0;">{% blocktrans with team=registration.foreign_name tournament=tournament.name club=club.name %}Good news -- {{ club }} has approved {{ team }}'s entry into {{ tournament }}. You're now on the schedule.{% endblocktrans %}</p>
+    {% else %}
+        <p style="margin:0 0 12px 0;">{% blocktrans with team=registration.foreign_name tournament=tournament.name club=club.name %}{{ club }} has reviewed {{ team }}'s entry into {{ tournament }} and won't be able to include it this time.{% endblocktrans %}</p>
+        {% if registration.rejection_reason %}
+            <p style="margin:0 0 20px 0;">{% blocktrans with reason=registration.rejection_reason %}Reason given: {{ reason }}{% endblocktrans %}</p>
+        {% endif %}
+    {% endif %}
+
+    {% trans "Check status" as status_label %}
+    {% include "email/_button.html" with href=status_url label=status_label bg=club.primary_color|default:"#4f46e5" fg=club.primary_color|default:"#4f46e5"|contrast_color %}
+
+    <p style="margin:0; font-size:13px; color:#6b7280;">{% trans "That link is for you alone — please don't forward it." %}</p>
+{% endblock content %}
+
+{% block footer %}
+    {% if club.contact_email %}
+        <p style="margin:0 0 8px 0;">{% blocktrans with email=club.contact_email %}Something not right? Reply to this note or write to {{ email }}.{% endblocktrans %}</p>
+    {% endif %}
+    <p style="margin:0;">{% blocktrans with club=club.name %}— {{ club }}{% endblocktrans %}</p>
+{% endblock footer %}

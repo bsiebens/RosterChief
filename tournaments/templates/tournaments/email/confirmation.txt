@@ -1,0 +1,12 @@
+{% load i18n %}{% blocktrans with name=contact_name %}Hello {{ name }},{% endblocktrans %}
+
+{% blocktrans with team=registration.foreign_name tournament=tournament.name club=club.name %}Thanks -- {{ club }} has received {{ team }}'s entry into {{ tournament }}.{% endblocktrans %}
+
+{% trans "Check its status here:" %}
+{{ status_url }}
+{% blocktrans %}That link is for you alone — please don't forward it.{% endblocktrans %}
+
+{% if club.contact_email %}
+{% blocktrans with email=club.contact_email %}Something not right? Reply to this note or write to {{ email }}.{% endblocktrans %}
+{% endif %}
+{% blocktrans with club=club.name %}— {{ club }}{% endblocktrans %}

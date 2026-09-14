@@ -41,6 +41,7 @@ from club.mixins import (
     OfficialsStaffRequiredMixin,
     ShopManagerRequiredMixin,
     TeamManagerRequiredMixin,
+    TournamentsManagerRequiredMixin,
 )
 from club.models import ClubMembership, ClubRole, DuesInvoice, EvaluationManager, MemberRequirementStatus, OnboardingRequirement, Season, ShopManager, Sponsor
 from club.services.access import (
@@ -136,6 +137,9 @@ from shop.services.vouchers import delete_manual_consumption, record_manual_cons
 from teams.models import NumberPool, NumberReservation, OfficialLevel, OfficialProfile, Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
 from teams.services import eligible_roster_members, place_member_on_team
 from teams.services.numbers import has_unresolved_conflict
+from tournaments.models import Tournament, TournamentRegistration
+from tournaments.services.notifications import send_registration_decision_email
+from tournaments.services.registration import RegistrationDecisionError, approve_registration, reject_registration
 
 from .bulk_import import build_member_import_template, family_choice_field_name, match_candidate_families, parse_member_import_rows, read_member_import_workbook
 from .email_previews import EMAIL_PREVIEWS, EMAIL_PREVIEWS_BY_KEY, render_preview
@@ -7276,3 +7280,69 @@ class BugListView(ClubStaffRequiredMixin, FormView):
 
     def get_success_url(self):
         return reverse("management:bug_list")
+
+
+class TournamentRegistrationQueueView(TournamentsManagerRequiredMixin, TemplateView):
+    """One tournament's registration review queue -- pending submissions shown
+    most prominently (oldest-first, same "the queue's own priority order"
+    reasoning as SignupDashboardView), already-decided ones listed after for
+    context rather than dropped.
+
+    There's no tournament list or nav entry yet (a later phase) -- this page
+    is reached directly by URL for now, e.g. a link from the Tournament admin
+    change page."""
+
+    template_name = "management/tournament_registration_queue.html"
+
+    def get_context_data(self, **kwargs):
+        tournament = get_object_or_404(Tournament, pk=self.kwargs["tournament_pk"], club=self.request.club)
+        registrations = list(TournamentRegistration.objects.filter(tournament=tournament).select_related("team").prefetch_related("players").order_by("-submitted_at"))
+        # PENDING first, oldest-first within that -- sorted in Python rather
+        # than via .order_by("status", ...), the same reasoning
+        # SignupDashboardView gives: a plain string sort of the Status values
+        # only happens to put "pending" first by accident, and that would
+        # silently break the moment a choice's value changes.
+        registrations.sort(key=lambda registration: (registration.status != TournamentRegistration.Status.PENDING, registration.submitted_at))
+        oldest_pending_id = next((registration.pk for registration in registrations if registration.status == TournamentRegistration.Status.PENDING), None)
+        for registration in registrations:
+            registration.is_oldest_pending = registration.pk == oldest_pending_id
+
+        return super().get_context_data(tournament=tournament, registrations=registrations, **kwargs)
+
+
+class TournamentRegistrationApproveView(TournamentsManagerRequiredMixin, View):
+    """The queue drawer's own "Approve" button -- tournaments.services.
+    registration.approve_registration for a single registration."""
+
+    def post(self, request, pk):
+        registration = get_object_or_404(TournamentRegistration, pk=pk, tournament__club=request.club)
+
+        try:
+            approve_registration(registration, reviewed_by=request.user)
+        except RegistrationDecisionError as error:
+            notify(request, f"w|{_('Could not approve')}|{error}")
+        else:
+            send_registration_decision_email(registration)
+            notify(request, f"s|{_('Registration approved')}|" + _("“%(name)s” has been added to the tournament bracket.") % {"name": registration.display_name})
+
+        return redirect("management:tournament_registration_queue", tournament_pk=registration.tournament_id)
+
+
+class TournamentRegistrationRejectView(TournamentsManagerRequiredMixin, View):
+    """The queue drawer's own "Reject" button -- tournaments.services.
+    registration.reject_registration for a single registration, with an
+    optional reason shown back to the submitter on their own status page."""
+
+    def post(self, request, pk):
+        registration = get_object_or_404(TournamentRegistration, pk=pk, tournament__club=request.club)
+        reason = request.POST.get("reason", "")
+
+        try:
+            reject_registration(registration, reviewed_by=request.user, reason=reason)
+        except RegistrationDecisionError as error:
+            notify(request, f"w|{_('Could not reject')}|{error}")
+        else:
+            send_registration_decision_email(registration)
+            notify(request, f"s|{_('Registration rejected')}|" + _("“%(name)s” has been rejected.") % {"name": registration.display_name})
+
+        return redirect("management:tournament_registration_queue", tournament_pk=registration.tournament_id)

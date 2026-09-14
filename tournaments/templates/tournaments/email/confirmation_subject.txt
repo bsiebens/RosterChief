@@ -1,0 +1,1 @@
+{% load i18n %}{% blocktrans with tournament=tournament.name club=club.name %}Your entry into {{ tournament }} at {{ club }}{% endblocktrans %}

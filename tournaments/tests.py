@@ -1,14 +1,19 @@
 import datetime
 
+from django.core import mail
+from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError
-from django.test import TestCase
+from django.test import TestCase, override_settings
+from django.urls import reverse
 from django.utils import timezone
+from waffle import get_waffle_flag_model
 
+from authentication.models import User
 from events.models import Event, Location
 from members.models import Member
 from rosterchief.test_support import make_club, make_season
-from teams.models import Team
+from teams.models import Position, Team, TeamMembership
 
 from .models import (
     DressingRoom,
@@ -20,12 +25,14 @@ from .models import (
     TournamentField,
     TournamentGroup,
     TournamentRegistration,
+    TournamentRegistrationPlayer,
     TournamentRosterEntry,
     TournamentStage,
     TournamentTask,
     TournamentTaskClaim,
     TournamentTeam,
 )
+from .services.registration import RegistrationDecisionError, approve_registration, reject_registration
 
 
 class TournamentsTestCase(TestCase):
@@ -564,3 +571,254 @@ class TournamentTaskClaimModelTests(TournamentsTestCase):
         TournamentTaskClaim.objects.create(task=self.task, member=other_member)
 
         self.assertEqual(self.task.claims.count(), 2)
+
+
+class ApproveRegistrationServiceTests(TournamentsTestCase):
+    def test_approving_a_foreign_registration_creates_a_team_and_copies_players(self):
+        reviewer = User.objects.create_user(email="staff@example.com", password="pw-secret-123")
+        registration = TournamentRegistration.objects.create(tournament=self.tournament, foreign_name="Visiting FC", foreign_contact_email="visitors@example.com")
+        TournamentRegistrationPlayer.objects.create(registration=registration, first_name="Sam", last_name="Striker", jersey_number=9)
+        TournamentRegistrationPlayer.objects.create(registration=registration, first_name="Dee", last_name="Fender")
+
+        team = approve_registration(registration, reviewed_by=reviewer)
+
+        registration.refresh_from_db()
+        self.assertEqual(registration.status, TournamentRegistration.Status.APPROVED)
+        self.assertEqual(registration.reviewed_by, reviewer)
+        self.assertIsNotNone(registration.reviewed_at)
+        self.assertEqual(team.tournament, self.tournament)
+        self.assertEqual(team.club, self.club)
+        self.assertEqual(team.foreign_name, "Visiting FC")
+        self.assertEqual(team.registration, registration)
+        roster = {entry.display_name: entry for entry in team.roster_entries.all()}
+        self.assertEqual(set(roster), {"Sam Striker", "Dee Fender"})
+        self.assertEqual(roster["Sam Striker"].jersey_number, 9)
+        self.assertIsNone(roster["Dee Fender"].jersey_number)
+
+    def test_approving_a_club_team_registration_snapshots_the_season_roster(self):
+        reviewer = User.objects.create_user(email="staff@example.com", password="pw-secret-123")
+        position = Position.objects.create(club=self.club, name="Forward", short_name="FW")
+        TeamMembership.objects.create(team=self.team, member=self.member, season=self.season, position=position, jersey_number=7)
+        registration = TournamentRegistration.objects.create(tournament=self.tournament, team=self.team)
+
+        team = approve_registration(registration, reviewed_by=reviewer)
+
+        roster = list(team.roster_entries.all())
+        self.assertEqual(len(roster), 1)
+        self.assertEqual(roster[0].member, self.member)
+        self.assertEqual(roster[0].jersey_number, 7)
+        self.assertEqual(roster[0].position_label, "Forward")
+
+    def test_approving_a_club_team_registration_does_not_use_another_seasons_roster(self):
+        reviewer = User.objects.create_user(email="staff@example.com", password="pw-secret-123")
+        other_season = make_season(self.club, start_year=2020)
+        TeamMembership.objects.create(team=self.team, member=self.member, season=other_season)
+        registration = TournamentRegistration.objects.create(tournament=self.tournament, team=self.team)
+
+        team = approve_registration(registration, reviewed_by=reviewer)
+
+        self.assertEqual(team.roster_entries.count(), 0)
+
+    def test_cannot_approve_an_already_decided_registration(self):
+        reviewer = User.objects.create_user(email="staff@example.com", password="pw-secret-123")
+        registration = TournamentRegistration.objects.create(tournament=self.tournament, foreign_name="Visiting FC")
+        approve_registration(registration, reviewed_by=reviewer)
+
+        with self.assertRaises(RegistrationDecisionError):
+            approve_registration(registration, reviewed_by=reviewer)
+
+
+class RejectRegistrationServiceTests(TournamentsTestCase):
+    def test_rejecting_sets_status_and_reason(self):
+        reviewer = User.objects.create_user(email="staff@example.com", password="pw-secret-123")
+        registration = TournamentRegistration.objects.create(tournament=self.tournament, foreign_name="Visiting FC")
+
+        reject_registration(registration, reviewed_by=reviewer, reason="Tournament is full.")
+
+        registration.refresh_from_db()
+        self.assertEqual(registration.status, TournamentRegistration.Status.REJECTED)
+        self.assertEqual(registration.rejection_reason, "Tournament is full.")
+        self.assertEqual(registration.reviewed_by, reviewer)
+        self.assertFalse(TournamentTeam.objects.filter(registration=registration).exists())
+
+    def test_cannot_reject_an_already_decided_registration(self):
+        reviewer = User.objects.create_user(email="staff@example.com", password="pw-secret-123")
+        registration = TournamentRegistration.objects.create(tournament=self.tournament, foreign_name="Visiting FC")
+        reject_registration(registration, reviewed_by=reviewer)
+
+        with self.assertRaises(RegistrationDecisionError):
+            reject_registration(registration, reviewed_by=reviewer)
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class TournamentRegistrationViewTests(TournamentsTestCase):
+    """tournaments:register -- the public, unauthenticated tournament-entry
+    page for a visiting (foreign) team (tournaments.views.TournamentRegistrationView)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.tournament.status = Tournament.Status.PUBLISHED
+        cls.tournament.save()
+
+    def setUp(self):
+        # waffle caches Flag lookups outside the DB transaction each test
+        # rolls back -- see management/tests.py's own FeatureGatedSectionsTests
+        # for the same reasoning. The "tournaments" flag row itself already
+        # exists (seeded by 0002_create_tournaments_flag), disabled
+        # everywhere -- get_or_create finds it rather than colliding on name.
+        cache.clear()
+        self.addCleanup(cache.clear)
+        get_waffle_flag_model().objects.get_or_create(name="tournaments")[0].clubs.add(self.club)
+
+    def _url(self):
+        return reverse("tournaments:register", kwargs={"tournament_slug": self.tournament.slug})
+
+    def formset_management(self, total=1, prefix="players"):
+        return {f"{prefix}-TOTAL_FORMS": str(total), f"{prefix}-INITIAL_FORMS": "0", f"{prefix}-MIN_NUM_FORMS": "0", f"{prefix}-MAX_NUM_FORMS": "1000"}
+
+    def player_data(self, index=0, prefix="players", **overrides):
+        data = {f"{prefix}-{index}-first_name": "Sam", f"{prefix}-{index}-last_name": "Striker", f"{prefix}-{index}-jersey_number": "9"}
+        data.update({f"{prefix}-{index}-{key}": value for key, value in overrides.items()})
+        return data
+
+    def contact_data(self, **overrides):
+        data = {"foreign_name": "Visiting FC", "foreign_contact_name": "Casey Coach", "foreign_contact_email": "casey@example.com", "foreign_contact_phone": ""}
+        data.update(overrides)
+        return data
+
+    def test_get_renders_the_form(self):
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Roster")
+
+    def test_post_with_valid_data_creates_a_pending_registration_and_players(self):
+        data = self.contact_data() | self.formset_management() | self.player_data()
+
+        response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+        registration = TournamentRegistration.objects.get()
+        self.assertEqual(registration.tournament, self.tournament)
+        self.assertEqual(registration.foreign_name, "Visiting FC")
+        self.assertEqual(registration.foreign_contact_email, "casey@example.com")
+        self.assertEqual(registration.status, TournamentRegistration.Status.PENDING)
+        self.assertRedirects(response, reverse("tournaments:registration_status", kwargs={"tournament_slug": self.tournament.slug, "token": registration.status_token}))
+
+        player = registration.players.get()
+        self.assertEqual(player.first_name, "Sam")
+        self.assertEqual(player.last_name, "Striker")
+        self.assertEqual(player.jersey_number, 9)
+
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn("casey@example.com", mail.outbox[0].to)
+
+    def test_post_with_invalid_data_rerenders_with_errors_and_creates_nothing(self):
+        data = self.contact_data(foreign_name="") | self.formset_management() | self.player_data()
+
+        response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(TournamentRegistration.objects.exists())
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_post_with_no_players_rerenders_with_errors_and_creates_nothing(self):
+        data = self.contact_data() | self.formset_management()
+
+        response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(TournamentRegistration.objects.exists())
+
+    def test_a_tournament_in_progress_404s(self):
+        self.tournament.status = Tournament.Status.IN_PROGRESS
+        self.tournament.save()
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_a_cancelled_tournament_404s(self):
+        self.tournament.status = Tournament.Status.CANCELLED
+        self.tournament.save()
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_a_draft_tournament_still_accepts_entries(self):
+        self.tournament.status = Tournament.Status.DRAFT
+        self.tournament.save()
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_an_unknown_tournament_slug_404s(self):
+        response = self.client.get(reverse("tournaments:register", kwargs={"tournament_slug": "no-such-tournament"}), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_404s_when_the_feature_flag_is_off(self):
+        get_waffle_flag_model().objects.get(name="tournaments").clubs.remove(self.club)
+        cache.clear()
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 404)
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class TournamentRegistrationStatusViewTests(TournamentsTestCase):
+    """tournaments:registration_status -- the token-gated, read-only status
+    page (tournaments.views.TournamentRegistrationStatusView)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.registration = TournamentRegistration.objects.create(tournament=cls.tournament, foreign_name="Visiting FC", foreign_contact_email="casey@example.com")
+
+    def setUp(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
+        get_waffle_flag_model().objects.get_or_create(name="tournaments")[0].clubs.add(self.club)
+
+    def _url(self, token=None):
+        return reverse("tournaments:registration_status", kwargs={"tournament_slug": self.tournament.slug, "token": token or self.registration.status_token})
+
+    def test_shows_pending_status(self):
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Pending review")
+
+    def test_shows_approved_status(self):
+        self.registration.status = TournamentRegistration.Status.APPROVED
+        self.registration.save()
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, "Approved")
+
+    def test_shows_rejected_status_with_reason(self):
+        self.registration.status = TournamentRegistration.Status.REJECTED
+        self.registration.rejection_reason = "Tournament is full."
+        self.registration.save()
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, "Not accepted")
+        self.assertContains(response, "Tournament is full.")
+
+    def test_an_unknown_token_404s(self):
+        response = self.client.get(self._url(token="not-a-real-token"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_404s_when_the_feature_flag_is_off(self):
+        get_waffle_flag_model().objects.get(name="tournaments").clubs.remove(self.club)
+        cache.clear()
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 404)

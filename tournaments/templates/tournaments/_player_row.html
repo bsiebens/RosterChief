@@ -1,0 +1,17 @@
+{% load i18n lucide ui %}
+{% comment %}
+    One row of the public tournament-registration page's own roster formset.
+    Rendered both for the rows already in the formset and (with __prefix__
+    placeholders) into the <template> the "Add another player" button clones
+    from -- same mechanism as registration/templates/registration/_entry_row.html
+    (static/js/bulk-add-rows.js).
+{% endcomment %}
+<div class="bulk-add-row relative flex flex-col gap-4 rounded-box border border-line p-3.5 pt-9">
+    <button class="btn btn-ghost btn-sm btn-square remove-row absolute top-1.5 right-1.5" type="button" aria-label="{% trans 'Remove this player' %}" title="{% trans 'Remove this player' %}">{% lucide "x" size=16 %}</button>
+
+    <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+        {% form_field form.first_name %}
+        {% form_field form.last_name %}
+    </div>
+    {% form_field form.jersey_number %}
+</div>

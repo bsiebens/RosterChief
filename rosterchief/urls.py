@@ -33,6 +33,7 @@ urlpatterns = [
     path("accounts/", include("allauth.urls")),
     path("", include("members.urls")),
     path("register/", include("registration.urls")),
+    path("tournaments/", include("tournaments.urls")),
     path("forms/", include("formbuilder.urls")),
     path("controlpanel/", include("controlpanel.urls")),
     path("manage/", include("management.urls")),

@@ -142,6 +142,16 @@ class FormManagerRequiredMixin(FeatureRequiredMixin):
         return can_manage_forms(self.request.user, self.request.club)
 
 
+class TournamentsManagerRequiredMixin(FeatureRequiredMixin):
+    """The tournaments section's own gate -- same "tournaments" waffle-flag 404
+    as FeatureRequiredMixin, and left ADMIN-only (no ``test_func`` override)
+    since there's no tournaments-specific manager grant yet, unlike
+    ShopManager/EvaluationManager -- widen this the same way those two did if
+    and when one is introduced."""
+
+    feature_flag = "tournaments"
+
+
 #: The "officials" section's own gate -- unlike shop/forms (one permission
 #: tier each), officials needs the same three-tier split the pre-existing
 #: referee system already has (RefereeListView/RefereeLevelListView are any

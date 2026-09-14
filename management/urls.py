@@ -151,6 +151,10 @@ urlpatterns = [
     path("opponents/new/", views.OpponentCreateView.as_view(), name="opponent_create"),
     path("opponents/<uuid:pk>/edit/", views.OpponentUpdateView.as_view(), name="opponent_update"),
     path("opponents/<uuid:pk>/delete/", views.OpponentDeleteView.as_view(), name="opponent_delete"),
+    # Tournaments (admin only)
+    path("tournaments/<uuid:tournament_pk>/registrations/", views.TournamentRegistrationQueueView.as_view(), name="tournament_registration_queue"),
+    path("tournaments/registrations/<uuid:pk>/approve/", views.TournamentRegistrationApproveView.as_view(), name="tournament_registration_approve"),
+    path("tournaments/registrations/<uuid:pk>/reject/", views.TournamentRegistrationRejectView.as_view(), name="tournament_registration_reject"),
     # Sponsors (admin only)
     path("sponsors/", views.SponsorListView.as_view(), name="sponsor_list"),
     path("sponsors/new/", views.SponsorCreateView.as_view(), name="sponsor_create"),

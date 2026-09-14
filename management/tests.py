@@ -57,6 +57,8 @@ from shop.services.invoices import ShopInvoicePDFError, create_invoice_for_order
 from shop.services.notifications import _notify_order_ready_for_pickup_by_id
 from teams.models import NumberPool, NumberReservation, Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
 from teams.services import eligible_roster_members
+from tournaments.models import Tournament, TournamentRegistration, TournamentRegistrationPlayer, TournamentTeam
+from tournaments.services.registration import approve_registration, reject_registration
 
 User = get_user_model()
 
@@ -13706,3 +13708,156 @@ class BugListViewTests(ManagementTestBase):
         self.assertIn("1.4.2", content)
         # Only the fixed report renders a fix date -- the open one must not.
         self.assertEqual(content.count("Fixed on"), 1)
+
+
+class TournamentRegistrationQueueTests(ManagementTestBase):
+    """management:tournament_registration_queue and its approve/reject
+    actions -- gated by the "tournaments" waffle flag the same way
+    FeatureGatedSectionsTests exercises shop/forms, admin-only via
+    TournamentsManagerRequiredMixin (club.mixins)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        today = timezone.localdate()
+        cls.tournament = Tournament.objects.create(
+            club=cls.club,
+            name="Fall Classic",
+            season=cls.season,
+            start_date=today,
+            end_date=today + datetime.timedelta(days=2),
+        )
+
+    def setUp(self):
+        super().setUp()
+        # waffle caches Flag lookups outside the DB transaction each test
+        # rolls back, so a flag created in one test can otherwise leak a
+        # stale/invalid pk into the next -- see FeatureGatedSectionsTests.
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def activate_flag(self):
+        flag, _created = get_waffle_flag_model().objects.get_or_create(name="tournaments")
+        flag.clubs.add(self.club)
+
+    def make_registration(self, name="Visiting Vipers", **kwargs):
+        registration = TournamentRegistration.objects.create(
+            tournament=self.tournament,
+            foreign_name=name,
+            foreign_contact_name="Pat Contact",
+            foreign_contact_email="pat@example.com",
+            **kwargs,
+        )
+        TournamentRegistrationPlayer.objects.create(registration=registration, first_name="Sam", last_name="Skater", jersey_number=9)
+        return registration
+
+    def make_coach(self, email="coach-tournaments@example.com"):
+        coach_user = User.objects.create_user(email=email, password="pw-secret-123")
+        coach_member = Member.objects.create(user=coach_user, first_name="Cara", last_name="Coach")
+        ClubMembership.objects.create(club=self.club, member=coach_member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        return coach_user
+
+    def test_queue_404s_when_the_flag_is_not_active(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_registration_queue", self.tournament.pk)
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_queue_403s_for_a_non_admin_even_with_the_flag_active(self):
+        self.activate_flag()
+        self.client.force_login(self.make_coach())
+
+        response = self.club_get("tournament_registration_queue", self.tournament.pk)
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_queue_lists_pending_approved_and_rejected_registrations(self):
+        self.activate_flag()
+        self.make_registration("Pending Panthers")
+        approved = self.make_registration("Approved Aces")
+        approve_registration(approved, reviewed_by=self.admin_user)
+        rejected = self.make_registration("Rejected Ravens")
+        reject_registration(rejected, reviewed_by=self.admin_user, reason="Field is full")
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_registration_queue", self.tournament.pk)
+
+        self.assertContains(response, "Pending Panthers")
+        self.assertContains(response, "Approved Aces")
+        self.assertContains(response, "Rejected Ravens")
+
+    def test_pending_registrations_sort_oldest_first(self):
+        self.activate_flag()
+        first = self.make_registration("First Pending")
+        second = self.make_registration("Second Pending")
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_registration_queue", self.tournament.pk)
+
+        registrations = response.context["registrations"]
+        self.assertEqual([registration.pk for registration in registrations], [first.pk, second.pk])
+        self.assertTrue(registrations[0].is_oldest_pending)
+        self.assertFalse(registrations[1].is_oldest_pending)
+
+    def test_approve_creates_a_tournament_team_and_flips_status(self):
+        self.activate_flag()
+        registration = self.make_registration()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("tournament_registration_approve", {}, registration.pk)
+
+        self.assertRedirects(response, reverse("management:tournament_registration_queue", args=[self.tournament.pk]))
+        registration.refresh_from_db()
+        self.assertEqual(registration.status, TournamentRegistration.Status.APPROVED)
+        self.assertEqual(registration.reviewed_by, self.admin_user)
+        team = TournamentTeam.objects.get(registration=registration)
+        self.assertEqual(team.foreign_name, "Visiting Vipers")
+
+    def test_double_approve_does_not_create_a_second_team(self):
+        self.activate_flag()
+        registration = self.make_registration()
+        self.client.force_login(self.admin_user)
+        self.club_post("tournament_registration_approve", {}, registration.pk)
+
+        response = self.club_post("tournament_registration_approve", {}, registration.pk)
+
+        self.assertRedirects(response, reverse("management:tournament_registration_queue", args=[self.tournament.pk]))
+        self.assertEqual(TournamentTeam.objects.filter(registration=registration).count(), 1)
+
+    def test_reject_sets_status_and_reason(self):
+        self.activate_flag()
+        registration = self.make_registration()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("tournament_registration_reject", {"reason": "Field capacity reached"}, registration.pk)
+
+        self.assertRedirects(response, reverse("management:tournament_registration_queue", args=[self.tournament.pk]))
+        registration.refresh_from_db()
+        self.assertEqual(registration.status, TournamentRegistration.Status.REJECTED)
+        self.assertEqual(registration.rejection_reason, "Field capacity reached")
+        self.assertEqual(registration.reviewed_by, self.admin_user)
+        self.assertFalse(TournamentTeam.objects.filter(registration=registration).exists())
+
+    def test_double_reject_is_reported_as_a_warning_not_a_500(self):
+        self.activate_flag()
+        registration = self.make_registration()
+        self.client.force_login(self.admin_user)
+        self.club_post("tournament_registration_reject", {"reason": "Full"}, registration.pk)
+
+        response = self.club_post("tournament_registration_reject", {"reason": "Full again"}, registration.pk)
+
+        self.assertRedirects(response, reverse("management:tournament_registration_queue", args=[self.tournament.pk]))
+        registration.refresh_from_db()
+        self.assertEqual(registration.rejection_reason, "Full")
+
+    def test_approve_and_reject_404_for_a_registration_in_another_club(self):
+        self.activate_flag()
+        other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
+        other_season = make_season(other_club)
+        other_tournament = Tournament.objects.create(club=other_club, name="Rival Cup", season=other_season, start_date=timezone.localdate(), end_date=timezone.localdate())
+        other_registration = TournamentRegistration.objects.create(tournament=other_tournament, foreign_name="Outsiders")
+        self.client.force_login(self.admin_user)
+
+        self.assertEqual(self.club_post("tournament_registration_approve", {}, other_registration.pk).status_code, 404)
+        self.assertEqual(self.club_post("tournament_registration_reject", {}, other_registration.pk).status_code, 404)

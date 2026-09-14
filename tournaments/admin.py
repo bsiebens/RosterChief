@@ -1,4 +1,6 @@
 from django.contrib import admin
+from django.urls import reverse
+from django.utils.html import format_html
 from django.utils.translation import gettext_lazy as _
 
 from .models import (
@@ -11,6 +13,7 @@ from .models import (
     TournamentField,
     TournamentGroup,
     TournamentRegistration,
+    TournamentRegistrationPlayer,
     TournamentRosterEntry,
     TournamentStage,
     TournamentTask,
@@ -41,7 +44,18 @@ class TournamentAdmin(admin.ModelAdmin):
     search_fields = ["name", "slug"]
     prepopulated_fields = {"slug": ["name"]}
     raw_id_fields = ["event"]
+    readonly_fields = ["registration_queue_link"]
     inlines = [TournamentStageInline, TournamentFieldInline]
+
+    @admin.display(description=_("registration review"))
+    def registration_queue_link(self, obj):
+        # A plain jump to the staff review queue (management app) -- there's no
+        # tournament list/nav there yet (a later phase), so the admin change
+        # page is the only discoverable way in for now.
+        if obj.pk is None:
+            return "—"
+        url = reverse("management:tournament_registration_queue", args=[obj.pk])
+        return format_html('<a href="{}">{}</a>', url, _("Review registrations"))
 
 
 @admin.register(TournamentField)
@@ -80,6 +94,13 @@ class TournamentGroupAdmin(admin.ModelAdmin):
     raw_id_fields = ["stage"]
 
 
+class TournamentRegistrationPlayerInline(admin.TabularInline):
+    """Submitted roster shown on the Registration page."""
+
+    model = TournamentRegistrationPlayer
+    extra = 0
+
+
 @admin.register(TournamentRegistration)
 class TournamentRegistrationAdmin(admin.ModelAdmin):
     # Not club-scoped itself -- club reached through `tournament`.
@@ -87,6 +108,7 @@ class TournamentRegistrationAdmin(admin.ModelAdmin):
     list_filter = ["tournament__club", "status"]
     search_fields = ["tournament__name", "team__name", "foreign_name", "foreign_contact_email"]
     raw_id_fields = ["tournament", "team", "reviewed_by"]
+    inlines = [TournamentRegistrationPlayerInline]
 
     @admin.display(description=_("team"))
     def display_name(self, obj):

@@ -1,0 +1,47 @@
+{% extends "registration/_base.html" %}
+{% load i18n lucide %}
+
+{% comment %}
+    The link tournaments.services.notifications.send_registration_confirmation_email
+    hands out (TournamentRegistration.status_token) -- see
+    TournamentRegistrationStatusView's own docstring. Unauthenticated,
+    token-gated, read-only for V1 (no cancel/edit here by design).
+{% endcomment %}
+
+{% block page_title %}{% trans "Registration status" %}{% endblock page_title %}
+
+{% block brand_href %}{% url "tournaments:register" tournament_slug=tournament.slug %}{% endblock brand_href %}
+
+{% block content %}
+    <div class="mb-5">
+        <h1 class="font-display text-3xl font-extrabold text-ink uppercase">{% trans "Registration status" %}</h1>
+        <p class="mt-1 flex items-center gap-1.5 text-sm text-muted">
+            {% lucide "trophy" size=15 class="shrink-0 text-club" %}
+            {{ tournament.name }}
+        </p>
+    </div>
+
+    <div class="card card-body">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+            <h2 class="card-title">{{ registration.display_name }}</h2>
+            {% if registration.status == "pending" %}
+                <span class="badge badge-warning">{% trans "Pending review" %}</span>
+            {% elif registration.status == "approved" %}
+                <span class="badge badge-success">{% trans "Approved" %}</span>
+            {% else %}
+                <span class="badge badge-error">{% trans "Not accepted" %}</span>
+            {% endif %}
+        </div>
+
+        {% if registration.status == "pending" %}
+            <p class="text-sm text-muted">{% trans "The club is still reviewing this entry -- check back soon." %}</p>
+        {% elif registration.status == "approved" %}
+            <p class="text-sm text-muted">{% trans "This team is on the schedule." %}</p>
+        {% else %}
+            <p class="text-sm text-muted">{% trans "This entry wasn't accepted this time." %}</p>
+            {% if registration.rejection_reason %}
+                <p class="rounded-box border border-line bg-paper px-3 py-2.5 text-sm text-ink">{{ registration.rejection_reason }}</p>
+            {% endif %}
+        {% endif %}
+    </div>
+{% endblock content %}

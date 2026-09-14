@@ -1,0 +1,1 @@
+{% load i18n %}{% if registration.status == "approved" %}{% blocktrans with tournament=tournament.name %}You're in: {{ tournament }}{% endblocktrans %}{% else %}{% blocktrans with tournament=tournament.name %}About your entry into {{ tournament }}{% endblocktrans %}{% endif %}

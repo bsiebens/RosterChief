@@ -224,6 +224,39 @@ class TournamentRegistration(UUIDModel):
         return self.team_id is None
 
 
+class TournamentRegistrationPlayer(UUIDModel):
+    """One roster line submitted with a pending ``TournamentRegistration`` --
+    the only place a foreign team's players can be captured before
+    approval, since ``TournamentRosterEntry`` (the live roster) requires an
+    already-approved ``TournamentTeam`` that doesn't exist yet at submission
+    time. Copied into real ``TournamentRosterEntry`` rows by
+    ``tournaments.services.registration.approve_registration`` -- kept as a
+    separate model rather than letting ``TournamentRosterEntry.tournament_team``
+    go nullable, so "submitted, not yet real" and "on the live roster" stay
+    two distinct, un-mixable states the same way ``TournamentRegistration``
+    and ``TournamentTeam`` themselves do. Meaningless for a club-team
+    registration (that roster comes from ``TeamMembership`` at approval
+    time instead) -- not enforced by a constraint, since staff may still
+    submit a team-linked registration with a proposed line-up here that gets
+    replaced by the real roster on approval, and that's a legitimate,
+    non-error use. Not itself club-scoped -- its club is reached through
+    ``registration``.
+    """
+
+    registration = models.ForeignKey(TournamentRegistration, on_delete=models.CASCADE, related_name="players", verbose_name=_("registration"))
+    first_name = models.CharField(_("first name"), max_length=150)
+    last_name = models.CharField(_("last name"), max_length=150)
+    jersey_number = models.PositiveSmallIntegerField(_("jersey number"), null=True, blank=True)
+
+    class Meta:
+        verbose_name = _("tournament registration player")
+        verbose_name_plural = _("tournament registration players")
+        ordering = ["registration", "jersey_number"]
+
+    def __str__(self):
+        return f"{self.registration} - {self.first_name} {self.last_name}".strip()
+
+
 class TournamentTeam(ClubScopedModel):
     """The entity that actually appears on the bracket -- created on
     registration approval (``registration`` set), or directly by tournament

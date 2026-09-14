@@ -1,0 +1,176 @@
+{% extends "management/base.html" %}
+{% load i18n lucide ui %}
+
+{% block heading %}{{ tournament.name }}{% endblock heading %}
+{% block topbar_context %}
+    <span class="font-mono text-[13px] text-muted">{% trans "Registrations" %}</span>
+{% endblock topbar_context %}
+
+{% block panel %}
+    <div class="card overflow-hidden">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>{% trans "Team" %}</th>
+                    <th>{% trans "Submitted" %}</th>
+                    <th>{% trans "Roster" %}</th>
+                    <th>{% trans "Status" %}</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for registration in registrations %}
+                    {# A plain border-left on a <tr> is unreliable under border-collapse -- an inset box-shadow paints the same accent bar without depending on table border behaviour at all, same as signup_list.html's own oldest-pending row. #}
+                    <tr class="cursor-pointer {% if registration.is_oldest_pending %}bg-row-focus shadow-[inset_3px_0_0_var(--color-info)]{% endif %}" onclick="openDrawer('{{ registration.pk|dom_id:"registration_drawer" }}')">
+                        <td>
+                            <div class="font-semibold text-ink">{{ registration.display_name }}</div>
+                            {% if registration.is_foreign and registration.foreign_contact_name %}
+                                <div class="text-xs text-muted">{{ registration.foreign_contact_name }}</div>
+                            {% endif %}
+                        </td>
+                        <td class="font-mono text-xs {% if registration.is_oldest_pending %}text-club-dark{% else %}text-muted{% endif %}">{{ registration.submitted_at|date:"j M Y" }}</td>
+                        <td class="text-sm text-ink">{% blocktrans count count=registration.players.count %}{{ count }} player{% plural %}{{ count }} players{% endblocktrans %}</td>
+                        <td>
+                            <span class="badge badge-sm {% if registration.status == "approved" %}badge-success{% elif registration.status == "rejected" %}badge-error{% else %}badge-warning{% endif %}">{{ registration.get_status_display }}</span>
+                        </td>
+                        <td class="text-right">
+                            <button class="btn btn-outline btn-xs gap-1" type="button" onclick="event.stopPropagation(); openDrawer('{{ registration.pk|dom_id:"registration_drawer" }}')">{% trans "Open" %} {% lucide "chevron-right" size=12 %}</button>
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="5" class="py-6 text-center text-muted">{% trans "No one has registered for this tournament yet." %}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+{% endblock panel %}
+
+{% block extra_body %}
+    {% for registration in registrations %}
+        <div id="{{ registration.pk|dom_id:"registration_drawer" }}" class="drawer-backdrop">
+            <div class="drawer">
+                <div class="flex items-center gap-3 border-b border-line p-5">
+                    <div class="min-w-0 flex-1">
+                        <div class="truncate font-display text-xl font-extrabold text-ink uppercase">{{ registration.display_name }}</div>
+                        <div class="text-[13px] text-muted">{% blocktrans with date=registration.submitted_at|date:"j M" %}Submitted {{ date }}{% endblocktrans %}</div>
+                    </div>
+                    <span class="badge badge-sm {% if registration.status == "approved" %}badge-success{% elif registration.status == "rejected" %}badge-error{% else %}badge-warning{% endif %}">{{ registration.get_status_display }}</span>
+                    <button type="button" class="btn btn-ghost btn-square btn-sm" aria-label="{% trans 'Close' %}" onclick="closeDrawer('{{ registration.pk|dom_id:"registration_drawer" }}')">{% lucide "x" size=16 %}</button>
+                </div>
+
+                <div class="flex flex-1 flex-col gap-5 overflow-y-auto p-5">
+                    {% if registration.is_foreign %}
+                        <div>
+                            <div class="mb-2.5 font-display text-xs font-bold tracking-[.14em] text-muted uppercase">{% trans "Contact" %}</div>
+                            <div class="flex flex-col gap-1 text-sm text-ink">
+                                {% if registration.foreign_contact_name %}<div>{{ registration.foreign_contact_name }}</div>{% endif %}
+                                {% if registration.foreign_contact_email %}<div class="text-muted">{{ registration.foreign_contact_email }}</div>{% endif %}
+                                {% if registration.foreign_contact_phone %}<div class="text-muted">{{ registration.foreign_contact_phone }}</div>{% endif %}
+                            </div>
+                        </div>
+                    {% endif %}
+
+                    <div>
+                        <div class="mb-2.5 font-display text-xs font-bold tracking-[.14em] text-muted uppercase">{% trans "Roster" %}</div>
+                        <div class="flex flex-col gap-1">
+                            {% for player in registration.players.all %}
+                                <div class="flex items-center gap-2.5 text-sm text-ink">
+                                    <span class="font-mono text-xs text-muted">{{ player.jersey_number|default:"—" }}</span>
+                                    <span>{{ player.first_name }} {{ player.last_name }}</span>
+                                </div>
+                            {% empty %}
+                                <p class="text-sm text-muted">{% trans "No roster was submitted with this registration." %}</p>
+                            {% endfor %}
+                        </div>
+                    </div>
+
+                    {% if registration.status == "rejected" and registration.rejection_reason %}
+                        <div>
+                            <div class="mb-2.5 font-display text-xs font-bold tracking-[.14em] text-muted uppercase">{% trans "Rejection reason" %}</div>
+                            <p class="text-sm text-ink">{{ registration.rejection_reason }}</p>
+                        </div>
+                    {% endif %}
+
+                    {% if registration.status != "pending" %}
+                        <div>
+                            <div class="mb-2.5 font-display text-xs font-bold tracking-[.14em] text-muted uppercase">{% trans "Decision" %}</div>
+                            <p class="text-sm text-muted">
+                                {% if registration.reviewed_by %}
+                                    {% blocktrans with reviewer=registration.reviewed_by.get_full_name date=registration.reviewed_at|date:"j M Y" %}By {{ reviewer }} on {{ date }}{% endblocktrans %}
+                                {% else %}
+                                    {{ registration.reviewed_at|date:"j M Y" }}
+                                {% endif %}
+                            </p>
+                        </div>
+                    {% endif %}
+                </div>
+
+                {% if registration.status == "pending" %}
+                    <div class="flex gap-2.5 border-t border-line p-4">
+                        <form method="post" action="{% url 'management:tournament_registration_approve' registration.pk %}" class="flex-1">
+                            {% csrf_token %}
+                            <button class="btn btn-success w-full gap-2" type="submit">{% lucide "check" size=16 %} {% trans "Approve" %}</button>
+                        </form>
+                        <button type="button" class="btn btn-outline btn-error gap-2" onclick="document.getElementById('{{ registration.pk|dom_id:"reject_modal" }}').showModal()">{% lucide "x-circle" size=16 %} {% trans "Reject" %}</button>
+                        <button type="button" class="btn btn-outline gap-2" onclick="closeDrawer('{{ registration.pk|dom_id:"registration_drawer" }}')">{% trans "Close" %}</button>
+                    </div>
+                {% else %}
+                    <div class="flex gap-2.5 border-t border-line p-4">
+                        <button type="button" class="btn btn-outline w-full gap-2" onclick="closeDrawer('{{ registration.pk|dom_id:"registration_drawer" }}')">{% trans "Close" %}</button>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+
+        {% if registration.status == "pending" %}
+            <dialog id="{{ registration.pk|dom_id:"reject_modal" }}" class="modal">
+                <div class="modal-box">
+                    <h3 class="text-lg font-bold text-ink">{% blocktrans with name=registration.display_name %}Reject “{{ name }}”?{% endblocktrans %}</h3>
+                    <form method="post" action="{% url 'management:tournament_registration_reject' registration.pk %}" id="{{ registration.pk|dom_id:"reject_modal" }}_form">
+                        {% csrf_token %}
+                        <div class="form-control mt-2">
+                            <label class="label-text">{% trans "Reason (shown to the submitter)" %}</label>
+                            <textarea class="textarea" name="reason" rows="2" placeholder="{% trans 'e.g. tournament is full at this age group' %}"></textarea>
+                        </div>
+                    </form>
+                    <div class="modal-action">
+                        <form method="dialog"><button class="btn btn-outline gap-2">{% lucide "x" size=16 %} {% trans "Cancel" %}</button></form>
+                        <button class="btn btn-error gap-2" type="submit" form="{{ registration.pk|dom_id:"reject_modal" }}_form">{% lucide "x-circle" size=16 %} {% trans "Reject" %}</button>
+                    </div>
+                </div>
+                <form method="dialog" class="modal-backdrop"><button>close</button></form>
+            </dialog>
+        {% endif %}
+    {% endfor %}
+
+    <script>
+        // Same drawer open/close mechanics as management/signup_list.html --
+        // see its own comment for why .drawer-backdrop is a plain div rather
+        // than a native <dialog>.
+        function openDrawer(id) {
+            const backdrop = document.getElementById(id);
+            backdrop.classList.add("visible");
+            void backdrop.offsetHeight;
+            backdrop.classList.add("open");
+        }
+
+        function closeDrawer(id) {
+            const backdrop = document.getElementById(id);
+            backdrop.classList.remove("open");
+            setTimeout(() => backdrop.classList.remove("visible"), 200);
+        }
+
+        document.querySelectorAll(".drawer-backdrop").forEach((backdrop) => {
+            backdrop.addEventListener("click", (event) => {
+                if (event.target === backdrop) closeDrawer(backdrop.id);
+            });
+        });
+
+        document.addEventListener("keydown", (event) => {
+            if (event.key !== "Escape") return;
+            document.querySelectorAll(".drawer-backdrop.open").forEach((backdrop) => closeDrawer(backdrop.id));
+        });
+    </script>
+{% endblock extra_body %}
