@@ -19,6 +19,7 @@ import itertools
 from django.db.models import Q
 from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from django.views import View
 from django.views.generic import DetailView, ListView
@@ -28,8 +29,8 @@ from controlpanel.messages import notify
 from members.views import ClubScopedPublicMixin
 from news.services import render_body_html
 
-from .forms import TournamentRegistrationForm, TournamentRegistrationPlayerFormSet, players_from_formset
-from .models import Match, Tournament, TournamentRegistration, TournamentRegistrationPlayer, TournamentStage, TournamentTeam
+from .forms import TournamentRegistrationForm, TournamentRegistrationPlayerFormSet, players_from_formset, roster_entries_from_formset
+from .models import Match, Tournament, TournamentRegistration, TournamentRegistrationPlayer, TournamentRosterEntry, TournamentStage, TournamentTeam
 from .services.notifications import send_registration_confirmation_email
 from .services.scheduling import compute_standings
 
@@ -105,26 +106,61 @@ class TournamentRegistrationStatusView(TournamentFeatureMixin, View):
     same idea as registration.models.RegistrationBatch.status_token), since
     whoever submitted the registration may have no account at all.
 
-    The roster is editable from here while the registration is still
-    PENDING -- a team often registers before its final line-up is settled,
-    and making them email the club to fix a name or add a late signing only
-    adds a manual step for staff. Once approved, TournamentRosterEntry is
-    already snapshotted from this data (tournaments.services.registration.
-    approve_registration) and editing here wouldn't reach it any more; once
-    rejected, there's nothing left to edit. Everything else (contact
-    details, team identity/colors/logo) stays fixed here -- deliberately
-    out of scope, same as before.
+    The roster is editable from here in two windows, against two different
+    models, using the exact same TournamentRegistrationPlayerFormSet/row
+    form/_player_row.html either way (only the bridge function differs --
+    see roster_entries_from_formset's own docstring for why one shared form
+    can drive two different target models):
+
+    - While PENDING, against the submitted TournamentRegistrationPlayer rows
+      -- a team often registers before its final line-up is settled, and
+      making them email the club to fix a name or add a late signing only
+      adds a manual step for staff.
+    - Once APPROVED, against the live TournamentTeam's own TournamentRosterEntry
+      rows -- a club may still want to add a late signing or fix a typo after
+      being accepted, right up until the tournament actually starts (see
+      _live_roster_is_editable below for the exact cutoff). Only for a
+      foreign team: the host club's own team skips this whole public flow
+      (see TournamentTeam's own docstring), so there's never a foreign-style
+      roster to edit here for one.
+
+    Once rejected, withdrawn, or the tournament has started, there's nothing
+    left to edit -- a plain read-only roster is shown instead (the live one
+    once a TournamentTeam exists, since that's the one that actually matters
+    by then; the originally-submitted one otherwise). Everything else
+    (contact details, team identity/colors/logo) stays fixed here --
+    deliberately out of scope, same as before.
     """
 
     template_name = "tournaments/registration_status.html"
 
     def get_registration(self, request, tournament_slug, token):
         return get_object_or_404(
-            TournamentRegistration.objects.select_related("tournament"),
+            TournamentRegistration.objects.select_related("tournament", "tournament_team"),
             tournament__club=request.club,
             tournament__slug=tournament_slug,
             status_token=token,
         )
+
+    def _live_roster_is_editable(self, registration) -> bool:
+        team = getattr(registration, "tournament_team", None)
+        return (
+            registration.status == TournamentRegistration.Status.APPROVED
+            and registration.is_foreign
+            and team is not None
+            and team.withdrawn_at is None
+            and timezone.localdate() < registration.tournament.start_date
+        )
+
+    def _live_roster_is_closed(self, registration) -> bool:
+        """Same eligibility as ``_live_roster_is_editable`` minus the date
+        cutoff -- i.e. "would be editable here if the tournament hadn't
+        already started," the one case that actually needs a "closed" note
+        rather than just silently showing a read-only list (withdrawn/
+        rejected/club-team already explain themselves elsewhere on the
+        page)."""
+        team = getattr(registration, "tournament_team", None)
+        return registration.status == TournamentRegistration.Status.APPROVED and registration.is_foreign and team is not None and team.withdrawn_at is None and timezone.localdate() >= registration.tournament.start_date
 
     def get_player_formset(self, registration, data=None):
         initial = [
@@ -143,10 +179,29 @@ class TournamentRegistrationStatusView(TournamentFeatureMixin, View):
         ]
         return TournamentRegistrationPlayerFormSet(data, initial=initial, prefix="players", form_kwargs={"tournament": registration.tournament})
 
+    def get_roster_formset(self, registration, data=None):
+        initial = [
+            {
+                "first_name": entry.foreign_first_name,
+                "last_name": entry.foreign_last_name,
+                "jersey_number": entry.jersey_number,
+                "role": entry.role,
+                "position_label": entry.position_label,
+                "date_of_birth": entry.date_of_birth,
+                "license_number": entry.license_number,
+                "dietary_restrictions": entry.dietary_restrictions,
+                "lunch_days": entry.lunch_days,
+            }
+            for entry in registration.tournament_team.roster_entries.all()
+        ]
+        return TournamentRegistrationPlayerFormSet(data, initial=initial, prefix="players", form_kwargs={"tournament": registration.tournament})
+
     def render_page(self, request, registration, player_formset=None):
-        context = {"tournament": registration.tournament, "registration": registration}
+        context = {"tournament": registration.tournament, "registration": registration, "roster_closed": self._live_roster_is_closed(registration)}
         if registration.status == TournamentRegistration.Status.PENDING:
             context["player_formset"] = player_formset if player_formset is not None else self.get_player_formset(registration)
+        elif self._live_roster_is_editable(registration):
+            context["player_formset"] = player_formset if player_formset is not None else self.get_roster_formset(registration)
         return render(request, self.template_name, context)
 
     def get(self, request, *args, **kwargs):
@@ -155,16 +210,24 @@ class TournamentRegistrationStatusView(TournamentFeatureMixin, View):
 
     def post(self, request, *args, **kwargs):
         registration = self.get_registration(request, kwargs["tournament_slug"], kwargs["token"])
-        if registration.status != TournamentRegistration.Status.PENDING:
-            notify(request, f"e|{_('Could not update roster')}|{_('This entry has already been decided -- the roster can no longer be changed.')}")
+
+        if registration.status == TournamentRegistration.Status.PENDING:
+            player_formset = self.get_player_formset(registration, data=request.POST)
+            if not player_formset.is_valid():
+                return self.render_page(request, registration, player_formset=player_formset)
+
+            registration.players.all().delete()
+            TournamentRegistrationPlayer.objects.bulk_create([TournamentRegistrationPlayer(registration=registration, **player) for player in players_from_formset(player_formset)])
+        elif self._live_roster_is_editable(registration):
+            player_formset = self.get_roster_formset(registration, data=request.POST)
+            if not player_formset.is_valid():
+                return self.render_page(request, registration, player_formset=player_formset)
+
+            registration.tournament_team.roster_entries.all().delete()
+            TournamentRosterEntry.objects.bulk_create([TournamentRosterEntry(tournament_team=registration.tournament_team, **entry) for entry in roster_entries_from_formset(player_formset)])
+        else:
+            notify(request, f"e|{_('Could not update roster')}|{_('This roster can no longer be changed.')}")
             return redirect("tournaments:registration_status", tournament_slug=registration.tournament.slug, token=registration.status_token)
-
-        player_formset = self.get_player_formset(registration, data=request.POST)
-        if not player_formset.is_valid():
-            return self.render_page(request, registration, player_formset=player_formset)
-
-        registration.players.all().delete()
-        TournamentRegistrationPlayer.objects.bulk_create([TournamentRegistrationPlayer(registration=registration, **player) for player in players_from_formset(player_formset)])
 
         notify(request, f"s|{_('Roster updated')}|{_('Your roster has been updated.')}")
         return redirect("tournaments:registration_status", tournament_slug=registration.tournament.slug, token=registration.status_token)

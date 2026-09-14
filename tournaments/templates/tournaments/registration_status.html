@@ -16,6 +16,19 @@
     TournamentTeam, not on the registration itself, so an approved-then-
     withdrawn registration still shows "Approved" below; this banner is
     what actually tells the team it's no longer in.
+
+    player_formset (when present) now covers two different editing windows
+    -- while PENDING, against the originally submitted roster; once
+    APPROVED and still before the tournament starts, against the live
+    TournamentTeam's own roster instead (see TournamentRegistrationStatusView's
+    own docstring) -- both rendered identically here, since the view already
+    resolved which one applies. Once a TournamentTeam exists but editing
+    isn't (any more, or never was -- a rejected/still-pending registration
+    has none yet) offered, the roster shown read-only is the *live* one
+    (roster_closed explains why when it's specifically "the tournament
+    already started," not withdrawn/rejected, which explain themselves
+    elsewhere on this page) -- the originally-submitted list only remains
+    relevant when there's no live team at all yet.
 {% endcomment %}
 
 {% block page_title %}{% trans "Registration status" %}{% endblock page_title %}
@@ -89,6 +102,22 @@
 
             <button class="btn btn-primary gap-2 self-start" type="submit">{% lucide "save" size=16 %} {% trans "Save roster" %}</button>
         </form>
+    {% elif registration.tournament_team %}
+        <div class="card card-body mt-4">
+            <h2 class="card-title">{% trans "Roster" %}</h2>
+            {% if roster_closed %}<p class="text-sm text-muted">{% trans "Roster changes are closed now that the tournament has started." %}</p>{% endif %}
+            <ul class="flex flex-col gap-1">
+                {% for entry in registration.tournament_team.roster_entries.all %}
+                    <li class="flex items-center gap-2.5 text-sm text-ink">
+                        <span class="font-mono text-xs text-muted">{{ entry.jersey_number|default:"—" }}</span>
+                        <span>{{ entry.display_name }}</span>
+                        {% if entry.role == "staff" %}<span class="badge badge-sm badge-neutral">{% trans "Staff" %}</span>{% endif %}
+                    </li>
+                {% empty %}
+                    <p class="text-sm text-muted">{% trans "No roster yet." %}</p>
+                {% endfor %}
+            </ul>
+        </div>
     {% elif registration.players.all %}
         <div class="card card-body mt-4">
             <h2 class="card-title">{% trans "Roster" %}</h2>

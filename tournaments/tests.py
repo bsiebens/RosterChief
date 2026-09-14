@@ -1209,6 +1209,89 @@ class TournamentRegistrationStatusViewTests(TournamentsTestCase):
         self.assertEqual(self.registration.players.get(), self.player)  # untouched
 
 
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class ApprovedForeignTeamRosterEditingTests(TournamentsTestCase):
+    """TournamentRegistrationStatusView's second editing window -- once
+    APPROVED, against the live TournamentTeam's own roster, until the
+    tournament actually starts. Uses a tournament dated relative to "today"
+    (not TournamentsTestCase's own fixed-date one) so these stay correct
+    regardless of when the suite runs."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        today = timezone.localdate()
+        cls.upcoming = Tournament.objects.create(club=cls.club, name="Winter Cup", season=cls.season, start_date=today + datetime.timedelta(days=5), end_date=today + datetime.timedelta(days=6))
+        cls.registration = TournamentRegistration.objects.create(tournament=cls.upcoming, foreign_name="Visiting FC", foreign_contact_email="casey@example.com")
+        cls.team = TournamentTeam.objects.create(club=cls.club, tournament=cls.upcoming, registration=cls.registration, foreign_name="Visiting FC")
+        cls.entry = TournamentRosterEntry.objects.create(tournament_team=cls.team, foreign_first_name="Sam", foreign_last_name="Striker", jersey_number=9)
+        cls.registration.status = TournamentRegistration.Status.APPROVED
+        cls.registration.save()
+
+    def setUp(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
+        get_waffle_flag_model().objects.get_or_create(name="tournaments")[0].clubs.add(self.club)
+
+    def _url(self):
+        return reverse("tournaments:registration_status", kwargs={"tournament_slug": self.upcoming.slug, "token": self.registration.status_token})
+
+    def formset_management(self, total, prefix="players"):
+        return {f"{prefix}-TOTAL_FORMS": str(total), f"{prefix}-INITIAL_FORMS": "0", f"{prefix}-MIN_NUM_FORMS": "0", f"{prefix}-MAX_NUM_FORMS": "1000"}
+
+    def test_shows_an_editable_roster_form_before_the_tournament_starts(self):
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, "Save roster")
+        self.assertContains(response, "Sam")
+
+    def test_updating_the_live_roster_replaces_its_entries(self):
+        data = self.formset_management(total=1) | {"players-0-first_name": "Robin", "players-0-last_name": "Newcomer", "players-0-jersey_number": "11", "players-0-role": "player"}
+
+        response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertRedirects(response, self._url())
+        self.assertEqual(self.team.roster_entries.count(), 1)
+        entry = self.team.roster_entries.get()
+        self.assertEqual(entry.foreign_first_name, "Robin")
+        self.assertEqual(entry.jersey_number, 11)
+        # The original submission (TournamentRegistrationPlayer) is
+        # untouched -- only the live TournamentRosterEntry rows are edited
+        # here once approved.
+        self.assertEqual(self.registration.players.count(), 0)
+
+    def test_a_withdrawn_team_cannot_have_its_roster_edited(self):
+        self.team.withdrawn_at = timezone.now()
+        self.team.withdrawal_reason = "No-show."
+        self.team.save()
+        data = self.formset_management(total=1) | {"players-0-first_name": "Robin", "players-0-last_name": "Newcomer"}
+
+        response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertRedirects(response, self._url())
+        self.assertEqual(self.team.roster_entries.get(), self.entry)  # untouched
+
+    def test_once_the_tournament_has_started_the_roster_is_read_only_with_a_note(self):
+        self.upcoming.start_date = timezone.localdate()
+        self.upcoming.save()
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertNotContains(response, "Save roster")
+        self.assertContains(response, "Sam")
+        self.assertContains(response, "closed")
+
+    def test_cannot_post_once_the_tournament_has_started(self):
+        self.upcoming.start_date = timezone.localdate()
+        self.upcoming.save()
+        data = self.formset_management(total=1) | {"players-0-first_name": "Robin", "players-0-last_name": "Newcomer"}
+
+        response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertRedirects(response, self._url())
+        self.assertEqual(self.team.roster_entries.get(), self.entry)  # untouched
+
+
 class RoundRobinPairingsTests(TestCase):
     def test_even_count_every_pair_meets_exactly_once(self):
         entries = ["A", "B", "C", "D"]

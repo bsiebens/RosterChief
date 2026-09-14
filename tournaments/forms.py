@@ -152,6 +152,34 @@ def players_from_formset(player_formset):
     ]
 
 
+def roster_entries_from_formset(player_formset):
+    """The same bridge as ``players_from_formset``, but into
+    ``TournamentRosterEntry`` field-kwargs dicts instead of
+    ``TournamentRegistrationPlayer`` ones -- used by
+    ``TournamentRegistrationStatusView`` once a foreign team's own roster
+    editing has moved from the pending submission onto its live roster (see
+    that view's own docstring). Reuses the exact same
+    ``TournamentRegistrationPlayerFormSet``/row form/``_player_row.html`` as
+    the pending editor -- only the target model's name fields differ
+    (``foreign_first_name``/``foreign_last_name`` here, not a flat
+    ``first_name``/``last_name``), which is all this second bridge function
+    exists to translate."""
+    return [
+        {
+            "foreign_first_name": row.cleaned_data.get("first_name") or "",
+            "foreign_last_name": row.cleaned_data["last_name"],
+            "jersey_number": row.cleaned_data.get("jersey_number"),
+            "role": row.cleaned_data.get("role") or TournamentRosterRole.PLAYER,
+            "position_label": row.cleaned_data.get("position_label") or "",
+            "date_of_birth": row.cleaned_data.get("date_of_birth"),
+            "license_number": row.cleaned_data.get("license_number") or "",
+            "dietary_restrictions": row.cleaned_data.get("dietary_restrictions") or "",
+            "lunch_days": row.lunch_days_value(),
+        }
+        for row in player_formset.non_blank_forms()
+    ]
+
+
 class TournamentForm(forms.ModelForm):
     """Create/edit a tournament itself -- closes the "admin-only" gap
     TournamentListView used to describe in its own docstring. ``club`` is
