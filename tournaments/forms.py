@@ -5,6 +5,7 @@ from django.utils.translation import gettext_lazy as _
 
 from club.models import Season
 from events.models import Event, Location
+from teams.models import Team
 
 from .models import DressingRoom, Tournament, TournamentField, TournamentRegistration, TournamentStage, TournamentTask, TournamentTeam
 
@@ -113,7 +114,7 @@ class TournamentForm(forms.ModelForm):
 
     class Meta:
         model = Tournament
-        fields = ["name", "status", "start_date", "end_date", "registration_open", "contact_email", "description", "event"]
+        fields = ["name", "status", "start_date", "end_date", "registration_open", "max_teams", "contact_email", "description", "event", "deposit_amount", "entry_fee_amount", "lunch_mode", "lunch_price_per_day"]
         widgets = {
             "start_date": forms.DateInput(attrs={"type": "date"}),
             "end_date": forms.DateInput(attrs={"type": "date"}),
@@ -291,3 +292,68 @@ class DressingRoomAssignmentForm(forms.Form):
         if start and end and end <= start:
             self.add_error("assigned_until", _("Must be after the start."))
         return cleaned
+
+
+class TournamentTeamForm(forms.Form):
+    """The management-only "Add team" modal -- creates a ``TournamentTeam``
+    directly (``registration=None``), bypassing the public queue entirely,
+    same shortcut ``TournamentTeam``'s own docstring already describes for
+    the host club's own team, extended here to any team staff want to enter
+    by hand (a late walk-up, one that registered by phone). A plain
+    ``Form``, not a ``ModelForm`` split the ``team``/``foreign_*`` way
+    ``TournamentRegistrationForm`` is -- the ``kind`` choice below switches
+    which set of fields is actually required, which a single ModelForm's
+    ``Meta.fields`` can't express, and the actual ``TournamentTeam``
+    creation (plus, for a club team, its roster snapshot) goes through
+    ``tournaments.services.registration.create_manual_team`` rather than
+    this form's own ``save()`` -- there isn't one."""
+
+    KIND_CLUB = "club"
+    KIND_FOREIGN = "foreign"
+
+    kind = forms.ChoiceField(label=_("Team"), choices=[(KIND_CLUB, _("Our own team")), (KIND_FOREIGN, _("Another team"))], widget=forms.RadioSelect, initial=KIND_CLUB)
+    team = forms.ModelChoiceField(queryset=Team.objects.none(), required=False, label=_("Team"))
+    foreign_name = forms.CharField(required=False, max_length=255, label=_("Team name"))
+    foreign_contact_name = forms.CharField(required=False, max_length=255, label=_("Contact name"))
+    foreign_contact_email = forms.EmailField(required=False, label=_("Contact email"))
+    foreign_contact_phone = forms.CharField(required=False, max_length=32, label=_("Contact phone"))
+    foreign_primary_color = forms.CharField(required=False, max_length=7, label=_("Primary color"), widget=forms.TextInput(attrs={"placeholder": "#1e40af"}))
+    foreign_secondary_color = forms.CharField(required=False, max_length=7, label=_("Secondary color"), widget=forms.TextInput(attrs={"placeholder": "#be185d"}))
+    foreign_logo = forms.ImageField(required=False, label=_("Logo"), widget=forms.ClearableFileInput(attrs={"accept": "image/png,image/jpeg,image/gif,image/webp,image/svg+xml"}))
+
+    def __init__(self, *args, club=None, tournament=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Excludes a club team already entered in this tournament -- the
+        # model's own unique_real_team_per_tournament constraint would
+        # reject a duplicate anyway, but filtering it out of the picker
+        # avoids the round trip to find that out.
+        self.fields["team"].queryset = Team.objects.filter(club=club).exclude(tournament_entries__tournament=tournament)
+
+    def clean(self):
+        cleaned = super().clean()
+        kind = cleaned.get("kind")
+        if kind == self.KIND_CLUB:
+            if not cleaned.get("team"):
+                self.add_error("team", _("Choose a team."))
+        elif kind == self.KIND_FOREIGN:
+            for name in ("foreign_name", "foreign_contact_name", "foreign_contact_email"):
+                if not cleaned.get(name):
+                    self.add_error(name, _("This field is required."))
+        return cleaned
+
+    def foreign_fields(self) -> dict:
+        """The ``foreign_*`` kwargs for ``create_manual_team`` -- omits
+        ``foreign_logo`` entirely when none was uploaded rather than passing
+        ``None`` (an ``ImageField`` wants its own empty string, not ``None``,
+        for "no file")."""
+        data = {
+            "foreign_name": self.cleaned_data.get("foreign_name", ""),
+            "foreign_contact_name": self.cleaned_data.get("foreign_contact_name", ""),
+            "foreign_contact_email": self.cleaned_data.get("foreign_contact_email", ""),
+            "foreign_contact_phone": self.cleaned_data.get("foreign_contact_phone", ""),
+            "foreign_primary_color": self.cleaned_data.get("foreign_primary_color", ""),
+            "foreign_secondary_color": self.cleaned_data.get("foreign_secondary_color", ""),
+        }
+        if self.cleaned_data.get("foreign_logo"):
+            data["foreign_logo"] = self.cleaned_data["foreign_logo"]
+        return data

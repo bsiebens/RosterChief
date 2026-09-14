@@ -26,6 +26,30 @@ def _guard_pending(registration: TournamentRegistration):
         raise RegistrationDecisionError(_("This registration has already been decided."))
 
 
+def snapshot_club_team_roster(tournament_team: TournamentTeam, team, season) -> None:
+    """Bulk-copies ``team``'s own season roster (``TeamMembership``, scoped
+    to ``season``) onto ``tournament_team`` as ``TournamentRosterEntry``
+    rows -- not read live afterwards, same "snapshot, don't trail a live
+    source" reasoning ``TournamentRosterEntry`` itself documents. The
+    club-team half of both ``approve_registration`` (an approved club-team
+    registration) and ``create_manual_team`` (the host club's own team,
+    added directly from the Teams tab) -- extracted here so both go through
+    exactly the same copy rather than two copies of the same loop drifting
+    apart."""
+    memberships = TeamMembership.objects.filter(team=team, season=season).select_related("member", "position")
+    TournamentRosterEntry.objects.bulk_create(
+        [
+            TournamentRosterEntry(
+                tournament_team=tournament_team,
+                member=membership.member,
+                jersey_number=membership.jersey_number,
+                position_label=membership.position.name if membership.position_id else "",
+            )
+            for membership in memberships
+        ]
+    )
+
+
 @transaction.atomic
 def approve_registration(registration: TournamentRegistration, *, reviewed_by) -> TournamentTeam:
     """Creates the live ``TournamentTeam`` and its roster, then marks the
@@ -64,18 +88,7 @@ def approve_registration(registration: TournamentRegistration, *, reviewed_by) -
     )
 
     if registration.team_id is not None:
-        memberships = TeamMembership.objects.filter(team=registration.team, season=registration.tournament.season).select_related("member", "position")
-        TournamentRosterEntry.objects.bulk_create(
-            [
-                TournamentRosterEntry(
-                    tournament_team=team,
-                    member=membership.member,
-                    jersey_number=membership.jersey_number,
-                    position_label=membership.position.name if membership.position_id else "",
-                )
-                for membership in memberships
-            ]
-        )
+        snapshot_club_team_roster(team, registration.team, registration.tournament.season)
     else:
         TournamentRosterEntry.objects.bulk_create(
             [
@@ -141,5 +154,23 @@ def withdraw_team(team: TournamentTeam, *, reason: str = "", withdrawn_by=None) 
     team.withdrawn_at = timezone.now()
     team.withdrawal_reason = reason
     team.save(update_fields=["withdrawn_at", "withdrawal_reason"])
+
+    return team
+
+
+@transaction.atomic
+def create_manual_team(tournament, *, club_team=None, foreign_fields: dict | None = None) -> TournamentTeam:
+    """Adds a ``TournamentTeam`` directly, bypassing the public registration
+    queue entirely -- the "host club skips the queue" shortcut
+    ``TournamentTeam``'s own docstring already describes, extended to any
+    team staff want to enter by hand (a late walk-up, one that registered by
+    phone). Exactly one of ``club_team``/``foreign_fields`` is given by the
+    caller (``TournamentTeamForm`` enforces that); a club team's roster is
+    snapshotted the same way an approved club-team registration's is."""
+    if club_team is not None:
+        team = TournamentTeam.objects.create(club=tournament.club, tournament=tournament, team=club_team)
+        snapshot_club_team_roster(team, club_team, tournament.season)
+    else:
+        team = TournamentTeam.objects.create(club=tournament.club, tournament=tournament, **foreign_fields)
 
     return team

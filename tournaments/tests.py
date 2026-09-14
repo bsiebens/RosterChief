@@ -39,7 +39,7 @@ from .models import (
     TournamentTeam,
 )
 from .services.dressing_rooms import DressingRoomAssignmentError, assign_dressing_room, release_dressing_room
-from .services.registration import RegistrationDecisionError, TeamWithdrawalError, approve_registration, reject_registration, withdraw_team
+from .services.registration import RegistrationDecisionError, TeamWithdrawalError, approve_registration, create_manual_team, reject_registration, withdraw_team
 from .services.scheduling import (
     DEFAULT_GAP,
     DEFAULT_MATCH_DURATION,
@@ -159,6 +159,21 @@ class TournamentModelTests(TournamentsTestCase):
 
         self.assertEqual(self.tournament.location, home)
 
+    def test_date_range_returns_every_day_inclusive(self):
+        self.assertEqual(self.tournament.date_range(), [datetime.date(2026, 9, 19), datetime.date(2026, 9, 20)])
+
+    def test_date_range_handles_a_single_day_tournament(self):
+        self.tournament.end_date = self.tournament.start_date
+        self.assertEqual(self.tournament.date_range(), [datetime.date(2026, 9, 19)])
+
+    def test_lunch_mode_defaults_to_none(self):
+        self.assertEqual(self.tournament.lunch_mode, Tournament.LunchMode.NONE)
+
+    def test_payment_and_lunch_amounts_default_to_blank(self):
+        self.assertIsNone(self.tournament.deposit_amount)
+        self.assertIsNone(self.tournament.entry_fee_amount)
+        self.assertIsNone(self.tournament.lunch_price_per_day)
+
     def test_slug_is_unique_per_club(self):
         with self.assertRaises(IntegrityError):
             Tournament.objects.create(club=self.club, name="Other Cup", slug="summer-cup", season=self.season, start_date=self.tournament.start_date, end_date=self.tournament.end_date)
@@ -275,6 +290,11 @@ class TournamentTeamModelTests(TournamentsTestCase):
 
         self.assertEqual(entry.display_name, "First Team")
         self.assertEqual(str(entry), "First Team")
+
+    def test_payment_status_defaults_to_unpaid(self):
+        entry = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, team=self.team)
+
+        self.assertEqual(entry.payment_status, TournamentTeam.PaymentStatus.UNPAID)
 
     def test_str_and_display_name_for_a_foreign_team(self):
         entry = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Guest FC")
@@ -776,6 +796,33 @@ class WithdrawTeamServiceTests(TournamentsTestCase):
 
         with self.assertRaises(TeamWithdrawalError):
             withdraw_team(team)
+
+
+class CreateManualTeamServiceTests(TournamentsTestCase):
+    def test_a_club_team_gets_created_with_registration_left_null_and_its_roster_snapshotted(self):
+        position = Position.objects.create(club=self.club, name="Forward", short_name="FW")
+        TeamMembership.objects.create(team=self.team, member=self.member, season=self.season, position=position, jersey_number=7)
+
+        team = create_manual_team(self.tournament, club_team=self.team)
+
+        self.assertEqual(team.tournament, self.tournament)
+        self.assertEqual(team.club, self.club)
+        self.assertEqual(team.team, self.team)
+        self.assertIsNone(team.registration)
+        roster = list(team.roster_entries.all())
+        self.assertEqual(len(roster), 1)
+        self.assertEqual(roster[0].member, self.member)
+        self.assertEqual(roster[0].jersey_number, 7)
+        self.assertEqual(roster[0].position_label, "Forward")
+
+    def test_a_foreign_team_gets_created_from_the_given_fields_with_no_roster(self):
+        team = create_manual_team(self.tournament, foreign_fields={"foreign_name": "Walk-up FC", "foreign_contact_email": "walkup@example.com"})
+
+        self.assertEqual(team.foreign_name, "Walk-up FC")
+        self.assertEqual(team.foreign_contact_email, "walkup@example.com")
+        self.assertIsNone(team.team)
+        self.assertIsNone(team.registration)
+        self.assertEqual(team.roster_entries.count(), 0)
 
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])

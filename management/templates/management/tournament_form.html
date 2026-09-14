@@ -94,7 +94,28 @@
                 <div class="card-title">{% lucide "send" size=16 %} {% trans "Registration" %}</div>
                 <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
                     {% form_field form.contact_email %}
+                    {% form_field form.max_teams %}
                     {% form_field form.registration_open %}
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-body">
+                <div class="card-title">{% lucide "banknote" size=16 %} {% trans "Payment" %}</div>
+                <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+                    {% form_field form.deposit_amount %}
+                    {% form_field form.entry_fee_amount %}
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-body">
+                <div class="card-title">{% lucide "utensils" size=16 %} {% trans "Lunch" %}</div>
+                <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+                    {% form_field form.lunch_mode %}
+                    {% form_field form.lunch_price_per_day %}
                 </div>
             </div>
         </div>

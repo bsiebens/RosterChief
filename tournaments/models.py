@@ -9,6 +9,7 @@ Gated by the "tournaments" waffle flag (features.models.Flag, per-club like
 """
 
 import secrets
+from datetime import timedelta
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -65,6 +66,26 @@ class Tournament(ClubScopedModel):
     #: reopens a slot without staff having to remember to toggle anything
     #: back on. Blank means uncapped.
     max_teams = models.PositiveSmallIntegerField(_("maximum teams"), null=True, blank=True, help_text=_("Registration closes automatically once this many teams are approved. Leave blank for no cap."))
+
+    class LunchMode(models.TextChoices):
+        NONE = "none", _("No lunch")
+        OPTIONAL = "optional", _("Optional")
+        MANDATORY = "mandatory", _("Mandatory")
+
+    #: A partial amount due to secure a spot, distinct from the full
+    #: ``entry_fee_amount`` -- both are informational for staff to track
+    #: against ``TournamentTeam.payment_status`` by hand (no invoice/payment
+    #: machinery here, unlike club.models.DuesInvoice's own fee flow; a home
+    #: tournament's entry fee is typically settled by bank transfer or cash
+    #: on the day, not through this platform).
+    deposit_amount = models.DecimalField(
+        _("deposit amount"), max_digits=8, decimal_places=2, null=True, blank=True, help_text=_("A partial amount due to secure a spot, ahead of the full entry fee. Leave blank if this tournament doesn't collect a separate deposit.")
+    )
+    entry_fee_amount = models.DecimalField(_("entry fee"), max_digits=8, decimal_places=2, null=True, blank=True, help_text=_("The full amount a team owes to take part. Leave blank if entry is free."))
+    lunch_mode = models.CharField(
+        _("lunch"), max_length=10, choices=LunchMode.choices, default=LunchMode.NONE, help_text=_("Optional: each player/staff member picks which tournament days they need lunch on. Mandatory: lunch is included for everyone, every day.")
+    )
+    lunch_price_per_day = models.DecimalField(_("lunch price per day"), max_digits=6, decimal_places=2, null=True, blank=True, help_text=_("Per person, per day -- shown alongside a team's lunch picks so staff can work out what's owed."))
     #: Shown on both the public tournament page and the registration page
     #: itself -- "who do I email about this tournament", distinct from a
     #: registering team's own ``foreign_contact_email`` (who the club should
@@ -128,6 +149,12 @@ class Tournament(ClubScopedModel):
         if self.event_id is not None and self.event.location_id is not None:
             return self.event.location
         return Location.objects.filter(club_id=self.club_id, is_home=True).first()
+
+    def date_range(self) -> list:
+        """Every calendar day this tournament runs, inclusive -- e.g. the
+        roster's per-day lunch picker only ever offers days the tournament
+        is actually on."""
+        return [self.start_date + timedelta(days=offset) for offset in range((self.end_date - self.start_date).days + 1)]
 
     def clean(self):
         if self.event_id is not None:
@@ -448,6 +475,16 @@ class TournamentTeam(ClubScopedModel):
     #: as well as to staff -- same "reason travels with the decision" idiom
     #: TournamentRegistration.rejection_reason already uses.
     withdrawal_reason = models.TextField(_("withdrawal reason"), blank=True)
+
+    class PaymentStatus(models.TextChoices):
+        UNPAID = "unpaid", _("Unpaid")
+        DEPOSIT_RECEIVED = "deposit_received", _("Deposit received")
+        FULLY_PAID = "fully_paid", _("Fully paid")
+
+    #: Set by hand from the tournament's own Teams tab -- no invoice/payment
+    #: machinery here (see Tournament.deposit_amount's own docstring for
+    #: why), just a staff-tracked status against those two reference amounts.
+    payment_status = models.CharField(_("payment status"), max_length=20, choices=PaymentStatus.choices, default=PaymentStatus.UNPAID)
 
     class Meta:
         verbose_name = _("tournament team")

@@ -166,8 +166,8 @@ class TournamentRosterEntryInline(admin.TabularInline):
 
 @admin.register(TournamentTeam)
 class TournamentTeamAdmin(admin.ModelAdmin):
-    list_display = ["display_name", "tournament", "club", "seed", "withdrawn_at"]
-    list_filter = ["club", "tournament", "withdrawn_at"]
+    list_display = ["display_name", "tournament", "club", "seed", "payment_status", "withdrawn_at"]
+    list_filter = ["club", "tournament", "payment_status", "withdrawn_at"]
     search_fields = ["team__name", "foreign_name"]
     raw_id_fields = ["tournament", "registration", "team"]
     inlines = [TournamentRosterEntryInline]
