@@ -1,10 +1,13 @@
 import datetime
+import itertools
 
+from django.contrib import admin, messages
+from django.contrib.messages.storage.fallback import FallbackStorage
 from django.core import mail
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
-from django.db import IntegrityError
-from django.test import TestCase, override_settings
+from django.db import IntegrityError, models
+from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 from waffle import get_waffle_flag_model
@@ -15,7 +18,9 @@ from members.models import Member
 from rosterchief.test_support import make_club, make_season
 from teams.models import Position, Team, TeamMembership
 
+from .admin import TournamentAdmin, TournamentStageAdmin
 from .models import (
+    BreakRule,
     DressingRoom,
     DressingRoomAssignment,
     Match,
@@ -33,6 +38,20 @@ from .models import (
     TournamentTeam,
 )
 from .services.registration import RegistrationDecisionError, approve_registration, reject_registration
+from .services.scheduling import (
+    DEFAULT_GAP,
+    DEFAULT_MATCH_DURATION,
+    SchedulingError,
+    allocate_schedule,
+    compute_standings,
+    gap_for_placement,
+    generate_next_swiss_round,
+    generate_stage_matches,
+    resolve_match_slots,
+    round_robin_pairings,
+    snake_seed_groups,
+    validate_placement,
+)
 
 
 class TournamentsTestCase(TestCase):
@@ -822,3 +841,788 @@ class TournamentRegistrationStatusViewTests(TournamentsTestCase):
         response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
 
         self.assertEqual(response.status_code, 404)
+
+
+class RoundRobinPairingsTests(TestCase):
+    def test_even_count_every_pair_meets_exactly_once(self):
+        entries = ["A", "B", "C", "D"]
+        rounds = round_robin_pairings(entries)
+
+        self.assertEqual(len(rounds), 3)
+        seen = [frozenset(pair) for round_pairs in rounds for pair in round_pairs]
+        expected = [frozenset(pair) for pair in itertools.combinations(entries, 2)]
+        self.assertCountEqual(seen, expected)
+
+    def test_no_entry_plays_twice_in_one_round(self):
+        entries = list(range(6))
+        for round_pairs in round_robin_pairings(entries):
+            players_this_round = [entry for pair in round_pairs for entry in pair]
+            self.assertEqual(len(players_this_round), len(set(players_this_round)))
+
+    def test_odd_count_gives_one_bye_per_round(self):
+        entries = ["A", "B", "C"]
+        rounds = round_robin_pairings(entries)
+
+        self.assertEqual(len(rounds), 3)
+        for round_pairs in rounds:
+            self.assertEqual(len(round_pairs), 1)
+
+    def test_fewer_than_two_entries_returns_no_rounds(self):
+        self.assertEqual(round_robin_pairings(["A"]), [])
+        self.assertEqual(round_robin_pairings([]), [])
+
+
+class SnakeSeedGroupsTests(TestCase):
+    def test_snake_order_across_three_groups(self):
+        entries = list(range(1, 10))  # already seed-ordered 1..9
+
+        groups = snake_seed_groups(entries, 3)
+
+        self.assertEqual(groups, [[1, 6, 7], [2, 5, 8], [3, 4, 9]])
+
+    def test_every_entry_placed_exactly_once(self):
+        entries = list(range(1, 14))
+        groups = snake_seed_groups(entries, 4)
+
+        self.assertCountEqual([entry for group in groups for entry in group], entries)
+
+    def test_rejects_fewer_than_one_group(self):
+        with self.assertRaises(SchedulingError):
+            snake_seed_groups([1, 2], 0)
+
+
+class GenerateStageMatchesTests(TournamentsTestCase):
+    def make_teams(self, count):
+        return [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"Team {i}", seed=i) for i in range(1, count + 1)]
+
+    def test_round_robin_creates_every_pairing(self):
+        teams = self.make_teams(4)
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
+
+        matches = generate_stage_matches(stage, entries=teams)
+
+        self.assertEqual(len(matches), 6)  # 4 choose 2
+
+    def test_regenerating_an_already_generated_stage_raises(self):
+        teams = self.make_teams(4)
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
+        generate_stage_matches(stage, entries=teams)
+
+        with self.assertRaises(SchedulingError):
+            generate_stage_matches(stage, entries=teams)
+
+    def test_custom_format_has_no_generator(self):
+        teams = self.make_teams(4)
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="Custom", format=TournamentStage.Format.CUSTOM)
+
+        with self.assertRaises(SchedulingError):
+            generate_stage_matches(stage, entries=teams)
+
+    def test_too_few_teams_raises(self):
+        teams = self.make_teams(1)
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
+
+        with self.assertRaises(SchedulingError):
+            generate_stage_matches(stage, entries=teams)
+
+    def test_groups_splits_and_seeds_correctly(self):
+        teams = self.make_teams(9)
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="Groups", format=TournamentStage.Format.GROUPS, config={"num_groups": 3})
+
+        matches = generate_stage_matches(stage, entries=teams)
+
+        self.assertEqual(stage.groups.count(), 3)
+        self.assertEqual(len(matches), 9)  # 3 groups x (3 choose 2)
+        for group in stage.groups.all():
+            self.assertEqual(group.matches.count(), 3)
+
+    def test_single_elim_seeds_are_kept_apart(self):
+        teams = self.make_teams(8)
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="KO", format=TournamentStage.Format.SINGLE_ELIM)
+
+        matches = generate_stage_matches(stage, entries=teams)
+
+        self.assertEqual(len(matches), 7)  # 4 + 2 + 1
+        round1 = [m for m in matches if m.round_number == 1]
+        self.assertCountEqual([frozenset((m.home_team.seed, m.away_team.seed)) for m in round1], [frozenset((1, 8)), frozenset((4, 5)), frozenset((2, 7)), frozenset((3, 6))])
+        final = next(m for m in matches if m.round_number == 3)
+        self.assertEqual(final.round_label, "Final")
+        self.assertIsNotNone(final.home_source_match_id)
+        self.assertIsNotNone(final.away_source_match_id)
+
+    def test_single_elim_with_a_bye_auto_advances_the_present_team(self):
+        teams = self.make_teams(3)  # bracket size 4, one bye
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="KO", format=TournamentStage.Format.SINGLE_ELIM)
+
+        generate_stage_matches(stage, entries=teams)
+
+        bye_match = Match.objects.get(stage=stage, round_number=1, away_team__isnull=True)
+        self.assertEqual(bye_match.status, Match.Status.WALKOVER)
+        final = Match.objects.get(stage=stage, round_number=2)
+        # The bye'd seed (seed 1, paired against the missing seed 4) is
+        # already sitting in the final without anyone completing its match.
+        self.assertEqual(final.home_team_id or final.away_team_id, teams[0].pk)
+
+    def test_double_elim_requires_a_power_of_two(self):
+        teams = self.make_teams(5)
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="DE", format=TournamentStage.Format.DOUBLE_ELIM)
+
+        with self.assertRaises(SchedulingError):
+            generate_stage_matches(stage, entries=teams)
+
+    def test_double_elim_grand_final_sources_the_right_matches(self):
+        teams = self.make_teams(4)
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="DE", format=TournamentStage.Format.DOUBLE_ELIM)
+
+        matches = generate_stage_matches(stage, entries=teams)
+
+        self.assertEqual(len(matches), 5)  # 2 semis + winners final + 1 losers round + grand final
+        grand_final = matches[-1]
+        self.assertEqual(grand_final.round_label, "Grand final")
+        winners_final = matches[2]
+        losers_final = matches[3]
+        self.assertEqual(grand_final.home_source_match_id, winners_final.pk)
+        self.assertTrue(grand_final.home_source_is_winner)
+        self.assertEqual(grand_final.away_source_match_id, losers_final.pk)
+        self.assertTrue(grand_final.away_source_is_winner)
+        # The losers-round match takes the LOSER of each semifinal, not the winner.
+        self.assertFalse(losers_final.home_source_is_winner)
+        self.assertFalse(losers_final.away_source_is_winner)
+
+
+class ResolveMatchSlotsTests(TournamentsTestCase):
+    def test_completing_a_match_advances_the_winner(self):
+        teams = self.make_teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 5)]
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="KO", format=TournamentStage.Format.SINGLE_ELIM)
+        generate_stage_matches(stage, entries=teams)
+        semi = Match.objects.get(stage=stage, round_number=1, sequence=0)
+        semi.score_home, semi.score_away, semi.status = 3, 1, Match.Status.COMPLETE
+        semi.save()
+
+        updated = resolve_match_slots(semi)
+
+        final = Match.objects.get(stage=stage, round_number=2)
+        self.assertEqual(len(updated), 1)
+        self.assertEqual(final.home_team_id or final.away_team_id, semi.home_team_id)
+
+    def test_incomplete_match_resolves_nothing(self):
+        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 5)]
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="KO", format=TournamentStage.Format.SINGLE_ELIM)
+        generate_stage_matches(stage, entries=teams)
+        semi = Match.objects.get(stage=stage, round_number=1, sequence=0)
+
+        self.assertEqual(resolve_match_slots(semi), [])
+
+    def test_group_completion_resolves_a_crossover_slot(self):
+        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 3)]
+        group_stage = TournamentStage.objects.create(tournament=self.tournament, name="Groups", format=TournamentStage.Format.GROUPS, sequence=0, config={"num_groups": 1})
+        generate_stage_matches(group_stage, entries=teams)
+        group = group_stage.groups.get()
+        knockout_stage = TournamentStage.objects.create(tournament=self.tournament, name="Final", format=TournamentStage.Format.CUSTOM, sequence=1)
+        crossover = Match.objects.create(stage=knockout_stage, round_number=1, home_source_group=group, home_source_rank=1)
+
+        only_match = group.matches.get()
+        only_match.score_home, only_match.score_away, only_match.status = 2, 0, Match.Status.COMPLETE
+        only_match.save()
+        resolve_match_slots(only_match)
+
+        crossover.refresh_from_db()
+        self.assertEqual(crossover.home_team_id, only_match.home_team_id)
+
+
+class BreakRuleModelTests(TournamentsTestCase):
+    def test_game_count_trigger_requires_its_own_field(self):
+        rule = BreakRule(tournament=self.tournament, trigger_type=BreakRule.TriggerType.GAME_COUNT, gap_minutes=15)
+        with self.assertRaises(ValidationError):
+            rule.full_clean()
+
+    def test_clock_window_requires_no_gap(self):
+        rule = BreakRule(tournament=self.tournament, trigger_type=BreakRule.TriggerType.CLOCK_WINDOW, trigger_window_start=datetime.time(12, 0), trigger_window_end=datetime.time(13, 0))
+        rule.full_clean()  # gap_minutes is meaningless here and correctly not required
+
+    def test_clock_window_end_must_be_after_start(self):
+        rule = BreakRule(tournament=self.tournament, trigger_type=BreakRule.TriggerType.CLOCK_WINDOW, trigger_window_start=datetime.time(13, 0), trigger_window_end=datetime.time(12, 0))
+        with self.assertRaises(ValidationError):
+            rule.full_clean()
+
+    def test_valid_game_count_rule(self):
+        rule = BreakRule(tournament=self.tournament, trigger_type=BreakRule.TriggerType.GAME_COUNT, trigger_every_n_games=3, gap_minutes=15)
+        rule.full_clean()
+
+
+class GapForPlacementTests(TournamentsTestCase):
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.field = TournamentField.objects.create(tournament=cls.tournament, name="Field 1")
+
+    def test_no_rules_falls_back_to_the_default(self):
+        gap, replaces = gap_for_placement(self.field, games_since_last_break=0, minutes_since_last_break=0, round_number=1, just_finished_round_number=None)
+        self.assertEqual(gap, DEFAULT_GAP)
+        self.assertTrue(replaces)
+
+    def test_game_count_rule_fires_once_threshold_reached(self):
+        BreakRule.objects.create(tournament=self.tournament, field=self.field, trigger_type=BreakRule.TriggerType.GAME_COUNT, trigger_every_n_games=3, gap_minutes=15, replaces_default_gap=True)
+
+        gap, replaces = gap_for_placement(self.field, games_since_last_break=3, minutes_since_last_break=0, round_number=1, just_finished_round_number=None)
+
+        self.assertEqual(gap, datetime.timedelta(minutes=15))
+        self.assertTrue(replaces)
+
+    def test_game_count_rule_does_not_fire_before_threshold(self):
+        BreakRule.objects.create(tournament=self.tournament, field=self.field, trigger_type=BreakRule.TriggerType.GAME_COUNT, trigger_every_n_games=3, gap_minutes=15)
+
+        gap, _replaces = gap_for_placement(self.field, games_since_last_break=2, minutes_since_last_break=0, round_number=1, just_finished_round_number=None)
+
+        self.assertEqual(gap, DEFAULT_GAP)
+
+    def test_tournament_wide_rule_applies_to_a_field_with_no_rules_of_its_own(self):
+        other_field = TournamentField.objects.create(tournament=self.tournament, name="Field 2")
+        BreakRule.objects.create(tournament=self.tournament, field=None, trigger_type=BreakRule.TriggerType.GAME_COUNT, trigger_every_n_games=2, gap_minutes=10)
+
+        gap, _replaces = gap_for_placement(other_field, games_since_last_break=2, minutes_since_last_break=0, round_number=1, just_finished_round_number=None)
+
+        self.assertEqual(gap, datetime.timedelta(minutes=10))
+
+    def test_field_specific_rule_does_not_leak_to_another_field(self):
+        other_field = TournamentField.objects.create(tournament=self.tournament, name="Field 2")
+        BreakRule.objects.create(tournament=self.tournament, field=self.field, trigger_type=BreakRule.TriggerType.GAME_COUNT, trigger_every_n_games=1, gap_minutes=99)
+
+        gap, _replaces = gap_for_placement(other_field, games_since_last_break=5, minutes_since_last_break=0, round_number=1, just_finished_round_number=None)
+
+        self.assertEqual(gap, DEFAULT_GAP)
+
+    def test_lower_priority_number_wins_over_a_later_rule(self):
+        BreakRule.objects.create(tournament=self.tournament, field=self.field, trigger_type=BreakRule.TriggerType.GAME_COUNT, trigger_every_n_games=1, gap_minutes=10, priority=5)
+        BreakRule.objects.create(tournament=self.tournament, field=self.field, trigger_type=BreakRule.TriggerType.GAME_COUNT, trigger_every_n_games=1, gap_minutes=20, priority=1)
+
+        gap, _replaces = gap_for_placement(self.field, games_since_last_break=1, minutes_since_last_break=0, round_number=1, just_finished_round_number=None)
+
+        self.assertEqual(gap, datetime.timedelta(minutes=20))
+
+    def test_round_boundary_fires_only_moving_into_the_next_round(self):
+        BreakRule.objects.create(tournament=self.tournament, field=self.field, trigger_type=BreakRule.TriggerType.ROUND_BOUNDARY, trigger_after_round_number=1, gap_minutes=20)
+
+        fires, _r = gap_for_placement(self.field, games_since_last_break=0, minutes_since_last_break=0, round_number=2, just_finished_round_number=1)
+        self.assertEqual(fires, datetime.timedelta(minutes=20))
+
+        no_fire, _r = gap_for_placement(self.field, games_since_last_break=0, minutes_since_last_break=0, round_number=1, just_finished_round_number=None)
+        self.assertEqual(no_fire, DEFAULT_GAP)
+
+
+class AllocateScheduleTests(TournamentsTestCase):
+    def test_raises_without_any_fields(self):
+        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 5)]
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
+        generate_stage_matches(stage, entries=teams)
+
+        with self.assertRaises(SchedulingError):
+            allocate_schedule(self.tournament)
+
+    def test_no_two_matches_share_a_field_and_overlap(self):
+        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 9)]
+        TournamentField.objects.create(tournament=self.tournament, name="Field 1", availability=[{"date": "2026-09-19", "start": "09:00", "end": "20:00"}])
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
+        generate_stage_matches(stage, entries=teams)
+
+        allocate_schedule(self.tournament)
+
+        by_field = list(Match.objects.filter(stage=stage).order_by("scheduled_start"))
+        for earlier, later in itertools.pairwise(by_field):
+            self.assertLessEqual(earlier.scheduled_start + DEFAULT_MATCH_DURATION, later.scheduled_start)
+
+    def test_a_team_never_double_booked_across_fields(self):
+        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 5)]
+        TournamentField.objects.create(tournament=self.tournament, name="Field 1", availability=[{"date": "2026-09-19", "start": "09:00", "end": "20:00"}])
+        TournamentField.objects.create(tournament=self.tournament, name="Field 2", availability=[{"date": "2026-09-19", "start": "09:00", "end": "20:00"}])
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
+        generate_stage_matches(stage, entries=teams)
+
+        allocate_schedule(self.tournament)
+
+        for team in teams:
+            team_matches = sorted(Match.objects.filter(stage=stage).filter(models.Q(home_team=team) | models.Q(away_team=team)), key=lambda m: m.scheduled_start)
+            for earlier, later in itertools.pairwise(team_matches):
+                self.assertLessEqual(earlier.scheduled_start + DEFAULT_MATCH_DURATION, later.scheduled_start)
+
+    def test_break_rule_gap_is_honoured_on_the_field(self):
+        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 9)]
+        field = TournamentField.objects.create(tournament=self.tournament, name="Field 1", availability=[{"date": "2026-09-19", "start": "09:00", "end": "20:00"}])
+        BreakRule.objects.create(tournament=self.tournament, field=field, trigger_type=BreakRule.TriggerType.GAME_COUNT, trigger_every_n_games=1, gap_minutes=30, replaces_default_gap=True)
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
+        generate_stage_matches(stage, entries=teams)
+
+        allocate_schedule(self.tournament)
+
+        ordered = list(Match.objects.filter(stage=stage).order_by("scheduled_start"))
+        gap = ordered[1].scheduled_start - (ordered[0].scheduled_start + DEFAULT_MATCH_DURATION)
+        self.assertEqual(gap, datetime.timedelta(minutes=30))
+
+    def test_tbd_matches_are_left_unscheduled(self):
+        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 5)]
+        TournamentField.objects.create(tournament=self.tournament, name="Field 1", availability=[{"date": "2026-09-19", "start": "09:00", "end": "20:00"}])
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="KO", format=TournamentStage.Format.SINGLE_ELIM)
+        generate_stage_matches(stage, entries=teams)
+
+        allocate_schedule(self.tournament)
+
+        final = Match.objects.get(stage=stage, round_number=2)
+        self.assertIsNone(final.scheduled_start)
+
+
+class ValidatePlacementTests(TournamentsTestCase):
+    def test_detects_field_double_booking(self):
+        field = TournamentField.objects.create(tournament=self.tournament, name="Field 1")
+        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}") for i in range(1, 5)]
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.CUSTOM)
+        start = timezone.now() + datetime.timedelta(days=1)
+        existing = Match.objects.create(stage=stage, home_team=teams[0], away_team=teams[1], field=field, scheduled_start=start)
+        candidate = Match.objects.create(stage=stage, home_team=teams[2], away_team=teams[3])
+
+        violations = validate_placement(candidate, field, start, start + DEFAULT_MATCH_DURATION)
+
+        self.assertTrue(violations)
+        existing.delete()
+
+    def test_no_violations_for_a_clean_placement(self):
+        field = TournamentField.objects.create(tournament=self.tournament, name="Field 1")
+        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}") for i in range(1, 3)]
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.CUSTOM)
+        candidate = Match.objects.create(stage=stage, home_team=teams[0], away_team=teams[1])
+        start = timezone.now() + datetime.timedelta(days=1)
+
+        self.assertEqual(validate_placement(candidate, field, start, start + DEFAULT_MATCH_DURATION), [])
+
+    def test_detects_a_team_already_playing_elsewhere(self):
+        field_a = TournamentField.objects.create(tournament=self.tournament, name="Field 1")
+        field_b = TournamentField.objects.create(tournament=self.tournament, name="Field 2")
+        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}") for i in range(1, 5)]
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.CUSTOM)
+        start = timezone.now() + datetime.timedelta(days=1)
+        Match.objects.create(stage=stage, home_team=teams[0], away_team=teams[1], field=field_a, scheduled_start=start)
+        candidate = Match.objects.create(stage=stage, home_team=teams[0], away_team=teams[2])
+
+        violations = validate_placement(candidate, field_b, start, start + DEFAULT_MATCH_DURATION)
+
+        self.assertTrue(violations)
+
+    def test_detects_a_blackout_window_overlap(self):
+        field = TournamentField.objects.create(tournament=self.tournament, name="Field 1")
+        BreakRule.objects.create(tournament=self.tournament, trigger_type=BreakRule.TriggerType.CLOCK_WINDOW, trigger_window_start=datetime.time(12, 0), trigger_window_end=datetime.time(13, 0))
+        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}") for i in range(1, 3)]
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.CUSTOM)
+        candidate = Match.objects.create(stage=stage, home_team=teams[0], away_team=teams[1])
+        start = timezone.make_aware(datetime.datetime(2026, 9, 19, 12, 15))
+
+        violations = validate_placement(candidate, field, start, start + DEFAULT_MATCH_DURATION)
+
+        self.assertTrue(violations)
+
+
+class ComputeStandingsTests(TournamentsTestCase):
+    def make_group_stage(self, count):
+        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, count + 1)]
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
+        generate_stage_matches(stage, entries=teams)
+        return stage, teams
+
+    def complete(self, match, home_score, away_score):
+        match.score_home, match.score_away, match.status = home_score, away_score, Match.Status.COMPLETE
+        match.save()
+
+    def test_points_rank_a_clear_winner_first(self):
+        stage, teams = self.make_group_stage(3)
+        for match in stage.matches.all():
+            winner_is_home = match.home_team.seed < match.away_team.seed
+            self.complete(match, 2 if winner_is_home else 0, 0 if winner_is_home else 2)
+
+        standings = compute_standings(stage)
+
+        self.assertEqual(standings[0]["team"], teams[0])
+        self.assertEqual(standings[0]["points"], 6)
+        self.assertEqual(standings[-1]["points"], 0)
+
+    def test_goal_difference_breaks_a_points_tie(self):
+        stage, teams = self.make_group_stage(3)
+        a, b, c = teams
+        matches = {frozenset((m.home_team_id, m.away_team_id)): m for m in stage.matches.all()}
+        self.complete(matches[frozenset((a.id, b.id))], 5, 0)  # a beats b big
+        self.complete(matches[frozenset((b.id, c.id))], 2, 0)  # b beats c
+        self.complete(matches[frozenset((a.id, c.id))], 0, 1)  # c beats a
+
+        standings = compute_standings(stage)
+        # a: 3 pts, +5 gd. b: 3 pts, -3 gd. c: 3 pts, -2 gd. -- a wins on gd, b last.
+        self.assertEqual(standings[0]["team"], a)
+        self.assertEqual(standings[-1]["team"], b)
+
+    def test_incomplete_matches_do_not_count(self):
+        stage, _teams = self.make_group_stage(3)
+        matches = list(stage.matches.all())
+        self.complete(matches[0], 1, 0)
+
+        standings = compute_standings(stage)
+
+        total_played = sum(row["played"] for row in standings)
+        self.assertEqual(total_played, 2)  # only the one completed match's two teams
+
+    def test_standings_config_overrides_default_points(self):
+        stage, _teams = self.make_group_stage(2)
+        match = stage.matches.get()
+        stage.standings_config = {"points": {"win": 5, "draw": 2, "loss": 1}}
+        stage.save()
+        self.complete(match, 3, 3)
+
+        standings = compute_standings(stage)
+
+        self.assertEqual(standings[0]["points"], 2)
+        self.assertEqual(standings[1]["points"], 2)
+
+
+class ComputeStandingsHeadToHeadTests(TournamentsTestCase):
+    """A genuine 3-way tie that only head_to_head, not goal_diff/goals_for,
+    can break -- A/B/C finish on identical points, goal-difference and
+    goals-for once matches against two outside teams (D/E) are folded in,
+    but their results against *each other alone* have a clear order."""
+
+    def test_a_genuine_three_way_tie_is_broken_by_head_to_head_alone(self):
+        team_a, team_b, team_c, team_d, team_e = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=name, seed=seed) for seed, name in enumerate(["A", "B", "C", "D", "E"], start=1)]
+        stage = TournamentStage.objects.create(
+            tournament=self.tournament,
+            name="RR",
+            format=TournamentStage.Format.ROUND_ROBIN,
+            standings_config={"tiebreakers": ["head_to_head", "goal_diff", "goals_for"]},
+        )
+        generate_stage_matches(stage, entries=[team_a, team_b, team_c, team_d, team_e])
+        matches = {frozenset((m.home_team_id, m.away_team_id)): m for m in stage.matches.all()}
+
+        def complete(winner, loser, winner_score=2, loser_score=0):
+            match = matches[frozenset((winner.id, loser.id))]
+            if match.home_team_id == winner.id:
+                match.score_home, match.score_away = winner_score, loser_score
+            else:
+                match.score_home, match.score_away = loser_score, winner_score
+            match.status = Match.Status.COMPLETE
+            match.save()
+
+        # Head-to-head among the trio alone: A beats both, B beats only C,
+        # C beats neither -- a clean, non-cyclic order (A > B > C).
+        complete(team_a, team_b)
+        complete(team_a, team_c)
+        complete(team_b, team_c)
+        # Games against D/E are chosen so every one of A/B/C ends up with the
+        # *exact same* overall points, goal-difference and goals-for -- so
+        # only head_to_head (not any other criterion) can possibly separate
+        # them, and D/E themselves stay out of the tied group entirely.
+        complete(team_d, team_a)
+        complete(team_e, team_a)
+        complete(team_d, team_b)
+        complete(team_b, team_e)
+        complete(team_c, team_d)
+        complete(team_c, team_e)
+        # D vs E is deliberately left unplayed -- irrelevant to the trio.
+
+        standings = compute_standings(stage)
+        by_team = {row["team"].id: row for row in standings}
+
+        self.assertEqual(by_team[team_a.id]["points"], by_team[team_b.id]["points"])
+        self.assertEqual(by_team[team_b.id]["points"], by_team[team_c.id]["points"])
+        self.assertEqual(by_team[team_a.id]["goal_diff"], by_team[team_b.id]["goal_diff"])
+        self.assertEqual(by_team[team_b.id]["goal_diff"], by_team[team_c.id]["goal_diff"])
+        self.assertEqual(by_team[team_a.id]["goals_for"], by_team[team_b.id]["goals_for"])
+        self.assertEqual(by_team[team_b.id]["goals_for"], by_team[team_c.id]["goals_for"])
+
+        trio_order = [row["team"] for row in standings if row["team"] in (team_a, team_b, team_c)]
+        self.assertEqual(trio_order, [team_a, team_b, team_c])
+
+
+class SingleEliminationStressTests(TournamentsTestCase):
+    """Larger, less-trivial single-elimination sizes than
+    GenerateStageMatchesTests' own 8-team/3-team cases -- an exact power of
+    two with no byes at all, and an awkward size with several unevenly-spread
+    byes, both fully played out to make sure the bracket graph always
+    resolves cleanly with no lingering TBD slots."""
+
+    def make_teams(self, count):
+        return [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"Team {i}", seed=i) for i in range(1, count + 1)]
+
+    def play_out(self, stage):
+        """Plays every real (non-walkover) match to completion, round by
+        round, the lower seed number (stronger) always winning -- calling
+        resolve_match_slots after each so a later round always sees its real
+        teams by the time this method reaches it."""
+        for round_number in sorted(stage.matches.values_list("round_number", flat=True).distinct()):
+            for match in list(stage.matches.filter(round_number=round_number, status=Match.Status.SCHEDULED)):
+                match.refresh_from_db()
+                self.assertIsNotNone(match.home_team_id)
+                self.assertIsNotNone(match.away_team_id)
+                if match.home_team.seed < match.away_team.seed:
+                    match.score_home, match.score_away = 2, 0
+                else:
+                    match.score_home, match.score_away = 0, 2
+                match.status = Match.Status.COMPLETE
+                match.save()
+                resolve_match_slots(match)
+
+    def test_16_teams_exact_power_of_two_has_no_byes(self):
+        teams = self.make_teams(16)
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="KO16", format=TournamentStage.Format.SINGLE_ELIM)
+
+        matches = generate_stage_matches(stage, entries=teams)
+
+        self.assertEqual(len(matches), 15)  # len(entries) - 1, no byes to subtract
+        self.assertEqual(Match.objects.filter(stage=stage, status=Match.Status.WALKOVER).count(), 0)
+        round1 = [m for m in matches if m.round_number == 1]
+        round1_seeds = set()
+        for m in round1:
+            round1_seeds.update([m.home_team.seed, m.away_team.seed])
+        self.assertEqual(round1_seeds, {team.seed for team in teams})  # every entry, exactly once
+
+        self.play_out(stage)
+
+        self.assertFalse(Match.objects.filter(stage=stage, home_team__isnull=True).exists())
+        self.assertFalse(Match.objects.filter(stage=stage, away_team__isnull=True).exists())
+        final = Match.objects.get(stage=stage, round_number=4)
+        self.assertEqual(final.winner.seed, 1)  # seed 1 never loses under this simulation
+        losers = [m.loser for m in stage.matches.all()]
+        self.assertEqual(len({loser.id for loser in losers}), 15)  # every non-champion eliminated exactly once
+        self.assertNotIn(final.winner, losers)
+
+    def test_11_teams_awkward_size_has_multiple_uneven_byes(self):
+        teams = self.make_teams(11)
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="KO11", format=TournamentStage.Format.SINGLE_ELIM)
+
+        matches = generate_stage_matches(stage, entries=teams)
+
+        # Bracket size is 16 (next power of two above 11): 16 - 11 = 5 byes,
+        # so 15 slots total, but only len(entries) - 1 = 10 of them are real,
+        # played matches -- a bye is a free pass, not a game.
+        real_matches = [m for m in matches if m.status != Match.Status.WALKOVER]
+        walkover_matches = [m for m in matches if m.status == Match.Status.WALKOVER]
+        self.assertEqual(len(matches), 15)
+        self.assertEqual(len(walkover_matches), 5)
+        self.assertEqual(len(real_matches), len(teams) - 1)
+
+        round1 = [m for m in matches if m.round_number == 1]
+        round1_seeds = set()
+        for m in round1:
+            if m.home_team_id:
+                round1_seeds.add(m.home_team.seed)
+            if m.away_team_id:
+                round1_seeds.add(m.away_team.seed)
+        self.assertEqual(round1_seeds, {team.seed for team in teams})  # every entry, exactly once
+
+        self.play_out(stage)
+
+        # No lingering TBD anywhere once every real match is complete -- a
+        # WALKOVER match's lone-None side is a deliberate bye, not a bug.
+        self.assertFalse(Match.objects.filter(stage=stage, home_team__isnull=True).exclude(status=Match.Status.WALKOVER).exists())
+        self.assertFalse(Match.objects.filter(stage=stage, away_team__isnull=True).exclude(status=Match.Status.WALKOVER).exists())
+        final = Match.objects.get(stage=stage, round_number=4)
+        self.assertEqual(final.winner.seed, 1)  # seed 1 never loses under this simulation
+
+
+class DoubleEliminationStressTests(TournamentsTestCase):
+    """8- and 16-team double-elimination brackets, fully played out (winners
+    and losers brackets alike) as a straight higher-seed-wins simulation."""
+
+    def make_teams(self, count):
+        return [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"Team {i}", seed=i) for i in range(1, count + 1)]
+
+    def play_out(self, stage):
+        for round_number in sorted(stage.matches.values_list("round_number", flat=True).distinct()):
+            for match in list(stage.matches.filter(round_number=round_number, status=Match.Status.SCHEDULED)):
+                match.refresh_from_db()
+                if match.home_team_id is None or match.away_team_id is None:
+                    continue  # a downstream slot this round's own matches haven't fed yet
+                self.assertNotEqual(match.home_team_id, match.away_team_id)
+                if match.home_team.seed < match.away_team.seed:
+                    match.score_home, match.score_away = 2, 0
+                else:
+                    match.score_home, match.score_away = 0, 2
+                match.status = Match.Status.COMPLETE
+                match.save()
+                resolve_match_slots(match)
+                # No match anywhere in the bracket may ever end up with the
+                # same team on both sides, at any point during the playout.
+                for check in stage.matches.exclude(home_team__isnull=True).exclude(away_team__isnull=True):
+                    self.assertNotEqual(check.home_team_id, check.away_team_id)
+
+    def test_8_teams_resolves_to_a_grand_final_with_seed_1_undefeated(self):
+        teams = self.make_teams(8)
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="DE8", format=TournamentStage.Format.DOUBLE_ELIM)
+        generate_stage_matches(stage, entries=teams)
+
+        self.play_out(stage)
+
+        grand_final = stage.matches.order_by("round_number").last()
+        self.assertEqual(grand_final.round_label, "Grand final")
+        self.assertIsNotNone(grand_final.home_team_id)
+        self.assertIsNotNone(grand_final.away_team_id)
+        self.assertIn(1, {grand_final.home_team.seed, grand_final.away_team.seed})
+
+    def test_16_teams_resolves_to_a_grand_final_with_seed_1_undefeated(self):
+        teams = self.make_teams(16)
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="DE16", format=TournamentStage.Format.DOUBLE_ELIM)
+        generate_stage_matches(stage, entries=teams)
+
+        self.play_out(stage)
+
+        grand_final = stage.matches.order_by("round_number").last()
+        self.assertEqual(grand_final.round_label, "Grand final")
+        self.assertIsNotNone(grand_final.home_team_id)
+        self.assertIsNotNone(grand_final.away_team_id)
+        self.assertIn(1, {grand_final.home_team.seed, grand_final.away_team.seed})
+
+
+class SwissStressTests(TournamentsTestCase):
+    """Several rounds of Swiss, played out with deterministic (higher-seed-
+    always-wins) results between generations -- hunting for forced repeat
+    pairings and for generate_next_swiss_round's own completeness guard."""
+
+    def make_teams(self, count):
+        return [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"Team {i}", seed=i) for i in range(1, count + 1)]
+
+    def complete_round(self, stage, round_number):
+        for match in stage.matches.filter(round_number=round_number):
+            if match.home_team.seed < match.away_team.seed:
+                match.score_home, match.score_away = 2, 0
+            else:
+                match.score_home, match.score_away = 0, 2
+            match.status = Match.Status.COMPLETE
+            match.save()
+
+    def test_pairings_never_repeat_across_three_rounds_with_a_large_enough_field(self):
+        teams = self.make_teams(8)
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="Swiss", format=TournamentStage.Format.SWISS)
+
+        generate_stage_matches(stage, entries=teams)  # round 1: seed order
+        self.complete_round(stage, 1)
+        generate_next_swiss_round(stage)  # round 2: paired by standings
+        self.complete_round(stage, 2)
+        generate_next_swiss_round(stage)  # round 3: paired by standings again
+
+        pairings_seen = set()
+        for match in stage.matches.all():
+            pair = frozenset((match.home_team_id, match.away_team_id))
+            self.assertNotIn(pair, pairings_seen, "Swiss re-paired the same two teams with a large enough field available.")
+            pairings_seen.add(pair)
+
+    def test_generating_round_one_again_before_it_completes_raises(self):
+        teams = self.make_teams(8)
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="Swiss", format=TournamentStage.Format.SWISS)
+        generate_stage_matches(stage, entries=teams)  # round 1, deliberately left incomplete
+
+        with self.assertRaises(SchedulingError):
+            generate_next_swiss_round(stage)
+
+    def test_generating_round_three_before_round_two_completes_raises(self):
+        teams = self.make_teams(8)
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="Swiss", format=TournamentStage.Format.SWISS)
+        generate_stage_matches(stage, entries=teams)
+        self.complete_round(stage, 1)
+        generate_next_swiss_round(stage)  # round 2, deliberately left incomplete
+
+        with self.assertRaises(SchedulingError):
+            generate_next_swiss_round(stage)
+
+
+class AllocateScheduleStressTests(TournamentsTestCase):
+    """allocate_schedule under harsher conditions than AllocateScheduleTests'
+    own small fixtures: far more matches than a single field can cleanly
+    interleave, and a blackout rule that swallows the entire working day."""
+
+    def test_16_teams_one_field_never_overlaps(self):
+        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 17)]
+        TournamentField.objects.create(tournament=self.tournament, name="Field 1", availability=[{"date": "2026-09-19", "start": "09:00", "end": "20:00"}])
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
+        generate_stage_matches(stage, entries=teams)
+
+        allocate_schedule(self.tournament)
+
+        ordered = list(Match.objects.filter(stage=stage).order_by("scheduled_start"))
+        self.assertEqual(len(ordered), 120)  # 16 choose 2
+        for earlier, later in itertools.pairwise(ordered):
+            self.assertLessEqual(earlier.scheduled_start + DEFAULT_MATCH_DURATION, later.scheduled_start)
+
+    def test_blackout_spanning_the_whole_working_window_pushes_every_match_past_it(self):
+        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 5)]
+        field = TournamentField.objects.create(tournament=self.tournament, name="Field 1", availability=[{"date": "2026-09-19", "start": "09:00", "end": "20:00"}])
+        BreakRule.objects.create(tournament=self.tournament, field=field, trigger_type=BreakRule.TriggerType.CLOCK_WINDOW, trigger_window_start=datetime.time(9, 0), trigger_window_end=datetime.time(20, 0))
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
+        generate_stage_matches(stage, entries=teams)
+
+        allocate_schedule(self.tournament)
+
+        for match in Match.objects.filter(stage=stage):
+            local_time = timezone.localtime(match.scheduled_start).time()
+            self.assertFalse(datetime.time(9, 0) <= local_time < datetime.time(20, 0))
+
+
+class TournamentAdminActionsTests(TournamentsTestCase):
+    """The Django admin actions that make the scheduling engine clickable --
+    called directly on the ModelAdmin instance (RequestFactory + a fallback
+    messages storage), the same message-capturing setup as
+    controlpanel.tests.NotifyTests' own request()."""
+
+    def make_teams(self, count):
+        return [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, count + 1)]
+
+    def make_request(self):
+        request = RequestFactory().get("/")
+        request.session = {}
+        storage = FallbackStorage(request)
+        request._messages = storage
+        return request, storage
+
+    def test_generate_matches_action_creates_matches_and_shows_success(self):
+        self.make_teams(4)
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
+        model_admin = TournamentStageAdmin(TournamentStage, admin.site)
+        request, storage = self.make_request()
+
+        model_admin.generate_matches(request, TournamentStage.objects.filter(pk=stage.pk))
+
+        self.assertEqual(stage.matches.count(), 6)  # 4 choose 2
+        [message] = list(storage)
+        self.assertEqual(message.level, messages.SUCCESS)
+
+    def test_generate_matches_action_shows_error_and_creates_nothing_when_already_generated(self):
+        teams = self.make_teams(4)
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
+        generate_stage_matches(stage, entries=teams)
+        existing_count = stage.matches.count()
+        model_admin = TournamentStageAdmin(TournamentStage, admin.site)
+        request, storage = self.make_request()
+
+        model_admin.generate_matches(request, TournamentStage.objects.filter(pk=stage.pk))
+
+        self.assertEqual(stage.matches.count(), existing_count)
+        [message] = list(storage)
+        self.assertEqual(message.level, messages.ERROR)
+
+    def test_allocate_schedule_action_schedules_matches(self):
+        teams = self.make_teams(4)
+        TournamentField.objects.create(tournament=self.tournament, name="Field 1", availability=[{"date": "2026-09-19", "start": "09:00", "end": "20:00"}])
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
+        generate_stage_matches(stage, entries=teams)
+        model_admin = TournamentAdmin(Tournament, admin.site)
+        request, storage = self.make_request()
+
+        model_admin.allocate_schedule_action(request, Tournament.objects.filter(pk=self.tournament.pk))
+
+        self.assertTrue(Match.objects.filter(stage=stage, scheduled_start__isnull=False).exists())
+        [message] = list(storage)
+        self.assertEqual(message.level, messages.SUCCESS)
+
+    def test_allocate_schedule_action_shows_error_when_no_fields_yet(self):
+        teams = self.make_teams(4)
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
+        generate_stage_matches(stage, entries=teams)
+        model_admin = TournamentAdmin(Tournament, admin.site)
+        request, storage = self.make_request()
+
+        model_admin.allocate_schedule_action(request, Tournament.objects.filter(pk=self.tournament.pk))
+
+        self.assertFalse(Match.objects.filter(stage=stage, scheduled_start__isnull=False).exists())
+        [message] = list(storage)
+        self.assertEqual(message.level, messages.ERROR)

@@ -1,9 +1,10 @@
-from django.contrib import admin
+from django.contrib import admin, messages
 from django.urls import reverse
 from django.utils.html import format_html
 from django.utils.translation import gettext_lazy as _
 
 from .models import (
+    BreakRule,
     DressingRoom,
     DressingRoomAssignment,
     Match,
@@ -20,6 +21,7 @@ from .models import (
     TournamentTaskClaim,
     TournamentTeam,
 )
+from .services.scheduling import SchedulingError, allocate_schedule, generate_stage_matches
 
 
 class TournamentStageInline(admin.TabularInline):
@@ -37,6 +39,16 @@ class TournamentFieldInline(admin.TabularInline):
     raw_id_fields = ["location"]
 
 
+class BreakRuleInline(admin.TabularInline):
+    """Break policy shown on the Tournament page -- edited here rather than
+    on a standalone page for now, since a tournament's whole rule set is
+    small and is easiest to review together."""
+
+    model = BreakRule
+    extra = 0
+    raw_id_fields = ["field"]
+
+
 @admin.register(Tournament)
 class TournamentAdmin(admin.ModelAdmin):
     list_display = ["name", "club", "season", "status", "start_date", "end_date"]
@@ -45,7 +57,8 @@ class TournamentAdmin(admin.ModelAdmin):
     prepopulated_fields = {"slug": ["name"]}
     raw_id_fields = ["event"]
     readonly_fields = ["registration_queue_link"]
-    inlines = [TournamentStageInline, TournamentFieldInline]
+    inlines = [TournamentStageInline, TournamentFieldInline, BreakRuleInline]
+    actions = ["allocate_schedule_action"]
 
     @admin.display(description=_("registration review"))
     def registration_queue_link(self, obj):
@@ -56,6 +69,21 @@ class TournamentAdmin(admin.ModelAdmin):
             return "—"
         url = reverse("management:tournament_registration_queue", args=[obj.pk])
         return format_html('<a href="{}">{}</a>', url, _("Review registrations"))
+
+    @admin.action(description=_("Allocate schedule"))
+    def allocate_schedule_action(self, request, queryset):
+        # Stopgap for phase 3 -- one call per selected tournament, straight
+        # try/except per object, no intermediate form. The real manual
+        # schedule editor is later work; this just makes the existing
+        # allocate_schedule() service clickable.
+        scheduled_count = 0
+        for tournament in queryset:
+            try:
+                scheduled_count += len(allocate_schedule(tournament))
+            except SchedulingError as error:
+                self.message_user(request, str(error), level=messages.ERROR)
+        if scheduled_count:
+            self.message_user(request, _("Scheduled %(count)s match(es).") % {"count": scheduled_count}, level=messages.SUCCESS)
 
 
 @admin.register(TournamentField)
@@ -83,6 +111,20 @@ class TournamentStageAdmin(admin.ModelAdmin):
     search_fields = ["name", "tournament__name"]
     raw_id_fields = ["tournament"]
     inlines = [TournamentGroupInline]
+    actions = ["generate_matches"]
+
+    @admin.action(description=_("Generate matches"))
+    def generate_matches(self, request, queryset):
+        # Stopgap for phase 3 -- see TournamentAdmin.allocate_schedule_action's
+        # own comment on why this is a plain admin action, not a form/editor.
+        created_count = 0
+        for stage in queryset:
+            try:
+                created_count += len(generate_stage_matches(stage))
+            except SchedulingError as error:
+                self.message_user(request, str(error), level=messages.ERROR)
+        if created_count:
+            self.message_user(request, _("Generated %(count)s match(es).") % {"count": created_count}, level=messages.SUCCESS)
 
 
 @admin.register(TournamentGroup)

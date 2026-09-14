@@ -102,6 +102,88 @@ class TournamentField(UUIDModel):
         return f"{self.tournament} - {self.name}"
 
 
+class BreakRule(UUIDModel):
+    """One rule in a tournament's break policy -- e.g. "5 minutes between any
+    two games" (the mandatory default every tournament falls back to when no
+    rule fires, enforced in ``tournaments.services.scheduling``, not stored
+    as a row itself) plus "every 3rd game on Field 2 needs 15 minutes
+    instead" or "no games 12:00-13:00, any field". Not itself club-scoped --
+    its club is reached through ``tournament``.
+
+    Rules are evaluated in ``priority`` order (lower first), first match
+    wins, same "ordered list, first match wins, mandatory fallback" shape as
+    a firewall ruleset -- there is no single query that expresses "the right
+    gap for this candidate slot," so this is deliberately a rule *engine*
+    the scheduler consults, not a field on ``TournamentField`` itself.
+
+    ``field`` null means tournament-wide (applies to every field); set means
+    that one field only. Exactly one of the trigger-specific field groups
+    below is meaningful, selected by ``trigger_type`` -- enforced in
+    ``clean()`` rather than a ``CheckConstraint`` (four-way, more than any
+    existing xor pair in this codebase, same reasoning ``Match.clean()``
+    gives for its own three-way per-side check).
+    """
+
+    class TriggerType(models.TextChoices):
+        GAME_COUNT = "game_count", _("every N games on this field")
+        ELAPSED_TIME = "elapsed_time", _("every N minutes of play on this field")
+        ROUND_BOUNDARY = "round_boundary", _("after a specific round finishes on this field")
+        CLOCK_WINDOW = "clock_window", _("blackout window (no games may overlap it)")
+
+    tournament = models.ForeignKey(Tournament, on_delete=models.CASCADE, related_name="break_rules", verbose_name=_("tournament"))
+    field = models.ForeignKey(TournamentField, on_delete=models.CASCADE, null=True, blank=True, related_name="break_rules", verbose_name=_("field"), help_text=_("Left blank to apply to every field."))
+    trigger_type = models.CharField(_("trigger"), max_length=20, choices=TriggerType.choices)
+
+    # GAME_COUNT
+    trigger_every_n_games = models.PositiveSmallIntegerField(_("every N games"), null=True, blank=True)
+    # ELAPSED_TIME
+    trigger_every_n_minutes = models.PositiveSmallIntegerField(_("every N minutes of play"), null=True, blank=True)
+    # ROUND_BOUNDARY
+    trigger_after_round_number = models.PositiveSmallIntegerField(_("after round number"), null=True, blank=True)
+    # CLOCK_WINDOW
+    trigger_window_start = models.TimeField(_("blackout start"), null=True, blank=True)
+    trigger_window_end = models.TimeField(_("blackout end"), null=True, blank=True)
+
+    #: Minutes to insert before the next game. Meaningless (left null) for
+    #: CLOCK_WINDOW, which is a hard exclusion band, not a gap to add.
+    gap_minutes = models.PositiveSmallIntegerField(_("gap (minutes)"), null=True, blank=True)
+    #: True: this gap stands in place of the tournament's own mandatory
+    #: default gap. False: it's additive, inserted on top of the default.
+    replaces_default_gap = models.BooleanField(_("replaces the default gap"), default=True)
+    priority = models.PositiveSmallIntegerField(_("priority"), default=0, help_text=_("Lower runs first; the first matching rule wins."))
+
+    class Meta:
+        verbose_name = _("break rule")
+        verbose_name_plural = _("break rules")
+        ordering = ["tournament", "priority"]
+
+    def __str__(self):
+        return f"{self.tournament} - {self.get_trigger_type_display()}"
+
+    def clean(self):
+        errors = {}
+        if self.trigger_type == self.TriggerType.GAME_COUNT:
+            if not self.trigger_every_n_games:
+                errors["trigger_every_n_games"] = _("Required for this trigger.")
+        elif self.trigger_type == self.TriggerType.ELAPSED_TIME:
+            if not self.trigger_every_n_minutes:
+                errors["trigger_every_n_minutes"] = _("Required for this trigger.")
+        elif self.trigger_type == self.TriggerType.ROUND_BOUNDARY:
+            if not self.trigger_after_round_number:
+                errors["trigger_after_round_number"] = _("Required for this trigger.")
+        elif self.trigger_type == self.TriggerType.CLOCK_WINDOW:
+            if not self.trigger_window_start or not self.trigger_window_end:
+                errors["trigger_window_start"] = _("Both a start and an end are required for this trigger.")
+            elif self.trigger_window_end <= self.trigger_window_start:
+                errors["trigger_window_end"] = _("Must be after the start.")
+
+        if self.trigger_type != self.TriggerType.CLOCK_WINDOW and not self.gap_minutes:
+            errors["gap_minutes"] = _("Required for every trigger except a blackout window.")
+
+        if errors:
+            raise ValidationError(errors)
+
+
 class TournamentStage(UUIDModel):
     """One phase of a tournament's format -- "Group Stage", then "Final Four".
     Not itself club-scoped -- its club is reached through ``tournament``.
