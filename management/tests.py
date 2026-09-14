@@ -14035,6 +14035,104 @@ class TournamentRegistrationQueueTests(ManagementTestBase):
         self.assertEqual(self.club_post("tournament_team_withdraw", {}, other_team.pk).status_code, 404)
 
 
+class TournamentTeamListTests(ManagementTestBase):
+    """management:tournament_team_list/tournament_team_create/
+    tournament_team_payment_update -- the tournament's own "Teams" tab, same
+    gating/fixture conventions as TournamentRegistrationQueueTests."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        today = timezone.localdate()
+        cls.tournament = Tournament.objects.create(club=cls.club, name="Fall Classic", season=cls.season, start_date=today, end_date=today + datetime.timedelta(days=2))
+        cls.team = Team.objects.create(club=cls.club, name="First Team", short_name="1st")
+
+    def setUp(self):
+        super().setUp()
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def activate_flag(self):
+        flag, _created = get_waffle_flag_model().objects.get_or_create(name="tournaments")
+        flag.clubs.add(self.club)
+
+    def test_list_404s_when_the_flag_is_not_active(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_team_list", self.tournament.pk)
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_list_shows_teams_including_withdrawn_ones(self):
+        self.activate_flag()
+        active = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Active FC")
+        withdrawn = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Gone FC", withdrawn_at=timezone.now(), withdrawal_reason="No-show.")
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_team_list", self.tournament.pk)
+
+        self.assertContains(response, active.foreign_name)
+        self.assertContains(response, withdrawn.foreign_name)
+        self.assertContains(response, "No-show.")
+
+    def test_create_our_own_team_snapshots_its_roster(self):
+        self.activate_flag()
+        position = Position.objects.create(club=self.club, name="Forward", short_name="FW")
+        member = Member.objects.create(first_name="Jane", last_name="Doe")
+        TeamMembership.objects.create(team=self.team, member=member, season=self.season, position=position, jersey_number=7)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("tournament_team_create", {"kind": "club", "team": self.team.pk}, self.tournament.pk)
+
+        self.assertRedirects(response, reverse("management:tournament_team_list", args=[self.tournament.pk]))
+        team = TournamentTeam.objects.get(tournament=self.tournament, team=self.team)
+        self.assertIsNone(team.registration)
+        self.assertEqual(team.roster_entries.count(), 1)
+
+    def test_create_another_team_requires_the_foreign_fields(self):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("tournament_team_create", {"kind": "foreign"}, self.tournament.pk)
+
+        self.assertRedirects(response, reverse("management:tournament_team_list", args=[self.tournament.pk]))
+        self.assertFalse(TournamentTeam.objects.filter(tournament=self.tournament).exists())
+
+    def test_create_another_team_with_valid_data(self):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post(
+            "tournament_team_create",
+            {"kind": "foreign", "foreign_name": "Walk-up FC", "foreign_contact_name": "Pat Contact", "foreign_contact_email": "pat@example.com"},
+            self.tournament.pk,
+        )
+
+        self.assertRedirects(response, reverse("management:tournament_team_list", args=[self.tournament.pk]))
+        self.assertTrue(TournamentTeam.objects.filter(tournament=self.tournament, foreign_name="Walk-up FC").exists())
+
+    def test_payment_status_update(self):
+        self.activate_flag()
+        team = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Active FC")
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("tournament_team_payment_update", {"payment_status": "fully_paid"}, team.pk)
+
+        self.assertRedirects(response, reverse("management:tournament_team_list", args=[self.tournament.pk]))
+        team.refresh_from_db()
+        self.assertEqual(team.payment_status, TournamentTeam.PaymentStatus.FULLY_PAID)
+
+    def test_payment_status_update_rejects_an_unknown_value(self):
+        self.activate_flag()
+        team = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Active FC")
+        self.client.force_login(self.admin_user)
+
+        self.club_post("tournament_team_payment_update", {"payment_status": "not-a-real-status"}, team.pk)
+
+        team.refresh_from_db()
+        self.assertEqual(team.payment_status, TournamentTeam.PaymentStatus.UNPAID)
+
+
 class TournamentScheduleTests(ManagementTestBase):
     """management:tournament_schedule and its two inline-edit actions
     (match_reschedule/match_result) -- same gating and fixture conventions as
@@ -14244,6 +14342,7 @@ class TournamentCreateUpdateTests(ManagementTestBase):
             "end_date": (today + datetime.timedelta(days=2)).isoformat(),
             "status": Tournament.Status.DRAFT,
             "description": "",
+            "lunch_mode": Tournament.LunchMode.NONE,
         }
         data.update(overrides)
         return data

@@ -138,11 +138,11 @@ from shop.services.vouchers import delete_manual_consumption, record_manual_cons
 from teams.models import NumberPool, NumberReservation, OfficialLevel, OfficialProfile, Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
 from teams.services import eligible_roster_members, place_member_on_team
 from teams.services.numbers import has_unresolved_conflict
-from tournaments.forms import DressingRoomAssignmentForm, DressingRoomForm, TournamentFieldForm, TournamentForm, TournamentStageForm, TournamentTaskForm
+from tournaments.forms import DressingRoomAssignmentForm, DressingRoomForm, TournamentFieldForm, TournamentForm, TournamentStageForm, TournamentTaskForm, TournamentTeamForm
 from tournaments.models import DressingRoom, DressingRoomAssignment, Match, Tournament, TournamentField, TournamentRegistration, TournamentStage, TournamentTask, TournamentTeam
 from tournaments.services.dressing_rooms import DressingRoomAssignmentError, assign_dressing_room, release_dressing_room
 from tournaments.services.notifications import send_registration_decision_email
-from tournaments.services.registration import RegistrationDecisionError, TeamWithdrawalError, approve_registration, reject_registration, withdraw_team
+from tournaments.services.registration import RegistrationDecisionError, TeamWithdrawalError, approve_registration, create_manual_team, reject_registration, withdraw_team
 from tournaments.services.scheduling import SchedulingError, record_result, reschedule_match
 
 from .bulk_import import build_member_import_template, family_choice_field_name, match_candidate_families, parse_member_import_rows, read_member_import_workbook
@@ -7411,6 +7411,74 @@ class TournamentTeamWithdrawView(TournamentsManagerRequiredMixin, View):
             notify(request, f"s|{_('Team withdrawn')}|" + _("“%(name)s” has been withdrawn from the tournament.") % {"name": team.display_name})
 
         return redirect("management:tournament_registration_queue", tournament_pk=team.tournament_id)
+
+
+class TournamentTeamListView(TournamentsManagerRequiredMixin, TemplateView):
+    """A tournament's own "Teams" tab -- every ``TournamentTeam`` actually in
+    the bracket, withdrawn ones included (de-emphasized in the template, not
+    hidden -- staff need to see who dropped out and why, same reasoning
+    ``TournamentRegistrationQueueView`` keeps decided registrations visible
+    rather than dropping them). Payment status is edited inline (posts
+    straight back here on change, ``TournamentTeamPaymentUpdateView`` below)
+    rather than through a whole edit screen -- it's the one thing staff
+    update often and repeatedly here. "Add team" (``TournamentTeamForm``)
+    lives on this same tab."""
+
+    template_name = "management/tournament_team_list.html"
+
+    def get_context_data(self, **kwargs):
+        tournament = get_object_or_404(Tournament, pk=self.kwargs["tournament_pk"], club=self.request.club)
+        teams = list(tournament.teams.select_related("team"))
+        return super().get_context_data(
+            tournament=tournament,
+            teams=teams,
+            payment_status_choices=TournamentTeam.PaymentStatus.choices,
+            team_form=TournamentTeamForm(club=self.request.club, tournament=tournament),
+            active_tab="teams",
+            **kwargs,
+        )
+
+
+class TournamentTeamPaymentUpdateView(TournamentsManagerRequiredMixin, View):
+    """The Teams tab's own inline payment-status select -- posts straight
+    back on change, one field, no confirmation needed (small, frequent,
+    reversible, same reasoning several other one-field inline updates in
+    this app skip a confirmation step)."""
+
+    def post(self, request, pk):
+        team = get_object_or_404(TournamentTeam, pk=pk, tournament__club=request.club)
+        value = request.POST.get("payment_status")
+        if value not in TournamentTeam.PaymentStatus.values:
+            notify(request, f"e|{_('Could not update payment status')}|{_('Unknown status.')}")
+        else:
+            team.payment_status = value
+            team.save(update_fields=["payment_status"])
+            notify(request, f"s|{_('Payment status updated')}|" + _("“%(name)s” marked %(status)s.") % {"name": team.display_name, "status": team.get_payment_status_display()})
+
+        return redirect("management:tournament_team_list", tournament_pk=team.tournament_id)
+
+
+class TournamentTeamCreateView(TournamentsManagerRequiredMixin, View):
+    """The Teams tab's own "Add team" modal -- tournaments.services.
+    registration.create_manual_team for either the host club's own team or
+    any other team staff want to enter by hand, bypassing the public
+    registration queue entirely."""
+
+    def post(self, request, tournament_pk):
+        tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
+        form = TournamentTeamForm(request.POST, request.FILES, club=request.club, tournament=tournament)
+        if not form.is_valid():
+            for error in form.errors.values():
+                notify(request, f"e|{_('Could not add team')}|{' '.join(error)}")
+            return redirect("management:tournament_team_list", tournament_pk=tournament.pk)
+
+        if form.cleaned_data["kind"] == TournamentTeamForm.KIND_CLUB:
+            team = create_manual_team(tournament, club_team=form.cleaned_data["team"])
+        else:
+            team = create_manual_team(tournament, foreign_fields=form.foreign_fields())
+
+        notify(request, f"s|{_('Team added')}|" + _("“%(name)s” was added to the tournament.") % {"name": team.display_name})
+        return redirect("management:tournament_team_list", tournament_pk=tournament.pk)
 
 
 class TournamentScheduleView(TournamentsManagerRequiredMixin, TemplateView):

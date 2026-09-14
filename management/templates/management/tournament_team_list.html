@@ -1,0 +1,114 @@
+{% extends "management/base.html" %}
+{% load i18n lucide ui %}
+
+{% comment %}
+    A tournament's own "Teams" tab -- every TournamentTeam actually in the
+    bracket (TournamentTeamListView), payment status editable inline (one
+    <select> per row, its own tiny <form>, posts straight back on change --
+    same onchange="this.form.submit()" idiom the filter-strip selects
+    elsewhere in this app use, just scoped to a per-row form/action instead
+    of a page-level GET filter). Withdrawn teams stay listed, dimmed, with
+    their reason shown -- same "keep it visible, don't hide history"
+    reasoning tournament_registration_queue.html already follows for
+    decided registrations.
+
+    "Add team" (team_form, a TournamentTeamForm) creates a TournamentTeam
+    directly, bypassing the public queue -- either the host club's own team
+    or any other team entered by hand. Its "Our own team"/"Another team"
+    radio toggles which field block is relevant via a bit of inline JS
+    (event_form.html's own kind-toggle idiom), targeting each field's
+    wrapper by id rather than needing a custom loop over
+    controlpanel/_form_fields.html's own blind one.
+{% endcomment %}
+
+{% block panel_title %}{{ tournament.name }}{% endblock panel_title %}
+{% block heading %}{{ tournament.name }}{% endblock heading %}
+
+{% block topbar_context %}
+    <span class="badge badge-neutral">{% blocktrans count counter=teams|length %}{{ counter }} team{% plural %}{{ counter }} teams{% endblocktrans %}</span>
+{% endblock topbar_context %}
+
+{% block actions %}
+    <button class="btn btn-primary gap-2" type="button" onclick="document.getElementById('team_create_modal').showModal()">{% lucide "plus" size=16 %} {% trans "Add team" %}</button>
+{% endblock actions %}
+
+{% block panel %}
+    {% include "management/_tournament_tabs.html" with tournament=tournament active_tab="teams" %}
+
+    <div class="card overflow-hidden">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>{% trans "Team" %}</th>
+                    <th>{% trans "Payment" %}</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for team in teams %}
+                    <tr class="{% if team.withdrawn_at %}opacity-60{% endif %}">
+                        <td>
+                            <div class="flex items-center gap-2.5">
+                                {% if team.foreign_logo %}
+                                    <img class="h-7 w-7 shrink-0 rounded object-cover" src="{{ team.foreign_logo.url }}" alt="">
+                                {% endif %}
+                                <div class="min-w-0">
+                                    <div class="font-semibold text-ink">{{ team.display_name }}</div>
+                                    {% if team.withdrawn_at %}
+                                        <div class="text-xs text-club-dark">{% trans "Withdrawn" %}{% if team.withdrawal_reason %} &mdash; {{ team.withdrawal_reason }}{% endif %}</div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </td>
+                        <td>
+                            <form method="post" action="{% url 'management:tournament_team_payment_update' team.pk %}">
+                                {% csrf_token %}
+                                <select name="payment_status" class="select w-auto" onchange="this.form.submit()">
+                                    {% for value, label in payment_status_choices %}
+                                        <option value="{{ value }}" {% if team.payment_status == value %}selected{% endif %}>{{ label }}</option>
+                                    {% endfor %}
+                                </select>
+                            </form>
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="2" class="py-6 text-center text-muted">{% trans "No teams yet." %}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    {% trans "Add team" as add_team_title %}
+    {% url 'management:tournament_team_create' tournament.pk as team_create_url %}
+    {% include "controlpanel/_modal_form.html" with modal_id="team_create_modal" title=add_team_title form=team_form action_url=team_create_url submit_label=add_team_title submit_icon="plus" box_class="max-w-lg" %}
+{% endblock panel %}
+
+{% block extra_body %}
+    <script>
+        // "Our own team" vs "Another team" toggles which field block is
+        // relevant -- same kind-toggle idiom event_form.html/event_series_
+        // form.html already use, just targeting each field's own wrapper by
+        // id (via controlpanel/_form_fields.html's generated "id_<field>")
+        // instead of a custom marker class, since that shared loop has no
+        // per-field hook to add one to.
+        (() => {
+            const kindInputs = document.querySelectorAll('input[name="kind"]');
+            if (!kindInputs.length) return;
+            const clubOnlyIds = ["id_team"];
+            const foreignOnlyIds = ["id_foreign_name", "id_foreign_contact_name", "id_foreign_contact_email", "id_foreign_contact_phone", "id_foreign_primary_color", "id_foreign_secondary_color", "id_foreign_logo"];
+            const wrapperFor = (id) => {
+                const el = document.getElementById(id);
+                return el ? el.closest(".form-control") : null;
+            };
+            const sync = () => {
+                const checked = document.querySelector('input[name="kind"]:checked');
+                const isClub = !!checked && checked.value === "club";
+                clubOnlyIds.forEach((id) => { const wrapper = wrapperFor(id); if (wrapper) wrapper.classList.toggle("hidden", !isClub); });
+                foreignOnlyIds.forEach((id) => { const wrapper = wrapperFor(id); if (wrapper) wrapper.classList.toggle("hidden", isClub); });
+            };
+            kindInputs.forEach((input) => input.addEventListener("change", sync));
+            sync();
+        })();
+    </script>
+{% endblock extra_body %}
