@@ -1,0 +1,81 @@
+{% extends "management/base.html" %}
+{% load i18n lucide ui %}
+
+{% block heading %}{{ tournament.name }}{% endblock heading %}
+{% block topbar_context %}
+    <span class="font-mono text-[13px] text-muted">{% trans "Schedule" %}</span>
+{% endblock topbar_context %}
+
+{% block panel %}
+    {% include "management/_tournament_tabs.html" %}
+
+    {% for stage_row in stages %}
+        <div class="card overflow-hidden">
+            <div class="border-b border-line px-4 py-3">
+                <span class="font-display text-sm font-bold tracking-[.08em] text-ink uppercase">{{ stage_row.stage.name }}</span>
+            </div>
+
+            {% for round_row in stage_row.rounds %}
+                <div class="bg-subhead px-4 py-2">
+                    <span class="font-mono text-xs font-semibold tracking-[.08em] text-muted uppercase">{{ round_row.label }}</span>
+                </div>
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>{% trans "Match" %}</th>
+                            <th>{% trans "Field & time" %}</th>
+                            <th>{% trans "Status" %}</th>
+                            <th>{% trans "Score" %}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for match in round_row.matches %}
+                            <tr>
+                                <td>
+                                    <div class="font-semibold text-ink">{{ match.home_display }} <span class="text-dim">{% trans "vs" %}</span> {{ match.away_display }}</div>
+                                </td>
+                                <td>
+                                    {% if match.home_team_id and match.away_team_id %}
+                                        <form method="post" action="{% url 'management:match_reschedule' match.pk %}" class="flex flex-wrap items-center gap-1.5">
+                                            {% csrf_token %}
+                                            <select name="field" class="select w-auto" aria-label="{% trans 'Field' %}">
+                                                <option value="">{% trans "No field" %}</option>
+                                                {% for field in fields %}
+                                                    <option value="{{ field.pk }}" {% if match.field_id == field.pk %}selected{% endif %}>{{ field.name }}</option>
+                                                {% endfor %}
+                                            </select>
+                                            <input type="datetime-local" name="scheduled_start" class="input w-auto" aria-label="{% trans 'Scheduled start' %}" value="{% if match.scheduled_start %}{{ match.scheduled_start|date:"Y-m-d\TH:i" }}{% endif %}">
+                                            <button class="btn btn-outline btn-sm" type="submit">{% trans "Save" %}</button>
+                                        </form>
+                                    {% else %}
+                                        <span class="text-xs text-dim">{% trans "Not schedulable yet -- waiting on an earlier result." %}</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <span class="badge badge-sm {% if match.status == "complete" %}badge-success{% elif match.status == "cancelled" %}badge-error{% elif match.status == "in_progress" %}badge-info{% elif match.status == "walkover" %}badge-warning{% else %}badge-outline{% endif %}">{{ match.get_status_display }}</span>
+                                </td>
+                                <td>
+                                    {% if match.status == "complete" %}
+                                        <span class="font-mono text-sm text-ink">{{ match.score_home }} - {{ match.score_away }}</span>
+                                    {% elif match.home_team_id and match.away_team_id %}
+                                        <form method="post" action="{% url 'management:match_result' match.pk %}" class="flex items-center gap-1.5">
+                                            {% csrf_token %}
+                                            <input type="number" min="0" name="score_home" class="input w-14" aria-label="{% blocktrans with team=match.home_display %}{{ team }} score{% endblocktrans %}" required>
+                                            <span class="text-dim">-</span>
+                                            <input type="number" min="0" name="score_away" class="input w-14" aria-label="{% blocktrans with team=match.away_display %}{{ team }} score{% endblocktrans %}" required>
+                                            <button class="btn btn-outline btn-sm" type="submit">{% trans "Save" %}</button>
+                                        </form>
+                                    {% else %}
+                                        <span class="text-xs text-dim">&mdash;</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            {% endfor %}
+        </div>
+    {% empty %}
+        <div class="card p-6 text-center text-muted">{% trans "No matches have been generated for this tournament yet." %}</div>
+    {% endfor %}
+{% endblock panel %}

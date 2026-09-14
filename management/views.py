@@ -11,6 +11,7 @@ from django.http import FileResponse, Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from django.utils.decorators import method_decorator
 from django.utils.functional import cached_property
 from django.utils.http import url_has_allowed_host_and_scheme
@@ -137,9 +138,10 @@ from shop.services.vouchers import delete_manual_consumption, record_manual_cons
 from teams.models import NumberPool, NumberReservation, OfficialLevel, OfficialProfile, Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
 from teams.services import eligible_roster_members, place_member_on_team
 from teams.services.numbers import has_unresolved_conflict
-from tournaments.models import Tournament, TournamentRegistration
+from tournaments.models import Match, Tournament, TournamentField, TournamentRegistration
 from tournaments.services.notifications import send_registration_decision_email
 from tournaments.services.registration import RegistrationDecisionError, approve_registration, reject_registration
+from tournaments.services.scheduling import SchedulingError, record_result, reschedule_match
 
 from .bulk_import import build_member_import_template, family_choice_field_name, match_candidate_families, parse_member_import_rows, read_member_import_workbook
 from .email_previews import EMAIL_PREVIEWS, EMAIL_PREVIEWS_BY_KEY, render_preview
@@ -7307,7 +7309,7 @@ class TournamentRegistrationQueueView(TournamentsManagerRequiredMixin, TemplateV
         for registration in registrations:
             registration.is_oldest_pending = registration.pk == oldest_pending_id
 
-        return super().get_context_data(tournament=tournament, registrations=registrations, **kwargs)
+        return super().get_context_data(tournament=tournament, registrations=registrations, active_tab="registrations", **kwargs)
 
 
 class TournamentRegistrationApproveView(TournamentsManagerRequiredMixin, View):
@@ -7346,3 +7348,106 @@ class TournamentRegistrationRejectView(TournamentsManagerRequiredMixin, View):
             notify(request, f"s|{_('Registration rejected')}|" + _("“%(name)s” has been rejected.") % {"name": registration.display_name})
 
         return redirect("management:tournament_registration_queue", tournament_pk=registration.tournament_id)
+
+
+class TournamentScheduleView(TournamentsManagerRequiredMixin, TemplateView):
+    """One tournament's full match schedule -- every ``Match`` across every
+    ``TournamentStage``, grouped by stage then round (mirrors
+    ``VolunteerListView``'s own ``itertools.groupby`` idiom for turning an
+    ordered queryset into a ``[{key, items}, ...]`` shape a template can walk
+    without doing the grouping itself). Each row's inline "field + time" and
+    score forms post to ``MatchRescheduleView``/``MatchResultView`` below."""
+
+    template_name = "management/tournament_schedule.html"
+
+    def get_context_data(self, **kwargs):
+        tournament = get_object_or_404(Tournament, pk=self.kwargs["tournament_pk"], club=self.request.club)
+        matches = Match.objects.filter(stage__tournament=tournament).select_related("stage", "group", "field", "home_team", "away_team").order_by("stage__sequence", "round_number", "sequence")
+
+        stages = []
+        for stage, stage_matches in groupby(matches, key=lambda match: match.stage):
+            rounds = []
+            for round_number, round_matches in groupby(stage_matches, key=lambda match: match.round_number):
+                round_matches = list(round_matches)
+                # A bracket round's matches usually share one round_label
+                # ("Semifinal") -- fall back to a plain "Round N" heading when
+                # none was set (round robin/groups/Swiss never set one).
+                label = next((match.round_label for match in round_matches if match.round_label), "") or (_("Round %(number)d") % {"number": round_number})
+                rounds.append({"round_number": round_number, "label": label, "matches": round_matches})
+            stages.append({"stage": stage, "rounds": rounds})
+
+        fields = list(tournament.fields.all())
+        return super().get_context_data(tournament=tournament, stages=stages, fields=fields, active_tab="schedule", **kwargs)
+
+
+class MatchRescheduleView(TournamentsManagerRequiredMixin, View):
+    """The schedule view's own inline "field + time" form -- always routed
+    through ``tournaments.services.scheduling.reschedule_match``, never a
+    direct ``match.field``/``match.scheduled_start`` write, so a hand-edit
+    can never violate an invariant the auto-generator itself would avoid."""
+
+    def post(self, request, pk):
+        match = get_object_or_404(Match, pk=pk, stage__tournament__club=request.club)
+        tournament = match.stage.tournament
+
+        field = None
+        field_id = request.POST.get("field")
+        if field_id:
+            field = get_object_or_404(TournamentField, pk=field_id, tournament=tournament)
+
+        scheduled_start = parse_datetime(request.POST.get("scheduled_start") or "")
+        if scheduled_start is not None and timezone.is_naive(scheduled_start):
+            scheduled_start = timezone.make_aware(scheduled_start)
+
+        if field is None or scheduled_start is None:
+            notify(request, f"e|{_('Could not reschedule')}|{_('Choose both a field and a time.')}")
+            return redirect("management:tournament_schedule", tournament_pk=tournament.pk)
+
+        try:
+            reschedule_match(match, field=field, scheduled_start=scheduled_start)
+        except SchedulingError as error:
+            notify(request, f"w|{_('Could not reschedule')}|{error}")
+        else:
+            notify(request, f"s|{_('Match rescheduled')}|" + _("%(home)s vs %(away)s moved to %(field)s.") % {"home": match.home_display, "away": match.away_display, "field": field.name})
+
+        return redirect("management:tournament_schedule", tournament_pk=tournament.pk)
+
+
+class MatchResultView(TournamentsManagerRequiredMixin, View):
+    """The schedule view's own inline score-entry form -- always routed
+    through ``tournaments.services.scheduling.record_result``, which marks
+    the match complete and cascades the result forward through the bracket
+    (``resolve_match_slots``) in one call."""
+
+    def post(self, request, pk):
+        match = get_object_or_404(Match, pk=pk, stage__tournament__club=request.club)
+        tournament = match.stage.tournament
+
+        if match.home_team_id is None or match.away_team_id is None:
+            notify(request, f"e|{_('Could not record result')}|{_('Both teams must be known before a score can be recorded.')}")
+            return redirect("management:tournament_schedule", tournament_pk=tournament.pk)
+
+        try:
+            score_home = int(request.POST.get("score_home"))
+            score_away = int(request.POST.get("score_away"))
+        except (TypeError, ValueError):
+            notify(request, f"e|{_('Could not record result')}|{_('Enter a score for both teams.')}")
+            return redirect("management:tournament_schedule", tournament_pk=tournament.pk)
+
+        updated = record_result(match, score_home=score_home, score_away=score_away)
+
+        if updated:
+            notify(
+                request,
+                f"s|{_('Score recorded')}|"
+                + ngettext(
+                    "%(home)s vs %(away)s is complete -- %(count)d downstream match just updated.",
+                    "%(home)s vs %(away)s is complete -- %(count)d downstream matches just updated.",
+                    len(updated),
+                )
+                % {"home": match.home_display, "away": match.away_display, "count": len(updated)},
+            )
+        else:
+            notify(request, f"s|{_('Score recorded')}|" + _("%(home)s vs %(away)s is now marked complete.") % {"home": match.home_display, "away": match.away_display})
+
+        return redirect("management:tournament_schedule", tournament_pk=tournament.pk)

@@ -600,3 +600,45 @@ def resolve_match_slots(match: Match) -> list[Match]:
             updated.append(dependent)
 
     return updated
+
+
+# --------------------------------------------------------------------------
+# Manual editing
+# --------------------------------------------------------------------------
+
+
+def reschedule_match(match: Match, *, field, scheduled_start: datetime.datetime) -> Match:
+    """The manual-editor counterpart to the auto-generator's own placements --
+    runs the placement through the exact same ``validate_placement`` check
+    the allocator uses, so a hand-dragged slot can never quietly violate an
+    invariant the draft itself would have avoided. Raises ``SchedulingError``
+    (carrying every violation, joined, so a caller can show them all at
+    once) rather than silently refusing; saves and returns the match on
+    success."""
+    end = scheduled_start + DEFAULT_MATCH_DURATION
+    violations = validate_placement(match, field, scheduled_start, end)
+    if violations:
+        raise SchedulingError(" ".join(violations))
+
+    match.field = field
+    match.scheduled_start = scheduled_start
+    match.save(update_fields=["field", "scheduled_start"])
+    return match
+
+
+def record_result(match: Match, *, score_home: int, score_away: int, went_to_overtime: bool = False, penalty_home: int | None = None, penalty_away: int | None = None) -> list[Match]:
+    """Enters a match's final score, marks it complete, and immediately
+    cascades the result forward via ``resolve_match_slots`` -- entering a
+    result and advancing the bracket are one action from the editor's own
+    point of view, not two separate steps a staff member has to remember to
+    do in order. Returns whatever ``resolve_match_slots`` returns (the
+    matches that changed as a result), so a caller can flag them for
+    re-allocation."""
+    match.score_home = score_home
+    match.score_away = score_away
+    match.went_to_overtime = went_to_overtime
+    match.penalty_home = penalty_home
+    match.penalty_away = penalty_away
+    match.status = Match.Status.COMPLETE
+    match.save(update_fields=["score_home", "score_away", "went_to_overtime", "penalty_home", "penalty_away", "status"])
+    return resolve_match_slots(match)

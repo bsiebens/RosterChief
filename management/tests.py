@@ -10,6 +10,7 @@ from urllib.parse import parse_qs, urlparse
 import openpyxl
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.contrib.messages import get_messages
 from django.core import mail
 from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -57,8 +58,9 @@ from shop.services.invoices import ShopInvoicePDFError, create_invoice_for_order
 from shop.services.notifications import _notify_order_ready_for_pickup_by_id
 from teams.models import NumberPool, NumberReservation, Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
 from teams.services import eligible_roster_members
-from tournaments.models import Tournament, TournamentRegistration, TournamentRegistrationPlayer, TournamentTeam
+from tournaments.models import Match, Tournament, TournamentField, TournamentRegistration, TournamentRegistrationPlayer, TournamentStage, TournamentTeam
 from tournaments.services.registration import approve_registration, reject_registration
+from tournaments.services.scheduling import generate_stage_matches
 
 User = get_user_model()
 
@@ -13861,3 +13863,180 @@ class TournamentRegistrationQueueTests(ManagementTestBase):
 
         self.assertEqual(self.club_post("tournament_registration_approve", {}, other_registration.pk).status_code, 404)
         self.assertEqual(self.club_post("tournament_registration_reject", {}, other_registration.pk).status_code, 404)
+
+
+class TournamentScheduleTests(ManagementTestBase):
+    """management:tournament_schedule and its two inline-edit actions
+    (match_reschedule/match_result) -- same gating and fixture conventions as
+    TournamentRegistrationQueueTests above. reschedule_match/record_result
+    themselves are exercised in depth by tournaments/tests.py
+    (RescheduleMatchTests/RecordResultTests); these tests check that the two
+    new views actually call through to them and flash/redirect correctly."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        today = timezone.localdate()
+        cls.tournament = Tournament.objects.create(
+            club=cls.club,
+            name="Fall Classic",
+            season=cls.season,
+            start_date=today,
+            end_date=today + datetime.timedelta(days=2),
+        )
+
+    def setUp(self):
+        super().setUp()
+        # waffle caches Flag lookups outside the DB transaction each test
+        # rolls back, so a flag created in one test can otherwise leak a
+        # stale/invalid pk into the next -- see FeatureGatedSectionsTests.
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def activate_flag(self):
+        flag, _created = get_waffle_flag_model().objects.get_or_create(name="tournaments")
+        flag.clubs.add(self.club)
+
+    def make_coach(self, email="coach-schedule@example.com"):
+        coach_user = User.objects.create_user(email=email, password="pw-secret-123")
+        coach_member = Member.objects.create(user=coach_user, first_name="Cara", last_name="Coach")
+        ClubMembership.objects.create(club=self.club, member=coach_member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        return coach_user
+
+    def make_team(self, name):
+        return TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=name)
+
+    def test_schedule_404s_when_the_flag_is_not_active(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_schedule", self.tournament.pk)
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_schedule_403s_for_a_non_admin_even_with_the_flag_active(self):
+        self.activate_flag()
+        self.client.force_login(self.make_coach())
+
+        response = self.club_get("tournament_schedule", self.tournament.pk)
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_schedule_groups_matches_by_stage_then_round(self):
+        self.activate_flag()
+        team_a, team_b, team_c, team_d = (self.make_team(f"Team {letter}") for letter in "ABCD")
+        stage1 = TournamentStage.objects.create(tournament=self.tournament, name="Group Stage", sequence=0, format=TournamentStage.Format.CUSTOM)
+        stage2 = TournamentStage.objects.create(tournament=self.tournament, name="Final Four", sequence=1, format=TournamentStage.Format.CUSTOM)
+        Match.objects.create(stage=stage1, round_number=1, sequence=0, home_team=team_a, away_team=team_b)
+        Match.objects.create(stage=stage1, round_number=1, sequence=1, home_team=team_c, away_team=team_d)
+        Match.objects.create(stage=stage1, round_number=2, sequence=0, home_team=team_a, away_team=team_c)
+        Match.objects.create(stage=stage2, round_number=1, sequence=0, round_label="Final", home_team=team_a, away_team=team_d)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_schedule", self.tournament.pk)
+
+        stages = response.context["stages"]
+        self.assertEqual([row["stage"] for row in stages], [stage1, stage2])
+        self.assertEqual([row["round_number"] for row in stages[0]["rounds"]], [1, 2])
+        self.assertEqual(len(stages[0]["rounds"][0]["matches"]), 2)
+        self.assertEqual(len(stages[0]["rounds"][1]["matches"]), 1)
+        self.assertEqual(stages[1]["rounds"][0]["label"], "Final")
+        self.assertContains(response, "Team A")
+        self.assertContains(response, "Final")
+
+    def test_a_match_with_an_unresolved_slot_reads_as_tbd_with_no_reschedule_form(self):
+        self.activate_flag()
+        team_a = self.make_team("Team A")
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="Knockout", format=TournamentStage.Format.CUSTOM)
+        Match.objects.create(stage=stage, round_number=1, sequence=0, home_team=team_a, away_team=None)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_schedule", self.tournament.pk)
+
+        self.assertContains(response, "TBD")
+        self.assertContains(response, "Not schedulable yet")
+
+    def test_valid_reschedule_updates_the_match_and_redirects_with_a_success_flash(self):
+        self.activate_flag()
+        team_a, team_b = self.make_team("Team A"), self.make_team("Team B")
+        field = TournamentField.objects.create(tournament=self.tournament, name="Field 1")
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="Group Stage", format=TournamentStage.Format.CUSTOM)
+        match = Match.objects.create(stage=stage, home_team=team_a, away_team=team_b)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("match_reschedule", {"field": field.pk, "scheduled_start": "2026-09-20T09:00"}, match.pk)
+
+        self.assertRedirects(response, reverse("management:tournament_schedule", args=[self.tournament.pk]))
+        match.refresh_from_db()
+        self.assertEqual(match.field, field)
+        self.assertEqual(match.scheduled_start, timezone.make_aware(datetime.datetime(2026, 9, 20, 9, 0)))
+        messages = [str(message) for message in get_messages(response.wsgi_request)]
+        self.assertTrue(any("moved to" in message for message in messages))
+
+    def test_a_conflicting_reschedule_leaves_the_match_unchanged_and_flashes_a_warning(self):
+        self.activate_flag()
+        team_a, team_b, team_c, team_d = (self.make_team(f"Team {letter}") for letter in "ABCD")
+        field = TournamentField.objects.create(tournament=self.tournament, name="Field 1")
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="Group Stage", format=TournamentStage.Format.CUSTOM)
+        start = timezone.make_aware(datetime.datetime(2026, 9, 20, 9, 0))
+        Match.objects.create(stage=stage, home_team=team_a, away_team=team_b, field=field, scheduled_start=start)
+        candidate = Match.objects.create(stage=stage, home_team=team_c, away_team=team_d)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("match_reschedule", {"field": field.pk, "scheduled_start": "2026-09-20T09:00"}, candidate.pk)
+
+        self.assertRedirects(response, reverse("management:tournament_schedule", args=[self.tournament.pk]))
+        candidate.refresh_from_db()
+        self.assertIsNone(candidate.field)
+        self.assertIsNone(candidate.scheduled_start)
+        messages = [str(message) for message in get_messages(response.wsgi_request)]
+        self.assertTrue(any("already scheduled on this field" in message for message in messages))
+
+    def test_valid_result_marks_the_match_complete_and_updates_a_downstream_slot(self):
+        self.activate_flag()
+        teams = [self.make_team(f"Team {i}") for i in range(1, 5)]
+        for index, team in enumerate(teams, start=1):
+            team.seed = index
+            team.save(update_fields=["seed"])
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="Knockout", format=TournamentStage.Format.SINGLE_ELIM)
+        generate_stage_matches(stage, entries=teams)
+        semi = Match.objects.get(stage=stage, round_number=1, sequence=0)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("match_result", {"score_home": 3, "score_away": 1}, semi.pk)
+
+        self.assertRedirects(response, reverse("management:tournament_schedule", args=[self.tournament.pk]))
+        semi.refresh_from_db()
+        self.assertEqual(semi.status, Match.Status.COMPLETE)
+        final = Match.objects.get(stage=stage, round_number=2)
+        self.assertEqual(final.home_team_id or final.away_team_id, semi.home_team_id)
+        messages = [str(message) for message in get_messages(response.wsgi_request)]
+        self.assertTrue(any("downstream match" in message for message in messages))
+
+    def test_result_post_leaves_a_still_tbd_match_untouched(self):
+        self.activate_flag()
+        team_a = self.make_team("Team A")
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="Knockout", format=TournamentStage.Format.CUSTOM)
+        match = Match.objects.create(stage=stage, home_team=team_a, away_team=None)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("match_result", {"score_home": 1, "score_away": 0}, match.pk)
+
+        self.assertRedirects(response, reverse("management:tournament_schedule", args=[self.tournament.pk]))
+        match.refresh_from_db()
+        self.assertEqual(match.status, Match.Status.SCHEDULED)
+        self.assertIsNone(match.score_home)
+
+    def test_reschedule_and_result_404_for_a_match_in_another_club(self):
+        self.activate_flag()
+        other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
+        other_season = make_season(other_club)
+        other_tournament = Tournament.objects.create(club=other_club, name="Rival Cup", season=other_season, start_date=timezone.localdate(), end_date=timezone.localdate())
+        other_field = TournamentField.objects.create(tournament=other_tournament, name="Field 1")
+        other_stage = TournamentStage.objects.create(tournament=other_tournament, name="Group", format=TournamentStage.Format.CUSTOM)
+        team_x = TournamentTeam.objects.create(club=other_club, tournament=other_tournament, foreign_name="X")
+        team_y = TournamentTeam.objects.create(club=other_club, tournament=other_tournament, foreign_name="Y")
+        other_match = Match.objects.create(stage=other_stage, home_team=team_x, away_team=team_y)
+        self.client.force_login(self.admin_user)
+
+        self.assertEqual(self.club_post("match_reschedule", {"field": other_field.pk, "scheduled_start": "2026-09-20T09:00"}, other_match.pk).status_code, 404)
+        self.assertEqual(self.club_post("match_result", {"score_home": 1, "score_away": 0}, other_match.pk).status_code, 404)

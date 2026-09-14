@@ -47,6 +47,8 @@ from .services.scheduling import (
     gap_for_placement,
     generate_next_swiss_round,
     generate_stage_matches,
+    record_result,
+    reschedule_match,
     resolve_match_slots,
     round_robin_pairings,
     snake_seed_groups,
@@ -1626,3 +1628,59 @@ class TournamentAdminActionsTests(TournamentsTestCase):
         self.assertFalse(Match.objects.filter(stage=stage, scheduled_start__isnull=False).exists())
         [message] = list(storage)
         self.assertEqual(message.level, messages.ERROR)
+
+
+class RescheduleMatchTests(TournamentsTestCase):
+    def test_valid_reschedule_saves_field_and_time(self):
+        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}") for i in range(1, 3)]
+        field = TournamentField.objects.create(tournament=self.tournament, name="Field 1")
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.CUSTOM)
+        match = Match.objects.create(stage=stage, home_team=teams[0], away_team=teams[1])
+        start = timezone.now() + datetime.timedelta(days=1)
+
+        reschedule_match(match, field=field, scheduled_start=start)
+
+        match.refresh_from_db()
+        self.assertEqual(match.field, field)
+        self.assertEqual(match.scheduled_start, start)
+
+    def test_conflicting_reschedule_raises_and_does_not_save(self):
+        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}") for i in range(1, 5)]
+        field = TournamentField.objects.create(tournament=self.tournament, name="Field 1")
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.CUSTOM)
+        start = timezone.now() + datetime.timedelta(days=1)
+        Match.objects.create(stage=stage, home_team=teams[0], away_team=teams[1], field=field, scheduled_start=start)
+        candidate = Match.objects.create(stage=stage, home_team=teams[2], away_team=teams[3])
+
+        with self.assertRaises(SchedulingError):
+            reschedule_match(candidate, field=field, scheduled_start=start)
+
+        candidate.refresh_from_db()
+        self.assertIsNone(candidate.field)
+        self.assertIsNone(candidate.scheduled_start)
+
+
+class RecordResultTests(TournamentsTestCase):
+    def test_records_score_and_marks_complete(self):
+        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}") for i in range(1, 3)]
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.CUSTOM)
+        match = Match.objects.create(stage=stage, home_team=teams[0], away_team=teams[1])
+
+        record_result(match, score_home=3, score_away=1)
+
+        match.refresh_from_db()
+        self.assertEqual(match.status, Match.Status.COMPLETE)
+        self.assertEqual(match.score_home, 3)
+        self.assertEqual(match.score_away, 1)
+
+    def test_recording_a_result_cascades_to_a_dependent_match(self):
+        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 5)]
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="KO", format=TournamentStage.Format.SINGLE_ELIM)
+        generate_stage_matches(stage, entries=teams)
+        semi = Match.objects.get(stage=stage, round_number=1, sequence=0)
+
+        updated = record_result(semi, score_home=2, score_away=0)
+
+        self.assertEqual(len(updated), 1)
+        final = Match.objects.get(stage=stage, round_number=2)
+        self.assertEqual(final.home_team_id or final.away_team_id, semi.home_team_id)

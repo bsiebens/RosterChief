@@ -1,0 +1,10 @@
+{% load i18n %}
+{% comment %}
+    Shared sub-nav for every tournament-scoped management page. ``active_tab``
+    is one of "registrations"/"schedule". Mirrors
+    _evaluation_checklist_tabs.html's own shape exactly.
+{% endcomment %}
+<div class="tabs tabs-boxed mb-4">
+    <a href="{% url 'management:tournament_registration_queue' tournament.pk %}" class="tab {% if active_tab == "registrations" %}tab-active{% endif %}">{% trans "Registrations" %}</a>
+    <a href="{% url 'management:tournament_schedule' tournament.pk %}" class="tab {% if active_tab == "schedule" %}tab-active{% endif %}">{% trans "Schedule" %}</a>
+</div>
