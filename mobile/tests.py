@@ -36,6 +36,7 @@ from shop.models import Cart, CartItem, Discount, Order, OrderLine, Product, Pro
 from shop.services.checkout import place_order
 from shop.services.invoices import create_invoice_for_order
 from teams.models import NumberPool, OfficialLevel, OfficialProfile, Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership
+from tournaments.models import Tournament, TournamentTask, TournamentTaskClaim
 
 from .coach_views import CoachTodayView
 from .models import CalendarFeedToken, PushSubscription
@@ -7963,3 +7964,278 @@ class BugListViewTests(TestCase):
         # _announcement_popup.html) always renders a <form method="dialog">, unrelated
         # to this page's own report-a-bug form.
         self.assertNotContains(response, '<form method="post"')
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class TournamentTaskListViewTests(TestCase):
+    """The standalone volunteer-shift board -- mobile.views.TournamentTaskListView,
+    reachable directly at /app/tournaments/<slug>/tasks/ regardless of nav
+    wiring or whether the tournament has a linked Event (see that view's own
+    docstring)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        today = timezone.localdate()
+        cls.season = Season.objects.create(club=cls.club, start_date=today - datetime.timedelta(days=30), end_date=today + datetime.timedelta(days=300))
+        cls.user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", email="parent@example.com", user=cls.user)
+        ClubMembership.objects.create(club=cls.club, member=cls.member, season=cls.season)
+        cls.tournament = Tournament.objects.create(club=cls.club, name="Summer Cup", season=cls.season, start_date=today, end_date=today + datetime.timedelta(days=1))
+
+    def setUp(self):
+        # waffle caches Flag lookups outside the DB transaction each test rolls
+        # back -- see tournaments/tests.py's own TournamentRegistrationViewTests
+        # for the same reasoning.
+        cache.clear()
+        self.addCleanup(cache.clear)
+        get_waffle_flag_model().objects.get_or_create(name="tournaments")[0].clubs.add(self.club)
+
+    def _url(self, tournament=None):
+        return reverse("mobile:tournament_task_list", kwargs={"tournament_slug": (tournament or self.tournament).slug})
+
+    def _get(self, tournament=None):
+        return self.client.get(self._url(tournament), HTTP_HOST="ajax-united.rosterchief.app")
+
+    def test_requires_login(self):
+        response = self._get()
+
+        self.assertEqual(response.status_code, 302)
+
+    def test_404s_when_the_flag_is_off(self):
+        get_waffle_flag_model().objects.get(name="tournaments").clubs.remove(self.club)
+        cache.clear()
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_an_unknown_tournament_slug_404s(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mobile:tournament_task_list", kwargs={"tournament_slug": "no-such-tournament"}), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_a_tournament_from_another_club_404s(self):
+        other_club = make_club(name="Rival FC", slug="rival-fc")
+        other_season = Season.objects.create(club=other_club, start_date=self.season.start_date, end_date=self.season.end_date)
+        other_tournament = Tournament.objects.create(club=other_club, name="Rival Cup", season=other_season, start_date=self.tournament.start_date, end_date=self.tournament.end_date)
+        self.client.force_login(self.user)
+
+        response = self._get(other_tournament)
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_lists_an_open_task_with_its_coverage_and_time_and_place(self):
+        starts = timezone.now() + datetime.timedelta(days=1)
+        TournamentTask.objects.create(tournament=self.tournament, title="Gate duty", starts_at=starts, ends_at=starts + datetime.timedelta(hours=1), location_label="Entrance", needed_quantity=2)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, "Gate duty")
+        self.assertContains(response, "Entrance")
+        self.assertContains(response, "0/2")
+
+    def test_a_claim_is_shown_under_the_claiming_members_family_label_not_their_own_name(self):
+        family = Family.objects.create(club=self.club, name="Bakker")
+        FamilyMembership.objects.create(family=family, member=self.member, role=FamilyMembership.FamilyRole.PARENT)
+        starts = timezone.now() + datetime.timedelta(days=1)
+        task = TournamentTask.objects.create(tournament=self.tournament, title="Gate duty", starts_at=starts, ends_at=starts + datetime.timedelta(hours=1), needed_quantity=2)
+        TournamentTaskClaim.objects.create(task=task, member=self.member)
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, "1/2")
+        self.assertContains(response, "Bakker family")
+        self.assertNotContains(response, "Lars Bakker")
+
+    def test_a_fully_claimed_task_has_no_claim_button(self):
+        starts = timezone.now() + datetime.timedelta(days=1)
+        task = TournamentTask.objects.create(tournament=self.tournament, title="Gate duty", starts_at=starts, ends_at=starts + datetime.timedelta(hours=1), needed_quantity=1)
+        TournamentTaskClaim.objects.create(task=task, member=Member.objects.create(first_name="Other", last_name="Person"))
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, "1/1")
+        # "take it" (not "take this ... after all") is unique to the claim
+        # button -- absent here since this member neither claimed a slot nor
+        # has one left to claim.
+        self.assertNotContains(response, "take it")
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class TournamentTaskRespondViewTests(TestCase):
+    """Claiming/unclaiming a tournament volunteer shift --
+    mobile.views.TournamentTaskRespondView, a straight mirror of
+    EventTaskRespondView: always self.me, never a managed-person picker."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        today = timezone.localdate()
+        cls.season = Season.objects.create(club=cls.club, start_date=today - datetime.timedelta(days=30), end_date=today + datetime.timedelta(days=300))
+        cls.user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", email="parent@example.com", user=cls.user)
+        ClubMembership.objects.create(club=cls.club, member=cls.member, season=cls.season)
+        cls.tournament = Tournament.objects.create(club=cls.club, name="Summer Cup", season=cls.season, start_date=today, end_date=today + datetime.timedelta(days=1))
+        starts = timezone.now() + datetime.timedelta(days=1)
+        cls.task = TournamentTask.objects.create(tournament=cls.tournament, title="Gate duty", starts_at=starts, ends_at=starts + datetime.timedelta(hours=1), needed_quantity=1)
+
+    def setUp(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
+        get_waffle_flag_model().objects.get_or_create(name="tournaments")[0].clubs.add(self.club)
+
+    def _post(self, data, task=None):
+        return self.client.post(reverse("mobile:tournament_task_respond", kwargs={"task_id": (task or self.task).pk}), data=data, HTTP_HOST="ajax-united.rosterchief.app")
+
+    def test_claiming_creates_a_claim_and_redirects_to_the_task_board(self):
+        self.client.force_login(self.user)
+
+        response = self._post({"response": "claim", "next": "tournament_task_list"})
+
+        self.assertRedirects(response, reverse("mobile:tournament_task_list", kwargs={"tournament_slug": self.tournament.slug}), fetch_redirect_response=False)
+        self.assertTrue(TournamentTaskClaim.objects.filter(task=self.task, member=self.member).exists())
+
+    def test_claiming_a_fully_covered_task_shows_an_error_and_creates_nothing(self):
+        other_member = Member.objects.create(first_name="Other", last_name="Person")
+        TournamentTaskClaim.objects.create(task=self.task, member=other_member)
+        self.client.force_login(self.user)
+
+        response = self._post({"response": "claim", "next": "tournament_task_list"})
+
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(TournamentTaskClaim.objects.filter(task=self.task, member=self.member).exists())
+        self.assertEqual(TournamentTaskClaim.objects.filter(task=self.task).count(), 1)
+
+    def test_cannot_claim_the_same_task_twice(self):
+        self.task.needed_quantity = 5
+        self.task.save()
+        TournamentTaskClaim.objects.create(task=self.task, member=self.member)
+        self.client.force_login(self.user)
+
+        self._post({"response": "claim", "next": "tournament_task_list"})
+
+        self.assertEqual(TournamentTaskClaim.objects.filter(task=self.task, member=self.member).count(), 1)
+
+    def test_unclaiming_removes_the_claim(self):
+        claim = TournamentTaskClaim.objects.create(task=self.task, member=self.member)
+        self.client.force_login(self.user)
+
+        self._post({"response": "unclaim", "next": "tournament_task_list"})
+
+        self.assertFalse(TournamentTaskClaim.objects.filter(pk=claim.pk).exists())
+
+    def test_next_event_detail_redirects_to_the_linked_event(self):
+        event = Event.objects.create(club=self.club, title="Summer Cup", start=timezone.now() + datetime.timedelta(days=1))
+        self.tournament.event = event
+        self.tournament.save()
+        self.client.force_login(self.user)
+
+        response = self._post({"response": "claim", "next": "event_detail"})
+
+        self.assertRedirects(response, reverse("mobile:event_detail", kwargs={"pk": event.pk}), fetch_redirect_response=False)
+
+    def test_next_event_detail_falls_back_to_the_task_board_without_a_linked_event(self):
+        self.client.force_login(self.user)
+
+        response = self._post({"response": "claim", "next": "event_detail"})
+
+        self.assertRedirects(response, reverse("mobile:tournament_task_list", kwargs={"tournament_slug": self.tournament.slug}), fetch_redirect_response=False)
+
+    def test_requires_a_member_record(self):
+        user_without_member = User.objects.create_user(email="noone@example.com", password="pw-secret-123")
+        self.client.force_login(user_without_member)
+
+        response = self._post({"response": "claim"})
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_404s_when_the_flag_is_off(self):
+        get_waffle_flag_model().objects.get(name="tournaments").clubs.remove(self.club)
+        cache.clear()
+        self.client.force_login(self.user)
+
+        response = self._post({"response": "claim"})
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_a_task_from_another_club_404s(self):
+        other_club = make_club(name="Rival FC", slug="rival-fc")
+        other_season = Season.objects.create(club=other_club, start_date=self.season.start_date, end_date=self.season.end_date)
+        other_tournament = Tournament.objects.create(club=other_club, name="Rival Cup", season=other_season, start_date=self.tournament.start_date, end_date=self.tournament.end_date)
+        starts = timezone.now() + datetime.timedelta(days=1)
+        other_task = TournamentTask.objects.create(tournament=other_tournament, title="Gate duty", starts_at=starts, ends_at=starts + datetime.timedelta(hours=1))
+        self.client.force_login(self.user)
+
+        response = self._post({"response": "claim"}, task=other_task)
+
+        self.assertEqual(response.status_code, 404)
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class EventDetailTournamentTasksTests(TestCase):
+    """The small "Volunteer shifts" addition EventDetailView makes when this
+    event is a tournament's own linked Event (Tournament.event, optional --
+    see its own docstring) -- see EventDetailView.get_context_data's own
+    comment. The tournament's standalone board (tested above) is the one
+    that has to work regardless of this link existing."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        today = timezone.localdate()
+        cls.season = Season.objects.create(club=cls.club, start_date=today - datetime.timedelta(days=30), end_date=today + datetime.timedelta(days=300))
+        cls.user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", email="parent@example.com", user=cls.user)
+        ClubMembership.objects.create(club=cls.club, member=cls.member, season=cls.season)
+        cls.event = Event.objects.create(club=cls.club, title="Summer Cup", start=timezone.now() + datetime.timedelta(days=1))
+        cls.tournament = Tournament.objects.create(club=cls.club, name="Summer Cup", season=cls.season, start_date=today, end_date=today + datetime.timedelta(days=1), event=cls.event)
+
+    def setUp(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
+        get_waffle_flag_model().objects.get_or_create(name="tournaments")[0].clubs.add(self.club)
+
+    def _get(self):
+        return self.client.get(reverse("mobile:event_detail", kwargs={"pk": self.event.pk}), HTTP_HOST="ajax-united.rosterchief.app")
+
+    def test_shows_the_tournaments_open_tasks(self):
+        starts = timezone.now() + datetime.timedelta(days=1)
+        TournamentTask.objects.create(tournament=self.tournament, title="Gate duty", starts_at=starts, ends_at=starts + datetime.timedelta(hours=1))
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, "Gate duty")
+        self.assertContains(response, "Volunteer shifts")
+
+    def test_hidden_when_the_tournaments_flag_is_off(self):
+        get_waffle_flag_model().objects.get(name="tournaments").clubs.remove(self.club)
+        cache.clear()
+        starts = timezone.now() + datetime.timedelta(days=1)
+        TournamentTask.objects.create(tournament=self.tournament, title="Gate duty", starts_at=starts, ends_at=starts + datetime.timedelta(hours=1))
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "Gate duty")
+
+    def test_claiming_from_the_event_page_redirects_back_to_it(self):
+        starts = timezone.now() + datetime.timedelta(days=1)
+        task = TournamentTask.objects.create(tournament=self.tournament, title="Gate duty", starts_at=starts, ends_at=starts + datetime.timedelta(hours=1))
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse("mobile:tournament_task_respond", kwargs={"task_id": task.pk}),
+            {"response": "claim", "next": "event_detail"},
+            HTTP_HOST="ajax-united.rosterchief.app",
+        )
+
+        self.assertRedirects(response, reverse("mobile:event_detail", kwargs={"pk": self.event.pk}), fetch_redirect_response=False)

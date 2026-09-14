@@ -1,0 +1,33 @@
+{% extends "mobile/base.html" %}
+{% load i18n lucide %}
+
+{% comment %}
+    Standalone volunteer-shift board for one tournament -- TournamentTaskListView's
+    own template. Reachable directly at /app/tournaments/<slug>/tasks/
+    regardless of whether the tournament has a linked calendar Event (see
+    that view's own docstring) and regardless of nav wiring, so this page
+    doesn't assume it was reached from anywhere in particular -- the back
+    arrow just goes Home, same "safe default" shop_order_detail.html's own
+    back-header uses when there's no one obvious list to return to.
+
+    The actual claim card markup lives in _tournament_tasks.html, shared
+    with event_detail.html's own "Volunteer shifts" section for a tournament
+    that does have a linked Event.
+{% endcomment %}
+
+{% block content %}
+    <div class="-mx-4 -mt-4 flex items-center gap-1 border-b border-line bg-white px-4 py-3">
+        <a class="-ml-2.5 flex h-11 w-11 shrink-0 items-center justify-center" href="{% url "mobile:home" %}" aria-label="{% trans "Back" %}">
+            {% lucide "chevron-left" size=20 stroke_width=2.4 class="text-ink" %}
+        </a>
+        <span class="min-w-0 flex-1 truncate font-display text-xl leading-none font-extrabold text-ink uppercase">{{ tournament.name }}</span>
+    </div>
+
+    {% if tasks %}
+        {% include "mobile/_tournament_tasks.html" with next="tournament_task_list" %}
+    {% else %}
+        <div class="m-card p-6 text-center">
+            <p class="text-sm text-muted">{% trans "No volunteer shifts yet." %}</p>
+        </div>
+    {% endif %}
+{% endblock content %}

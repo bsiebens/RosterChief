@@ -138,7 +138,9 @@ from shop.services.vouchers import delete_manual_consumption, record_manual_cons
 from teams.models import NumberPool, NumberReservation, OfficialLevel, OfficialProfile, Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
 from teams.services import eligible_roster_members, place_member_on_team
 from teams.services.numbers import has_unresolved_conflict
-from tournaments.models import Match, Tournament, TournamentField, TournamentRegistration
+from tournaments.forms import DressingRoomAssignmentForm, DressingRoomForm, TournamentFieldForm, TournamentForm, TournamentStageForm, TournamentTaskForm
+from tournaments.models import DressingRoom, DressingRoomAssignment, Match, Tournament, TournamentField, TournamentRegistration, TournamentStage, TournamentTask
+from tournaments.services.dressing_rooms import DressingRoomAssignmentError, assign_dressing_room, release_dressing_room
 from tournaments.services.notifications import send_registration_decision_email
 from tournaments.services.registration import RegistrationDecisionError, approve_registration, reject_registration
 from tournaments.services.scheduling import SchedulingError, record_result, reschedule_match
@@ -7286,11 +7288,9 @@ class BugListView(ClubStaffRequiredMixin, FormView):
 
 class TournamentListView(TournamentsManagerRequiredMixin, ListView):
     """Every tournament this club has ever run -- the "Tournaments" nav
-    entry's own landing page, and so far the only way in without already
-    holding a direct link (creating a tournament itself is still Django
-    admin only; a real create/settings screen is later work, same
-    "screen-building catches up to the schema in passes" reasoning
-    ``EvaluationChecklistListView`` documents for its own add/archive split)."""
+    entry's own landing page. Create/settings now have real screens
+    (TournamentCreateView/TournamentUpdateView below), closing the
+    "Django admin only" gap this docstring used to describe."""
 
     template_name = "management/tournament_list.html"
     context_object_name = "tournaments"
@@ -7466,3 +7466,343 @@ class MatchResultView(TournamentsManagerRequiredMixin, View):
             notify(request, f"s|{_('Score recorded')}|" + _("%(home)s vs %(away)s is now marked complete.") % {"home": match.home_display, "away": match.away_display})
 
         return redirect("management:tournament_schedule", tournament_pk=tournament.pk)
+
+
+class TournamentCreateView(TournamentsManagerRequiredMixin, CreateView):
+    """The tournament create screen -- closes the "admin-only" gap
+    TournamentListView's own docstring used to describe. Redirects to the
+    new tournament's own settings page, not the schedule/registrations tabs --
+    there's nothing to schedule yet until fields/stages exist, added from
+    that settings page's own "Fields & stages" tab next."""
+
+    model = Tournament
+    form_class = TournamentForm
+    template_name = "management/tournament_form.html"
+
+    def get_form_kwargs(self):
+        return super().get_form_kwargs() | {"club": self.request.club}
+
+    def form_valid(self, form):
+        form.instance.club = self.request.club
+        response = super().form_valid(form)
+        notify(self.request, f"s|{_('Tournament created')}|" + _("“%(name)s” was created. Add fields and stages before generating a schedule.") % {"name": self.object.name})
+        return response
+
+    def get_success_url(self):
+        return reverse("management:tournament_settings", args=[self.object.pk])
+
+
+class TournamentUpdateView(TournamentsManagerRequiredMixin, UpdateView):
+    """A tournament's own settings page -- also the page the "Settings" link
+    on ``_tournament_tabs.html`` (shown on every other tournament-scoped
+    page) points at."""
+
+    model = Tournament
+    form_class = TournamentForm
+    template_name = "management/tournament_form.html"
+
+    def get_queryset(self):
+        return Tournament.objects.filter(club=self.request.club)
+
+    def get_form_kwargs(self):
+        return super().get_form_kwargs() | {"club": self.request.club}
+
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        notify(self.request, f"s|{_('Tournament updated')}|" + _("“%(name)s” updated.") % {"name": self.object.name})
+        return response
+
+    def get_success_url(self):
+        return reverse("management:tournament_settings", args=[self.object.pk])
+
+    def get_context_data(self, **kwargs):
+        return super().get_context_data(update_view=True, active_tab="settings", **kwargs)
+
+
+class TournamentFieldStageView(TournamentsManagerRequiredMixin, TemplateView):
+    """The tournament's own "Fields & stages" tab -- the minimum a tournament
+    needs before ``tournaments.services.scheduling.generate_stage_matches``/
+    ``allocate_schedule`` have anything to work with. Both lists are short
+    enough to share one tab rather than two, same "small lists, one screen"
+    shape ``_event_task_panel.html`` already uses for a single-model list."""
+
+    template_name = "management/tournament_field_stage_list.html"
+
+    def get_context_data(self, **kwargs):
+        tournament = get_object_or_404(Tournament, pk=self.kwargs["tournament_pk"], club=self.request.club)
+        fields = list(tournament.fields.all())
+        for field in fields:
+            field.edit_form = TournamentFieldForm(instance=field, club=self.request.club)
+        stages = list(tournament.stages.all())
+        for stage in stages:
+            stage.edit_form = TournamentStageForm(instance=stage)
+        return super().get_context_data(
+            tournament=tournament,
+            fields=fields,
+            stages=stages,
+            field_form=TournamentFieldForm(club=self.request.club),
+            stage_form=TournamentStageForm(),
+            active_tab="fields_stages",
+            **kwargs,
+        )
+
+
+class TournamentFieldCreateView(TournamentsManagerRequiredMixin, View):
+    def post(self, request, tournament_pk):
+        tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
+        form = TournamentFieldForm(request.POST, club=request.club)
+        if not form.is_valid():
+            for error in form.errors.values():
+                notify(request, f"e|{_('Could not add field')}|{' '.join(error)}")
+            return redirect("management:tournament_field_stage_list", tournament_pk=tournament.pk)
+
+        field = form.save(commit=False)
+        field.tournament = tournament
+        field.save()
+        notify(request, f"s|{_('Field added')}|" + _("“%(name)s” was added to this tournament.") % {"name": field.name})
+        return redirect("management:tournament_field_stage_list", tournament_pk=tournament.pk)
+
+
+class TournamentFieldUpdateView(TournamentsManagerRequiredMixin, View):
+    def post(self, request, tournament_pk, field_pk):
+        tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
+        field = get_object_or_404(TournamentField, pk=field_pk, tournament=tournament)
+        form = TournamentFieldForm(request.POST, instance=field, club=request.club)
+        if not form.is_valid():
+            for error in form.errors.values():
+                notify(request, f"e|{_('Could not update field')}|{' '.join(error)}")
+            return redirect("management:tournament_field_stage_list", tournament_pk=tournament.pk)
+
+        form.save()
+        notify(request, f"s|{_('Field updated')}|" + _("“%(name)s” updated.") % {"name": field.name})
+        return redirect("management:tournament_field_stage_list", tournament_pk=tournament.pk)
+
+
+class TournamentFieldDeleteView(TournamentsManagerRequiredMixin, View):
+    def post(self, request, tournament_pk, field_pk):
+        tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
+        field = get_object_or_404(TournamentField, pk=field_pk, tournament=tournament)
+        name = field.name
+        field.delete()
+        notify(request, f"w|{_('Field deleted')}|" + _("“%(name)s” was removed from this tournament.") % {"name": name})
+        return redirect("management:tournament_field_stage_list", tournament_pk=tournament.pk)
+
+
+class TournamentStageCreateView(TournamentsManagerRequiredMixin, View):
+    def post(self, request, tournament_pk):
+        tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
+        form = TournamentStageForm(request.POST)
+        if not form.is_valid():
+            for error in form.errors.values():
+                notify(request, f"e|{_('Could not add stage')}|{' '.join(error)}")
+            return redirect("management:tournament_field_stage_list", tournament_pk=tournament.pk)
+
+        stage = form.save(commit=False)
+        stage.tournament = tournament
+        stage.save()
+        notify(request, f"s|{_('Stage added')}|" + _("“%(name)s” was added to this tournament.") % {"name": stage.name})
+        return redirect("management:tournament_field_stage_list", tournament_pk=tournament.pk)
+
+
+class TournamentStageUpdateView(TournamentsManagerRequiredMixin, View):
+    def post(self, request, tournament_pk, stage_pk):
+        tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
+        stage = get_object_or_404(TournamentStage, pk=stage_pk, tournament=tournament)
+        form = TournamentStageForm(request.POST, instance=stage)
+        if not form.is_valid():
+            for error in form.errors.values():
+                notify(request, f"e|{_('Could not update stage')}|{' '.join(error)}")
+            return redirect("management:tournament_field_stage_list", tournament_pk=tournament.pk)
+
+        form.save()
+        notify(request, f"s|{_('Stage updated')}|" + _("“%(name)s” updated.") % {"name": stage.name})
+        return redirect("management:tournament_field_stage_list", tournament_pk=tournament.pk)
+
+
+class TournamentStageDeleteView(TournamentsManagerRequiredMixin, View):
+    def post(self, request, tournament_pk, stage_pk):
+        tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
+        stage = get_object_or_404(TournamentStage, pk=stage_pk, tournament=tournament)
+        name = stage.name
+        stage.delete()
+        notify(request, f"w|{_('Stage deleted')}|" + _("“%(name)s” was removed from this tournament.") % {"name": name})
+        return redirect("management:tournament_field_stage_list", tournament_pk=tournament.pk)
+
+
+class TournamentTaskListView(TournamentsManagerRequiredMixin, TemplateView):
+    """The tournament's own "Tasks" tab -- every ``TournamentTask`` across
+    the whole tournament, time-sorted (unlike ``_event_task_panel.html``,
+    which is scoped to one event with no sense of time). Read-only claim
+    list -- claiming a slot only happens on mobile, each claim shown under
+    ``claim_label_for`` rather than the claiming member's own name, same
+    privacy convention ``_event_task_panel.html`` documents for its own
+    ``EventTask`` list."""
+
+    template_name = "management/tournament_task_list.html"
+
+    def get_context_data(self, **kwargs):
+        tournament = get_object_or_404(Tournament, pk=self.kwargs["tournament_pk"], club=self.request.club)
+        tasks = list(tournament.tasks.prefetch_related("claims__member").order_by("starts_at"))
+        for task in tasks:
+            task.claim_labels = [claim_label_for(claim.member, tournament.club) for claim in task.claims.all()]
+            task.is_full = len(task.claim_labels) >= task.needed_quantity
+            task.edit_form = TournamentTaskForm(instance=task)
+        return super().get_context_data(tournament=tournament, tasks=tasks, task_form=TournamentTaskForm(), active_tab="tasks", **kwargs)
+
+
+class TournamentTaskCreateView(TournamentsManagerRequiredMixin, View):
+    def post(self, request, tournament_pk):
+        tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
+        form = TournamentTaskForm(request.POST)
+        if not form.is_valid():
+            for error in form.errors.values():
+                notify(request, f"e|{_('Could not add task')}|{' '.join(error)}")
+            return redirect("management:tournament_task_list", tournament_pk=tournament.pk)
+
+        task = form.save(commit=False)
+        task.tournament = tournament
+        task.created_by = Member.objects.filter(user=request.user).first()
+        task.save()
+        notify(request, f"s|{_('Task added')}|" + _("“%(title)s” was added to this tournament.") % {"title": task.title})
+        return redirect("management:tournament_task_list", tournament_pk=tournament.pk)
+
+
+class TournamentTaskUpdateView(TournamentsManagerRequiredMixin, View):
+    def post(self, request, tournament_pk, task_pk):
+        tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
+        task = get_object_or_404(TournamentTask, pk=task_pk, tournament=tournament)
+        form = TournamentTaskForm(request.POST, instance=task)
+        if not form.is_valid():
+            for error in form.errors.values():
+                notify(request, f"e|{_('Could not update task')}|{' '.join(error)}")
+            return redirect("management:tournament_task_list", tournament_pk=tournament.pk)
+
+        form.save()
+        notify(request, f"s|{_('Task updated')}|" + _("“%(title)s” was updated.") % {"title": task.title})
+        return redirect("management:tournament_task_list", tournament_pk=tournament.pk)
+
+
+class TournamentTaskDeleteView(TournamentsManagerRequiredMixin, View):
+    def post(self, request, tournament_pk, task_pk):
+        tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
+        task = get_object_or_404(TournamentTask, pk=task_pk, tournament=tournament)
+        title = task.title
+        task.delete()
+        notify(request, f"w|{_('Task deleted')}|" + _("“%(title)s” was removed from this tournament.") % {"title": title})
+        return redirect("management:tournament_task_list", tournament_pk=tournament.pk)
+
+
+class TournamentDressingRoomsView(TournamentsManagerRequiredMixin, TemplateView):
+    """The tournament's own "Dressing rooms" tab -- every non-withdrawn
+    ``TournamentTeam`` in this tournament and which club dressing room(s)
+    it's currently booked into, with an assign/release action routed through
+    ``tournaments.services.dressing_rooms`` (never a direct
+    ``DressingRoomAssignment`` write -- see that module's own docstring for
+    why a genuine double-booking needs a service-level lock, not just its
+    ``UniqueConstraint``)."""
+
+    template_name = "management/tournament_dressing_rooms.html"
+
+    def get_context_data(self, **kwargs):
+        tournament = get_object_or_404(Tournament, pk=self.kwargs["tournament_pk"], club=self.request.club)
+        teams = list(tournament.teams.filter(withdrawn_at__isnull=True).prefetch_related("dressing_room_assignments__dressing_room"))
+        rooms = DressingRoom.objects.filter(club=self.request.club)
+        return super().get_context_data(
+            tournament=tournament,
+            teams=teams,
+            rooms=rooms,
+            assign_form=DressingRoomAssignmentForm(club=self.request.club, tournament=tournament),
+            active_tab="dressing_rooms",
+            **kwargs,
+        )
+
+
+class TournamentDressingRoomAssignView(TournamentsManagerRequiredMixin, View):
+    def post(self, request, tournament_pk):
+        tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
+        form = DressingRoomAssignmentForm(request.POST, club=request.club, tournament=tournament)
+        if not form.is_valid():
+            for error in form.errors.values():
+                notify(request, f"e|{_('Could not assign a dressing room')}|{' '.join(error)}")
+            return redirect("management:tournament_dressing_room_list", tournament_pk=tournament.pk)
+
+        try:
+            assignment = assign_dressing_room(
+                form.cleaned_data["dressing_room"],
+                form.cleaned_data["tournament_team"],
+                assigned_from=form.cleaned_data.get("assigned_from"),
+                assigned_until=form.cleaned_data.get("assigned_until"),
+                note=form.cleaned_data.get("note") or "",
+            )
+        except DressingRoomAssignmentError as error:
+            notify(request, f"w|{_('Could not assign a dressing room')}|{error}")
+        else:
+            notify(request, f"s|{_('Dressing room assigned')}|" + _("“%(room)s” assigned to %(team)s.") % {"room": assignment.dressing_room.name, "team": assignment.tournament_team.display_name})
+
+        return redirect("management:tournament_dressing_room_list", tournament_pk=tournament.pk)
+
+
+class TournamentDressingRoomReleaseView(TournamentsManagerRequiredMixin, View):
+    def post(self, request, tournament_pk, assignment_pk):
+        tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
+        assignment = get_object_or_404(DressingRoomAssignment.objects.filter(dressing_room__club=request.club, tournament_team__tournament=tournament), pk=assignment_pk)
+        room_name, team_name = assignment.dressing_room.name, assignment.tournament_team.display_name
+        release_dressing_room(assignment)
+        notify(request, f"w|{_('Dressing room released')}|" + _("“%(room)s” released from %(team)s.") % {"room": room_name, "team": team_name})
+        return redirect("management:tournament_dressing_room_list", tournament_pk=tournament.pk)
+
+
+class DressingRoomListView(TournamentsManagerRequiredMixin, TemplateView):
+    """A club's own physical dressing rooms -- persists across tournaments
+    and seasons (``DressingRoom`` is club-scoped, not tournament-scoped, see
+    its own docstring), so it gets a Settings-area screen of its own rather
+    than living inside any one tournament's own pages -- nothing else would
+    ever build this screen otherwise. Mirrors
+    ``onboarding_requirement_list.html``'s plain list + modal-form CRUD
+    shape."""
+
+    template_name = "management/dressing_room_list.html"
+
+    def get_context_data(self, **kwargs):
+        rooms = list(DressingRoom.objects.filter(club=self.request.club))
+        for room in rooms:
+            room.edit_form = DressingRoomForm(instance=room, club=self.request.club)
+        return super().get_context_data(rooms=rooms, room_form=DressingRoomForm(club=self.request.club), **kwargs)
+
+
+class DressingRoomCreateView(TournamentsManagerRequiredMixin, View):
+    def post(self, request):
+        form = DressingRoomForm(request.POST, club=request.club)
+        if not form.is_valid():
+            for error in form.errors.values():
+                notify(request, f"e|{_('Could not add dressing room')}|{' '.join(error)}")
+            return redirect("management:dressing_room_list")
+
+        room = form.save(commit=False)
+        room.club = request.club
+        room.save()
+        notify(request, f"s|{_('Dressing room added')}|" + _("“%(name)s” was added.") % {"name": room.name})
+        return redirect("management:dressing_room_list")
+
+
+class DressingRoomUpdateView(TournamentsManagerRequiredMixin, View):
+    def post(self, request, pk):
+        room = get_object_or_404(DressingRoom.objects.filter(club=request.club), pk=pk)
+        form = DressingRoomForm(request.POST, instance=room, club=request.club)
+        if not form.is_valid():
+            for error in form.errors.values():
+                notify(request, f"e|{_('Could not update dressing room')}|{' '.join(error)}")
+            return redirect("management:dressing_room_list")
+
+        form.save()
+        notify(request, f"s|{_('Dressing room updated')}|" + _("“%(name)s” updated.") % {"name": room.name})
+        return redirect("management:dressing_room_list")
+
+
+class DressingRoomDeleteView(TournamentsManagerRequiredMixin, View):
+    def post(self, request, pk):
+        room = get_object_or_404(DressingRoom.objects.filter(club=request.club), pk=pk)
+        name = room.name
+        room.delete()
+        notify(request, f"w|{_('Dressing room deleted')}|" + _("“%(name)s” was removed.") % {"name": name})
+        return redirect("management:dressing_room_list")

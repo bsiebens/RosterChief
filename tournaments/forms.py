@@ -1,8 +1,12 @@
 from django import forms
 from django.core.exceptions import ValidationError
+from django.db.models import Q
 from django.utils.translation import gettext_lazy as _
 
-from .models import TournamentRegistration
+from club.models import Season
+from events.models import Event, Location
+
+from .models import DressingRoom, Tournament, TournamentField, TournamentRegistration, TournamentStage, TournamentTask, TournamentTeam
 
 
 class TournamentRegistrationForm(forms.ModelForm):
@@ -85,3 +89,188 @@ def players_from_formset(player_formset):
         }
         for row in player_formset.non_blank_forms()
     ]
+
+
+class TournamentForm(forms.ModelForm):
+    """Create/edit a tournament itself -- closes the "admin-only" gap
+    TournamentListView used to describe in its own docstring. ``club`` is
+    never a form field (set by the view, same as ``TeamForm``'s own
+    club-scoped fields in ``management.forms``); ``season``/``event`` are
+    both scoped to the given club in ``__init__`` the same way."""
+
+    class Meta:
+        model = Tournament
+        fields = ["name", "season", "start_date", "end_date", "status", "description", "event"]
+        widgets = {
+            "start_date": forms.DateInput(attrs={"type": "date"}),
+            "end_date": forms.DateInput(attrs={"type": "date"}),
+            "description": forms.Textarea(attrs={"rows": 3}),
+        }
+
+    def __init__(self, *args, club=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["season"].queryset = Season.objects.filter(club=club)
+        # An Event already claimed by some other Tournament is excluded --
+        # except this form's own instance's current event, so editing a
+        # tournament without touching this field doesn't spuriously drop it
+        # from the choices. See Tournament.event's own docstring.
+        event_queryset = Event.objects.filter(club=club).filter(Q(tournament__isnull=True) | Q(pk=self.instance.event_id))
+        self.fields["event"].queryset = event_queryset
+        self.fields["event"].required = False
+        self.fields["event"].empty_label = _("— none —")
+
+    def clean(self):
+        cleaned = super().clean()
+        start, end = cleaned.get("start_date"), cleaned.get("end_date")
+        if start and end and end < start:
+            self.add_error("end_date", _("Must be on or after the start date."))
+        return cleaned
+
+
+class TournamentFieldForm(forms.ModelForm):
+    """Create/edit one bookable field/pitch. ``availability`` is a JSON list
+    of per-day windows on the model (see ``TournamentField.availability``'s
+    own docstring), but this first-pass screen only ever collects **one**
+    date + start + end, saved as a single-entry list -- multi-window/multi-
+    day editing is a known simplification, not solved here; a club that
+    needs more can still use the Django admin's raw JSON widget for that one
+    field. ``tournament`` comes from the view, never the form."""
+
+    availability_date = forms.DateField(label=_("Date"), required=False, widget=forms.DateInput(attrs={"type": "date"}))
+    availability_start = forms.TimeField(label=_("Start time"), required=False, widget=forms.TimeInput(attrs={"type": "time"}))
+    availability_end = forms.TimeField(label=_("End time"), required=False, widget=forms.TimeInput(attrs={"type": "time"}))
+
+    class Meta:
+        model = TournamentField
+        fields = ["name", "location"]
+
+    def __init__(self, *args, club=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["location"].queryset = Location.objects.filter(club=club)
+        self.fields["location"].required = False
+        self.fields["location"].empty_label = _("— none —")
+
+        window = (self.instance.availability or [None])[0] if self.instance.pk else None
+        if window:
+            self.fields["availability_date"].initial = window.get("date")
+            self.fields["availability_start"].initial = window.get("start")
+            self.fields["availability_end"].initial = window.get("end")
+
+    def clean(self):
+        cleaned = super().clean()
+        date_, start, end = cleaned.get("availability_date"), cleaned.get("availability_start"), cleaned.get("availability_end")
+        if (date_ or start or end) and not (date_ and start and end):
+            raise ValidationError(_("Set a date, start time, and end time together, or leave all three blank."))
+        if start and end and end <= start:
+            self.add_error("availability_end", _("Must be after the start time."))
+        return cleaned
+
+    def save(self, commit=True):
+        instance = super().save(commit=False)
+        date_, start, end = self.cleaned_data.get("availability_date"), self.cleaned_data.get("availability_start"), self.cleaned_data.get("availability_end")
+        instance.availability = [{"date": date_.isoformat(), "start": start.strftime("%H:%M"), "end": end.strftime("%H:%M")}] if (date_ and start and end) else []
+        if commit:
+            instance.save()
+        return instance
+
+
+class TournamentStageForm(forms.ModelForm):
+    """Create/edit one stage. ``config``/``standings_config`` are free-form
+    JSON on the model (format-specific parameters, points/tie-break rules --
+    see ``TournamentStage``'s own docstring); for this first pass they're a
+    plain Textarea with a basic "is this valid JSON object" check rather than
+    a dynamic per-format field UI, matching the model's own "enum + flexible
+    JSON" idiom. ``tournament`` comes from the view, never the form."""
+
+    class Meta:
+        model = TournamentStage
+        fields = ["name", "sequence", "format", "config", "standings_config"]
+        widgets = {
+            "config": forms.Textarea(attrs={"rows": 4}),
+            "standings_config": forms.Textarea(attrs={"rows": 4}),
+        }
+
+    def _clean_json_object(self, name):
+        # forms.JSONField (the model field's auto-generated form field) has
+        # already parsed the raw text and rejected malformed JSON by the time
+        # this runs -- this only adds the extra "must be an object" check,
+        # since config/standings_config are both documented as JSON *objects*
+        # (a bare list or string would silently break the scheduler).
+        value = self.cleaned_data.get(name)
+        if value is None:
+            return {}
+        if not isinstance(value, dict):
+            raise ValidationError(_('Enter a JSON object, e.g. {"key": "value"}.'))
+        return value
+
+    def clean_config(self):
+        return self._clean_json_object("config")
+
+    def clean_standings_config(self):
+        return self._clean_json_object("standings_config")
+
+
+class TournamentTaskForm(forms.ModelForm):
+    """Create/edit one volunteer shift definition -- mirrors
+    ``management.forms.EventTaskForm`` plus the time/place fields a
+    tournament-wide shift needs that a single-event favour doesn't.
+    ``tournament``/``created_by`` come from the view, never the form. The
+    model's own ``clean()`` already rejects an end before the start."""
+
+    class Meta:
+        model = TournamentTask
+        fields = ["title", "description", "starts_at", "ends_at", "location_label", "needed_quantity"]
+        widgets = {
+            "description": forms.Textarea(attrs={"rows": 2}),
+            "starts_at": forms.DateTimeInput(attrs={"type": "datetime-local"}),
+            "ends_at": forms.DateTimeInput(attrs={"type": "datetime-local"}),
+            "needed_quantity": forms.NumberInput(attrs={"min": "1"}),
+        }
+
+
+class DressingRoomForm(forms.ModelForm):
+    """Create/edit one of the club's own dressing rooms -- a club-wide,
+    persists-across-tournaments record (see ``DressingRoom``'s own
+    docstring), so this is reached from Settings, not from any one
+    tournament's own pages. ``club`` comes from the view, never the form."""
+
+    class Meta:
+        model = DressingRoom
+        fields = ["name", "location", "capacity", "notes"]
+        widgets = {
+            "capacity": forms.NumberInput(attrs={"min": "0"}),
+            "notes": forms.Textarea(attrs={"rows": 2}),
+        }
+
+    def __init__(self, *args, club=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["location"].queryset = Location.objects.filter(club=club)
+        self.fields["location"].required = False
+        self.fields["location"].empty_label = _("— none —")
+
+
+class DressingRoomAssignmentForm(forms.Form):
+    """The "assign a team to a room" action on a tournament's own Dressing
+    rooms tab -- a plain Form, not a ModelForm, since it's never used to
+    create a ``DressingRoomAssignment`` row directly: the view always routes
+    through ``tournaments.services.dressing_rooms.assign_dressing_room``,
+    which does the actual double-booking check that model alone can't
+    express (see that module's own docstring)."""
+
+    dressing_room = forms.ModelChoiceField(queryset=DressingRoom.objects.none(), label=_("Dressing room"))
+    tournament_team = forms.ModelChoiceField(queryset=TournamentTeam.objects.none(), label=_("Team"))
+    assigned_from = forms.DateTimeField(required=False, label=_("From"), help_text=_("Leave both dates blank to book the room for the whole tournament."), widget=forms.DateTimeInput(attrs={"type": "datetime-local"}))
+    assigned_until = forms.DateTimeField(required=False, label=_("Until"), widget=forms.DateTimeInput(attrs={"type": "datetime-local"}))
+    note = forms.CharField(required=False, label=_("Note"), widget=forms.Textarea(attrs={"rows": 2}))
+
+    def __init__(self, *args, club=None, tournament=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["dressing_room"].queryset = DressingRoom.objects.filter(club=club)
+        self.fields["tournament_team"].queryset = TournamentTeam.objects.filter(tournament=tournament, withdrawn_at__isnull=True)
+
+    def clean(self):
+        cleaned = super().clean()
+        start, end = cleaned.get("assigned_from"), cleaned.get("assigned_until")
+        if start and end and end <= start:
+            self.add_error("assigned_until", _("Must be after the start."))
+        return cleaned

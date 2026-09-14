@@ -1,10 +1,19 @@
-{% load i18n %}
+{% load i18n lucide %}
 {% comment %}
-    Shared sub-nav for every tournament-scoped management page. ``active_tab``
-    is one of "registrations"/"schedule". Mirrors
-    _evaluation_checklist_tabs.html's own shape exactly.
+    Shared sub-nav for every tournament-scoped management page. ``active_tab`` is one
+    of "registrations"/"schedule"/"fields_stages"/"tasks"/"dressing_rooms". Mirrors
+    _evaluation_checklist_tabs.html's own shape, plus a "Settings" link on the right --
+    not itself one of the tabs (editing the tournament's own name/season/dates isn't a
+    "browse this tournament's data" concern the way the tabs are), but styled to pick up
+    the active state too when that's the page actually showing (TournamentUpdateView).
 {% endcomment %}
-<div class="tabs tabs-boxed mb-4">
-    <a href="{% url 'management:tournament_registration_queue' tournament.pk %}" class="tab {% if active_tab == "registrations" %}tab-active{% endif %}">{% trans "Registrations" %}</a>
-    <a href="{% url 'management:tournament_schedule' tournament.pk %}" class="tab {% if active_tab == "schedule" %}tab-active{% endif %}">{% trans "Schedule" %}</a>
+<div class="mb-4 flex flex-wrap items-center justify-between gap-2">
+    <div class="tabs tabs-boxed">
+        <a href="{% url 'management:tournament_registration_queue' tournament.pk %}" class="tab {% if active_tab == "registrations" %}tab-active{% endif %}">{% trans "Registrations" %}</a>
+        <a href="{% url 'management:tournament_schedule' tournament.pk %}" class="tab {% if active_tab == "schedule" %}tab-active{% endif %}">{% trans "Schedule" %}</a>
+        <a href="{% url 'management:tournament_field_stage_list' tournament.pk %}" class="tab {% if active_tab == "fields_stages" %}tab-active{% endif %}">{% trans "Fields & stages" %}</a>
+        <a href="{% url 'management:tournament_task_list' tournament.pk %}" class="tab {% if active_tab == "tasks" %}tab-active{% endif %}">{% trans "Tasks" %}</a>
+        <a href="{% url 'management:tournament_dressing_room_list' tournament.pk %}" class="tab {% if active_tab == "dressing_rooms" %}tab-active{% endif %}">{% trans "Dressing rooms" %}</a>
+    </div>
+    <a class="btn btn-sm gap-1.5 {% if active_tab == "settings" %}btn-primary{% else %}btn-outline{% endif %}" href="{% url 'management:tournament_settings' tournament.pk %}">{% lucide "settings" size=14 %} {% trans "Settings" %}</a>
 </div>

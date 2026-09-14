@@ -1,0 +1,89 @@
+{% extends "management/base.html" %}
+{% load i18n lucide ui %}
+
+{% comment %}
+    A tournament's own "Tasks" tab -- every TournamentTask across the whole
+    tournament, time-sorted (unlike _event_task_panel.html, which is scoped
+    to one event with no sense of time). Read-only claim list -- claiming a
+    slot only happens on mobile, each claim shown under
+    members.services.family.claim_label_for(claim.member) rather than the
+    claiming member's own name, same privacy convention
+    _event_task_panel.html documents for EventTask.
+
+    Context: tournament, tasks (each with .claim_labels/.is_full/.edit_form
+    attached in TournamentTaskListView.get_context_data), task_form.
+{% endcomment %}
+
+{% block panel_title %}{{ tournament.name }}{% endblock panel_title %}
+{% block heading %}{{ tournament.name }}{% endblock heading %}
+
+{% block topbar_context %}
+    <span class="badge badge-neutral">{% blocktrans count counter=tasks|length %}{{ counter }} shift{% plural %}{{ counter }} shifts{% endblocktrans %}</span>
+{% endblock topbar_context %}
+
+{% block actions %}
+    <button class="btn btn-primary gap-2" type="button" onclick="document.getElementById('task_create_modal').showModal()">{% lucide "plus" size=16 %} {% trans "Add task" %}</button>
+{% endblock actions %}
+
+{% block panel %}
+    {% include "management/_tournament_tabs.html" with tournament=tournament active_tab="tasks" %}
+
+    <div class="card overflow-hidden">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>{% trans "Shift" %}</th>
+                    <th>{% trans "When" %}</th>
+                    <th>{% trans "Location" %}</th>
+                    <th>{% trans "Coverage" %}</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for task in tasks %}
+                    <tr>
+                        <td>
+                            <span class="font-semibold">{{ task.title }}</span>
+                            {% if task.description %}<div class="text-xs text-muted">{{ task.description }}</div>{% endif %}
+                        </td>
+                        <td class="font-mono text-xs tabular-nums text-muted whitespace-nowrap">{{ task.starts_at|date:"j M, H:i" }}&ndash;{{ task.ends_at|date:"H:i" }}</td>
+                        <td class="text-sm text-muted">{{ task.location_label|default:"—" }}</td>
+                        <td>
+                            <span class="badge badge-sm {% if task.is_full %}badge-success{% else %}badge-outline{% endif %}">{{ task.claim_labels|length }} / {{ task.needed_quantity }}</span>
+                            {% if task.claim_labels %}
+                                <div class="text-xs text-muted">{% trans "Covered by" %}: {{ task.claim_labels|join:", " }}</div>
+                            {% else %}
+                                <div class="text-xs text-dim">{% trans "Nobody has claimed this yet." %}</div>
+                            {% endif %}
+                        </td>
+                        <td class="text-right whitespace-nowrap">
+                            <button class="btn btn-outline btn-xs" type="button" onclick="document.getElementById('{{ task.pk|dom_id:"task_update_modal" }}').showModal()">{% lucide "pencil" size=12 %} {% trans "Edit" %}</button>
+                            <button class="btn btn-outline btn-xs btn-error" type="button" onclick="document.getElementById('{{ task.pk|dom_id:"task_delete_modal" }}').showModal()">{% lucide "trash-2" size=12 %} {% trans "Delete" %}</button>
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="5" class="text-center text-dim">{% trans "No volunteer shifts yet." %}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    {% trans "Add task" as add_task_title %}
+    {% trans "Add" as add_task_submit_label %}
+    {% url 'management:tournament_task_create' tournament.pk as task_create_url %}
+    {% include "controlpanel/_modal_form.html" with modal_id="task_create_modal" title=add_task_title form=task_form action_url=task_create_url submit_label=add_task_submit_label submit_icon="plus" %}
+
+    {% trans "Edit task" as edit_task_title %}
+    {% trans "Delete task" as delete_task_title %}
+    {% trans "Delete" as delete_task_label %}
+    {% for task in tasks %}
+        {% url 'management:tournament_task_update' tournament.pk task.pk as task_update_url %}
+        {% include "controlpanel/_modal_form.html" with modal_id=task.pk|dom_id:"task_update_modal" title=edit_task_title form=task.edit_form action_url=task_update_url submit_icon="check" %}
+
+        {% url 'management:tournament_task_delete' tournament.pk task.pk as task_delete_url %}
+        {% blocktrans with title=task.title asvar delete_task_body %}Delete “{{ title }}”? This cannot be undone.{% endblocktrans %}
+        {% include "controlpanel/_confirm_modal.html" with modal_id=task.pk|dom_id:"task_delete_modal" title=delete_task_title body=delete_task_body action_url=task_delete_url submit_label=delete_task_label %}
+    {% endfor %}
+{% endblock panel %}

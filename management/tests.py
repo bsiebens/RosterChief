@@ -58,7 +58,8 @@ from shop.services.invoices import ShopInvoicePDFError, create_invoice_for_order
 from shop.services.notifications import _notify_order_ready_for_pickup_by_id
 from teams.models import NumberPool, NumberReservation, Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
 from teams.services import eligible_roster_members
-from tournaments.models import Match, Tournament, TournamentField, TournamentRegistration, TournamentRegistrationPlayer, TournamentStage, TournamentTeam
+from tournaments.models import DressingRoom, DressingRoomAssignment, Match, Tournament, TournamentField, TournamentRegistration, TournamentRegistrationPlayer, TournamentStage, TournamentTask, TournamentTaskClaim, TournamentTeam
+from tournaments.services.dressing_rooms import assign_dressing_room
 from tournaments.services.registration import approve_registration, reject_registration
 from tournaments.services.scheduling import generate_stage_matches
 
@@ -14097,3 +14098,597 @@ class TournamentScheduleTests(ManagementTestBase):
 
         self.assertEqual(self.club_post("match_reschedule", {"field": other_field.pk, "scheduled_start": "2026-09-20T09:00"}, other_match.pk).status_code, 404)
         self.assertEqual(self.club_post("match_result", {"score_home": 1, "score_away": 0}, other_match.pk).status_code, 404)
+
+
+class TournamentCreateUpdateTests(ManagementTestBase):
+    """management:tournament_create/tournament_settings -- closes the
+    "Django admin only" gap TournamentListView's own docstring used to
+    describe. Same gating and fixture conventions as
+    TournamentRegistrationQueueTests."""
+
+    def setUp(self):
+        super().setUp()
+        # waffle caches Flag lookups outside the DB transaction each test
+        # rolls back, so a flag created in one test can otherwise leak a
+        # stale/invalid pk into the next -- see FeatureGatedSectionsTests.
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def activate_flag(self):
+        flag, _created = get_waffle_flag_model().objects.get_or_create(name="tournaments")
+        flag.clubs.add(self.club)
+
+    def make_coach(self, email="coach-tournament-settings@example.com"):
+        coach_user = User.objects.create_user(email=email, password="pw-secret-123")
+        coach_member = Member.objects.create(user=coach_user, first_name="Cara", last_name="Coach")
+        ClubMembership.objects.create(club=self.club, member=coach_member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        return coach_user
+
+    def valid_data(self, **overrides):
+        today = timezone.localdate()
+        data = {
+            "name": "Fall Classic",
+            "season": self.season.pk,
+            "start_date": today.isoformat(),
+            "end_date": (today + datetime.timedelta(days=2)).isoformat(),
+            "status": Tournament.Status.DRAFT,
+            "description": "",
+        }
+        data.update(overrides)
+        return data
+
+    def test_create_404s_when_the_flag_is_not_active(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_create")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_create_403s_for_a_non_admin_even_with_the_flag_active(self):
+        self.activate_flag()
+        self.client.force_login(self.make_coach())
+
+        response = self.club_get("tournament_create")
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_valid_create_makes_a_tournament_and_redirects_to_settings(self):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("tournament_create", self.valid_data())
+
+        tournament = Tournament.objects.get(club=self.club, name="Fall Classic")
+        self.assertRedirects(response, reverse("management:tournament_settings", args=[tournament.pk]))
+        self.assertEqual(tournament.season, self.season)
+
+    def test_another_clubs_season_is_not_an_accepted_choice(self):
+        self.activate_flag()
+        other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
+        other_season = make_season(other_club)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("tournament_create", self.valid_data(season=other_season.pk))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Tournament.objects.filter(club=self.club, name="Fall Classic").exists())
+        self.assertIn("season", response.context["form"].errors)
+
+    def test_end_date_before_start_date_is_rejected(self):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+        today = timezone.localdate()
+
+        response = self.club_post("tournament_create", self.valid_data(start_date=today.isoformat(), end_date=(today - datetime.timedelta(days=1)).isoformat()))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("end_date", response.context["form"].errors)
+        self.assertFalse(Tournament.objects.filter(club=self.club, name="Fall Classic").exists())
+
+    def test_update_404s_for_a_tournament_in_another_club(self):
+        self.activate_flag()
+        other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
+        other_season = make_season(other_club)
+        other_tournament = Tournament.objects.create(club=other_club, name="Rival Cup", season=other_season, start_date=timezone.localdate(), end_date=timezone.localdate())
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_settings", other_tournament.pk)
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_valid_update_changes_the_tournament_and_flashes_a_success(self):
+        self.activate_flag()
+        tournament = Tournament.objects.create(club=self.club, name="Fall Classic", season=self.season, start_date=timezone.localdate(), end_date=timezone.localdate())
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("tournament_settings", self.valid_data(name="Fall Classic 2026"), tournament.pk)
+
+        self.assertRedirects(response, reverse("management:tournament_settings", args=[tournament.pk]))
+        tournament.refresh_from_db()
+        self.assertEqual(tournament.name, "Fall Classic 2026")
+        messages = [str(message) for message in get_messages(response.wsgi_request)]
+        self.assertTrue(any("updated" in message for message in messages))
+
+
+class TournamentFieldStageCrudTests(ManagementTestBase):
+    """management:tournament_field_stage_list and its field/stage CRUD --
+    the minimum a tournament needs before tournaments.services.scheduling.
+    generate_stage_matches/allocate_schedule have anything to work with."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        today = timezone.localdate()
+        cls.tournament = Tournament.objects.create(club=cls.club, name="Fall Classic", season=cls.season, start_date=today, end_date=today + datetime.timedelta(days=2))
+
+    def setUp(self):
+        super().setUp()
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def activate_flag(self):
+        flag, _created = get_waffle_flag_model().objects.get_or_create(name="tournaments")
+        flag.clubs.add(self.club)
+
+    def make_coach(self, email="coach-fields-stages@example.com"):
+        coach_user = User.objects.create_user(email=email, password="pw-secret-123")
+        coach_member = Member.objects.create(user=coach_user, first_name="Cara", last_name="Coach")
+        ClubMembership.objects.create(club=self.club, member=coach_member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        return coach_user
+
+    def test_list_404s_when_the_flag_is_not_active(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_field_stage_list", self.tournament.pk)
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_list_403s_for_a_non_admin_even_with_the_flag_active(self):
+        self.activate_flag()
+        self.client.force_login(self.make_coach())
+
+        response = self.club_get("tournament_field_stage_list", self.tournament.pk)
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_create_field_with_an_availability_window(self):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post(
+            "tournament_field_create",
+            {"name": "Field 1", "location": "", "availability_date": "2026-09-19", "availability_start": "08:00", "availability_end": "20:00"},
+            self.tournament.pk,
+        )
+
+        self.assertRedirects(response, reverse("management:tournament_field_stage_list", args=[self.tournament.pk]))
+        field = TournamentField.objects.get(tournament=self.tournament, name="Field 1")
+        self.assertEqual(field.availability, [{"date": "2026-09-19", "start": "08:00", "end": "20:00"}])
+
+    def test_create_field_without_an_availability_window(self):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("tournament_field_create", {"name": "Field 2", "location": ""}, self.tournament.pk)
+
+        self.assertRedirects(response, reverse("management:tournament_field_stage_list", args=[self.tournament.pk]))
+        field = TournamentField.objects.get(tournament=self.tournament, name="Field 2")
+        self.assertEqual(field.availability, [])
+
+    def test_a_partial_availability_window_is_rejected(self):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post(
+            "tournament_field_create",
+            {"name": "Field 3", "location": "", "availability_date": "2026-09-19"},
+            self.tournament.pk,
+        )
+
+        self.assertRedirects(response, reverse("management:tournament_field_stage_list", args=[self.tournament.pk]))
+        self.assertFalse(TournamentField.objects.filter(tournament=self.tournament, name="Field 3").exists())
+
+    def test_update_and_delete_a_field(self):
+        self.activate_flag()
+        field = TournamentField.objects.create(tournament=self.tournament, name="Field 1")
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("tournament_field_update", {"name": "Field 1 (renamed)", "location": ""}, self.tournament.pk, field.pk)
+        self.assertRedirects(response, reverse("management:tournament_field_stage_list", args=[self.tournament.pk]))
+        field.refresh_from_db()
+        self.assertEqual(field.name, "Field 1 (renamed)")
+
+        response = self.club_post("tournament_field_delete", {}, self.tournament.pk, field.pk)
+        self.assertRedirects(response, reverse("management:tournament_field_stage_list", args=[self.tournament.pk]))
+        self.assertFalse(TournamentField.objects.filter(pk=field.pk).exists())
+
+    def test_field_crud_404s_for_a_field_in_another_tournament(self):
+        self.activate_flag()
+        other_tournament = Tournament.objects.create(club=self.club, name="Spring Cup", season=self.season, start_date=timezone.localdate(), end_date=timezone.localdate())
+        other_field = TournamentField.objects.create(tournament=other_tournament, name="Field X")
+        self.client.force_login(self.admin_user)
+
+        self.assertEqual(self.club_post("tournament_field_update", {"name": "Hack"}, self.tournament.pk, other_field.pk).status_code, 404)
+        self.assertEqual(self.club_post("tournament_field_delete", {}, self.tournament.pk, other_field.pk).status_code, 404)
+
+    def test_create_a_stage_with_valid_json_config(self):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post(
+            "tournament_stage_create",
+            {"name": "Group Stage", "sequence": 0, "format": TournamentStage.Format.ROUND_ROBIN, "config": '{"rounds": 1}', "standings_config": "{}"},
+            self.tournament.pk,
+        )
+
+        self.assertRedirects(response, reverse("management:tournament_field_stage_list", args=[self.tournament.pk]))
+        stage = TournamentStage.objects.get(tournament=self.tournament, name="Group Stage")
+        self.assertEqual(stage.config, {"rounds": 1})
+
+    def test_invalid_json_config_is_rejected_without_a_500(self):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post(
+            "tournament_stage_create",
+            {"name": "Group Stage", "sequence": 0, "format": TournamentStage.Format.ROUND_ROBIN, "config": "{not json}", "standings_config": "{}"},
+            self.tournament.pk,
+        )
+
+        self.assertRedirects(response, reverse("management:tournament_field_stage_list", args=[self.tournament.pk]))
+        self.assertFalse(TournamentStage.objects.filter(tournament=self.tournament, name="Group Stage").exists())
+
+    def test_a_json_array_config_is_rejected(self):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post(
+            "tournament_stage_create",
+            {"name": "Group Stage", "sequence": 0, "format": TournamentStage.Format.ROUND_ROBIN, "config": "[1, 2]", "standings_config": "{}"},
+            self.tournament.pk,
+        )
+
+        self.assertRedirects(response, reverse("management:tournament_field_stage_list", args=[self.tournament.pk]))
+        self.assertFalse(TournamentStage.objects.filter(tournament=self.tournament, name="Group Stage").exists())
+
+    def test_update_and_delete_a_stage(self):
+        self.activate_flag()
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="Group Stage", format=TournamentStage.Format.ROUND_ROBIN)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post(
+            "tournament_stage_update",
+            {"name": "Group Stage A", "sequence": 1, "format": TournamentStage.Format.ROUND_ROBIN, "config": "{}", "standings_config": "{}"},
+            self.tournament.pk,
+            stage.pk,
+        )
+        self.assertRedirects(response, reverse("management:tournament_field_stage_list", args=[self.tournament.pk]))
+        stage.refresh_from_db()
+        self.assertEqual(stage.name, "Group Stage A")
+        self.assertEqual(stage.sequence, 1)
+
+        response = self.club_post("tournament_stage_delete", {}, self.tournament.pk, stage.pk)
+        self.assertRedirects(response, reverse("management:tournament_field_stage_list", args=[self.tournament.pk]))
+        self.assertFalse(TournamentStage.objects.filter(pk=stage.pk).exists())
+
+    def test_stage_crud_404s_for_a_stage_in_another_tournament(self):
+        self.activate_flag()
+        other_tournament = Tournament.objects.create(club=self.club, name="Spring Cup", season=self.season, start_date=timezone.localdate(), end_date=timezone.localdate())
+        other_stage = TournamentStage.objects.create(tournament=other_tournament, name="Other Stage", format=TournamentStage.Format.CUSTOM)
+        self.client.force_login(self.admin_user)
+
+        self.assertEqual(self.club_post("tournament_stage_update", {"name": "Hack"}, self.tournament.pk, other_stage.pk).status_code, 404)
+        self.assertEqual(self.club_post("tournament_stage_delete", {}, self.tournament.pk, other_stage.pk).status_code, 404)
+
+
+class TournamentTaskManagementTests(ManagementTestBase):
+    """management:tournament_task_list and its CRUD -- the one genuinely new
+    surface phase 6 adds: a time-sorted list across the whole tournament,
+    not grouped by event (unlike _event_task_panel.html's own per-event
+    list). Same read-only claim-list privacy convention as that panel
+    (claim_label_for, never the claiming member's own name)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        today = timezone.localdate()
+        cls.tournament = Tournament.objects.create(club=cls.club, name="Fall Classic", season=cls.season, start_date=today, end_date=today + datetime.timedelta(days=2))
+
+    def setUp(self):
+        super().setUp()
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def activate_flag(self):
+        flag, _created = get_waffle_flag_model().objects.get_or_create(name="tournaments")
+        flag.clubs.add(self.club)
+
+    def make_coach(self, email="coach-tasks@example.com"):
+        coach_user = User.objects.create_user(email=email, password="pw-secret-123")
+        coach_member = Member.objects.create(user=coach_user, first_name="Cara", last_name="Coach")
+        ClubMembership.objects.create(club=self.club, member=coach_member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        return coach_user
+
+    def make_family_member(self, first_name="Fin", last_name="Family", family_name="Skater"):
+        family = Family.objects.create(club=self.club, name=family_name)
+        member = Member.objects.create(first_name=first_name, last_name=last_name)
+        FamilyMembership.objects.create(family=family, member=member)
+        return member
+
+    def test_list_404s_when_the_flag_is_not_active(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_task_list", self.tournament.pk)
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_list_403s_for_a_non_admin_even_with_the_flag_active(self):
+        self.activate_flag()
+        self.client.force_login(self.make_coach())
+
+        response = self.club_get("tournament_task_list", self.tournament.pk)
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_tasks_are_ordered_by_start_time(self):
+        self.activate_flag()
+        later = TournamentTask.objects.create(
+            tournament=self.tournament,
+            title="Late shift",
+            starts_at=timezone.make_aware(datetime.datetime(2026, 9, 20, 14, 0)),
+            ends_at=timezone.make_aware(datetime.datetime(2026, 9, 20, 16, 0)),
+        )
+        earlier = TournamentTask.objects.create(
+            tournament=self.tournament,
+            title="Early shift",
+            starts_at=timezone.make_aware(datetime.datetime(2026, 9, 20, 8, 0)),
+            ends_at=timezone.make_aware(datetime.datetime(2026, 9, 20, 10, 0)),
+        )
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_task_list", self.tournament.pk)
+
+        tasks = response.context["tasks"]
+        self.assertEqual([task.pk for task in tasks], [earlier.pk, later.pk])
+
+    def test_coverage_and_claim_labels_use_the_family_label_not_the_members_own_name(self):
+        self.activate_flag()
+        task = TournamentTask.objects.create(
+            tournament=self.tournament,
+            title="Gate duty",
+            starts_at=timezone.make_aware(datetime.datetime(2026, 9, 20, 8, 0)),
+            ends_at=timezone.make_aware(datetime.datetime(2026, 9, 20, 10, 0)),
+            needed_quantity=2,
+        )
+        member = self.make_family_member()
+        TournamentTaskClaim.objects.create(task=task, member=member)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_task_list", self.tournament.pk)
+
+        tasks = response.context["tasks"]
+        self.assertEqual(tasks[0].claim_labels, ["Skater family"])
+        self.assertFalse(tasks[0].is_full)
+        self.assertNotContains(response, member.get_full_name())
+        self.assertContains(response, "Skater family")
+
+    def test_create_update_delete_a_task(self):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post(
+            "tournament_task_create",
+            {"title": "Gate duty", "description": "", "starts_at": "2026-09-20T08:00", "ends_at": "2026-09-20T10:00", "location_label": "Entrance", "needed_quantity": 2},
+            self.tournament.pk,
+        )
+
+        self.assertRedirects(response, reverse("management:tournament_task_list", args=[self.tournament.pk]))
+        task = TournamentTask.objects.get(tournament=self.tournament, title="Gate duty")
+        self.assertEqual(task.needed_quantity, 2)
+        self.assertEqual(task.created_by, self.admin_member)
+
+        response = self.club_post(
+            "tournament_task_update",
+            {"title": "Gate duty (updated)", "description": "", "starts_at": "2026-09-20T08:00", "ends_at": "2026-09-20T10:00", "location_label": "Entrance", "needed_quantity": 3},
+            self.tournament.pk,
+            task.pk,
+        )
+        self.assertRedirects(response, reverse("management:tournament_task_list", args=[self.tournament.pk]))
+        task.refresh_from_db()
+        self.assertEqual(task.title, "Gate duty (updated)")
+        self.assertEqual(task.needed_quantity, 3)
+
+        response = self.club_post("tournament_task_delete", {}, self.tournament.pk, task.pk)
+        self.assertRedirects(response, reverse("management:tournament_task_list", args=[self.tournament.pk]))
+        self.assertFalse(TournamentTask.objects.filter(pk=task.pk).exists())
+
+    def test_an_end_before_the_start_is_rejected_without_a_500(self):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post(
+            "tournament_task_create",
+            {"title": "Bad shift", "description": "", "starts_at": "2026-09-20T10:00", "ends_at": "2026-09-20T08:00", "location_label": "", "needed_quantity": 1},
+            self.tournament.pk,
+        )
+
+        self.assertRedirects(response, reverse("management:tournament_task_list", args=[self.tournament.pk]))
+        self.assertFalse(TournamentTask.objects.filter(tournament=self.tournament, title="Bad shift").exists())
+
+    def test_task_crud_404s_for_a_task_in_another_tournament(self):
+        self.activate_flag()
+        other_tournament = Tournament.objects.create(club=self.club, name="Spring Cup", season=self.season, start_date=timezone.localdate(), end_date=timezone.localdate())
+        other_task = TournamentTask.objects.create(tournament=other_tournament, title="Other shift", starts_at=timezone.now(), ends_at=timezone.now() + datetime.timedelta(hours=1))
+        self.client.force_login(self.admin_user)
+
+        self.assertEqual(self.club_post("tournament_task_update", {"title": "Hack"}, self.tournament.pk, other_task.pk).status_code, 404)
+        self.assertEqual(self.club_post("tournament_task_delete", {}, self.tournament.pk, other_task.pk).status_code, 404)
+
+
+class DressingRoomManagementTests(ManagementTestBase):
+    """management:dressing_room_list and its CRUD -- DressingRoom is
+    club-scoped (persists across tournaments/seasons, see the model's own
+    docstring), so this lives under Settings rather than inside any one
+    tournament's own pages."""
+
+    def setUp(self):
+        super().setUp()
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def activate_flag(self):
+        flag, _created = get_waffle_flag_model().objects.get_or_create(name="tournaments")
+        flag.clubs.add(self.club)
+
+    def make_coach(self, email="coach-dressing-rooms@example.com"):
+        coach_user = User.objects.create_user(email=email, password="pw-secret-123")
+        coach_member = Member.objects.create(user=coach_user, first_name="Cara", last_name="Coach")
+        ClubMembership.objects.create(club=self.club, member=coach_member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        return coach_user
+
+    def test_list_404s_when_the_flag_is_not_active(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("dressing_room_list")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_list_403s_for_a_non_admin_even_with_the_flag_active(self):
+        self.activate_flag()
+        self.client.force_login(self.make_coach())
+
+        response = self.club_get("dressing_room_list")
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_create_update_delete_a_dressing_room(self):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("dressing_room_create", {"name": "Room A", "location": "", "capacity": 20, "notes": ""})
+        self.assertRedirects(response, reverse("management:dressing_room_list"))
+        room = DressingRoom.objects.get(club=self.club, name="Room A")
+        self.assertEqual(room.capacity, 20)
+
+        response = self.club_post("dressing_room_update", {"name": "Room A (renamed)", "location": "", "capacity": 25, "notes": ""}, room.pk)
+        self.assertRedirects(response, reverse("management:dressing_room_list"))
+        room.refresh_from_db()
+        self.assertEqual(room.name, "Room A (renamed)")
+
+        response = self.club_post("dressing_room_delete", {}, room.pk)
+        self.assertRedirects(response, reverse("management:dressing_room_list"))
+        self.assertFalse(DressingRoom.objects.filter(pk=room.pk).exists())
+
+    def test_crud_404s_for_a_dressing_room_in_another_club(self):
+        self.activate_flag()
+        other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
+        other_room = DressingRoom.objects.create(club=other_club, name="Rival Room")
+        self.client.force_login(self.admin_user)
+
+        self.assertEqual(self.club_post("dressing_room_update", {"name": "Hack"}, other_room.pk).status_code, 404)
+        self.assertEqual(self.club_post("dressing_room_delete", {}, other_room.pk).status_code, 404)
+
+
+class TournamentDressingRoomAssignmentTests(ManagementTestBase):
+    """management:tournament_dressing_room_list and its assign/release
+    actions -- always routed through
+    tournaments.services.dressing_rooms.assign_dressing_room/
+    release_dressing_room, never a direct DressingRoomAssignment write (see
+    that module's own docstring for why a genuine double-booking needs a
+    service-level lock, not just its UniqueConstraint)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        today = timezone.localdate()
+        cls.tournament = Tournament.objects.create(club=cls.club, name="Fall Classic", season=cls.season, start_date=today, end_date=today + datetime.timedelta(days=2))
+        cls.room = DressingRoom.objects.create(club=cls.club, name="Room A")
+
+    def setUp(self):
+        super().setUp()
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def activate_flag(self):
+        flag, _created = get_waffle_flag_model().objects.get_or_create(name="tournaments")
+        flag.clubs.add(self.club)
+
+    def make_coach(self, email="coach-dressing-room-assign@example.com"):
+        coach_user = User.objects.create_user(email=email, password="pw-secret-123")
+        coach_member = Member.objects.create(user=coach_user, first_name="Cara", last_name="Coach")
+        ClubMembership.objects.create(club=self.club, member=coach_member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        return coach_user
+
+    def make_team(self, name):
+        return TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=name)
+
+    def test_list_404s_when_the_flag_is_not_active(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_dressing_room_list", self.tournament.pk)
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_list_403s_for_a_non_admin_even_with_the_flag_active(self):
+        self.activate_flag()
+        self.client.force_login(self.make_coach())
+
+        response = self.club_get("tournament_dressing_room_list", self.tournament.pk)
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_valid_assignment_is_created_and_flashed(self):
+        self.activate_flag()
+        team = self.make_team("Team A")
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post(
+            "tournament_dressing_room_assign",
+            {"dressing_room": self.room.pk, "tournament_team": team.pk, "assigned_from": "", "assigned_until": "", "note": ""},
+            self.tournament.pk,
+        )
+
+        self.assertRedirects(response, reverse("management:tournament_dressing_room_list", args=[self.tournament.pk]))
+        assignment = DressingRoomAssignment.objects.get(dressing_room=self.room, tournament_team=team)
+        self.assertIsNone(assignment.assigned_from)
+        messages = [str(message) for message in get_messages(response.wsgi_request)]
+        self.assertTrue(any("assigned" in message for message in messages))
+
+    def test_a_genuine_conflict_is_flashed_as_a_warning_not_a_500(self):
+        self.activate_flag()
+        team_a, team_b = self.make_team("Team A"), self.make_team("Team B")
+        assign_dressing_room(self.room, team_a)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post(
+            "tournament_dressing_room_assign",
+            {"dressing_room": self.room.pk, "tournament_team": team_b.pk, "assigned_from": "", "assigned_until": "", "note": ""},
+            self.tournament.pk,
+        )
+
+        self.assertRedirects(response, reverse("management:tournament_dressing_room_list", args=[self.tournament.pk]))
+        self.assertFalse(DressingRoomAssignment.objects.filter(dressing_room=self.room, tournament_team=team_b).exists())
+        messages = [str(message) for message in get_messages(response.wsgi_request)]
+        self.assertTrue(any("already booked" in message for message in messages))
+
+    def test_release_removes_the_assignment(self):
+        self.activate_flag()
+        team = self.make_team("Team A")
+        assignment = assign_dressing_room(self.room, team)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("tournament_dressing_room_release", {}, self.tournament.pk, assignment.pk)
+
+        self.assertRedirects(response, reverse("management:tournament_dressing_room_list", args=[self.tournament.pk]))
+        self.assertFalse(DressingRoomAssignment.objects.filter(pk=assignment.pk).exists())
+
+    def test_release_404s_for_an_assignment_in_another_tournament(self):
+        self.activate_flag()
+        other_tournament = Tournament.objects.create(club=self.club, name="Spring Cup", season=self.season, start_date=timezone.localdate(), end_date=timezone.localdate())
+        other_team = TournamentTeam.objects.create(club=self.club, tournament=other_tournament, foreign_name="Other Team")
+        other_assignment = assign_dressing_room(self.room, other_team)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("tournament_dressing_room_release", {}, self.tournament.pk, other_assignment.pk)
+
+        self.assertEqual(response.status_code, 404)

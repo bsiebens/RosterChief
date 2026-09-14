@@ -27,6 +27,7 @@ from waffle import flag_is_active
 from bugs.forms import BugReportForm
 from bugs.models import BugReport
 from bugs.services import file_report
+from club.mixins import FeatureFlagMixin
 from club.models import ClubMembership
 from club.services.access import current_season, get_current_season, has_management_access, teams_managed_by
 from club.services.fees import open_dues_rows
@@ -70,6 +71,10 @@ from shop.services.invoices import ShopInvoicePDFError, render_invoice_pdf
 from shop.services.pricing import cart_totals
 from teams.models import StaffAssignment, Team, TeamMembership
 from teams.services.numbers import member_current_number
+from tournaments.models import Tournament, TournamentTask
+from tournaments.services.tasks import TaskClaimError as TournamentTaskClaimError
+from tournaments.services.tasks import claim_task as claim_tournament_task
+from tournaments.services.tasks import unclaim_task as unclaim_tournament_task
 
 from .forms import _INPUT_CLASSES, _TEXTAREA_CLASSES, MemberProfileForm, style_dynamic_form
 from .mixins import DesktopTemplateMixin, PersonScopeMixin, ShopScopeMixin
@@ -672,6 +677,21 @@ class EventDetailView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
             task.is_full = len(task.claim_labels) >= task.needed_quantity
             task.claimed_by_me = self.me is not None and any(claim.member_id == self.me.pk for claim in task.claims.all())
 
+        # This event's own tournament, if it's one side of a home tournament's
+        # optional Event link (Tournament.event -- see that field's own
+        # docstring) -- small addition here so a member who reached this
+        # event the ordinary way also sees its volunteer shifts, but the
+        # tournament's own standalone board (TournamentTaskListView) is the
+        # one that has to work regardless of this link existing.
+        tournament = Tournament.objects.filter(event=event).first() if flag_is_active(self.request, "tournaments") else None
+        tournament_tasks = []
+        if tournament is not None:
+            tournament_tasks = list(tournament.tasks.prefetch_related("claims__member"))
+            for task in tournament_tasks:
+                task.claim_labels = [claim_label_for(claim.member, tournament.club) for claim in task.claims.all()]
+                task.is_full = len(task.claim_labels) >= task.needed_quantity
+                task.claimed_by_me = self.me is not None and any(claim.member_id == self.me.pk for claim in task.claims.all())
+
         your_answers = []
         blocked_signups = []
         if self.managed_people:
@@ -725,6 +745,8 @@ class EventDetailView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
             referee_signups=referee_signups,
             official_signups=official_signups,
             tasks=tasks,
+            tournament=tournament,
+            tournament_tasks=tournament_tasks,
             your_answers=your_answers,
             blocked_signups=blocked_signups,
             squad_summary=squad_summary,
@@ -798,6 +820,87 @@ class EventDetailView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         if request.POST.get("next") == "event_detail":
             return HttpResponseRedirect(reverse("mobile:event_detail", kwargs={"pk": event.pk}))
         return HttpResponseRedirect(reverse("mobile:home"))
+
+
+class TournamentTaskListView(FeatureFlagMixin, PersonScopeMixin, LoginRequiredMixin, TemplateView):
+    """A tournament's own volunteer-shift board -- the standalone counterpart
+    of EventDetailView's "Tasks" card, reachable directly at
+    ``/app/tournaments/<slug>/tasks/`` regardless of whether the tournament
+    has a linked calendar Event at all (Tournament.event is optional; see
+    its own docstring), and regardless of whether that link is wired into
+    this club's nav yet -- same "reachable by direct link before nav catches
+    up" precedent as the phase-2 staff registration queue.
+
+    Gated by FeatureFlagMixin the same way tournaments.views.TournamentFeatureMixin
+    gates the public tournament site, just layered onto this app's own
+    PersonScopeMixin/LoginRequiredMixin pair instead of that mixin's public
+    ClubScopedPublicMixin base -- a member has to be signed in to claim a
+    shift, unlike browsing a public bracket."""
+
+    template_name = "mobile/tournament_tasks.html"
+    feature_flag = "tournaments"
+    active_tab = ""
+
+    def get_context_data(self, **kwargs):
+        tournament = get_object_or_404(Tournament, club=self.request.club, slug=self.kwargs["tournament_slug"])
+
+        # Same claim_labels/is_full/claimed_by_me context-time annotation as
+        # EventDetailView gives EventTask -- never a model property (see
+        # TournamentTask's own docstring).
+        tasks = list(tournament.tasks.prefetch_related("claims__member"))
+        for task in tasks:
+            task.claim_labels = [claim_label_for(claim.member, tournament.club) for claim in task.claims.all()]
+            task.is_full = len(task.claim_labels) >= task.needed_quantity
+            task.claimed_by_me = self.me is not None and any(claim.member_id == self.me.pk for claim in task.claims.all())
+
+        return super().get_context_data(
+            screen_title=tournament.name,
+            tournament=tournament,
+            tasks=tasks,
+            **kwargs,
+        )
+
+
+class TournamentTaskRespondView(FeatureFlagMixin, PersonScopeMixin, LoginRequiredMixin, View):
+    """Claim/unclaim one slot of a tournament task -- a straight mirror of
+    EventTaskRespondView above, right down to the "always self.me, never a
+    managed-person picker" rule (see that view's own docstring): a volunteer
+    shift belongs to whichever parent/member is actually handling it, not a
+    specific child. Routes through tournaments.services.tasks.claim_task/
+    unclaim_task, so capacity is enforced in the one place this screen's own
+    coverage pill already reflects."""
+
+    feature_flag = "tournaments"
+
+    def post(self, request, *args, **kwargs):
+        if self.me is None:
+            return HttpResponseBadRequest(_("No member record for this account."))
+
+        task = get_object_or_404(TournamentTask, pk=kwargs["task_id"], tournament__club=request.club)
+        response = request.POST.get("response")
+
+        if response == "claim":
+            try:
+                claim_tournament_task(task, self.me)
+                notify(request, f"s|{_('Claimed')}|" + _("You're down for “%(title)s”.") % {"title": task.title})
+            except TournamentTaskClaimError as exc:
+                notify(request, f"e|{_('Could not claim')}|{exc}")
+        elif response == "unclaim":
+            claim = task.claims.filter(member=self.me).first()
+            if claim is not None:
+                unclaim_tournament_task(claim)
+                notify(request, f"w|{_('Removed')}|" + _("You're no longer down for “%(title)s”.") % {"title": task.title})
+        else:
+            return HttpResponseBadRequest(_("Unknown response."))
+
+        # Same redirect-back convention as EventTaskRespondView: "next=event_detail"
+        # only makes sense (and only gets sent, by event_detail.html's own
+        # copy of this task card) when the tournament actually has a linked
+        # Event; the standalone board's own card instead asks for its own
+        # page back.
+        if request.POST.get("next") == "event_detail" and task.tournament.event_id:
+            return HttpResponseRedirect(reverse("mobile:event_detail", kwargs={"pk": task.tournament.event_id}))
+        return HttpResponseRedirect(reverse("mobile:tournament_task_list", kwargs={"tournament_slug": task.tournament.slug}))
 
 
 class NewsListView(PersonScopeMixin, LoginRequiredMixin, TemplateView):

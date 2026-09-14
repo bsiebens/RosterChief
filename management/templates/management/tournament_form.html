@@ -1,0 +1,40 @@
+{% extends "management/base.html" %}
+{% load lucide ui i18n %}
+
+{% comment %}
+    Tournament create/settings -- mirrors member_form.html's own shape
+    exactly (a plain {% form_field %} grid). The tabs bar only shows on the
+    update view (a brand-new tournament has no registrations/schedule/etc.
+    to browse yet), with "Settings" itself picked out as the active one.
+{% endcomment %}
+
+{% block heading %}{% if update_view %}{{ object.name }}{% else %}{% trans "New tournament" %}{% endif %}{% endblock heading %}
+
+{% block panel %}
+    {% if update_view %}
+        {% include "management/_tournament_tabs.html" with tournament=object active_tab="settings" %}
+    {% endif %}
+
+    <div class="card card-body">
+        <form method="post">
+            {% csrf_token %}
+
+            {% for error in form.non_field_errors %}
+                <div class="alert alert-error my-2">
+                    <span>{{ error }}</span>
+                </div>
+            {% endfor %}
+
+            <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+                {% for field in form %}
+                    {% form_field field %}
+                {% endfor %}
+            </div>
+
+            <div class="mt-2 flex items-center gap-2 pt-2">
+                <a class="btn btn-outline gap-2" href="{% if update_view %}{% url "management:tournament_field_stage_list" object.pk %}{% else %}{% url "management:tournament_list" %}{% endif %}">{% lucide "arrow-left" size=16 %} {% trans "Cancel" %}</a>
+                <button class="btn btn-primary gap-2" type="submit">{% lucide "save" size=16 %} {% trans "Save" %}</button>
+            </div>
+        </form>
+    </div>
+{% endblock panel %}

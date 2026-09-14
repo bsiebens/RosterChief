@@ -8,6 +8,10 @@
     <span class="badge badge-neutral">{% blocktrans count counter=tournaments|length %}{{ counter }} tournament{% plural %}{{ counter }} tournaments{% endblocktrans %}</span>
 {% endblock topbar_context %}
 
+{% block actions %}
+    <a class="btn btn-primary gap-2" href="{% url 'management:tournament_create' %}">{% lucide "plus" size=16 %} {% trans "New tournament" %}</a>
+{% endblock actions %}
+
 {% block panel %}
     <div class="card overflow-hidden">
         <table class="table">
@@ -37,11 +41,12 @@
                                 {% if tournament.pending_registration_count %}<span class="badge badge-error badge-xs">{{ tournament.pending_registration_count }}</span>{% endif %}
                             </a>
                             <a class="btn btn-outline btn-sm gap-1.5" href="{% url 'management:tournament_schedule' tournament.pk %}">{% lucide "calendar-days" size=14 %} {% trans "Schedule" %}</a>
+                            <a class="btn btn-outline btn-sm gap-1.5" href="{% url 'management:tournament_settings' tournament.pk %}">{% lucide "settings" size=14 %} {% trans "Settings" %}</a>
                         </td>
                     </tr>
                 {% empty %}
                     <tr>
-                        <td colspan="5" class="text-center text-dim">{% trans "No tournaments yet -- create one from the Django admin for now." %}</td>
+                        <td colspan="5" class="text-center text-dim">{% trans "No tournaments yet." %}</td>
                     </tr>
                 {% endfor %}
             </tbody>

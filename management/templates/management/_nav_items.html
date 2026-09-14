@@ -130,6 +130,7 @@
                     {% endif %}
                     {% if tournaments_enabled %}
                         <a class="nav-subitem {% if nav == 'tournament_list' %}active{% endif %}" href="{% url 'management:tournament_list' %}">{% trans "Tournaments" %}</a>
+                        <a class="nav-subitem {% if nav == 'dressing_room_list' %}active{% endif %}" href="{% url 'management:dressing_room_list' %}">{% trans "Dressing rooms" %}</a>
                     {% endif %}
                 {% endif %}
             </div>

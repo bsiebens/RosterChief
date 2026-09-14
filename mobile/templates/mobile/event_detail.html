@@ -142,6 +142,10 @@
         {% include "mobile/_event_tasks.html" %}
     {% endif %}
 
+    {% if tournament_tasks %}
+        {% include "mobile/_tournament_tasks.html" with tasks=tournament_tasks next="event_detail" %}
+    {% endif %}
+
     {% if lineup %}
         <div class="m-card p-4">
             <div class="flex items-center justify-between">
@@ -304,7 +308,7 @@
         </div>
     {% endif %}
 
-    {% if not your_answers and not squad_summary and not lineup and not referee_signups and not blocked_signups and not tasks and not official_signups %}
+    {% if not your_answers and not squad_summary and not lineup and not referee_signups and not blocked_signups and not tasks and not official_signups and not tournament_tasks %}
         <div class="m-card p-6 text-center">
             <p class="text-sm text-muted">{% trans "No one you manage is invited to this event." %}</p>
         </div>

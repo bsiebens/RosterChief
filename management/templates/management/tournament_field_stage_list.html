@@ -1,0 +1,106 @@
+{% extends "management/base.html" %}
+{% load i18n lucide ui %}
+
+{% comment %}
+    A tournament's own "Fields & stages" tab -- the minimum a tournament needs
+    before tournaments.services.scheduling.generate_stage_matches/allocate_schedule
+    have anything to work with. Both lists are short enough to share one tab.
+    Modal-form CRUD, same controlpanel/_modal_form.html + _confirm_modal.html
+    pattern _event_task_panel.html already established for a single-model list,
+    here used twice (fields, stages).
+
+    Context: tournament, fields (each with .edit_form), stages (each with
+    .edit_form), field_form, stage_form.
+{% endcomment %}
+
+{% block panel_title %}{{ tournament.name }}{% endblock panel_title %}
+{% block heading %}{{ tournament.name }}{% endblock heading %}
+
+{% block panel %}
+    {% include "management/_tournament_tabs.html" with tournament=tournament active_tab="fields_stages" %}
+
+    <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div class="card card-body">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+                <h2 class="card-title">{% lucide "map-pin" size=18 %} {% trans "Fields" %}</h2>
+                <button class="btn btn-outline btn-sm gap-1" type="button" onclick="document.getElementById('field_create_modal').showModal()">{% lucide "plus" size=14 %} {% trans "Add field" %}</button>
+            </div>
+            <ul class="divide-y divide-rule">
+                {% for field in fields %}
+                    <li class="flex flex-wrap items-start justify-between gap-3 py-2.5">
+                        <div class="flex min-w-0 flex-col gap-0.5">
+                            <span class="text-sm font-semibold text-ink">{{ field.name }}</span>
+                            {% if field.location %}<span class="text-xs text-muted">{{ field.location }}</span>{% endif %}
+                            {% if field.availability %}
+                                <span class="text-xs text-dim">{{ field.availability.0.date }}, {{ field.availability.0.start }}&ndash;{{ field.availability.0.end }}</span>
+                            {% else %}
+                                <span class="text-xs text-dim">{% trans "No availability window set." %}</span>
+                            {% endif %}
+                        </div>
+                        <div class="flex shrink-0 items-center gap-1.5">
+                            <button class="btn btn-outline btn-xs" type="button" onclick="document.getElementById('{{ field.pk|dom_id:"field_update_modal" }}').showModal()">{% lucide "pencil" size=12 %} {% trans "Edit" %}</button>
+                            <button class="btn btn-outline btn-xs btn-error" type="button" onclick="document.getElementById('{{ field.pk|dom_id:"field_delete_modal" }}').showModal()">{% lucide "trash-2" size=12 %} {% trans "Delete" %}</button>
+                        </div>
+                    </li>
+                {% empty %}
+                    <li class="py-2.5 text-sm text-muted">{% trans "No fields yet -- add at least one before generating a schedule." %}</li>
+                {% endfor %}
+            </ul>
+        </div>
+
+        <div class="card card-body">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+                <h2 class="card-title">{% lucide "layers" size=18 %} {% trans "Stages" %}</h2>
+                <button class="btn btn-outline btn-sm gap-1" type="button" onclick="document.getElementById('stage_create_modal').showModal()">{% lucide "plus" size=14 %} {% trans "Add stage" %}</button>
+            </div>
+            <ul class="divide-y divide-rule">
+                {% for stage in stages %}
+                    <li class="flex flex-wrap items-start justify-between gap-3 py-2.5">
+                        <div class="flex min-w-0 flex-col gap-0.5">
+                            <span class="text-sm font-semibold text-ink">{{ stage.sequence }}. {{ stage.name }}</span>
+                            <span class="text-xs text-muted">{{ stage.get_format_display }} &middot; {{ stage.get_status_display }}</span>
+                        </div>
+                        <div class="flex shrink-0 items-center gap-1.5">
+                            <button class="btn btn-outline btn-xs" type="button" onclick="document.getElementById('{{ stage.pk|dom_id:"stage_update_modal" }}').showModal()">{% lucide "pencil" size=12 %} {% trans "Edit" %}</button>
+                            <button class="btn btn-outline btn-xs btn-error" type="button" onclick="document.getElementById('{{ stage.pk|dom_id:"stage_delete_modal" }}').showModal()">{% lucide "trash-2" size=12 %} {% trans "Delete" %}</button>
+                        </div>
+                    </li>
+                {% empty %}
+                    <li class="py-2.5 text-sm text-muted">{% trans "No stages yet -- add at least one before generating a schedule." %}</li>
+                {% endfor %}
+            </ul>
+        </div>
+    </div>
+
+    {% trans "Add field" as add_field_title %}
+    {% trans "Add" as add_label %}
+    {% url 'management:tournament_field_create' tournament.pk as field_create_url %}
+    {% include "controlpanel/_modal_form.html" with modal_id="field_create_modal" title=add_field_title form=field_form action_url=field_create_url submit_label=add_label submit_icon="plus" %}
+
+    {% trans "Edit field" as edit_field_title %}
+    {% trans "Delete field" as delete_field_title %}
+    {% trans "Delete" as delete_label %}
+    {% for field in fields %}
+        {% url 'management:tournament_field_update' tournament.pk field.pk as field_update_url %}
+        {% include "controlpanel/_modal_form.html" with modal_id=field.pk|dom_id:"field_update_modal" title=edit_field_title form=field.edit_form action_url=field_update_url submit_icon="check" %}
+
+        {% url 'management:tournament_field_delete' tournament.pk field.pk as field_delete_url %}
+        {% blocktrans with name=field.name asvar delete_field_body %}Delete “{{ name }}”? Any matches scheduled on this field lose their field assignment. This cannot be undone.{% endblocktrans %}
+        {% include "controlpanel/_confirm_modal.html" with modal_id=field.pk|dom_id:"field_delete_modal" title=delete_field_title body=delete_field_body action_url=field_delete_url submit_label=delete_label %}
+    {% endfor %}
+
+    {% trans "Add stage" as add_stage_title %}
+    {% url 'management:tournament_stage_create' tournament.pk as stage_create_url %}
+    {% include "controlpanel/_modal_form.html" with modal_id="stage_create_modal" title=add_stage_title form=stage_form action_url=stage_create_url submit_label=add_label submit_icon="plus" box_class="max-w-2xl" %}
+
+    {% trans "Edit stage" as edit_stage_title %}
+    {% trans "Delete stage" as delete_stage_title %}
+    {% for stage in stages %}
+        {% url 'management:tournament_stage_update' tournament.pk stage.pk as stage_update_url %}
+        {% include "controlpanel/_modal_form.html" with modal_id=stage.pk|dom_id:"stage_update_modal" title=edit_stage_title form=stage.edit_form action_url=stage_update_url submit_icon="check" box_class="max-w-2xl" %}
+
+        {% url 'management:tournament_stage_delete' tournament.pk stage.pk as stage_delete_url %}
+        {% blocktrans with name=stage.name asvar delete_stage_body %}Delete “{{ name }}”? Any matches already generated for this stage are removed too. This cannot be undone.{% endblocktrans %}
+        {% include "controlpanel/_confirm_modal.html" with modal_id=stage.pk|dom_id:"stage_delete_modal" title=delete_stage_title body=delete_stage_body action_url=stage_delete_url submit_label=delete_label %}
+    {% endfor %}
+{% endblock panel %}

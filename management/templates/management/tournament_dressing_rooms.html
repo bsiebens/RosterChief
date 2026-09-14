@@ -1,0 +1,83 @@
+{% extends "management/base.html" %}
+{% load i18n lucide ui %}
+
+{% comment %}
+    A tournament's own "Dressing rooms" tab -- every non-withdrawn
+    TournamentTeam in this tournament and which club dressing room(s) it's
+    booked into, with an assign/release action routed through
+    tournaments.services.dressing_rooms (see TournamentDressingRoomsView's
+    own docstring for why -- never a direct DressingRoomAssignment write).
+
+    Context: tournament, teams (each with .dressing_room_assignments
+    prefetched), rooms (this club's own DressingRoom queryset, just for the
+    "none set up yet" empty state), assign_form.
+{% endcomment %}
+
+{% block panel_title %}{{ tournament.name }}{% endblock panel_title %}
+{% block heading %}{{ tournament.name }}{% endblock heading %}
+
+{% block actions %}
+    <button class="btn btn-primary gap-2" type="button" onclick="document.getElementById('dressing_room_assign_modal').showModal()">{% lucide "plus" size=16 %} {% trans "Assign room" %}</button>
+{% endblock actions %}
+
+{% block panel %}
+    {% include "management/_tournament_tabs.html" with tournament=tournament active_tab="dressing_rooms" %}
+
+    {% if not rooms %}
+        <div class="alert alert-warning my-2">
+            <span>{% blocktrans %}This club has no dressing rooms set up yet.{% endblocktrans %} <a class="link" href="{% url 'management:dressing_room_list' %}">{% trans "Add one from Settings." %}</a></span>
+        </div>
+    {% endif %}
+
+    <div class="card overflow-hidden">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>{% trans "Team" %}</th>
+                    <th>{% trans "Dressing room" %}</th>
+                    <th>{% trans "Window" %}</th>
+                    <th>{% trans "Note" %}</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for team in teams %}
+                    {% for assignment in team.dressing_room_assignments.all %}
+                        <tr>
+                            <td class="font-semibold">{{ team.display_name }}</td>
+                            <td>{{ assignment.dressing_room.name }}</td>
+                            <td class="font-mono text-xs tabular-nums text-muted whitespace-nowrap">
+                                {% if assignment.assigned_from or assignment.assigned_until %}
+                                    {{ assignment.assigned_from|date:"j M H:i"|default:"…" }}&ndash;{{ assignment.assigned_until|date:"j M H:i"|default:"…" }}
+                                {% else %}
+                                    {% trans "Whole tournament" %}
+                                {% endif %}
+                            </td>
+                            <td class="text-sm text-muted">{{ assignment.note|default:"—" }}</td>
+                            <td class="text-right">
+                                <form method="post" action="{% url 'management:tournament_dressing_room_release' tournament.pk assignment.pk %}" class="inline">
+                                    {% csrf_token %}
+                                    <button class="btn btn-outline btn-xs btn-error" type="submit">{% lucide "x" size=12 %} {% trans "Release" %}</button>
+                                </form>
+                            </td>
+                        </tr>
+                    {% empty %}
+                        <tr>
+                            <td class="font-semibold">{{ team.display_name }}</td>
+                            <td colspan="4" class="text-dim">{% trans "No dressing room assigned." %}</td>
+                        </tr>
+                    {% endfor %}
+                {% empty %}
+                    <tr>
+                        <td colspan="5" class="text-center text-dim">{% trans "No teams in this tournament yet." %}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    {% trans "Assign a dressing room" as assign_title %}
+    {% trans "Assign" as assign_label %}
+    {% url 'management:tournament_dressing_room_assign' tournament.pk as assign_url %}
+    {% include "controlpanel/_modal_form.html" with modal_id="dressing_room_assign_modal" title=assign_title form=assign_form action_url=assign_url submit_label=assign_label submit_icon="plus" %}
+{% endblock panel %}

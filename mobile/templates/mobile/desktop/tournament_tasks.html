@@ -1,0 +1,21 @@
+{% extends "mobile/desktop/base.html" %}
+{% load i18n %}
+
+{% comment %}
+    Desktop counterpart of mobile/tournament_tasks.html -- same view/context
+    (TournamentTaskListView), the shared desktop card partial. No back-header
+    of its own: the desktop shell already shows screen_title (the tournament
+    name) in its own header bar.
+{% endcomment %}
+
+{% block content %}
+    <div class="mx-auto flex w-full max-w-[680px] flex-col gap-4">
+        {% if tasks %}
+            {% include "mobile/desktop/_tournament_tasks.html" with next="tournament_task_list" %}
+        {% else %}
+            <div class="card p-6 text-center">
+                <p class="text-sm text-muted">{% trans "No volunteer shifts yet." %}</p>
+            </div>
+        {% endif %}
+    </div>
+{% endblock content %}

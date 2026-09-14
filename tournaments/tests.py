@@ -38,6 +38,7 @@ from .models import (
     TournamentTaskClaim,
     TournamentTeam,
 )
+from .services.dressing_rooms import DressingRoomAssignmentError, assign_dressing_room, release_dressing_room
 from .services.registration import RegistrationDecisionError, approve_registration, reject_registration
 from .services.scheduling import (
     DEFAULT_GAP,
@@ -55,6 +56,7 @@ from .services.scheduling import (
     snake_seed_groups,
     validate_placement,
 )
+from .services.tasks import TaskClaimError, claim_task, unclaim_task
 
 
 class TournamentsTestCase(TestCase):
@@ -2026,3 +2028,95 @@ class TournamentTeamScheduleViewTests(TournamentsTestCase):
         response = self.client.get(self._url(team), HTTP_HOST="ajax-united.rosterchief.app")
 
         self.assertEqual(response.status_code, 404)
+
+
+class ClaimTaskServiceTests(TournamentsTestCase):
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        starts = timezone.now() + datetime.timedelta(days=1)
+        cls.task = TournamentTask.objects.create(tournament=cls.tournament, title="Gate duty", starts_at=starts, ends_at=starts + datetime.timedelta(hours=1), needed_quantity=1)
+
+    def test_claiming_creates_a_claim(self):
+        claim = claim_task(self.task, self.member)
+
+        self.assertEqual(claim.task, self.task)
+        self.assertEqual(claim.member, self.member)
+
+    def test_cannot_claim_the_same_task_twice(self):
+        claim_task(self.task, self.member)
+
+        with self.assertRaises(TaskClaimError):
+            claim_task(self.task, self.member)
+
+    def test_cannot_claim_a_fully_covered_task(self):
+        other_member = Member.objects.create(first_name="John", last_name="Smith")
+        claim_task(self.task, self.member)
+
+        with self.assertRaises(TaskClaimError):
+            claim_task(self.task, other_member)
+
+    def test_unclaim_removes_the_claim(self):
+        claim = claim_task(self.task, self.member)
+
+        unclaim_task(claim)
+
+        self.assertEqual(self.task.claims.count(), 0)
+
+    def test_unclaiming_frees_the_slot_for_someone_else(self):
+        other_member = Member.objects.create(first_name="John", last_name="Smith")
+        claim = claim_task(self.task, self.member)
+        unclaim_task(claim)
+
+        claim_task(self.task, other_member)  # should not raise
+
+        self.assertEqual(self.task.claims.count(), 1)
+
+
+class AssignDressingRoomServiceTests(TournamentsTestCase):
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.room = DressingRoom.objects.create(club=cls.club, name="Room A")
+        cls.team_a = TournamentTeam.objects.create(club=cls.club, tournament=cls.tournament, foreign_name="Team A")
+        cls.team_b = TournamentTeam.objects.create(club=cls.club, tournament=cls.tournament, foreign_name="Team B")
+
+    def test_assigns_a_free_room(self):
+        assignment = assign_dressing_room(self.room, self.team_a)
+
+        self.assertEqual(assignment.dressing_room, self.room)
+        self.assertEqual(assignment.tournament_team, self.team_a)
+
+    def test_cannot_assign_the_same_team_to_the_same_room_twice(self):
+        assign_dressing_room(self.room, self.team_a)
+
+        with self.assertRaises(DressingRoomAssignmentError):
+            assign_dressing_room(self.room, self.team_a)
+
+    def test_whole_tournament_booking_blocks_any_other_team(self):
+        assign_dressing_room(self.room, self.team_a)  # no window -- whole tournament
+
+        with self.assertRaises(DressingRoomAssignmentError):
+            assign_dressing_room(self.room, self.team_b)
+
+    def test_non_overlapping_time_windows_are_both_allowed(self):
+        start = timezone.now() + datetime.timedelta(days=1)
+        assign_dressing_room(self.room, self.team_a, assigned_from=start, assigned_until=start + datetime.timedelta(hours=1))
+
+        assign_dressing_room(self.room, self.team_b, assigned_from=start + datetime.timedelta(hours=1), assigned_until=start + datetime.timedelta(hours=2))  # should not raise
+
+        self.assertEqual(self.room.assignments.count(), 2)
+
+    def test_overlapping_time_windows_conflict(self):
+        start = timezone.now() + datetime.timedelta(days=1)
+        assign_dressing_room(self.room, self.team_a, assigned_from=start, assigned_until=start + datetime.timedelta(hours=2))
+
+        with self.assertRaises(DressingRoomAssignmentError):
+            assign_dressing_room(self.room, self.team_b, assigned_from=start + datetime.timedelta(hours=1), assigned_until=start + datetime.timedelta(hours=3))
+
+    def test_release_removes_the_assignment(self):
+        assignment = assign_dressing_room(self.room, self.team_a)
+
+        release_dressing_room(assignment)
+
+        self.assertEqual(self.room.assignments.count(), 0)

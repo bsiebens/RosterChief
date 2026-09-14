@@ -1,0 +1,72 @@
+{% extends "management/base.html" %}
+{% load i18n lucide ui %}
+
+{% comment %}
+    A club's own physical dressing rooms -- persists across tournaments and
+    seasons (DressingRoom is club-scoped, not tournament-scoped, see its own
+    docstring), so it gets a Settings-area screen of its own rather than
+    living inside any one tournament's own pages. Mirrors
+    onboarding_requirement_list.html's plain list + modal-form CRUD shape.
+{% endcomment %}
+
+{% block panel_title %}{% trans "Dressing rooms" %}{% endblock panel_title %}
+{% block heading %}{% trans "Dressing rooms" %}{% endblock heading %}
+
+{% block topbar_context %}
+    <span class="badge badge-neutral">{% blocktrans count counter=rooms|length %}{{ counter }} room{% plural %}{{ counter }} rooms{% endblocktrans %}</span>
+{% endblock topbar_context %}
+
+{% block actions %}
+    <button class="btn btn-primary gap-2" type="button" onclick="document.getElementById('room_create_modal').showModal()">{% lucide "plus" size=16 %} {% trans "New dressing room" %}</button>
+{% endblock actions %}
+
+{% block panel %}
+    <p class="text-sm text-muted">{% trans "Assign a room to a team from within that tournament's own Dressing rooms tab." %}</p>
+
+    <div class="card overflow-hidden">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>{% trans "Name" %}</th>
+                    <th>{% trans "Location" %}</th>
+                    <th>{% trans "Capacity" %}</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for room in rooms %}
+                    <tr>
+                        <td class="font-semibold">{{ room.name }}</td>
+                        <td class="text-sm text-muted">{{ room.location|default:"—" }}</td>
+                        <td class="font-mono text-xs tabular-nums">{{ room.capacity|default:"—" }}</td>
+                        <td class="text-right whitespace-nowrap">
+                            <button class="btn btn-outline btn-sm" type="button" onclick="document.getElementById('{{ room.pk|dom_id:"room_update_modal" }}').showModal()" aria-label="{% trans 'Edit' %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</button>
+                            <button class="btn btn-sm btn-outline btn-error" type="button" onclick="document.getElementById('{{ room.pk|dom_id:"room_delete_modal" }}').showModal()" aria-label="{% trans 'Delete' %}">{% lucide "trash-2" size=14 %} {% trans "Delete" %}</button>
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="4" class="text-center text-dim">{% trans "No dressing rooms yet." %}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    {% trans "New dressing room" as create_title %}
+    {% trans "Add" as create_label %}
+    {% url 'management:dressing_room_create' as room_create_url %}
+    {% include "controlpanel/_modal_form.html" with modal_id="room_create_modal" title=create_title form=room_form action_url=room_create_url submit_label=create_label submit_icon="plus" %}
+
+    {% trans "Edit dressing room" as edit_title %}
+    {% trans "Delete dressing room" as delete_title %}
+    {% trans "Delete" as delete_label %}
+    {% for room in rooms %}
+        {% url 'management:dressing_room_update' room.pk as room_update_url %}
+        {% include "controlpanel/_modal_form.html" with modal_id=room.pk|dom_id:"room_update_modal" title=edit_title form=room.edit_form action_url=room_update_url submit_icon="check" %}
+
+        {% url 'management:dressing_room_delete' room.pk as room_delete_url %}
+        {% blocktrans with name=room.name asvar delete_body %}Delete “{{ name }}”? Any tournament assignments to this room are removed too. This cannot be undone.{% endblocktrans %}
+        {% include "controlpanel/_confirm_modal.html" with modal_id=room.pk|dom_id:"room_delete_modal" title=delete_title body=delete_body action_url=room_delete_url submit_label=delete_label %}
+    {% endfor %}
+{% endblock panel %}
