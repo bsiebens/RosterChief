@@ -71,11 +71,15 @@ class TournamentRegistrationView(TournamentFeatureMixin, View):
 
     def get(self, request, *args, **kwargs):
         tournament = self.get_tournament(request, kwargs["tournament_slug"])
+        if not tournament.registration_open:
+            return render(request, self.template_name, {"tournament": tournament, "registration_closed": True})
         contact_form, player_formset = self.get_forms()
         return self.render_page(request, tournament, contact_form, player_formset)
 
     def post(self, request, *args, **kwargs):
         tournament = self.get_tournament(request, kwargs["tournament_slug"])
+        if not tournament.registration_open:
+            return render(request, self.template_name, {"tournament": tournament, "registration_closed": True})
         contact_form, player_formset = self.get_forms(request.POST, request.FILES)
         if not contact_form.is_valid() or not player_formset.is_valid():
             return self.render_page(request, tournament, contact_form, player_formset)
@@ -98,19 +102,58 @@ class TournamentRegistrationStatusView(TournamentFeatureMixin, View):
     """The link tournaments.services.notifications.send_registration_confirmation_email
     hands out -- unguessable-token access (TournamentRegistration.status_token,
     same idea as registration.models.RegistrationBatch.status_token), since
-    whoever submitted the registration may have no account at all. Read-only
-    for V1: no cancel/edit from here, deliberately out of scope."""
+    whoever submitted the registration may have no account at all.
+
+    The roster is editable from here while the registration is still
+    PENDING -- a team often registers before its final line-up is settled,
+    and making them email the club to fix a name or add a late signing only
+    adds a manual step for staff. Once approved, TournamentRosterEntry is
+    already snapshotted from this data (tournaments.services.registration.
+    approve_registration) and editing here wouldn't reach it any more; once
+    rejected, there's nothing left to edit. Everything else (contact
+    details, team identity/colors/logo) stays fixed here -- deliberately
+    out of scope, same as before.
+    """
 
     template_name = "tournaments/registration_status.html"
 
-    def get(self, request, *args, **kwargs):
-        registration = get_object_or_404(
+    def get_registration(self, request, tournament_slug, token):
+        return get_object_or_404(
             TournamentRegistration.objects.select_related("tournament"),
             tournament__club=request.club,
-            tournament__slug=kwargs["tournament_slug"],
-            status_token=kwargs["token"],
+            tournament__slug=tournament_slug,
+            status_token=token,
         )
-        return render(request, self.template_name, {"tournament": registration.tournament, "registration": registration})
+
+    def get_player_formset(self, registration, data=None):
+        initial = [{"first_name": player.first_name, "last_name": player.last_name, "jersey_number": player.jersey_number} for player in registration.players.all()]
+        return TournamentRegistrationPlayerFormSet(data, initial=initial, prefix="players")
+
+    def render_page(self, request, registration, player_formset=None):
+        context = {"tournament": registration.tournament, "registration": registration}
+        if registration.status == TournamentRegistration.Status.PENDING:
+            context["player_formset"] = player_formset if player_formset is not None else self.get_player_formset(registration)
+        return render(request, self.template_name, context)
+
+    def get(self, request, *args, **kwargs):
+        registration = self.get_registration(request, kwargs["tournament_slug"], kwargs["token"])
+        return self.render_page(request, registration)
+
+    def post(self, request, *args, **kwargs):
+        registration = self.get_registration(request, kwargs["tournament_slug"], kwargs["token"])
+        if registration.status != TournamentRegistration.Status.PENDING:
+            notify(request, f"e|{_('Could not update roster')}|{_('This entry has already been decided -- the roster can no longer be changed.')}")
+            return redirect("tournaments:registration_status", tournament_slug=registration.tournament.slug, token=registration.status_token)
+
+        player_formset = self.get_player_formset(registration, data=request.POST)
+        if not player_formset.is_valid():
+            return self.render_page(request, registration, player_formset=player_formset)
+
+        registration.players.all().delete()
+        TournamentRegistrationPlayer.objects.bulk_create([TournamentRegistrationPlayer(registration=registration, **player) for player in players_from_formset(player_formset)])
+
+        notify(request, f"s|{_('Roster updated')}|{_('Your roster has been updated.')}")
+        return redirect("tournaments:registration_status", tournament_slug=registration.tournament.slug, token=registration.status_token)
 
 
 # --------------------------------------------------------------------------

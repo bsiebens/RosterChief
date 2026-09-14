@@ -1,11 +1,13 @@
 {% extends "registration/_base.html" %}
-{% load i18n lucide %}
+{% load i18n lucide ui static %}
 
 {% comment %}
     The link tournaments.services.notifications.send_registration_confirmation_email
     hands out (TournamentRegistration.status_token) -- see
     TournamentRegistrationStatusView's own docstring. Unauthenticated,
-    token-gated, read-only for V1 (no cancel/edit here by design).
+    token-gated. The roster is editable here while still pending
+    (player_formset is only in context for that status); everything else
+    (contact/team identity) stays read-only by design.
 {% endcomment %}
 
 {% block page_title %}{% trans "Registration status" %}{% endblock page_title %}
@@ -34,7 +36,7 @@
         </div>
 
         {% if registration.status == "pending" %}
-            <p class="text-sm text-muted">{% trans "The club is still reviewing this entry -- check back soon." %}</p>
+            <p class="text-sm text-muted">{% trans "The club is still reviewing this entry -- check back soon. You can still update your roster below." %}</p>
         {% elif registration.status == "approved" %}
             <p class="text-sm text-muted">{% trans "This team is on the schedule." %}</p>
         {% else %}
@@ -44,4 +46,45 @@
             {% endif %}
         {% endif %}
     </div>
+
+    {% if player_formset %}
+        <form method="post" class="card card-body mt-4 flex flex-col gap-4">
+            {% csrf_token %}
+            {% for error in player_formset.non_form_errors %}
+                <div class="alert alert-error" role="alert">{% lucide "circle-x" size=18 %} <span>{{ error }}</span></div>
+            {% endfor %}
+
+            <div class="flex flex-wrap items-center justify-between gap-2">
+                <h2 class="card-title">{% trans "Roster" %}</h2>
+                <button class="btn btn-outline btn-sm gap-2" type="button" id="add-row">{% lucide "plus" size=14 %} {% trans "Add another player" %}</button>
+            </div>
+            {{ player_formset.management_form }}
+            <div id="bulk-add-rows" data-prefix="{{ player_formset.prefix }}" class="flex flex-col gap-3">
+                {% for player_form in player_formset %}
+                    {% include "tournaments/_player_row.html" with form=player_form %}
+                {% endfor %}
+            </div>
+            <template id="bulk-add-row-template">
+                {% include "tournaments/_player_row.html" with form=player_formset.empty_form %}
+            </template>
+
+            <button class="btn btn-primary gap-2 self-start" type="submit">{% lucide "save" size=16 %} {% trans "Save roster" %}</button>
+        </form>
+    {% elif registration.players.all %}
+        <div class="card card-body mt-4">
+            <h2 class="card-title">{% trans "Roster" %}</h2>
+            <ul class="flex flex-col gap-1">
+                {% for player in registration.players.all %}
+                    <li class="flex items-center gap-2.5 text-sm text-ink">
+                        <span class="font-mono text-xs text-muted">{{ player.jersey_number|default:"—" }}</span>
+                        <span>{{ player.first_name }} {{ player.last_name }}</span>
+                    </li>
+                {% endfor %}
+            </ul>
+        </div>
+    {% endif %}
 {% endblock content %}
+
+{% block extra_body %}
+    {% if player_formset %}<script src="{% static 'js/bulk-add-rows.js' %}"></script>{% endif %}
+{% endblock extra_body %}

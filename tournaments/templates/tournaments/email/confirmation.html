@@ -41,6 +41,8 @@
 
     <p style="margin:0 0 20px 0;">{% blocktrans with team=registration.foreign_name tournament=tournament.name club=club.name %}Thanks -- {{ club }} has received {{ team }}'s entry into {{ tournament }}.{% endblocktrans %}</p>
 
+    <p style="margin:0 0 16px 0;">{% trans "Use the link below to track its status, or to update your roster while it's still pending review." %}</p>
+
     {% trans "Check status" as status_label %}
     {% include "email/_button.html" with href=status_url label=status_label bg=club.primary_color|default:"#4f46e5" fg=club.primary_color|default:"#4f46e5"|contrast_color %}
 

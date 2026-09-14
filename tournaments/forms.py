@@ -109,11 +109,16 @@ class TournamentForm(forms.ModelForm):
     -- ``Tournament.season`` is a required, PROTECTed FK (the approval flow
     reads a club team's *that season's* roster off it), so there has to be
     a real one.
+
+    ``registration_open`` is the manual override that closes entries early
+    (e.g. once full) without touching ``status`` -- see
+    ``Tournament.accepts_registrations``, the one place both are checked
+    together.
     """
 
     class Meta:
         model = Tournament
-        fields = ["name", "status", "start_date", "end_date", "description", "event"]
+        fields = ["name", "status", "start_date", "end_date", "registration_open", "description", "event"]
         widgets = {
             "start_date": forms.DateInput(attrs={"type": "date"}),
             "end_date": forms.DateInput(attrs={"type": "date"}),

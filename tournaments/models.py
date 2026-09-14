@@ -46,6 +46,13 @@ class Tournament(ClubScopedModel):
     start_date = models.DateField(_("start date"))
     end_date = models.DateField(_("end date"))
     status = models.CharField(_("status"), max_length=20, choices=Status.choices, default=Status.DRAFT)
+    #: A manual override, independent of ``status`` -- publishing a
+    #: tournament (making its page and registration form public) and
+    #: registration actually still being open are two different questions:
+    #: a club may want to close entries early (full, deadline passed)
+    #: without touching ``status`` at all. ``accepts_registrations`` below
+    #: is what everything else should actually check.
+    registration_open = models.BooleanField(_("registration open"), default=True, help_text=_("Turn off to stop accepting new entries even while the tournament is still published -- e.g. once it's full."))
     description = models.TextField(_("description"), blank=True)
 
     event = models.OneToOneField("events.Event", on_delete=models.SET_NULL, null=True, blank=True, related_name="tournament", verbose_name=_("calendar event"))
@@ -60,6 +67,17 @@ class Tournament(ClubScopedModel):
 
     def __str__(self):
         return self.name
+
+    @property
+    def accepts_registrations(self) -> bool:
+        """Whether a new team can apply right now -- the status (only DRAFT/
+        PUBLISHED even have a registration concept at all; once a tournament
+        is under way, finished, or cancelled there's nothing left to
+        register for) and the manual ``registration_open`` toggle both have
+        to agree. The one thing every public "Register" CTA and the
+        registration view itself should check, so they can never disagree
+        about whether entries are actually open."""
+        return self.status in (self.Status.DRAFT, self.Status.PUBLISHED) and self.registration_open
 
     def clean(self):
         if self.event_id is not None:

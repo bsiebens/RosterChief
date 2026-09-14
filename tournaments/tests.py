@@ -88,6 +88,25 @@ class TournamentModelTests(TournamentsTestCase):
     def test_status_defaults_to_draft(self):
         self.assertEqual(self.tournament.status, Tournament.Status.DRAFT)
 
+    def test_registration_open_defaults_to_true(self):
+        self.assertTrue(self.tournament.registration_open)
+
+    def test_accepts_registrations_true_for_draft_and_published(self):
+        self.tournament.status = Tournament.Status.DRAFT
+        self.assertTrue(self.tournament.accepts_registrations)
+        self.tournament.status = Tournament.Status.PUBLISHED
+        self.assertTrue(self.tournament.accepts_registrations)
+
+    def test_accepts_registrations_false_once_in_progress_completed_or_cancelled(self):
+        for status in (Tournament.Status.IN_PROGRESS, Tournament.Status.COMPLETED, Tournament.Status.CANCELLED):
+            self.tournament.status = status
+            self.assertFalse(self.tournament.accepts_registrations)
+
+    def test_accepts_registrations_false_when_manually_closed(self):
+        self.tournament.status = Tournament.Status.PUBLISHED
+        self.tournament.registration_open = False
+        self.assertFalse(self.tournament.accepts_registrations)
+
     def test_slug_is_unique_per_club(self):
         with self.assertRaises(IntegrityError):
             Tournament.objects.create(club=self.club, name="Other Cup", slug="summer-cup", season=self.season, start_date=self.tournament.start_date, end_date=self.tournament.end_date)
@@ -811,16 +830,38 @@ class TournamentRegistrationViewTests(TournamentsTestCase):
 
         self.assertEqual(response.status_code, 404)
 
+    def test_closed_registration_shows_a_note_not_a_404(self):
+        self.tournament.registration_open = False
+        self.tournament.save()
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Registration is closed")
+        self.assertNotContains(response, "Roster")
+
+    def test_closed_registration_rejects_a_post_without_creating_anything(self):
+        self.tournament.registration_open = False
+        self.tournament.save()
+        data = self.contact_data() | self.formset_management() | self.player_data()
+
+        response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(TournamentRegistration.objects.exists())
+
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
 class TournamentRegistrationStatusViewTests(TournamentsTestCase):
-    """tournaments:registration_status -- the token-gated, read-only status
-    page (tournaments.views.TournamentRegistrationStatusView)."""
+    """tournaments:registration_status -- the token-gated status page
+    (tournaments.views.TournamentRegistrationStatusView), roster edits
+    included while the registration is still pending."""
 
     @classmethod
     def setUpTestData(cls):
         super().setUpTestData()
         cls.registration = TournamentRegistration.objects.create(tournament=cls.tournament, foreign_name="Visiting FC", foreign_contact_email="casey@example.com")
+        cls.player = TournamentRegistrationPlayer.objects.create(registration=cls.registration, first_name="Sam", last_name="Striker", jersey_number=9)
 
     def setUp(self):
         cache.clear()
@@ -829,6 +870,9 @@ class TournamentRegistrationStatusViewTests(TournamentsTestCase):
 
     def _url(self, token=None):
         return reverse("tournaments:registration_status", kwargs={"tournament_slug": self.tournament.slug, "token": token or self.registration.status_token})
+
+    def formset_management(self, total, prefix="players"):
+        return {f"{prefix}-TOTAL_FORMS": str(total), f"{prefix}-INITIAL_FORMS": "0", f"{prefix}-MIN_NUM_FORMS": "0", f"{prefix}-MAX_NUM_FORMS": "1000"}
 
     def test_shows_pending_status(self):
         response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
@@ -866,6 +910,50 @@ class TournamentRegistrationStatusViewTests(TournamentsTestCase):
         response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
 
         self.assertEqual(response.status_code, 404)
+
+    def test_pending_registration_shows_an_editable_roster_form(self):
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, "Save roster")
+        self.assertContains(response, "Sam")
+
+    def test_decided_registration_shows_a_read_only_roster(self):
+        self.registration.status = TournamentRegistration.Status.APPROVED
+        self.registration.save()
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertNotContains(response, "Save roster")
+        self.assertContains(response, "Sam")
+
+    def test_updating_the_roster_while_pending_replaces_the_players(self):
+        data = self.formset_management(total=1) | {"players-0-first_name": "Robin", "players-0-last_name": "Newcomer", "players-0-jersey_number": "11"}
+
+        response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertRedirects(response, self._url())
+        self.assertEqual(self.registration.players.count(), 1)
+        player = self.registration.players.get()
+        self.assertEqual(player.first_name, "Robin")
+        self.assertEqual(player.jersey_number, 11)
+
+    def test_updating_the_roster_with_no_players_rerenders_with_an_error(self):
+        data = self.formset_management(total=0)
+
+        response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.registration.players.count(), 1)  # unchanged
+
+    def test_cannot_update_the_roster_once_approved(self):
+        self.registration.status = TournamentRegistration.Status.APPROVED
+        self.registration.save()
+        data = self.formset_management(total=1) | {"players-0-first_name": "Robin", "players-0-last_name": "Newcomer", "players-0-jersey_number": "11"}
+
+        response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertRedirects(response, self._url())
+        self.assertEqual(self.registration.players.get(), self.player)  # untouched
 
 
 class RoundRobinPairingsTests(TestCase):
@@ -1816,6 +1904,28 @@ class TournamentDetailViewTests(TournamentsTestCase):
         response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
 
         self.assertEqual(response.status_code, 404)
+
+    def test_shows_a_register_link_when_open(self):
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, reverse("tournaments:register", kwargs={"tournament_slug": self.tournament.slug}))
+
+    def test_hides_the_register_link_and_shows_a_note_when_closed(self):
+        self.tournament.registration_open = False
+        self.tournament.save()
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertNotContains(response, reverse("tournaments:register", kwargs={"tournament_slug": self.tournament.slug}))
+        self.assertContains(response, "Registration is closed")
+
+    def test_hides_the_register_link_once_in_progress(self):
+        self.tournament.status = Tournament.Status.IN_PROGRESS
+        self.tournament.save()
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertNotContains(response, reverse("tournaments:register", kwargs={"tournament_slug": self.tournament.slug}))
 
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])

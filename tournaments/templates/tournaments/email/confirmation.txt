@@ -2,7 +2,7 @@
 
 {% blocktrans with team=registration.foreign_name tournament=tournament.name club=club.name %}Thanks -- {{ club }} has received {{ team }}'s entry into {{ tournament }}.{% endblocktrans %}
 
-{% trans "Check its status here:" %}
+{% trans "Track its status, or update your roster while it's still pending, here:" %}
 {{ status_url }}
 {% blocktrans %}That link is for you alone — please don't forward it.{% endblocktrans %}
 

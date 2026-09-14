@@ -22,8 +22,22 @@
             {% lucide "calendar" size=15 class="shrink-0 text-club" %}
             {% blocktrans with start=tournament.start_date|date:"DATE_FORMAT" end=tournament.end_date|date:"DATE_FORMAT" %}{{ start }} – {{ end }}{% endblocktrans %}
         </p>
-        <p class="mt-1 text-sm text-muted">{% trans "Enter your team below, then add its roster. The club will review this before it's final." %}</p>
+        {% if not registration_closed %}
+            <p class="mt-1 text-sm text-muted">{% trans "Enter your team below, then add its roster. The club will review this before it's final." %}</p>
+        {% endif %}
     </div>
+
+    {% if registration_closed %}
+        <div class="card card-body">
+            <div class="flex items-start gap-3">
+                {% lucide "circle-slash" size=20 class="mt-0.5 shrink-0 text-dim" %}
+                <div>
+                    <h2 class="card-title">{% trans "Registration is closed" %}</h2>
+                    <p class="mt-1 text-sm text-muted">{% trans "This tournament isn't accepting new entries right now." %}</p>
+                </div>
+            </div>
+        </div>
+    {% else %}
 
     <form method="post" enctype="multipart/form-data" class="flex flex-col gap-4">
         {% csrf_token %}
@@ -70,8 +84,9 @@
 
         <button class="btn btn-primary gap-2 self-start" type="submit">{% lucide "send" size=16 %} {% trans "Submit entry" %}</button>
     </form>
+    {% endif %}
 {% endblock content %}
 
 {% block extra_body %}
-    <script src="{% static 'js/bulk-add-rows.js' %}"></script>
+    {% if not registration_closed %}<script src="{% static 'js/bulk-add-rows.js' %}"></script>{% endif %}
 {% endblock extra_body %}
