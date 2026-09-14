@@ -2,10 +2,13 @@
 {% load lucide ui i18n %}
 
 {% comment %}
-    Tournament create/settings -- mirrors member_form.html's own shape
-    exactly (a plain {% form_field %} grid). The tabs bar only shows on the
-    update view (a brand-new tournament has no registrations/schedule/etc.
-    to browse yet), with "Settings" itself picked out as the active one.
+    Tournament create/settings -- explicit named {% form_field %} calls in a
+    3-per-row grid (club_settings.html's own convention, not member_form.html's
+    blind loop -- this form needs one field, description, pulled out to its
+    own full-width row rather than sharing one with whatever the Meta.fields
+    order happens to put next to it). The tabs bar only shows on the update
+    view (a brand-new tournament has no registrations/schedule/etc. to
+    browse yet), with "Settings" itself picked out as the active one.
 {% endcomment %}
 
 {% block heading %}{% if update_view %}{{ object.name }}{% else %}{% trans "New tournament" %}{% endif %}{% endblock heading %}
@@ -49,10 +52,28 @@
                 </div>
             {% endfor %}
 
-            <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
-                {% for field in form %}
-                    {% form_field field %}
-                {% endfor %}
+            <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
+                {% form_field form.name %}
+                {% form_field form.status %}
+                {% form_field form.start_date %}
+                {% form_field form.end_date %}
+                {% form_field form.registration_open %}
+                {% form_field form.contact_email %}
+                {% form_field form.event %}
+            </div>
+
+            <div class="mt-4">
+                {% form_field form.description textarea_height="h-40" %}
+                <p class="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-dim">
+                    <span>{% trans "Markdown:" %}</span>
+                    <code class="rounded bg-paper px-1 py-0.5">**{% trans "bold" %}**</code>
+                    <code class="rounded bg-paper px-1 py-0.5">*{% trans "italic" %}*</code>
+                    <code class="rounded bg-paper px-1 py-0.5"># {% trans "Heading" %}</code>
+                    <code class="rounded bg-paper px-1 py-0.5">- {% trans "list item" %}</code>
+                    <code class="rounded bg-paper px-1 py-0.5">1. {% trans "numbered" %}</code>
+                    <code class="rounded bg-paper px-1 py-0.5">[{% trans "text" %}](url)</code>
+                    <code class="rounded bg-paper px-1 py-0.5">```{% trans "code" %}```</code>
+                </p>
             </div>
 
             <div class="mt-2 flex items-center gap-2 pt-2">
