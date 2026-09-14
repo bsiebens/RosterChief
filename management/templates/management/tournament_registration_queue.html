@@ -25,10 +25,17 @@
                     {# A plain border-left on a <tr> is unreliable under border-collapse -- an inset box-shadow paints the same accent bar without depending on table border behaviour at all, same as signup_list.html's own oldest-pending row. #}
                     <tr class="cursor-pointer {% if registration.is_oldest_pending %}bg-row-focus shadow-[inset_3px_0_0_var(--color-info)]{% endif %}" onclick="openDrawer('{{ registration.pk|dom_id:"registration_drawer" }}')">
                         <td>
-                            <div class="font-semibold text-ink">{{ registration.display_name }}</div>
-                            {% if registration.is_foreign and registration.foreign_contact_name %}
-                                <div class="text-xs text-muted">{{ registration.foreign_contact_name }}</div>
-                            {% endif %}
+                            <div class="flex items-center gap-2.5">
+                                {% if registration.is_foreign and registration.foreign_logo %}
+                                    <img class="h-7 w-7 shrink-0 rounded object-cover" src="{{ registration.foreign_logo.url }}" alt="">
+                                {% endif %}
+                                <div class="min-w-0">
+                                    <div class="font-semibold text-ink">{{ registration.display_name }}</div>
+                                    {% if registration.is_foreign and registration.foreign_contact_name %}
+                                        <div class="text-xs text-muted">{{ registration.foreign_contact_name }}</div>
+                                    {% endif %}
+                                </div>
+                            </div>
                         </td>
                         <td class="font-mono text-xs {% if registration.is_oldest_pending %}text-club-dark{% else %}text-muted{% endif %}">{{ registration.submitted_at|date:"j M Y" }}</td>
                         <td class="text-sm text-ink">{% blocktrans count count=registration.players.count %}{{ count }} player{% plural %}{{ count }} players{% endblocktrans %}</td>
@@ -54,6 +61,9 @@
         <div id="{{ registration.pk|dom_id:"registration_drawer" }}" class="drawer-backdrop">
             <div class="drawer">
                 <div class="flex items-center gap-3 border-b border-line p-5">
+                    {% if registration.is_foreign and registration.foreign_logo %}
+                        <img class="h-9 w-9 shrink-0 rounded object-cover" src="{{ registration.foreign_logo.url }}" alt="">
+                    {% endif %}
                     <div class="min-w-0 flex-1">
                         <div class="truncate font-display text-xl font-extrabold text-ink uppercase">{{ registration.display_name }}</div>
                         <div class="text-[13px] text-muted">{% blocktrans with date=registration.submitted_at|date:"j M" %}Submitted {{ date }}{% endblocktrans %}</div>
@@ -63,6 +73,20 @@
                 </div>
 
                 <div class="flex flex-1 flex-col gap-5 overflow-y-auto p-5">
+                    {% if registration.tournament_team.withdrawn_at %}
+                        <div class="alert alert-warning">
+                            {% lucide "circle-minus" size=18 %}
+                            <div>
+                                <div class="font-display text-sm font-bold tracking-wide uppercase">{% trans "Team withdrawn" %}</div>
+                                {% if registration.tournament_team.withdrawal_reason %}<div class="text-sm">{{ registration.tournament_team.withdrawal_reason }}</div>{% endif %}
+                            </div>
+                        </div>
+                    {% endif %}
+
+                    <a class="flex items-center gap-1.5 self-start text-xs font-semibold text-club hover:underline" href="{% url 'tournaments:registration_status' tournament_slug=registration.tournament.slug token=registration.status_token %}" target="_blank" rel="noopener">
+                        {% lucide "external-link" size=13 %} {% trans "View status page" %}
+                    </a>
+
                     {% if registration.is_foreign %}
                         <div>
                             <div class="mb-2.5 font-display text-xs font-bold tracking-[.14em] text-muted uppercase">{% trans "Contact" %}</div>
@@ -118,6 +142,11 @@
                         <button type="button" class="btn btn-outline btn-error gap-2" onclick="document.getElementById('{{ registration.pk|dom_id:"reject_modal" }}').showModal()">{% lucide "x-circle" size=16 %} {% trans "Reject" %}</button>
                         <button type="button" class="btn btn-outline gap-2" onclick="closeDrawer('{{ registration.pk|dom_id:"registration_drawer" }}')">{% trans "Close" %}</button>
                     </div>
+                {% elif registration.status == "approved" and registration.tournament_team and not registration.tournament_team.withdrawn_at %}
+                    <div class="flex gap-2.5 border-t border-line p-4">
+                        <button type="button" class="btn btn-outline btn-error gap-2" onclick="document.getElementById('{{ registration.pk|dom_id:"withdraw_modal" }}').showModal()">{% lucide "circle-minus" size=16 %} {% trans "Withdraw" %}</button>
+                        <button type="button" class="btn btn-outline flex-1 gap-2" onclick="closeDrawer('{{ registration.pk|dom_id:"registration_drawer" }}')">{% trans "Close" %}</button>
+                    </div>
                 {% else %}
                     <div class="flex gap-2.5 border-t border-line p-4">
                         <button type="button" class="btn btn-outline w-full gap-2" onclick="closeDrawer('{{ registration.pk|dom_id:"registration_drawer" }}')">{% trans "Close" %}</button>
@@ -140,6 +169,27 @@
                     <div class="modal-action">
                         <form method="dialog"><button class="btn btn-outline gap-2">{% lucide "x" size=16 %} {% trans "Cancel" %}</button></form>
                         <button class="btn btn-error gap-2" type="submit" form="{{ registration.pk|dom_id:"reject_modal" }}_form">{% lucide "x-circle" size=16 %} {% trans "Reject" %}</button>
+                    </div>
+                </div>
+                <form method="dialog" class="modal-backdrop"><button>close</button></form>
+            </dialog>
+        {% endif %}
+
+        {% if registration.status == "approved" and registration.tournament_team and not registration.tournament_team.withdrawn_at %}
+            <dialog id="{{ registration.pk|dom_id:"withdraw_modal" }}" class="modal">
+                <div class="modal-box">
+                    <h3 class="text-lg font-bold text-ink">{% blocktrans with name=registration.display_name %}Withdraw “{{ name }}”?{% endblocktrans %}</h3>
+                    <p class="mt-1 text-sm text-muted">{% trans "The team is removed from the schedule and its slot frees up. This is shown back to them on their own status page." %}</p>
+                    <form method="post" action="{% url 'management:tournament_team_withdraw' registration.tournament_team.pk %}" id="{{ registration.pk|dom_id:"withdraw_modal" }}_form">
+                        {% csrf_token %}
+                        <div class="form-control mt-2">
+                            <label class="label-text">{% trans "Reason (shown to the team)" %}</label>
+                            <textarea class="textarea" name="reason" rows="2" placeholder="{% trans 'e.g. no-show, withdrew by their own request' %}"></textarea>
+                        </div>
+                    </form>
+                    <div class="modal-action">
+                        <form method="dialog"><button class="btn btn-outline gap-2">{% lucide "x" size=16 %} {% trans "Cancel" %}</button></form>
+                        <button class="btn btn-error gap-2" type="submit" form="{{ registration.pk|dom_id:"withdraw_modal" }}_form">{% lucide "circle-minus" size=16 %} {% trans "Withdraw" %}</button>
                     </div>
                 </div>
                 <form method="dialog" class="modal-backdrop"><button>close</button></form>

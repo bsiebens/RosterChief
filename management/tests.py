@@ -13777,6 +13777,34 @@ class TournamentListViewTests(ManagementTestBase):
 
         self.assertEqual(response.context["tournaments"][0].pending_registration_count, 1)
 
+    def test_teams_in_count_excludes_withdrawn_teams(self):
+        self.activate_flag()
+        TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Team A")
+        TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Team B", withdrawn_at=timezone.now())
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_list")
+
+        self.assertEqual(response.context["tournaments"][0].teams_in_count, 1)
+
+    def test_teams_in_count_and_pending_registration_count_do_not_inflate_each_other(self):
+        # A regression check for the classic Django "two Count()s over two
+        # different reverse relations in one annotate() cross-joins them"
+        # gotcha -- see get_queryset's own comment.
+        self.activate_flag()
+        TournamentRegistration.objects.create(tournament=self.tournament, foreign_name="Pending A")
+        TournamentRegistration.objects.create(tournament=self.tournament, foreign_name="Pending B")
+        TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Team A")
+        TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Team B")
+        TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Team C")
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_list")
+
+        tournament = response.context["tournaments"][0]
+        self.assertEqual(tournament.pending_registration_count, 2)
+        self.assertEqual(tournament.teams_in_count, 3)
+
     def test_can_filter_by_season(self):
         self.activate_flag()
         other_season = Season.objects.create(club=self.club, start_date=self.season.start_date.replace(year=self.season.start_date.year - 1), end_date=self.season.start_date)
@@ -13888,6 +13916,19 @@ class TournamentRegistrationQueueTests(ManagementTestBase):
         self.assertTrue(registrations[0].is_oldest_pending)
         self.assertFalse(registrations[1].is_oldest_pending)
 
+    def test_registrations_are_grouped_approved_then_pending_then_rejected(self):
+        self.activate_flag()
+        pending = self.make_registration("Pending Panthers")
+        approved = self.make_registration("Approved Aces")
+        approve_registration(approved, reviewed_by=self.admin_user)
+        rejected = self.make_registration("Rejected Ravens")
+        reject_registration(rejected, reviewed_by=self.admin_user, reason="Field is full")
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_registration_queue", self.tournament.pk)
+
+        self.assertEqual([registration.pk for registration in response.context["registrations"]], [approved.pk, pending.pk, rejected.pk])
+
     def test_approve_creates_a_tournament_team_and_flips_status(self):
         self.activate_flag()
         registration = self.make_registration()
@@ -13949,6 +13990,49 @@ class TournamentRegistrationQueueTests(ManagementTestBase):
 
         self.assertEqual(self.club_post("tournament_registration_approve", {}, other_registration.pk).status_code, 404)
         self.assertEqual(self.club_post("tournament_registration_reject", {}, other_registration.pk).status_code, 404)
+
+    def test_withdraw_sets_reason_and_frees_a_slot(self):
+        self.activate_flag()
+        self.tournament.max_teams = 1
+        self.tournament.status = Tournament.Status.PUBLISHED
+        self.tournament.save()
+        registration = self.make_registration()
+        approve_registration(registration, reviewed_by=self.admin_user)
+        team = TournamentTeam.objects.get(registration=registration)
+        self.assertFalse(self.tournament.accepts_registrations)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("tournament_team_withdraw", {"reason": "No-show."}, team.pk)
+
+        self.assertRedirects(response, reverse("management:tournament_registration_queue", args=[self.tournament.pk]))
+        team.refresh_from_db()
+        self.assertIsNotNone(team.withdrawn_at)
+        self.assertEqual(team.withdrawal_reason, "No-show.")
+        self.assertTrue(self.tournament.accepts_registrations)
+
+    def test_double_withdraw_is_reported_as_a_warning_not_a_500(self):
+        self.activate_flag()
+        registration = self.make_registration()
+        approve_registration(registration, reviewed_by=self.admin_user)
+        team = TournamentTeam.objects.get(registration=registration)
+        self.client.force_login(self.admin_user)
+        self.club_post("tournament_team_withdraw", {"reason": "First."}, team.pk)
+
+        response = self.club_post("tournament_team_withdraw", {"reason": "Second."}, team.pk)
+
+        self.assertRedirects(response, reverse("management:tournament_registration_queue", args=[self.tournament.pk]))
+        team.refresh_from_db()
+        self.assertEqual(team.withdrawal_reason, "First.")
+
+    def test_withdraw_404s_for_a_team_in_another_club(self):
+        self.activate_flag()
+        other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
+        other_season = make_season(other_club)
+        other_tournament = Tournament.objects.create(club=other_club, name="Rival Cup", season=other_season, start_date=timezone.localdate(), end_date=timezone.localdate())
+        other_team = TournamentTeam.objects.create(club=other_club, tournament=other_tournament, foreign_name="Outsiders")
+        self.client.force_login(self.admin_user)
+
+        self.assertEqual(self.club_post("tournament_team_withdraw", {}, other_team.pk).status_code, 404)
 
 
 class TournamentScheduleTests(ManagementTestBase):
@@ -14321,7 +14405,7 @@ class TournamentFieldStageCrudTests(ManagementTestBase):
 
         response = self.club_post(
             "tournament_field_create",
-            {"name": "Field 1", "location": "", "availability_date": "2026-09-19", "availability_start": "08:00", "availability_end": "20:00"},
+            {"name": "Field 1", "availability_date": "2026-09-19", "availability_start": "08:00", "availability_end": "20:00"},
             self.tournament.pk,
         )
 
@@ -14333,7 +14417,7 @@ class TournamentFieldStageCrudTests(ManagementTestBase):
         self.activate_flag()
         self.client.force_login(self.admin_user)
 
-        response = self.club_post("tournament_field_create", {"name": "Field 2", "location": ""}, self.tournament.pk)
+        response = self.club_post("tournament_field_create", {"name": "Field 2"}, self.tournament.pk)
 
         self.assertRedirects(response, reverse("management:tournament_field_stage_list", args=[self.tournament.pk]))
         field = TournamentField.objects.get(tournament=self.tournament, name="Field 2")
@@ -14345,7 +14429,7 @@ class TournamentFieldStageCrudTests(ManagementTestBase):
 
         response = self.club_post(
             "tournament_field_create",
-            {"name": "Field 3", "location": "", "availability_date": "2026-09-19"},
+            {"name": "Field 3", "availability_date": "2026-09-19"},
             self.tournament.pk,
         )
 
@@ -14357,7 +14441,7 @@ class TournamentFieldStageCrudTests(ManagementTestBase):
         field = TournamentField.objects.create(tournament=self.tournament, name="Field 1")
         self.client.force_login(self.admin_user)
 
-        response = self.club_post("tournament_field_update", {"name": "Field 1 (renamed)", "location": ""}, self.tournament.pk, field.pk)
+        response = self.club_post("tournament_field_update", {"name": "Field 1 (renamed)"}, self.tournament.pk, field.pk)
         self.assertRedirects(response, reverse("management:tournament_field_stage_list", args=[self.tournament.pk]))
         field.refresh_from_db()
         self.assertEqual(field.name, "Field 1 (renamed)")

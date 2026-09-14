@@ -158,6 +158,7 @@ urlpatterns = [
     path("tournaments/<uuid:tournament_pk>/registrations/", views.TournamentRegistrationQueueView.as_view(), name="tournament_registration_queue"),
     path("tournaments/registrations/<uuid:pk>/approve/", views.TournamentRegistrationApproveView.as_view(), name="tournament_registration_approve"),
     path("tournaments/registrations/<uuid:pk>/reject/", views.TournamentRegistrationRejectView.as_view(), name="tournament_registration_reject"),
+    path("tournaments/teams/<uuid:pk>/withdraw/", views.TournamentTeamWithdrawView.as_view(), name="tournament_team_withdraw"),
     path("tournaments/<uuid:tournament_pk>/schedule/", views.TournamentScheduleView.as_view(), name="tournament_schedule"),
     path("tournaments/matches/<uuid:pk>/reschedule/", views.MatchRescheduleView.as_view(), name="match_reschedule"),
     path("tournaments/matches/<uuid:pk>/result/", views.MatchResultView.as_view(), name="match_result"),

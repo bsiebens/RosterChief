@@ -139,10 +139,10 @@ from teams.models import NumberPool, NumberReservation, OfficialLevel, OfficialP
 from teams.services import eligible_roster_members, place_member_on_team
 from teams.services.numbers import has_unresolved_conflict
 from tournaments.forms import DressingRoomAssignmentForm, DressingRoomForm, TournamentFieldForm, TournamentForm, TournamentStageForm, TournamentTaskForm
-from tournaments.models import DressingRoom, DressingRoomAssignment, Match, Tournament, TournamentField, TournamentRegistration, TournamentStage, TournamentTask
+from tournaments.models import DressingRoom, DressingRoomAssignment, Match, Tournament, TournamentField, TournamentRegistration, TournamentStage, TournamentTask, TournamentTeam
 from tournaments.services.dressing_rooms import DressingRoomAssignmentError, assign_dressing_room, release_dressing_room
 from tournaments.services.notifications import send_registration_decision_email
-from tournaments.services.registration import RegistrationDecisionError, approve_registration, reject_registration
+from tournaments.services.registration import RegistrationDecisionError, TeamWithdrawalError, approve_registration, reject_registration, withdraw_team
 from tournaments.services.scheduling import SchedulingError, record_result, reschedule_match
 
 from .bulk_import import build_member_import_template, family_choice_field_name, match_candidate_families, parse_member_import_rows, read_member_import_workbook
@@ -7301,7 +7301,15 @@ class TournamentListView(TournamentsManagerRequiredMixin, ListView):
 
     def get_queryset(self):
         self.selected_season = self.request.GET.get("season", "")
-        tournaments = Tournament.objects.filter(club=self.request.club).annotate(pending_registration_count=Count("registrations", filter=Q(registrations__status=TournamentRegistration.Status.PENDING)))
+        # distinct=True on both -- combining two Count()s over two different
+        # reverse relations (registrations, teams) in one annotate() joins
+        # both tables, and without it each count gets inflated by the other
+        # relation's row count (a classic Django multi-annotate cross-join
+        # gotcha), not just the one it's actually counting.
+        tournaments = Tournament.objects.filter(club=self.request.club).annotate(
+            pending_registration_count=Count("registrations", filter=Q(registrations__status=TournamentRegistration.Status.PENDING), distinct=True),
+            teams_in_count=Count("teams", filter=Q(teams__withdrawn_at__isnull=True), distinct=True),
+        )
         if self.selected_season:
             tournaments = tournaments.filter(season_id=self.selected_season)
         return tournaments
@@ -7310,11 +7318,24 @@ class TournamentListView(TournamentsManagerRequiredMixin, ListView):
         return super().get_context_data(selected_season=self.selected_season, seasons=Season.objects.filter(club=self.request.club).order_by("-start_date"), **kwargs)
 
 
+#: Group order for TournamentRegistrationQueueView's own listing -- approved
+#: teams (what staff actually want to see day-to-day once a tournament's
+#: roster is mostly settled) first, then pending (still needing a decision),
+#: then rejected. A plain dict lookup rather than relying on the Status
+#: values' own string order, the same reasoning SignupDashboardView already
+#: gives for not sorting on the raw status string.
+_REGISTRATION_QUEUE_GROUP_ORDER = {
+    TournamentRegistration.Status.APPROVED: 0,
+    TournamentRegistration.Status.PENDING: 1,
+    TournamentRegistration.Status.REJECTED: 2,
+}
+
+
 class TournamentRegistrationQueueView(TournamentsManagerRequiredMixin, TemplateView):
-    """One tournament's registration review queue -- pending submissions shown
-    most prominently (oldest-first, same "the queue's own priority order"
-    reasoning as SignupDashboardView), already-decided ones listed after for
-    context rather than dropped.
+    """One tournament's registration review queue -- grouped approved, then
+    pending, then rejected (oldest-first within the pending group, the same
+    "the queue's own priority order" reasoning as SignupDashboardView gives
+    for surfacing what needs action), rather than dropped once decided.
 
     There's no tournament list or nav entry yet (a later phase) -- this page
     is reached directly by URL for now, e.g. a link from the Tournament admin
@@ -7324,13 +7345,10 @@ class TournamentRegistrationQueueView(TournamentsManagerRequiredMixin, TemplateV
 
     def get_context_data(self, **kwargs):
         tournament = get_object_or_404(Tournament, pk=self.kwargs["tournament_pk"], club=self.request.club)
-        registrations = list(TournamentRegistration.objects.filter(tournament=tournament).select_related("team").prefetch_related("players").order_by("-submitted_at"))
-        # PENDING first, oldest-first within that -- sorted in Python rather
-        # than via .order_by("status", ...), the same reasoning
-        # SignupDashboardView gives: a plain string sort of the Status values
-        # only happens to put "pending" first by accident, and that would
-        # silently break the moment a choice's value changes.
-        registrations.sort(key=lambda registration: (registration.status != TournamentRegistration.Status.PENDING, registration.submitted_at))
+        registrations = list(
+            TournamentRegistration.objects.filter(tournament=tournament).select_related("team", "tournament_team").prefetch_related("players").order_by("-submitted_at")
+        )
+        registrations.sort(key=lambda registration: (_REGISTRATION_QUEUE_GROUP_ORDER[registration.status], registration.submitted_at))
         oldest_pending_id = next((registration.pk for registration in registrations if registration.status == TournamentRegistration.Status.PENDING), None)
         for registration in registrations:
             registration.is_oldest_pending = registration.pk == oldest_pending_id
@@ -7374,6 +7392,25 @@ class TournamentRegistrationRejectView(TournamentsManagerRequiredMixin, View):
             notify(request, f"s|{_('Registration rejected')}|" + _("“%(name)s” has been rejected.") % {"name": registration.display_name})
 
         return redirect("management:tournament_registration_queue", tournament_pk=registration.tournament_id)
+
+
+class TournamentTeamWithdrawView(TournamentsManagerRequiredMixin, View):
+    """The queue drawer's own "Withdraw" button, for a team that's already
+    approved -- tournaments.services.registration.withdraw_team, with an
+    optional reason shown back to the team on its own status page."""
+
+    def post(self, request, pk):
+        team = get_object_or_404(TournamentTeam, pk=pk, tournament__club=request.club)
+        reason = request.POST.get("reason", "")
+
+        try:
+            withdraw_team(team, reason=reason, withdrawn_by=request.user)
+        except TeamWithdrawalError as error:
+            notify(request, f"w|{_('Could not withdraw team')}|{error}")
+        else:
+            notify(request, f"s|{_('Team withdrawn')}|" + _("“%(name)s” has been withdrawn from the tournament.") % {"name": team.display_name})
+
+        return redirect("management:tournament_registration_queue", tournament_pk=team.tournament_id)
 
 
 class TournamentScheduleView(TournamentsManagerRequiredMixin, TemplateView):
@@ -7543,7 +7580,7 @@ class TournamentFieldStageView(TournamentsManagerRequiredMixin, TemplateView):
         tournament = get_object_or_404(Tournament, pk=self.kwargs["tournament_pk"], club=self.request.club)
         fields = list(tournament.fields.all())
         for field in fields:
-            field.edit_form = TournamentFieldForm(instance=field, club=self.request.club)
+            field.edit_form = TournamentFieldForm(instance=field)
         stages = list(tournament.stages.all())
         for stage in stages:
             stage.edit_form = TournamentStageForm(instance=stage)
@@ -7551,7 +7588,7 @@ class TournamentFieldStageView(TournamentsManagerRequiredMixin, TemplateView):
             tournament=tournament,
             fields=fields,
             stages=stages,
-            field_form=TournamentFieldForm(club=self.request.club),
+            field_form=TournamentFieldForm(),
             stage_form=TournamentStageForm(),
             active_tab="fields_stages",
             **kwargs,
@@ -7561,7 +7598,7 @@ class TournamentFieldStageView(TournamentsManagerRequiredMixin, TemplateView):
 class TournamentFieldCreateView(TournamentsManagerRequiredMixin, View):
     def post(self, request, tournament_pk):
         tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
-        form = TournamentFieldForm(request.POST, club=request.club)
+        form = TournamentFieldForm(request.POST)
         if not form.is_valid():
             for error in form.errors.values():
                 notify(request, f"e|{_('Could not add field')}|{' '.join(error)}")
@@ -7578,7 +7615,7 @@ class TournamentFieldUpdateView(TournamentsManagerRequiredMixin, View):
     def post(self, request, tournament_pk, field_pk):
         tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
         field = get_object_or_404(TournamentField, pk=field_pk, tournament=tournament)
-        form = TournamentFieldForm(request.POST, instance=field, club=request.club)
+        form = TournamentFieldForm(request.POST, instance=field)
         if not form.is_valid():
             for error in form.errors.values():
                 notify(request, f"e|{_('Could not update field')}|{' '.join(error)}")
