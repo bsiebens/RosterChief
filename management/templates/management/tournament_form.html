@@ -2,19 +2,31 @@
 {% load lucide ui i18n %}
 
 {% comment %}
-    Tournament create/settings -- explicit named {% form_field %} calls in a
-    3-per-row grid (club_settings.html's own convention, not member_form.html's
-    blind loop -- this form needs one field, description, pulled out to its
-    own full-width row rather than sharing one with whatever the Meta.fields
-    order happens to put next to it). Status and description's Markdown
-    cheat-sheet both come from the model fields' own help_text (news's
-    convention -- see NewsItem.body) rather than being hand-rolled here.
-    The tabs bar only shows on the update view (a brand-new tournament has
-    no registrations/schedule/etc. to browse yet), with "Settings" itself
-    picked out as the active one.
+    Tournament create/settings -- explicit named {% form_field %} calls,
+    grouped into club_settings.html-style sectioned cards (one card per
+    topic, not one long grid) rather than a single blind Meta.fields loop.
+    Splitting it out this way is what actually gives status/contact_email/
+    registration_open's longer help_text strings room to wrap without the
+    3-per-row grid this used to be turning ragged. Status and description's
+    Markdown cheat-sheet both come from the model fields' own help_text
+    (news's convention -- see NewsItem.body) rather than being hand-rolled
+    here. The tabs bar only shows on the update view (a brand-new
+    tournament has no registrations/schedule/etc. to browse yet), with
+    "Settings" itself picked out as the active one.
+
+    Header actions mirror club_settings.html (a real Save button, submitting
+    the form by id rather than sitting at the bottom of an increasingly tall
+    stack of cards) plus a Back button in the evaluation_stats/matrix/
+    walkthrough.html "All checklists" mould -- back to the tournament
+    overview when editing, the tournament list when creating.
 {% endcomment %}
 
 {% block heading %}{% if update_view %}{{ object.name }}{% else %}{% trans "New tournament" %}{% endif %}{% endblock heading %}
+
+{% block actions %}
+    <a class="btn btn-outline gap-2" href="{% if update_view %}{% url "management:tournament_field_stage_list" object.pk %}{% else %}{% url "management:tournament_list" %}{% endif %}">{% lucide "arrow-left" size=16 %} {% trans "Back" %}</a>
+    <button class="btn btn-primary gap-2" type="submit" form="tournament-settings-form">{% lucide "save" size=16 %} {% trans "Save" %}</button>
+{% endblock actions %}
 
 {% block panel %}
     {% if update_view %}
@@ -45,34 +57,58 @@
         </div>
     {% endif %}
 
-    <div class="card card-body">
-        <form method="post">
-            {% csrf_token %}
+    <form id="tournament-settings-form" method="post" class="flex flex-col gap-4">
+        {% csrf_token %}
 
-            {% for error in form.non_field_errors %}
-                <div class="alert alert-error my-2">
-                    <span>{{ error }}</span>
+        {% for error in form.non_field_errors %}
+            <div class="alert alert-error">
+                {% lucide "circle-x" size=18 %}
+                <span>{{ error }}</span>
+            </div>
+        {% endfor %}
+
+        <div class="card">
+            <div class="card-body">
+                <div class="card-title">{% lucide "trophy" size=16 %} {% trans "Tournament" %}</div>
+                <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+                    {% form_field form.name %}
+                    {% form_field form.status %}
                 </div>
-            {% endfor %}
+            </div>
+        </div>
 
-            <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
-                {% form_field form.name %}
-                {% form_field form.status %}
-                {% form_field form.contact_email %}
-                {% form_field form.start_date %}
-                {% form_field form.end_date %}
-                {% form_field form.registration_open %}
+        <div class="card">
+            <div class="card-body">
+                <div class="card-title">{% lucide "calendar-days" size=16 %} {% trans "Dates" %}</div>
+                <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+                    {% form_field form.start_date %}
+                    {% form_field form.end_date %}
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-body">
+                <div class="card-title">{% lucide "send" size=16 %} {% trans "Registration" %}</div>
+                <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+                    {% form_field form.contact_email %}
+                    {% form_field form.registration_open %}
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-body">
+                <div class="card-title">{% lucide "link" size=16 %} {% trans "Calendar event" %}</div>
                 {% form_field form.event %}
             </div>
+        </div>
 
-            <div class="mt-4">
+        <div class="card">
+            <div class="card-body">
+                <div class="card-title">{% lucide "file-text" size=16 %} {% trans "Description" %}</div>
                 {% form_field form.description textarea_height="h-40" %}
             </div>
-
-            <div class="mt-2 flex items-center gap-2 pt-2">
-                <a class="btn btn-outline gap-2" href="{% if update_view %}{% url "management:tournament_field_stage_list" object.pk %}{% else %}{% url "management:tournament_list" %}{% endif %}">{% lucide "arrow-left" size=16 %} {% trans "Cancel" %}</a>
-                <button class="btn btn-primary gap-2" type="submit">{% lucide "save" size=16 %} {% trans "Save" %}</button>
-            </div>
-        </form>
-    </div>
+        </div>
+    </form>
 {% endblock panel %}
