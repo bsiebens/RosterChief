@@ -59,6 +59,12 @@ class Tournament(ClubScopedModel):
     #: without touching ``status`` at all. ``accepts_registrations`` below
     #: is what everything else should actually check.
     registration_open = models.BooleanField(_("registration open"), default=True, help_text=_("Turn off to stop accepting new entries even while the tournament is still published -- e.g. once it's full."))
+    #: A soft cap, checked live against non-withdrawn TournamentTeam rows
+    #: (see ``accepts_registrations`` below) rather than by flipping
+    #: ``registration_open`` itself -- so a withdrawal automatically
+    #: reopens a slot without staff having to remember to toggle anything
+    #: back on. Blank means uncapped.
+    max_teams = models.PositiveSmallIntegerField(_("maximum teams"), null=True, blank=True, help_text=_("Registration closes automatically once this many teams are approved. Leave blank for no cap."))
     #: Shown on both the public tournament page and the registration page
     #: itself -- "who do I email about this tournament", distinct from a
     #: registering team's own ``foreign_contact_email`` (who the club should
@@ -92,11 +98,20 @@ class Tournament(ClubScopedModel):
         """Whether a new team can apply right now -- the status (only DRAFT/
         PUBLISHED even have a registration concept at all; once a tournament
         is under way, finished, or cancelled there's nothing left to
-        register for) and the manual ``registration_open`` toggle both have
-        to agree. The one thing every public "Register" CTA and the
-        registration view itself should check, so they can never disagree
-        about whether entries are actually open."""
-        return self.status in (self.Status.DRAFT, self.Status.PUBLISHED) and self.registration_open
+        register for), the manual ``registration_open`` toggle, and (when
+        set) ``max_teams`` all have to agree. The one thing every public
+        "Register" CTA and the registration view itself should check, so
+        they can never disagree about whether entries are actually open.
+
+        The capacity check is computed live against non-withdrawn
+        ``TournamentTeam`` rows rather than persisted anywhere, so a later
+        withdrawal (freeing a slot) or a raised ``max_teams`` is reflected
+        immediately without anything else having to notice and react."""
+        if self.status not in (self.Status.DRAFT, self.Status.PUBLISHED) or not self.registration_open:
+            return False
+        if self.max_teams is not None and self.teams.filter(withdrawn_at__isnull=True).count() >= self.max_teams:
+            return False
+        return True
 
     @property
     def location(self):
@@ -131,10 +146,16 @@ class TournamentField(UUIDModel):
     """One bookable playing surface for a tournament's own duration -- not the
     same thing as ``events.Location`` (one permanent venue record per club,
     no sub-surface or availability-window concept), so a 3-pitch tournament
-    needs its own resource rather than three fake Locations. Optionally
-    points at a real Location for the address. Not itself club-scoped -- its
-    club is reached through ``tournament``, same reasoning as
-    ``club.models.FeePayment``.
+    needs its own resource rather than three fake Locations. Not itself
+    club-scoped -- its club is reached through ``tournament``, same
+    reasoning as ``club.models.FeePayment``.
+
+    No location of its own -- a field's venue is just wherever the
+    tournament itself is played (``Tournament.location``); every field in a
+    tournament sharing one venue is the common case, and a per-field
+    override was one more place for staff to have to get right (and
+    possibly disagree with the tournament's own location) for a shape that
+    almost never comes up in practice.
 
     ``availability`` is a list of per-day windows rather than one start/end
     pair, so a multi-day tournament can open a field at different hours on
@@ -143,7 +164,6 @@ class TournamentField(UUIDModel):
 
     tournament = models.ForeignKey(Tournament, on_delete=models.CASCADE, related_name="fields", verbose_name=_("tournament"))
     name = models.CharField(_("name"), max_length=255)
-    location = models.ForeignKey("events.Location", on_delete=models.SET_NULL, null=True, blank=True, related_name="tournament_fields", verbose_name=_("location"))
     availability = models.JSONField(_("availability"), default=tournament_field_availability_default, blank=True, help_text=_('Per-day windows, e.g. [{"date": "2026-09-19", "start": "08:00", "end": "20:00"}].'))
 
     class Meta:
@@ -424,6 +444,10 @@ class TournamentTeam(ClubScopedModel):
 
     seed = models.PositiveSmallIntegerField(_("seed"), null=True, blank=True)
     withdrawn_at = models.DateTimeField(_("withdrawn at"), null=True, blank=True)
+    #: Shown back to the team on its own status page (TournamentRegistrationStatusView)
+    #: as well as to staff -- same "reason travels with the decision" idiom
+    #: TournamentRegistration.rejection_reason already uses.
+    withdrawal_reason = models.TextField(_("withdrawal reason"), blank=True)
 
     class Meta:
         verbose_name = _("tournament team")

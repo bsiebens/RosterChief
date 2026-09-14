@@ -39,7 +39,7 @@ from .models import (
     TournamentTeam,
 )
 from .services.dressing_rooms import DressingRoomAssignmentError, assign_dressing_room, release_dressing_room
-from .services.registration import RegistrationDecisionError, approve_registration, reject_registration
+from .services.registration import RegistrationDecisionError, TeamWithdrawalError, approve_registration, reject_registration, withdraw_team
 from .services.scheduling import (
     DEFAULT_GAP,
     DEFAULT_MATCH_DURATION,
@@ -106,6 +106,30 @@ class TournamentModelTests(TournamentsTestCase):
         self.tournament.status = Tournament.Status.PUBLISHED
         self.tournament.registration_open = False
         self.assertFalse(self.tournament.accepts_registrations)
+
+    def test_accepts_registrations_true_when_under_the_max_teams_cap(self):
+        self.tournament.status = Tournament.Status.PUBLISHED
+        self.tournament.max_teams = 2
+        self.tournament.save()
+        TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Team A")
+
+        self.assertTrue(self.tournament.accepts_registrations)
+
+    def test_accepts_registrations_false_once_the_max_teams_cap_is_reached(self):
+        self.tournament.status = Tournament.Status.PUBLISHED
+        self.tournament.max_teams = 1
+        self.tournament.save()
+        TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Team A")
+
+        self.assertFalse(self.tournament.accepts_registrations)
+
+    def test_accepts_registrations_ignores_withdrawn_teams_against_the_cap(self):
+        self.tournament.status = Tournament.Status.PUBLISHED
+        self.tournament.max_teams = 1
+        self.tournament.save()
+        TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Team A", withdrawn_at=timezone.now())
+
+        self.assertTrue(self.tournament.accepts_registrations)
 
     def test_location_is_none_without_an_event_or_a_home_location(self):
         self.assertIsNone(self.tournament.location)
@@ -185,12 +209,6 @@ class TournamentFieldModelTests(TournamentsTestCase):
     def test_availability_defaults_to_an_empty_list(self):
         field = TournamentField.objects.create(tournament=self.tournament, name="Field 1")
         self.assertEqual(field.availability, [])
-
-    def test_location_is_optional_and_reachable(self):
-        location = Location.objects.create(club=self.club, name="Arena", address="1 St", city="Town", zip_code="1000", country="BE")
-        field = TournamentField.objects.create(tournament=self.tournament, name="Field 1", location=location)
-
-        self.assertEqual(field.location, location)
 
 
 class TournamentStageModelTests(TournamentsTestCase):
@@ -741,6 +759,25 @@ class RejectRegistrationServiceTests(TournamentsTestCase):
             reject_registration(registration, reviewed_by=reviewer)
 
 
+class WithdrawTeamServiceTests(TournamentsTestCase):
+    def test_withdrawing_sets_withdrawn_at_and_reason(self):
+        staff = User.objects.create_user(email="staff@example.com", password="pw-secret-123")
+        team = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Visiting FC")
+
+        withdraw_team(team, reason="No-show.", withdrawn_by=staff)
+
+        team.refresh_from_db()
+        self.assertIsNotNone(team.withdrawn_at)
+        self.assertEqual(team.withdrawal_reason, "No-show.")
+
+    def test_cannot_withdraw_an_already_withdrawn_team(self):
+        team = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Visiting FC")
+        withdraw_team(team)
+
+        with self.assertRaises(TeamWithdrawalError):
+            withdraw_team(team)
+
+
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
 class TournamentRegistrationViewTests(TournamentsTestCase):
     """tournaments:register -- the public, unauthenticated tournament-entry
@@ -925,6 +962,28 @@ class TournamentRegistrationStatusViewTests(TournamentsTestCase):
         response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
 
         self.assertContains(response, "Approved")
+
+    def test_shows_a_withdrawal_banner_when_the_team_was_withdrawn(self):
+        self.registration.status = TournamentRegistration.Status.APPROVED
+        self.registration.save()
+        TournamentTeam.objects.create(club=self.club, tournament=self.tournament, registration=self.registration, foreign_name="Visiting FC", withdrawn_at=timezone.now(), withdrawal_reason="No-show.")
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, "Team withdrawn")
+        self.assertContains(response, "No-show.")
+        # Withdrawal doesn't change the registration's own status -- it's the
+        # linked TournamentTeam that carries it (see withdraw_team's own docstring).
+        self.assertContains(response, "Approved")
+
+    def test_no_withdrawal_banner_for_an_approved_team_still_in(self):
+        self.registration.status = TournamentRegistration.Status.APPROVED
+        self.registration.save()
+        TournamentTeam.objects.create(club=self.club, tournament=self.tournament, registration=self.registration, foreign_name="Visiting FC")
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertNotContains(response, "Team withdrawn")
 
     def test_shows_rejected_status_with_reason(self):
         self.registration.status = TournamentRegistration.Status.REJECTED

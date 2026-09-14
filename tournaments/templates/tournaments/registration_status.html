@@ -8,6 +8,14 @@
     token-gated. The roster is editable here while still pending
     (player_formset is only in context for that status); everything else
     (contact/team identity) stays read-only by design.
+
+    registration.tournament_team is read straight off the model (reverse
+    OneToOne, django's template resolver treats a missing one as falsy
+    rather than raising) rather than passed separately -- withdrawal
+    (tournaments.services.registration.withdraw_team) lives on the live
+    TournamentTeam, not on the registration itself, so an approved-then-
+    withdrawn registration still shows "Approved" below; this banner is
+    what actually tells the team it's no longer in.
 {% endcomment %}
 
 {% block page_title %}{% trans "Registration status" %}{% endblock page_title %}
@@ -22,6 +30,17 @@
             {{ tournament.name }}
         </p>
     </div>
+
+    {% if registration.tournament_team.withdrawn_at %}
+        <div class="alert alert-warning mb-4">
+            {% lucide "circle-minus" size=18 %}
+            <div>
+                <div class="font-display text-sm font-bold tracking-wide uppercase">{% trans "Team withdrawn" %}</div>
+                <p class="text-sm">{% trans "This team has been withdrawn from the tournament and is no longer on the schedule." %}</p>
+                {% if registration.tournament_team.withdrawal_reason %}<p class="mt-1 rounded-box border border-line bg-paper px-3 py-2.5 text-sm text-ink">{{ registration.tournament_team.withdrawal_reason }}</p>{% endif %}
+            </div>
+        </div>
+    {% endif %}
 
     <div class="card card-body">
         <div class="flex flex-wrap items-center justify-between gap-2">

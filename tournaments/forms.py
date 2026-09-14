@@ -153,7 +153,9 @@ class TournamentFieldForm(forms.ModelForm):
     date + start + end, saved as a single-entry list -- multi-window/multi-
     day editing is a known simplification, not solved here; a club that
     needs more can still use the Django admin's raw JSON widget for that one
-    field. ``tournament`` comes from the view, never the form."""
+    field. ``tournament`` comes from the view, never the form. No
+    ``location`` field here at all -- see ``TournamentField``'s own
+    docstring for why a field's venue is just the tournament's."""
 
     availability_date = forms.DateField(label=_("Date"), required=False, widget=forms.DateInput(attrs={"type": "date"}))
     availability_start = forms.TimeField(label=_("Start time"), required=False, widget=forms.TimeInput(attrs={"type": "time"}))
@@ -161,14 +163,10 @@ class TournamentFieldForm(forms.ModelForm):
 
     class Meta:
         model = TournamentField
-        fields = ["name", "location"]
+        fields = ["name"]
 
-    def __init__(self, *args, club=None, **kwargs):
+    def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields["location"].queryset = Location.objects.filter(club=club)
-        self.fields["location"].required = False
-        self.fields["location"].empty_label = _("— none —")
-
         window = (self.instance.availability or [None])[0] if self.instance.pk else None
         if window:
             self.fields["availability_date"].initial = window.get("date")

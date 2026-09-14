@@ -17,6 +17,10 @@ class RegistrationDecisionError(Exception):
     """A registration could not be approved or rejected."""
 
 
+class TeamWithdrawalError(Exception):
+    """A team could not be withdrawn."""
+
+
 def _guard_pending(registration: TournamentRegistration):
     if registration.status != TournamentRegistration.Status.PENDING:
         raise RegistrationDecisionError(_("This registration has already been decided."))
@@ -109,3 +113,33 @@ def reject_registration(registration: TournamentRegistration, *, reviewed_by, re
     registration.save(update_fields=["status", "rejection_reason", "reviewed_by", "reviewed_at"])
 
     return registration
+
+
+@transaction.atomic
+def withdraw_team(team: TournamentTeam, *, reason: str = "", withdrawn_by=None) -> TournamentTeam:
+    """Marks an already-in ``TournamentTeam`` withdrawn -- a soft state
+    (``withdrawn_at``/``withdrawal_reason``), not a delete, same reasoning
+    ``club.models.Club.archived_at`` already gives: matches already scheduled
+    against this team, and its roster/dressing-room history, all stay
+    intact. ``reason`` is shown back on the team's own registration status
+    page (when it has one -- a manually-added team never does) the same way
+    ``reject_registration``'s own ``reason`` is. Freeing a slot here is
+    implicit: ``Tournament.accepts_registrations`` counts non-withdrawn
+    teams live, so nothing else needs to react to this.
+
+    Raises ``TeamWithdrawalError`` if the team is already withdrawn (e.g. a
+    double-click, or two admins acting on the same team at once) --
+    ``withdrawn_by`` isn't persisted anywhere yet (no such field on the
+    model), accepted for symmetry with the request-scoped caller and future
+    use, same as ``MatchReferee.assigned_by``'s own shape elsewhere in this
+    app.
+    """
+    team = TournamentTeam.objects.select_for_update().get(pk=team.pk)
+    if team.withdrawn_at is not None:
+        raise TeamWithdrawalError(_("This team has already been withdrawn."))
+
+    team.withdrawn_at = timezone.now()
+    team.withdrawal_reason = reason
+    team.save(update_fields=["withdrawn_at", "withdrawal_reason"])
+
+    return team

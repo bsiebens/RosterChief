@@ -36,7 +36,6 @@ class TournamentFieldInline(admin.TabularInline):
 
     model = TournamentField
     extra = 0
-    raw_id_fields = ["location"]
 
 
 class BreakRuleInline(admin.TabularInline):
@@ -88,10 +87,10 @@ class TournamentAdmin(admin.ModelAdmin):
 
 @admin.register(TournamentField)
 class TournamentFieldAdmin(admin.ModelAdmin):
-    list_display = ["name", "tournament", "location"]
+    list_display = ["name", "tournament"]
     list_filter = ["tournament__club"]
     search_fields = ["name", "tournament__name"]
-    raw_id_fields = ["tournament", "location"]
+    raw_id_fields = ["tournament"]
 
 
 class TournamentGroupInline(admin.TabularInline):
