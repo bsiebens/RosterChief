@@ -26,14 +26,33 @@
     // themselves out to match -- and a disabled input isn't submitted, so the
     // server sees nothing set either way. The row form rejects them regardless;
     // this only saves the user from filling in something that can't apply.
+    //
+    // A tournament roster row (tournaments/forms.py's own role field) has no
+    // Position model to read a staff flag off -- "[data-role-select]" is a
+    // plain Player/Staff <select> instead, so "is this row staff" is just
+    // its raw value rather than the chosen option's dataset. It's a data
+    // attribute, not a class, because that row renders through the
+    // form_field template tag, which duplicates a widget's own "class" attr
+    // after its own hardcoded one -- a browser drops the second, so a plain
+    // CSS class added there would never actually apply (see the form
+    // field's own comment in tournaments/forms.py). "[data-player-only]"
+    // is the same row's date-of-birth grey-out target for the same reason;
+    // ".player-only" (a real class) still works for the team roster's own
+    // bulk-add row below, rendered via plain {{ form.field }} instead.
     const syncPlayerOnlyFields = (row) => {
         const position = row.querySelector(".position-select");
-        if (!position) return;
+        const role = row.querySelector("[data-role-select]");
+        if (!position && !role) return;
 
-        const chosen = position.options[position.selectedIndex];
-        const isStaff = Boolean(chosen && chosen.dataset.staff === "1");
+        let isStaff = false;
+        if (position) {
+            const chosen = position.options[position.selectedIndex];
+            isStaff = Boolean(chosen && chosen.dataset.staff === "1");
+        } else {
+            isStaff = role.value === "staff";
+        }
 
-        row.querySelectorAll(".player-only").forEach((field) => {
+        row.querySelectorAll(".player-only, [data-player-only]").forEach((field) => {
             field.disabled = isStaff;
             if (!isStaff) return;
             if (field.type === "checkbox") {
@@ -51,6 +70,8 @@
 
         const position = row.querySelector(".position-select");
         if (position) position.addEventListener("change", () => syncPlayerOnlyFields(row));
+        const role = row.querySelector("[data-role-select]");
+        if (role) role.addEventListener("change", () => syncPlayerOnlyFields(row));
         syncPlayerOnlyFields(row);
 
         const remove = row.querySelector(".remove-row");

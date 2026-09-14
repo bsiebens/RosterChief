@@ -180,8 +180,8 @@ class TournamentTeamAdmin(admin.ModelAdmin):
 @admin.register(TournamentRosterEntry)
 class TournamentRosterEntryAdmin(admin.ModelAdmin):
     # Not club-scoped itself -- club reached through `tournament_team`.
-    list_display = ["display_name", "tournament_team", "jersey_number", "position_label"]
-    list_filter = ["tournament_team__tournament__club"]
+    list_display = ["display_name", "tournament_team", "role", "jersey_number", "position_label"]
+    list_filter = ["tournament_team__tournament__club", "role"]
     search_fields = ["member__first_name", "member__last_name", "foreign_first_name", "foreign_last_name"]
     raw_id_fields = ["tournament_team", "member"]
 

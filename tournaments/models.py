@@ -406,6 +406,18 @@ class TournamentRegistration(UUIDModel):
         return self.team_id is None
 
 
+class TournamentRosterRole(models.TextChoices):
+    """Shared between ``TournamentRegistrationPlayer`` and
+    ``TournamentRosterEntry`` -- one person on a tournament roster is either
+    a player or a staff member (coach, physio, ...); a staff row has no
+    ``date_of_birth`` (see both models' own ``clean()``) but otherwise shares
+    every field a player row has (position, license number, dietary
+    restrictions, lunch days)."""
+
+    PLAYER = "player", _("Player")
+    STAFF = "staff", _("Staff")
+
+
 class TournamentRegistrationPlayer(UUIDModel):
     """One roster line submitted with a pending ``TournamentRegistration`` --
     the only place a foreign team's players can be captured before
@@ -423,12 +435,30 @@ class TournamentRegistrationPlayer(UUIDModel):
     replaced by the real roster on approval, and that's a legitimate,
     non-error use. Not itself club-scoped -- its club is reached through
     ``registration``.
+
+    Carries the same extra fields ``TournamentRosterEntry`` does (see that
+    model's own docstring for why they're duplicated rather than shared
+    through an abstract base -- the two models' name fields don't share a
+    shape, a flat first/last name here vs. member-or-foreign-name there) so
+    nothing is lost when a foreign team's submitted roster is copied onto
+    the live one at approval.
     """
 
     registration = models.ForeignKey(TournamentRegistration, on_delete=models.CASCADE, related_name="players", verbose_name=_("registration"))
     first_name = models.CharField(_("first name"), max_length=150)
     last_name = models.CharField(_("last name"), max_length=150)
     jersey_number = models.PositiveSmallIntegerField(_("jersey number"), null=True, blank=True)
+    role = models.CharField(_("role"), max_length=10, choices=TournamentRosterRole.choices, default=TournamentRosterRole.PLAYER)
+    position_label = models.CharField(_("position"), max_length=100, blank=True)
+    date_of_birth = models.DateField(_("date of birth"), null=True, blank=True, help_text=_("Players only."))
+    license_number = models.CharField(_("license number"), max_length=100, blank=True)
+    dietary_restrictions = models.TextField(_("dietary restrictions"), blank=True, help_text=_("Allergies, intolerances, or anything the kitchen should know about."))
+    #: List of ISO date strings, a subset of the tournament's own
+    #: ``date_range()`` -- meaningless while ``Tournament.lunch_mode`` is
+    #: NONE, and (by convention, not a constraint -- see the row form's own
+    #: handling) every tournament day when MANDATORY rather than left empty,
+    #: so a plain ``len()`` here always gives the right day count either way.
+    lunch_days = models.JSONField(_("lunch days"), default=list, blank=True)
 
     class Meta:
         verbose_name = _("tournament registration player")
@@ -437,6 +467,10 @@ class TournamentRegistrationPlayer(UUIDModel):
 
     def __str__(self):
         return f"{self.registration} - {self.first_name} {self.last_name}".strip()
+
+    def clean(self):
+        if self.role == TournamentRosterRole.STAFF and self.date_of_birth is not None:
+            raise ValidationError({"date_of_birth": _("Staff rows don't need a date of birth.")})
 
 
 class TournamentTeam(ClubScopedModel):
@@ -535,7 +569,14 @@ class TournamentRosterEntry(UUIDModel):
     foreign_first_name = models.CharField(_("first name"), max_length=150, blank=True)
     foreign_last_name = models.CharField(_("last name"), max_length=150, blank=True)
     jersey_number = models.PositiveSmallIntegerField(_("jersey number"), null=True, blank=True)
+    role = models.CharField(_("role"), max_length=10, choices=TournamentRosterRole.choices, default=TournamentRosterRole.PLAYER)
     position_label = models.CharField(_("position"), max_length=100, blank=True)
+    date_of_birth = models.DateField(_("date of birth"), null=True, blank=True, help_text=_("Players only."))
+    license_number = models.CharField(_("license number"), max_length=100, blank=True)
+    dietary_restrictions = models.TextField(_("dietary restrictions"), blank=True, help_text=_("Allergies, intolerances, or anything the kitchen should know about."))
+    #: See ``TournamentRegistrationPlayer.lunch_days`` -- same shape, same
+    #: "every tournament day when MANDATORY, not left empty" convention.
+    lunch_days = models.JSONField(_("lunch days"), default=list, blank=True)
 
     class Meta:
         verbose_name = _("tournament roster entry")
@@ -551,6 +592,10 @@ class TournamentRosterEntry(UUIDModel):
 
     def __str__(self):
         return self.display_name
+
+    def clean(self):
+        if self.role == TournamentRosterRole.STAFF and self.date_of_birth is not None:
+            raise ValidationError({"date_of_birth": _("Staff rows don't need a date of birth.")})
 
     @property
     def display_name(self) -> str:

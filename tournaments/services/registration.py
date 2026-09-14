@@ -97,6 +97,12 @@ def approve_registration(registration: TournamentRegistration, *, reviewed_by) -
                     foreign_first_name=player.first_name,
                     foreign_last_name=player.last_name,
                     jersey_number=player.jersey_number,
+                    role=player.role,
+                    position_label=player.position_label,
+                    date_of_birth=player.date_of_birth,
+                    license_number=player.license_number,
+                    dietary_restrictions=player.dietary_restrictions,
+                    lunch_days=player.lunch_days,
                 )
                 for player in registration.players.all()
             ]

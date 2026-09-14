@@ -33,6 +33,7 @@ from .models import (
     TournamentRegistration,
     TournamentRegistrationPlayer,
     TournamentRosterEntry,
+    TournamentRosterRole,
     TournamentStage,
     TournamentTask,
     TournamentTaskClaim,
@@ -284,6 +285,26 @@ class TournamentRegistrationModelTests(TournamentsTestCase):
         TournamentRegistration.objects.create(tournament=self.tournament, foreign_name="Guest FC")
 
 
+class TournamentRegistrationPlayerModelTests(TournamentsTestCase):
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.registration = TournamentRegistration.objects.create(tournament=cls.tournament, foreign_name="Guest FC")
+
+    def test_role_defaults_to_player(self):
+        player = TournamentRegistrationPlayer.objects.create(registration=self.registration, first_name="Sam", last_name="Striker")
+        self.assertEqual(player.role, TournamentRosterRole.PLAYER)
+
+    def test_a_staff_row_with_a_date_of_birth_fails_clean(self):
+        staff = TournamentRegistrationPlayer(registration=self.registration, first_name="Cam", last_name="Coach", role=TournamentRosterRole.STAFF, date_of_birth=datetime.date(1980, 1, 1))
+        with self.assertRaises(ValidationError):
+            staff.full_clean(exclude=["registration"])
+
+    def test_a_player_row_with_a_date_of_birth_passes_clean(self):
+        player = TournamentRegistrationPlayer(registration=self.registration, first_name="Sam", last_name="Striker", role=TournamentRosterRole.PLAYER, date_of_birth=datetime.date(2010, 1, 1))
+        player.full_clean(exclude=["registration"])  # no error raised
+
+
 class TournamentTeamModelTests(TournamentsTestCase):
     def test_str_and_display_name_for_a_real_team(self):
         entry = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, team=self.team)
@@ -409,6 +430,36 @@ class TournamentRosterEntryModelTests(TournamentsTestCase):
         TournamentRosterEntry.objects.create(tournament_team=self.tournament_team, member=other_member, jersey_number=None)
 
         self.assertEqual(self.tournament_team.roster_entries.count(), 2)
+
+    def test_role_defaults_to_player(self):
+        entry = TournamentRosterEntry.objects.create(tournament_team=self.tournament_team, member=self.member)
+        self.assertEqual(entry.role, TournamentRosterRole.PLAYER)
+
+    def test_extra_fields_round_trip(self):
+        entry = TournamentRosterEntry.objects.create(
+            tournament_team=self.tournament_team,
+            member=self.member,
+            role=TournamentRosterRole.STAFF,
+            position_label="Coach",
+            license_number="LIC-42",
+            dietary_restrictions="No nuts.",
+            lunch_days=["2026-09-19"],
+        )
+        entry.refresh_from_db()
+        self.assertEqual(entry.role, TournamentRosterRole.STAFF)
+        self.assertEqual(entry.position_label, "Coach")
+        self.assertEqual(entry.license_number, "LIC-42")
+        self.assertEqual(entry.dietary_restrictions, "No nuts.")
+        self.assertEqual(entry.lunch_days, ["2026-09-19"])
+
+    def test_a_staff_row_with_a_date_of_birth_fails_clean(self):
+        staff = TournamentRosterEntry(tournament_team=self.tournament_team, member=self.member, role=TournamentRosterRole.STAFF, date_of_birth=datetime.date(1980, 1, 1))
+        with self.assertRaises(ValidationError):
+            staff.full_clean(exclude=["tournament_team"])
+
+    def test_a_player_row_with_a_date_of_birth_passes_clean(self):
+        player = TournamentRosterEntry(tournament_team=self.tournament_team, member=self.member, role=TournamentRosterRole.PLAYER, date_of_birth=datetime.date(2010, 1, 1))
+        player.full_clean(exclude=["tournament_team"])  # no error raised
 
 
 class MatchModelTests(TournamentsTestCase):
@@ -748,6 +799,29 @@ class ApproveRegistrationServiceTests(TournamentsTestCase):
 
         self.assertEqual(team.roster_entries.count(), 0)
 
+    def test_approving_a_foreign_registration_copies_the_extra_roster_fields(self):
+        reviewer = User.objects.create_user(email="staff@example.com", password="pw-secret-123")
+        registration = TournamentRegistration.objects.create(tournament=self.tournament, foreign_name="Visiting FC")
+        TournamentRegistrationPlayer.objects.create(
+            registration=registration,
+            first_name="Cam",
+            last_name="Coach",
+            role=TournamentRosterRole.STAFF,
+            position_label="Coach",
+            license_number="LIC-1",
+            dietary_restrictions="Vegetarian.",
+            lunch_days=["2026-09-19"],
+        )
+
+        team = approve_registration(registration, reviewed_by=reviewer)
+
+        entry = team.roster_entries.get()
+        self.assertEqual(entry.role, TournamentRosterRole.STAFF)
+        self.assertEqual(entry.position_label, "Coach")
+        self.assertEqual(entry.license_number, "LIC-1")
+        self.assertEqual(entry.dietary_restrictions, "Vegetarian.")
+        self.assertEqual(entry.lunch_days, ["2026-09-19"])
+
     def test_cannot_approve_an_already_decided_registration(self):
         reviewer = User.objects.create_user(email="staff@example.com", password="pw-secret-123")
         registration = TournamentRegistration.objects.create(tournament=self.tournament, foreign_name="Visiting FC")
@@ -906,6 +980,41 @@ class TournamentRegistrationViewTests(TournamentsTestCase):
         self.assertEqual(registration.status, TournamentRegistration.Status.PENDING)
         self.assertFalse(registration.players.exists())
         self.assertRedirects(response, reverse("tournaments:registration_status", kwargs={"tournament_slug": self.tournament.slug, "token": registration.status_token}))
+
+    def test_a_staff_role_drops_a_submitted_date_of_birth(self):
+        data = self.contact_data() | self.formset_management() | self.player_data(role="staff", date_of_birth="1980-01-01", position_label="Coach")
+
+        self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+        player = TournamentRegistrationPlayer.objects.get()
+        self.assertEqual(player.role, TournamentRosterRole.STAFF)
+        self.assertIsNone(player.date_of_birth)
+        self.assertEqual(player.position_label, "Coach")
+
+    def test_lunch_days_are_not_stored_when_the_tournament_has_no_lunch(self):
+        data = self.contact_data() | self.formset_management() | self.player_data()
+
+        self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(TournamentRegistrationPlayer.objects.get().lunch_days, [])
+
+    def test_optional_lunch_stores_only_the_days_ticked(self):
+        self.tournament.lunch_mode = Tournament.LunchMode.OPTIONAL
+        self.tournament.save()
+        data = self.contact_data() | self.formset_management() | self.player_data(**{"lunch_days": "2026-09-19"})
+
+        self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(TournamentRegistrationPlayer.objects.get().lunch_days, ["2026-09-19"])
+
+    def test_mandatory_lunch_stores_every_tournament_day_regardless_of_input(self):
+        self.tournament.lunch_mode = Tournament.LunchMode.MANDATORY
+        self.tournament.save()
+        data = self.contact_data() | self.formset_management() | self.player_data()
+
+        self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(TournamentRegistrationPlayer.objects.get().lunch_days, ["2026-09-19", "2026-09-20"])
 
     def test_a_tournament_in_progress_404s(self):
         self.tournament.status = Tournament.Status.IN_PROGRESS

@@ -62,9 +62,9 @@ class TournamentRegistrationView(TournamentFeatureMixin, View):
             raise Http404("This tournament isn't accepting entries.")
         return tournament
 
-    def get_forms(self, data=None, files=None):
+    def get_forms(self, tournament, data=None, files=None):
         contact_form = TournamentRegistrationForm(data, files)
-        player_formset = TournamentRegistrationPlayerFormSet(data, prefix="players")
+        player_formset = TournamentRegistrationPlayerFormSet(data, prefix="players", form_kwargs={"tournament": tournament})
         return contact_form, player_formset
 
     def render_page(self, request, tournament, contact_form, player_formset):
@@ -74,14 +74,14 @@ class TournamentRegistrationView(TournamentFeatureMixin, View):
         tournament = self.get_tournament(request, kwargs["tournament_slug"])
         if not tournament.registration_open:
             return render(request, self.template_name, {"tournament": tournament, "registration_closed": True})
-        contact_form, player_formset = self.get_forms()
+        contact_form, player_formset = self.get_forms(tournament)
         return self.render_page(request, tournament, contact_form, player_formset)
 
     def post(self, request, *args, **kwargs):
         tournament = self.get_tournament(request, kwargs["tournament_slug"])
         if not tournament.registration_open:
             return render(request, self.template_name, {"tournament": tournament, "registration_closed": True})
-        contact_form, player_formset = self.get_forms(request.POST, request.FILES)
+        contact_form, player_formset = self.get_forms(tournament, request.POST, request.FILES)
         if not contact_form.is_valid() or not player_formset.is_valid():
             return self.render_page(request, tournament, contact_form, player_formset)
 
@@ -127,8 +127,21 @@ class TournamentRegistrationStatusView(TournamentFeatureMixin, View):
         )
 
     def get_player_formset(self, registration, data=None):
-        initial = [{"first_name": player.first_name, "last_name": player.last_name, "jersey_number": player.jersey_number} for player in registration.players.all()]
-        return TournamentRegistrationPlayerFormSet(data, initial=initial, prefix="players")
+        initial = [
+            {
+                "first_name": player.first_name,
+                "last_name": player.last_name,
+                "jersey_number": player.jersey_number,
+                "role": player.role,
+                "position_label": player.position_label,
+                "date_of_birth": player.date_of_birth,
+                "license_number": player.license_number,
+                "dietary_restrictions": player.dietary_restrictions,
+                "lunch_days": player.lunch_days,
+            }
+            for player in registration.players.all()
+        ]
+        return TournamentRegistrationPlayerFormSet(data, initial=initial, prefix="players", form_kwargs={"tournament": registration.tournament})
 
     def render_page(self, request, registration, player_formset=None):
         context = {"tournament": registration.tournament, "registration": registration}

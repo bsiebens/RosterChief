@@ -7,7 +7,7 @@ from club.models import Season
 from events.models import Event, Location
 from teams.models import Team
 
-from .models import DressingRoom, Tournament, TournamentField, TournamentRegistration, TournamentStage, TournamentTask, TournamentTeam
+from .models import DressingRoom, Tournament, TournamentField, TournamentRegistration, TournamentRosterEntry, TournamentRosterRole, TournamentStage, TournamentTask, TournamentTeam
 
 
 class TournamentRegistrationForm(forms.ModelForm):
@@ -45,11 +45,54 @@ class TournamentRegistrationPlayerRowForm(forms.Form):
     skipped" idiom as ``registration.forms.RegistrationEntryRowForm``. The
     roster itself is optional too (a team may register before its roster is
     finalized, and add players later via TournamentRegistrationStatusView) --
-    the formset below doesn't require any non-blank row."""
+    the formset below doesn't require any non-blank row.
+
+    ``tournament`` (threaded through via the formset's own ``form_kwargs``,
+    not a plain constructor default -- every call site now passes it) drives
+    whether/how ``lunch_days`` even appears: no field at all when
+    ``lunch_mode`` is NONE, a per-day checkbox group when OPTIONAL, nothing
+    shown (everyone gets every day, decided in ``lunch_days_value()`` below
+    rather than left for the submitter to tick) when MANDATORY. ``role``
+    carries the ``role-select``/``date_of_birth`` the ``player-only`` CSS
+    hook static/js/bulk-add-rows.js's own ``syncPlayerOnlyFields`` already
+    understands (extended there to recognise ``.role-select`` alongside the
+    team roster's own ``.position-select``), so a Staff row greys out its
+    date-of-birth input the same way a staff position already greys out
+    jersey/captaincy there.
+    """
 
     first_name = forms.CharField(label=_("First name"), max_length=150, required=False)
     last_name = forms.CharField(label=_("Last name"), max_length=150, required=False)
     jersey_number = forms.IntegerField(label=_("Jersey number"), required=False, min_value=0)
+    #: "role-select"/"player-only" as data attrs, not CSS classes -- this
+    #: form renders through the form_field template tag (controlpanel/
+    #: templatetags/field.html), which already hardcodes its own "class" on
+    #: every widget and then
+    #: layers the field's *own* widget.attrs on top verbatim, duplicate
+    #: "class" attribute and all -- a browser keeps only the first one it
+    #: sees, so a plain CSS class added here would silently never apply. A
+    #: data attribute has no such collision (nothing else in field.html sets
+    #: one), which is exactly why static/js/bulk-add-rows.js's own
+    #: syncPlayerOnlyFields looks for "[data-role-select]"/"[data-player-only]"
+    #: here rather than the ".position-select"/".player-only" *classes* it
+    #: already uses for the team roster's own bulk-add row (rendered via
+    #: plain {{ form.field }} there, so a class attr collides with nothing).
+    role = forms.ChoiceField(label=_("Role"), choices=TournamentRosterRole.choices, initial=TournamentRosterRole.PLAYER, required=False, widget=forms.Select(attrs={"data-role-select": "1"}))
+    position_label = forms.CharField(label=_("Position"), max_length=100, required=False)
+    date_of_birth = forms.DateField(label=_("Date of birth"), required=False, widget=forms.DateInput(attrs={"type": "date", "data-player-only": "1"}))
+    license_number = forms.CharField(label=_("License number"), max_length=100, required=False)
+    dietary_restrictions = forms.CharField(label=_("Dietary restrictions"), required=False, widget=forms.Textarea(attrs={"rows": 2}))
+
+    def __init__(self, *args, tournament=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.tournament = tournament
+        if tournament is not None and tournament.lunch_mode == Tournament.LunchMode.OPTIONAL:
+            self.fields["lunch_days"] = forms.MultipleChoiceField(
+                label=_("Lunch days"),
+                required=False,
+                choices=[(day.isoformat(), day.strftime("%a %d %b")) for day in tournament.date_range()],
+                widget=forms.CheckboxSelectMultiple,
+            )
 
     def has_a_person(self):
         data = self.cleaned_data
@@ -62,7 +105,23 @@ class TournamentRegistrationPlayerRowForm(forms.Form):
 
         if not cleaned.get("last_name"):
             self.add_error("last_name", _("Enter a last name."))
+        if not cleaned.get("role"):
+            cleaned["role"] = TournamentRosterRole.PLAYER
+        if cleaned.get("role") == TournamentRosterRole.STAFF and cleaned.get("date_of_birth"):
+            cleaned["date_of_birth"] = None  # a staff row's DOB is greyed out client-side; a bypassed value is just dropped, not an error
         return cleaned
+
+    def lunch_days_value(self) -> list:
+        """The list of ISO date strings to actually store -- every tournament
+        day when lunch is MANDATORY (nothing for the submitter to have
+        picked, since no field is rendered for that case), whatever was
+        ticked when OPTIONAL, or an empty list when there's no lunch at
+        all."""
+        if self.tournament is None or self.tournament.lunch_mode == Tournament.LunchMode.NONE:
+            return []
+        if self.tournament.lunch_mode == Tournament.LunchMode.MANDATORY:
+            return [day.isoformat() for day in self.tournament.date_range()]
+        return list(self.cleaned_data.get("lunch_days") or [])
 
 
 class BaseTournamentRegistrationPlayerFormSet(forms.BaseFormSet):
@@ -82,6 +141,12 @@ def players_from_formset(player_formset):
             "first_name": row.cleaned_data.get("first_name") or "",
             "last_name": row.cleaned_data["last_name"],
             "jersey_number": row.cleaned_data.get("jersey_number"),
+            "role": row.cleaned_data.get("role") or TournamentRosterRole.PLAYER,
+            "position_label": row.cleaned_data.get("position_label") or "",
+            "date_of_birth": row.cleaned_data.get("date_of_birth"),
+            "license_number": row.cleaned_data.get("license_number") or "",
+            "dietary_restrictions": row.cleaned_data.get("dietary_restrictions") or "",
+            "lunch_days": row.lunch_days_value(),
         }
         for row in player_formset.non_blank_forms()
     ]
@@ -357,3 +422,73 @@ class TournamentTeamForm(forms.Form):
         if self.cleaned_data.get("foreign_logo"):
             data["foreign_logo"] = self.cleaned_data["foreign_logo"]
         return data
+
+
+class TournamentRosterEntryForm(forms.ModelForm):
+    """The management-only "always editable" roster screen -- one
+    ``TournamentRosterEntry`` at a time, for either a club team's snapshotted
+    row or a foreign team's, regardless of tournament status (see
+    ``TournamentTeamRosterView``'s own docstring for why this screen exists
+    at all: it's where DOB/license/dietary get filled in for a club-team
+    row, since ``TeamMembership`` has no such fields to snapshot from in the
+    first place).
+
+    ``foreign_first_name``/``foreign_last_name`` are dropped from the form
+    entirely for an existing *member*-backed row (name comes from the real
+    Member there, not something this screen edits) -- kept for a new row or
+    an existing foreign-backed one, where they're how the person is actually
+    named.
+
+    No ``lunch_days`` field here at all, unlike the public row form's own --
+    this form renders through controlpanel/_form_fields.html's blind
+    ``{% for field in form %}`` loop (every modal-form/card-form in this app
+    shares it), which only knows how to render ``form_field``'s handful of
+    widget types and has no per-field override hook to special-case a
+    ``CheckboxSelectMultiple`` the way ``_player_row.html`` hand-rolls it.
+    ``TournamentRosterEntryLunchUpdateView``/the roster template's own inline
+    checkbox row cover editing it instead, the same single-field-inline-post
+    idiom ``TournamentTeamPaymentUpdateView`` already uses for
+    ``payment_status``. ``save()`` still resolves the NONE/MANDATORY cases
+    here (fully determined either way, nothing to edit), leaving an existing
+    OPTIONAL value untouched rather than wiping it on every unrelated field
+    edit."""
+
+    class Meta:
+        model = TournamentRosterEntry
+        fields = ["foreign_first_name", "foreign_last_name", "jersey_number", "role", "position_label", "date_of_birth", "license_number", "dietary_restrictions"]
+        widgets = {
+            "date_of_birth": forms.DateInput(attrs={"type": "date"}),
+            "dietary_restrictions": forms.Textarea(attrs={"rows": 2}),
+        }
+
+    def __init__(self, *args, tournament=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.tournament = tournament
+        self.fields["position_label"].required = True
+        if self.instance.pk and self.instance.member_id:
+            del self.fields["foreign_first_name"]
+            del self.fields["foreign_last_name"]
+        else:
+            # A new entry (or an existing foreign-backed one) has no Member
+            # to fall back on -- the model's own member_xor_foreign_name
+            # constraint needs both set, so this can't be left to blank=True
+            # (which only describes the model, not what a *new* row here
+            # actually needs).
+            self.fields["foreign_first_name"].required = True
+            self.fields["foreign_last_name"].required = True
+
+    def clean(self):
+        cleaned = super().clean()
+        if cleaned.get("role") == TournamentRosterRole.STAFF and cleaned.get("date_of_birth"):
+            self.add_error("date_of_birth", _("Staff rows don't need a date of birth."))
+        return cleaned
+
+    def save(self, commit=True):
+        instance = super().save(commit=False)
+        if self.tournament is not None and self.tournament.lunch_mode == Tournament.LunchMode.NONE:
+            instance.lunch_days = []
+        elif self.tournament is not None and self.tournament.lunch_mode == Tournament.LunchMode.MANDATORY:
+            instance.lunch_days = [day.isoformat() for day in self.tournament.date_range()]
+        if commit:
+            instance.save()
+        return instance

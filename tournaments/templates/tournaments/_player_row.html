@@ -1,17 +1,51 @@
 {% load i18n lucide ui %}
 {% comment %}
-    One row of the public tournament-registration page's own roster formset.
-    Rendered both for the rows already in the formset and (with __prefix__
-    placeholders) into the <template> the "Add another player" button clones
-    from -- same mechanism as registration/templates/registration/_entry_row.html
-    (static/js/bulk-add-rows.js).
+    One row of the public tournament-registration page's own roster formset --
+    a small per-person card, not a single compact row, now that there are 8
+    possible fields per person (name/role/jersey, position/DOB/license,
+    dietary + lunch days) rather than 3. Rendered both for the rows already
+    in the formset and (with __prefix__ placeholders) into the <template> the
+    "Add another player" button clones from -- same mechanism as
+    registration/templates/registration/_entry_row.html
+    (static/js/bulk-add-rows.js, whose syncPlayerOnlyFields also greys out
+    date_of_birth -- marked "player-only" below -- for a Staff row via the
+    "role-select" class on form.role).
+
+    form.lunch_days only exists at all when the tournament's lunch_mode is
+    OPTIONAL (see TournamentRegistrationPlayerRowForm.__init__) -- NONE means
+    no lunch to pick, MANDATORY means everyone gets every day with nothing to
+    choose, so the checkbox group is skipped in both cases. It's a plain
+    MultipleChoiceField/CheckboxSelectMultiple, which the form_field
+    template tag doesn't know how to render (it falls through to a bare text
+    input) -- hand-rolled here instead, same idea as a plain radio group
+    elsewhere in this app.
 {% endcomment %}
 <div class="bulk-add-row relative flex flex-col gap-4 rounded-box border border-line p-3.5 pt-9">
     <button class="btn btn-ghost btn-sm btn-square remove-row absolute top-1.5 right-1.5" type="button" aria-label="{% trans 'Remove this player' %}" title="{% trans 'Remove this player' %}">{% lucide "x" size=16 %}</button>
 
-    <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+    <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
         {% form_field form.first_name %}
         {% form_field form.last_name %}
+        {% form_field form.role %}
     </div>
-    {% form_field form.jersey_number %}
+    <div class="grid grid-cols-1 gap-4 md:grid-cols-4">
+        {% form_field form.jersey_number %}
+        {% form_field form.position_label %}
+        {% form_field form.date_of_birth %}
+        {% form_field form.license_number %}
+    </div>
+    {% form_field form.dietary_restrictions textarea_height="h-16" %}
+
+    {% if form.lunch_days %}
+        <div>
+            <div class="mb-1.5 font-display text-[11px] font-bold tracking-[.12em] text-muted uppercase">{{ form.lunch_days.label }}</div>
+            <div class="flex flex-wrap gap-3">
+                {% for checkbox in form.lunch_days %}
+                    <label class="flex items-center gap-1.5 text-sm text-ink">
+                        {{ checkbox.tag }} {{ checkbox.choice_label }}
+                    </label>
+                {% endfor %}
+            </div>
+        </div>
+    {% endif %}
 </div>
