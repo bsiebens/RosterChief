@@ -10,13 +10,16 @@
     module's own .article-body styling), format per stage, a compact
     standings/bracket snapshot (top rows / latest round only -- the full
     versions live at tournaments:standings), and a short upcoming-matches
-    teaser (the full schedule lives at tournaments:schedule). The
-    "Register a team" CTA is deliberately the most visually prominent thing
-    on the page (solid club-branded banner, not just another button in a
-    row) when accepts_registrations is true; a plain alert banner explains
-    why otherwise. See tournaments.views.TournamentDetailView for exactly
-    which statuses resolve here (broader than the public list -- direct
-    links work regardless of status).
+    teaser (the full schedule lives at tournaments:schedule). The header
+    is a dark, club-accented hero card (not a plain white page top) with
+    the "Register a team" CTA folded directly into it when
+    accepts_registrations is true -- deliberately the most visually
+    prominent thing on the page, not just another button in a row; a
+    plain alert banner explains why otherwise, kept outside the hero
+    since a "closed" state doesn't want the same weight. See
+    tournaments.views.TournamentDetailView for exactly which statuses
+    resolve here (broader than the public list -- direct links work
+    regardless of status).
 {% endcomment %}
 
 {% block page_title %}{{ tournament.name }}{% endblock page_title %}
@@ -26,43 +29,47 @@
 {% block content_width %}max-w-3xl{% endblock content_width %}
 
 {% block content %}
-    <div class="mb-5">
-        <h1 class="font-display text-3xl font-extrabold text-ink uppercase">{{ tournament.name }}</h1>
-        <div class="mt-1.5 flex flex-col gap-1 text-sm text-muted">
-            <p class="flex items-center gap-1.5">
-                {% lucide "calendar" size=15 class="shrink-0 text-club" %}
-                {% blocktrans with start=tournament.start_date|date:"DATE_FORMAT" end=tournament.end_date|date:"DATE_FORMAT" %}{{ start }} &ndash; {{ end }}{% endblocktrans %}
-            </p>
-            {% if tournament.location %}
-                <p class="flex items-center gap-1.5">
-                    {% lucide "map-pin" size=15 class="shrink-0 text-club" %}
-                    {{ tournament.location.name }}{% if tournament.location.city %}, {{ tournament.location.city }}{% endif %}
-                </p>
+    <div class="relative mb-4 overflow-hidden rounded-box bg-ink">
+        <div class="pointer-events-none absolute inset-0 bg-gradient-to-br from-club/50 via-club/10 to-transparent"></div>
+        <div class="relative p-6 sm:p-8">
+            <h1 class="font-display text-3xl font-extrabold tracking-tight text-white uppercase sm:text-4xl">{{ tournament.name }}</h1>
+            <div class="mt-2 flex flex-col gap-1 text-sm text-white/70 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-4 sm:gap-y-1">
+                <span class="flex items-center gap-1.5">
+                    {% lucide "calendar" size=15 class="shrink-0 text-club" %}
+                    {% blocktrans with start=tournament.start_date|date:"DATE_FORMAT" end=tournament.end_date|date:"DATE_FORMAT" %}{{ start }} &ndash; {{ end }}{% endblocktrans %}
+                </span>
+                {% if tournament.location %}
+                    <span class="flex items-center gap-1.5">
+                        {% lucide "map-pin" size=15 class="shrink-0 text-club" %}
+                        {{ tournament.location.name }}{% if tournament.location.city %}, {{ tournament.location.city }}{% endif %}
+                    </span>
+                {% endif %}
+                {% if tournament.contact_email %}
+                    <span class="flex items-center gap-1.5">
+                        {% lucide "mail" size=15 class="shrink-0 text-club" %}
+                        <a class="hover:underline" href="mailto:{{ tournament.contact_email }}">{{ tournament.contact_email }}</a>
+                    </span>
+                {% endif %}
+            </div>
+
+            <div class="mt-4 flex flex-wrap gap-2">
+                <a class="btn btn-sm gap-2 border-white/25 bg-white/10 text-white hover:bg-white/20" href="{% url 'tournaments:schedule' tournament.slug %}">{% lucide "list" size=14 %} {% trans "Full schedule" %}</a>
+                <a class="btn btn-sm gap-2 border-white/25 bg-white/10 text-white hover:bg-white/20" href="{% url 'tournaments:standings' tournament.slug %}">{% lucide "trophy" size=14 %} {% trans "Standings" %}</a>
+            </div>
+
+            {% if tournament.accepts_registrations %}
+                <div class="mt-5 flex flex-wrap items-center justify-between gap-4 border-t border-white/15 pt-5">
+                    <div>
+                        <div class="font-display text-lg font-extrabold text-white uppercase">{% trans "Registration is open" %}</div>
+                        <p class="text-sm text-white/70">{% trans "Enter your team for this tournament today -- it only takes a couple of minutes." %}</p>
+                    </div>
+                    <a class="btn btn-lg gap-2 border-none bg-white text-ink hover:bg-white/90" href="{% url 'tournaments:register' tournament_slug=tournament.slug %}">{% lucide "send" size=18 %} {% trans "Register a team" %}</a>
+                </div>
             {% endif %}
-            {% if tournament.contact_email %}
-                <p class="flex items-center gap-1.5">
-                    {% lucide "mail" size=15 class="shrink-0 text-club" %}
-                    <a class="hover:underline" href="mailto:{{ tournament.contact_email }}">{{ tournament.contact_email }}</a>
-                </p>
-            {% endif %}
-        </div>
-        <div class="mt-3 flex flex-wrap gap-2">
-            <a class="btn btn-outline btn-sm gap-2" href="{% url 'tournaments:schedule' tournament.slug %}">{% lucide "list" size=14 %} {% trans "Full schedule" %}</a>
-            <a class="btn btn-outline btn-sm gap-2" href="{% url 'tournaments:standings' tournament.slug %}">{% lucide "trophy" size=14 %} {% trans "Standings" %}</a>
         </div>
     </div>
 
-    {% if tournament.accepts_registrations %}
-        <div class="card card-body mb-4 bg-club text-club-content">
-            <div class="flex flex-wrap items-center justify-between gap-4">
-                <div>
-                    <div class="font-display text-xl font-extrabold uppercase">{% trans "Registration is open" %}</div>
-                    <p class="text-sm opacity-90">{% trans "Enter your team for this tournament today -- it only takes a couple of minutes." %}</p>
-                </div>
-                <a class="btn btn-lg gap-2 border-none bg-white text-ink hover:bg-white/90" href="{% url 'tournaments:register' tournament_slug=tournament.slug %}">{% lucide "send" size=18 %} {% trans "Register a team" %}</a>
-            </div>
-        </div>
-    {% else %}
+    {% if not tournament.accepts_registrations %}
         <div class="alert alert-warning mb-4">
             {% lucide "circle-slash" size=18 %}
             <span>{% trans "Registration is closed for this tournament -- no new teams can be entered right now." %}</span>
