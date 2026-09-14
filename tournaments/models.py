@@ -32,11 +32,11 @@ class Tournament(ClubScopedModel):
     lightweight, not one Event each."""
 
     class Status(models.TextChoices):
-        DRAFT = "draft", _("draft")
-        PUBLISHED = "published", _("published")
-        IN_PROGRESS = "in_progress", _("in progress")
-        COMPLETED = "completed", _("completed")
-        CANCELLED = "cancelled", _("cancelled")
+        DRAFT = "draft", _("Draft")
+        PUBLISHED = "published", _("Published")
+        IN_PROGRESS = "in_progress", _("In progress")
+        COMPLETED = "completed", _("Completed")
+        CANCELLED = "cancelled", _("Cancelled")
 
     name = models.CharField(_("name"), max_length=255)
     slug = models.SlugField(_("slug"), max_length=255, blank=True)
@@ -45,7 +45,13 @@ class Tournament(ClubScopedModel):
     season = models.ForeignKey("club.Season", on_delete=models.PROTECT, related_name="tournaments", verbose_name=_("season"))
     start_date = models.DateField(_("start date"))
     end_date = models.DateField(_("end date"))
-    status = models.CharField(_("status"), max_length=20, choices=Status.choices, default=Status.DRAFT)
+    status = models.CharField(
+        _("status"),
+        max_length=20,
+        choices=Status.choices,
+        default=Status.DRAFT,
+        help_text=_("Draft: hidden from the public list, link still works. Published: listed publicly. In progress / Completed: informational once the tournament is underway or done. Cancelled: hidden and closed to entries."),
+    )
     #: A manual override, independent of ``status`` -- publishing a
     #: tournament (making its page and registration form public) and
     #: registration actually still being open are two different questions:
@@ -62,7 +68,11 @@ class Tournament(ClubScopedModel):
     #: wherever it's actually shown -- the same "one render function, called
     #: everywhere, never raw source" discipline that module's own docstring
     #: describes for News.
-    description = models.TextField(_("description"), blank=True, help_text=_("Markdown supported."))
+    description = models.TextField(
+        _("description"),
+        blank=True,
+        help_text=_("Supports Markdown: **bold**, *italic*, [link text](https://example.com), # heading, - list item, 1. numbered item, ```code```. Rendered to HTML on the public tournament page."),
+    )
 
     event = models.OneToOneField("events.Event", on_delete=models.SET_NULL, null=True, blank=True, related_name="tournament", verbose_name=_("calendar event"))
 
