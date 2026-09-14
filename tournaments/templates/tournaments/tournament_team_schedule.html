@@ -1,0 +1,60 @@
+{% extends "registration/_base.html" %}
+{% load i18n lucide %}
+
+{% comment %}
+    Public, unauthenticated page for one TournamentTeam's own matches --
+    linked from the schedule/standings pages' own team links.
+    tournaments.views.TournamentTeamScheduleView.
+{% endcomment %}
+
+{% block page_title %}{% blocktrans with team=team.display_name tournament=tournament.name %}{{ team }} &middot; {{ tournament }}{% endblocktrans %}{% endblock page_title %}
+
+{% block brand_href %}{% url "tournaments:detail" tournament.slug %}{% endblock brand_href %}
+
+{% block content %}
+    <div class="mb-5">
+        <h1 class="font-display text-3xl font-extrabold text-ink uppercase">{{ team.display_name }}</h1>
+        <p class="mt-1 flex items-center gap-1.5 text-sm text-muted">
+            {% lucide "trophy" size=15 class="shrink-0 text-club" %}
+            <a class="hover:underline" href="{% url 'tournaments:detail' tournament.slug %}">{{ tournament.name }}</a>
+        </p>
+    </div>
+
+    <div class="card overflow-hidden">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>{% trans "Match" %}</th>
+                    <th>{% trans "Field & time" %}</th>
+                    <th>{% trans "Status" %}</th>
+                    <th>{% trans "Score" %}</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for match in matches %}
+                    <tr>
+                        <td class="font-semibold text-ink">{{ match.home_display }} <span class="text-dim">{% trans "vs" %}</span> {{ match.away_display }}</td>
+                        <td>
+                            {% if match.field %}{{ match.field.name }}{% else %}<span class="text-dim">&mdash;</span>{% endif %}
+                            {% if match.scheduled_start %}<div class="text-xs text-muted">{{ match.scheduled_start|date:"D j M, H:i" }}</div>{% endif %}
+                        </td>
+                        <td>
+                            <span class="badge badge-sm {% if match.status == "complete" %}badge-success{% elif match.status == "cancelled" %}badge-error{% elif match.status == "in_progress" %}badge-info{% elif match.status == "walkover" %}badge-warning{% else %}badge-outline{% endif %}">{{ match.get_status_display }}</span>
+                        </td>
+                        <td>
+                            {% if match.status == "complete" %}
+                                <span class="font-mono text-sm text-ink">{{ match.score_home }} - {{ match.score_away }}</span>
+                            {% else %}
+                                <span class="text-xs text-dim">&mdash;</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="4" class="text-center text-muted">{% trans "No matches scheduled for this team yet." %}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+{% endblock content %}

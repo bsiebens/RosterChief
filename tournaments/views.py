@@ -14,18 +14,23 @@ one (approve/reject) is tournaments.services.registration's job, called from
 the staff-side review queue, never from here.
 """
 
+import itertools
+
+from django.db.models import Q
 from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.translation import gettext_lazy as _
 from django.views import View
+from django.views.generic import DetailView, ListView
 
 from club.mixins import FeatureFlagMixin
 from controlpanel.messages import notify
 from members.views import ClubScopedPublicMixin
 
 from .forms import TournamentRegistrationForm, TournamentRegistrationPlayerFormSet, players_from_formset
-from .models import Tournament, TournamentRegistration, TournamentRegistrationPlayer
+from .models import Match, Tournament, TournamentRegistration, TournamentRegistrationPlayer, TournamentStage, TournamentTeam
 from .services.notifications import send_registration_confirmation_email
+from .services.scheduling import compute_standings
 
 #: Tournament.Status values still open to new public entries. Once a
 #: tournament is under way, finished, or cancelled, its registration page
@@ -106,3 +111,261 @@ class TournamentRegistrationStatusView(TournamentFeatureMixin, View):
             status_token=kwargs["token"],
         )
         return render(request, self.template_name, {"tournament": registration.tournament, "registration": registration})
+
+
+# --------------------------------------------------------------------------
+# Public tournament site -- home page, schedule, standings/bracket, one
+# team's own slate. No login, no unguessable token (unlike the registration
+# flow above): a tournament's schedule/standings are public information by
+# design, same reasoning TournamentTeam.slug's own docstring already gives
+# for *that* not being a secret either.
+# --------------------------------------------------------------------------
+
+#: Tournament.Status values shown on the public tournament list
+#: (TournamentListView). Deliberately narrower than registration's own
+#: OPEN_FOR_REGISTRATION_STATUSES:
+#: - DRAFT is excluded -- a tournament can legitimately be quietly open for
+#:   entries (see OPEN_FOR_REGISTRATION_STATUSES above) before the club is
+#:   ready to broadcast that it exists at all; the direct registration link
+#:   handles that case, the public list shouldn't.
+#: - CANCELLED is excluded too -- once a tournament isn't happening, there's
+#:   no ongoing reason to keep it in a browsable list; a club that wants to
+#:   announce a cancellation does so through news/direct communication, not
+#:   by leaving a dead entry in this listing.
+#: PUBLISHED and IN_PROGRESS are shown as "upcoming/in progress"; COMPLETED
+#: becomes "past" -- see TournamentListView.get_context_data.
+PUBLIC_LIST_STATUSES = (Tournament.Status.PUBLISHED, Tournament.Status.IN_PROGRESS, Tournament.Status.COMPLETED)
+
+
+def _round_groups(matches) -> list[dict]:
+    """Turns an ordered (by round_number, then sequence) iterable of Match
+    rows into a ``[{round_number, label, matches}, ...]`` list -- shared by
+    every grouped-by-round view below (the full schedule, the schedule rows
+    partial, a bracket-format stage's standings view). Mirrors
+    ``management.views.TournamentScheduleView.get_context_data``'s own
+    ``itertools.groupby`` idiom exactly, factored out so the public views
+    below and that staff-only one can never quietly drift apart on what
+    "grouped by round" means."""
+    rounds = []
+    for round_number, round_matches in itertools.groupby(matches, key=lambda match: match.round_number):
+        round_matches = list(round_matches)
+        label = next((match.round_label for match in round_matches if match.round_label), "") or (_("Round %(number)d") % {"number": round_number})
+        rounds.append({"round_number": round_number, "label": label, "matches": round_matches})
+    return rounds
+
+
+def _grouped_schedule(tournament) -> list[dict]:
+    """Every match across every stage of ``tournament``, grouped stage then
+    round -- the read-only public counterpart to the staff-side
+    ``management.views.TournamentScheduleView``'s own grouping, reused by
+    both the full schedule page and its htmx-polled rows partial so they can
+    never disagree about the grouping."""
+    matches = Match.objects.filter(stage__tournament=tournament).select_related("stage", "group", "field", "home_team", "away_team").order_by("stage__sequence", "round_number", "sequence")
+    return [{"stage": stage, "rounds": _round_groups(list(stage_matches))} for stage, stage_matches in itertools.groupby(matches, key=lambda match: match.stage)]
+
+
+def _standings_context(tournament) -> dict:
+    """Every stage's standings/progression, split into two shapes a template
+    can walk directly:
+
+    - ``standings_stages``: round-robin/Swiss/custom stages get one table
+      (``group`` is ``None``); a GROUPS-format stage gets one table per
+      ``TournamentGroup``, each computed via ``compute_standings(stage,
+      group=group)`` -- exactly the per-group call the design spec asks for.
+    - ``bracket_stages``: single/double-elimination stages instead get a
+      round-by-round match list (``_round_groups``, the same shape the
+      schedule view uses) -- a table of points/wins doesn't mean anything
+      for a knockout stage, but "who's advanced so far" does, and
+      ``Match.home_display``/``away_display`` already render an unresolved
+      slot as "TBD".
+
+    Shared by both the full standings page and its htmx-polled rows partial,
+    and reused (truncated in the template) for TournamentDetailView's own
+    compact snapshot.
+    """
+    standings_stages, bracket_stages = [], []
+    for stage in tournament.stages.order_by("sequence").prefetch_related("groups"):
+        if stage.format == TournamentStage.Format.GROUPS:
+            groups = list(stage.groups.order_by("sequence"))
+            tables = [{"group": group, "rows": compute_standings(stage, group=group)} for group in groups]
+            standings_stages.append({"stage": stage, "tables": tables})
+        elif stage.format in (TournamentStage.Format.SINGLE_ELIM, TournamentStage.Format.DOUBLE_ELIM):
+            matches = list(stage.matches.select_related("home_team", "away_team").order_by("round_number", "sequence"))
+            bracket_stages.append({"stage": stage, "rounds": _round_groups(matches)})
+        else:
+            # ROUND_ROBIN, SWISS, CUSTOM -- one plain table. compute_standings
+            # only ever reads completed matches, so this is harmless (an
+            # empty table) even for a CUSTOM stage nobody's populated yet.
+            standings_stages.append({"stage": stage, "tables": [{"group": None, "rows": compute_standings(stage)}]})
+    return {"standings_stages": standings_stages, "bracket_stages": bracket_stages}
+
+
+class TournamentListView(TournamentFeatureMixin, ListView):
+    """``/tournaments/`` -- every publicly-listable tournament for this club,
+    most recent first, split into "upcoming/in progress" vs. "past" in the
+    template. See ``PUBLIC_LIST_STATUSES`` for exactly which statuses that
+    is and why."""
+
+    model = Tournament
+    template_name = "tournaments/tournament_list.html"
+    context_object_name = "tournaments"
+
+    def get_queryset(self):
+        return Tournament.objects.filter(club=self.request.club, status__in=PUBLIC_LIST_STATUSES)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        tournaments = context["tournaments"]
+        context["upcoming_tournaments"] = [tournament for tournament in tournaments if tournament.status != Tournament.Status.COMPLETED]
+        context["past_tournaments"] = [tournament for tournament in tournaments if tournament.status == Tournament.Status.COMPLETED]
+        return context
+
+
+class TournamentDetailView(TournamentFeatureMixin, DetailView):
+    """``/tournaments/<slug>/`` -- the tournament "home": dates, format per
+    stage, a compact standings/bracket snapshot, and a short upcoming-matches
+    teaser (the full schedule lives at ``TournamentScheduleView``, linked
+    from here).
+
+    Unlike ``TournamentListView``, this does *not* filter by
+    ``PUBLIC_LIST_STATUSES`` -- only by ``club``, so any status (including a
+    DRAFT tournament whose direct registration link is already being shared,
+    or a CANCELLED one someone still has bookmarked) resolves for whoever
+    has the exact URL. Judgment call: unlike ``TournamentRegistration.status_token``,
+    a tournament's own slug was never meant to be a secret (see
+    ``TournamentTeam.slug``'s docstring making the same point for a team's
+    own page) -- "not broadcast on the public list" and "doesn't exist" are
+    different things, and staff sharing a not-yet-listed tournament's link
+    directly (the same reason DRAFT still accepts registrations) is a
+    legitimate, intentional use this view shouldn't block.
+    """
+
+    model = Tournament
+    template_name = "tournaments/tournament_detail.html"
+    context_object_name = "tournament"
+
+    def get_queryset(self):
+        return Tournament.objects.filter(club=self.request.club)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        tournament = self.object
+        context["stages"] = list(tournament.stages.order_by("sequence"))
+        context["upcoming_matches"] = (
+            Match.objects.filter(stage__tournament=tournament)
+            .exclude(status=Match.Status.COMPLETE)
+            .exclude(scheduled_start__isnull=True)
+            .select_related("stage", "home_team", "away_team")
+            .order_by("scheduled_start")[:5]
+        )
+        context.update(_standings_context(tournament))
+        return context
+
+
+class TournamentScheduleView(TournamentFeatureMixin, DetailView):
+    """``/tournaments/<slug>/schedule/`` -- the full schedule, every match
+    across every stage/round, grouped the same way the staff-only
+    ``management.views.TournamentScheduleView`` groups them (minus the
+    inline edit forms -- this is read-only). The rows themselves live in
+    ``tournaments/_schedule_rows.html``, included here and polled by
+    ``TournamentScheduleRowsView`` below for live score updates."""
+
+    model = Tournament
+    template_name = "tournaments/tournament_schedule.html"
+    context_object_name = "tournament"
+
+    def get_queryset(self):
+        return Tournament.objects.filter(club=self.request.club)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["stages"] = _grouped_schedule(self.object)
+        return context
+
+
+class TournamentScheduleRowsView(TournamentFeatureMixin, DetailView):
+    """``/tournaments/<slug>/schedule/rows/`` -- just the grouped match table
+    (``_schedule_rows.html``), no page chrome. Polled by the full schedule
+    page's own ``hx-get``/``hx-trigger="every 20s"`` container -- htmx
+    polling, not WebSockets/SSE (there's no such infrastructure anywhere in
+    this codebase, see the design spec), and only the rows are re-fetched,
+    never a full-page render."""
+
+    model = Tournament
+    template_name = "tournaments/_schedule_rows.html"
+    context_object_name = "tournament"
+
+    def get_queryset(self):
+        return Tournament.objects.filter(club=self.request.club)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["stages"] = _grouped_schedule(self.object)
+        return context
+
+
+class TournamentStandingsView(TournamentFeatureMixin, DetailView):
+    """``/tournaments/<slug>/standings/`` -- every stage's standings (a table
+    per stage, or per group within a GROUPS-format stage), plus a simple
+    bracket/progression view for single/double-elimination stages. See
+    ``_standings_context`` for the exact shape. The rows themselves live in
+    ``tournaments/_standings_rows.html``, included here and polled by
+    ``TournamentStandingsRowsView`` below."""
+
+    model = Tournament
+    template_name = "tournaments/tournament_standings.html"
+    context_object_name = "tournament"
+
+    def get_queryset(self):
+        return Tournament.objects.filter(club=self.request.club)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.update(_standings_context(self.object))
+        return context
+
+
+class TournamentStandingsRowsView(TournamentFeatureMixin, DetailView):
+    """``/tournaments/<slug>/standings/rows/`` -- just the standings/bracket
+    tables (``_standings_rows.html``), no page chrome. Same
+    ``hx-trigger="every 20s"`` polling idiom as ``TournamentScheduleRowsView``."""
+
+    model = Tournament
+    template_name = "tournaments/_standings_rows.html"
+    context_object_name = "tournament"
+
+    def get_queryset(self):
+        return Tournament.objects.filter(club=self.request.club)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.update(_standings_context(self.object))
+        return context
+
+
+class TournamentTeamScheduleView(TournamentFeatureMixin, DetailView):
+    """``/tournaments/<slug>/teams/<team_slug>/`` -- one ``TournamentTeam``'s
+    own matches only (``Q(home_team=team) | Q(away_team=team)``), scoped by
+    both the tournament's own slug and the team's own slug so a team slug
+    that happens to collide with one from a different tournament (slugs are
+    unique *per tournament*, not globally -- see ``TournamentTeam.slug``'s
+    own docstring) can never resolve the wrong team."""
+
+    model = TournamentTeam
+    template_name = "tournaments/tournament_team_schedule.html"
+    context_object_name = "team"
+
+    def get_object(self, queryset=None):
+        return get_object_or_404(
+            TournamentTeam.objects.select_related("tournament"),
+            tournament__club=self.request.club,
+            tournament__slug=self.kwargs["slug"],
+            slug=self.kwargs["team_slug"],
+        )
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        team = self.object
+        context["tournament"] = team.tournament
+        context["matches"] = Match.objects.filter(Q(home_team=team) | Q(away_team=team)).select_related("stage", "group", "field", "home_team", "away_team").order_by("stage__sequence", "round_number", "sequence")
+        return context

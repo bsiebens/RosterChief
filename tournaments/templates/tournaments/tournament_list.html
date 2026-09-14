@@ -1,0 +1,60 @@
+{% extends "registration/_base.html" %}
+{% load i18n lucide %}
+
+{% comment %}
+    Public, unauthenticated tournament list -- every publicly-listable
+    tournament for this club (see tournaments.views.PUBLIC_LIST_STATUSES),
+    split into "upcoming & in progress" and "past". Linkable from a club's
+    own website, same as registration/_base.html's other public pages.
+{% endcomment %}
+
+{% block page_title %}{% trans "Tournaments" %}{% endblock page_title %}
+
+{% block brand_href %}{% url "tournaments:list" %}{% endblock brand_href %}
+
+{% block content %}
+    <div class="mb-5">
+        <h1 class="font-display text-3xl font-extrabold text-ink uppercase">{% trans "Tournaments" %}</h1>
+    </div>
+
+    {% if upcoming_tournaments %}
+        <div class="mb-6">
+            <h2 class="mb-2 font-display text-sm font-bold tracking-[.08em] text-muted uppercase">{% trans "Upcoming & in progress" %}</h2>
+            <div class="flex flex-col gap-3">
+                {% for tournament in upcoming_tournaments %}
+                    <a class="card card-body block hover:border-club" href="{% url 'tournaments:detail' tournament.slug %}">
+                        <div class="flex flex-wrap items-center justify-between gap-2">
+                            <h3 class="card-title">{{ tournament.name }}</h3>
+                            {% if tournament.status == "in_progress" %}<span class="badge badge-info">{% trans "In progress" %}</span>{% endif %}
+                        </div>
+                        <p class="mt-1 flex items-center gap-1.5 text-sm text-muted">
+                            {% lucide "calendar" size=14 class="shrink-0 text-club" %}
+                            {% blocktrans with start=tournament.start_date|date:"DATE_FORMAT" end=tournament.end_date|date:"DATE_FORMAT" %}{{ start }} &ndash; {{ end }}{% endblocktrans %}
+                        </p>
+                    </a>
+                {% endfor %}
+            </div>
+        </div>
+    {% endif %}
+
+    {% if past_tournaments %}
+        <div>
+            <h2 class="mb-2 font-display text-sm font-bold tracking-[.08em] text-muted uppercase">{% trans "Past tournaments" %}</h2>
+            <div class="flex flex-col gap-3">
+                {% for tournament in past_tournaments %}
+                    <a class="card card-body block hover:border-club" href="{% url 'tournaments:detail' tournament.slug %}">
+                        <h3 class="card-title">{{ tournament.name }}</h3>
+                        <p class="mt-1 flex items-center gap-1.5 text-sm text-muted">
+                            {% lucide "calendar" size=14 class="shrink-0 text-club" %}
+                            {% blocktrans with start=tournament.start_date|date:"DATE_FORMAT" end=tournament.end_date|date:"DATE_FORMAT" %}{{ start }} &ndash; {{ end }}{% endblocktrans %}
+                        </p>
+                    </a>
+                {% endfor %}
+            </div>
+        </div>
+    {% endif %}
+
+    {% if not upcoming_tournaments and not past_tournaments %}
+        <div class="card p-6 text-center text-muted">{% trans "No tournaments to show yet." %}</div>
+    {% endif %}
+{% endblock content %}

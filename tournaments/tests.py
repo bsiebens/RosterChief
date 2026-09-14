@@ -13,6 +13,7 @@ from django.utils import timezone
 from waffle import get_waffle_flag_model
 
 from authentication.models import User
+from club.models import Club
 from events.models import Event, Location
 from members.models import Member
 from rosterchief.test_support import make_club, make_season
@@ -1704,3 +1705,324 @@ class RecordResultTests(TournamentsTestCase):
         self.assertEqual(len(updated), 1)
         final = Match.objects.get(stage=stage, round_number=2)
         self.assertEqual(final.home_team_id or final.away_team_id, semi.home_team_id)
+
+
+# --------------------------------------------------------------------------
+# Public tournament site -- list/detail/schedule/standings/team views
+# (tournaments.views, appended for phase 5). Same HTTP_HOST/flag-activation
+# conventions as TournamentRegistrationViewTests/TournamentRegistrationStatusViewTests
+# above.
+# --------------------------------------------------------------------------
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class TournamentListViewTests(TournamentsTestCase):
+    """tournaments:list -- the public tournament list (tournaments.views.TournamentListView)."""
+
+    def setUp(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
+        get_waffle_flag_model().objects.get_or_create(name="tournaments")[0].clubs.add(self.club)
+
+    def _url(self):
+        return reverse("tournaments:list")
+
+    def test_only_publicly_listable_statuses_show(self):
+        self.tournament.status = Tournament.Status.DRAFT
+        self.tournament.save()
+        cancelled = Tournament.objects.create(club=self.club, name="Cancelled Cup", season=self.season, start_date=datetime.date(2026, 9, 1), end_date=datetime.date(2026, 9, 2), status=Tournament.Status.CANCELLED)
+        published = Tournament.objects.create(club=self.club, name="Autumn Cup", season=self.season, start_date=datetime.date(2026, 10, 1), end_date=datetime.date(2026, 10, 2), status=Tournament.Status.PUBLISHED)
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        tournaments = list(response.context["tournaments"])
+        self.assertIn(published, tournaments)
+        self.assertNotIn(self.tournament, tournaments)
+        self.assertNotIn(cancelled, tournaments)
+
+    def test_splits_upcoming_and_past(self):
+        self.tournament.status = Tournament.Status.PUBLISHED
+        self.tournament.save()
+        completed = Tournament.objects.create(club=self.club, name="Spring Cup", season=self.season, start_date=datetime.date(2026, 4, 1), end_date=datetime.date(2026, 4, 2), status=Tournament.Status.COMPLETED)
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertIn(self.tournament, response.context["upcoming_tournaments"])
+        self.assertIn(completed, response.context["past_tournaments"])
+        self.assertNotIn(completed, response.context["upcoming_tournaments"])
+
+    def test_scoped_to_the_current_club(self):
+        self.tournament.status = Tournament.Status.PUBLISHED
+        self.tournament.save()
+        other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
+        Tournament.objects.create(club=other_club, name="Rival Cup", season=make_season(other_club), start_date=datetime.date(2026, 9, 1), end_date=datetime.date(2026, 9, 2), status=Tournament.Status.PUBLISHED)
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(list(response.context["tournaments"]), [self.tournament])
+
+    def test_404s_when_the_feature_flag_is_off(self):
+        get_waffle_flag_model().objects.get(name="tournaments").clubs.remove(self.club)
+        cache.clear()
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 404)
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class TournamentDetailViewTests(TournamentsTestCase):
+    """tournaments:detail -- the tournament "home" page (tournaments.views.TournamentDetailView)."""
+
+    def setUp(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
+        get_waffle_flag_model().objects.get_or_create(name="tournaments")[0].clubs.add(self.club)
+
+    def _url(self, tournament=None):
+        return reverse("tournaments:detail", kwargs={"slug": (tournament or self.tournament).slug})
+
+    def test_renders_for_a_published_tournament(self):
+        self.tournament.status = Tournament.Status.PUBLISHED
+        self.tournament.save()
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, self.tournament.name)
+
+    def test_a_draft_tournament_still_resolves_by_direct_link(self):
+        # DRAFT isn't on the public list, but (like registration itself) a
+        # direct link to it isn't a secret -- see TournamentDetailView's own
+        # docstring for the reasoning.
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_404s_for_a_tournament_in_another_club(self):
+        other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
+        other_tournament = Tournament.objects.create(club=other_club, name="Rival Cup", season=make_season(other_club), start_date=datetime.date(2026, 9, 1), end_date=datetime.date(2026, 9, 2), status=Tournament.Status.PUBLISHED)
+
+        response = self.client.get(self._url(other_tournament), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_404s_when_the_feature_flag_is_off(self):
+        get_waffle_flag_model().objects.get(name="tournaments").clubs.remove(self.club)
+        cache.clear()
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 404)
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class TournamentScheduleViewTests(TournamentsTestCase):
+    """tournaments:schedule -- the full read-only schedule (tournaments.views.TournamentScheduleView)."""
+
+    def setUp(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
+        get_waffle_flag_model().objects.get_or_create(name="tournaments")[0].clubs.add(self.club)
+
+    def _url(self, tournament=None):
+        return reverse("tournaments:schedule", kwargs={"slug": (tournament or self.tournament).slug})
+
+    def test_groups_matches_by_stage_then_round(self):
+        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 5)]
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="Round Robin", format=TournamentStage.Format.ROUND_ROBIN)
+        generate_stage_matches(stage, entries=teams)
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+        stages = response.context["stages"]
+        self.assertEqual(len(stages), 1)
+        self.assertEqual(stages[0]["stage"], stage)
+        rounds = stages[0]["rounds"]
+        self.assertEqual(len(rounds), 3)  # 4 teams round robin -> 3 rounds
+        for round_row in rounds:
+            self.assertEqual(len(round_row["matches"]), 2)  # 2 matches per round
+        self.assertEqual(sum(len(round_row["matches"]) for round_row in rounds), 6)  # 4 choose 2
+
+    def test_404s_for_a_tournament_in_another_club(self):
+        other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
+        other_tournament = Tournament.objects.create(club=other_club, name="Rival Cup", season=make_season(other_club), start_date=datetime.date(2026, 9, 1), end_date=datetime.date(2026, 9, 2))
+
+        response = self.client.get(self._url(other_tournament), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_404s_when_the_feature_flag_is_off(self):
+        get_waffle_flag_model().objects.get(name="tournaments").clubs.remove(self.club)
+        cache.clear()
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 404)
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class TournamentScheduleRowsViewTests(TournamentsTestCase):
+    """tournaments:schedule_rows -- the htmx-polled partial (tournaments.views.TournamentScheduleRowsView)."""
+
+    def setUp(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
+        get_waffle_flag_model().objects.get_or_create(name="tournaments")[0].clubs.add(self.club)
+
+    def test_returns_only_the_rows_partial(self):
+        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 3)]
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
+        generate_stage_matches(stage, entries=teams)
+
+        response = self.client.get(reverse("tournaments:schedule_rows", kwargs={"slug": self.tournament.slug}), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "tournaments/_schedule_rows.html")
+        self.assertTemplateNotUsed(response, "registration/_base.html")
+        self.assertNotContains(response, "<html")
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class TournamentStandingsViewTests(TournamentsTestCase):
+    """tournaments:standings -- stage/group standings plus bracket progression
+    (tournaments.views.TournamentStandingsView)."""
+
+    def setUp(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
+        get_waffle_flag_model().objects.get_or_create(name="tournaments")[0].clubs.add(self.club)
+
+    def _url(self, tournament=None):
+        return reverse("tournaments:standings", kwargs={"slug": (tournament or self.tournament).slug})
+
+    def test_shows_the_right_ranked_order(self):
+        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 4)]
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
+        generate_stage_matches(stage, entries=teams)
+        for match in stage.matches.all():
+            winner_is_home = match.home_team.seed < match.away_team.seed
+            match.score_home, match.score_away = (2, 0) if winner_is_home else (0, 2)
+            match.status = Match.Status.COMPLETE
+            match.save()
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+        rows = response.context["standings_stages"][0]["tables"][0]["rows"]
+        self.assertEqual([row["team"] for row in rows], [row["team"] for row in compute_standings(stage)])  # sanity: same order as the raw call
+        self.assertEqual(rows[0]["team"], teams[0])
+        self.assertEqual(rows[0]["rank"], 1)
+        self.assertEqual(rows[-1]["team"], teams[-1])
+
+    def test_groups_stage_gets_one_table_per_group(self):
+        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 7)]
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="Groups", format=TournamentStage.Format.GROUPS, config={"num_groups": 2})
+        generate_stage_matches(stage, entries=teams)
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        tables = response.context["standings_stages"][0]["tables"]
+        self.assertEqual(len(tables), 2)
+        self.assertTrue(all(table["group"] is not None for table in tables))
+
+    def test_single_elim_stage_is_a_bracket_not_a_table(self):
+        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 5)]
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="KO", format=TournamentStage.Format.SINGLE_ELIM)
+        generate_stage_matches(stage, entries=teams)
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.context["standings_stages"], [])
+        bracket_stages = response.context["bracket_stages"]
+        self.assertEqual(len(bracket_stages), 1)
+        self.assertEqual(len(bracket_stages[0]["rounds"]), 2)  # semis, final
+
+    def test_404s_for_a_tournament_in_another_club(self):
+        other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
+        other_tournament = Tournament.objects.create(club=other_club, name="Rival Cup", season=make_season(other_club), start_date=datetime.date(2026, 9, 1), end_date=datetime.date(2026, 9, 2))
+
+        response = self.client.get(self._url(other_tournament), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_404s_when_the_feature_flag_is_off(self):
+        get_waffle_flag_model().objects.get(name="tournaments").clubs.remove(self.club)
+        cache.clear()
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 404)
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class TournamentStandingsRowsViewTests(TournamentsTestCase):
+    """tournaments:standings_rows -- the htmx-polled partial (tournaments.views.TournamentStandingsRowsView)."""
+
+    def setUp(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
+        get_waffle_flag_model().objects.get_or_create(name="tournaments")[0].clubs.add(self.club)
+
+    def test_returns_only_the_rows_partial(self):
+        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 3)]
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
+        generate_stage_matches(stage, entries=teams)
+
+        response = self.client.get(reverse("tournaments:standings_rows", kwargs={"slug": self.tournament.slug}), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "tournaments/_standings_rows.html")
+        self.assertTemplateNotUsed(response, "registration/_base.html")
+        self.assertNotContains(response, "<html")
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class TournamentTeamScheduleViewTests(TournamentsTestCase):
+    """tournaments:team_schedule -- one TournamentTeam's own matches only
+    (tournaments.views.TournamentTeamScheduleView)."""
+
+    def setUp(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
+        get_waffle_flag_model().objects.get_or_create(name="tournaments")[0].clubs.add(self.club)
+
+    def _url(self, team, tournament=None):
+        return reverse("tournaments:team_schedule", kwargs={"slug": (tournament or self.tournament).slug, "team_slug": team.slug})
+
+    def test_only_shows_this_teams_own_matches(self):
+        team_a, team_b, team_c = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=name, seed=seed) for seed, name in enumerate(["A", "B", "C"], start=1)]
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
+        generate_stage_matches(stage, entries=[team_a, team_b, team_c])
+
+        response = self.client.get(self._url(team_a), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+        matches = response.context["matches"]
+        self.assertEqual(len(matches), 2)  # A plays B and C, not B-vs-C
+        for match in matches:
+            self.assertIn(team_a.id, (match.home_team_id, match.away_team_id))
+
+    def test_404_for_an_unknown_team_slug(self):
+        response = self.client.get(reverse("tournaments:team_schedule", kwargs={"slug": self.tournament.slug, "team_slug": "no-such-team"}), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_404s_for_a_team_in_another_club(self):
+        other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
+        other_tournament = Tournament.objects.create(club=other_club, name="Rival Cup", season=make_season(other_club), start_date=datetime.date(2026, 9, 1), end_date=datetime.date(2026, 9, 2))
+        other_team = TournamentTeam.objects.create(club=other_club, tournament=other_tournament, foreign_name="Rival Team")
+
+        response = self.client.get(self._url(other_team, tournament=other_tournament), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_404s_when_the_feature_flag_is_off(self):
+        team = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Solo FC")
+        get_waffle_flag_model().objects.get(name="tournaments").clubs.remove(self.club)
+        cache.clear()
+
+        response = self.client.get(self._url(team), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 404)

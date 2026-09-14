@@ -1,0 +1,83 @@
+{% load i18n %}
+{% comment %}
+    Just the standings tables and bracket/progression lists -- no page
+    chrome, no {% extends %}. Included by tournament_standings.html's full
+    page AND fetched directly (as its own complete response) by
+    TournamentStandingsRowsView for htmx polling ("every 20s"). Fed by
+    tournaments.views._standings_context -- see that function's own
+    docstring for the standings_stages/bracket_stages shape.
+{% endcomment %}
+{% for stage_row in standings_stages %}
+    <div class="card mb-4 overflow-hidden">
+        <div class="border-b border-line px-4 py-3">
+            <span class="font-display text-sm font-bold tracking-[.08em] text-ink uppercase">{{ stage_row.stage.name }}</span>
+        </div>
+        {% for table in stage_row.tables %}
+            {% if table.group %}
+                <div class="bg-subhead px-4 py-2">
+                    <span class="font-mono text-xs font-semibold tracking-[.08em] text-muted uppercase">{{ table.group.name }}</span>
+                </div>
+            {% endif %}
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>{% trans "Team" %}</th>
+                        <th>{% trans "P" %}</th>
+                        <th>{% trans "W" %}</th>
+                        <th>{% trans "D" %}</th>
+                        <th>{% trans "L" %}</th>
+                        <th>{% trans "GD" %}</th>
+                        <th>{% trans "Pts" %}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in table.rows %}
+                        <tr>
+                            <td class="font-mono text-sm text-muted">{{ row.rank }}</td>
+                            <td class="font-semibold text-ink">
+                                <a class="hover:underline" href="{% url 'tournaments:team_schedule' tournament.slug row.team.slug %}">{{ row.team }}</a>
+                            </td>
+                            <td>{{ row.played }}</td>
+                            <td>{{ row.won }}</td>
+                            <td>{{ row.drawn }}</td>
+                            <td>{{ row.lost }}</td>
+                            <td>{{ row.goal_diff }}</td>
+                            <td class="font-bold text-ink">{{ row.points }}</td>
+                        </tr>
+                    {% empty %}
+                        <tr>
+                            <td colspan="8" class="text-center text-muted">{% trans "No completed matches yet." %}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% endfor %}
+    </div>
+{% endfor %}
+
+{% for stage_row in bracket_stages %}
+    <div class="card mb-4 overflow-hidden">
+        <div class="border-b border-line px-4 py-3">
+            <span class="font-display text-sm font-bold tracking-[.08em] text-ink uppercase">{{ stage_row.stage.name }}</span>
+        </div>
+        {% for round_row in stage_row.rounds %}
+            <div class="bg-subhead px-4 py-2">
+                <span class="font-mono text-xs font-semibold tracking-[.08em] text-muted uppercase">{{ round_row.label }}</span>
+            </div>
+            <ul class="divide-y divide-line">
+                {% for match in round_row.matches %}
+                    <li class="flex items-center justify-between gap-3 px-4 py-2.5 text-sm">
+                        <span class="{% if match.winner == match.home_team and match.home_team %}font-bold text-ink{% else %}text-muted{% endif %}">{{ match.home_display }}</span>
+                        <span class="font-mono text-xs text-dim">{% if match.status == "complete" %}{{ match.score_home }}&ndash;{{ match.score_away }}{% else %}{% trans "vs" %}{% endif %}</span>
+                        <span class="{% if match.winner == match.away_team and match.away_team %}font-bold text-ink{% else %}text-muted{% endif %}">{{ match.away_display }}</span>
+                    </li>
+                {% endfor %}
+            </ul>
+        {% endfor %}
+    </div>
+{% endfor %}
+
+{% if not standings_stages and not bracket_stages %}
+    <div class="card p-6 text-center text-muted">{% trans "Standings will appear once this tournament's schedule is set." %}</div>
+{% endif %}

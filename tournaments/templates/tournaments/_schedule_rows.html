@@ -1,0 +1,68 @@
+{% load i18n %}
+{% comment %}
+    Just the grouped match table -- no page chrome, no {% extends %}. Included
+    by tournament_schedule.html's full page AND fetched directly (as its own
+    complete response) by TournamentScheduleRowsView for htmx polling
+    ("every 20s" -- see tournament_schedule.html's own container). Mirrors
+    management/templates/management/tournament_schedule.html's table shape,
+    minus the inline field/time and score-entry forms -- this is read-only.
+{% endcomment %}
+{% for stage_row in stages %}
+    <div class="card mb-4 overflow-hidden">
+        <div class="border-b border-line px-4 py-3">
+            <span class="font-display text-sm font-bold tracking-[.08em] text-ink uppercase">{{ stage_row.stage.name }}</span>
+        </div>
+        {% for round_row in stage_row.rounds %}
+            <div class="bg-subhead px-4 py-2">
+                <span class="font-mono text-xs font-semibold tracking-[.08em] text-muted uppercase">{{ round_row.label }}</span>
+            </div>
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>{% trans "Match" %}</th>
+                        <th>{% trans "Field & time" %}</th>
+                        <th>{% trans "Status" %}</th>
+                        <th>{% trans "Score" %}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for match in round_row.matches %}
+                        <tr>
+                            <td>
+                                <div class="font-semibold text-ink">
+                                    {% if match.home_team %}
+                                        <a class="hover:underline" href="{% url 'tournaments:team_schedule' tournament.slug match.home_team.slug %}">{{ match.home_display }}</a>
+                                    {% else %}
+                                        {{ match.home_display }}
+                                    {% endif %}
+                                    <span class="text-dim">{% trans "vs" %}</span>
+                                    {% if match.away_team %}
+                                        <a class="hover:underline" href="{% url 'tournaments:team_schedule' tournament.slug match.away_team.slug %}">{{ match.away_display }}</a>
+                                    {% else %}
+                                        {{ match.away_display }}
+                                    {% endif %}
+                                </div>
+                            </td>
+                            <td>
+                                {% if match.field %}{{ match.field.name }}{% else %}<span class="text-dim">&mdash;</span>{% endif %}
+                                {% if match.scheduled_start %}<div class="text-xs text-muted">{{ match.scheduled_start|date:"D j M, H:i" }}</div>{% endif %}
+                            </td>
+                            <td>
+                                <span class="badge badge-sm {% if match.status == "complete" %}badge-success{% elif match.status == "cancelled" %}badge-error{% elif match.status == "in_progress" %}badge-info{% elif match.status == "walkover" %}badge-warning{% else %}badge-outline{% endif %}">{{ match.get_status_display }}</span>
+                            </td>
+                            <td>
+                                {% if match.status == "complete" %}
+                                    <span class="font-mono text-sm text-ink">{{ match.score_home }} - {{ match.score_away }}</span>
+                                {% else %}
+                                    <span class="text-xs text-dim">&mdash;</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% endfor %}
+    </div>
+{% empty %}
+    <div class="card p-6 text-center text-muted">{% trans "No matches have been scheduled for this tournament yet." %}</div>
+{% endfor %}

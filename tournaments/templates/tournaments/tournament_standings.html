@@ -1,0 +1,42 @@
+{% extends "registration/_base.html" %}
+{% load i18n lucide static %}
+
+{% comment %}
+    Public, unauthenticated standings/bracket page -- every stage's table (or,
+    for a GROUPS-format stage, one table per group), plus a round-by-round
+    progression list for single/double-elimination stages
+    (tournaments.views._standings_context). The tables themselves are
+    _standings_rows.html, included below AND polled directly every 20s via
+    htmx (TournamentStandingsRowsView) -- same progressive-enhancement
+    reasoning as tournament_schedule.html.
+{% endcomment %}
+
+{% block page_title %}{% blocktrans with tournament=tournament.name %}Standings &middot; {{ tournament }}{% endblocktrans %}{% endblock page_title %}
+
+{% block brand_href %}{% url "tournaments:detail" tournament.slug %}{% endblock brand_href %}
+
+{% block content_width %}max-w-3xl{% endblock content_width %}
+
+{% block content %}
+    <div class="mb-5 flex flex-wrap items-start justify-between gap-3">
+        <div>
+            <h1 class="font-display text-3xl font-extrabold text-ink uppercase">{{ tournament.name }}</h1>
+            <p class="mt-1 flex items-center gap-1.5 text-sm text-muted">
+                {% lucide "trophy" size=15 class="shrink-0 text-club" %}
+                {% trans "Standings" %}
+            </p>
+        </div>
+        <div class="flex flex-wrap gap-2">
+            <a class="btn btn-outline btn-sm gap-2" href="{% url 'tournaments:detail' tournament.slug %}">{% lucide "arrow-left" size=14 %} {% trans "Overview" %}</a>
+            <a class="btn btn-outline btn-sm gap-2" href="{% url 'tournaments:schedule' tournament.slug %}">{% lucide "list" size=14 %} {% trans "Full schedule" %}</a>
+        </div>
+    </div>
+
+    <div id="standings-rows" hx-get="{% url 'tournaments:standings_rows' tournament.slug %}" hx-trigger="every 20s" hx-swap="innerHTML">
+        {% include "tournaments/_standings_rows.html" %}
+    </div>
+{% endblock content %}
+
+{% block extra_body %}
+    <script src="{% static 'js/htmx.js' %}" defer></script>
+{% endblock extra_body %}
