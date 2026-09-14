@@ -53,7 +53,16 @@ class Tournament(ClubScopedModel):
     #: without touching ``status`` at all. ``accepts_registrations`` below
     #: is what everything else should actually check.
     registration_open = models.BooleanField(_("registration open"), default=True, help_text=_("Turn off to stop accepting new entries even while the tournament is still published -- e.g. once it's full."))
-    description = models.TextField(_("description"), blank=True)
+    #: Shown on both the public tournament page and the registration page
+    #: itself -- "who do I email about this tournament", distinct from a
+    #: registering team's own ``foreign_contact_email`` (who the club should
+    #: reach *them* at). One tournament-wide address, not per-team.
+    contact_email = models.EmailField(_("contact email"), blank=True, help_text=_("Shown publicly on the tournament and registration pages, for questions about this tournament."))
+    #: Markdown source, rendered through news.services.render_body_html
+    #: wherever it's actually shown -- the same "one render function, called
+    #: everywhere, never raw source" discipline that module's own docstring
+    #: describes for News.
+    description = models.TextField(_("description"), blank=True, help_text=_("Markdown supported."))
 
     event = models.OneToOneField("events.Event", on_delete=models.SET_NULL, null=True, blank=True, related_name="tournament", verbose_name=_("calendar event"))
 
@@ -78,6 +87,22 @@ class Tournament(ClubScopedModel):
         registration view itself should check, so they can never disagree
         about whether entries are actually open."""
         return self.status in (self.Status.DRAFT, self.Status.PUBLISHED) and self.registration_open
+
+    @property
+    def location(self):
+        """Where this tournament is actually played -- the linked Event's
+        own location if one is set, otherwise the club's home ground. Not a
+        field of its own: a tournament's venue is exactly whichever of those
+        two already-real things applies, and duplicating it here would just
+        be one more place to get out of sync with the Event or the club's
+        own ground. Local import, not a top-level one -- every other
+        cross-app reference in this file is a lazy string FK for the same
+        reason (avoiding import-order coupling to the events app)."""
+        from events.models import Location
+
+        if self.event_id is not None and self.event.location_id is not None:
+            return self.event.location
+        return Location.objects.filter(club_id=self.club_id, is_home=True).first()
 
     def clean(self):
         if self.event_id is not None:

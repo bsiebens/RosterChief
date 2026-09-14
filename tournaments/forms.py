@@ -118,11 +118,11 @@ class TournamentForm(forms.ModelForm):
 
     class Meta:
         model = Tournament
-        fields = ["name", "status", "start_date", "end_date", "registration_open", "description", "event"]
+        fields = ["name", "status", "start_date", "end_date", "registration_open", "contact_email", "description", "event"]
         widgets = {
             "start_date": forms.DateInput(attrs={"type": "date"}),
             "end_date": forms.DateInput(attrs={"type": "date"}),
-            "description": forms.Textarea(attrs={"rows": 3}),
+            "description": forms.Textarea(attrs={"rows": 5}),
         }
 
     def __init__(self, *args, club=None, **kwargs):

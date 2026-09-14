@@ -26,6 +26,7 @@ from django.views.generic import DetailView, ListView
 from club.mixins import FeatureFlagMixin
 from controlpanel.messages import notify
 from members.views import ClubScopedPublicMixin
+from news.services import render_body_html
 
 from .forms import TournamentRegistrationForm, TournamentRegistrationPlayerFormSet, players_from_formset
 from .models import Match, Tournament, TournamentRegistration, TournamentRegistrationPlayer, TournamentStage, TournamentTeam
@@ -301,6 +302,7 @@ class TournamentDetailView(TournamentFeatureMixin, DetailView):
             .select_related("stage", "home_team", "away_team")
             .order_by("scheduled_start")[:5]
         )
+        context["description_html"] = render_body_html(tournament.description) if tournament.description else ""
         context.update(_standings_context(tournament))
         return context
 

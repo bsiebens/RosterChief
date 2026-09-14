@@ -107,6 +107,34 @@ class TournamentModelTests(TournamentsTestCase):
         self.tournament.registration_open = False
         self.assertFalse(self.tournament.accepts_registrations)
 
+    def test_location_is_none_without_an_event_or_a_home_location(self):
+        self.assertIsNone(self.tournament.location)
+
+    def test_location_falls_back_to_the_clubs_home_location(self):
+        home = Location.objects.create(club=self.club, name="Ajax Arena", address="1 Main St", city="Mechelen", zip_code="2800", country="BE", is_home=True)
+        away = Location.objects.create(club=self.club, name="Away Ground", address="2 Side St", city="Elsewhere", zip_code="1000", country="BE", is_home=False)
+
+        self.assertEqual(self.tournament.location, home)
+        self.assertNotEqual(self.tournament.location, away)
+
+    def test_location_prefers_the_linked_events_own_location(self):
+        home = Location.objects.create(club=self.club, name="Ajax Arena", address="1 Main St", city="Mechelen", zip_code="2800", country="BE", is_home=True)
+        event_location = Location.objects.create(club=self.club, name="Neutral Venue", address="3 Other St", city="Neutral City", zip_code="3000", country="BE")
+        event = Event.objects.create(club=self.club, kind=Event.EventKind.TOURNAMENT, title="Cup", start=timezone.now(), location=event_location)
+        self.tournament.event = event
+        self.tournament.save()
+
+        self.assertEqual(self.tournament.location, event_location)
+        self.assertNotEqual(self.tournament.location, home)
+
+    def test_location_falls_back_to_home_location_when_event_has_none(self):
+        home = Location.objects.create(club=self.club, name="Ajax Arena", address="1 Main St", city="Mechelen", zip_code="2800", country="BE", is_home=True)
+        event = Event.objects.create(club=self.club, kind=Event.EventKind.TOURNAMENT, title="Cup", start=timezone.now())
+        self.tournament.event = event
+        self.tournament.save()
+
+        self.assertEqual(self.tournament.location, home)
+
     def test_slug_is_unique_per_club(self):
         with self.assertRaises(IntegrityError):
             Tournament.objects.create(club=self.club, name="Other Cup", slug="summer-cup", season=self.season, start_date=self.tournament.start_date, end_date=self.tournament.end_date)
@@ -849,6 +877,14 @@ class TournamentRegistrationViewTests(TournamentsTestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertFalse(TournamentRegistration.objects.exists())
+
+    def test_shows_the_tournaments_contact_email_when_set(self):
+        self.tournament.contact_email = "organiser@example.com"
+        self.tournament.save()
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, "organiser@example.com")
 
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
@@ -1926,6 +1962,44 @@ class TournamentDetailViewTests(TournamentsTestCase):
         response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
 
         self.assertNotContains(response, reverse("tournaments:register", kwargs={"tournament_slug": self.tournament.slug}))
+
+    def test_shows_the_closed_banner_when_registration_is_closed(self):
+        self.tournament.registration_open = False
+        self.tournament.save()
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, "Registration is closed for this tournament")
+
+    def test_shows_the_contact_email_when_set(self):
+        self.tournament.contact_email = "organiser@example.com"
+        self.tournament.save()
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, "organiser@example.com")
+
+    def test_does_not_show_a_contact_email_row_when_unset(self):
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertNotContains(response, "mailto:")
+
+    def test_shows_the_location_when_the_club_has_a_home_ground(self):
+        Location.objects.create(club=self.club, name="Ajax Arena", address="1 Main St", city="Mechelen", zip_code="2800", country="BE", is_home=True)
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, "Ajax Arena")
+
+    def test_description_is_rendered_as_markdown(self):
+        self.tournament.description = "**Bold** and a [link](https://example.com)."
+        self.tournament.save()
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, "<strong>Bold</strong>", html=False)
+        self.assertContains(response, 'href="https://example.com"', html=False)
+        self.assertContains(response, ">link</a>", html=False)
 
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])

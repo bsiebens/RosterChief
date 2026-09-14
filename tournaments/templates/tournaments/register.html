@@ -25,6 +25,12 @@
         {% if not registration_closed %}
             <p class="mt-1 text-sm text-muted">{% trans "Enter your team below, then add its roster. The club will review this before it's final." %}</p>
         {% endif %}
+        {% if tournament.contact_email %}
+            <p class="mt-1 flex items-center gap-1.5 text-sm text-muted">
+                {% lucide "mail" size=15 class="shrink-0 text-club" %}
+                {% trans "Questions? Contact" %} <a class="hover:underline" href="mailto:{{ tournament.contact_email }}">{{ tournament.contact_email }}</a>
+            </p>
+        {% endif %}
     </div>
 
     {% if registration_closed %}
