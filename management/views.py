@@ -153,8 +153,8 @@ from tournaments.forms import (
 from tournaments.models import DressingRoom, DressingRoomAssignment, Match, Tournament, TournamentField, TournamentRegistration, TournamentRosterEntry, TournamentRosterRole, TournamentStage, TournamentTask, TournamentTeam
 from tournaments.services.dressing_rooms import DressingRoomAssignmentError, assign_dressing_room, release_dressing_room, windows_conflict
 from tournaments.services.lunch import daily_lunch_summary
-from tournaments.services.notifications import send_registration_decision_email
-from tournaments.services.registration import RegistrationDecisionError, TeamWithdrawalError, approve_registration, create_manual_team, reject_registration, withdraw_team
+from tournaments.services.notifications import dispatch_notify_tournament_shifts_open, send_registration_decision_email
+from tournaments.services.registration import RegistrationDecisionError, TeamWithdrawalError, approve_registration, create_manual_team, ensure_home_team, reject_registration, withdraw_team
 from tournaments.services.scheduling import SchedulingError, record_result, reschedule_match
 from tournaments.services.tasks import TaskClaimError, claim_task, generate_task_shifts
 
@@ -7790,6 +7790,12 @@ class TournamentCreateView(TournamentsManagerRequiredMixin, CreateView):
         form.instance.club = self.request.club
         response = super().form_valid(form)
         notify(self.request, f"s|{_('Tournament created')}|" + _("“%(name)s” was created. Add fields and stages before generating a schedule.") % {"name": self.object.name})
+        # A tournament can be created already PUBLISHED (skipping DRAFT
+        # entirely) -- that still counts as "just published" for the shift
+        # notification below, same as TournamentUpdateView's own check.
+        ensure_home_team(self.object)
+        if self.object.status == Tournament.Status.PUBLISHED:
+            dispatch_notify_tournament_shifts_open(str(self.object.pk))
         return response
 
     def get_success_url(self):
@@ -7812,8 +7818,18 @@ class TournamentUpdateView(TournamentsManagerRequiredMixin, UpdateView):
         return super().get_form_kwargs() | {"club": self.request.club}
 
     def form_valid(self, form):
+        # A fresh DB read, not self.object's own (already-mutated-in-memory
+        # by form validation) status -- see ensure_home_team's own docstring
+        # for why this has to be idempotent regardless, and
+        # notify_tournament_shifts_open's docstring for why this must fire
+        # exactly once, on the actual DRAFT->PUBLISHED transition, not every
+        # later save while already published.
+        was_published = Tournament.objects.filter(pk=self.object.pk, status=Tournament.Status.PUBLISHED).exists()
         response = super().form_valid(form)
         notify(self.request, f"s|{_('Tournament updated')}|" + _("“%(name)s” updated.") % {"name": self.object.name})
+        ensure_home_team(self.object)
+        if not was_published and self.object.status == Tournament.Status.PUBLISHED:
+            dispatch_notify_tournament_shifts_open(str(self.object.pk))
         return response
 
     def get_success_url(self):

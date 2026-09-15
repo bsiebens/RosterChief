@@ -67,7 +67,11 @@
             <tbody>
                 {% for entry in entries %}
                     <tr class="{% if entry.age_flagged %}bg-row-warn shadow-[inset_3px_0_0_var(--color-warn-text)]{% endif %}">
-                        <td class="font-semibold text-ink">{{ entry.display_name }}</td>
+                        <td>
+                            <div class="font-semibold text-ink">{{ entry.display_name }}</div>
+                            {# For a foreign team, this ticks whenever the club edits its own roster through its public status page -- otherwise-silent, so staff have no way to know a change just happened without this. #}
+                            <div class="text-[11px] text-dim">{% blocktrans with when=entry.updated_at|date:"j M, H:i" %}Updated {{ when }}{% endblocktrans %}</div>
+                        </td>
                         <td><span class="badge badge-sm {% if entry.role == "staff" %}badge-neutral{% else %}badge-outline{% endif %}">{{ entry.get_role_display }}</span></td>
                         <td class="font-mono text-xs tabular-nums text-muted">{{ entry.jersey_number|default:"—" }}</td>
                         <td class="text-sm text-muted">{{ entry.position_label|default:"—" }}</td>

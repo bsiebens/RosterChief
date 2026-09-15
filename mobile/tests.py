@@ -568,8 +568,8 @@ class HomeViewTests(TestCase):
 
         open_tasks = list(response.context["open_tasks"])
         self.assertEqual(len(open_tasks), 1)
-        self.assertEqual(open_tasks[0].pk, task.pk)
-        self.assertEqual(open_tasks[0].open_count, 1)
+        self.assertEqual(open_tasks[0]["title"], task.title)
+        self.assertEqual(open_tasks[0]["open_count"], 1)
         self.assertContains(response, "Bring fruit")
         self.assertContains(response, "1 open")
 
@@ -584,6 +584,34 @@ class HomeViewTests(TestCase):
 
         self.assertEqual(list(response.context["open_tasks"]), [])
         self.assertNotContains(response, "Bring fruit")
+
+    def test_open_tasks_includes_an_open_shift_on_a_published_tournament(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
+        get_waffle_flag_model().objects.get_or_create(name="tournaments")[0].clubs.add(self.club)
+        tournament = Tournament.objects.create(club=self.club, name="Summer Cup", season=self.season, start_date=timezone.localdate(), end_date=timezone.localdate(), status=Tournament.Status.PUBLISHED)
+        task = TournamentTask.objects.create(tournament=tournament, title="Gate duty", starts_at=self.future, ends_at=self.future + datetime.timedelta(hours=1), needed_quantity=1)
+        self.client.force_login(self.user)
+
+        response = self._get("home")
+
+        open_tasks = list(response.context["open_tasks"])
+        self.assertEqual(len(open_tasks), 1)
+        self.assertEqual(open_tasks[0]["title"], task.title)
+        self.assertEqual(open_tasks[0]["subtitle"], tournament.name)
+        self.assertContains(response, "Gate duty")
+
+    def test_open_tasks_excludes_a_shift_on_an_unpublished_tournament(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
+        get_waffle_flag_model().objects.get_or_create(name="tournaments")[0].clubs.add(self.club)
+        tournament = Tournament.objects.create(club=self.club, name="Summer Cup", season=self.season, start_date=timezone.localdate(), end_date=timezone.localdate(), status=Tournament.Status.DRAFT)
+        TournamentTask.objects.create(tournament=tournament, title="Gate duty", starts_at=self.future, ends_at=self.future + datetime.timedelta(hours=1), needed_quantity=1)
+        self.client.force_login(self.user)
+
+        response = self._get("home")
+
+        self.assertEqual(list(response.context["open_tasks"]), [])
 
     def test_open_tasks_ignores_a_task_on_an_event_not_in_scope(self):
         # A task on some other club event this member has no Attendance row

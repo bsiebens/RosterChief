@@ -110,6 +110,26 @@ class Tournament(ClubScopedModel):
     )
 
     event = models.OneToOneField("events.Event", on_delete=models.SET_NULL, null=True, blank=True, related_name="tournament", verbose_name=_("calendar event"))
+    #: The host club's own team playing in its own tournament -- set at
+    #: creation (or added later from Settings), auto-added to Teams and
+    #: never billed (tournaments.services.registration.ensure_home_team,
+    #: called from TournamentCreateView/TournamentUpdateView.form_valid),
+    #: with its own auto-created ``event`` so normal RSVP/signup decides its
+    #: roster instead of a snapshot -- see TournamentRosterEntry's own
+    #: "always live for a home team" signal (tournaments/signals.py).
+    #: SET_NULL rather than PROTECT: the club deleting/reassigning this team
+    #: shouldn't be blocked by a past tournament still pointing at it, and
+    #: the already-created TournamentTeam/roster stand on their own either
+    #: way (unaffected by home_team going blank afterwards).
+    home_team = models.ForeignKey(
+        "teams.Team",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="home_tournaments",
+        verbose_name=_("home team"),
+        help_text=_("Your own team playing in this tournament. Automatically added to Teams (can't be withdrawn), marked fully paid, and given its own calendar event so normal sign-up decides its roster."),
+    )
 
     class Meta:
         verbose_name = _("tournament")
@@ -615,6 +635,12 @@ class TournamentRosterEntry(UUIDModel):
     #: See ``TournamentRegistrationPlayer.lunch_days`` -- same shape, same
     #: "every tournament day when MANDATORY, not left empty" convention.
     lunch_days = models.JSONField(_("lunch days"), default=list, blank=True)
+    #: Lets staff on the roster screen see when a foreign team last touched
+    #: its own roster through TournamentRegistrationStatusView's public
+    #: edit path -- that write already lands here live, this just makes
+    #: *when* visible rather than silent. Also ticks on the home team's own
+    #: live-sync writes (tournaments/signals.py) and any staff edit here.
+    updated_at = models.DateTimeField(_("updated at"), auto_now=True)
 
     class Meta:
         verbose_name = _("tournament roster entry")

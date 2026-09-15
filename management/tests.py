@@ -14780,6 +14780,54 @@ class TournamentCreateUpdateTests(ManagementTestBase):
 
         self.assertNotContains(response, "Still a draft")
 
+    def test_creating_with_a_home_team_auto_adds_it_fully_paid(self):
+        self.activate_flag()
+        team = Team.objects.create(club=self.club, name="First Team", short_name="1st")
+        self.client.force_login(self.admin_user)
+
+        self.club_post("tournament_create", self.valid_data(home_team=team.pk))
+
+        tournament = Tournament.objects.get(club=self.club, name="Fall Classic")
+        tournament_team = tournament.teams.get(team=team)
+        self.assertEqual(tournament_team.payment_status, TournamentTeam.PaymentStatus.FULLY_PAID)
+        self.assertIsNotNone(tournament.event_id)
+
+    def test_saving_settings_again_does_not_duplicate_the_home_team(self):
+        self.activate_flag()
+        team = Team.objects.create(club=self.club, name="First Team", short_name="1st")
+        self.client.force_login(self.admin_user)
+        self.club_post("tournament_create", self.valid_data(home_team=team.pk))
+        tournament = Tournament.objects.get(club=self.club, name="Fall Classic")
+
+        self.club_post("tournament_settings", self.valid_data(home_team=team.pk), tournament.pk)
+
+        self.assertEqual(tournament.teams.filter(team=team).count(), 1)
+
+    def test_publishing_dispatches_the_shift_notification_exactly_once(self):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+        tournament = Tournament.objects.create(club=self.club, name="Fall Classic", season=self.season, start_date=timezone.localdate(), end_date=timezone.localdate(), status=Tournament.Status.DRAFT)
+
+        with mock.patch("management.views.dispatch_notify_tournament_shifts_open") as dispatch:
+            self.club_post("tournament_settings", self.valid_data(status=Tournament.Status.PUBLISHED), tournament.pk)
+            dispatch.assert_called_once_with(str(tournament.pk))
+
+            dispatch.reset_mock()
+            self.club_post("tournament_settings", self.valid_data(status=Tournament.Status.PUBLISHED), tournament.pk)
+            dispatch.assert_not_called()
+
+    def test_going_back_to_draft_and_republishing_notifies_again(self):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+        tournament = Tournament.objects.create(club=self.club, name="Fall Classic", season=self.season, start_date=timezone.localdate(), end_date=timezone.localdate(), status=Tournament.Status.PUBLISHED)
+
+        with mock.patch("management.views.dispatch_notify_tournament_shifts_open") as dispatch:
+            self.club_post("tournament_settings", self.valid_data(status=Tournament.Status.DRAFT), tournament.pk)
+            dispatch.assert_not_called()
+
+            self.club_post("tournament_settings", self.valid_data(status=Tournament.Status.PUBLISHED), tournament.pk)
+            dispatch.assert_called_once_with(str(tournament.pk))
+
 
 class TournamentFieldStageCrudTests(ManagementTestBase):
     """management:tournament_field_stage_list and its field/stage CRUD --

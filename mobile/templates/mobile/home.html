@@ -146,14 +146,14 @@
                 <div class="mt-3 flex flex-col gap-2.5">
                     {% for task in open_tasks %}
                         {% if not forloop.first %}<div class="h-px bg-rule"></div>{% endif %}
-                        <a class="flex items-center gap-3" href="{% url "mobile:event_detail" task.event.pk %}">
+                        <a class="flex items-center gap-3" href="{{ task.url }}">
                             <div class="w-9.5 shrink-0 text-center">
-                                <div class="font-display text-xl leading-none font-extrabold text-ink">{{ task.event.start|date:"d" }}</div>
-                                <div class="font-mono text-[10px] text-muted uppercase tracking-wide">{{ task.event.start|date:"M" }}</div>
+                                <div class="font-display text-xl leading-none font-extrabold text-ink">{{ task.when|date:"d" }}</div>
+                                <div class="font-mono text-[10px] text-muted uppercase tracking-wide">{{ task.when|date:"M" }}</div>
                             </div>
                             <div class="min-w-0 flex-1">
                                 <div class="text-sm font-semibold text-ink">{{ task.title }}</div>
-                                <div class="text-xs text-muted">{{ task.event.title }}</div>
+                                <div class="text-xs text-muted">{{ task.subtitle }}</div>
                             </div>
                             <span class="pill pill-info shrink-0">{% blocktrans count counter=task.open_count %}{{ counter }} open{% plural %}{{ counter }} open{% endblocktrans %}</span>
                         </a>

@@ -16,7 +16,7 @@ from waffle import get_waffle_flag_model
 
 from authentication.models import User
 from club.models import Club
-from events.models import Event, Location
+from events.models import Attendance, Event, Location
 from members.models import Member
 from rosterchief.test_support import make_club, make_season
 from teams.models import Position, Team, TeamMembership
@@ -42,7 +42,8 @@ from .models import (
     TournamentTeam,
 )
 from .services.dressing_rooms import DressingRoomAssignmentError, assign_dressing_room, release_dressing_room, windows_conflict
-from .services.registration import RegistrationDecisionError, TeamWithdrawalError, approve_registration, create_manual_team, reject_registration, withdraw_team
+from .services.notifications import notify_tournament_shifts_open
+from .services.registration import RegistrationDecisionError, TeamWithdrawalError, approve_registration, create_manual_team, ensure_home_team, reject_registration, withdraw_team
 from .services.scheduling import (
     DEFAULT_GAP,
     DEFAULT_MATCH_DURATION,
@@ -966,6 +967,177 @@ class CreateManualTeamServiceTests(TournamentsTestCase):
         self.assertEqual(team.roster_entries.count(), 0)
 
 
+class EnsureHomeTeamServiceTests(TournamentsTestCase):
+    def test_does_nothing_when_home_team_is_blank(self):
+        ensure_home_team(self.tournament)
+
+        self.assertEqual(TournamentTeam.objects.count(), 0)
+        self.assertIsNone(self.tournament.event)
+
+    def test_creates_the_tournament_team_fully_paid_with_its_roster_snapshotted(self):
+        position = Position.objects.create(club=self.club, name="Forward", short_name="FW")
+        TeamMembership.objects.create(team=self.team, member=self.member, season=self.season, position=position, jersey_number=7)
+        self.tournament.home_team = self.team
+        self.tournament.save(update_fields=["home_team"])
+
+        team = ensure_home_team(self.tournament)
+
+        self.assertEqual(team.team, self.team)
+        self.assertEqual(team.payment_status, TournamentTeam.PaymentStatus.FULLY_PAID)
+        roster = list(team.roster_entries.all())
+        self.assertEqual(len(roster), 1)
+        self.assertEqual(roster[0].member, self.member)
+
+    def test_creates_and_links_an_event_scoped_to_the_home_team(self):
+        self.tournament.home_team = self.team
+        self.tournament.save(update_fields=["home_team"])
+
+        ensure_home_team(self.tournament)
+
+        self.tournament.refresh_from_db()
+        self.assertIsNotNone(self.tournament.event)
+        self.assertEqual(self.tournament.event.kind, Event.EventKind.TOURNAMENT)
+        self.assertEqual(list(self.tournament.event.teams.all()), [self.team])
+        self.assertFalse(self.tournament.event.club_wide)
+
+    def test_calling_it_again_does_not_duplicate_the_team_or_the_event(self):
+        self.tournament.home_team = self.team
+        self.tournament.save(update_fields=["home_team"])
+        ensure_home_team(self.tournament)
+        self.tournament.refresh_from_db()
+        first_event_id = self.tournament.event_id
+
+        ensure_home_team(self.tournament)
+
+        self.assertEqual(TournamentTeam.objects.filter(tournament=self.tournament, team=self.team).count(), 1)
+        self.tournament.refresh_from_db()
+        self.assertEqual(self.tournament.event_id, first_event_id)
+
+    def test_does_not_overwrite_an_already_linked_event(self):
+        other_event = Event.objects.create(club=self.club, season=self.season, kind=Event.EventKind.OTHER, title="Something else", start=timezone.now())
+        self.tournament.home_team = self.team
+        self.tournament.event = other_event
+        self.tournament.save(update_fields=["home_team", "event"])
+
+        ensure_home_team(self.tournament)
+
+        self.tournament.refresh_from_db()
+        self.assertEqual(self.tournament.event_id, other_event.pk)
+
+
+class WithdrawHomeTeamGuardTests(TournamentsTestCase):
+    def test_the_home_team_cannot_be_withdrawn(self):
+        self.tournament.home_team = self.team
+        self.tournament.save(update_fields=["home_team"])
+        team = create_manual_team(self.tournament, club_team=self.team)
+
+        with self.assertRaises(TeamWithdrawalError):
+            withdraw_team(team)
+
+        team.refresh_from_db()
+        self.assertIsNone(team.withdrawn_at)
+
+    def test_a_non_home_club_team_can_still_be_withdrawn(self):
+        other_team = Team.objects.create(club=self.club, name="Second Team", short_name="2nd")
+        self.tournament.home_team = self.team  # some other team is home, not this one
+        self.tournament.save(update_fields=["home_team"])
+        team = create_manual_team(self.tournament, club_team=other_team)
+
+        withdraw_team(team)
+
+        team.refresh_from_db()
+        self.assertIsNotNone(team.withdrawn_at)
+
+
+class HomeTeamRosterSyncSignalTests(TournamentsTestCase):
+    def setUp(self):
+        self.tournament.home_team = self.team
+        self.tournament.save(update_fields=["home_team"])
+        self.tournament_team = ensure_home_team(self.tournament)
+        self.tournament.refresh_from_db()
+
+    def test_present_attendance_adds_a_roster_entry(self):
+        Attendance.objects.create(event=self.tournament.event, member=self.member, status=Attendance.AttendanceStatus.PRESENT)
+
+        entry = TournamentRosterEntry.objects.get(tournament_team=self.tournament_team, member=self.member)
+        self.assertEqual(entry.role, TournamentRosterRole.PLAYER)
+
+    def test_selected_attendance_also_adds_a_roster_entry(self):
+        Attendance.objects.create(event=self.tournament.event, member=self.member, status=Attendance.AttendanceStatus.SELECTED)
+
+        self.assertTrue(TournamentRosterEntry.objects.filter(tournament_team=self.tournament_team, member=self.member).exists())
+
+    def test_leaving_the_attending_set_removes_the_roster_entry(self):
+        attendance = Attendance.objects.create(event=self.tournament.event, member=self.member, status=Attendance.AttendanceStatus.PRESENT)
+        self.assertTrue(TournamentRosterEntry.objects.filter(tournament_team=self.tournament_team, member=self.member).exists())
+
+        attendance.status = Attendance.AttendanceStatus.ABSENT
+        attendance.save()
+
+        self.assertFalse(TournamentRosterEntry.objects.filter(tournament_team=self.tournament_team, member=self.member).exists())
+
+    def test_no_response_does_not_add_a_roster_entry(self):
+        Attendance.objects.create(event=self.tournament.event, member=self.member, status=Attendance.AttendanceStatus.NO_RESPONSE)
+
+        self.assertFalse(TournamentRosterEntry.objects.filter(tournament_team=self.tournament_team, member=self.member).exists())
+
+    def test_a_normal_events_attendance_is_unaffected(self):
+        other_member = Member.objects.create(first_name="Sam", last_name="Smith")
+        plain_event = Event.objects.create(club=self.club, season=self.season, kind=Event.EventKind.TRAINING, title="Training", start=timezone.now())
+
+        Attendance.objects.create(event=plain_event, member=other_member, status=Attendance.AttendanceStatus.PRESENT)
+
+        self.assertFalse(TournamentRosterEntry.objects.filter(tournament_team=self.tournament_team, member=other_member).exists())
+
+    def test_getting_or_creating_does_not_duplicate_an_existing_entry(self):
+        # A coach may have already filled in position/DOB/etc by hand on the
+        # roster screen (a club-team row's only way to get that info at
+        # all) -- re-saving the same Attendance (e.g. a note edit, not a
+        # status change) must not clobber it.
+        entry = TournamentRosterEntry.objects.create(tournament_team=self.tournament_team, member=self.member, position_label="Striker")
+        attendance = Attendance.objects.create(event=self.tournament.event, member=self.member, status=Attendance.AttendanceStatus.PRESENT)
+
+        attendance.note = "running late"
+        attendance.save()
+
+        entry.refresh_from_db()
+        self.assertEqual(entry.position_label, "Striker")
+        self.assertEqual(TournamentRosterEntry.objects.filter(tournament_team=self.tournament_team, member=self.member).count(), 1)
+
+
+class NotifyTournamentShiftsOpenServiceTests(TournamentsTestCase):
+    def setUp(self):
+        TeamMembership.objects.create(team=self.team, member=self.member, season=self.season)
+        self.tournament.home_team = self.team
+        self.tournament.status = Tournament.Status.PUBLISHED
+        self.tournament.save(update_fields=["home_team", "status"])
+        self.tournament_team = ensure_home_team(self.tournament)
+        self.tournament.refresh_from_db()
+
+    def test_skips_when_there_is_no_home_team(self):
+        self.tournament.home_team = None
+        self.tournament.save(update_fields=["home_team"])
+
+        result = notify_tournament_shifts_open(str(self.tournament.pk))
+
+        self.assertIn("Skipped", result)
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_skips_when_there_are_no_shifts_yet(self):
+        result = notify_tournament_shifts_open(str(self.tournament.pk))
+
+        self.assertIn("Skipped", result)
+
+    def test_notifies_members_on_the_home_teams_roster(self):
+        self.member.email = "jane@example.com"
+        self.member.save()
+        TournamentTask.objects.create(tournament=self.tournament, title="Gate duty", starts_at=timezone.now(), ends_at=timezone.now() + datetime.timedelta(hours=1))
+
+        result = notify_tournament_shifts_open(str(self.tournament.pk))
+
+        self.assertIn("Notified 1", result)
+
+
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
 class TournamentRegistrationViewTests(TournamentsTestCase):
     """tournaments:register -- the public, unauthenticated tournament-entry
@@ -1387,6 +1559,19 @@ class ApprovedForeignTeamRosterEditingTests(TournamentsTestCase):
         # untouched -- only the live TournamentRosterEntry rows are edited
         # here once approved.
         self.assertEqual(self.registration.players.count(), 0)
+
+    def test_updating_the_live_roster_bumps_updated_at(self):
+        # So staff on the management roster screen can see *when* a foreign
+        # team last touched its own roster through this exact page -- the
+        # write itself already lands live (see the test above), this is
+        # purely about that timestamp being visible.
+        original_updated_at = self.entry.updated_at
+        data = self.formset_management(total=1) | {"players-0-first_name": "Robin", "players-0-last_name": "Newcomer", "players-0-role": "player"}
+
+        self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+        new_entry = self.team.roster_entries.get()
+        self.assertGreater(new_entry.updated_at, original_updated_at)
 
     def test_a_withdrawn_team_cannot_have_its_roster_edited(self):
         self.team.withdrawn_at = timezone.now()

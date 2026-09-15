@@ -208,7 +208,7 @@ class TournamentForm(forms.ModelForm):
 
     class Meta:
         model = Tournament
-        fields = ["name", "status", "start_date", "end_date", "registration_open", "max_teams", "min_age", "max_age", "contact_email", "description", "event", "deposit_amount", "entry_fee_amount", "lunch_mode", "lunch_price_per_day"]
+        fields = ["name", "status", "start_date", "end_date", "registration_open", "max_teams", "min_age", "max_age", "contact_email", "description", "event", "home_team", "deposit_amount", "entry_fee_amount", "lunch_mode", "lunch_price_per_day"]
         widgets = {
             "start_date": forms.DateInput(attrs={"type": "date"}),
             "end_date": forms.DateInput(attrs={"type": "date"}),
@@ -226,6 +226,9 @@ class TournamentForm(forms.ModelForm):
         self.fields["event"].queryset = event_queryset
         self.fields["event"].required = False
         self.fields["event"].empty_label = _("— none —")
+        self.fields["home_team"].queryset = Team.objects.filter(club=club)
+        self.fields["home_team"].required = False
+        self.fields["home_team"].empty_label = _("— none —")
 
     def clean(self):
         cleaned = super().clean()

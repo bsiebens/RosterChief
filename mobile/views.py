@@ -230,9 +230,13 @@ class HomeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
     ask, just on a different model -- an
     "open tasks" list of unclaimed EventTask slots on those same in-scope
     upcoming events (regardless of RSVP status -- a task is open to anyone,
-    not tied to one person's reply), a season-dues card per person who owes
-    money, and a news teaser. Every card is independently optional -- an
-    empty-state screen is just those `if`s all being falsy.
+    not tied to one person's reply), merged with any open TournamentTask
+    shift on a published tournament in this club (club-wide, not scoped to
+    `upcoming` the way EventTask is -- a volunteer shift isn't tied to one
+    person's own Attendance the way a per-event task is), a season-dues card
+    per person who owes money, and a news teaser. Every card is
+    independently optional -- an empty-state screen is just those `if`s all
+    being falsy.
 
     Scoped to ``self.people_in_scope`` (mobile/mixins.py), not just
     ``scope_person`` -- with the header's "All" chip now the default the
@@ -329,13 +333,40 @@ class HomeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
             # this screen (not every upcoming club event), one row per open
             # task rather than per event, so which specific ask is open is
             # visible without a tap through to the event.
-            open_tasks_qs = (
-                EventTask.objects.filter(event_id__in=upcoming.values_list("event_id", flat=True).distinct()).annotate(claim_count=Count("claims")).filter(claim_count__lt=F("needed_quantity")).select_related("event").order_by("event__start")
+            event_open_tasks_qs = (
+                EventTask.objects.filter(event_id__in=upcoming.values_list("event_id", flat=True).distinct()).annotate(claim_count=Count("claims")).filter(claim_count__lt=F("needed_quantity")).select_related("event")
             )
-            open_tasks_total = open_tasks_qs.count()
-            open_tasks = list(open_tasks_qs[: self.OPEN_TASKS_LIMIT])
-            for task in open_tasks:
-                task.open_count = task.needed_quantity - task.claim_count
+            open_task_rows = [
+                {"title": task.title, "when": task.event.start, "subtitle": task.event.title, "open_count": task.needed_quantity - task.claim_count, "url": reverse("mobile:event_detail", args=[task.event_id])} for task in event_open_tasks_qs
+            ]
+
+            # Tournament shifts aren't tied to any one member's own Attendance
+            # the way an EventTask is (they're a club-wide volunteer ask, open
+            # to any member -- see tournaments.services.tasks.claim_task's own
+            # docstring), so this is scoped by club + published status rather
+            # than reusing `upcoming` above -- every published tournament's
+            # open shifts show up here for everyone in scope, not just
+            # whoever happens to already have an Attendance row on its home-
+            # team event. Same "one row per open task, regardless of who
+            # already answered" idea open_task_rows above already follows.
+            if flag_is_active(self.request, "tournaments"):
+                tournament_open_tasks_qs = (
+                    TournamentTask.objects.filter(tournament__club=self.request.club, tournament__status=Tournament.Status.PUBLISHED).annotate(claim_count=Count("claims")).filter(claim_count__lt=F("needed_quantity")).select_related("tournament")
+                )
+                open_task_rows += [
+                    {
+                        "title": task.title,
+                        "when": task.starts_at,
+                        "subtitle": task.tournament.name,
+                        "open_count": task.needed_quantity - task.claim_count,
+                        "url": reverse("mobile:tournament_task_list", kwargs={"tournament_slug": task.tournament.slug}),
+                    }
+                    for task in tournament_open_tasks_qs
+                ]
+
+            open_task_rows.sort(key=lambda row: row["when"])
+            open_tasks_total = len(open_task_rows)
+            open_tasks = open_task_rows[: self.OPEN_TASKS_LIMIT]
 
             season = current_season(self.request.club)
             if season is not None:

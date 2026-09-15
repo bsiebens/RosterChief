@@ -4,6 +4,8 @@ queue, and any future bulk-decision screen all go through the same rules
 rather than each reimplementing them.
 """
 
+from datetime import datetime, time
+
 from django.db import transaction
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
@@ -156,6 +158,8 @@ def withdraw_team(team: TournamentTeam, *, reason: str = "", withdrawn_by=None) 
     team = TournamentTeam.objects.select_for_update().get(pk=team.pk)
     if team.withdrawn_at is not None:
         raise TeamWithdrawalError(_("This team has already been withdrawn."))
+    if team.team_id is not None and team.team_id == team.tournament.home_team_id:
+        raise TeamWithdrawalError(_("The home team can't be withdrawn -- change or clear the tournament's home team in Settings instead."))
 
     team.withdrawn_at = timezone.now()
     team.withdrawal_reason = reason
@@ -180,5 +184,61 @@ def create_manual_team(tournament, *, club_team=None, foreign_fields: dict | Non
         snapshot_club_team_roster(team, club_team, tournament.season)
     else:
         team = TournamentTeam.objects.create(club=tournament.club, tournament=tournament, **foreign_fields)
+
+    return team
+
+
+@transaction.atomic
+def ensure_home_team(tournament) -> TournamentTeam | None:
+    """Auto-adds ``tournament.home_team`` as a ``TournamentTeam`` and gives
+    the tournament its own linked calendar ``Event`` scoped to that team --
+    called from ``TournamentCreateView``/``TournamentUpdateView.form_valid``
+    on *every* save, not just the first one home_team is set on, so it has
+    to be idempotent: does nothing at all when ``home_team`` is blank, and
+    skips whichever half (team, event) already exists rather than
+    duplicating it.
+
+    The ``TournamentTeam`` goes through ``create_manual_team`` -- same
+    "host club skips the queue" shortcut a manually-added team already
+    uses, so the home team gets its FULLY_PAID default and club-logo
+    fallback (``TournamentTeam.display_logo``) for free, no separate path.
+    ``withdraw_team`` refuses to withdraw it (see that function's own
+    guard).
+
+    The ``Event`` is what makes "so that signup works" true: scoping it to
+    ``teams={home_team}`` fires events.signals.sync_on_audience_change,
+    which creates one ``Attendance`` row per team member the same way any
+    other team event does -- from there, tournaments/signals.py's own
+    ``sync_home_team_roster`` keeps ``TournamentRosterEntry`` in step with
+    however those Attendances get answered, live, for as long as the
+    tournament exists. Deliberately not passed via ``Event.objects.create
+    (..., teams=...)`` -- a ManyToManyField can't be set that way at all;
+    it has to be ``.set()`` *after* the row exists, which is also the only
+    way that matters here: ``teams`` is an M2M, so ``sync_on_audience_change``
+    only ever fires on an ``m2m_changed`` signal, never on the plain
+    ``post_save`` a kwarg-only create would rely on.
+
+    Deliberately does NOT try to keep up with ``home_team`` being changed
+    to a different team after the first save -- the original team's
+    ``TournamentTeam``/roster just stand as an ordinary (no longer "home")
+    entry from then on; reconciling that is left to staff by hand via the
+    Teams tab, not automated here.
+    """
+    if tournament.home_team_id is None:
+        return None
+
+    team = TournamentTeam.objects.filter(tournament=tournament, team_id=tournament.home_team_id).first()
+    if team is None:
+        team = create_manual_team(tournament, club_team=tournament.home_team)
+
+    if tournament.event_id is None:
+        from events.models import Event  # local import -- see Tournament.location's own docstring for why every cross-app reference in this app is lazy
+
+        start = timezone.make_aware(datetime.combine(tournament.start_date, time.min))
+        end = timezone.make_aware(datetime.combine(tournament.end_date, time(23, 59)))
+        event = Event.objects.create(club=tournament.club, season=tournament.season, kind=Event.EventKind.TOURNAMENT, title=tournament.name, start=start, end=end)
+        event.teams.set([tournament.home_team])
+        tournament.event = event
+        tournament.save(update_fields=["event"])
 
     return team
