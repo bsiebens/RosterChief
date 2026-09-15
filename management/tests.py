@@ -14563,6 +14563,32 @@ class TournamentScheduleTests(ManagementTestBase):
 
         self.assertEqual(response.status_code, 403)
 
+    def test_generate_schedule_button_actually_schedules_matches(self):
+        # Regression test: allocate_schedule existed as a service with
+        # nothing in the UI ever calling it -- this is the Schedule tab's
+        # own "Generate schedule" button actually wired through to it.
+        self.activate_flag()
+        TournamentField.objects.create(tournament=self.tournament, name="Field 1")
+        team_a, team_b = self.make_team("Team A"), self.make_team("Team B")
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="Round Robin", format=TournamentStage.Format.CUSTOM)
+        match = Match.objects.create(stage=stage, round_number=1, sequence=0, home_team=team_a, away_team=team_b)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("tournament_schedule_generate", {}, self.tournament.pk)
+
+        self.assertRedirects(response, reverse("management:tournament_schedule", args=[self.tournament.pk]))
+        match.refresh_from_db()
+        self.assertIsNotNone(match.scheduled_start)
+        self.assertIsNotNone(match.field_id)
+
+    def test_generate_schedule_flashes_a_warning_with_no_fields(self):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("tournament_schedule_generate", {}, self.tournament.pk)
+
+        self.assertRedirects(response, reverse("management:tournament_schedule", args=[self.tournament.pk]))
+
     def test_schedule_groups_matches_by_stage_then_round(self):
         self.activate_flag()
         team_a, team_b, team_c, team_d = (self.make_team(f"Team {letter}") for letter in "ABCD")
@@ -15077,6 +15103,32 @@ class TournamentFieldStageCrudTests(ManagementTestBase):
 
         self.assertEqual(self.club_post("tournament_stage_update", {"name": "Hack"}, self.tournament.pk, other_stage.pk).status_code, 404)
         self.assertEqual(self.club_post("tournament_stage_delete", {}, self.tournament.pk, other_stage.pk).status_code, 404)
+
+    def test_generate_matches_button_actually_generates_them(self):
+        # Regression test: generate_stage_matches/allocate_schedule existed
+        # as services with nothing in the UI ever calling them -- this is
+        # the "Generate matches" button on the Fields & stages tab actually
+        # wired through to tournaments.services.scheduling.generate_stage_matches.
+        self.activate_flag()
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="Round Robin", format=TournamentStage.Format.ROUND_ROBIN)
+        TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Team A")
+        TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Team B")
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("tournament_stage_generate_matches", {}, self.tournament.pk, stage.pk)
+
+        self.assertRedirects(response, reverse("management:tournament_field_stage_list", args=[self.tournament.pk]))
+        self.assertEqual(stage.matches.count(), 1)
+
+    def test_generate_matches_flashes_a_warning_instead_of_erroring(self):
+        self.activate_flag()
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="Custom", format=TournamentStage.Format.CUSTOM)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("tournament_stage_generate_matches", {}, self.tournament.pk, stage.pk)
+
+        self.assertRedirects(response, reverse("management:tournament_field_stage_list", args=[self.tournament.pk]))
+        self.assertEqual(stage.matches.count(), 0)
 
 
 class TournamentTaskManagementTests(ManagementTestBase):
@@ -15685,6 +15737,8 @@ class TournamentPermissionTiersTests(ManagementTestBase):
             ("match_reschedule", [self.match.pk]),
             ("match_result", [self.match.pk]),
             ("tournament_dressing_room_assign", [self.tournament.pk]),
+            ("tournament_stage_generate_matches", [self.tournament.pk, self.stage.pk]),
+            ("tournament_schedule_generate", [self.tournament.pk]),
         ]
 
     def delete_cases(self):

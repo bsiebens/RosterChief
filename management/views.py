@@ -158,7 +158,7 @@ from tournaments.services.dressing_rooms import DressingRoomAssignmentError, ass
 from tournaments.services.lunch import daily_lunch_summary
 from tournaments.services.notifications import dispatch_notify_tournament_shifts_open, send_registration_decision_email
 from tournaments.services.registration import RegistrationDecisionError, TeamDeletionError, TeamWithdrawalError, approve_registration, create_manual_team, delete_manual_team, ensure_home_team, reject_registration, withdraw_team
-from tournaments.services.scheduling import SchedulingError, record_result, reschedule_match
+from tournaments.services.scheduling import SchedulingError, allocate_schedule, generate_stage_matches, record_result, reschedule_match
 from tournaments.services.tasks import TaskClaimError, claim_task, generate_task_shifts
 
 from .bulk_import import build_member_import_template, family_choice_field_name, match_candidate_families, parse_member_import_rows, read_member_import_workbook
@@ -7760,6 +7760,32 @@ class TournamentScheduleView(TournamentsManagerRequiredMixin, TemplateView):
         return super().get_context_data(tournament=tournament, stages=stages, fields=fields, active_tab="schedule", **self.tournament_permissions(tournament), **kwargs)
 
 
+class TournamentAllocateScheduleView(TournamentOperatorRequiredMixin, View):
+    """The Schedule tab's own "Generate schedule" button --
+    tournaments.services.scheduling.allocate_schedule for the whole
+    tournament: a first-draft field/time assignment for every not-yet-
+    scheduled, fully-resolved match (a still-TBD bracket slot is left
+    alone -- schedule it once its source match/group actually resolves,
+    a later run of this same action picks those up). Safe to run again
+    later as the bracket fills in -- it only ever touches matches with no
+    scheduled_start yet, never reshuffles ones already placed (see
+    reschedule_match for moving one by hand instead). Raises
+    SchedulingError when there are no fields to schedule onto yet."""
+
+    def post(self, request, tournament_pk):
+        tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
+
+        try:
+            scheduled = allocate_schedule(tournament)
+        except SchedulingError as error:
+            notify(request, f"w|{_('Could not generate a schedule')}|{error}")
+        else:
+            body = ngettext("%(count)d match scheduled.", "%(count)d matches scheduled.", len(scheduled)) % {"count": len(scheduled)}
+            notify(request, f"s|{_('Schedule generated')}|{body}")
+
+        return redirect("management:tournament_schedule", tournament_pk=tournament.pk)
+
+
 class MatchRescheduleView(TournamentOperatorRequiredMixin, View):
     """The schedule view's own inline "field + time" form -- always routed
     through ``tournaments.services.scheduling.reschedule_match``, never a
@@ -8020,6 +8046,32 @@ class TournamentStageDeleteView(TournamentOperatorRequiredMixin, View):
         name = stage.name
         stage.delete()
         notify(request, f"w|{_('Stage deleted')}|" + _("“%(name)s” was removed from this tournament.") % {"name": name})
+        return redirect("management:tournament_field_stage_list", tournament_pk=tournament.pk)
+
+
+class TournamentStageGenerateMatchesView(TournamentOperatorRequiredMixin, View):
+    """The Fields & stages tab's own "Generate matches" button --
+    tournaments.services.scheduling.generate_stage_matches for one stage,
+    from its own already-entered teams (every non-withdrawn TournamentTeam,
+    seed-ordered). Raises SchedulingError for a stage that already has
+    matches (delete them first, an explicit action, not something this
+    button does implicitly), a CUSTOM-format stage (hand-built only, never
+    auto-generated), or fewer than two teams -- shown back as a toast
+    rather than a 500, same shape every other scheduling action in this
+    file already uses (see MatchRescheduleView/MatchResultView)."""
+
+    def post(self, request, tournament_pk, stage_pk):
+        tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
+        stage = get_object_or_404(TournamentStage, pk=stage_pk, tournament=tournament)
+
+        try:
+            matches = generate_stage_matches(stage)
+        except SchedulingError as error:
+            notify(request, f"w|{_('Could not generate matches')}|{error}")
+        else:
+            body = ngettext("%(count)d match generated for “%(name)s”.", "%(count)d matches generated for “%(name)s”.", len(matches)) % {"count": len(matches), "name": stage.name}
+            notify(request, f"s|{_('Matches generated')}|{body}")
+
         return redirect("management:tournament_field_stage_list", tournament_pk=tournament.pk)
 
 

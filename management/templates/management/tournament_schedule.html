@@ -6,6 +6,15 @@
     <span class="font-mono text-[13px] text-muted">{% trans "Schedule" %}</span>
 {% endblock topbar_context %}
 
+{% block actions %}
+    {% if can_operate_tournament %}
+        <form method="post" action="{% url 'management:tournament_schedule_generate' tournament.pk %}">
+            {% csrf_token %}
+            <button class="btn btn-primary gap-2" type="submit">{% lucide "shuffle" size=16 %} {% trans "Generate schedule" %}</button>
+        </form>
+    {% endif %}
+{% endblock actions %}
+
 {% block panel %}
     {% include "management/_tournament_tabs.html" %}
 
