@@ -80,11 +80,11 @@
             {{ player_formset.management_form }}
             <div id="bulk-add-rows" data-prefix="{{ player_formset.prefix }}" class="flex flex-col gap-3">
                 {% for player_form in player_formset %}
-                    {% include "tournaments/_player_row.html" with form=player_form %}
+                    {% include "tournaments/_player_row.html" with form=player_form show_lunch=True %}
                 {% endfor %}
             </div>
             <template id="bulk-add-row-template">
-                {% include "tournaments/_player_row.html" with form=player_formset.empty_form %}
+                {% include "tournaments/_player_row.html" with form=player_formset.empty_form show_lunch=True %}
             </template>
         </div>
 

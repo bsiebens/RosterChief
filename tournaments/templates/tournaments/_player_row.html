@@ -20,13 +20,18 @@
     input) -- hand-rolled here instead, same idea as a plain radio group
     elsewhere in this app.
 
-    ``show_lunch`` (default True): registration_status.html passes False --
-    that page pulls lunch_days/dietary_restrictions out into their own
-    dedicated Lunch section (alongside price-per-day and a running total)
-    rather than showing them here, so this card stays about who's on the
-    team. register.html (the initial public submission form) never passes
-    it, so it keeps showing both fields inline here exactly as before --
-    there's no equivalent Lunch section on that page.
+    ``show_lunch``: register.html (the initial public submission form, no
+    separate Lunch section) always passes True, so this card keeps showing
+    both fields inline. registration_status.html passes False -- that page
+    pulls lunch_days/dietary_restrictions out into their own dedicated
+    Lunch section (alongside price-per-day and a running total) instead,
+    so this card stays about who's on the team. Deliberately no
+    ``|default:True`` fallback here: Django's ``default`` filter treats an
+    explicit ``False`` as "not provided" (it only checks truthiness, not
+    whether the variable was actually passed) and silently substitutes the
+    default right back -- that's what caused this to render alongside the
+    Lunch section instead of yielding to it, so every caller must now pass
+    the flag explicitly, not rely on a default.
 {% endcomment %}
 <div class="bulk-add-row relative flex flex-col gap-4 rounded-box border border-line p-3.5 pt-9">
     <button class="btn btn-ghost btn-sm btn-square remove-row absolute top-1.5 right-1.5" type="button" aria-label="{% trans 'Remove this player' %}" title="{% trans 'Remove this player' %}">{% lucide "x" size=16 %}</button>
@@ -42,7 +47,7 @@
         {% form_field form.date_of_birth %}
         {% form_field form.license_number %}
     </div>
-    {% if show_lunch|default:True %}
+    {% if show_lunch %}
         {% form_field form.dietary_restrictions textarea_height="h-16" %}
 
         {% if form.lunch_days %}
