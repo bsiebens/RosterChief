@@ -1128,7 +1128,7 @@ class TournamentRegistrationViewTests(TournamentsTestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Registration is closed")
-        self.assertNotContains(response, "Roster")
+        self.assertNotContains(response, "Add another player")
 
     def test_closed_registration_rejects_a_post_without_creating_anything(self):
         self.tournament.registration_open = False
@@ -2410,7 +2410,10 @@ class TournamentDetailViewTests(TournamentsTestCase):
     def test_does_not_show_a_contact_email_row_when_unset(self):
         response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
 
-        self.assertNotContains(response, "mailto:")
+        # The shared page footer always has its own "Powered by RosterChief"
+        # mailto link -- this test only cares that the tournament's own
+        # contact-email row doesn't add a second one.
+        self.assertContains(response, "mailto:", count=1)
 
     def test_shows_the_location_when_the_club_has_a_home_ground(self):
         Location.objects.create(club=self.club, name="Ajax Arena", address="1 Main St", city="Mechelen", zip_code="2800", country="BE", is_home=True)

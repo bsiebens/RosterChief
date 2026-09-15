@@ -87,7 +87,9 @@
         </main>
 
         <footer class="border-t border-line px-5 py-4 text-center font-mono text-[11px] text-dim sm:px-7">
-            {{ club.name }}
+            <div>{{ club.name }}</div>
+            {# Reaches every public tournament/registration/formbuilder page in one place -- see this file's own top comment for why they all share this shell. #}
+            <div class="mt-1 opacity-70">{% trans "Powered by" %} <a class="hover:underline" href="mailto:bernard@rosterchief.app">RosterChief</a></div>
         </footer>
 
         {% block extra_body %}{% endblock extra_body %}
