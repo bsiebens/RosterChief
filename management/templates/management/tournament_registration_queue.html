@@ -144,7 +144,7 @@
                     </div>
                 {% elif registration.status == "approved" and registration.tournament_team and not registration.tournament_team.withdrawn_at %}
                     <div class="flex gap-2.5 border-t border-line p-4">
-                        <button type="button" class="btn btn-outline btn-error gap-2" onclick="document.getElementById('{{ registration.pk|dom_id:"withdraw_modal" }}').showModal()">{% lucide "circle-minus" size=16 %} {% trans "Withdraw" %}</button>
+                        <button type="button" class="btn btn-outline btn-error flex-1 gap-2" onclick="document.getElementById('{{ registration.pk|dom_id:"withdraw_modal" }}').showModal()">{% lucide "circle-minus" size=16 %} {% trans "Withdraw" %}</button>
                         <button type="button" class="btn btn-outline flex-1 gap-2" onclick="closeDrawer('{{ registration.pk|dom_id:"registration_drawer" }}')">{% trans "Close" %}</button>
                     </div>
                 {% else %}
