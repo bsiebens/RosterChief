@@ -28,7 +28,6 @@
             <thead>
                 <tr>
                     <th>{% trans "Name" %}</th>
-                    <th>{% trans "Location" %}</th>
                     <th>{% trans "Capacity" %}</th>
                     <th></th>
                 </tr>
@@ -37,7 +36,6 @@
                 {% for room in rooms %}
                     <tr>
                         <td class="font-semibold">{{ room.name }}</td>
-                        <td class="text-sm text-muted">{{ room.location|default:"—" }}</td>
                         <td class="font-mono text-xs tabular-nums">{{ room.capacity|default:"—" }}</td>
                         <td class="text-right whitespace-nowrap">
                             <button class="btn btn-outline btn-sm" type="button" onclick="document.getElementById('{{ room.pk|dom_id:"room_update_modal" }}').showModal()" aria-label="{% trans 'Edit' %}">{% lucide "pencil" size=14 %} {% trans "Edit" %}</button>
@@ -46,7 +44,7 @@
                     </tr>
                 {% empty %}
                     <tr>
-                        <td colspan="4" class="text-center text-dim">{% trans "No dressing rooms yet." %}</td>
+                        <td colspan="3" class="text-center text-dim">{% trans "No dressing rooms yet." %}</td>
                     </tr>
                 {% endfor %}
             </tbody>

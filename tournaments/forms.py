@@ -4,7 +4,7 @@ from django.db.models import Q
 from django.utils.translation import gettext_lazy as _
 
 from club.models import Season
-from events.models import Event, Location
+from events.models import Event
 from teams.models import Team
 
 from .models import DressingRoom, Tournament, TournamentField, TournamentRegistration, TournamentRosterEntry, TournamentRosterRole, TournamentStage, TournamentTask, TournamentTeam
@@ -441,11 +441,16 @@ class DressingRoomForm(forms.ModelForm):
     """Create/edit one of the club's own dressing rooms -- a club-wide,
     persists-across-tournaments record (see ``DressingRoom``'s own
     docstring), so this is reached from Settings, not from any one
-    tournament's own pages. ``club`` comes from the view, never the form."""
+    tournament's own pages. No ``location`` field -- same simplification
+    as ``TournamentField``'s own dropped location: a room is just at the
+    club's own location, not a separately-picked one. ``club`` comes from
+    the view, never the form (kept as a kwarg for a consistent
+    signature with this file's other club-scoped forms, even though
+    nothing here reads it any more)."""
 
     class Meta:
         model = DressingRoom
-        fields = ["name", "location", "capacity", "notes"]
+        fields = ["name", "capacity", "notes"]
         widgets = {
             "capacity": forms.NumberInput(attrs={"min": "0"}),
             "notes": forms.Textarea(attrs={"rows": 2}),
@@ -453,9 +458,6 @@ class DressingRoomForm(forms.ModelForm):
 
     def __init__(self, *args, club=None, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields["location"].queryset = Location.objects.filter(club=club)
-        self.fields["location"].required = False
-        self.fields["location"].empty_label = _("— none —")
 
 
 class DressingRoomAssignmentForm(forms.Form):

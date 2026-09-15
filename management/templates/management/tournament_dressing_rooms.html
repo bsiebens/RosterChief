@@ -9,8 +9,15 @@
     own docstring for why -- never a direct DressingRoomAssignment write).
 
     Context: tournament, teams (each with .dressing_room_assignments
-    prefetched), rooms (this club's own DressingRoom queryset, just for the
-    "none set up yet" empty state), assign_form.
+    prefetched, each assignment annotated with .conflicts -- see
+    TournamentDressingRoomsView), rooms (this club's own DressingRoom
+    queryset, just for the "none set up yet" empty state), assign_form.
+    Overlapping bookings are allowed (tournaments.services.dressing_rooms'
+    own docstring) -- a conflicting row gets the same inset-accent-bar row
+    highlight tournament_registration_queue.html uses for its own
+    oldest-pending row, just in the warning colour reserved for exactly this
+    (--color-row-warn was already provisioned in management.css, unused
+    until now).
 {% endcomment %}
 
 {% block panel_title %}{{ tournament.name }}{% endblock panel_title %}
@@ -43,9 +50,17 @@
             <tbody>
                 {% for team in teams %}
                     {% for assignment in team.dressing_room_assignments.all %}
-                        <tr>
+                        <tr class="{% if assignment.conflicts %}bg-row-warn shadow-[inset_3px_0_0_var(--color-warn-text)]{% endif %}">
                             <td class="font-semibold">{{ team.display_name }}</td>
-                            <td>{{ assignment.dressing_room.name }}</td>
+                            <td>
+                                <div class="flex items-center gap-1.5">
+                                    {{ assignment.dressing_room.name }}
+                                    {% if assignment.conflicts %}{% lucide "triangle-alert" size=13 class="text-[var(--color-warn-text)]" %}{% endif %}
+                                </div>
+                                {% if assignment.conflicts %}
+                                    <div class="text-xs text-[var(--color-warn-text)]">{% blocktrans with names=assignment.conflict_labels|join:", " %}Also booked: {{ names }}{% endblocktrans %}</div>
+                                {% endif %}
+                            </td>
                             <td class="font-mono text-xs tabular-nums text-muted whitespace-nowrap">
                                 {% if assignment.assigned_from or assignment.assigned_until %}
                                     {{ assignment.assigned_from|date:"j M H:i"|default:"…" }}&ndash;{{ assignment.assigned_until|date:"j M H:i"|default:"…" }}

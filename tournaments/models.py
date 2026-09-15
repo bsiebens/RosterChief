@@ -790,7 +790,6 @@ class DressingRoom(ClubScopedModel):
     permanent club record rather than a per-event one."""
 
     name = models.CharField(_("name"), max_length=255)
-    location = models.ForeignKey("events.Location", on_delete=models.SET_NULL, null=True, blank=True, related_name="dressing_rooms", verbose_name=_("location"))
     capacity = models.PositiveSmallIntegerField(_("capacity"), null=True, blank=True)
     notes = models.TextField(_("notes"), blank=True)
 

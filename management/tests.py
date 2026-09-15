@@ -15070,12 +15070,12 @@ class DressingRoomManagementTests(ManagementTestBase):
         self.activate_flag()
         self.client.force_login(self.admin_user)
 
-        response = self.club_post("dressing_room_create", {"name": "Room A", "location": "", "capacity": 20, "notes": ""})
+        response = self.club_post("dressing_room_create", {"name": "Room A", "capacity": 20, "notes": ""})
         self.assertRedirects(response, reverse("management:dressing_room_list"))
         room = DressingRoom.objects.get(club=self.club, name="Room A")
         self.assertEqual(room.capacity, 20)
 
-        response = self.club_post("dressing_room_update", {"name": "Room A (renamed)", "location": "", "capacity": 25, "notes": ""}, room.pk)
+        response = self.club_post("dressing_room_update", {"name": "Room A (renamed)", "capacity": 25, "notes": ""}, room.pk)
         self.assertRedirects(response, reverse("management:dressing_room_list"))
         room.refresh_from_db()
         self.assertEqual(room.name, "Room A (renamed)")
@@ -15159,7 +15159,10 @@ class TournamentDressingRoomAssignmentTests(ManagementTestBase):
         messages = [str(message) for message in get_messages(response.wsgi_request)]
         self.assertTrue(any("assigned" in message for message in messages))
 
-    def test_a_genuine_conflict_is_flashed_as_a_warning_not_a_500(self):
+    def test_an_overlapping_booking_by_another_team_is_allowed_not_blocked(self):
+        # tournaments.services.dressing_rooms allows overlapping bookings --
+        # the "Dressing rooms" tab flags them visually instead of the
+        # service rejecting them (see test below and its own docstring).
         self.activate_flag()
         team_a, team_b = self.make_team("Team A"), self.make_team("Team B")
         assign_dressing_room(self.room, team_a)
@@ -15172,9 +15175,39 @@ class TournamentDressingRoomAssignmentTests(ManagementTestBase):
         )
 
         self.assertRedirects(response, reverse("management:tournament_dressing_room_list", args=[self.tournament.pk]))
-        self.assertFalse(DressingRoomAssignment.objects.filter(dressing_room=self.room, tournament_team=team_b).exists())
+        self.assertTrue(DressingRoomAssignment.objects.filter(dressing_room=self.room, tournament_team=team_b).exists())
         messages = [str(message) for message in get_messages(response.wsgi_request)]
-        self.assertTrue(any("already booked" in message for message in messages))
+        self.assertTrue(any("assigned" in message for message in messages))
+
+    def test_reassigning_the_same_team_to_the_same_room_is_flashed_as_a_warning_not_a_500(self):
+        self.activate_flag()
+        team = self.make_team("Team A")
+        assign_dressing_room(self.room, team)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post(
+            "tournament_dressing_room_assign",
+            {"dressing_room": self.room.pk, "tournament_team": team.pk, "assigned_from": "", "assigned_until": "", "note": ""},
+            self.tournament.pk,
+        )
+
+        self.assertRedirects(response, reverse("management:tournament_dressing_room_list", args=[self.tournament.pk]))
+        self.assertEqual(DressingRoomAssignment.objects.filter(dressing_room=self.room, tournament_team=team).count(), 1)
+        messages = [str(message) for message in get_messages(response.wsgi_request)]
+        self.assertTrue(any("already assigned" in message for message in messages))
+
+    def test_the_list_flags_an_overlapping_booking(self):
+        self.activate_flag()
+        team_a, team_b = self.make_team("Team A"), self.make_team("Team B")
+        assign_dressing_room(self.room, team_a)
+        assign_dressing_room(self.room, team_b)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_dressing_room_list", self.tournament.pk)
+
+        self.assertContains(response, "Also booked")
+        self.assertContains(response, "Team A")
+        self.assertContains(response, "Team B")
 
     def test_release_removes_the_assignment(self):
         self.activate_flag()

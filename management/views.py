@@ -140,7 +140,7 @@ from teams.services import eligible_roster_members, place_member_on_team
 from teams.services.numbers import has_unresolved_conflict
 from tournaments.forms import DressingRoomAssignmentForm, DressingRoomForm, TournamentFieldForm, TournamentForm, TournamentRosterEntryForm, TournamentStageForm, TournamentTaskForm, TournamentTaskGenerateForm, TournamentTeamForm
 from tournaments.models import DressingRoom, DressingRoomAssignment, Match, Tournament, TournamentField, TournamentRegistration, TournamentRosterEntry, TournamentStage, TournamentTask, TournamentTeam
-from tournaments.services.dressing_rooms import DressingRoomAssignmentError, assign_dressing_room, release_dressing_room
+from tournaments.services.dressing_rooms import DressingRoomAssignmentError, assign_dressing_room, release_dressing_room, windows_conflict
 from tournaments.services.notifications import send_registration_decision_email
 from tournaments.services.registration import RegistrationDecisionError, TeamWithdrawalError, approve_registration, create_manual_team, reject_registration, withdraw_team
 from tournaments.services.scheduling import SchedulingError, record_result, reschedule_match
@@ -7951,9 +7951,11 @@ class TournamentDressingRoomsView(TournamentsManagerRequiredMixin, TemplateView)
     ``TournamentTeam`` in this tournament and which club dressing room(s)
     it's currently booked into, with an assign/release action routed through
     ``tournaments.services.dressing_rooms`` (never a direct
-    ``DressingRoomAssignment`` write -- see that module's own docstring for
-    why a genuine double-booking needs a service-level lock, not just its
-    ``UniqueConstraint``)."""
+    ``DressingRoomAssignment`` write). Overlapping bookings are allowed (see
+    that module's own docstring) -- this view is where they actually become
+    visible, by annotating each assignment with the other assignments it
+    overlaps (same room booked to another team, or the same team already
+    holding another room) so the template can flag them."""
 
     template_name = "management/tournament_dressing_rooms.html"
 
@@ -7961,6 +7963,23 @@ class TournamentDressingRoomsView(TournamentsManagerRequiredMixin, TemplateView)
         tournament = get_object_or_404(Tournament, pk=self.kwargs["tournament_pk"], club=self.request.club)
         teams = list(tournament.teams.filter(withdrawn_at__isnull=True).prefetch_related("dressing_room_assignments__dressing_room"))
         rooms = DressingRoom.objects.filter(club=self.request.club)
+
+        all_assignments = [assignment for team in teams for assignment in team.dressing_room_assignments.all()]
+        for assignment in all_assignments:
+            conflicts = [
+                other
+                for other in all_assignments
+                if other.pk != assignment.pk
+                and (other.dressing_room_id == assignment.dressing_room_id or other.tournament_team_id == assignment.tournament_team_id)
+                and windows_conflict(assignment.assigned_from, assignment.assigned_until, other.assigned_from, other.assigned_until)
+            ]
+            # Same room, different team -> name the other team; same team,
+            # different room -> name the other room. A row can have both
+            # kinds of conflict at once (a shared room AND a double-booked
+            # team), so this is a list, not a single flag.
+            assignment.conflicts = conflicts
+            assignment.conflict_labels = [(other.tournament_team.display_name if other.dressing_room_id == assignment.dressing_room_id else other.dressing_room.name) for other in conflicts]
+
         return super().get_context_data(
             tournament=tournament,
             teams=teams,

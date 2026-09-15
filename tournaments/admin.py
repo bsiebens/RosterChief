@@ -275,10 +275,9 @@ class DressingRoomAssignmentInline(admin.TabularInline):
 
 @admin.register(DressingRoom)
 class DressingRoomAdmin(admin.ModelAdmin):
-    list_display = ["name", "club", "location", "capacity"]
+    list_display = ["name", "club", "capacity"]
     list_filter = ["club"]
     search_fields = ["name"]
-    raw_id_fields = ["location"]
     inlines = [DressingRoomAssignmentInline]
 
 

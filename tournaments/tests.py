@@ -40,7 +40,7 @@ from .models import (
     TournamentTaskClaim,
     TournamentTeam,
 )
-from .services.dressing_rooms import DressingRoomAssignmentError, assign_dressing_room, release_dressing_room
+from .services.dressing_rooms import DressingRoomAssignmentError, assign_dressing_room, release_dressing_room, windows_conflict
 from .services.registration import RegistrationDecisionError, TeamWithdrawalError, approve_registration, create_manual_team, reject_registration, withdraw_team
 from .services.scheduling import (
     DEFAULT_GAP,
@@ -678,12 +678,6 @@ class DressingRoomModelTests(TournamentsTestCase):
     def test_str(self):
         room = DressingRoom.objects.create(club=self.club, name="Room 1")
         self.assertEqual(str(room), "Room 1")
-
-    def test_location_is_optional_and_reachable(self):
-        location = Location.objects.create(club=self.club, name="Arena", address="1 St", city="Town", zip_code="1000", country="BE")
-        room = DressingRoom.objects.create(club=self.club, name="Room 1", location=location)
-
-        self.assertEqual(room.location, location)
 
 
 class DressingRoomAssignmentModelTests(TournamentsTestCase):
@@ -2668,11 +2662,15 @@ class AssignDressingRoomServiceTests(TournamentsTestCase):
         with self.assertRaises(DressingRoomAssignmentError):
             assign_dressing_room(self.room, self.team_a)
 
-    def test_whole_tournament_booking_blocks_any_other_team(self):
+    def test_whole_tournament_booking_allows_a_different_team_too(self):
+        # Overlapping bookings are allowed, not blocked -- the "Dressing
+        # rooms" tab flags them visually instead. Only the exact same
+        # (room, team) pair twice is still rejected (see the test above).
         assign_dressing_room(self.room, self.team_a)  # no window -- whole tournament
 
-        with self.assertRaises(DressingRoomAssignmentError):
-            assign_dressing_room(self.room, self.team_b)
+        assign_dressing_room(self.room, self.team_b)  # should not raise
+
+        self.assertEqual(self.room.assignments.count(), 2)
 
     def test_non_overlapping_time_windows_are_both_allowed(self):
         start = timezone.now() + datetime.timedelta(days=1)
@@ -2682,12 +2680,13 @@ class AssignDressingRoomServiceTests(TournamentsTestCase):
 
         self.assertEqual(self.room.assignments.count(), 2)
 
-    def test_overlapping_time_windows_conflict(self):
+    def test_overlapping_time_windows_are_allowed_too(self):
         start = timezone.now() + datetime.timedelta(days=1)
         assign_dressing_room(self.room, self.team_a, assigned_from=start, assigned_until=start + datetime.timedelta(hours=2))
 
-        with self.assertRaises(DressingRoomAssignmentError):
-            assign_dressing_room(self.room, self.team_b, assigned_from=start + datetime.timedelta(hours=1), assigned_until=start + datetime.timedelta(hours=3))
+        assign_dressing_room(self.room, self.team_b, assigned_from=start + datetime.timedelta(hours=1), assigned_until=start + datetime.timedelta(hours=3))  # should not raise
+
+        self.assertEqual(self.room.assignments.count(), 2)
 
     def test_release_removes_the_assignment(self):
         assignment = assign_dressing_room(self.room, self.team_a)
@@ -2695,3 +2694,18 @@ class AssignDressingRoomServiceTests(TournamentsTestCase):
         release_dressing_room(assignment)
 
         self.assertEqual(self.room.assignments.count(), 0)
+
+
+class WindowsConflictTests(TournamentsTestCase):
+    def test_either_side_missing_a_window_always_conflicts(self):
+        start = timezone.now()
+        self.assertTrue(windows_conflict(None, None, start, start + datetime.timedelta(hours=1)))
+        self.assertTrue(windows_conflict(start, start + datetime.timedelta(hours=1), None, None))
+
+    def test_non_overlapping_windows_do_not_conflict(self):
+        start = timezone.now()
+        self.assertFalse(windows_conflict(start, start + datetime.timedelta(hours=1), start + datetime.timedelta(hours=1), start + datetime.timedelta(hours=2)))
+
+    def test_overlapping_windows_conflict(self):
+        start = timezone.now()
+        self.assertTrue(windows_conflict(start, start + datetime.timedelta(hours=2), start + datetime.timedelta(hours=1), start + datetime.timedelta(hours=3)))
