@@ -1,5 +1,6 @@
 import datetime
 import itertools
+from decimal import Decimal
 
 from django.contrib import admin, messages
 from django.contrib.messages.storage.fallback import FallbackStorage
@@ -1216,6 +1217,67 @@ class TournamentRegistrationStatusViewTests(TournamentsTestCase):
 
         self.assertContains(response, "Not accepted")
         self.assertContains(response, "Tournament is full.")
+
+    def test_shows_the_payment_section_once_approved_with_a_team(self):
+        self.registration.status = TournamentRegistration.Status.APPROVED
+        self.registration.save()
+        self.tournament.deposit_amount = Decimal("50.00")
+        self.tournament.entry_fee_amount = Decimal("150.00")
+        self.tournament.save()
+        TournamentTeam.objects.create(club=self.club, tournament=self.tournament, registration=self.registration, foreign_name="Visiting FC", payment_status=TournamentTeam.PaymentStatus.DEPOSIT_RECEIVED)
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, "Deposit received")
+        self.assertContains(response, "50.00")
+        self.assertContains(response, "150.00")
+
+    def test_no_payment_section_while_pending(self):
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertNotContains(response, "Payment")
+
+    def test_no_lunch_section_when_lunch_mode_is_none(self):
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertNotContains(response, "Lunch")
+
+    def test_lunch_section_shows_days_before_dietary_restrictions(self):
+        self.tournament.lunch_mode = Tournament.LunchMode.OPTIONAL
+        self.tournament.lunch_price_per_day = Decimal("10.00")
+        self.tournament.save()
+        self.player.lunch_days = ["2026-09-19"]
+        self.player.dietary_restrictions = "Nut allergy"
+        self.player.save()
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+        content = response.content.decode()
+
+        self.assertIn("Sat 19 Sep", content)
+        self.assertIn("Nut allergy", content)
+        self.assertLess(content.index("Sat 19 Sep"), content.index("Nut allergy"))
+
+    def test_lunch_total_reflects_price_and_selected_days(self):
+        self.tournament.lunch_mode = Tournament.LunchMode.OPTIONAL
+        self.tournament.lunch_price_per_day = Decimal("10.00")
+        self.tournament.save()
+        self.player.lunch_days = ["2026-09-19", "2026-09-20"]
+        self.player.save()
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, "20.00")
+
+    def test_mandatory_lunch_shows_included_every_day_and_the_full_total(self):
+        self.tournament.lunch_mode = Tournament.LunchMode.MANDATORY
+        self.tournament.lunch_price_per_day = Decimal("10.00")
+        self.tournament.save()
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, "Included every day")
+        # One player, two tournament days, 10.00/day -> 20.00.
+        self.assertContains(response, "20.00")
 
     def test_an_unknown_token_404s(self):
         response = self.client.get(self._url(token="not-a-real-token"), HTTP_HOST="ajax-united.rosterchief.app")

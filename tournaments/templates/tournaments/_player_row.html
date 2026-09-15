@@ -19,6 +19,14 @@
     template tag doesn't know how to render (it falls through to a bare text
     input) -- hand-rolled here instead, same idea as a plain radio group
     elsewhere in this app.
+
+    ``show_lunch`` (default True): registration_status.html passes False --
+    that page pulls lunch_days/dietary_restrictions out into their own
+    dedicated Lunch section (alongside price-per-day and a running total)
+    rather than showing them here, so this card stays about who's on the
+    team. register.html (the initial public submission form) never passes
+    it, so it keeps showing both fields inline here exactly as before --
+    there's no equivalent Lunch section on that page.
 {% endcomment %}
 <div class="bulk-add-row relative flex flex-col gap-4 rounded-box border border-line p-3.5 pt-9">
     <button class="btn btn-ghost btn-sm btn-square remove-row absolute top-1.5 right-1.5" type="button" aria-label="{% trans 'Remove this player' %}" title="{% trans 'Remove this player' %}">{% lucide "x" size=16 %}</button>
@@ -34,18 +42,20 @@
         {% form_field form.date_of_birth %}
         {% form_field form.license_number %}
     </div>
-    {% form_field form.dietary_restrictions textarea_height="h-16" %}
+    {% if show_lunch|default:True %}
+        {% form_field form.dietary_restrictions textarea_height="h-16" %}
 
-    {% if form.lunch_days %}
-        <div>
-            <div class="mb-1.5 font-display text-[11px] font-bold tracking-[.12em] text-muted uppercase">{{ form.lunch_days.label }}</div>
-            <div class="flex flex-wrap gap-3">
-                {% for checkbox in form.lunch_days %}
-                    <label class="flex items-center gap-1.5 text-sm text-ink">
-                        {{ checkbox.tag }} {{ checkbox.choice_label }}
-                    </label>
-                {% endfor %}
+        {% if form.lunch_days %}
+            <div>
+                <div class="mb-1.5 font-display text-[11px] font-bold tracking-[.12em] text-muted uppercase">{{ form.lunch_days.label }}</div>
+                <div class="flex flex-wrap gap-3">
+                    {% for checkbox in form.lunch_days %}
+                        <label class="flex items-center gap-1.5 text-sm text-ink">
+                            {{ checkbox.tag }} {{ checkbox.choice_label }}
+                        </label>
+                    {% endfor %}
+                </div>
             </div>
-        </div>
+        {% endif %}
     {% endif %}
 </div>

@@ -29,6 +29,22 @@
     already started," not withdrawn/rejected, which explain themselves
     elsewhere on this page) -- the originally-submitted list only remains
     relevant when there's no live team at all yet.
+
+    Payment/Lunch sections below are new: Payment is read-only always (staff
+    set payment_status from the Teams tab, never here) and only shown once
+    approved with a live team to report on. Lunch pulls lunch_days/
+    dietary_restrictions OUT of the roster card itself (_player_row.html's
+    show_lunch=False here) into their own section instead, via
+    _player_lunch_row.html -- rendered from the exact same player_formset
+    when one's in context (kept in lockstep with the Roster card's own
+    "Add another player" by static/js/bulk-add-rows.js's own companion-row
+    support), or straight off the read-only roster/player list otherwise.
+    Days before restrictions, each day tagged with its price, and a running
+    total up top that recomputes live as checkboxes toggle -- see
+    #lunch-total's own inline <script> below and
+    TournamentRegistrationStatusView._lunch_total's own docstring for why
+    the server-rendered figure is only a *starting* point in the editable
+    case but the final one in every read-only case.
 {% endcomment %}
 
 {% block page_title %}{% trans "Registration status" %}{% endblock page_title %}
@@ -79,6 +95,79 @@
         {% endif %}
     </div>
 
+    {% if registration.status == "approved" and registration.tournament_team %}
+        <div class="card card-body mt-4">
+            <h2 class="card-title">{% lucide "banknote" size=18 %} {% trans "Payment" %}</h2>
+            <div class="flex flex-wrap items-center gap-2">
+                {% with status=registration.tournament_team.payment_status %}
+                    <span class="badge {% if status == "fully_paid" %}badge-success{% elif status == "deposit_received" %}badge-warning{% else %}badge-error{% endif %}">{{ registration.tournament_team.get_payment_status_display }}</span>
+                {% endwith %}
+            </div>
+            {% if tournament.deposit_amount or tournament.entry_fee_amount %}
+                <dl class="mt-2 flex flex-wrap gap-x-6 gap-y-1 text-sm">
+                    {% if tournament.deposit_amount %}
+                        <div class="flex items-baseline gap-1.5"><dt class="text-muted">{% trans "Deposit" %}</dt><dd class="font-mono font-semibold text-ink">{{ tournament.deposit_amount }}</dd></div>
+                    {% endif %}
+                    {% if tournament.entry_fee_amount %}
+                        <div class="flex items-baseline gap-1.5"><dt class="text-muted">{% trans "Entry fee" %}</dt><dd class="font-mono font-semibold text-ink">{{ tournament.entry_fee_amount }}</dd></div>
+                    {% endif %}
+                </dl>
+            {% endif %}
+        </div>
+    {% endif %}
+
+    {% if tournament.lunch_mode != "none" %}
+        <div class="card card-body mt-4">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+                <h2 class="card-title">{% lucide "utensils" size=18 %} {% trans "Lunch" %}</h2>
+                {% if tournament.lunch_price_per_day %}
+                    <div class="text-sm text-muted">
+                        {% trans "Total" %}:
+                        <span id="lunch-total" class="font-mono font-bold text-ink" data-price-per-day="{{ tournament.lunch_price_per_day|stringformat:"f" }}" data-mandatory-total="{{ mandatory_total|stringformat:"f" }}">{{ lunch_total }}</span>
+                    </div>
+                {% endif %}
+            </div>
+            {% if tournament.lunch_price_per_day %}<p class="text-xs text-dim">{% blocktrans with price=tournament.lunch_price_per_day %}{{ price }} per person, per day.{% endblocktrans %}</p>{% endif %}
+
+            {% if player_formset %}
+                <div id="lunch-add-rows" data-prefix="{{ player_formset.prefix }}" class="mt-2 flex flex-col gap-3">
+                    {% for player_form in player_formset %}
+                        {% include "tournaments/_player_lunch_row.html" with form=player_form price_per_day=tournament.lunch_price_per_day price_per_day_raw=tournament.lunch_price_per_day mandatory_days=lunch_is_mandatory %}
+                    {% endfor %}
+                </div>
+                <template id="lunch-add-row-template">
+                    {% include "tournaments/_player_lunch_row.html" with form=player_formset.empty_form price_per_day=tournament.lunch_price_per_day price_per_day_raw=tournament.lunch_price_per_day mandatory_days=lunch_is_mandatory %}
+                </template>
+            {% elif registration.tournament_team %}
+                <ul class="mt-2 flex flex-col gap-2">
+                    {% for entry in registration.tournament_team.roster_entries.all %}
+                        {% if entry.lunch_days or entry.dietary_restrictions %}
+                            <li class="text-sm">
+                                <span class="font-semibold text-ink">{{ entry.display_name }}</span>
+                                {% if entry.lunch_days %}<span class="ml-1.5 text-muted">{{ entry.lunch_days|join:", " }}</span>{% endif %}
+                                {% if entry.dietary_restrictions %}<div class="text-xs text-dim">{{ entry.dietary_restrictions }}</div>{% endif %}
+                            </li>
+                        {% endif %}
+                    {% empty %}
+                        <p class="text-sm text-muted">{% trans "No lunch details yet." %}</p>
+                    {% endfor %}
+                </ul>
+            {% elif registration.players.all %}
+                <ul class="mt-2 flex flex-col gap-2">
+                    {% for player in registration.players.all %}
+                        {% if player.lunch_days or player.dietary_restrictions %}
+                            <li class="text-sm">
+                                <span class="font-semibold text-ink">{{ player.first_name }} {{ player.last_name }}</span>
+                                {% if player.lunch_days %}<span class="ml-1.5 text-muted">{{ player.lunch_days|join:", " }}</span>{% endif %}
+                                {% if player.dietary_restrictions %}<div class="text-xs text-dim">{{ player.dietary_restrictions }}</div>{% endif %}
+                            </li>
+                        {% endif %}
+                    {% endfor %}
+                </ul>
+            {% endif %}
+        </div>
+    {% endif %}
+
     {% if player_formset %}
         <form method="post" class="card card-body mt-4 flex flex-col gap-4">
             {% csrf_token %}
@@ -91,13 +180,13 @@
                 <button class="btn btn-outline btn-sm gap-2" type="button" id="add-row">{% lucide "plus" size=14 %} {% trans "Add another player" %}</button>
             </div>
             {{ player_formset.management_form }}
-            <div id="bulk-add-rows" data-prefix="{{ player_formset.prefix }}" class="flex flex-col gap-3">
+            <div id="bulk-add-rows" data-prefix="{{ player_formset.prefix }}" data-companion-rows="lunch-add-rows" data-companion-template="lunch-add-row-template" class="flex flex-col gap-3">
                 {% for player_form in player_formset %}
-                    {% include "tournaments/_player_row.html" with form=player_form %}
+                    {% include "tournaments/_player_row.html" with form=player_form show_lunch=False %}
                 {% endfor %}
             </div>
             <template id="bulk-add-row-template">
-                {% include "tournaments/_player_row.html" with form=player_formset.empty_form %}
+                {% include "tournaments/_player_row.html" with form=player_formset.empty_form show_lunch=False %}
             </template>
 
             <button class="btn btn-primary gap-2 self-start" type="submit">{% lucide "save" size=16 %} {% trans "Save roster" %}</button>
@@ -135,4 +224,36 @@
 
 {% block extra_body %}
     {% if player_formset %}<script src="{% static 'js/bulk-add-rows.js' %}"></script>{% endif %}
+    {% if tournament.lunch_mode != "none" and tournament.lunch_price_per_day %}
+        <script>
+            // Recomputes #lunch-total live as OPTIONAL-mode checkboxes (each
+            // wrapped in a [data-lunch-day] label, see _player_lunch_row.html)
+            // are toggled -- delegated on document so it keeps working for
+            // rows bulk-add-rows.js's companion-row support adds after load.
+            // MANDATORY mode has no checkboxes at all, so it never runs here
+            // -- the server-rendered starting figure (mandatory_total, price
+            // per day x every tournament day x every person) is already the
+            // final total in that case.
+            (() => {
+                const totalEl = document.getElementById("lunch-total");
+                if (!totalEl) return;
+                const pricePerDay = parseFloat(totalEl.dataset.pricePerDay || "0");
+                const mandatoryTotal = parseFloat(totalEl.dataset.mandatoryTotal || "0");
+
+                const recompute = () => {
+                    let total = mandatoryTotal;
+                    document.querySelectorAll("[data-lunch-day] input[type=checkbox]:checked").forEach(() => {
+                        total += pricePerDay;
+                    });
+                    totalEl.textContent = total.toFixed(2);
+                };
+
+                document.addEventListener("change", (event) => {
+                    if (event.target.closest("[data-lunch-day]")) recompute();
+                });
+
+                if (document.querySelector("[data-lunch-day]")) recompute();
+            })();
+        </script>
+    {% endif %}
 {% endblock extra_body %}

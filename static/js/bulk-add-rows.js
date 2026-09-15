@@ -20,6 +20,15 @@
     const totalForms = document.getElementById(`id_${rows.dataset.prefix}-TOTAL_FORMS`);
     if (!totalForms) return;
 
+    // Opt-in second row list for the same formset, kept in lockstep by plain
+    // DOM position rather than any index bookkeeping -- registration_status.html
+    // is the only page with one (its own Lunch section mirrors this same
+    // formset's rows one-for-one, see its own template comment for why). Every
+    // other page using this script has neither attribute, so companionRows
+    // stays null and every branch below is a no-op for them.
+    const companionRows = rows.dataset.companionRows ? document.getElementById(rows.dataset.companionRows) : null;
+    const companionTemplate = rows.dataset.companionTemplate ? document.getElementById(rows.dataset.companionTemplate) : null;
+
     // Jersey number and captaincy belong to a TeamMembership; a staff position
     // becomes a StaffAssignment, which has neither. PositionSelect
     // (management/forms.py) marks the staff options so those inputs can grey
@@ -75,17 +84,27 @@
         syncPlayerOnlyFields(row);
 
         const remove = row.querySelector(".remove-row");
-        if (remove) remove.addEventListener("click", () => row.remove());
+        if (remove) {
+            remove.addEventListener("click", () => {
+                if (companionRows) {
+                    const position = Array.from(rows.children).indexOf(row);
+                    const companion = companionRows.children[position];
+                    if (companion) companion.remove();
+                }
+                row.remove();
+            });
+        }
     };
 
     rows.querySelectorAll(".bulk-add-row").forEach(wireRow);
 
-    // Cloned from the template's parsed content rather than re-parsed from its
-    // innerHTML: the rows are <tr>s, and assigning "<tr>...</tr>" to some stray
-    // <div>'s innerHTML drops them on the floor -- a <tr> is only valid inside a
-    // table, which is exactly the context <template> already parsed it in.
-    const buildRow = (index) => {
-        const row = template.content.firstElementChild.cloneNode(true);
+    // Cloned from the given template's parsed content rather than re-parsed
+    // from its innerHTML: a formset row can be a <tr>, and assigning
+    // "<tr>...</tr>" to some stray <div>'s innerHTML drops it on the floor --
+    // a <tr> is only valid inside a table, which is exactly the context
+    // <template> already parsed it in.
+    const buildRow = (index, fromTemplate) => {
+        const row = fromTemplate.content.firstElementChild.cloneNode(true);
         for (const element of [row, ...row.querySelectorAll("*")]) {
             for (const attribute of Array.from(element.attributes)) {
                 if (attribute.value.includes("__prefix__")) {
@@ -98,11 +117,15 @@
 
     addButton.addEventListener("click", () => {
         const index = Number(totalForms.value);
-        const row = buildRow(index);
+        const row = buildRow(index, template);
 
         rows.appendChild(row);
         totalForms.value = index + 1;
         wireRow(row);
+
+        if (companionRows && companionTemplate) {
+            companionRows.appendChild(buildRow(index, companionTemplate));
+        }
 
         const firstInput = row.querySelector("input, select");
         if (firstInput) firstInput.focus();

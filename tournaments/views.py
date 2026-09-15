@@ -15,6 +15,7 @@ the staff-side review queue, never from here.
 """
 
 import itertools
+from decimal import Decimal
 
 from django.db.models import Q
 from django.http import Http404
@@ -196,12 +197,55 @@ class TournamentRegistrationStatusView(TournamentFeatureMixin, View):
         ]
         return TournamentRegistrationPlayerFormSet(data, initial=initial, prefix="players", form_kwargs={"tournament": registration.tournament})
 
+    def _lunch_total(self, tournament, player_formset, registration):
+        """The Lunch section's starting total -- read-only branches (no
+        `player_formset` in context at all) have no checkboxes for
+        registration_status.html's own totalling <script> to sum, so this is
+        also the *final* figure there, not just an initial one. For the
+        editable OPTIONAL case the script immediately recomputes from the
+        rendered checkboxes anyway (see the template), so this only has to
+        be roughly right as a first paint before JS takes over -- but it
+        still has to count the same people the page is about to render, so
+        it's computed here rather than duplicated in the template.
+
+        Returns ``(mandatory_total, total)`` -- ``mandatory_total`` is the
+        fixed contribution from MANDATORY-mode people (nothing to toggle,
+        so the script bakes it straight into its own starting point rather
+        than re-summing it), ``total`` is the full starting figure.
+        """
+        if tournament.lunch_mode == Tournament.LunchMode.NONE:
+            return Decimal("0"), Decimal("0")
+
+        price = tournament.lunch_price_per_day or Decimal("0")
+        if player_formset is not None:
+            person_count = sum(1 for form in player_formset.forms if form.initial.get("first_name") or form.initial.get("last_name"))
+            lunch_day_lists = [form.initial.get("lunch_days") or [] for form in player_formset.forms if form.initial.get("first_name") or form.initial.get("last_name")]
+        elif getattr(registration, "tournament_team", None):
+            entries = list(registration.tournament_team.roster_entries.all())
+            person_count = len(entries)
+            lunch_day_lists = [entry.lunch_days or [] for entry in entries]
+        else:
+            players = list(registration.players.all())
+            person_count = len(players)
+            lunch_day_lists = [player.lunch_days or [] for player in players]
+
+        if tournament.lunch_mode == Tournament.LunchMode.MANDATORY:
+            mandatory_total = price * len(tournament.date_range()) * person_count
+            return mandatory_total, mandatory_total
+
+        total = price * sum(len(days) for days in lunch_day_lists)
+        return Decimal("0"), total
+
     def render_page(self, request, registration, player_formset=None):
-        context = {"tournament": registration.tournament, "registration": registration, "roster_closed": self._live_roster_is_closed(registration)}
+        tournament = registration.tournament
+        context = {"tournament": tournament, "registration": registration, "roster_closed": self._live_roster_is_closed(registration)}
         if registration.status == TournamentRegistration.Status.PENDING:
             context["player_formset"] = player_formset if player_formset is not None else self.get_player_formset(registration)
         elif self._live_roster_is_editable(registration):
             context["player_formset"] = player_formset if player_formset is not None else self.get_roster_formset(registration)
+
+        context["mandatory_total"], context["lunch_total"] = self._lunch_total(tournament, context.get("player_formset"), registration)
+        context["lunch_is_mandatory"] = tournament.lunch_mode == Tournament.LunchMode.MANDATORY
         return render(request, self.template_name, context)
 
     def get(self, request, *args, **kwargs):

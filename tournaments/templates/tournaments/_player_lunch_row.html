@@ -1,0 +1,45 @@
+{% load i18n ui %}
+{% comment %}
+    One person's row in registration_status.html's own Lunch section --
+    the editable-formset counterpart to _player_row.html, rendering the same
+    form's lunch_days/dietary_restrictions fields (show_lunch=False on that
+    partial skips them there so they only ever appear once). Lunch days
+    before dietary restrictions, per the redesign -- and each selected day
+    tagged with its price so the running total up top isn't the only place
+    the cost shows. OPTIONAL mode: each checkbox's wrapping <label> carries
+    data-lunch-day/data-lunch-price, which the page's own totalling <script>
+    sums over on every change. MANDATORY mode has no checkboxes to toggle --
+    its per-day cost is baked into the total's server-computed starting
+    point instead (mandatory_total in the view), not re-summed client-side.
+{% endcomment %}
+<div class="flex flex-col gap-3 rounded-box border border-line p-3.5">
+    <div class="text-sm font-semibold text-ink">{{ form.first_name.value|default:"" }} {{ form.last_name.value|default:"" }}</div>
+
+    {% if form.lunch_days %}
+        <div>
+            <div class="mb-1.5 font-display text-[11px] font-bold tracking-[.12em] text-muted uppercase">{{ form.lunch_days.label }}</div>
+            <div class="flex flex-wrap gap-3">
+                {% for checkbox in form.lunch_days %}
+                    {% comment %}
+                        data-lunch-price on the <label>, not the <input> -- checkbox.tag renders the
+                        bare widget with no way to pass extra attrs through template auto-call, so the
+                        page's own <script> reads the price off the wrapping label instead (see
+                        registration_status.html's totalling script).
+                    {% endcomment %}
+                    <label class="flex items-center gap-1.5 text-sm text-ink" data-lunch-day data-lunch-price="{{ price_per_day_raw|default:"0" }}">
+                        {{ checkbox.tag }}
+                        {{ checkbox.choice_label }}
+                        {% if price_per_day %}<span class="font-mono text-xs text-muted">({{ price_per_day }})</span>{% endif %}
+                    </label>
+                {% endfor %}
+            </div>
+        </div>
+    {% elif mandatory_days %}
+        <div>
+            <div class="mb-1.5 font-display text-[11px] font-bold tracking-[.12em] text-muted uppercase">{% trans "Lunch days" %}</div>
+            <p class="text-sm text-muted">{% blocktrans %}Included every day -- lunch is mandatory for this tournament.{% endblocktrans %}</p>
+        </div>
+    {% endif %}
+
+    {% form_field form.dietary_restrictions textarea_height="h-16" %}
+</div>
