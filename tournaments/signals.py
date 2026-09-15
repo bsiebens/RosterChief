@@ -18,11 +18,12 @@ from events.models import Attendance
 
 from .models import Tournament, TournamentRosterEntry, TournamentRosterRole
 
-#: The two Attendance statuses that count as "confirmed to play" for a home
-#: team's roster -- the same pair mobile.views.HomeView's own
-#: "going_attendance" hero card already treats as "actually going" (a plain
-#: RSVP yes, or explicitly picked onto a roster by a coach).
-ATTENDING_STATUSES = {Attendance.AttendanceStatus.PRESENT, Attendance.AttendanceStatus.SELECTED}
+#: The Attendance status that counts as "confirmed to play" for a home
+#: team's roster -- deliberately just SELECTED (explicitly picked onto the
+#: roster by a coach), not also PRESENT (a plain "I'm coming" RSVP): a home
+#: tournament roster is who the coach is actually fielding, same distinction
+#: a normal game day already draws between "attending" and "selected."
+ATTENDING_STATUSES = {Attendance.AttendanceStatus.SELECTED}
 
 
 @receiver(post_save, sender=Attendance)
