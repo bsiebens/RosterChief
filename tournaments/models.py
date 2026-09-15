@@ -94,6 +94,13 @@ class Tournament(ClubScopedModel):
         _("lunch"), max_length=10, choices=LunchMode.choices, default=LunchMode.NONE, help_text=_("Optional: each player/staff member picks which tournament days they need lunch on. Mandatory: lunch is included for everyone, every day.")
     )
     lunch_price_per_day = models.DecimalField(_("lunch price per day"), max_digits=6, decimal_places=2, null=True, blank=True, help_text=_("Per person, per day -- shown alongside a team's lunch picks so staff can work out what's owed."))
+    #: Purely a display/calculation toggle for the status page's own "amount
+    #: still owed" figure (see TournamentRegistrationStatusView._amount_owed)
+    #: -- clubs genuinely differ here: some fold lunch into the one transfer
+    #: a team sends for its entry fee, others collect it separately (cash on
+    #: the day, a different channel entirely). Doesn't affect anything else
+    #: (payment_status stays one manually-set status either way).
+    lunch_billed_with_fee = models.BooleanField(_("bill lunch with the entry fee"), default=True, help_text=_("On: lunch is added to the entry fee/deposit total below. Off: lunch is collected separately, and left out of that total."))
     #: Shown on both the public tournament page and the registration page
     #: itself -- "who do I email about this tournament", distinct from a
     #: registering team's own ``foreign_contact_email`` (who the club should

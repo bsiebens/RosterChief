@@ -237,6 +237,29 @@ class TournamentRegistrationStatusView(TournamentFeatureMixin, View):
         total = price * sum(len(days) for days in lunch_day_lists)
         return Decimal("0"), total
 
+    def _amount_owed(self, tournament, lunch_total, team) -> Decimal:
+        """What's still open, in bold on the Payment card -- necessarily an
+        approximation, since ``TournamentTeam.payment_status`` is one of
+        three coarse states (nothing tracks a partial amount actually
+        received): FULLY_PAID counts as fully settled regardless of the
+        figures below, DEPOSIT_RECEIVED counts exactly ``deposit_amount``
+        as paid, UNPAID counts nothing as paid yet. ``lunch_total`` only
+        counts toward what's owed when ``lunch_billed_with_fee`` is on --
+        off, and lunch is collected through some other channel entirely,
+        so it has no business in this figure at all."""
+        owed = tournament.entry_fee_amount or Decimal("0")
+        if tournament.lunch_billed_with_fee:
+            owed += lunch_total
+
+        if team.payment_status == TournamentTeam.PaymentStatus.FULLY_PAID:
+            paid = owed
+        elif team.payment_status == TournamentTeam.PaymentStatus.DEPOSIT_RECEIVED:
+            paid = tournament.deposit_amount or Decimal("0")
+        else:
+            paid = Decimal("0")
+
+        return max(owed - paid, Decimal("0"))
+
     def render_page(self, request, registration, player_formset=None):
         tournament = registration.tournament
         context = {"tournament": tournament, "registration": registration, "roster_closed": self._live_roster_is_closed(registration)}
@@ -247,6 +270,8 @@ class TournamentRegistrationStatusView(TournamentFeatureMixin, View):
 
         context["mandatory_total"], context["lunch_total"] = self._lunch_total(tournament, context.get("player_formset"), registration)
         context["lunch_is_mandatory"] = tournament.lunch_mode == Tournament.LunchMode.MANDATORY
+        if registration.status == TournamentRegistration.Status.APPROVED and getattr(registration, "tournament_team", None):
+            context["amount_owed"] = self._amount_owed(tournament, context["lunch_total"], registration.tournament_team)
         return render(request, self.template_name, context)
 
     def get(self, request, *args, **kwargs):

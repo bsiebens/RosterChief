@@ -213,7 +213,24 @@ class TournamentForm(forms.ModelForm):
 
     class Meta:
         model = Tournament
-        fields = ["name", "status", "start_date", "end_date", "registration_open", "max_teams", "min_age", "max_age", "contact_email", "description", "home_team", "deposit_amount", "entry_fee_amount", "lunch_mode", "lunch_price_per_day"]
+        fields = [
+            "name",
+            "status",
+            "start_date",
+            "end_date",
+            "registration_open",
+            "max_teams",
+            "min_age",
+            "max_age",
+            "contact_email",
+            "description",
+            "home_team",
+            "deposit_amount",
+            "entry_fee_amount",
+            "lunch_mode",
+            "lunch_price_per_day",
+            "lunch_billed_with_fee",
+        ]
         widgets = {
             "start_date": forms.DateInput(attrs={"type": "date"}),
             "end_date": forms.DateInput(attrs={"type": "date"}),

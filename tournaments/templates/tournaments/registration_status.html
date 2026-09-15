@@ -130,6 +130,13 @@
                     {% endif %}
                 </dl>
             {% endif %}
+            {% if amount_owed is not None %}
+                <p class="mt-2 text-sm text-muted">
+                    {% trans "Still to pay:" %}
+                    <span class="font-mono text-base font-extrabold {% if amount_owed > 0 %}text-club-dark{% else %}text-ok{% endif %}">{{ amount_owed }}</span>
+                    {% if not tournament.lunch_billed_with_fee and tournament.lunch_mode != "none" %}<span class="block text-xs text-dim">{% trans "Lunch is billed separately, not included here." %}</span>{% endif %}
+                </p>
+            {% endif %}
         </div>
     {% endif %}
 

@@ -1516,6 +1516,71 @@ class TournamentRegistrationStatusViewTests(TournamentsTestCase):
         self.assertIn("Payment", content)
         self.assertLess(content.index("Payment"), content.index("20.00"))
 
+    def test_amount_owed_is_the_full_fee_when_unpaid(self):
+        self.registration.status = TournamentRegistration.Status.APPROVED
+        self.registration.save()
+        self.tournament.entry_fee_amount = Decimal("150.00")
+        self.tournament.save()
+        TournamentTeam.objects.create(club=self.club, tournament=self.tournament, registration=self.registration, foreign_name="Visiting FC", payment_status=TournamentTeam.PaymentStatus.UNPAID)
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.context["amount_owed"], Decimal("150.00"))
+
+    def test_amount_owed_subtracts_the_deposit_once_received(self):
+        self.registration.status = TournamentRegistration.Status.APPROVED
+        self.registration.save()
+        self.tournament.deposit_amount = Decimal("50.00")
+        self.tournament.entry_fee_amount = Decimal("150.00")
+        self.tournament.save()
+        TournamentTeam.objects.create(club=self.club, tournament=self.tournament, registration=self.registration, foreign_name="Visiting FC", payment_status=TournamentTeam.PaymentStatus.DEPOSIT_RECEIVED)
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.context["amount_owed"], Decimal("100.00"))
+
+    def test_amount_owed_is_zero_once_fully_paid(self):
+        self.registration.status = TournamentRegistration.Status.APPROVED
+        self.registration.save()
+        self.tournament.entry_fee_amount = Decimal("150.00")
+        self.tournament.save()
+        TournamentTeam.objects.create(club=self.club, tournament=self.tournament, registration=self.registration, foreign_name="Visiting FC", payment_status=TournamentTeam.PaymentStatus.FULLY_PAID)
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.context["amount_owed"], Decimal("0"))
+
+    def test_amount_owed_includes_lunch_when_billed_with_the_fee(self):
+        self.registration.status = TournamentRegistration.Status.APPROVED
+        self.registration.save()
+        self.tournament.entry_fee_amount = Decimal("150.00")
+        self.tournament.lunch_mode = Tournament.LunchMode.OPTIONAL
+        self.tournament.lunch_price_per_day = Decimal("10.00")
+        self.tournament.lunch_billed_with_fee = True
+        self.tournament.save()
+        team = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, registration=self.registration, foreign_name="Visiting FC", payment_status=TournamentTeam.PaymentStatus.UNPAID)
+        TournamentRosterEntry.objects.create(tournament_team=team, foreign_first_name="Robin", foreign_last_name="Newcomer", lunch_days=["2026-09-19"])
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.context["amount_owed"], Decimal("160.00"))
+
+    def test_amount_owed_excludes_lunch_when_billed_separately(self):
+        self.registration.status = TournamentRegistration.Status.APPROVED
+        self.registration.save()
+        self.tournament.entry_fee_amount = Decimal("150.00")
+        self.tournament.lunch_mode = Tournament.LunchMode.OPTIONAL
+        self.tournament.lunch_price_per_day = Decimal("10.00")
+        self.tournament.lunch_billed_with_fee = False
+        self.tournament.save()
+        team = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, registration=self.registration, foreign_name="Visiting FC", payment_status=TournamentTeam.PaymentStatus.UNPAID)
+        TournamentRosterEntry.objects.create(tournament_team=team, foreign_first_name="Robin", foreign_last_name="Newcomer", lunch_days=["2026-09-19"])
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.context["amount_owed"], Decimal("150.00"))
+        self.assertContains(response, "billed separately")
+
     def test_no_lunch_section_when_lunch_mode_is_none(self):
         response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
 
