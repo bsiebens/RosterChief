@@ -97,8 +97,8 @@
 
     {% if registration.status == "approved" and registration.tournament_team %}
         <div class="card card-body mt-4">
-            <h2 class="card-title">{% lucide "banknote" size=18 %} {% trans "Payment" %}</h2>
-            <div class="flex flex-wrap items-center gap-2">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+                <h2 class="card-title">{% lucide "banknote" size=18 %} {% trans "Payment" %}</h2>
                 {% with status=registration.tournament_team.payment_status %}
                     <span class="badge {% if status == "fully_paid" %}badge-success{% elif status == "deposit_received" %}badge-warning{% else %}badge-error{% endif %}">{{ registration.tournament_team.get_payment_status_display }}</span>
                 {% endwith %}
