@@ -5,6 +5,7 @@ from django.utils.translation import gettext_lazy as _
 
 from club.models import Season
 from events.models import Event
+from members.models import Member
 from teams.models import Team
 
 from .models import DressingRoom, Tournament, TournamentField, TournamentRegistration, TournamentRosterEntry, TournamentRosterRole, TournamentStage, TournamentTask, TournamentTeam
@@ -435,6 +436,25 @@ class TournamentTaskGenerateForm(forms.Form):
         if start and end and end <= start:
             self.add_error("ends_at", _("Must be after the start time."))
         return cleaned
+
+
+class TournamentTaskAssignForm(forms.Form):
+    """A staff-facing counterpart to the mobile self-claim flow -- a
+    tournament admin picking any club member for an open shift, e.g. a
+    parent who agreed in person rather than through the app.
+    ``tournaments.services.tasks.claim_task`` does the actual claim (same
+    capacity/duplicate checks either path goes through); this is just the
+    picker. ``club``/``tournament`` come from the view, never the form."""
+
+    member = forms.ModelChoiceField(queryset=Member.objects.none(), label=_("Member"), widget=forms.Select(attrs={"data-searchable": "true", "data-search-placeholder": _("Type a name to search...")}))
+
+    def __init__(self, *args, club=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        # A shift is as often covered by a parent (a FamilyMembership, no
+        # ClubMembership of their own) as by a player/coach (member_of) --
+        # unlike SignupLinkMemberForm's own member_of-only queryset (which
+        # deliberately wants "real club members" only), this needs both.
+        self.fields["member"].queryset = Member.objects.filter(Q(member_of__club=club) | Q(family_memberships__family__club=club)).distinct().order_by("last_name", "first_name")
 
 
 class DressingRoomForm(forms.ModelForm):

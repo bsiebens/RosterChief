@@ -4,14 +4,17 @@
 {% comment %}
     A tournament's own "Tasks" tab -- every TournamentTask across the whole
     tournament, time-sorted (unlike _event_task_panel.html, which is scoped
-    to one event with no sense of time). Read-only claim list -- claiming a
-    slot only happens on mobile, each claim shown under
+    to one event with no sense of time). Self-claiming only happens on
+    mobile, but staff can also assign any club member directly here
+    (TournamentTaskAssignView, e.g. someone who agreed in person) --
+    either way each claim is shown under
     members.services.family.claim_label_for(claim.member) rather than the
     claiming member's own name, same privacy convention
     _event_task_panel.html documents for EventTask.
 
-    Context: tournament, tasks (each with .claim_labels/.is_full/.edit_form
-    attached in TournamentTaskListView.get_context_data), task_form.
+    Context: tournament, tasks (each with .claim_labels/.is_full/.edit_form/
+    .assign_form attached in TournamentTaskListView.get_context_data),
+    task_form.
 {% endcomment %}
 
 {% block panel_title %}{{ tournament.name }}{% endblock panel_title %}
@@ -22,6 +25,7 @@
 {% endblock topbar_context %}
 
 {% block actions %}
+    <a class="btn btn-outline gap-2" href="{% url 'management:tournament_task_print' tournament.pk %}">{% lucide "printer" size=16 %} {% trans "Print overview" %}</a>
     <button class="btn btn-outline gap-2" type="button" onclick="document.getElementById('shift_generate_modal').showModal()">{% lucide "layers" size=16 %} {% trans "Generate shifts" %}</button>
     <button class="btn btn-primary gap-2" type="button" onclick="document.getElementById('shift_create_modal').showModal()">{% lucide "plus" size=16 %} {% trans "Add shift" %}</button>
 {% endblock actions %}
@@ -58,6 +62,9 @@
                             {% endif %}
                         </td>
                         <td class="text-right whitespace-nowrap">
+                            {% if not task.is_full %}
+                                <button class="btn btn-outline btn-xs" type="button" onclick="document.getElementById('{{ task.pk|dom_id:"shift_assign_modal" }}').showModal()">{% lucide "user-plus" size=12 %} {% trans "Assign" %}</button>
+                            {% endif %}
                             <button class="btn btn-outline btn-xs" type="button" onclick="document.getElementById('{{ task.pk|dom_id:"shift_update_modal" }}').showModal()">{% lucide "pencil" size=12 %} {% trans "Edit" %}</button>
                             <button class="btn btn-outline btn-xs btn-error" type="button" onclick="document.getElementById('{{ task.pk|dom_id:"shift_delete_modal" }}').showModal()">{% lucide "trash-2" size=12 %} {% trans "Delete" %}</button>
                         </td>
@@ -82,10 +89,15 @@
     {% blocktrans asvar generate_shifts_blurb %}Fills a whole window with same-length shifts back to back -- e.g. 09:00-12:00 in 30-minute slices makes 6 shifts, each needing the same number of people.{% endblocktrans %}
     {% include "controlpanel/_modal_form.html" with modal_id="shift_generate_modal" title=generate_shifts_title form=generate_form action_url=task_generate_url submit_label=generate_shifts_submit_label submit_icon="layers" blurb=generate_shifts_blurb %}
 
+    {% trans "Assign a member" as assign_shift_title %}
+    {% trans "Assign" as assign_shift_label %}
     {% trans "Edit shift" as edit_shift_title %}
     {% trans "Delete shift" as delete_shift_title %}
     {% trans "Delete" as delete_shift_label %}
     {% for task in tasks %}
+        {% url 'management:tournament_task_assign' tournament.pk task.pk as task_assign_url %}
+        {% include "controlpanel/_modal_form.html" with modal_id=task.pk|dom_id:"shift_assign_modal" title=assign_shift_title form=task.assign_form action_url=task_assign_url submit_label=assign_shift_label submit_icon="user-plus" %}
+
         {% url 'management:tournament_task_update' tournament.pk task.pk as task_update_url %}
         {% include "controlpanel/_modal_form.html" with modal_id=task.pk|dom_id:"shift_update_modal" title=edit_shift_title form=task.edit_form action_url=task_update_url submit_icon="check" %}
 
