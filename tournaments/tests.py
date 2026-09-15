@@ -1521,6 +1521,30 @@ class TournamentRegistrationStatusViewTests(TournamentsTestCase):
         self.assertIn("Nut allergy", content)
         self.assertLess(content.index("Sat 19 Sep"), content.index("Nut allergy"))
 
+    def test_lunch_table_shows_the_players_name(self):
+        self.tournament.lunch_mode = Tournament.LunchMode.OPTIONAL
+        self.tournament.lunch_price_per_day = Decimal("10.00")
+        self.tournament.save()
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, "Sam")
+        self.assertContains(response, "Striker")
+
+    def test_lunch_table_shows_the_roster_before_the_lunch_section(self):
+        self.registration.status = TournamentRegistration.Status.APPROVED
+        self.registration.save()
+        team = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, registration=self.registration, foreign_name="Visiting FC")
+        TournamentRosterEntry.objects.create(tournament_team=team, foreign_first_name="Robin", foreign_last_name="Newcomer", lunch_days=["2026-09-19"])
+        self.tournament.lunch_mode = Tournament.LunchMode.OPTIONAL
+        self.tournament.lunch_price_per_day = Decimal("10.00")
+        self.tournament.save()
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+        content = response.content.decode()
+
+        self.assertLess(content.index("Roster"), content.index("Lunch"))
+
     def test_lunch_total_reflects_price_and_selected_days(self):
         self.tournament.lunch_mode = Tournament.LunchMode.OPTIONAL
         self.tournament.lunch_price_per_day = Decimal("10.00")

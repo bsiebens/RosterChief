@@ -1,23 +1,29 @@
 {% load i18n ui %}
 {% comment %}
-    One person's row in registration_status.html's own Lunch section --
-    the editable-formset counterpart to _player_row.html, rendering the same
+    One person's ROW in registration_status.html's own Lunch table -- the
+    editable-formset counterpart to _player_row.html, rendering the same
     form's lunch_days/dietary_restrictions fields (show_lunch=False on that
-    partial skips them there so they only ever appear once). Lunch days
-    before dietary restrictions, per the redesign -- and each selected day
-    tagged with its price so the running total up top isn't the only place
-    the cost shows. OPTIONAL mode: each checkbox's wrapping <label> carries
-    data-lunch-day/data-lunch-price, which the page's own totalling <script>
-    sums over on every change. MANDATORY mode has no checkboxes to toggle --
-    its per-day cost is baked into the total's server-computed starting
-    point instead (mandatory_total in the view), not re-summed client-side.
-{% endcomment %}
-<div class="flex flex-col gap-3 rounded-box border border-line p-3.5">
-    <div class="text-sm font-semibold text-ink">{{ form.first_name.value|default:"" }} {{ form.last_name.value|default:"" }}</div>
+    partial skips them there so they only ever appear once). A <tr> in a
+    single table, not a card of its own -- collapsed from one card per
+    person (easy to lose track of whose card was whose) into a table with
+    its own Name column, sitting after the Roster section rather than a
+    stack of cards above it. No remove button of its own: bulk-add-rows.js's
+    companion-row support already removes this row when the matching Roster
+    row's own remove button is used, see that script's own comment.
 
-    {% if form.lunch_days %}
-        <div>
-            <div class="mb-1.5 font-display text-[11px] font-bold tracking-[.12em] text-muted uppercase">{{ form.lunch_days.label }}</div>
+    Lunch days before dietary restrictions, per the earlier redesign -- and
+    each selected day tagged with its price so the running total up top
+    isn't the only place the cost shows. OPTIONAL mode: each checkbox's
+    wrapping <label> carries data-lunch-day/data-lunch-price, which the
+    page's own totalling <script> sums over on every change. MANDATORY mode
+    has no checkboxes to toggle -- its per-day cost is baked into the
+    total's server-computed starting point instead (mandatory_total in the
+    view), not re-summed client-side.
+{% endcomment %}
+<tr class="bulk-add-row align-top">
+    <td class="py-2 pr-3 text-sm font-semibold whitespace-nowrap text-ink">{{ form.first_name.value|default:"" }} {{ form.last_name.value|default:"" }}</td>
+    <td class="py-2 pr-3">
+        {% if form.lunch_days %}
             <div class="flex flex-wrap gap-3">
                 {% for checkbox in form.lunch_days %}
                     {% comment %}
@@ -33,13 +39,11 @@
                     </label>
                 {% endfor %}
             </div>
-        </div>
-    {% elif mandatory_days %}
-        <div>
-            <div class="mb-1.5 font-display text-[11px] font-bold tracking-[.12em] text-muted uppercase">{% trans "Lunch days" %}</div>
-            <p class="text-sm text-muted">{% blocktrans %}Included every day -- lunch is mandatory for this tournament.{% endblocktrans %}</p>
-        </div>
-    {% endif %}
-
-    {% form_field form.dietary_restrictions textarea_height="h-16" %}
-</div>
+        {% elif mandatory_days %}
+            <p class="text-sm text-muted">{% trans "Included every day" %}</p>
+        {% endif %}
+    </td>
+    <td class="min-w-[16rem] py-2">
+        {% form_field form.dietary_restrictions show_label=False textarea_height="h-12" %}
+    </td>
+</tr>
