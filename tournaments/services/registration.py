@@ -200,19 +200,26 @@ def delete_manual_team(team: TournamentTeam):
 
 
 @transaction.atomic
-def create_manual_team(tournament, *, club_team=None, foreign_fields: dict | None = None) -> TournamentTeam:
+def create_manual_team(tournament, *, club_team=None, foreign_fields: dict | None = None, snapshot_roster: bool = True) -> TournamentTeam:
     """Adds a ``TournamentTeam`` directly, bypassing the public registration
     queue entirely -- the "host club skips the queue" shortcut
     ``TournamentTeam``'s own docstring already describes, extended to any
     team staff want to enter by hand (a late walk-up, one that registered by
     phone). Exactly one of ``club_team``/``foreign_fields`` is given by the
     caller (``TournamentTeamForm`` enforces that); a club team's roster is
-    snapshotted the same way an approved club-team registration's is."""
+    snapshotted the same way an approved club-team registration's is --
+    unless ``snapshot_roster=False``, which ``ensure_home_team`` passes:
+    the home team's roster is live (``tournaments/signals.py``'s
+    ``sync_home_team_roster``), built up entirely from whichever members
+    the coach actually selects via the auto-created Event's Attendance,
+    not a one-time dump of the whole team regardless of who's been picked
+    for this tournament."""
     if club_team is not None:
         # The club doesn't pay itself -- a club team entered here is always
         # already fully paid, no staff step required.
         team = TournamentTeam.objects.create(club=tournament.club, tournament=tournament, team=club_team, payment_status=TournamentTeam.PaymentStatus.FULLY_PAID)
-        snapshot_club_team_roster(team, club_team, tournament.season)
+        if snapshot_roster:
+            snapshot_club_team_roster(team, club_team, tournament.season)
     else:
         team = TournamentTeam.objects.create(club=tournament.club, tournament=tournament, **foreign_fields)
 
@@ -232,7 +239,10 @@ def ensure_home_team(tournament) -> TournamentTeam | None:
     The ``TournamentTeam`` goes through ``create_manual_team`` -- same
     "host club skips the queue" shortcut a manually-added team already
     uses, so the home team gets its FULLY_PAID default and club-logo
-    fallback (``TournamentTeam.display_logo``) for free, no separate path.
+    fallback (``TournamentTeam.display_logo``) for free, no separate path
+    -- but with ``snapshot_roster=False``: unlike every other club-team
+    path in this app, the home team's roster is never a one-time
+    TeamMembership dump, only ever the live Attendance-driven sync below.
     ``withdraw_team`` refuses to withdraw it (see that function's own
     guard).
 
@@ -270,7 +280,7 @@ def ensure_home_team(tournament) -> TournamentTeam | None:
 
     team = TournamentTeam.objects.filter(tournament=tournament, team_id=tournament.home_team_id).first()
     if team is None:
-        team = create_manual_team(tournament, club_team=tournament.home_team)
+        team = create_manual_team(tournament, club_team=tournament.home_team, snapshot_roster=False)
 
     if tournament.event_id is None:
         from events.models import Event  # local import -- see Tournament.location's own docstring for why every cross-app reference in this app is lazy

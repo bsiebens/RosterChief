@@ -22,8 +22,9 @@ from members.models import Member
 from notifications.services import notify_members
 from rosterchief.concurrency import run_in_background
 from rosterchief.mail import send_message
+from teams.models import TeamMembership
 
-from ..models import Tournament, TournamentRosterEntry
+from ..models import Tournament
 
 
 def _status_url(registration, *, request=None) -> str:
@@ -97,12 +98,17 @@ def notify_tournament_shifts_open(tournament_id):
     events.services.notifications.notify_new_event's own docstring
     describes for its own dispatch site).
 
-    Notifies the home team's own roster -- their families are exactly who a
-    home tournament actually asks to volunteer for its shifts. Skipped
-    entirely (same "Skipped: ..." early-return shape notify_new_event uses)
-    when there's no home_team, the home team's own TournamentTeam hasn't
-    been created yet, there are no shifts defined, or nobody on that roster
-    has a real Member behind them to notify."""
+    Notifies the home team's whole squad (``TeamMembership`` for the
+    tournament's own season), not just whoever's already been selected onto
+    the tournament roster -- the entire point of this notification is to
+    ask people to *go sign up* (tournaments/signals.py's sync_home_team_roster
+    only ever adds a TournamentRosterEntry once a coach has SELECTED someone
+    via that sign-up), so querying the roster itself here would almost
+    always find nobody yet, right when a fresh notification is most useful.
+    Skipped entirely (same "Skipped: ..." early-return shape notify_new_event
+    uses) when there's no home_team, the home team's own TournamentTeam
+    hasn't been created yet, there are no shifts defined, or the team has
+    no members for this season to notify."""
     tournament = Tournament.objects.filter(pk=tournament_id).select_related("club").first()
     if tournament is None or tournament.home_team_id is None:
         return "Skipped: no tournament or no home team."
@@ -113,7 +119,7 @@ def notify_tournament_shifts_open(tournament_id):
     if home_team_entry is None:
         return "Skipped: home team not added yet."
 
-    member_ids = TournamentRosterEntry.objects.filter(tournament_team=home_team_entry, member__isnull=False).values_list("member_id", flat=True)
+    member_ids = TeamMembership.objects.filter(team_id=tournament.home_team_id, season=tournament.season).values_list("member_id", flat=True)
     members = Member.objects.filter(id__in=member_ids)
     if not members:
         return "Skipped: no one to notify."

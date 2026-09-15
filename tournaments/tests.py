@@ -1004,6 +1004,13 @@ class CreateManualTeamServiceTests(TournamentsTestCase):
         self.assertEqual(roster[0].jersey_number, 7)
         self.assertEqual(roster[0].position_label, "Forward")
 
+    def test_snapshot_roster_false_skips_the_teammembership_dump(self):
+        TeamMembership.objects.create(team=self.team, member=self.member, season=self.season)
+
+        team = create_manual_team(self.tournament, club_team=self.team, snapshot_roster=False)
+
+        self.assertEqual(team.roster_entries.count(), 0)
+
     def test_a_foreign_team_gets_created_from_the_given_fields_with_no_roster(self):
         team = create_manual_team(self.tournament, foreign_fields={"foreign_name": "Walk-up FC", "foreign_contact_email": "walkup@example.com"})
 
@@ -1021,7 +1028,12 @@ class EnsureHomeTeamServiceTests(TournamentsTestCase):
         self.assertEqual(TournamentTeam.objects.count(), 0)
         self.assertIsNone(self.tournament.event)
 
-    def test_creates_the_tournament_team_fully_paid_with_its_roster_snapshotted(self):
+    def test_creates_the_tournament_team_fully_paid_with_no_roster_snapshot(self):
+        # Unlike every other club-team path in this app, the home team's
+        # roster is never a one-time TeamMembership dump -- only the live
+        # Attendance-driven sync (tournaments/signals.py) ever adds to it,
+        # so a team member with no qualifying Attendance yet must not show
+        # up here just because ensure_home_team ran.
         position = Position.objects.create(club=self.club, name="Forward", short_name="FW")
         TeamMembership.objects.create(team=self.team, member=self.member, season=self.season, position=position, jersey_number=7)
         self.tournament.home_team = self.team
@@ -1031,9 +1043,7 @@ class EnsureHomeTeamServiceTests(TournamentsTestCase):
 
         self.assertEqual(team.team, self.team)
         self.assertEqual(team.payment_status, TournamentTeam.PaymentStatus.FULLY_PAID)
-        roster = list(team.roster_entries.all())
-        self.assertEqual(len(roster), 1)
-        self.assertEqual(roster[0].member, self.member)
+        self.assertEqual(team.roster_entries.count(), 0)
 
     def test_creates_and_links_an_event_scoped_to_the_home_team(self):
         self.tournament.home_team = self.team
@@ -1194,7 +1204,23 @@ class NotifyTournamentShiftsOpenServiceTests(TournamentsTestCase):
 
         self.assertIn("Skipped", result)
 
-    def test_notifies_members_on_the_home_teams_roster(self):
+    def test_notifies_the_home_teams_whole_squad(self):
+        self.member.email = "jane@example.com"
+        self.member.save()
+        TournamentTask.objects.create(tournament=self.tournament, title="Gate duty", starts_at=timezone.now(), ends_at=timezone.now() + datetime.timedelta(hours=1))
+
+        result = notify_tournament_shifts_open(str(self.tournament.pk))
+
+        self.assertIn("Notified 1", result)
+
+    def test_notifies_the_whole_squad_even_before_anyone_has_been_selected(self):
+        # This is the entire point of the notification: it fires the moment
+        # the tournament is published, before any coach has picked anyone
+        # for the actual roster (sync_home_team_roster only adds a
+        # TournamentRosterEntry once someone's SELECTED) -- querying the
+        # roster itself here would find nobody, right when a fresh
+        # publish-notification is most useful.
+        self.assertEqual(self.tournament_team.roster_entries.count(), 0)
         self.member.email = "jane@example.com"
         self.member.save()
         TournamentTask.objects.create(tournament=self.tournament, title="Gate duty", starts_at=timezone.now(), ends_at=timezone.now() + datetime.timedelta(hours=1))
