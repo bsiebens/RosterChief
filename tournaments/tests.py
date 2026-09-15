@@ -1501,6 +1501,21 @@ class TournamentRegistrationStatusViewTests(TournamentsTestCase):
 
         self.assertNotContains(response, "Payment")
 
+    def test_payment_section_also_shows_the_lunch_total(self):
+        self.registration.status = TournamentRegistration.Status.APPROVED
+        self.registration.save()
+        team = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, registration=self.registration, foreign_name="Visiting FC")
+        TournamentRosterEntry.objects.create(tournament_team=team, foreign_first_name="Robin", foreign_last_name="Newcomer", lunch_days=["2026-09-19", "2026-09-20"])
+        self.tournament.lunch_mode = Tournament.LunchMode.OPTIONAL
+        self.tournament.lunch_price_per_day = Decimal("10.00")
+        self.tournament.save()
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+        content = response.content.decode()
+
+        self.assertIn("Payment", content)
+        self.assertLess(content.index("Payment"), content.index("20.00"))
+
     def test_no_lunch_section_when_lunch_mode_is_none(self):
         response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
 
@@ -1543,7 +1558,10 @@ class TournamentRegistrationStatusViewTests(TournamentsTestCase):
         response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
         content = response.content.decode()
 
-        self.assertLess(content.index("Roster"), content.index("Lunch"))
+        # "Lunch" alone also matches the Payment card's own lunch-total line,
+        # which now legitimately sits above Roster -- "Lunch days" (the
+        # table's own column header) only ever appears in the Lunch section.
+        self.assertLess(content.index("Roster"), content.index("Lunch days"))
 
     def test_lunch_total_reflects_price_and_selected_days(self):
         self.tournament.lunch_mode = Tournament.LunchMode.OPTIONAL
@@ -1605,6 +1623,29 @@ class TournamentRegistrationStatusViewTests(TournamentsTestCase):
         player = self.registration.players.get()
         self.assertEqual(player.first_name, "Robin")
         self.assertEqual(player.jersey_number, 11)
+
+    def test_saving_from_the_lunch_section_actually_stores_lunch_selections(self):
+        # Regression test: lunch_days/dietary_restrictions used to render in
+        # a <div> entirely outside the Roster <form>, so nothing you ticked
+        # there was ever actually in the POST body no matter which button
+        # was clicked -- both save buttons now submit the same single form
+        # that contains everything, Roster and Lunch fields alike.
+        self.tournament.lunch_mode = Tournament.LunchMode.OPTIONAL
+        self.tournament.lunch_price_per_day = Decimal("10.00")
+        self.tournament.save()
+        data = self.formset_management(total=1) | {
+            "players-0-first_name": "Robin",
+            "players-0-last_name": "Newcomer",
+            "players-0-lunch_days": ["2026-09-19"],
+            "players-0-dietary_restrictions": "Vegetarian",
+        }
+
+        response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertRedirects(response, self._url())
+        player = self.registration.players.get()
+        self.assertEqual(player.lunch_days, ["2026-09-19"])
+        self.assertEqual(player.dietary_restrictions, "Vegetarian")
 
     def test_updating_the_roster_with_no_players_clears_it(self):
         data = self.formset_management(total=0)

@@ -1,0 +1,9 @@
+{% comment %}
+    The lunch running total -- shown in both the Payment card and the Lunch
+    section's own header on registration_status.html, so the cost is
+    visible wherever someone's actually looking (deliberately in both
+    places rather than picking one). Kept in sync by the same delegated
+    <script> updating every .lunch-total-value element on the page at once,
+    not just a single #lunch-total -- see that script's own comment.
+{% endcomment %}
+<span class="lunch-total-value font-mono font-bold text-ink" data-price-per-day="{{ tournament.lunch_price_per_day|stringformat:"f" }}" data-mandatory-total="{{ mandatory_total|stringformat:"f" }}">{{ lunch_total }}</span>
