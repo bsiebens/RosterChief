@@ -23,7 +23,7 @@ from waffle import get_waffle_flag_model
 from billing.models import Plan, PlanPrice
 from billing.services.dues import record_payment, subscribe
 from bugs.models import BugNote, BugReport
-from club.models import Club, ClubMembership, ClubRole, DuesInvoice, EvaluationManager, FeePayment, MemberRequirementStatus, OnboardingRequirement, Season, ShopManager, Sponsor
+from club.models import Club, ClubMembership, ClubRole, DuesInvoice, EvaluationManager, FeePayment, MemberRequirementStatus, OnboardingRequirement, Season, ShopManager, Sponsor, TournamentManager
 from club.services.invoicing import DuesInvoicePDFError, create_or_resend_invoice
 from club.services.onboarding import mark_complete
 from evaluations.models import EvaluationChecklist, EvaluationNote, EvaluationOutcome, EvaluationSession, PlayerEvaluation
@@ -15560,3 +15560,242 @@ class TournamentDressingRoomAssignmentTests(ManagementTestBase):
         response = self.club_post("tournament_dressing_room_release", {}, self.tournament.pk, other_assignment.pk)
 
         self.assertEqual(response.status_code, 404)
+
+
+class TournamentPermissionTiersTests(ManagementTestBase):
+    """The three-tier tournament permission model (club.mixins.
+    TournamentAdminRequiredMixin/TournamentOperatorRequiredMixin/plain
+    TournamentsManagerRequiredMixin -- see those mixins' own docstrings and
+    club.services.access.can_manage_tournaments/can_manage_tournament_operations)
+    -- proves the actual security boundary on every re-gated view, not just
+    that the happy path (admin) still works. Four users throughout:
+    admin_user (ClubRole ADMIN, inherited from ManagementTestBase), a
+    TournamentManager grant holder, the home team's own current-season
+    manager, a different team's manager, and a plain (non-management) staff
+    member -- each POST/GET is checked against all the non-admin ones."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.team = Team.objects.create(club=cls.club, name="Home Team", short_name="HOME")
+        cls.other_team = Team.objects.create(club=cls.club, name="Other Team", short_name="OTH")
+        cls.management_position = Position.objects.create(club=cls.club, name="Manager", short_name="MGR", staff_position=True, management_position=True)
+        cls.support_position = Position.objects.create(club=cls.club, name="Physio", short_name="PHY", staff_position=True, management_position=False)
+
+        today = timezone.localdate()
+        cls.tournament = Tournament.objects.create(club=cls.club, name="Cup", season=cls.season, start_date=today, end_date=today + datetime.timedelta(days=1), home_team=cls.team)
+        cls.team_entry = TournamentTeam.objects.create(club=cls.club, tournament=cls.tournament, foreign_name="Visiting FC")
+        cls.roster_entry = TournamentRosterEntry.objects.create(tournament_team=cls.team_entry, foreign_first_name="Sam", foreign_last_name="Striker", role=TournamentRosterRole.PLAYER)
+        cls.registration = TournamentRegistration.objects.create(tournament=cls.tournament, foreign_name="Pending FC")
+        cls.field = TournamentField.objects.create(tournament=cls.tournament, name="Field 1")
+        cls.stage = TournamentStage.objects.create(tournament=cls.tournament, name="Group Stage", format=TournamentStage.Format.CUSTOM)
+        cls.match = Match.objects.create(stage=cls.stage, home_team=cls.team_entry, away_team=None)
+        cls.task = TournamentTask.objects.create(tournament=cls.tournament, title="Gate duty", starts_at=timezone.now(), ends_at=timezone.now() + datetime.timedelta(hours=1))
+        cls.room = DressingRoom.objects.create(club=cls.club, name="Room A")
+        cls.assignment = assign_dressing_room(cls.room, cls.team_entry)
+
+        cls.tournament_admin_user = cls._make_staff_user("tournament-admin@example.com", "Tia", "Admin")
+        TournamentManager.objects.create(club=cls.club, member=Member.objects.get(user=cls.tournament_admin_user))
+
+        cls.home_manager_user = cls._make_staff_user("home-manager@example.com", "Hana", "Home")
+        StaffAssignment.objects.create(team=cls.team, member=Member.objects.get(user=cls.home_manager_user), season=cls.season, position=cls.management_position)
+
+        cls.other_manager_user = cls._make_staff_user("other-manager@example.com", "Otto", "Other")
+        StaffAssignment.objects.create(team=cls.other_team, member=Member.objects.get(user=cls.other_manager_user), season=cls.season, position=cls.management_position)
+
+        cls.plain_staff_user = cls._make_staff_user("plain-staff@example.com", "Percy", "Physio")
+        StaffAssignment.objects.create(team=cls.team, member=Member.objects.get(user=cls.plain_staff_user), season=cls.season, position=cls.support_position)
+
+    @classmethod
+    def _make_staff_user(cls, email, first_name, last_name):
+        user = User.objects.create_user(email=email, password="pw-secret-123")
+        Member.objects.create(user=user, first_name=first_name, last_name=last_name)
+        return user
+
+    def setUp(self):
+        super().setUp()
+        cache.clear()
+        self.addCleanup(cache.clear)
+        get_waffle_flag_model().objects.get_or_create(name="tournaments")[0].clubs.add(self.club)
+
+    # --- admin-only views: club-admin and the TournamentManager grant both succeed, everyone else 403s ---
+
+    def admin_only_cases(self):
+        """(url_name, args, method) for every TournamentAdminRequiredMixin view."""
+        return [
+            ("tournament_settings", [self.tournament.pk], "get"),
+            ("tournament_registration_approve", [self.registration.pk], "post"),
+            ("tournament_registration_reject", [self.registration.pk], "post"),
+            ("tournament_team_withdraw", [self.team_entry.pk], "post"),
+            ("tournament_team_payment_update", [self.team_entry.pk], "post"),
+            ("dressing_room_list", [], "get"),
+        ]
+
+    def test_admin_only_views_reject_everyone_but_a_tournament_admin(self):
+        non_admins = [
+            ("home team manager", self.home_manager_user),
+            ("other team manager", self.other_manager_user),
+            ("plain staff", self.plain_staff_user),
+        ]
+        for name, args, method in self.admin_only_cases():
+            for label, user in non_admins:
+                with self.subTest(view=name, user=label):
+                    self.client.force_login(user)
+                    if method == "post":
+                        response = self.club_post(name, {}, *args)
+                    else:
+                        response = self.club_get(name, *args)
+                    self.assertEqual(response.status_code, 403)
+                    self.client.logout()
+
+    def test_admin_only_views_accept_the_club_admin_and_a_tournament_manager_grant(self):
+        admins = [("club admin", self.admin_user), ("tournament manager grant", self.tournament_admin_user)]
+        for name, args, method in self.admin_only_cases():
+            for label, user in admins:
+                with self.subTest(view=name, user=label):
+                    self.client.force_login(user)
+                    if method == "post":
+                        response = self.club_post(name, {}, *args)
+                    else:
+                        response = self.client.get(reverse(f"management:{name}", args=args), HTTP_HOST="ajax-united.rosterchief.app")
+                    self.assertIn(response.status_code, (200, 302))
+                    self.client.logout()
+
+    # --- operator views: the home team's manager (and admin tiers) succeed, an unrelated manager/plain staff 403 ---
+
+    def operator_cases(self):
+        """(url_name, args) for every non-destructive TournamentOperatorRequiredMixin
+        POST view -- field/stage delete are tested separately below (each
+        actually deletes the shared fixture object on a permitted call, so
+        looping the SAME object across several "this should succeed" users
+        would 404 every call after the first for a reason that has nothing
+        to do with permissions; deleting the stage also CASCADEs onto
+        self.match, which match_reschedule/match_result then need intact)."""
+        return [
+            ("tournament_field_create", [self.tournament.pk]),
+            ("tournament_field_update", [self.tournament.pk, self.field.pk]),
+            ("tournament_stage_create", [self.tournament.pk]),
+            ("tournament_stage_update", [self.tournament.pk, self.stage.pk]),
+            ("tournament_task_create", [self.tournament.pk]),
+            ("tournament_task_generate", [self.tournament.pk]),
+            ("tournament_task_update", [self.tournament.pk, self.task.pk]),
+            ("tournament_roster_entry_create", [self.tournament.pk, self.team_entry.pk]),
+            ("tournament_roster_entry_update", [self.tournament.pk, self.team_entry.pk, self.roster_entry.pk]),
+            ("tournament_roster_entry_lunch_update", [self.tournament.pk, self.team_entry.pk, self.roster_entry.pk]),
+            ("match_reschedule", [self.match.pk]),
+            ("match_result", [self.match.pk]),
+            ("tournament_dressing_room_assign", [self.tournament.pk]),
+        ]
+
+    def delete_cases(self):
+        """(url_name, args_fn) for the two operator-tier delete views --
+        args_fn(self) creates and returns a fresh, disposable object each
+        call so a permitted delete in one subtest doesn't 404 the next."""
+        return [
+            ("tournament_field_delete", lambda: [self.tournament.pk, TournamentField.objects.create(tournament=self.tournament, name="Disposable field").pk]),
+            ("tournament_stage_delete", lambda: [self.tournament.pk, TournamentStage.objects.create(tournament=self.tournament, name="Disposable stage", format=TournamentStage.Format.CUSTOM).pk]),
+        ]
+
+    def test_operator_views_reject_an_unrelated_manager_and_plain_staff(self):
+        rejected = [
+            ("other team manager", self.other_manager_user),
+            ("plain staff", self.plain_staff_user),
+        ]
+        for name, args in self.operator_cases():
+            for label, user in rejected:
+                with self.subTest(view=name, user=label):
+                    self.client.force_login(user)
+                    response = self.club_post(name, {}, *args)
+                    self.assertEqual(response.status_code, 403)
+                    self.client.logout()
+        # Delete cases too -- a rejected request must never delete anything.
+        for name, args_fn in self.delete_cases():
+            for label, user in rejected:
+                with self.subTest(view=name, user=label):
+                    self.client.force_login(user)
+                    response = self.club_post(name, {}, *args_fn())
+                    self.assertEqual(response.status_code, 403)
+                    self.client.logout()
+
+    def test_operator_views_accept_the_home_teams_manager_and_admin_tiers(self):
+        accepted = [
+            ("home team manager", self.home_manager_user),
+            ("club admin", self.admin_user),
+            ("tournament manager grant", self.tournament_admin_user),
+        ]
+        for name, args in self.operator_cases():
+            for label, user in accepted:
+                with self.subTest(view=name, user=label):
+                    self.client.force_login(user)
+                    response = self.club_post(name, {}, *args)
+                    # Not 403/404 -- an invalid/empty POST body still reaches
+                    # the view and redirects back with a validation notify(),
+                    # which is exactly what proves the permission check itself
+                    # passed rather than blocking the request outright.
+                    self.assertNotIn(response.status_code, (403, 404))
+                    self.client.logout()
+        for name, args_fn in self.delete_cases():
+            for label, user in accepted:
+                with self.subTest(view=name, user=label):
+                    self.client.force_login(user)
+                    response = self.club_post(name, {}, *args_fn())
+                    self.assertNotIn(response.status_code, (403, 404))
+                    self.client.logout()
+
+    # --- view-only pages: any club staff can see them, including an unrelated team's manager ---
+
+    def view_only_cases(self):
+        return [
+            ("tournament_list", []),
+            ("tournament_registration_queue", [self.tournament.pk]),
+            ("tournament_team_list", [self.tournament.pk]),
+            ("tournament_team_roster", [self.tournament.pk, self.team_entry.pk]),
+            ("tournament_schedule", [self.tournament.pk]),
+            ("tournament_field_stage_list", [self.tournament.pk]),
+            ("tournament_task_list", [self.tournament.pk]),
+            ("tournament_dressing_room_list", [self.tournament.pk]),
+        ]
+
+    def test_view_only_pages_are_open_to_any_club_staff(self):
+        viewers = [
+            ("home team manager", self.home_manager_user),
+            ("other team manager", self.other_manager_user),
+            ("plain staff", self.plain_staff_user),
+        ]
+        for name, args in self.view_only_cases():
+            for label, user in viewers:
+                with self.subTest(view=name, user=label):
+                    self.client.force_login(user)
+                    response = self.club_get(name, *args)
+                    self.assertEqual(response.status_code, 200)
+                    self.client.logout()
+
+    # --- template-level button visibility (UX polish on top of the real, view-level boundary above) ---
+
+    def test_settings_link_hidden_from_a_non_admin_on_the_teams_tab(self):
+        self.client.force_login(self.home_manager_user)
+
+        response = self.club_get("tournament_team_list", self.tournament.pk)
+
+        self.assertNotContains(response, reverse("management:tournament_settings", args=[self.tournament.pk]))
+
+    def test_settings_link_shown_to_a_tournament_admin_on_the_teams_tab(self):
+        self.client.force_login(self.tournament_admin_user)
+
+        response = self.club_get("tournament_team_list", self.tournament.pk)
+
+        self.assertContains(response, reverse("management:tournament_settings", args=[self.tournament.pk]))
+
+    def test_add_team_button_hidden_from_an_unrelated_manager(self):
+        self.client.force_login(self.other_manager_user)
+
+        response = self.club_get("tournament_team_list", self.tournament.pk)
+
+        self.assertNotContains(response, "Add team")
+
+    def test_add_team_button_shown_to_the_home_teams_manager(self):
+        self.client.force_login(self.home_manager_user)
+
+        response = self.club_get("tournament_team_list", self.tournament.pk)
+
+        self.assertContains(response, "Add team")

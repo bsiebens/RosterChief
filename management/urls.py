@@ -65,6 +65,7 @@ urlpatterns = [
     path("roles/<uuid:pk>/revoke/", views.ClubRoleRevokeView.as_view(), name="role_revoke"),
     path("roles/shop-admins/<uuid:pk>/revoke/", views.ShopManagerRevokeView.as_view(), name="shop_admin_revoke"),
     path("roles/evaluation-managers/<uuid:pk>/revoke/", views.EvaluationManagerRevokeView.as_view(), name="evaluation_manager_revoke"),
+    path("roles/tournament-admins/<uuid:pk>/revoke/", views.TournamentManagerRevokeView.as_view(), name="tournament_admin_revoke"),
     path("groups/", views.GroupListView.as_view(), name="group_list"),
     path("groups/new/", views.GroupCreateView.as_view(), name="group_create"),
     path("groups/<uuid:pk>/", views.GroupDetailView.as_view(), name="group_detail"),

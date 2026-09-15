@@ -42,9 +42,11 @@ from club.mixins import (
     OfficialsStaffRequiredMixin,
     ShopManagerRequiredMixin,
     TeamManagerRequiredMixin,
+    TournamentAdminRequiredMixin,
+    TournamentOperatorRequiredMixin,
     TournamentsManagerRequiredMixin,
 )
-from club.models import ClubMembership, ClubRole, DuesInvoice, EvaluationManager, MemberRequirementStatus, OnboardingRequirement, Season, ShopManager, Sponsor
+from club.models import ClubMembership, ClubRole, DuesInvoice, EvaluationManager, MemberRequirementStatus, OnboardingRequirement, Season, ShopManager, Sponsor, TournamentManager
 from club.services.access import (
     _guardians_only,
     can_add_news,
@@ -52,6 +54,7 @@ from club.services.access import (
     can_manage_evaluations,
     can_manage_members,
     can_manage_shop,
+    can_manage_tournaments,
     can_publish_news,
     current_season,
     get_current_season,
@@ -1876,11 +1879,13 @@ class ClubRoleListView(ClubAdminRequiredMixin, ListView):
         sections = [(value, label, ROLE_DESCRIPTIONS.get(value, ""), [role for role in self.object_list if role.role == value]) for value, label in ClubRole.Roles.choices if value != ClubRole.Roles.MEMBER]
         shop_admins = ShopManager.objects.filter(club=self.request.club).select_related("member")
         evaluation_managers = EvaluationManager.objects.filter(club=self.request.club).select_related("member")
+        tournament_admins = TournamentManager.objects.filter(club=self.request.club).select_related("member")
         return super().get_context_data(
             sections=sections,
             role_form=ClubRoleAssignForm(club=self.request.club),
             shop_admins=shop_admins,
             evaluation_managers=evaluation_managers,
+            tournament_admins=tournament_admins,
             **kwargs,
         )
 
@@ -1918,6 +1923,14 @@ class ClubRoleCreateView(ClubAdminRequiredMixin, RedirectOnInvalidMixin, FormVie
                 notify(self.request, f"s|{_('Evaluation manager granted')}|{_('“%(member)s” can now manage player evaluations.') % {'member': member}}")
             else:
                 notify(self.request, f"s|{_('Already an evaluation manager')}|{_('“%(member)s” already manages player evaluations.') % {'member': member}}")
+            return redirect("management:role_list")
+
+        if role == ClubRoleAssignForm.TOURNAMENT_ADMIN:
+            _grant, created = TournamentManager.objects.get_or_create(club=self.request.club, member=member)
+            if created:
+                notify(self.request, f"s|{_('Tournament admin granted')}|{_('“%(member)s” can now decide registrations, payment status, and tournament settings.') % {'member': member}}")
+            else:
+                notify(self.request, f"s|{_('Already a tournament admin')}|{_('“%(member)s” already has tournament admin access.') % {'member': member}}")
             return redirect("management:role_list")
 
         # A member holds at most one ClubRole per club (the membership-status sync in
@@ -1970,6 +1983,21 @@ class EvaluationManagerRevokeView(ClubAdminRequiredMixin, View):
         member = grant.member
         grant.delete()
         notify(request, f"w|{_('Evaluation manager revoked')}|{_('“%(member)s” no longer manages player evaluations.') % {'member': member}}")
+        return redirect("management:role_list")
+
+
+class TournamentManagerRevokeView(ClubAdminRequiredMixin, View):
+    """Granting tournament admin goes through ClubRoleCreateView (the roles
+    page's one "Grant role" flow) -- but revoking still needs its own view,
+    same reasoning as ShopManagerRevokeView/EvaluationManagerRevokeView:
+    TournamentManager isn't a ClubRole row, so ClubRoleRevokeView's
+    delete-this-pk-from-ClubRole logic doesn't apply."""
+
+    def post(self, request, pk):
+        grant = get_object_or_404(TournamentManager, pk=pk, club=request.club)
+        member = grant.member
+        grant.delete()
+        notify(request, f"w|{_('Tournament admin revoked')}|{_('“%(member)s” no longer has tournament admin access.') % {'member': member}}")
         return redirect("management:role_list")
 
 
@@ -7328,7 +7356,11 @@ class TournamentListView(TournamentsManagerRequiredMixin, ListView):
         return tournaments
 
     def get_context_data(self, **kwargs):
-        return super().get_context_data(selected_season=self.selected_season, seasons=Season.objects.filter(club=self.request.club).order_by("-start_date"), **kwargs)
+        # No one tournament here to derive an operator check against ("New
+        # tournament" is a club-wide, not per-tournament, action) -- only
+        # the admin-tier flag applies on this page.
+        can_manage_tournament = can_manage_tournaments(self.request.user, self.request.club)
+        return super().get_context_data(selected_season=self.selected_season, seasons=Season.objects.filter(club=self.request.club).order_by("-start_date"), can_manage_tournament=can_manage_tournament, **kwargs)
 
 
 #: Group order for TournamentRegistrationQueueView's own listing -- approved
@@ -7366,10 +7398,10 @@ class TournamentRegistrationQueueView(TournamentsManagerRequiredMixin, TemplateV
         for registration in registrations:
             registration.is_oldest_pending = registration.pk == oldest_pending_id
 
-        return super().get_context_data(tournament=tournament, registrations=registrations, active_tab="registrations", **kwargs)
+        return super().get_context_data(tournament=tournament, registrations=registrations, active_tab="registrations", **self.tournament_permissions(tournament), **kwargs)
 
 
-class TournamentRegistrationApproveView(TournamentsManagerRequiredMixin, View):
+class TournamentRegistrationApproveView(TournamentAdminRequiredMixin, View):
     """The queue drawer's own "Approve" button -- tournaments.services.
     registration.approve_registration for a single registration."""
 
@@ -7387,7 +7419,7 @@ class TournamentRegistrationApproveView(TournamentsManagerRequiredMixin, View):
         return redirect("management:tournament_registration_queue", tournament_pk=registration.tournament_id)
 
 
-class TournamentRegistrationRejectView(TournamentsManagerRequiredMixin, View):
+class TournamentRegistrationRejectView(TournamentAdminRequiredMixin, View):
     """The queue drawer's own "Reject" button -- tournaments.services.
     registration.reject_registration for a single registration, with an
     optional reason shown back to the submitter on their own status page."""
@@ -7407,7 +7439,7 @@ class TournamentRegistrationRejectView(TournamentsManagerRequiredMixin, View):
         return redirect("management:tournament_registration_queue", tournament_pk=registration.tournament_id)
 
 
-class TournamentTeamWithdrawView(TournamentsManagerRequiredMixin, View):
+class TournamentTeamWithdrawView(TournamentAdminRequiredMixin, View):
     """The queue drawer's own "Withdraw" button, for a team that's already
     approved -- tournaments.services.registration.withdraw_team, with an
     optional reason shown back to the team on its own status page."""
@@ -7426,7 +7458,7 @@ class TournamentTeamWithdrawView(TournamentsManagerRequiredMixin, View):
         return redirect("management:tournament_registration_queue", tournament_pk=team.tournament_id)
 
 
-class TournamentTeamDeleteView(TournamentsManagerRequiredMixin, View):
+class TournamentTeamDeleteView(TournamentAdminRequiredMixin, View):
     """The Teams tab's own "Delete" action -- tournaments.services.
     registration.delete_manual_team, for a team staff entered by hand
     (never one that came through the public registration queue, or the
@@ -7485,11 +7517,12 @@ class TournamentTeamListView(TournamentsManagerRequiredMixin, TemplateView):
             teams=teams,
             payment_status_choices=TournamentTeam.PaymentStatus.choices,
             active_tab="teams",
+            **self.tournament_permissions(tournament),
             **kwargs,
         )
 
 
-class TournamentTeamPaymentUpdateView(TournamentsManagerRequiredMixin, View):
+class TournamentTeamPaymentUpdateView(TournamentAdminRequiredMixin, View):
     """The Teams tab's own inline payment-status select -- posts straight
     back on change, one field, no confirmation needed (small, frequent,
     reversible, same reasoning several other one-field inline updates in
@@ -7508,7 +7541,7 @@ class TournamentTeamPaymentUpdateView(TournamentsManagerRequiredMixin, View):
         return redirect("management:tournament_team_list", tournament_pk=team.tournament_id)
 
 
-class TournamentTeamCreateView(TournamentsManagerRequiredMixin, View):
+class TournamentTeamCreateView(TournamentOperatorRequiredMixin, View):
     """The Teams tab's own "Add team" modal -- tournaments.services.
     registration.create_manual_team for either the host club's own team or
     any other team staff want to enter by hand, bypassing the public
@@ -7569,6 +7602,7 @@ class TournamentTeamRosterView(TournamentsManagerRequiredMixin, TemplateView):
             staff_count=sum(1 for entry in entries if entry.role == TournamentRosterRole.STAFF),
             lunch_days=daily_lunch_summary(tournament, entries) if tournament.lunch_mode != Tournament.LunchMode.NONE else [],
             active_tab="teams",
+            **self.tournament_permissions(tournament),
             **kwargs,
         )
 
@@ -7633,7 +7667,7 @@ class TournamentTeamLunchPdfView(TournamentsManagerRequiredMixin, View):
         return response
 
 
-class TournamentRosterEntryCreateView(TournamentsManagerRequiredMixin, View):
+class TournamentRosterEntryCreateView(TournamentOperatorRequiredMixin, View):
     def post(self, request, tournament_pk, team_pk):
         tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
         team = get_object_or_404(TournamentTeam, pk=team_pk, tournament=tournament)
@@ -7650,7 +7684,7 @@ class TournamentRosterEntryCreateView(TournamentsManagerRequiredMixin, View):
         return redirect("management:tournament_team_roster", tournament_pk=tournament.pk, team_pk=team.pk)
 
 
-class TournamentRosterEntryUpdateView(TournamentsManagerRequiredMixin, View):
+class TournamentRosterEntryUpdateView(TournamentOperatorRequiredMixin, View):
     def post(self, request, tournament_pk, team_pk, entry_pk):
         tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
         team = get_object_or_404(TournamentTeam, pk=team_pk, tournament=tournament)
@@ -7666,7 +7700,7 @@ class TournamentRosterEntryUpdateView(TournamentsManagerRequiredMixin, View):
         return redirect("management:tournament_team_roster", tournament_pk=tournament.pk, team_pk=team.pk)
 
 
-class TournamentRosterEntryDeleteView(TournamentsManagerRequiredMixin, View):
+class TournamentRosterEntryDeleteView(TournamentOperatorRequiredMixin, View):
     def post(self, request, tournament_pk, team_pk, entry_pk):
         tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
         team = get_object_or_404(TournamentTeam, pk=team_pk, tournament=tournament)
@@ -7677,7 +7711,7 @@ class TournamentRosterEntryDeleteView(TournamentsManagerRequiredMixin, View):
         return redirect("management:tournament_team_roster", tournament_pk=tournament.pk, team_pk=team.pk)
 
 
-class TournamentRosterEntryLunchUpdateView(TournamentsManagerRequiredMixin, View):
+class TournamentRosterEntryLunchUpdateView(TournamentOperatorRequiredMixin, View):
     """The roster screen's own inline lunch-days checkbox row -- only
     reachable/meaningful while ``lunch_mode`` is OPTIONAL (NONE/MANDATORY
     are both fully determined already, see ``TournamentRosterEntryForm.save()``);
@@ -7723,14 +7757,21 @@ class TournamentScheduleView(TournamentsManagerRequiredMixin, TemplateView):
             stages.append({"stage": stage, "rounds": rounds})
 
         fields = list(tournament.fields.all())
-        return super().get_context_data(tournament=tournament, stages=stages, fields=fields, active_tab="schedule", **kwargs)
+        return super().get_context_data(tournament=tournament, stages=stages, fields=fields, active_tab="schedule", **self.tournament_permissions(tournament), **kwargs)
 
 
-class MatchRescheduleView(TournamentsManagerRequiredMixin, View):
+class MatchRescheduleView(TournamentOperatorRequiredMixin, View):
     """The schedule view's own inline "field + time" form -- always routed
     through ``tournaments.services.scheduling.reschedule_match``, never a
     direct ``match.field``/``match.scheduled_start`` write, so a hand-edit
     can never violate an invariant the auto-generator itself would avoid."""
+
+    def get_tournament(self):
+        # This URL only carries the Match's own pk, not tournament_pk --
+        # TournamentOperatorRequiredMixin's default get_tournament() can't
+        # apply here, so this traverses match.stage.tournament instead.
+        match = get_object_or_404(Match, pk=self.kwargs["pk"], stage__tournament__club=self.request.club)
+        return match.stage.tournament
 
     def post(self, request, pk):
         match = get_object_or_404(Match, pk=pk, stage__tournament__club=request.club)
@@ -7759,11 +7800,16 @@ class MatchRescheduleView(TournamentsManagerRequiredMixin, View):
         return redirect("management:tournament_schedule", tournament_pk=tournament.pk)
 
 
-class MatchResultView(TournamentsManagerRequiredMixin, View):
+class MatchResultView(TournamentOperatorRequiredMixin, View):
     """The schedule view's own inline score-entry form -- always routed
     through ``tournaments.services.scheduling.record_result``, which marks
     the match complete and cascades the result forward through the bracket
     (``resolve_match_slots``) in one call."""
+
+    def get_tournament(self):
+        # Same reasoning as MatchRescheduleView.get_tournament() just above.
+        match = get_object_or_404(Match, pk=self.kwargs["pk"], stage__tournament__club=self.request.club)
+        return match.stage.tournament
 
     def post(self, request, pk):
         match = get_object_or_404(Match, pk=pk, stage__tournament__club=request.club)
@@ -7799,7 +7845,7 @@ class MatchResultView(TournamentsManagerRequiredMixin, View):
         return redirect("management:tournament_schedule", tournament_pk=tournament.pk)
 
 
-class TournamentCreateView(TournamentsManagerRequiredMixin, CreateView):
+class TournamentCreateView(TournamentAdminRequiredMixin, CreateView):
     """The tournament create screen -- closes the "admin-only" gap
     TournamentListView's own docstring used to describe. Redirects to the
     new tournament's own settings page, not the schedule/registrations tabs --
@@ -7829,7 +7875,7 @@ class TournamentCreateView(TournamentsManagerRequiredMixin, CreateView):
         return reverse("management:tournament_settings", args=[self.object.pk])
 
 
-class TournamentUpdateView(TournamentsManagerRequiredMixin, UpdateView):
+class TournamentUpdateView(TournamentAdminRequiredMixin, UpdateView):
     """A tournament's own settings page -- also the page the "Settings" link
     on ``_tournament_tabs.html`` (shown on every other tournament-scoped
     page) points at."""
@@ -7890,11 +7936,12 @@ class TournamentFieldStageView(TournamentsManagerRequiredMixin, TemplateView):
             field_form=TournamentFieldForm(),
             stage_form=TournamentStageForm(),
             active_tab="fields_stages",
+            **self.tournament_permissions(tournament),
             **kwargs,
         )
 
 
-class TournamentFieldCreateView(TournamentsManagerRequiredMixin, View):
+class TournamentFieldCreateView(TournamentOperatorRequiredMixin, View):
     def post(self, request, tournament_pk):
         tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
         form = TournamentFieldForm(request.POST)
@@ -7910,7 +7957,7 @@ class TournamentFieldCreateView(TournamentsManagerRequiredMixin, View):
         return redirect("management:tournament_field_stage_list", tournament_pk=tournament.pk)
 
 
-class TournamentFieldUpdateView(TournamentsManagerRequiredMixin, View):
+class TournamentFieldUpdateView(TournamentOperatorRequiredMixin, View):
     def post(self, request, tournament_pk, field_pk):
         tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
         field = get_object_or_404(TournamentField, pk=field_pk, tournament=tournament)
@@ -7925,7 +7972,7 @@ class TournamentFieldUpdateView(TournamentsManagerRequiredMixin, View):
         return redirect("management:tournament_field_stage_list", tournament_pk=tournament.pk)
 
 
-class TournamentFieldDeleteView(TournamentsManagerRequiredMixin, View):
+class TournamentFieldDeleteView(TournamentOperatorRequiredMixin, View):
     def post(self, request, tournament_pk, field_pk):
         tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
         field = get_object_or_404(TournamentField, pk=field_pk, tournament=tournament)
@@ -7935,7 +7982,7 @@ class TournamentFieldDeleteView(TournamentsManagerRequiredMixin, View):
         return redirect("management:tournament_field_stage_list", tournament_pk=tournament.pk)
 
 
-class TournamentStageCreateView(TournamentsManagerRequiredMixin, View):
+class TournamentStageCreateView(TournamentOperatorRequiredMixin, View):
     def post(self, request, tournament_pk):
         tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
         form = TournamentStageForm(request.POST)
@@ -7951,7 +7998,7 @@ class TournamentStageCreateView(TournamentsManagerRequiredMixin, View):
         return redirect("management:tournament_field_stage_list", tournament_pk=tournament.pk)
 
 
-class TournamentStageUpdateView(TournamentsManagerRequiredMixin, View):
+class TournamentStageUpdateView(TournamentOperatorRequiredMixin, View):
     def post(self, request, tournament_pk, stage_pk):
         tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
         stage = get_object_or_404(TournamentStage, pk=stage_pk, tournament=tournament)
@@ -7966,7 +8013,7 @@ class TournamentStageUpdateView(TournamentsManagerRequiredMixin, View):
         return redirect("management:tournament_field_stage_list", tournament_pk=tournament.pk)
 
 
-class TournamentStageDeleteView(TournamentsManagerRequiredMixin, View):
+class TournamentStageDeleteView(TournamentOperatorRequiredMixin, View):
     def post(self, request, tournament_pk, stage_pk):
         tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
         stage = get_object_or_404(TournamentStage, pk=stage_pk, tournament=tournament)
@@ -7995,10 +8042,10 @@ class TournamentTaskListView(TournamentsManagerRequiredMixin, TemplateView):
             task.is_full = len(task.claim_labels) >= task.needed_quantity
             task.edit_form = TournamentTaskForm(instance=task)
             task.assign_form = TournamentTaskAssignForm(club=self.request.club)
-        return super().get_context_data(tournament=tournament, tasks=tasks, task_form=TournamentTaskForm(), generate_form=TournamentTaskGenerateForm(tournament=tournament), active_tab="tasks", **kwargs)
+        return super().get_context_data(tournament=tournament, tasks=tasks, task_form=TournamentTaskForm(), generate_form=TournamentTaskGenerateForm(tournament=tournament), active_tab="tasks", **self.tournament_permissions(tournament), **kwargs)
 
 
-class TournamentTaskCreateView(TournamentsManagerRequiredMixin, View):
+class TournamentTaskCreateView(TournamentOperatorRequiredMixin, View):
     def post(self, request, tournament_pk):
         tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
         form = TournamentTaskForm(request.POST)
@@ -8015,7 +8062,7 @@ class TournamentTaskCreateView(TournamentsManagerRequiredMixin, View):
         return redirect("management:tournament_task_list", tournament_pk=tournament.pk)
 
 
-class TournamentTaskGenerateView(TournamentsManagerRequiredMixin, View):
+class TournamentTaskGenerateView(TournamentOperatorRequiredMixin, View):
     """The Tasks tab's own "Generate shifts" action --
     tournaments.services.tasks.generate_task_shifts for a whole run of
     same-length shifts at once, alongside TournamentTaskCreateView's single
@@ -8047,7 +8094,7 @@ class TournamentTaskGenerateView(TournamentsManagerRequiredMixin, View):
         return redirect("management:tournament_task_list", tournament_pk=tournament.pk)
 
 
-class TournamentTaskUpdateView(TournamentsManagerRequiredMixin, View):
+class TournamentTaskUpdateView(TournamentOperatorRequiredMixin, View):
     def post(self, request, tournament_pk, task_pk):
         tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
         task = get_object_or_404(TournamentTask, pk=task_pk, tournament=tournament)
@@ -8062,7 +8109,7 @@ class TournamentTaskUpdateView(TournamentsManagerRequiredMixin, View):
         return redirect("management:tournament_task_list", tournament_pk=tournament.pk)
 
 
-class TournamentTaskDeleteView(TournamentsManagerRequiredMixin, View):
+class TournamentTaskDeleteView(TournamentOperatorRequiredMixin, View):
     def post(self, request, tournament_pk, task_pk):
         tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
         task = get_object_or_404(TournamentTask, pk=task_pk, tournament=tournament)
@@ -8072,7 +8119,7 @@ class TournamentTaskDeleteView(TournamentsManagerRequiredMixin, View):
         return redirect("management:tournament_task_list", tournament_pk=tournament.pk)
 
 
-class TournamentTaskAssignView(TournamentsManagerRequiredMixin, View):
+class TournamentTaskAssignView(TournamentOperatorRequiredMixin, View):
     """A staff-side counterpart to the mobile self-claim flow -- lets a
     tournament admin put any club member onto an open shift directly
     (e.g. someone who agreed in person rather than through the app).
@@ -8177,11 +8224,12 @@ class TournamentDressingRoomsView(TournamentsManagerRequiredMixin, TemplateView)
             rooms=rooms,
             assign_form=DressingRoomAssignmentForm(club=self.request.club, tournament=tournament),
             active_tab="dressing_rooms",
+            **self.tournament_permissions(tournament),
             **kwargs,
         )
 
 
-class TournamentDressingRoomAssignView(TournamentsManagerRequiredMixin, View):
+class TournamentDressingRoomAssignView(TournamentOperatorRequiredMixin, View):
     def post(self, request, tournament_pk):
         tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
         form = DressingRoomAssignmentForm(request.POST, club=request.club, tournament=tournament)
@@ -8206,7 +8254,7 @@ class TournamentDressingRoomAssignView(TournamentsManagerRequiredMixin, View):
         return redirect("management:tournament_dressing_room_list", tournament_pk=tournament.pk)
 
 
-class TournamentDressingRoomReleaseView(TournamentsManagerRequiredMixin, View):
+class TournamentDressingRoomReleaseView(TournamentOperatorRequiredMixin, View):
     def post(self, request, tournament_pk, assignment_pk):
         tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
         assignment = get_object_or_404(DressingRoomAssignment.objects.filter(dressing_room__club=request.club, tournament_team__tournament=tournament), pk=assignment_pk)
@@ -8216,7 +8264,7 @@ class TournamentDressingRoomReleaseView(TournamentsManagerRequiredMixin, View):
         return redirect("management:tournament_dressing_room_list", tournament_pk=tournament.pk)
 
 
-class DressingRoomListView(TournamentsManagerRequiredMixin, TemplateView):
+class DressingRoomListView(TournamentAdminRequiredMixin, TemplateView):
     """A club's own physical dressing rooms -- persists across tournaments
     and seasons (``DressingRoom`` is club-scoped, not tournament-scoped, see
     its own docstring), so it gets a screen of its own (under the
@@ -8234,7 +8282,7 @@ class DressingRoomListView(TournamentsManagerRequiredMixin, TemplateView):
         return super().get_context_data(rooms=rooms, room_form=DressingRoomForm(club=self.request.club), **kwargs)
 
 
-class DressingRoomCreateView(TournamentsManagerRequiredMixin, View):
+class DressingRoomCreateView(TournamentAdminRequiredMixin, View):
     def post(self, request):
         form = DressingRoomForm(request.POST, club=request.club)
         if not form.is_valid():
@@ -8249,7 +8297,7 @@ class DressingRoomCreateView(TournamentsManagerRequiredMixin, View):
         return redirect("management:dressing_room_list")
 
 
-class DressingRoomUpdateView(TournamentsManagerRequiredMixin, View):
+class DressingRoomUpdateView(TournamentAdminRequiredMixin, View):
     def post(self, request, pk):
         room = get_object_or_404(DressingRoom.objects.filter(club=request.club), pk=pk)
         form = DressingRoomForm(request.POST, instance=room, club=request.club)
@@ -8263,7 +8311,7 @@ class DressingRoomUpdateView(TournamentsManagerRequiredMixin, View):
         return redirect("management:dressing_room_list")
 
 
-class DressingRoomDeleteView(TournamentsManagerRequiredMixin, View):
+class DressingRoomDeleteView(TournamentAdminRequiredMixin, View):
     def post(self, request, pk):
         room = get_object_or_404(DressingRoom.objects.filter(club=request.club), pk=pk)
         name = room.name
