@@ -86,3 +86,13 @@ def event_official_form_pdf(context: dict) -> bytes:
 def evaluation_outcomes_pdf(context: dict) -> bytes:
     html = render_to_string("management/evaluation_outcomes_pdf.html", context)
     return render_pdf(html)
+
+
+def tournament_team_roster_pdf(context: dict) -> bytes:
+    html = render_to_string("management/tournament_team_roster_pdf.html", context)
+    return render_pdf(html)
+
+
+def tournament_team_lunch_pdf(context: dict) -> bytes:
+    html = render_to_string("management/tournament_team_lunch_pdf.html", context)
+    return render_pdf(html)

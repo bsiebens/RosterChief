@@ -77,8 +77,12 @@
                                 </select>
                             </form>
                         </td>
-                        <td class="text-right">
+                        <td class="text-right whitespace-nowrap">
                             <a class="btn btn-outline btn-sm gap-1.5" href="{% url 'management:tournament_team_roster' tournament.pk team.pk %}">{% lucide "users" size=14 %} {% trans "Roster" %}</a>
+                            <a class="btn btn-outline btn-sm" href="{% url 'management:tournament_team_roster_pdf' tournament.pk team.pk %}" title="{% trans "Roster PDF" %}">{% lucide "file-down" size=14 %}</a>
+                            {% if tournament.lunch_mode != "none" %}
+                                <a class="btn btn-outline btn-sm" href="{% url 'management:tournament_team_lunch_pdf' tournament.pk team.pk %}" title="{% trans "Lunch PDF" %}">{% lucide "utensils" size=14 %}</a>
+                            {% endif %}
                         </td>
                     </tr>
                 {% empty %}

@@ -138,13 +138,25 @@ from shop.services.vouchers import delete_manual_consumption, record_manual_cons
 from teams.models import NumberPool, NumberReservation, OfficialLevel, OfficialProfile, Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
 from teams.services import eligible_roster_members, place_member_on_team
 from teams.services.numbers import has_unresolved_conflict
-from tournaments.forms import DressingRoomAssignmentForm, DressingRoomForm, TournamentFieldForm, TournamentForm, TournamentRosterEntryForm, TournamentStageForm, TournamentTaskForm, TournamentTaskGenerateForm, TournamentTeamForm
-from tournaments.models import DressingRoom, DressingRoomAssignment, Match, Tournament, TournamentField, TournamentRegistration, TournamentRosterEntry, TournamentStage, TournamentTask, TournamentTeam
+from tournaments.forms import (
+    DressingRoomAssignmentForm,
+    DressingRoomForm,
+    TournamentFieldForm,
+    TournamentForm,
+    TournamentRosterEntryForm,
+    TournamentStageForm,
+    TournamentTaskAssignForm,
+    TournamentTaskForm,
+    TournamentTaskGenerateForm,
+    TournamentTeamForm,
+)
+from tournaments.models import DressingRoom, DressingRoomAssignment, Match, Tournament, TournamentField, TournamentRegistration, TournamentRosterEntry, TournamentRosterRole, TournamentStage, TournamentTask, TournamentTeam
 from tournaments.services.dressing_rooms import DressingRoomAssignmentError, assign_dressing_room, release_dressing_room, windows_conflict
+from tournaments.services.lunch import daily_lunch_summary
 from tournaments.services.notifications import send_registration_decision_email
 from tournaments.services.registration import RegistrationDecisionError, TeamWithdrawalError, approve_registration, create_manual_team, reject_registration, withdraw_team
 from tournaments.services.scheduling import SchedulingError, record_result, reschedule_match
-from tournaments.services.tasks import generate_task_shifts
+from tournaments.services.tasks import TaskClaimError, claim_task, generate_task_shifts
 
 from .bulk_import import build_member_import_template, family_choice_field_name, match_candidate_families, parse_member_import_rows, read_member_import_workbook
 from .email_previews import EMAIL_PREVIEWS, EMAIL_PREVIEWS_BY_KEY, render_preview
@@ -221,7 +233,7 @@ from .forms import (
     _text_from_options,
     bulk_add_member_label,
 )
-from .pdf import PDFExportError, evaluation_outcomes_pdf, event_official_form_pdf, event_referee_form_pdf, membership_list_pdf, referee_form_colors
+from .pdf import PDFExportError, evaluation_outcomes_pdf, event_official_form_pdf, event_referee_form_pdf, membership_list_pdf, referee_form_colors, tournament_team_lunch_pdf, tournament_team_roster_pdf
 from .pdf_previews import PDF_PREVIEWS, PDF_PREVIEWS_BY_KEY, render_pdf_preview
 from .recurrence_ui import describe_rrule
 from .shop_export import build_production_export, pop_production_export, stash_production_export
@@ -7526,9 +7538,72 @@ class TournamentTeamRosterView(TournamentsManagerRequiredMixin, TemplateView):
             team=team,
             entries=entries,
             entry_form=TournamentRosterEntryForm(tournament=tournament),
+            player_count=sum(1 for entry in entries if entry.role == TournamentRosterRole.PLAYER),
+            staff_count=sum(1 for entry in entries if entry.role == TournamentRosterRole.STAFF),
+            lunch_days=daily_lunch_summary(tournament, entries) if tournament.lunch_mode != Tournament.LunchMode.NONE else [],
             active_tab="teams",
             **kwargs,
         )
+
+
+class TournamentTeamRosterPdfView(TournamentsManagerRequiredMixin, View):
+    """Downloadable roster PDF for one team -- staff-only fields (DOB,
+    license) included, unlike the public team page, same "internal
+    document vs. public page" split ``EventRefereeFormPdfView`` draws
+    against its own public-facing counterparts."""
+
+    def get(self, request, tournament_pk, team_pk):
+        tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
+        team = get_object_or_404(TournamentTeam, pk=team_pk, tournament=tournament)
+        entries = list(team.roster_entries.select_related("member"))
+        context = {
+            "club": request.club,
+            "tournament": tournament,
+            "team": team,
+            "entries": entries,
+            "player_count": sum(1 for entry in entries if entry.role == TournamentRosterRole.PLAYER),
+            "staff_count": sum(1 for entry in entries if entry.role == TournamentRosterRole.STAFF),
+            "generated_at": timezone.now(),
+        }
+
+        try:
+            pdf = tournament_team_roster_pdf(context)
+        except PDFExportError as error:
+            notify(request, f"e|{_('PDF unavailable')}|{error}")
+            return redirect("management:tournament_team_roster", tournament_pk=tournament.pk, team_pk=team.pk)
+
+        response = HttpResponse(pdf, content_type="application/pdf")
+        response["Content-Disposition"] = f'attachment; filename="{team.slug}-roster.pdf"'
+        return response
+
+
+class TournamentTeamLunchPdfView(TournamentsManagerRequiredMixin, View):
+    """Downloadable per-day lunch summary for one team -- for whoever's
+    catering, not for the club itself: counts first, then only the
+    dietary notes of people actually eating that day (see
+    ``tournaments.services.lunch.daily_lunch_summary``)."""
+
+    def get(self, request, tournament_pk, team_pk):
+        tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
+        team = get_object_or_404(TournamentTeam, pk=team_pk, tournament=tournament)
+        entries = list(team.roster_entries.all())
+        context = {
+            "club": request.club,
+            "tournament": tournament,
+            "team": team,
+            "days": daily_lunch_summary(tournament, entries),
+            "generated_at": timezone.now(),
+        }
+
+        try:
+            pdf = tournament_team_lunch_pdf(context)
+        except PDFExportError as error:
+            notify(request, f"e|{_('PDF unavailable')}|{error}")
+            return redirect("management:tournament_team_roster", tournament_pk=tournament.pk, team_pk=team.pk)
+
+        response = HttpResponse(pdf, content_type="application/pdf")
+        response["Content-Disposition"] = f'attachment; filename="{team.slug}-lunch.pdf"'
+        return response
 
 
 class TournamentRosterEntryCreateView(TournamentsManagerRequiredMixin, View):
@@ -7876,6 +7951,7 @@ class TournamentTaskListView(TournamentsManagerRequiredMixin, TemplateView):
             task.claim_labels = [claim_label_for(claim.member, tournament.club) for claim in task.claims.all()]
             task.is_full = len(task.claim_labels) >= task.needed_quantity
             task.edit_form = TournamentTaskForm(instance=task)
+            task.assign_form = TournamentTaskAssignForm(club=self.request.club)
         return super().get_context_data(tournament=tournament, tasks=tasks, task_form=TournamentTaskForm(), generate_form=TournamentTaskGenerateForm(tournament=tournament), active_tab="tasks", **kwargs)
 
 
@@ -7951,6 +8027,71 @@ class TournamentTaskDeleteView(TournamentsManagerRequiredMixin, View):
         task.delete()
         notify(request, f"w|{_('Task deleted')}|" + _("“%(title)s” was removed from this tournament.") % {"title": title})
         return redirect("management:tournament_task_list", tournament_pk=tournament.pk)
+
+
+class TournamentTaskAssignView(TournamentsManagerRequiredMixin, View):
+    """A staff-side counterpart to the mobile self-claim flow -- lets a
+    tournament admin put any club member onto an open shift directly
+    (e.g. someone who agreed in person rather than through the app).
+    ``tournaments.services.tasks.claim_task`` is the exact same call
+    self-claiming makes, so a shift that's already full or a member who's
+    already claimed it fails the same way either path."""
+
+    def post(self, request, tournament_pk, task_pk):
+        tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
+        task = get_object_or_404(TournamentTask, pk=task_pk, tournament=tournament)
+        form = TournamentTaskAssignForm(request.POST, club=request.club)
+        if not form.is_valid():
+            for error in form.errors.values():
+                notify(request, f"e|{_('Could not assign shift')}|{' '.join(error)}")
+            return redirect("management:tournament_task_list", tournament_pk=tournament.pk)
+
+        member = form.cleaned_data["member"]
+        try:
+            claim_task(task, member)
+        except TaskClaimError as error:
+            notify(request, f"e|{_('Could not assign shift')}|{error}")
+        else:
+            notify(request, f"s|{_('Shift assigned')}|" + _("%(member)s was assigned to “%(title)s”.") % {"member": member, "title": task.title})
+        return redirect("management:tournament_task_list", tournament_pk=tournament.pk)
+
+
+class TournamentTaskPrintView(TournamentsManagerRequiredMixin, TemplateView):
+    """A print-friendly overview of every shift -- a plain table plus a
+    visual timeline (one row per location, shifts laid out left-to-right
+    by time), each showing who's claimed it. Meant to be printed via the
+    browser's own print dialog (Tailwind's ``print:`` variants hide the
+    app chrome in the template) and pinned up at the venue -- unlike the
+    roster/lunch exports above, there's no PDF generation here, nothing
+    a club would email out."""
+
+    template_name = "management/tournament_task_print.html"
+
+    def get_context_data(self, **kwargs):
+        tournament = get_object_or_404(Tournament, pk=self.kwargs["tournament_pk"], club=self.request.club)
+        tasks = list(tournament.tasks.prefetch_related("claims__member").order_by("location_label", "starts_at"))
+        for task in tasks:
+            task.claim_labels = [claim_label_for(claim.member, tournament.club) for claim in task.claims.all()]
+            task.is_full = len(task.claim_labels) >= task.needed_quantity
+
+        locations = [{"location_label": location_label or _("No location set"), "tasks": list(location_tasks)} for location_label, location_tasks in groupby(tasks, key=lambda task: task.location_label)]
+
+        # Timeline columns are positioned as a % of the whole tournament's
+        # shift window (earliest start to latest end) -- if there's only
+        # one shift (or none), the window has zero width and the % math
+        # below is meaningless, so every shift just gets the full row.
+        timeline_start = min((task.starts_at for task in tasks), default=None)
+        timeline_end = max((task.ends_at for task in tasks), default=None)
+        window_seconds = (timeline_end - timeline_start).total_seconds() if timeline_start and timeline_end else 0
+        for task in tasks:
+            if window_seconds > 0:
+                task.timeline_left_pct = (task.starts_at - timeline_start).total_seconds() / window_seconds * 100
+                task.timeline_width_pct = (task.ends_at - task.starts_at).total_seconds() / window_seconds * 100
+            else:
+                task.timeline_left_pct = 0
+                task.timeline_width_pct = 100
+
+        return super().get_context_data(tournament=tournament, tasks=tasks, locations=locations, active_tab="tasks", **kwargs)
 
 
 class TournamentDressingRoomsView(TournamentsManagerRequiredMixin, TemplateView):

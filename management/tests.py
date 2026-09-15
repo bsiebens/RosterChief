@@ -58,7 +58,21 @@ from shop.services.invoices import ShopInvoicePDFError, create_invoice_for_order
 from shop.services.notifications import _notify_order_ready_for_pickup_by_id
 from teams.models import NumberPool, NumberReservation, Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
 from teams.services import eligible_roster_members
-from tournaments.models import DressingRoom, DressingRoomAssignment, Match, Tournament, TournamentField, TournamentRegistration, TournamentRegistrationPlayer, TournamentRosterEntry, TournamentStage, TournamentTask, TournamentTaskClaim, TournamentTeam
+from tournaments.models import (
+    DressingRoom,
+    DressingRoomAssignment,
+    Match,
+    Tournament,
+    TournamentField,
+    TournamentRegistration,
+    TournamentRegistrationPlayer,
+    TournamentRosterEntry,
+    TournamentRosterRole,
+    TournamentStage,
+    TournamentTask,
+    TournamentTaskClaim,
+    TournamentTeam,
+)
 from tournaments.services.dressing_rooms import assign_dressing_room
 from tournaments.services.registration import approve_registration, reject_registration
 from tournaments.services.scheduling import generate_stage_matches
@@ -14336,6 +14350,112 @@ class TournamentTeamRosterTests(ManagementTestBase):
         entry.refresh_from_db()
         self.assertEqual(entry.lunch_days, [day_one])
 
+    def test_roster_screen_shows_player_and_staff_counts(self):
+        self.activate_flag()
+        TournamentRosterEntry.objects.create(tournament_team=self.team, foreign_first_name="Sam", foreign_last_name="Striker", role=TournamentRosterRole.PLAYER)
+        TournamentRosterEntry.objects.create(tournament_team=self.team, foreign_first_name="Cam", foreign_last_name="Coach", role=TournamentRosterRole.STAFF)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_team_roster", self.tournament.pk, self.team.pk)
+
+        self.assertEqual(response.context["player_count"], 1)
+        self.assertEqual(response.context["staff_count"], 1)
+
+    def test_roster_screen_shows_a_lunch_section_per_day(self):
+        self.activate_flag()
+        self.tournament.lunch_mode = Tournament.LunchMode.OPTIONAL
+        self.tournament.save()
+        day_one = self.tournament.start_date.isoformat()
+        TournamentRosterEntry.objects.create(tournament_team=self.team, foreign_first_name="Sam", foreign_last_name="Striker", lunch_days=[day_one], dietary_restrictions="No nuts")
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_team_roster", self.tournament.pk, self.team.pk)
+
+        self.assertContains(response, "No nuts")
+        self.assertEqual(response.context["lunch_days"][0]["player_count"], 1)
+
+    def test_no_lunch_section_when_lunch_mode_is_none(self):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_team_roster", self.tournament.pk, self.team.pk)
+
+        self.assertEqual(response.context["lunch_days"], [])
+
+
+class TournamentTeamRosterExportTests(ManagementTestBase):
+    """management:tournament_team_roster_pdf/tournament_team_lunch_pdf --
+    PDFExportError (WeasyPrint's native libraries missing, e.g. in this
+    dev/CI environment) is handled the same way every other PDF export in
+    this app handles it: a flash message and a redirect back, never a
+    500 -- see EventRefereeFormPdfView for the pattern this mirrors."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        today = timezone.localdate()
+        cls.tournament = Tournament.objects.create(club=cls.club, name="Fall Classic", season=cls.season, start_date=today, end_date=today + datetime.timedelta(days=1))
+        cls.team = TournamentTeam.objects.create(club=cls.club, tournament=cls.tournament, foreign_name="Visiting FC")
+
+    def setUp(self):
+        super().setUp()
+        cache.clear()
+        self.addCleanup(cache.clear)
+        get_waffle_flag_model().objects.get_or_create(name="tournaments")[0].clubs.add(self.club)
+
+    def test_roster_pdf_redirects_back_when_weasyprint_is_unavailable(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_team_roster_pdf", self.tournament.pk, self.team.pk)
+
+        self.assertRedirects(response, reverse("management:tournament_team_roster", args=[self.tournament.pk, self.team.pk]))
+
+    def test_lunch_pdf_redirects_back_when_weasyprint_is_unavailable(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_team_lunch_pdf", self.tournament.pk, self.team.pk)
+
+        self.assertRedirects(response, reverse("management:tournament_team_roster", args=[self.tournament.pk, self.team.pk]))
+
+    def test_roster_pdf_returns_a_pdf_when_weasyprint_is_available(self):
+        TournamentRosterEntry.objects.create(tournament_team=self.team, foreign_first_name="Sam", foreign_last_name="Striker")
+        self.client.force_login(self.admin_user)
+
+        try:
+            from weasyprint import HTML  # noqa: F401
+        except (ImportError, OSError):
+            self.skipTest("WeasyPrint's native libraries aren't available in this environment.")
+
+        response = self.club_get("tournament_team_roster_pdf", self.tournament.pk, self.team.pk)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/pdf")
+        self.assertIn("attachment", response["Content-Disposition"])
+
+    def test_roster_pdf_does_not_error_on_an_empty_roster(self):
+        self.client.force_login(self.admin_user)
+
+        try:
+            from weasyprint import HTML  # noqa: F401
+        except (ImportError, OSError):
+            self.skipTest("WeasyPrint's native libraries aren't available in this environment.")
+
+        response = self.club_get("tournament_team_roster_pdf", self.tournament.pk, self.team.pk)
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_lunch_pdf_does_not_error_with_no_lunch_configured(self):
+        self.client.force_login(self.admin_user)
+
+        try:
+            from weasyprint import HTML  # noqa: F401
+        except (ImportError, OSError):
+            self.skipTest("WeasyPrint's native libraries aren't available in this environment.")
+
+        response = self.club_get("tournament_team_lunch_pdf", self.tournament.pk, self.team.pk)
+
+        self.assertEqual(response.status_code, 200)
+
 
 class TournamentScheduleTests(ManagementTestBase):
     """management:tournament_schedule and its two inline-edit actions
@@ -14949,8 +15069,16 @@ class TournamentTaskManagementTests(ManagementTestBase):
         tasks = response.context["tasks"]
         self.assertEqual(tasks[0].claim_labels, ["Skater family"])
         self.assertFalse(tasks[0].is_full)
-        self.assertNotContains(response, member.get_full_name())
         self.assertContains(response, "Skater family")
+        # The coverage badge itself never shows the real name -- but this
+        # page now also carries a staff-only "Assign a member" picker
+        # (TournamentTaskAssignForm), which legitimately needs real names
+        # so staff can tell people apart when handing out a shift in
+        # person; that's a different, admin-only surface from the public-
+        # facing claim/coverage display this test is actually about, so
+        # the member's real name IS expected to appear once, in that
+        # picker's own <option> list.
+        self.assertContains(response, member.get_full_name(), count=1)
 
     def test_create_update_delete_a_task(self):
         self.activate_flag()
@@ -15063,6 +15191,66 @@ class TournamentTaskManagementTests(ManagementTestBase):
         tasks = list(TournamentTask.objects.filter(tournament=self.tournament, title="Uneven").order_by("starts_at"))
         self.assertEqual(len(tasks), 3)
         self.assertEqual(timezone.localtime(tasks[-1].ends_at).strftime("%H:%M"), "10:40")
+
+    def test_print_overview_shows_the_table_and_timeline(self):
+        self.activate_flag()
+        task = TournamentTask.objects.create(
+            tournament=self.tournament,
+            title="Gate duty",
+            location_label="Entrance",
+            starts_at=timezone.make_aware(datetime.datetime(2026, 9, 20, 9, 0)),
+            ends_at=timezone.make_aware(datetime.datetime(2026, 9, 20, 10, 0)),
+        )
+        member = self.make_family_member()
+        TournamentTaskClaim.objects.create(task=task, member=member)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_task_print", self.tournament.pk)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Gate duty")
+        self.assertContains(response, "Entrance")
+        self.assertEqual(response.context["locations"][0]["location_label"], "Entrance")
+
+    def test_print_overview_404s_when_the_flag_is_not_active(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_task_print", self.tournament.pk)
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_staff_can_assign_a_member_to_an_open_shift(self):
+        self.activate_flag()
+        task = TournamentTask.objects.create(tournament=self.tournament, title="Gate duty", starts_at=timezone.make_aware(datetime.datetime(2026, 9, 20, 9, 0)), ends_at=timezone.make_aware(datetime.datetime(2026, 9, 20, 10, 0)))
+        member = self.make_family_member()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("tournament_task_assign", {"member": member.pk}, self.tournament.pk, task.pk)
+
+        self.assertRedirects(response, reverse("management:tournament_task_list", args=[self.tournament.pk]))
+        self.assertTrue(TournamentTaskClaim.objects.filter(task=task, member=member).exists())
+
+    def test_assigning_the_same_member_twice_is_rejected(self):
+        self.activate_flag()
+        task = TournamentTask.objects.create(tournament=self.tournament, title="Gate duty", starts_at=timezone.make_aware(datetime.datetime(2026, 9, 20, 9, 0)), ends_at=timezone.make_aware(datetime.datetime(2026, 9, 20, 10, 0)))
+        member = self.make_family_member()
+        TournamentTaskClaim.objects.create(task=task, member=member)
+        self.client.force_login(self.admin_user)
+
+        self.club_post("tournament_task_assign", {"member": member.pk}, self.tournament.pk, task.pk)
+
+        self.assertEqual(TournamentTaskClaim.objects.filter(task=task, member=member).count(), 1)
+
+    def test_assigning_a_full_shift_is_rejected(self):
+        self.activate_flag()
+        task = TournamentTask.objects.create(tournament=self.tournament, title="Gate duty", needed_quantity=1, starts_at=timezone.make_aware(datetime.datetime(2026, 9, 20, 9, 0)), ends_at=timezone.make_aware(datetime.datetime(2026, 9, 20, 10, 0)))
+        TournamentTaskClaim.objects.create(task=task, member=self.make_family_member(first_name="First"))
+        second_member = self.make_family_member(first_name="Second")
+        self.client.force_login(self.admin_user)
+
+        self.club_post("tournament_task_assign", {"member": second_member.pk}, self.tournament.pk, task.pk)
+
+        self.assertFalse(TournamentTaskClaim.objects.filter(task=task, member=second_member).exists())
 
 
 class DressingRoomManagementTests(ManagementTestBase):

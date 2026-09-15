@@ -1,0 +1,86 @@
+{% load i18n %}
+
+{% comment %}
+    Rendered by WeasyPrint, not a browser -- same standalone-document,
+    no-app.css convention as membership_list_pdf.html. Staff-only fields
+    (DOB, license) belong here, unlike the public team page
+    (tournament_team_schedule.html), which only ever shows name/role/
+    position/jersey.
+
+    Context: club, tournament, team, entries, player_count, staff_count,
+    generated_at.
+{% endcomment %}
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <title>{% blocktrans with name=team.display_name %}{{ name }} roster{% endblocktrans %}</title>
+        <style>
+            @page {
+                size: A4;
+                margin: 18mm;
+                @bottom-center {
+                    content: "{{ club.name }} — {{ team.display_name }} — " counter(page) " / " counter(pages);
+                    font-size: 8pt;
+                    color: #666;
+                }
+            }
+            body { font-family: sans-serif; font-size: 9.5pt; color: #111; }
+            h1 { font-size: 18pt; margin: 0 0 2mm; }
+            .muted { color: #666; }
+            .header { display: flex; justify-content: space-between; margin-bottom: 6mm; }
+            .stats { display: flex; gap: 6mm; margin-bottom: 6mm; }
+            .stat { border: 1px solid #ddd; border-radius: 2mm; padding: 2mm 4mm; }
+            .stat .value { font-size: 14pt; font-weight: bold; }
+            .stat .label { font-size: 8pt; color: #666; text-transform: uppercase; letter-spacing: 0.5pt; }
+            table { width: 100%; border-collapse: collapse; }
+            th { text-align: left; font-size: 8pt; text-transform: uppercase; letter-spacing: 0.5pt; color: #666; border-bottom: 1px solid #999; padding: 2mm 2mm 1mm 0; }
+            td { padding: 1.5mm 2mm 1.5mm 0; border-bottom: 1px solid #eee; vertical-align: top; }
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            <div>
+                <h1>{{ team.display_name }}</h1>
+                <div class="muted">{{ tournament.name }} — {% trans "Roster" %}</div>
+            </div>
+            <div class="muted">
+                {% blocktrans with generated=generated_at|date:"j F Y, H:i" %}Generated {{ generated }}{% endblocktrans %}
+            </div>
+        </div>
+
+        <div class="stats">
+            <div class="stat"><div class="value">{{ player_count }}</div><div class="label">{% trans "Players" %}</div></div>
+            <div class="stat"><div class="value">{{ staff_count }}</div><div class="label">{% trans "Staff" %}</div></div>
+        </div>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>{% trans "Name" %}</th>
+                    <th>{% trans "Role" %}</th>
+                    <th>{% trans "Jersey" %}</th>
+                    <th>{% trans "Position" %}</th>
+                    <th>{% trans "Date of birth" %}</th>
+                    <th>{% trans "License" %}</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for entry in entries %}
+                    <tr>
+                        <td>{{ entry.display_name }}</td>
+                        <td>{{ entry.get_role_display }}</td>
+                        <td>{{ entry.jersey_number|default:"—" }}</td>
+                        <td>{{ entry.position_label|default:"—" }}</td>
+                        <td>{{ entry.date_of_birth|date:"j M Y"|default:"—" }}</td>
+                        <td>{{ entry.license_number|default:"—" }}</td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="6" class="muted">{% trans "No one on the roster yet." %}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </body>
+</html>

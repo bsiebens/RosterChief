@@ -10,7 +10,11 @@
     _confirm_modal.html pattern tournament_field_stage_list.html's fields/
     stages lists already use.
 
-    Context: tournament, team, entries (each with .edit_form), entry_form.
+    Context: tournament, team, entries (each with .edit_form), entry_form,
+    player_count, staff_count, lunch_days (tournaments.services.lunch.
+    daily_lunch_summary's own [{date, players, staff, player_count,
+    staff_count, dietary_notes}, ...] shape -- empty when lunch_mode is
+    NONE).
 {% endcomment %}
 
 {% block panel_title %}{{ team.display_name }}{% endblock panel_title %}
@@ -22,10 +26,25 @@
 
 {% block actions %}
     <a class="btn btn-outline gap-2" href="{% url 'management:tournament_team_list' tournament.pk %}">{% lucide "arrow-left" size=16 %} {% trans "Back to teams" %}</a>
+    <a class="btn btn-outline gap-2" href="{% url 'management:tournament_team_roster_pdf' tournament.pk team.pk %}">{% lucide "file-down" size=16 %} {% trans "Roster PDF" %}</a>
+    {% if tournament.lunch_mode != "none" %}
+        <a class="btn btn-outline gap-2" href="{% url 'management:tournament_team_lunch_pdf' tournament.pk team.pk %}">{% lucide "file-down" size=16 %} {% trans "Lunch PDF" %}</a>
+    {% endif %}
     <button class="btn btn-primary gap-2" type="button" onclick="document.getElementById('entry_create_modal').showModal()">{% lucide "plus" size=16 %} {% trans "Add to roster" %}</button>
 {% endblock actions %}
 
 {% block panel %}
+    <div class="mb-4 flex flex-wrap gap-3">
+        <div class="card card-body flex-1 basis-40">
+            <div class="font-display text-2xl font-extrabold text-ink">{{ player_count }}</div>
+            <div class="text-xs text-muted">{% trans "Players" %}</div>
+        </div>
+        <div class="card card-body flex-1 basis-40">
+            <div class="font-display text-2xl font-extrabold text-ink">{{ staff_count }}</div>
+            <div class="text-xs text-muted">{% trans "Staff" %}</div>
+        </div>
+    </div>
+
     <div class="card overflow-hidden">
         <table class="table">
             <thead>
@@ -92,6 +111,32 @@
             </tbody>
         </table>
     </div>
+
+    {% if lunch_days %}
+        <div class="card card-body mt-4">
+            <h2 class="card-title">{% lucide "utensils" size=16 %} {% trans "Lunch" %}</h2>
+            <p class="text-xs text-muted">{% trans "A read-only per-day summary -- edit who's having lunch from their row in the roster table above." %}</p>
+            <div class="mt-2 grid grid-cols-1 gap-3 md:grid-cols-2">
+                {% for day in lunch_days %}
+                    <div class="rounded-box border border-line p-3">
+                        <div class="flex items-center justify-between">
+                            <span class="font-display text-sm font-bold text-ink uppercase">{{ day.date|date:"l j M" }}</span>
+                            <span class="font-mono text-xs text-muted">{{ day.player_count }} {% trans "players" %} &middot; {{ day.staff_count }} {% trans "staff" %}</span>
+                        </div>
+                        {% if day.dietary_notes %}
+                            <ul class="mt-1.5 flex flex-col gap-0.5 text-xs text-muted">
+                                {% for note in day.dietary_notes %}
+                                    <li>&bull; {{ note }}</li>
+                                {% endfor %}
+                            </ul>
+                        {% else %}
+                            <p class="mt-1.5 text-xs text-dim">{% trans "No dietary restrictions noted." %}</p>
+                        {% endif %}
+                    </div>
+                {% endfor %}
+            </div>
+        </div>
+    {% endif %}
 
     {% trans "Add to roster" as add_entry_title %}
     {% trans "Add" as add_label %}
