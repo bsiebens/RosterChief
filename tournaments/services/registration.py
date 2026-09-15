@@ -249,11 +249,21 @@ def ensure_home_team(tournament) -> TournamentTeam | None:
     only ever fires on an ``m2m_changed`` signal, never on the plain
     ``post_save`` a kwarg-only create would rely on.
 
-    Deliberately does NOT try to keep up with ``home_team`` being changed
-    to a different team after the first save -- the original team's
-    ``TournamentTeam``/roster just stand as an ordinary (no longer "home")
-    entry from then on; reconciling that is left to staff by hand via the
-    Teams tab, not automated here.
+    The linked ``Event``'s own ``teams`` is kept following ``home_team``
+    on every call, not just the one that creates it -- changing the home
+    team to a different one re-points the same event at the new team
+    (``event.teams.set(...)`` only actually adds/removes what changed, so
+    this is a cheap no-op when home_team hasn't moved). That's what keeps
+    "so that signup works" true after a change, not just on the first
+    save. The original home team's own ``TournamentTeam``/roster still
+    just stand as an ordinary (no longer "home") entry once replaced --
+    reconciling *those* is left to staff by hand via the Teams tab, not
+    automated here; only the event's audience follows automatically.
+    Clearing ``home_team`` back to blank leaves an already-linked event's
+    teams alone (there's no way to tell a since-cleared home team's
+    audience apart from one a club set on the event by hand before this
+    feature existed) -- staff can always fix that manually via the event's
+    own edit screen.
     """
     if tournament.home_team_id is None:
         return None
@@ -268,8 +278,9 @@ def ensure_home_team(tournament) -> TournamentTeam | None:
         start = timezone.make_aware(datetime.combine(tournament.start_date, time.min))
         end = timezone.make_aware(datetime.combine(tournament.end_date, time(23, 59)))
         event = Event.objects.create(club=tournament.club, season=tournament.season, kind=Event.EventKind.TOURNAMENT, title=tournament.name, start=start, end=end)
-        event.teams.set([tournament.home_team])
         tournament.event = event
         tournament.save(update_fields=["event"])
+
+    tournament.event.teams.set([tournament.home_team])
 
     return team

@@ -4,7 +4,6 @@ from django.db.models import Q
 from django.utils.translation import gettext_lazy as _
 
 from club.models import Season
-from events.models import Event
 from members.models import Member
 from teams.models import Team
 
@@ -185,8 +184,14 @@ class TournamentForm(forms.ModelForm):
     """Create/edit a tournament itself -- closes the "admin-only" gap
     TournamentListView used to describe in its own docstring. ``club`` is
     never a form field (set by the view, same as ``TeamForm``'s own
-    club-scoped fields in ``management.forms``); ``event`` is scoped to the
-    given club in ``__init__`` the same way.
+    club-scoped fields in ``management.forms``).
+
+    ``event`` is deliberately NOT a form field -- it used to be a plain
+    picker, but now that ``ensure_home_team`` auto-creates and re-points
+    it at whichever team is ``home_team``, letting staff also hand-pick
+    it here just invited the two to disagree. The settings template shows
+    it as a plain link to whatever's currently linked instead (see
+    tournament_form.html).
 
     ``season`` isn't a form field at all -- picking one by hand duplicated
     the start/end dates already on the form and, for a club with no season
@@ -208,7 +213,7 @@ class TournamentForm(forms.ModelForm):
 
     class Meta:
         model = Tournament
-        fields = ["name", "status", "start_date", "end_date", "registration_open", "max_teams", "min_age", "max_age", "contact_email", "description", "event", "home_team", "deposit_amount", "entry_fee_amount", "lunch_mode", "lunch_price_per_day"]
+        fields = ["name", "status", "start_date", "end_date", "registration_open", "max_teams", "min_age", "max_age", "contact_email", "description", "home_team", "deposit_amount", "entry_fee_amount", "lunch_mode", "lunch_price_per_day"]
         widgets = {
             "start_date": forms.DateInput(attrs={"type": "date"}),
             "end_date": forms.DateInput(attrs={"type": "date"}),
@@ -218,14 +223,6 @@ class TournamentForm(forms.ModelForm):
     def __init__(self, *args, club=None, **kwargs):
         super().__init__(*args, **kwargs)
         self._club = club
-        # An Event already claimed by some other Tournament is excluded --
-        # except this form's own instance's current event, so editing a
-        # tournament without touching this field doesn't spuriously drop it
-        # from the choices. See Tournament.event's own docstring.
-        event_queryset = Event.objects.filter(club=club).filter(Q(tournament__isnull=True) | Q(pk=self.instance.event_id))
-        self.fields["event"].queryset = event_queryset
-        self.fields["event"].required = False
-        self.fields["event"].empty_label = _("— none —")
         self.fields["home_team"].queryset = Team.objects.filter(club=club)
         self.fields["home_team"].required = False
         self.fields["home_team"].empty_label = _("— none —")
