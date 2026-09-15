@@ -671,6 +671,32 @@ class ShopManager(ClubScopedModel):
         return f"{self.club} - {self.member}"
 
 
+class TournamentManager(ClubScopedModel):
+    """An additive grant, not a ClubRole value -- same shape as ShopManager/
+    EvaluationManager, and for the same reason: deciding a tournament's
+    registrations, its teams' payment status, and its own settings is its
+    own trust boundary, separate from being any given team's coach/manager
+    (who gets a narrower, per-tournament "operator" tier derived from
+    ``StaffAssignment`` on that tournament's own ``home_team`` instead --
+    see ``club.services.access.can_manage_tournament_operations``). Club-wide
+    and season-independent, layered on top of whatever ClubRole/StaffAssignment
+    a member already holds -- see ``club.services.access.can_manage_tournaments``.
+    """
+
+    member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="tournament_manager_grants", verbose_name=_("member"))
+
+    class Meta:
+        verbose_name = _("tournament manager")
+        verbose_name_plural = _("tournament managers")
+        ordering = ["club", "member__last_name", "member__first_name"]
+        constraints = [
+            models.UniqueConstraint(fields=["club", "member"], name="unique_tournament_manager_per_club"),
+        ]
+
+    def __str__(self):
+        return f"{self.club} - {self.member}"
+
+
 class EvaluationManager(ClubScopedModel):
     """An additive grant, not a ClubRole value -- same shape as ShopManager, and
     for the same reason: evaluating players is its own trust boundary (a

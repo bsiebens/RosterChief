@@ -25,14 +25,17 @@ from registration.models import RegistrationBatch, RegistrationDetails
 from rosterchief.test_support import enrol_mfa, make_season
 from teams.models import Position, StaffAssignment, Team, TeamMembership
 from teams.services import eligible_roster_members
+from tournaments.models import Tournament
 
-from .models import Club, ClubMembership, ClubRole, DuesInvoice, EvaluationManager, FeePayment, MemberRequirementStatus, OnboardingRequirement, Season, ShopManager, Sponsor, club_logo_path
+from .models import Club, ClubMembership, ClubRole, DuesInvoice, EvaluationManager, FeePayment, MemberRequirementStatus, OnboardingRequirement, Season, ShopManager, Sponsor, TournamentManager, club_logo_path
 from .services.access import (
     COACH_MANAGER,
     can_edit_event,
     can_manage_evaluations,
     can_manage_members,
     can_manage_shop,
+    can_manage_tournament_operations,
+    can_manage_tournaments,
     has_club_role,
     has_management_access,
     is_club_admin,
@@ -40,6 +43,7 @@ from .services.access import (
     is_member_admin,
     is_platform_superuser,
     is_shop_admin,
+    is_tournament_admin,
     members_visible_to,
     roles_in_club,
     teams_managed_by,
@@ -1132,6 +1136,86 @@ class AccessServiceTests(TestCase):
         EvaluationManager.objects.create(club=self.other_club, member=member)
 
         self.assertFalse(can_manage_evaluations(user, self.club))
+
+    # --- can_manage_tournaments / is_tournament_admin ---
+    def test_admin_can_manage_tournaments_without_a_grant(self):
+        admin_user, admin_member = self.make_user_member("admin-tourn@example.com")
+        self.grant(admin_member, ClubRole.Roles.ADMIN)
+        editor_user, editor_member = self.make_user_member("editor-tourn@example.com")
+        self.grant(editor_member, ClubRole.Roles.EDITOR)
+
+        self.assertTrue(can_manage_tournaments(admin_user, self.club))
+        self.assertFalse(can_manage_tournaments(editor_user, self.club))
+
+    def test_a_tournament_manager_grant_is_additive_on_top_of_another_role(self):
+        user, member = self.make_user_member("editor-tournmanager@example.com")
+        self.grant(member, ClubRole.Roles.EDITOR)
+        TournamentManager.objects.create(club=self.club, member=member)
+
+        self.assertTrue(is_tournament_admin(user, self.club))
+        self.assertTrue(can_manage_tournaments(user, self.club))
+        self.assertTrue(has_club_role(user, self.club, ClubRole.Roles.EDITOR))
+
+    def test_a_tournament_manager_grant_alone_is_enough_with_no_clubrole_at_all(self):
+        user, member = self.make_user_member("tournmanageronly@example.com")
+        TournamentManager.objects.create(club=self.club, member=member)
+
+        self.assertTrue(can_manage_tournaments(user, self.club))
+        self.assertFalse(is_club_admin(user, self.club))
+
+    def test_a_tournament_manager_grant_in_another_club_does_not_count_here(self):
+        user, member = self.make_user_member("othertournmanager@example.com")
+        TournamentManager.objects.create(club=self.other_club, member=member)
+
+        self.assertFalse(can_manage_tournaments(user, self.club))
+
+    # --- can_manage_tournament_operations ---
+    def make_tournament(self, *, home_team=None):
+        today = timezone.localdate()
+        return Tournament.objects.create(club=self.club, name="Cup", season=self.season, start_date=today, end_date=today + datetime.timedelta(days=1), home_team=home_team)
+
+    def test_a_tournament_admin_can_operate_a_tournament_with_no_home_team(self):
+        user, member = self.make_user_member("tournadmin-op@example.com")
+        TournamentManager.objects.create(club=self.club, member=member)
+        tournament = self.make_tournament()
+
+        self.assertTrue(can_manage_tournament_operations(user, self.club, tournament))
+
+    def test_no_home_team_means_no_operator_derivation_for_a_non_admin(self):
+        user, member = self.make_user_member("nohometeam@example.com")
+        self.make_coach(member)  # manages self.team, but the tournament has no home_team at all
+        tournament = self.make_tournament()
+
+        self.assertFalse(can_manage_tournament_operations(user, self.club, tournament))
+
+    def test_the_home_teams_manager_can_operate_the_tournament(self):
+        user, member = self.make_user_member("hometeammanager@example.com")
+        self.make_coach(member, team=self.team)
+        tournament = self.make_tournament(home_team=self.team)
+
+        self.assertTrue(can_manage_tournament_operations(user, self.club, tournament))
+
+    def test_a_different_teams_manager_cannot_operate_the_tournament(self):
+        user, member = self.make_user_member("otherteammanager@example.com")
+        self.make_coach(member, team=self.second_team)
+        tournament = self.make_tournament(home_team=self.team)
+
+        self.assertFalse(can_manage_tournament_operations(user, self.club, tournament))
+
+    def test_non_management_staff_on_the_home_team_cannot_operate_the_tournament(self):
+        # Same escalation shape as teams_managed_by itself: a manager exists on
+        # the home team, but the physio must not inherit operator status from them.
+        user, member = self.make_user_member("hometeamphysio@example.com")
+        self.make_support_staff(member, team=self.team)
+        tournament = self.make_tournament(home_team=self.team)
+
+        self.assertFalse(can_manage_tournament_operations(user, self.club, tournament))
+
+    def test_a_plain_staff_member_with_no_role_or_grant_cannot_operate_the_tournament(self):
+        user, _member = self.make_user_member("plaintourn@example.com")
+        tournament = self.make_tournament(home_team=self.team)
+
+        self.assertFalse(can_manage_tournament_operations(user, self.club, tournament))
 
     # --- platform superuser bypass ---
     def test_superuser_is_club_admin_everywhere_with_no_clubrole_at_all(self):

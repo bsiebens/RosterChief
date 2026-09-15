@@ -1,10 +1,26 @@
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from django.http import Http404
+from django.shortcuts import get_object_or_404
 from waffle import flag_is_active
 
 from members.models import Group
 
-from .services.access import can_add_news, can_edit_news, can_manage_evaluations, can_manage_forms, can_manage_members, can_manage_shop, can_publish_news, groups_manageable_by, has_management_access, is_club_admin, is_coach_manager, teams_managed_by
+from .services.access import (
+    can_add_news,
+    can_edit_news,
+    can_manage_evaluations,
+    can_manage_forms,
+    can_manage_members,
+    can_manage_shop,
+    can_manage_tournament_operations,
+    can_manage_tournaments,
+    can_publish_news,
+    groups_manageable_by,
+    has_management_access,
+    is_club_admin,
+    is_coach_manager,
+    teams_managed_by,
+)
 
 
 class ClubStaffRequiredMixin(LoginRequiredMixin, UserPassesTestMixin):
@@ -142,14 +158,73 @@ class FormManagerRequiredMixin(FeatureRequiredMixin):
         return can_manage_forms(self.request.user, self.request.club)
 
 
-class TournamentsManagerRequiredMixin(FeatureRequiredMixin):
-    """The tournaments section's own gate -- same "tournaments" waffle-flag 404
-    as FeatureRequiredMixin, and left ADMIN-only (no ``test_func`` override)
-    since there's no tournaments-specific manager grant yet, unlike
-    ShopManager/EvaluationManager -- widen this the same way those two did if
-    and when one is introduced."""
+class TournamentsManagerRequiredMixin(FeatureFlagMixin, ClubStaffRequiredMixin):
+    """The tournaments section's own view floor -- same "tournaments"
+    waffle-flag 404 every tournament-scoped view already had, but any club
+    staff now (ADMIN/EDITOR/any current-season StaffAssignment), not
+    admin-only: every tournament-scoped screen is at least readable by any
+    coach/manager, even one managing an unrelated team. Two narrower tiers
+    layer on top for the actual edit actions -- see
+    ``TournamentAdminRequiredMixin``/``TournamentOperatorRequiredMixin``
+    just below, and ``club.models.TournamentManager``/
+    ``club.services.access.can_manage_tournaments``/
+    ``can_manage_tournament_operations`` for what each one actually checks.
+
+    Also provides ``tournament_permissions()``, a small helper every
+    view-only GET view calls to put ``can_manage_tournament``/
+    ``can_operate_tournament`` into template context so action buttons can
+    hide themselves for a viewer who can't use them -- the ``test_func`` on
+    each edit-tier mixin below is the real security boundary; this is UX
+    polish on top of it, not a substitute for it."""
 
     feature_flag = "tournaments"
+
+    def test_func(self):
+        # has_management_access alone doesn't know about a TournamentManager
+        # grant (it only checks ClubRole ADMIN/EDITOR/MEMBER_ADMIN or any
+        # current-season StaffAssignment) -- without this, a tournament
+        # admin granted with no *other* staff role could reach the
+        # admin-only action views below (their own test_func is a full
+        # override, not layered on has_management_access at all) but 403
+        # on the plain list/detail pages needed to navigate to them in the
+        # first place.
+        return has_management_access(self.request.user, self.request.club) or can_manage_tournaments(self.request.user, self.request.club)
+
+    def tournament_permissions(self, tournament) -> dict:
+        return {
+            "can_manage_tournament": can_manage_tournaments(self.request.user, self.request.club),
+            "can_operate_tournament": can_manage_tournament_operations(self.request.user, self.request.club, tournament),
+        }
+
+
+class TournamentAdminRequiredMixin(TournamentsManagerRequiredMixin):
+    """Tournament-admin-only ground: deciding registrations (approve/
+    reject), withdrawing/deleting a team, a team's payment status, and the
+    tournament's own settings. See ``can_manage_tournaments`` /
+    ``club.models.TournamentManager``."""
+
+    def test_func(self):
+        return can_manage_tournaments(self.request.user, self.request.club)
+
+
+class TournamentOperatorRequiredMixin(TournamentsManagerRequiredMixin):
+    """Tournament-admin tier, OR a current-season manager of the relevant
+    tournament's own ``home_team`` -- "everything else that's an edit"
+    (rosters/lunch for any team, adding a team, fields & stages, dressing
+    rooms, shifts, match reschedule/result). ``self.get_tournament()``
+    defaults to a ``tournament_pk`` URL kwarg lookup (most views carry one
+    directly); override it for the handful whose URL only carries a child
+    object's own ``pk`` (a ``TournamentRegistration``/``TournamentTeam``/
+    ``Match``) and need to traverse to its tournament instead -- see
+    ``can_manage_tournament_operations``."""
+
+    def get_tournament(self):
+        from tournaments.models import Tournament  # local import -- avoid cross-app coupling, same reasoning Tournament.location's own docstring gives for every cross-app reference in that app
+
+        return get_object_or_404(Tournament, pk=self.kwargs["tournament_pk"], club=self.request.club)
+
+    def test_func(self):
+        return can_manage_tournament_operations(self.request.user, self.request.club, self.get_tournament())
 
 
 #: The "officials" section's own gate -- unlike shop/forms (one permission

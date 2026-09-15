@@ -21,7 +21,7 @@ from django.http import HttpRequest
 from django.utils import timezone
 
 from authentication.models import User
-from club.models import Club, ClubMembership, ClubRole, EvaluationManager, Season, ShopManager
+from club.models import Club, ClubMembership, ClubRole, EvaluationManager, Season, ShopManager, TournamentManager
 from events.models import Event
 from members.models import FamilyMembership, Group, Member
 from rosterchief.request_cache import cached_on_request
@@ -259,6 +259,36 @@ def is_evaluation_manager(user: User, club: Club) -> bool:
 
 def can_manage_evaluations(user: User, club: Club) -> bool:
     return is_club_admin(user, club) or is_evaluation_manager(user, club)
+
+
+def is_tournament_admin(user: User, club: Club) -> bool:
+    """An additive grant (club.models.TournamentManager), not a ClubRole
+    value -- same shape as is_shop_admin/is_evaluation_manager, for the same
+    reason: see that model's own docstring."""
+    return TournamentManager.objects.filter(member__user=user, club=club).exists()
+
+
+def can_manage_tournaments(user: User, club: Club) -> bool:
+    """The tournament-admin tier: deciding registrations, a team's payment
+    status or removal, and the tournament's own settings. Real ADMIN, or a
+    TournamentManager grant."""
+    return is_club_admin(user, club) or is_tournament_admin(user, club)
+
+
+def can_manage_tournament_operations(user: User, club: Club, tournament) -> bool:
+    """The tournament-operator tier: "everything else that's an edit" on one
+    specific tournament -- rosters/lunch, adding a team, fields & stages,
+    dressing rooms, shifts, match reschedule/result. Tournament-admin tier
+    (can_manage_tournaments), OR a current-season manager of *this*
+    tournament's own home_team (teams_managed_by already does exactly the
+    "current-season management-position StaffAssignment" derivation this
+    needs). False when the tournament has no home_team at all -- there's
+    nothing to derive operator status from."""
+    if can_manage_tournaments(user, club):
+        return True
+    if tournament.home_team_id is None:
+        return False
+    return teams_managed_by(user, club).filter(pk=tournament.home_team_id).exists()
 
 
 def can_add_news(user: User, club: Club) -> bool:
