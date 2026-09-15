@@ -59,9 +59,11 @@ from shop.services.notifications import _notify_order_ready_for_pickup_by_id
 from teams.models import NumberPool, NumberReservation, Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
 from teams.services import eligible_roster_members
 from tournaments.models import (
+    BreakRule,
     DressingRoom,
     DressingRoomAssignment,
     Match,
+    ScheduleBlock,
     Tournament,
     TournamentField,
     TournamentRegistration,
@@ -14473,7 +14475,7 @@ class TournamentTeamRosterExportTests(ManagementTestBase):
 
         try:
             from weasyprint import HTML  # noqa: F401
-        except (ImportError, OSError):
+        except ImportError, OSError:
             self.skipTest("WeasyPrint's native libraries aren't available in this environment.")
 
         response = self.club_get("tournament_team_roster_pdf", self.tournament.pk, self.team.pk)
@@ -14487,7 +14489,7 @@ class TournamentTeamRosterExportTests(ManagementTestBase):
 
         try:
             from weasyprint import HTML  # noqa: F401
-        except (ImportError, OSError):
+        except ImportError, OSError:
             self.skipTest("WeasyPrint's native libraries aren't available in this environment.")
 
         response = self.club_get("tournament_team_roster_pdf", self.tournament.pk, self.team.pk)
@@ -14499,7 +14501,7 @@ class TournamentTeamRosterExportTests(ManagementTestBase):
 
         try:
             from weasyprint import HTML  # noqa: F401
-        except (ImportError, OSError):
+        except ImportError, OSError:
             self.skipTest("WeasyPrint's native libraries aren't available in this environment.")
 
         response = self.club_get("tournament_team_lunch_pdf", self.tournament.pk, self.team.pk)
@@ -14588,6 +14590,118 @@ class TournamentScheduleTests(ManagementTestBase):
         response = self.club_post("tournament_schedule_generate", {}, self.tournament.pk)
 
         self.assertRedirects(response, reverse("management:tournament_schedule", args=[self.tournament.pk]))
+
+    def test_generate_schedule_honours_a_custom_match_duration(self):
+        self.activate_flag()
+        TournamentField.objects.create(tournament=self.tournament, name="Field 1", availability=[{"date": self.tournament.start_date.isoformat(), "start": "09:00", "end": "20:00"}])
+        team_a, team_b, team_c, team_d = self.make_team("Team A"), self.make_team("Team B"), self.make_team("Team C"), self.make_team("Team D")
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="Round Robin", format=TournamentStage.Format.CUSTOM)
+        match_1 = Match.objects.create(stage=stage, round_number=1, sequence=0, home_team=team_a, away_team=team_b)
+        Match.objects.create(stage=stage, round_number=1, sequence=1, home_team=team_c, away_team=team_d)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("tournament_schedule_generate", {"match_duration_minutes": "20"}, self.tournament.pk)
+
+        self.assertRedirects(response, reverse("management:tournament_schedule", args=[self.tournament.pk]))
+        match_1.refresh_from_db()
+        self.assertIsNotNone(match_1.scheduled_start)
+
+    def test_generate_schedule_falls_back_to_the_tournaments_own_default_when_unset(self):
+        self.activate_flag()
+        TournamentField.objects.create(tournament=self.tournament, name="Field 1", availability=[{"date": self.tournament.start_date.isoformat(), "start": "09:00", "end": "20:00"}])
+        team_a, team_b = self.make_team("Team A"), self.make_team("Team B")
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="Round Robin", format=TournamentStage.Format.CUSTOM)
+        match = Match.objects.create(stage=stage, round_number=1, sequence=0, home_team=team_a, away_team=team_b)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("tournament_schedule_generate", {"match_duration_minutes": "not-a-number"}, self.tournament.pk)
+
+        self.assertRedirects(response, reverse("management:tournament_schedule", args=[self.tournament.pk]))
+        match.refresh_from_db()
+        self.assertIsNotNone(match.scheduled_start)
+
+    def test_schedule_page_shows_the_default_match_duration_pre_filled(self):
+        self.activate_flag()
+        self.tournament.default_match_duration_minutes = 30
+        self.tournament.save(update_fields=["default_match_duration_minutes"])
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_schedule", self.tournament.pk)
+
+        self.assertContains(response, 'value="30"')
+
+    def test_create_a_field_only_schedule_block(self):
+        self.activate_flag()
+        field = TournamentField.objects.create(tournament=self.tournament, name="Field 1")
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post(
+            "tournament_schedule_block_create",
+            {"title": "Lunch break", "starts_at": "2026-09-19T12:00", "ends_at": "2026-09-19T13:00", "field": field.pk},
+            self.tournament.pk,
+        )
+
+        self.assertRedirects(response, reverse("management:tournament_schedule", args=[self.tournament.pk]))
+        block = ScheduleBlock.objects.get(tournament=self.tournament, title="Lunch break")
+        self.assertEqual(block.field, field)
+        self.assertEqual(list(block.teams.all()), [])
+
+    def test_create_a_team_scoped_schedule_block(self):
+        self.activate_flag()
+        team = self.make_team("Team A")
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post(
+            "tournament_schedule_block_create",
+            {"title": "Team huddle", "starts_at": "2026-09-19T08:00", "ends_at": "2026-09-19T08:30", "teams": [team.pk]},
+            self.tournament.pk,
+        )
+
+        self.assertRedirects(response, reverse("management:tournament_schedule", args=[self.tournament.pk]))
+        block = ScheduleBlock.objects.get(tournament=self.tournament, title="Team huddle")
+        self.assertIsNone(block.field)
+        self.assertEqual(list(block.teams.all()), [team])
+
+    def test_schedule_block_end_before_start_is_rejected(self):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post(
+            "tournament_schedule_block_create",
+            {"title": "Bad block", "starts_at": "2026-09-19T13:00", "ends_at": "2026-09-19T12:00"},
+            self.tournament.pk,
+        )
+
+        self.assertRedirects(response, reverse("management:tournament_schedule", args=[self.tournament.pk]))
+        self.assertFalse(ScheduleBlock.objects.filter(tournament=self.tournament, title="Bad block").exists())
+
+    def test_update_and_delete_a_schedule_block(self):
+        self.activate_flag()
+        block = ScheduleBlock.objects.create(tournament=self.tournament, title="Lunch break", starts_at=timezone.now(), ends_at=timezone.now() + datetime.timedelta(hours=1))
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post(
+            "tournament_schedule_block_update",
+            {"title": "Lunch break (renamed)", "starts_at": "2026-09-19T12:00", "ends_at": "2026-09-19T13:00"},
+            self.tournament.pk,
+            block.pk,
+        )
+        self.assertRedirects(response, reverse("management:tournament_schedule", args=[self.tournament.pk]))
+        block.refresh_from_db()
+        self.assertEqual(block.title, "Lunch break (renamed)")
+
+        response = self.club_post("tournament_schedule_block_delete", {}, self.tournament.pk, block.pk)
+        self.assertRedirects(response, reverse("management:tournament_schedule", args=[self.tournament.pk]))
+        self.assertFalse(ScheduleBlock.objects.filter(pk=block.pk).exists())
+
+    def test_schedule_block_crud_404s_for_a_block_in_another_tournament(self):
+        self.activate_flag()
+        other_tournament = Tournament.objects.create(club=self.club, name="Spring Cup", season=self.season, start_date=timezone.localdate(), end_date=timezone.localdate())
+        other_block = ScheduleBlock.objects.create(tournament=other_tournament, title="Other block", starts_at=timezone.now(), ends_at=timezone.now() + datetime.timedelta(hours=1))
+        self.client.force_login(self.admin_user)
+
+        self.assertEqual(self.club_post("tournament_schedule_block_update", {"title": "Hack"}, self.tournament.pk, other_block.pk).status_code, 404)
+        self.assertEqual(self.club_post("tournament_schedule_block_delete", {}, self.tournament.pk, other_block.pk).status_code, 404)
 
     def test_schedule_groups_matches_by_stage_then_round(self):
         self.activate_flag()
@@ -14771,6 +14885,29 @@ class TournamentCreateUpdateTests(ManagementTestBase):
         tournament = Tournament.objects.get(club=self.club, name="Fall Classic")
         self.assertRedirects(response, reverse("management:tournament_settings", args=[tournament.pk]))
         self.assertEqual(tournament.season, self.season)
+
+    def test_omitting_the_match_duration_falls_back_to_forty_five(self):
+        # Regression test: making this field required in the form would
+        # break every existing caller (this test's own valid_data() helper
+        # included) that doesn't yet post it.
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+        data = self.valid_data()
+        data.pop("default_match_duration_minutes", None)
+
+        self.club_post("tournament_create", data)
+
+        tournament = Tournament.objects.get(club=self.club, name="Fall Classic")
+        self.assertEqual(tournament.default_match_duration_minutes, 45)
+
+    def test_an_explicit_match_duration_is_saved(self):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+
+        self.club_post("tournament_create", self.valid_data(default_match_duration_minutes="30"))
+
+        tournament = Tournament.objects.get(club=self.club, name="Fall Classic")
+        self.assertEqual(tournament.default_match_duration_minutes, 30)
 
     def test_dates_outside_every_season_are_rejected_with_a_clear_error(self):
         self.activate_flag()
@@ -15129,6 +15266,64 @@ class TournamentFieldStageCrudTests(ManagementTestBase):
 
         self.assertRedirects(response, reverse("management:tournament_field_stage_list", args=[self.tournament.pk]))
         self.assertEqual(stage.matches.count(), 0)
+
+    def test_create_a_game_count_break_rule(self):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post(
+            "tournament_break_rule_create",
+            {"trigger_type": BreakRule.TriggerType.GAME_COUNT, "trigger_every_n_games": "3", "gap_minutes": "15", "replaces_default_gap": "on", "priority": "0"},
+            self.tournament.pk,
+        )
+
+        self.assertRedirects(response, reverse("management:tournament_field_stage_list", args=[self.tournament.pk]))
+        rule = BreakRule.objects.get(tournament=self.tournament)
+        self.assertEqual(rule.trigger_type, BreakRule.TriggerType.GAME_COUNT)
+        self.assertEqual(rule.trigger_every_n_games, 3)
+        self.assertEqual(rule.gap_minutes, 15)
+
+    def test_a_clock_window_break_rule_with_no_end_is_rejected(self):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post(
+            "tournament_break_rule_create",
+            {"trigger_type": BreakRule.TriggerType.CLOCK_WINDOW, "trigger_window_start": "12:00", "priority": "0"},
+            self.tournament.pk,
+        )
+
+        self.assertRedirects(response, reverse("management:tournament_field_stage_list", args=[self.tournament.pk]))
+        self.assertFalse(BreakRule.objects.filter(tournament=self.tournament).exists())
+
+    def test_update_and_delete_a_break_rule(self):
+        self.activate_flag()
+        rule = BreakRule.objects.create(tournament=self.tournament, trigger_type=BreakRule.TriggerType.GAME_COUNT, trigger_every_n_games=3, gap_minutes=15)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post(
+            "tournament_break_rule_update",
+            {"trigger_type": BreakRule.TriggerType.GAME_COUNT, "trigger_every_n_games": "5", "gap_minutes": "20", "priority": "0"},
+            self.tournament.pk,
+            rule.pk,
+        )
+        self.assertRedirects(response, reverse("management:tournament_field_stage_list", args=[self.tournament.pk]))
+        rule.refresh_from_db()
+        self.assertEqual(rule.trigger_every_n_games, 5)
+        self.assertEqual(rule.gap_minutes, 20)
+
+        response = self.club_post("tournament_break_rule_delete", {}, self.tournament.pk, rule.pk)
+        self.assertRedirects(response, reverse("management:tournament_field_stage_list", args=[self.tournament.pk]))
+        self.assertFalse(BreakRule.objects.filter(pk=rule.pk).exists())
+
+    def test_break_rule_crud_404s_for_a_rule_in_another_tournament(self):
+        self.activate_flag()
+        other_tournament = Tournament.objects.create(club=self.club, name="Spring Cup", season=self.season, start_date=timezone.localdate(), end_date=timezone.localdate())
+        other_rule = BreakRule.objects.create(tournament=other_tournament, trigger_type=BreakRule.TriggerType.GAME_COUNT, trigger_every_n_games=1, gap_minutes=5)
+        self.client.force_login(self.admin_user)
+
+        self.assertEqual(self.club_post("tournament_break_rule_update", {"trigger_type": BreakRule.TriggerType.GAME_COUNT}, self.tournament.pk, other_rule.pk).status_code, 404)
+        self.assertEqual(self.club_post("tournament_break_rule_delete", {}, self.tournament.pk, other_rule.pk).status_code, 404)
 
 
 class TournamentTaskManagementTests(ManagementTestBase):
@@ -15642,6 +15837,8 @@ class TournamentPermissionTiersTests(ManagementTestBase):
         cls.field = TournamentField.objects.create(tournament=cls.tournament, name="Field 1")
         cls.stage = TournamentStage.objects.create(tournament=cls.tournament, name="Group Stage", format=TournamentStage.Format.CUSTOM)
         cls.match = Match.objects.create(stage=cls.stage, home_team=cls.team_entry, away_team=None)
+        cls.break_rule = BreakRule.objects.create(tournament=cls.tournament, trigger_type=BreakRule.TriggerType.GAME_COUNT, trigger_every_n_games=3, gap_minutes=15)
+        cls.schedule_block = ScheduleBlock.objects.create(tournament=cls.tournament, title="Lunch", starts_at=timezone.now(), ends_at=timezone.now() + datetime.timedelta(hours=1))
         cls.task = TournamentTask.objects.create(tournament=cls.tournament, title="Gate duty", starts_at=timezone.now(), ends_at=timezone.now() + datetime.timedelta(hours=1))
         cls.room = DressingRoom.objects.create(club=cls.club, name="Room A")
         cls.assignment = assign_dressing_room(cls.room, cls.team_entry)
@@ -15739,15 +15936,21 @@ class TournamentPermissionTiersTests(ManagementTestBase):
             ("tournament_dressing_room_assign", [self.tournament.pk]),
             ("tournament_stage_generate_matches", [self.tournament.pk, self.stage.pk]),
             ("tournament_schedule_generate", [self.tournament.pk]),
+            ("tournament_break_rule_create", [self.tournament.pk]),
+            ("tournament_break_rule_update", [self.tournament.pk, self.break_rule.pk]),
+            ("tournament_schedule_block_create", [self.tournament.pk]),
+            ("tournament_schedule_block_update", [self.tournament.pk, self.schedule_block.pk]),
         ]
 
     def delete_cases(self):
-        """(url_name, args_fn) for the two operator-tier delete views --
+        """(url_name, args_fn) for the operator-tier delete views --
         args_fn(self) creates and returns a fresh, disposable object each
         call so a permitted delete in one subtest doesn't 404 the next."""
         return [
             ("tournament_field_delete", lambda: [self.tournament.pk, TournamentField.objects.create(tournament=self.tournament, name="Disposable field").pk]),
             ("tournament_stage_delete", lambda: [self.tournament.pk, TournamentStage.objects.create(tournament=self.tournament, name="Disposable stage", format=TournamentStage.Format.CUSTOM).pk]),
+            ("tournament_break_rule_delete", lambda: [self.tournament.pk, BreakRule.objects.create(tournament=self.tournament, trigger_type=BreakRule.TriggerType.GAME_COUNT, trigger_every_n_games=1, gap_minutes=5).pk]),
+            ("tournament_schedule_block_delete", lambda: [self.tournament.pk, ScheduleBlock.objects.create(tournament=self.tournament, title="Disposable block", starts_at=timezone.now(), ends_at=timezone.now() + datetime.timedelta(hours=1)).pk]),
         ]
 
     def test_operator_views_reject_an_unrelated_manager_and_plain_staff(self):

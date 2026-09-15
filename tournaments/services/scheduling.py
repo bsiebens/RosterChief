@@ -21,7 +21,7 @@ from django.db.models import Q
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
-from ..models import BreakRule, Match, TournamentGroup, TournamentStage, TournamentTeam
+from ..models import BreakRule, Match, ScheduleBlock, TournamentGroup, TournamentStage, TournamentTeam
 from .brackets import BracketError, double_elimination_bracket, single_elimination_bracket
 
 #: The one thing every tournament falls back to when no BreakRule fires --
@@ -358,6 +358,12 @@ def allocate_schedule(tournament, *, match_duration: datetime.timedelta = DEFAUL
     if not fields:
         raise SchedulingError(_("Add at least one field before generating a schedule."))
 
+    # Fetched once, not per-match -- a tournament has few enough blocks that
+    # re-checking every one of them against every candidate placement is
+    # cheap, and prefetching .teams here avoids an extra query per block on
+    # every _skip_schedule_blocks() call below.
+    schedule_blocks = list(ScheduleBlock.objects.filter(tournament=tournament).select_related("field").prefetch_related("teams"))
+
     # The tournament's own start date, not "today" -- a draft generated a
     # week before the tournament runs must not land on the day it happened
     # to be clicked.
@@ -391,6 +397,9 @@ def allocate_schedule(tournament, *, match_duration: datetime.timedelta = DEFAUL
                     if team.id in team_clock and team_clock[team.id] > candidate_start:
                         candidate_start = team_clock[team.id]
 
+                if schedule_blocks:
+                    candidate_start = _skip_schedule_blocks(candidate_start, match_duration, field_id=field.id, team_ids={match.home_team_id, match.away_team_id}, blocks=schedule_blocks)
+
                 match.field = field
                 match.scheduled_start = candidate_start
                 match.save(update_fields=["field", "scheduled_start"])
@@ -421,6 +430,35 @@ def _skip_blackouts(field, candidate_start: datetime.datetime) -> datetime.datet
     for window_start, window_end in blackout_windows(field):
         if window_start <= local_start.time() < window_end:
             return timezone.make_aware(datetime.datetime.combine(local_start.date(), window_end))
+    return candidate_start
+
+
+def _skip_schedule_blocks(candidate_start: datetime.datetime, match_duration: datetime.timedelta, *, field_id, team_ids: set, blocks: list) -> datetime.datetime:
+    """Pushes ``candidate_start`` past any ``ScheduleBlock`` that reserves
+    either this field or one of ``team_ids`` and overlaps the candidate
+    window -- the auto-generator's own counterpart to the field/team clocks
+    it already keeps for placed matches (see ``allocate_schedule``'s own
+    docstring), just reserved in advance rather than by an earlier match.
+
+    Pushing past a field block can newly overlap a team block (or vice
+    versa: the team's block might start right where the field block just
+    pushed to), so this re-checks every block against the *updated*
+    candidate window in a bounded loop rather than a single pass -- each
+    pass only ever pushes forward, so 5 passes is always enough headroom for
+    the handful of blocks a real tournament has, and this always
+    terminates."""
+    for _pass in range(5):
+        candidate_end = candidate_start + match_duration
+        moved = False
+        for block in blocks:
+            if block.starts_at >= candidate_end or candidate_start >= block.ends_at:
+                continue
+            applies = block.field_id == field_id or bool(team_ids & {team.id for team in block.teams.all()})
+            if applies:
+                candidate_start = max(candidate_start, block.ends_at)
+                moved = True
+        if not moved:
+            break
     return candidate_start
 
 

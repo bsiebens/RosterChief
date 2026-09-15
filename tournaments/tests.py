@@ -29,6 +29,7 @@ from .models import (
     Match,
     MatchOfficial,
     MatchReferee,
+    ScheduleBlock,
     Tournament,
     TournamentField,
     TournamentGroup,
@@ -94,6 +95,9 @@ class TournamentModelTests(TournamentsTestCase):
 
     def test_registration_open_defaults_to_true(self):
         self.assertTrue(self.tournament.registration_open)
+
+    def test_default_match_duration_minutes_defaults_to_forty_five(self):
+        self.assertEqual(self.tournament.default_match_duration_minutes, 45)
 
     def test_accepts_registrations_true_for_draft_and_published(self):
         self.tournament.status = Tournament.Status.DRAFT
@@ -2069,6 +2073,31 @@ class BreakRuleModelTests(TournamentsTestCase):
         rule = BreakRule(tournament=self.tournament, trigger_type=BreakRule.TriggerType.GAME_COUNT, trigger_every_n_games=3, gap_minutes=15)
         rule.full_clean()
 
+    def test_display_summary_for_a_game_count_rule(self):
+        field = TournamentField.objects.create(tournament=self.tournament, name="Field 2")
+        rule = BreakRule.objects.create(tournament=self.tournament, field=field, trigger_type=BreakRule.TriggerType.GAME_COUNT, trigger_every_n_games=3, gap_minutes=15, replaces_default_gap=True)
+        self.assertEqual(rule.display_summary, "Field 2: every 3 games, 15 minutes gap (replaces default)")
+
+    def test_display_summary_for_a_tournament_wide_clock_window(self):
+        rule = BreakRule.objects.create(tournament=self.tournament, trigger_type=BreakRule.TriggerType.CLOCK_WINDOW, trigger_window_start=datetime.time(12, 0), trigger_window_end=datetime.time(13, 0))
+        self.assertEqual(rule.display_summary, "every field: no games 12:00-13:00")
+
+
+class ScheduleBlockModelTests(TournamentsTestCase):
+    def test_str_includes_the_title(self):
+        block = ScheduleBlock.objects.create(tournament=self.tournament, title="Lunch break", starts_at=timezone.now(), ends_at=timezone.now() + datetime.timedelta(hours=1))
+        self.assertIn("Lunch break", str(block))
+
+    def test_end_must_be_after_start(self):
+        start = timezone.now()
+        block = ScheduleBlock(tournament=self.tournament, title="Lunch break", starts_at=start, ends_at=start - datetime.timedelta(minutes=1))
+        with self.assertRaises(ValidationError):
+            block.full_clean()
+
+    def test_field_and_teams_are_both_optional(self):
+        block = ScheduleBlock(tournament=self.tournament, title="Ceremony", starts_at=timezone.now(), ends_at=timezone.now() + datetime.timedelta(hours=1))
+        block.full_clean()  # neither field nor teams is required
+
 
 class GapForPlacementTests(TournamentsTestCase):
     @classmethod
@@ -2188,6 +2217,63 @@ class AllocateScheduleTests(TournamentsTestCase):
 
         final = Match.objects.get(stage=stage, round_number=2)
         self.assertIsNone(final.scheduled_start)
+
+    def test_accepts_a_custom_match_duration(self):
+        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 3)]
+        TournamentField.objects.create(tournament=self.tournament, name="Field 1", availability=[{"date": "2026-09-19", "start": "09:00", "end": "20:00"}])
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
+        generate_stage_matches(stage, entries=teams)
+
+        allocate_schedule(self.tournament, match_duration=datetime.timedelta(minutes=20))
+
+        match = Match.objects.get(stage=stage)
+        self.assertIsNotNone(match.scheduled_start)
+
+    def test_a_field_only_schedule_block_reserves_no_match_on_that_field_during_its_window(self):
+        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 3)]
+        field = TournamentField.objects.create(tournament=self.tournament, name="Field 1", availability=[{"date": "2026-09-19", "start": "09:00", "end": "20:00"}])
+        window_start = timezone.make_aware(datetime.datetime(2026, 9, 19, 9, 0))
+        ScheduleBlock.objects.create(tournament=self.tournament, title="Lunch", field=field, starts_at=window_start, ends_at=window_start + datetime.timedelta(hours=1))
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
+        generate_stage_matches(stage, entries=teams)
+
+        allocate_schedule(self.tournament)
+
+        match = Match.objects.get(stage=stage)
+        self.assertGreaterEqual(match.scheduled_start, window_start + datetime.timedelta(hours=1))
+
+    def test_a_team_only_schedule_block_leaves_other_teams_unaffected(self):
+        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 5)]
+        TournamentField.objects.create(tournament=self.tournament, name="Field 1", availability=[{"date": "2026-09-19", "start": "09:00", "end": "20:00"}])
+        TournamentField.objects.create(tournament=self.tournament, name="Field 2", availability=[{"date": "2026-09-19", "start": "09:00", "end": "20:00"}])
+        window_start = timezone.make_aware(datetime.datetime(2026, 9, 19, 9, 0))
+        block = ScheduleBlock.objects.create(tournament=self.tournament, title="Team huddle", starts_at=window_start, ends_at=window_start + datetime.timedelta(hours=1))
+        block.teams.add(teams[0])
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
+        generate_stage_matches(stage, entries=teams)
+
+        allocate_schedule(self.tournament)
+
+        for match in Match.objects.filter(stage=stage):
+            if teams[0].id in (match.home_team_id, match.away_team_id):
+                self.assertGreaterEqual(match.scheduled_start, window_start + datetime.timedelta(hours=1))
+
+        others_scheduled_in_window = Match.objects.filter(stage=stage, scheduled_start__gte=window_start, scheduled_start__lt=window_start + datetime.timedelta(hours=1)).exclude(home_team=teams[0]).exclude(away_team=teams[0])
+        self.assertTrue(others_scheduled_in_window.exists())
+
+    def test_a_combined_field_and_team_schedule_block_is_respected(self):
+        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 3)]
+        field = TournamentField.objects.create(tournament=self.tournament, name="Field 1", availability=[{"date": "2026-09-19", "start": "09:00", "end": "20:00"}])
+        window_start = timezone.make_aware(datetime.datetime(2026, 9, 19, 9, 0))
+        block = ScheduleBlock.objects.create(tournament=self.tournament, title="Opening ceremony", field=field, starts_at=window_start, ends_at=window_start + datetime.timedelta(hours=1))
+        block.teams.add(teams[0])
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
+        generate_stage_matches(stage, entries=teams)
+
+        allocate_schedule(self.tournament)
+
+        match = Match.objects.get(stage=stage)
+        self.assertGreaterEqual(match.scheduled_start, window_start + datetime.timedelta(hours=1))
 
 
 class ValidatePlacementTests(TournamentsTestCase):

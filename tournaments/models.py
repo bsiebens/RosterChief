@@ -16,6 +16,7 @@ from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import Q
 from django.utils.translation import gettext_lazy as _
+from django.utils.translation import ngettext
 
 from rosterchief.base import ClubScopedModel, UUIDModel, unique_slugify, validate_club_scope
 
@@ -137,6 +138,14 @@ class Tournament(ClubScopedModel):
         verbose_name=_("home team"),
         help_text=_("Your own team playing in this tournament. Automatically added to Teams (can't be withdrawn), marked fully paid, and given its own calendar event so normal sign-up decides its roster."),
     )
+    #: The starting point every "Generate schedule" run pre-fills its own
+    #: match-duration input from -- still overridable per run (see
+    #: TournamentAllocateScheduleView), this is just what staff don't have
+    #: to type in again every time. Mirrors
+    #: tournaments.services.scheduling.DEFAULT_MATCH_DURATION's own 45-minute
+    #: assumption, now a real per-tournament setting instead of a hardcoded
+    #: module constant.
+    default_match_duration_minutes = models.PositiveSmallIntegerField(_("default match duration (minutes)"), default=45, help_text=_("How long a single match is assumed to run. Pre-fills the “Generate schedule” form -- still adjustable per run."))
 
     class Meta:
         verbose_name = _("tournament")
@@ -331,6 +340,32 @@ class BreakRule(UUIDModel):
 
         if errors:
             raise ValidationError(errors)
+
+    @property
+    def display_summary(self) -> str:
+        """Plain-language description of what this rule does -- e.g. "Field
+        2: every 3 games, 15 minute gap (replaces default)" -- shown on the
+        Fields & stages tab instead of a raw field dump, the same "list is a
+        summary, editing is a modal" idiom this app already uses for
+        break-rule-adjacent Fields/Stages lists."""
+        scope = self.field.name if self.field_id else str(_("every field"))
+        if self.trigger_type == self.TriggerType.CLOCK_WINDOW:
+            return _("%(scope)s: no games %(start)s-%(end)s") % {
+                "scope": scope,
+                "start": self.trigger_window_start.strftime("%H:%M"),
+                "end": self.trigger_window_end.strftime("%H:%M"),
+            }
+
+        if self.trigger_type == self.TriggerType.GAME_COUNT:
+            trigger = ngettext("every %(n)d game", "every %(n)d games", self.trigger_every_n_games or 0) % {"n": self.trigger_every_n_games}
+        elif self.trigger_type == self.TriggerType.ELAPSED_TIME:
+            trigger = _("every %(n)d minutes of play") % {"n": self.trigger_every_n_minutes}
+        else:
+            trigger = _("after round %(n)d") % {"n": self.trigger_after_round_number}
+
+        gap = ngettext("%(n)d minute gap", "%(n)d minutes gap", self.gap_minutes or 0) % {"n": self.gap_minutes}
+        mode = _("replaces default") if self.replaces_default_gap else _("added on top of default")
+        return f"{scope}: {trigger}, {gap} ({mode})"
 
 
 class TournamentStage(UUIDModel):
@@ -778,6 +813,42 @@ class Match(UUIDModel):
         if self.winner is None:
             return None
         return self.away_team if self.winner == self.home_team else self.home_team
+
+
+class ScheduleBlock(UUIDModel):
+    """A reserved window on the schedule that isn't a match -- lunch, an
+    opening ceremony, anything staff want auto-generation to route around
+    rather than have to eyeball and manually work between. Not itself
+    club-scoped -- its club is reached through ``tournament``.
+
+    ``field`` and ``teams`` are deliberately independent knobs, not one
+    "applies to everything" flag: ``field`` blank reserves no field, only
+    the selected team(s)' own clock (a team-wide break that doesn't care
+    which pitch is free); ``teams`` empty reserves the field only, with no
+    team's clock affected. Respected by
+    ``tournaments.services.scheduling.allocate_schedule`` -- a block is
+    treated the same way an already-placed match's own clock is, pushing a
+    candidate start past it, not merely shown for staff to plan around by
+    eye."""
+
+    tournament = models.ForeignKey(Tournament, on_delete=models.CASCADE, related_name="schedule_blocks", verbose_name=_("tournament"))
+    title = models.CharField(_("title"), max_length=255, help_text=_('e.g. "Lunch break", "Opening ceremony".'))
+    starts_at = models.DateTimeField(_("starts at"))
+    ends_at = models.DateTimeField(_("ends at"))
+    field = models.ForeignKey(TournamentField, on_delete=models.CASCADE, null=True, blank=True, related_name="schedule_blocks", verbose_name=_("field"), help_text=_("Leave blank to reserve this time for the selected team(s) only, on every field."))
+    teams = models.ManyToManyField(TournamentTeam, blank=True, related_name="schedule_blocks", verbose_name=_("teams"), help_text=_("Leave blank to reserve the field only -- no team's own clock is affected."))
+
+    class Meta:
+        verbose_name = _("schedule block")
+        verbose_name_plural = _("schedule blocks")
+        ordering = ["tournament", "starts_at"]
+
+    def __str__(self):
+        return f"{self.tournament} - {self.title}"
+
+    def clean(self):
+        if self.starts_at and self.ends_at and self.ends_at <= self.starts_at:
+            raise ValidationError({"ends_at": _("Must be after the start time.")})
 
 
 class MatchReferee(UUIDModel):

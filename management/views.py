@@ -142,8 +142,10 @@ from teams.models import NumberPool, NumberReservation, OfficialLevel, OfficialP
 from teams.services import eligible_roster_members, place_member_on_team
 from teams.services.numbers import has_unresolved_conflict
 from tournaments.forms import (
+    BreakRuleForm,
     DressingRoomAssignmentForm,
     DressingRoomForm,
+    ScheduleBlockForm,
     TournamentFieldForm,
     TournamentForm,
     TournamentRosterEntryForm,
@@ -153,7 +155,7 @@ from tournaments.forms import (
     TournamentTaskGenerateForm,
     TournamentTeamForm,
 )
-from tournaments.models import DressingRoom, DressingRoomAssignment, Match, Tournament, TournamentField, TournamentRegistration, TournamentRosterEntry, TournamentRosterRole, TournamentStage, TournamentTask, TournamentTeam
+from tournaments.models import BreakRule, DressingRoom, DressingRoomAssignment, Match, ScheduleBlock, Tournament, TournamentField, TournamentRegistration, TournamentRosterEntry, TournamentRosterRole, TournamentStage, TournamentTask, TournamentTeam
 from tournaments.services.dressing_rooms import DressingRoomAssignmentError, assign_dressing_room, release_dressing_room, windows_conflict
 from tournaments.services.lunch import daily_lunch_summary
 from tournaments.services.notifications import dispatch_notify_tournament_shifts_open, send_registration_decision_email
@@ -7390,9 +7392,7 @@ class TournamentRegistrationQueueView(TournamentsManagerRequiredMixin, TemplateV
 
     def get_context_data(self, **kwargs):
         tournament = get_object_or_404(Tournament, pk=self.kwargs["tournament_pk"], club=self.request.club)
-        registrations = list(
-            TournamentRegistration.objects.filter(tournament=tournament).select_related("team", "tournament_team").prefetch_related("players").order_by("-submitted_at")
-        )
+        registrations = list(TournamentRegistration.objects.filter(tournament=tournament).select_related("team", "tournament_team").prefetch_related("players").order_by("-submitted_at"))
         registrations.sort(key=lambda registration: (_REGISTRATION_QUEUE_GROUP_ORDER[registration.status], registration.submitted_at))
         oldest_pending_id = next((registration.pk for registration in registrations if registration.status == TournamentRegistration.Status.PENDING), None)
         for registration in registrations:
@@ -7757,7 +7757,19 @@ class TournamentScheduleView(TournamentsManagerRequiredMixin, TemplateView):
             stages.append({"stage": stage, "rounds": rounds})
 
         fields = list(tournament.fields.all())
-        return super().get_context_data(tournament=tournament, stages=stages, fields=fields, active_tab="schedule", **self.tournament_permissions(tournament), **kwargs)
+        schedule_blocks = list(tournament.schedule_blocks.select_related("field").prefetch_related("teams"))
+        for block in schedule_blocks:
+            block.edit_form = ScheduleBlockForm(instance=block, tournament=tournament)
+        return super().get_context_data(
+            tournament=tournament,
+            stages=stages,
+            fields=fields,
+            schedule_blocks=schedule_blocks,
+            schedule_block_form=ScheduleBlockForm(tournament=tournament),
+            active_tab="schedule",
+            **self.tournament_permissions(tournament),
+            **kwargs,
+        )
 
 
 class TournamentAllocateScheduleView(TournamentOperatorRequiredMixin, View):
@@ -7770,13 +7782,26 @@ class TournamentAllocateScheduleView(TournamentOperatorRequiredMixin, View):
     later as the bracket fills in -- it only ever touches matches with no
     scheduled_start yet, never reshuffles ones already placed (see
     reschedule_match for moving one by hand instead). Raises
-    SchedulingError when there are no fields to schedule onto yet."""
+    SchedulingError when there are no fields to schedule onto yet.
+
+    ``match_duration_minutes`` comes from the tab's own small form
+    (pre-filled from ``tournament.default_match_duration_minutes``, still
+    overridable per run) -- falls back to that same default if missing or
+    unparseable rather than erroring, since the field is a plain number
+    input with no client-side requirement enforced."""
 
     def post(self, request, tournament_pk):
         tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
 
         try:
-            scheduled = allocate_schedule(tournament)
+            match_duration_minutes = int(request.POST.get("match_duration_minutes"))
+            if match_duration_minutes < 1:
+                raise ValueError
+        except TypeError, ValueError:
+            match_duration_minutes = tournament.default_match_duration_minutes
+
+        try:
+            scheduled = allocate_schedule(tournament, match_duration=timedelta(minutes=match_duration_minutes))
         except SchedulingError as error:
             notify(request, f"w|{_('Could not generate a schedule')}|{error}")
         else:
@@ -7848,7 +7873,7 @@ class MatchResultView(TournamentOperatorRequiredMixin, View):
         try:
             score_home = int(request.POST.get("score_home"))
             score_away = int(request.POST.get("score_away"))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             notify(request, f"e|{_('Could not record result')}|{_('Enter a score for both teams.')}")
             return redirect("management:tournament_schedule", tournament_pk=tournament.pk)
 
@@ -7868,6 +7893,48 @@ class MatchResultView(TournamentOperatorRequiredMixin, View):
         else:
             notify(request, f"s|{_('Score recorded')}|" + _("%(home)s vs %(away)s is now marked complete.") % {"home": match.home_display, "away": match.away_display})
 
+        return redirect("management:tournament_schedule", tournament_pk=tournament.pk)
+
+
+class TournamentScheduleBlockCreateView(TournamentOperatorRequiredMixin, View):
+    def post(self, request, tournament_pk):
+        tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
+        form = ScheduleBlockForm(request.POST, tournament=tournament)
+        if not form.is_valid():
+            for error in form.errors.values():
+                notify(request, f"e|{_('Could not add schedule block')}|{' '.join(error)}")
+            return redirect("management:tournament_schedule", tournament_pk=tournament.pk)
+
+        block = form.save(commit=False)
+        block.tournament = tournament
+        block.save()
+        form.save_m2m()
+        notify(request, f"s|{_('Schedule block added')}|" + _("“%(title)s” was added to the schedule.") % {"title": block.title})
+        return redirect("management:tournament_schedule", tournament_pk=tournament.pk)
+
+
+class TournamentScheduleBlockUpdateView(TournamentOperatorRequiredMixin, View):
+    def post(self, request, tournament_pk, block_pk):
+        tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
+        block = get_object_or_404(ScheduleBlock, pk=block_pk, tournament=tournament)
+        form = ScheduleBlockForm(request.POST, instance=block, tournament=tournament)
+        if not form.is_valid():
+            for error in form.errors.values():
+                notify(request, f"e|{_('Could not update schedule block')}|{' '.join(error)}")
+            return redirect("management:tournament_schedule", tournament_pk=tournament.pk)
+
+        form.save()
+        notify(request, f"s|{_('Schedule block updated')}|" + _("“%(title)s” updated.") % {"title": block.title})
+        return redirect("management:tournament_schedule", tournament_pk=tournament.pk)
+
+
+class TournamentScheduleBlockDeleteView(TournamentOperatorRequiredMixin, View):
+    def post(self, request, tournament_pk, block_pk):
+        tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
+        block = get_object_or_404(ScheduleBlock, pk=block_pk, tournament=tournament)
+        title = block.title
+        block.delete()
+        notify(request, f"w|{_('Schedule block deleted')}|" + _("“%(title)s” was removed from the schedule.") % {"title": title})
         return redirect("management:tournament_schedule", tournament_pk=tournament.pk)
 
 
@@ -7955,12 +8022,17 @@ class TournamentFieldStageView(TournamentsManagerRequiredMixin, TemplateView):
         stages = list(tournament.stages.all())
         for stage in stages:
             stage.edit_form = TournamentStageForm(instance=stage)
+        break_rules = list(tournament.break_rules.select_related("field"))
+        for break_rule in break_rules:
+            break_rule.edit_form = BreakRuleForm(instance=break_rule, tournament=tournament)
         return super().get_context_data(
             tournament=tournament,
             fields=fields,
             stages=stages,
+            break_rules=break_rules,
             field_form=TournamentFieldForm(),
             stage_form=TournamentStageForm(),
+            break_rule_form=BreakRuleForm(tournament=tournament),
             active_tab="fields_stages",
             **self.tournament_permissions(tournament),
             **kwargs,
@@ -8072,6 +8144,47 @@ class TournamentStageGenerateMatchesView(TournamentOperatorRequiredMixin, View):
             body = ngettext("%(count)d match generated for “%(name)s”.", "%(count)d matches generated for “%(name)s”.", len(matches)) % {"count": len(matches), "name": stage.name}
             notify(request, f"s|{_('Matches generated')}|{body}")
 
+        return redirect("management:tournament_field_stage_list", tournament_pk=tournament.pk)
+
+
+class TournamentBreakRuleCreateView(TournamentOperatorRequiredMixin, View):
+    def post(self, request, tournament_pk):
+        tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
+        form = BreakRuleForm(request.POST, tournament=tournament)
+        if not form.is_valid():
+            for error in form.errors.values():
+                notify(request, f"e|{_('Could not add break rule')}|{' '.join(error)}")
+            return redirect("management:tournament_field_stage_list", tournament_pk=tournament.pk)
+
+        rule = form.save(commit=False)
+        rule.tournament = tournament
+        rule.save()
+        notify(request, f"s|{_('Break rule added')}|{rule.display_summary}")
+        return redirect("management:tournament_field_stage_list", tournament_pk=tournament.pk)
+
+
+class TournamentBreakRuleUpdateView(TournamentOperatorRequiredMixin, View):
+    def post(self, request, tournament_pk, rule_pk):
+        tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
+        rule = get_object_or_404(BreakRule, pk=rule_pk, tournament=tournament)
+        form = BreakRuleForm(request.POST, instance=rule, tournament=tournament)
+        if not form.is_valid():
+            for error in form.errors.values():
+                notify(request, f"e|{_('Could not update break rule')}|{' '.join(error)}")
+            return redirect("management:tournament_field_stage_list", tournament_pk=tournament.pk)
+
+        form.save()
+        notify(request, f"s|{_('Break rule updated')}|{rule.display_summary}")
+        return redirect("management:tournament_field_stage_list", tournament_pk=tournament.pk)
+
+
+class TournamentBreakRuleDeleteView(TournamentOperatorRequiredMixin, View):
+    def post(self, request, tournament_pk, rule_pk):
+        tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
+        rule = get_object_or_404(BreakRule, pk=rule_pk, tournament=tournament)
+        summary = rule.display_summary
+        rule.delete()
+        notify(request, f"w|{_('Break rule deleted')}|{summary}")
         return redirect("management:tournament_field_stage_list", tournament_pk=tournament.pk)
 
 

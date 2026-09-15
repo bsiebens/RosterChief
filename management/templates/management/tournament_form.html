@@ -91,6 +91,15 @@
 
         <div class="card">
             <div class="card-body">
+                <div class="card-title">{% lucide "shuffle" size=16 %} {% trans "Scheduling" %}</div>
+                <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+                    {% form_field form.default_match_duration_minutes %}
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-body">
                 <div class="card-title">{% lucide "send" size=16 %} {% trans "Registration" %}</div>
                 <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
                     {% form_field form.contact_email %}

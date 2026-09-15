@@ -7,7 +7,7 @@ from club.models import Season
 from members.models import Member
 from teams.models import Team
 
-from .models import DressingRoom, Tournament, TournamentField, TournamentRegistration, TournamentRosterEntry, TournamentRosterRole, TournamentStage, TournamentTask, TournamentTeam
+from .models import BreakRule, DressingRoom, ScheduleBlock, Tournament, TournamentField, TournamentRegistration, TournamentRosterEntry, TournamentRosterRole, TournamentStage, TournamentTask, TournamentTeam
 
 
 class TournamentRegistrationForm(forms.ModelForm):
@@ -230,11 +230,13 @@ class TournamentForm(forms.ModelForm):
             "lunch_mode",
             "lunch_price_per_day",
             "lunch_billed_with_fee",
+            "default_match_duration_minutes",
         ]
         widgets = {
             "start_date": forms.DateInput(attrs={"type": "date"}),
             "end_date": forms.DateInput(attrs={"type": "date"}),
             "description": forms.Textarea(attrs={"rows": 5}),
+            "default_match_duration_minutes": forms.NumberInput(attrs={"min": "1"}),
         }
 
     def __init__(self, *args, club=None, **kwargs):
@@ -243,6 +245,14 @@ class TournamentForm(forms.ModelForm):
         self.fields["home_team"].queryset = Team.objects.filter(club=club)
         self.fields["home_team"].required = False
         self.fields["home_team"].empty_label = _("— none —")
+        # Not required -- an omitted/blank value falls back to the model's
+        # own default (see clean_default_match_duration_minutes below)
+        # rather than erroring, so existing callers that don't yet know
+        # about this field (an older client, a test fixture) keep working.
+        self.fields["default_match_duration_minutes"].required = False
+
+    def clean_default_match_duration_minutes(self):
+        return self.cleaned_data.get("default_match_duration_minutes") or self._meta.model._meta.get_field("default_match_duration_minutes").default
 
     def clean(self):
         cleaned = super().clean()
@@ -399,6 +409,39 @@ class TournamentStageForm(forms.ModelForm):
         return instance
 
 
+class BreakRuleForm(forms.ModelForm):
+    """Create/edit one break-policy rule -- mirrors ``TournamentStageForm``'s
+    own "one form, JS shows only the fields relevant to the selected choice"
+    idiom (``tournament_field_stage_list.html``'s inline ``<script>``, keyed
+    on ``trigger_type`` instead of ``format``): every trigger-specific field
+    is always present in the form and always validated/saved (the model's
+    own ``clean()`` -- reached automatically through ``ModelForm``'s
+    ``_post_clean`` -- already enforces exactly the right ones are filled in
+    for whichever ``trigger_type`` was actually submitted, the same way it
+    would for a direct admin edit), just shown/hidden client-side. ``field``
+    is scoped to this tournament's own fields; blank means tournament-wide.
+    ``tournament`` comes from the view, never the form."""
+
+    class Meta:
+        model = BreakRule
+        fields = ["field", "trigger_type", "trigger_every_n_games", "trigger_every_n_minutes", "trigger_after_round_number", "trigger_window_start", "trigger_window_end", "gap_minutes", "replaces_default_gap", "priority"]
+        widgets = {
+            "trigger_window_start": forms.TimeInput(attrs={"type": "time"}),
+            "trigger_window_end": forms.TimeInput(attrs={"type": "time"}),
+            "trigger_every_n_games": forms.NumberInput(attrs={"min": "1"}),
+            "trigger_every_n_minutes": forms.NumberInput(attrs={"min": "1"}),
+            "trigger_after_round_number": forms.NumberInput(attrs={"min": "1"}),
+            "gap_minutes": forms.NumberInput(attrs={"min": "0"}),
+            "priority": forms.NumberInput(attrs={"min": "0"}),
+        }
+
+    def __init__(self, *args, tournament=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["field"].queryset = TournamentField.objects.filter(tournament=tournament) if tournament is not None else TournamentField.objects.none()
+        self.fields["field"].required = False
+        self.fields["field"].empty_label = _("— every field —")
+
+
 class TournamentTaskForm(forms.ModelForm):
     """Create/edit one volunteer shift definition -- mirrors
     ``management.forms.EventTaskForm`` plus the time/place fields a
@@ -521,6 +564,37 @@ class DressingRoomAssignmentForm(forms.Form):
         start, end = cleaned.get("assigned_from"), cleaned.get("assigned_until")
         if start and end and end <= start:
             self.add_error("assigned_until", _("Must be after the start."))
+        return cleaned
+
+
+class ScheduleBlockForm(forms.ModelForm):
+    """Create/edit one non-match reservation on the schedule (lunch, an
+    opening ceremony) -- ``tournaments.services.scheduling.allocate_schedule``
+    routes generated matches around it (see ``ScheduleBlock``'s own
+    docstring). ``field``/``teams`` are both scoped to this tournament;
+    ``tournament`` comes from the view, never the form."""
+
+    class Meta:
+        model = ScheduleBlock
+        fields = ["title", "starts_at", "ends_at", "field", "teams"]
+        widgets = {
+            "starts_at": forms.DateTimeInput(attrs={"type": "datetime-local"}),
+            "ends_at": forms.DateTimeInput(attrs={"type": "datetime-local"}),
+        }
+
+    def __init__(self, *args, tournament=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["field"].queryset = TournamentField.objects.filter(tournament=tournament) if tournament is not None else TournamentField.objects.none()
+        self.fields["field"].required = False
+        self.fields["field"].empty_label = _("— no field —")
+        self.fields["teams"].queryset = TournamentTeam.objects.filter(tournament=tournament, withdrawn_at__isnull=True) if tournament is not None else TournamentTeam.objects.none()
+        self.fields["teams"].required = False
+
+    def clean(self):
+        cleaned = super().clean()
+        start, end = cleaned.get("starts_at"), cleaned.get("ends_at")
+        if start and end and end <= start:
+            self.add_error("ends_at", _("Must be after the start time."))
         return cleaned
 
 
