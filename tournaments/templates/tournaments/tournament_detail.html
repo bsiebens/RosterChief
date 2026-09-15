@@ -55,6 +55,7 @@
             <div class="mt-4 flex flex-wrap gap-2">
                 <a class="btn btn-sm gap-2 border-white/25 bg-white/10 text-white hover:bg-white/20" href="{% url 'tournaments:schedule' tournament.slug %}">{% lucide "list" size=14 %} {% trans "Full schedule" %}</a>
                 <a class="btn btn-sm gap-2 border-white/25 bg-white/10 text-white hover:bg-white/20" href="{% url 'tournaments:standings' tournament.slug %}">{% lucide "trophy" size=14 %} {% trans "Standings" %}</a>
+                <a class="btn btn-sm gap-2 border-white/25 bg-white/10 text-white hover:bg-white/20" href="{% url 'tournaments:teams' tournament.slug %}">{% lucide "users" size=14 %} {% trans "Teams" %}</a>
             </div>
 
             {% if tournament.accepts_registrations %}

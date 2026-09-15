@@ -7429,7 +7429,13 @@ class TournamentTeamListView(TournamentsManagerRequiredMixin, TemplateView):
 
     def get_context_data(self, **kwargs):
         tournament = get_object_or_404(Tournament, pk=self.kwargs["tournament_pk"], club=self.request.club)
-        teams = list(tournament.teams.select_related("team"))
+        teams = list(tournament.teams.select_related("team").prefetch_related("roster_entries"))
+        # Tournament.age_out_of_range is a pure read-time flag (see its own
+        # docstring) -- computed here per team, not stored, so raising/
+        # lowering min_age/max_age is reflected immediately for every team
+        # already on the roster.
+        for team in teams:
+            team.has_age_flag = any(tournament.age_out_of_range(entry.date_of_birth) for entry in team.roster_entries.all())
         # A failed "Add team" submit (TournamentTeamCreateView below) passes
         # its own bound, errored team_form back in via kwargs so this same
         # template can re-render with the modal reopened and the errors
@@ -7514,6 +7520,7 @@ class TournamentTeamRosterView(TournamentsManagerRequiredMixin, TemplateView):
         entries = list(team.roster_entries.select_related("member"))
         for entry in entries:
             entry.edit_form = TournamentRosterEntryForm(instance=entry, tournament=tournament)
+            entry.age_flagged = tournament.age_out_of_range(entry.date_of_birth)
         return super().get_context_data(
             tournament=tournament,
             team=team,

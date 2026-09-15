@@ -47,12 +47,20 @@
             </thead>
             <tbody>
                 {% for entry in entries %}
-                    <tr>
+                    <tr class="{% if entry.age_flagged %}bg-row-warn shadow-[inset_3px_0_0_var(--color-warn-text)]{% endif %}">
                         <td class="font-semibold text-ink">{{ entry.display_name }}</td>
                         <td><span class="badge badge-sm {% if entry.role == "staff" %}badge-neutral{% else %}badge-outline{% endif %}">{{ entry.get_role_display }}</span></td>
                         <td class="font-mono text-xs tabular-nums text-muted">{{ entry.jersey_number|default:"—" }}</td>
                         <td class="text-sm text-muted">{{ entry.position_label|default:"—" }}</td>
-                        <td class="font-mono text-xs text-muted">{{ entry.date_of_birth|date:"j M Y"|default:"—" }}</td>
+                        <td class="font-mono text-xs text-muted">
+                            <span class="flex items-center gap-1">
+                                {{ entry.date_of_birth|date:"j M Y"|default:"—" }}
+                                {% if entry.age_flagged %}
+                                    {% trans "Outside this tournament's age range" as age_flag_title %}
+                                    <span title="{{ age_flag_title }}">{% lucide "triangle-alert" size=12 class="text-[var(--color-warn-text)]" %}</span>
+                                {% endif %}
+                            </span>
+                        </td>
                         <td class="font-mono text-xs text-muted">{{ entry.license_number|default:"—" }}</td>
                         <td class="max-w-40 truncate text-sm text-muted" title="{{ entry.dietary_restrictions }}">{{ entry.dietary_restrictions|default:"—" }}</td>
                         {% if tournament.lunch_mode == "optional" %}

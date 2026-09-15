@@ -176,6 +176,49 @@ class TournamentModelTests(TournamentsTestCase):
         self.assertIsNone(self.tournament.entry_fee_amount)
         self.assertIsNone(self.tournament.lunch_price_per_day)
 
+    def test_age_range_defaults_to_blank(self):
+        self.assertIsNone(self.tournament.min_age)
+        self.assertIsNone(self.tournament.max_age)
+
+    def test_age_out_of_range_false_when_neither_bound_is_set(self):
+        self.assertFalse(self.tournament.age_out_of_range(datetime.date(2020, 1, 1)))
+
+    def test_age_out_of_range_false_when_no_date_of_birth(self):
+        self.tournament.min_age, self.tournament.max_age = 8, 12
+        self.assertFalse(self.tournament.age_out_of_range(None))
+
+    def test_age_out_of_range_true_below_the_minimum(self):
+        self.tournament.min_age, self.tournament.max_age = 8, 12
+        self.assertTrue(self.tournament.age_out_of_range(datetime.date(2019, 9, 19)))  # turns 7 on start_date
+
+    def test_age_out_of_range_true_above_the_maximum(self):
+        self.tournament.min_age, self.tournament.max_age = 8, 12
+        self.assertTrue(self.tournament.age_out_of_range(datetime.date(2013, 9, 19)))  # turns 13 on start_date
+
+    def test_age_out_of_range_false_within_bounds(self):
+        self.tournament.min_age, self.tournament.max_age = 8, 12
+        self.assertFalse(self.tournament.age_out_of_range(datetime.date(2016, 9, 19)))  # turns 10 on start_date
+
+    def test_age_out_of_range_exactly_at_each_boundary_is_not_out_of_range(self):
+        self.tournament.min_age, self.tournament.max_age = 8, 12
+        self.assertFalse(self.tournament.age_out_of_range(datetime.date(2018, 9, 19)))  # turns 8 exactly
+        self.assertFalse(self.tournament.age_out_of_range(datetime.date(2014, 9, 19)))  # turns 12 exactly
+
+    def test_age_out_of_range_respects_the_birthday_not_yet_reached(self):
+        self.tournament.min_age = 10
+        # Born the day after start_date's month/day -- hasn't turned 10 yet as of start_date, so still 9.
+        self.assertTrue(self.tournament.age_out_of_range(datetime.date(2016, 9, 20)))
+
+    def test_age_out_of_range_with_only_min_age_set(self):
+        self.tournament.min_age = 8
+        self.assertTrue(self.tournament.age_out_of_range(datetime.date(2019, 9, 19)))  # 7
+        self.assertFalse(self.tournament.age_out_of_range(datetime.date(2000, 9, 19)))  # 26, no upper bound
+
+    def test_age_out_of_range_with_only_max_age_set(self):
+        self.tournament.max_age = 12
+        self.assertTrue(self.tournament.age_out_of_range(datetime.date(2013, 9, 19)))  # 13
+        self.assertFalse(self.tournament.age_out_of_range(datetime.date(2021, 9, 19)))  # 5, no lower bound
+
     def test_slug_is_unique_per_club(self):
         with self.assertRaises(IntegrityError):
             Tournament.objects.create(club=self.club, name="Other Cup", slug="summer-cup", season=self.season, start_date=self.tournament.start_date, end_date=self.tournament.end_date)
@@ -2533,6 +2576,86 @@ class TournamentTeamScheduleViewTests(TournamentsTestCase):
         cache.clear()
 
         response = self.client.get(self._url(team), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_shows_the_roster_with_public_safe_fields_only(self):
+        team = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Solo FC")
+        TournamentRosterEntry.objects.create(
+            tournament_team=team,
+            foreign_first_name="Guest",
+            foreign_last_name="Player",
+            jersey_number=7,
+            position_label="Forward",
+            license_number="LIC-99887",
+            dietary_restrictions="Peanut allergy",
+            date_of_birth=datetime.date(2015, 1, 1),
+        )
+
+        response = self.client.get(self._url(team), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, "Guest Player")
+        self.assertContains(response, "Forward")
+        # Staff-only fields never reach this public page at all.
+        self.assertNotContains(response, "LIC-99887")
+        self.assertNotContains(response, "Peanut allergy")
+        self.assertNotContains(response, "2015")
+
+    def test_shows_dressing_room_assignments_when_present(self):
+        team = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Solo FC")
+        room = DressingRoom.objects.create(club=self.club, name="Room 3")
+        DressingRoomAssignment.objects.create(dressing_room=room, tournament_team=team)
+
+        response = self.client.get(self._url(team), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, "Room 3")
+
+    def test_no_dressing_room_section_when_none_assigned(self):
+        team = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Solo FC")
+
+        response = self.client.get(self._url(team), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertNotContains(response, "Dressing room")
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class TournamentTeamsViewTests(TournamentsTestCase):
+    """tournaments:teams -- the public list of every team in the bracket
+    (tournaments.views.TournamentTeamsView)."""
+
+    def setUp(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
+        get_waffle_flag_model().objects.get_or_create(name="tournaments")[0].clubs.add(self.club)
+
+    def _url(self, tournament=None):
+        return reverse("tournaments:teams", kwargs={"slug": (tournament or self.tournament).slug})
+
+    def test_lists_non_withdrawn_teams(self):
+        TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Alpha FC")
+        withdrawn = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Beta FC")
+        withdrawn.withdrawn_at = timezone.now()
+        withdrawn.save(update_fields=["withdrawn_at"])
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, "Alpha FC")
+        self.assertNotContains(response, "Beta FC")
+
+    def test_a_club_linked_team_falls_back_to_the_clubs_logo(self):
+        self.club.logo = SimpleUploadedFile("crest.png", b"fake-image-bytes", content_type="image/png")
+        self.club.save(update_fields=["logo"])
+        TournamentTeam.objects.create(club=self.club, tournament=self.tournament, team=self.team)
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, self.club.logo.url)
+
+    def test_404s_when_the_feature_flag_is_off(self):
+        get_waffle_flag_model().objects.get(name="tournaments").clubs.remove(self.club)
+        cache.clear()
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
 
         self.assertEqual(response.status_code, 404)
 

@@ -12,6 +12,7 @@ urlpatterns = [
     path("<slug:slug>/schedule/", views.TournamentScheduleView.as_view(), name="schedule"),
     path("<slug:slug>/standings/rows/", views.TournamentStandingsRowsView.as_view(), name="standings_rows"),
     path("<slug:slug>/standings/", views.TournamentStandingsView.as_view(), name="standings"),
+    path("<slug:slug>/teams/", views.TournamentTeamsView.as_view(), name="teams"),
     path("<slug:slug>/teams/<slug:team_slug>/", views.TournamentTeamScheduleView.as_view(), name="team_schedule"),
     path("<slug:slug>/", views.TournamentDetailView.as_view(), name="detail"),
 ]

@@ -66,6 +66,14 @@ class Tournament(ClubScopedModel):
     #: reopens a slot without staff having to remember to toggle anything
     #: back on. Blank means uncapped.
     max_teams = models.PositiveSmallIntegerField(_("maximum teams"), null=True, blank=True, help_text=_("Registration closes automatically once this many teams are approved. Leave blank for no cap."))
+    #: A soft, read-time-only flag -- never enforced anywhere (a registering
+    #: team can still submit a too-old/too-young player, "no warning" is the
+    #: whole point), just something staff can spot and check on the Teams
+    #: list / roster screen. Age is computed as of ``start_date``, not
+    #: today's date, since that's the date that actually matters for
+    #: eligibility.
+    min_age = models.PositiveSmallIntegerField(_("minimum age"), null=True, blank=True, help_text=_("Age as of the tournament's start date. Leave blank for no minimum -- players outside the range are flagged for staff to check, never blocked."))
+    max_age = models.PositiveSmallIntegerField(_("maximum age"), null=True, blank=True, help_text=_("Age as of the tournament's start date. Leave blank for no maximum."))
 
     class LunchMode(models.TextChoices):
         NONE = "none", _("No lunch")
@@ -155,6 +163,20 @@ class Tournament(ClubScopedModel):
         roster's per-day lunch picker only ever offers days the tournament
         is actually on."""
         return [self.start_date + timedelta(days=offset) for offset in range((self.end_date - self.start_date).days + 1)]
+
+    def age_out_of_range(self, date_of_birth) -> bool:
+        """Whether a player born on ``date_of_birth`` falls outside
+        ``[min_age, max_age]`` as of this tournament's own ``start_date`` --
+        a single shared age-math home for the Teams list and roster screen
+        (both need the same computation; neither should reimplement it).
+        Always ``False`` when there's no birth date to check or neither
+        bound is set."""
+        if date_of_birth is None or (self.min_age is None and self.max_age is None):
+            return False
+        age = self.start_date.year - date_of_birth.year - ((self.start_date.month, self.start_date.day) < (date_of_birth.month, date_of_birth.day))
+        if self.min_age is not None and age < self.min_age:
+            return True
+        return self.max_age is not None and age > self.max_age
 
     def clean(self):
         if self.event_id is not None:

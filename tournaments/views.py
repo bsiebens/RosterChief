@@ -464,10 +464,35 @@ class TournamentStandingsRowsView(TournamentFeatureMixin, DetailView):
         return context
 
 
+class TournamentTeamsView(TournamentFeatureMixin, DetailView):
+    """``/tournaments/<slug>/teams/`` -- every team actually in the bracket,
+    linked from the tournament home page's schedule/standings button row.
+    Withdrawn teams are excluded entirely (unlike the management Teams tab,
+    which keeps them visible with a reason for staff) -- a team that
+    dropped out isn't part of the public picture any more, there's nothing
+    useful to show a visitor about it."""
+
+    model = Tournament
+    template_name = "tournaments/tournament_teams.html"
+    context_object_name = "tournament"
+
+    def get_queryset(self):
+        return Tournament.objects.filter(club=self.request.club)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["teams"] = self.object.teams.filter(withdrawn_at__isnull=True).select_related("team", "club")
+        return context
+
+
 class TournamentTeamScheduleView(TournamentFeatureMixin, DetailView):
     """``/tournaments/<slug>/teams/<team_slug>/`` -- one ``TournamentTeam``'s
-    own matches only (``Q(home_team=team) | Q(away_team=team)``), scoped by
-    both the tournament's own slug and the team's own slug so a team slug
+    own page: roster (public-safe fields only -- name, role, position,
+    jersey; explicitly not date_of_birth/license_number/dietary_restrictions/
+    lunch_days, all staff-only, see TournamentRosterEntryForm's own docstring
+    for why those exist in the first place), its dressing room booking(s) if
+    any, and its matches (``Q(home_team=team) | Q(away_team=team)``). Scoped
+    by both the tournament's own slug and the team's own slug so a team slug
     that happens to collide with one from a different tournament (slugs are
     unique *per tournament*, not globally -- see ``TournamentTeam.slug``'s
     own docstring) can never resolve the wrong team."""
@@ -488,5 +513,7 @@ class TournamentTeamScheduleView(TournamentFeatureMixin, DetailView):
         context = super().get_context_data(**kwargs)
         team = self.object
         context["tournament"] = team.tournament
+        context["roster_entries"] = team.roster_entries.select_related("member").order_by("role", "jersey_number")
+        context["dressing_room_assignments"] = team.dressing_room_assignments.select_related("dressing_room")
         context["matches"] = Match.objects.filter(Q(home_team=team) | Q(away_team=team)).select_related("stage", "group", "field", "home_team", "away_team").order_by("stage__sequence", "round_number", "sequence")
         return context

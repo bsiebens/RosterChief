@@ -2,9 +2,11 @@
 {% load i18n lucide %}
 
 {% comment %}
-    Public, unauthenticated page for one TournamentTeam's own matches --
-    linked from the schedule/standings pages' own team links.
-    tournaments.views.TournamentTeamScheduleView.
+    Public, unauthenticated page for one TournamentTeam -- its roster
+    (public-safe fields only, see TournamentTeamScheduleView's own
+    docstring), dressing room booking(s) if any, and its matches. Linked
+    from the tournament home page's Teams button and the schedule/standings
+    pages' own team links. tournaments.views.TournamentTeamScheduleView.
 {% endcomment %}
 
 {% block page_title %}{% blocktrans with team=team.display_name tournament=tournament.name %}{{ team }} &middot; {{ tournament }}{% endblocktrans %}{% endblock page_title %}
@@ -19,6 +21,42 @@
             <a class="hover:underline" href="{% url 'tournaments:detail' tournament.slug %}">{{ tournament.name }}</a>
         </p>
     </div>
+
+    {% if roster_entries %}
+        <div class="card card-body mb-4">
+            <h2 class="card-title">{% trans "Roster" %}</h2>
+            <ul class="flex flex-col divide-y divide-line">
+                {% for entry in roster_entries %}
+                    <li class="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
+                        <span class="flex items-center gap-2">
+                            <span class="font-mono text-xs text-muted">{{ entry.jersey_number|default:"—" }}</span>
+                            <span class="text-ink">{{ entry.display_name }}</span>
+                        </span>
+                        <span class="flex items-center gap-2 text-xs text-muted">
+                            {% if entry.position_label %}{{ entry.position_label }}{% endif %}
+                            <span class="badge badge-sm {% if entry.role == "staff" %}badge-neutral{% else %}badge-outline{% endif %}">{{ entry.get_role_display }}</span>
+                        </span>
+                    </li>
+                {% endfor %}
+            </ul>
+        </div>
+    {% endif %}
+
+    {% if dressing_room_assignments %}
+        <div class="card card-body mb-4">
+            <h2 class="card-title">{% trans "Dressing room" %}</h2>
+            <ul class="flex flex-col gap-1 text-sm text-ink">
+                {% for assignment in dressing_room_assignments %}
+                    <li>
+                        {{ assignment.dressing_room.name }}
+                        {% if assignment.assigned_from or assignment.assigned_until %}
+                            <span class="text-xs text-muted">({{ assignment.assigned_from|date:"j M H:i"|default:"…" }}&ndash;{{ assignment.assigned_until|date:"j M H:i"|default:"…" }})</span>
+                        {% endif %}
+                    </li>
+                {% endfor %}
+            </ul>
+        </div>
+    {% endif %}
 
     <div class="card overflow-hidden">
         <table class="table">

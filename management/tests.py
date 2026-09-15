@@ -14075,6 +14075,28 @@ class TournamentTeamListTests(ManagementTestBase):
         self.assertContains(response, withdrawn.foreign_name)
         self.assertContains(response, "No-show.")
 
+    def test_shows_an_age_flag_badge_when_a_roster_entry_is_out_of_range(self):
+        self.activate_flag()
+        self.tournament.min_age = 10
+        self.tournament.save(update_fields=["min_age"])
+        team = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Too Young FC")
+        TournamentRosterEntry.objects.create(tournament_team=team, foreign_first_name="Kid", foreign_last_name="Player", date_of_birth=self.tournament.start_date - datetime.timedelta(days=365 * 5))
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_team_list", self.tournament.pk)
+
+        self.assertContains(response, "At least one player is outside this tournament's age range")
+
+    def test_no_age_flag_badge_when_no_age_range_is_set(self):
+        self.activate_flag()
+        team = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Any Age FC")
+        TournamentRosterEntry.objects.create(tournament_team=team, foreign_first_name="Kid", foreign_last_name="Player", date_of_birth=datetime.date(2000, 1, 1))
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_team_list", self.tournament.pk)
+
+        self.assertNotContains(response, "At least one player is outside this tournament's age range")
+
     def test_create_our_own_team_snapshots_its_roster(self):
         self.activate_flag()
         position = Position.objects.create(club=self.club, name="Forward", short_name="FW")
@@ -14193,6 +14215,28 @@ class TournamentTeamRosterTests(ManagementTestBase):
         response = self.club_get("tournament_team_roster", self.tournament.pk, self.team.pk)
 
         self.assertEqual(response.context["nav_section"], "tournaments")
+
+    def test_out_of_range_row_gets_the_warning_highlight(self):
+        self.activate_flag()
+        self.tournament.max_age = 12
+        self.tournament.save(update_fields=["max_age"])
+        TournamentRosterEntry.objects.create(tournament_team=self.team, foreign_first_name="Old", foreign_last_name="Timer", date_of_birth=self.tournament.start_date - datetime.timedelta(days=365 * 20))
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_team_roster", self.tournament.pk, self.team.pk)
+
+        self.assertContains(response, "bg-row-warn")
+
+    def test_no_warning_highlight_within_the_age_range(self):
+        self.activate_flag()
+        self.tournament.max_age = 12
+        self.tournament.save(update_fields=["max_age"])
+        TournamentRosterEntry.objects.create(tournament_team=self.team, foreign_first_name="Young", foreign_last_name="Player", date_of_birth=self.tournament.start_date - datetime.timedelta(days=365 * 10))
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_team_roster", self.tournament.pk, self.team.pk)
+
+        self.assertNotContains(response, "bg-row-warn")
 
     def test_create_adds_a_foreign_entry_even_on_a_completed_tournament(self):
         self.activate_flag()
