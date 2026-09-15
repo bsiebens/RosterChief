@@ -201,7 +201,13 @@
     /* --- App shell -------------------------------------------------------------- */
 
     .app-header {
-        padding: max(env(safe-area-inset-top), 14px) 16px 14px;
+        /* clamp(), not max(): iOS 26's "black-translucent" PWA status bar has been
+           reported to hand back an inflated env(safe-area-inset-top) on some builds
+           (a Liquid-Glass-era regression, not a real device inset) -- every actual
+           iPhone status bar tops out around 59px (Dynamic Island models), so capping
+           there absorbs the bad value without affecting any real device, where the
+           inset was already well under that ceiling. */
+        padding: clamp(14px, env(safe-area-inset-top), 59px) 16px 14px;
         background: var(--color-navy);
         color: #fff;
         flex-shrink: 0;
@@ -572,7 +578,9 @@
        rounded overlap. */
 
     .coach-header {
-        padding: max(env(safe-area-inset-top), 14px) 16px 22px;
+        /* Same iOS 26 safe-area-inset-top clamp as .app-header above -- see its
+           comment for why this is clamp(), not max(). */
+        padding: clamp(14px, env(safe-area-inset-top), 59px) 16px 22px;
         background: var(--color-ink);
         color: #fff;
         flex-shrink: 0;
