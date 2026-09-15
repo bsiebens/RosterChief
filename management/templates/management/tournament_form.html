@@ -131,13 +131,14 @@
 
         <div class="card">
             <div class="card-body">
-                <div class="card-title">{% lucide "link" size=16 %} {% trans "Calendar event" %}</div>
-                {% if object.event %}
-                    <a class="btn btn-outline gap-2 self-start" href="{% url "management:event_detail" object.event.pk %}">{% lucide "calendar" size=14 %} {{ object.event.title }}</a>
-                    <p class="mt-1.5 text-xs text-dim">{% trans "Created and kept pointed at the home team automatically -- not editable here." %}</p>
-                {% else %}
-                    <p class="text-sm text-muted">{% trans "None yet -- set a home team above and save to create one automatically." %}</p>
-                {% endif %}
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                    <div class="card-title">{% lucide "link" size=16 %} {% trans "Calendar event" %}</div>
+                    {% if object.event %}
+                        <a class="btn btn-outline btn-sm gap-2" href="{% url "management:event_detail" object.event.pk %}">{% lucide "calendar" size=14 %} {{ object.event.title }}</a>
+                    {% else %}
+                        <span class="text-sm text-muted">{% trans "None yet" %}</span>
+                    {% endif %}
+                </div>
             </div>
         </div>
 
