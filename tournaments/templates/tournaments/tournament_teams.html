@@ -38,10 +38,10 @@
     </div>
 
     <div class="card overflow-hidden">
-        {# hover:bg-paper lives on <li> itself, not the <a> inside it -- both the divide-y border above and the hover background then belong to the exact same box, so there's no seam between a bordered element and a separately-backgrounded child for the highlight to visually "double" the line against. #}
-        <ul class="divide-y divide-line">
+        {# A plain border-b per row (not divide-y's sibling-combinator border-top) -- divide-y's `> :not([hidden]) ~ :not([hidden])` compound selector rendered one specific divider visibly thicker than the rest in testing, a known rough edge with that technique on some browsers; a border owned by each row itself is simpler to reason about and side-steps it entirely. hover:bg-paper lives on the <li> too, not the <a> inside it, so the border and the hover background always belong to the same box -- no seam for a highlight to visually double the line against. #}
+        <ul>
             {% for team in teams %}
-                <li class="hover:bg-paper">
+                <li class="hover:bg-paper {% if not forloop.last %}border-b border-line{% endif %}">
                     <a class="flex items-center gap-3 p-3" href="{% url 'tournaments:team_schedule' tournament.slug team.slug %}">
                         {% if team.display_logo %}
                             <img class="h-9 w-9 shrink-0 rounded object-cover" src="{{ team.display_logo.url }}" alt="">
