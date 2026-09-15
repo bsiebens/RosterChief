@@ -23,6 +23,10 @@ class TeamWithdrawalError(Exception):
     """A team could not be withdrawn."""
 
 
+class TeamDeletionError(Exception):
+    """A team could not be deleted."""
+
+
 def _guard_pending(registration: TournamentRegistration):
     if registration.status != TournamentRegistration.Status.PENDING:
         raise RegistrationDecisionError(_("This registration has already been decided."))
@@ -158,7 +162,7 @@ def withdraw_team(team: TournamentTeam, *, reason: str = "", withdrawn_by=None) 
     team = TournamentTeam.objects.select_for_update().get(pk=team.pk)
     if team.withdrawn_at is not None:
         raise TeamWithdrawalError(_("This team has already been withdrawn."))
-    if team.team_id is not None and team.team_id == team.tournament.home_team_id:
+    if team.is_home_team:
         raise TeamWithdrawalError(_("The home team can't be withdrawn -- change or clear the tournament's home team in Settings instead."))
 
     team.withdrawn_at = timezone.now()
@@ -166,6 +170,33 @@ def withdraw_team(team: TournamentTeam, *, reason: str = "", withdrawn_by=None) 
     team.save(update_fields=["withdrawn_at", "withdrawal_reason"])
 
     return team
+
+
+@transaction.atomic
+def delete_manual_team(team: TournamentTeam):
+    """Actually removes a ``TournamentTeam`` -- unlike ``withdraw_team``'s
+    soft state, only ever appropriate for one entered by hand
+    (``registration_id`` is null): there's no registration/audit trail
+    behind it worth preserving, so leaving a permanent "withdrawn" row
+    around for a mistaken or test entry is pure clutter, not history.
+    A real applicant's team (``registration_id`` set) must go through
+    ``withdraw_team`` instead -- its own status page depends on the
+    ``TournamentTeam`` row still existing to show the withdrawal reason.
+
+    Raises ``TeamDeletionError`` for a registration-backed team or the
+    tournament's own home team (same "can't remove the home team" rule
+    ``withdraw_team`` enforces). Roster entries and dressing-room
+    assignments cascade-delete with it; any match already scheduled
+    against it just loses that side (``Match.home_team``/``away_team``
+    are ``SET_NULL``), same as a withdrawal leaves them.
+    """
+    team = TournamentTeam.objects.select_for_update().get(pk=team.pk)
+    if team.registration_id is not None:
+        raise TeamDeletionError(_("This team came from a registration -- withdraw it instead of deleting it, so its own status page can still show why."))
+    if team.is_home_team:
+        raise TeamDeletionError(_("The home team can't be removed -- change or clear the tournament's home team in Settings instead."))
+
+    team.delete()
 
 
 @transaction.atomic

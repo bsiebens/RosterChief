@@ -610,6 +610,16 @@ class TournamentTeam(ClubScopedModel):
             return self.club.logo or None
         return None
 
+    @property
+    def is_home_team(self) -> bool:
+        """Whether this is the tournament's own ``home_team`` -- the one
+        entry that can never be withdrawn or deleted (see ``withdraw_team``/
+        ``delete_manual_team`` in ``tournaments.services.registration``,
+        both of which enforce this same check server-side; this property
+        just lets templates ask the same question without duplicating the
+        ``team_id``-must-be-set-and-match logic inline)."""
+        return self.team_id is not None and self.team_id == self.tournament.home_team_id
+
 
 class TournamentRosterEntry(UUIDModel):
     """One player on a ``TournamentTeam``'s roster. For a club team, copied

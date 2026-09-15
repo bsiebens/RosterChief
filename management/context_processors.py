@@ -229,6 +229,7 @@ _NAV_SECTIONS = {
     "tournament_team_create": "tournament_list",
     "tournament_team_payment_update": "tournament_list",
     "tournament_team_withdraw": "tournament_list",
+    "tournament_team_delete": "tournament_list",
     "tournament_team_roster": "tournament_list",
     "tournament_team_roster_pdf": "tournament_list",
     "tournament_team_lunch_pdf": "tournament_list",

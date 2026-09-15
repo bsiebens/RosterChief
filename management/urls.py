@@ -159,6 +159,7 @@ urlpatterns = [
     path("tournaments/registrations/<uuid:pk>/approve/", views.TournamentRegistrationApproveView.as_view(), name="tournament_registration_approve"),
     path("tournaments/registrations/<uuid:pk>/reject/", views.TournamentRegistrationRejectView.as_view(), name="tournament_registration_reject"),
     path("tournaments/teams/<uuid:pk>/withdraw/", views.TournamentTeamWithdrawView.as_view(), name="tournament_team_withdraw"),
+    path("tournaments/teams/<uuid:pk>/delete/", views.TournamentTeamDeleteView.as_view(), name="tournament_team_delete"),
     path("tournaments/<uuid:tournament_pk>/teams/", views.TournamentTeamListView.as_view(), name="tournament_team_list"),
     path("tournaments/<uuid:tournament_pk>/teams/create/", views.TournamentTeamCreateView.as_view(), name="tournament_team_create"),
     path("tournaments/teams/<uuid:pk>/payment/", views.TournamentTeamPaymentUpdateView.as_view(), name="tournament_team_payment_update"),

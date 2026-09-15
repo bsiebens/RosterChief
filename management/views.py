@@ -154,7 +154,7 @@ from tournaments.models import DressingRoom, DressingRoomAssignment, Match, Tour
 from tournaments.services.dressing_rooms import DressingRoomAssignmentError, assign_dressing_room, release_dressing_room, windows_conflict
 from tournaments.services.lunch import daily_lunch_summary
 from tournaments.services.notifications import dispatch_notify_tournament_shifts_open, send_registration_decision_email
-from tournaments.services.registration import RegistrationDecisionError, TeamWithdrawalError, approve_registration, create_manual_team, ensure_home_team, reject_registration, withdraw_team
+from tournaments.services.registration import RegistrationDecisionError, TeamDeletionError, TeamWithdrawalError, approve_registration, create_manual_team, delete_manual_team, ensure_home_team, reject_registration, withdraw_team
 from tournaments.services.scheduling import SchedulingError, record_result, reschedule_match
 from tournaments.services.tasks import TaskClaimError, claim_task, generate_task_shifts
 
@@ -7426,6 +7426,27 @@ class TournamentTeamWithdrawView(TournamentsManagerRequiredMixin, View):
         return redirect("management:tournament_registration_queue", tournament_pk=team.tournament_id)
 
 
+class TournamentTeamDeleteView(TournamentsManagerRequiredMixin, View):
+    """The Teams tab's own "Delete" action -- tournaments.services.
+    registration.delete_manual_team, for a team staff entered by hand
+    (never one that came through the public registration queue, or the
+    tournament's own home team -- the service enforces both)."""
+
+    def post(self, request, pk):
+        team = get_object_or_404(TournamentTeam, pk=pk, tournament__club=request.club)
+        tournament_pk = team.tournament_id
+        display_name = team.display_name
+
+        try:
+            delete_manual_team(team)
+        except TeamDeletionError as error:
+            notify(request, f"w|{_('Could not delete team')}|{error}")
+        else:
+            notify(request, f"s|{_('Team deleted')}|" + _("“%(name)s” has been removed from the tournament.") % {"name": display_name})
+
+        return redirect("management:tournament_team_list", tournament_pk=tournament_pk)
+
+
 class TournamentTeamListView(TournamentsManagerRequiredMixin, TemplateView):
     """A tournament's own "Teams" tab -- every ``TournamentTeam`` actually in
     the bracket, withdrawn ones included (de-emphasized in the template, not
@@ -7448,6 +7469,12 @@ class TournamentTeamListView(TournamentsManagerRequiredMixin, TemplateView):
         # already on the roster.
         for team in teams:
             team.has_age_flag = any(tournament.age_out_of_range(entry.date_of_birth) for entry in team.roster_entries.all())
+            # Reuse the already-fetched tournament instance rather than
+            # letting team.is_home_team's own team.tournament lookup hit
+            # the DB again per row (tournament.teams.select_related() has
+            # no reason to know its own reverse manager's parent already
+            # exists in memory).
+            team.tournament = tournament
         # A failed "Add team" submit (TournamentTeamCreateView below) passes
         # its own bound, errored team_form back in via kwargs so this same
         # template can re-render with the modal reopened and the errors

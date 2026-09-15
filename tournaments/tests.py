@@ -43,7 +43,7 @@ from .models import (
 )
 from .services.dressing_rooms import DressingRoomAssignmentError, assign_dressing_room, release_dressing_room, windows_conflict
 from .services.notifications import notify_tournament_shifts_open
-from .services.registration import RegistrationDecisionError, TeamWithdrawalError, approve_registration, create_manual_team, ensure_home_team, reject_registration, withdraw_team
+from .services.registration import RegistrationDecisionError, TeamDeletionError, TeamWithdrawalError, approve_registration, create_manual_team, delete_manual_team, ensure_home_team, reject_registration, withdraw_team
 from .services.scheduling import (
     DEFAULT_GAP,
     DEFAULT_MATCH_DURATION,
@@ -938,6 +938,53 @@ class WithdrawTeamServiceTests(TournamentsTestCase):
 
         with self.assertRaises(TeamWithdrawalError):
             withdraw_team(team)
+
+
+class DeleteManualTeamServiceTests(TournamentsTestCase):
+    def test_deletes_a_manually_added_foreign_team(self):
+        team = create_manual_team(self.tournament, foreign_fields={"foreign_name": "Walk-up FC"})
+
+        delete_manual_team(team)
+
+        self.assertFalse(TournamentTeam.objects.filter(pk=team.pk).exists())
+
+    def test_deletes_a_manually_added_club_team_and_its_roster(self):
+        team = create_manual_team(self.tournament, club_team=self.team)
+        TournamentRosterEntry.objects.create(tournament_team=team, member=self.member, role=TournamentRosterRole.PLAYER)
+
+        delete_manual_team(team)
+
+        self.assertFalse(TournamentTeam.objects.filter(pk=team.pk).exists())
+        self.assertFalse(TournamentRosterEntry.objects.filter(tournament_team_id=team.pk).exists())
+
+    def test_a_registration_backed_team_cannot_be_deleted(self):
+        registration = TournamentRegistration.objects.create(tournament=self.tournament, foreign_name="Visiting FC")
+        team = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, registration=registration, foreign_name="Visiting FC")
+
+        with self.assertRaises(TeamDeletionError):
+            delete_manual_team(team)
+
+        self.assertTrue(TournamentTeam.objects.filter(pk=team.pk).exists())
+
+    def test_the_home_team_cannot_be_deleted(self):
+        self.tournament.home_team = self.team
+        self.tournament.save(update_fields=["home_team"])
+        team = create_manual_team(self.tournament, club_team=self.team)
+
+        with self.assertRaises(TeamDeletionError):
+            delete_manual_team(team)
+
+        self.assertTrue(TournamentTeam.objects.filter(pk=team.pk).exists())
+
+    def test_a_non_home_manually_added_club_team_can_still_be_deleted(self):
+        other_team = Team.objects.create(club=self.club, name="Second Team", short_name="2nd")
+        self.tournament.home_team = self.team
+        self.tournament.save(update_fields=["home_team"])
+        team = create_manual_team(self.tournament, club_team=other_team)
+
+        delete_manual_team(team)
+
+        self.assertFalse(TournamentTeam.objects.filter(pk=team.pk).exists())
 
 
 class CreateManualTeamServiceTests(TournamentsTestCase):

@@ -74,7 +74,7 @@ from tournaments.models import (
     TournamentTeam,
 )
 from tournaments.services.dressing_rooms import assign_dressing_room
-from tournaments.services.registration import approve_registration, reject_registration
+from tournaments.services.registration import approve_registration, create_manual_team, reject_registration
 from tournaments.services.scheduling import generate_stage_matches
 
 User = get_user_model()
@@ -14189,6 +14189,56 @@ class TournamentTeamListTests(ManagementTestBase):
 
         team.refresh_from_db()
         self.assertEqual(team.payment_status, TournamentTeam.PaymentStatus.UNPAID)
+
+    def test_delete_action_shown_for_a_manually_added_team(self):
+        self.activate_flag()
+        team = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Walk-up FC")
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_team_list", self.tournament.pk)
+
+        self.assertContains(response, reverse("management:tournament_team_delete", args=[team.pk]))
+
+    def test_delete_action_not_shown_for_a_registration_backed_team(self):
+        self.activate_flag()
+        registration = TournamentRegistration.objects.create(tournament=self.tournament, foreign_name="Visiting FC")
+        team = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, registration=registration, foreign_name="Visiting FC")
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_team_list", self.tournament.pk)
+
+        self.assertNotContains(response, reverse("management:tournament_team_delete", args=[team.pk]))
+
+    def test_delete_action_not_shown_for_the_home_team(self):
+        self.activate_flag()
+        self.tournament.home_team = self.team
+        self.tournament.save(update_fields=["home_team"])
+        team = create_manual_team(self.tournament, club_team=self.team)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_team_list", self.tournament.pk)
+
+        self.assertNotContains(response, reverse("management:tournament_team_delete", args=[team.pk]))
+
+    def test_delete_removes_a_manually_added_team(self):
+        self.activate_flag()
+        team = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Walk-up FC")
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("tournament_team_delete", {}, team.pk)
+
+        self.assertRedirects(response, reverse("management:tournament_team_list", args=[self.tournament.pk]))
+        self.assertFalse(TournamentTeam.objects.filter(pk=team.pk).exists())
+
+    def test_delete_rejects_a_registration_backed_team(self):
+        self.activate_flag()
+        registration = TournamentRegistration.objects.create(tournament=self.tournament, foreign_name="Visiting FC")
+        team = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, registration=registration, foreign_name="Visiting FC")
+        self.client.force_login(self.admin_user)
+
+        self.club_post("tournament_team_delete", {}, team.pk)
+
+        self.assertTrue(TournamentTeam.objects.filter(pk=team.pk).exists())
 
 
 class TournamentTeamRosterTests(ManagementTestBase):
