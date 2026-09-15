@@ -23,7 +23,7 @@
         <div class="card card-body">
             <div class="flex flex-wrap items-center justify-between gap-2">
                 <h2 class="card-title">{% lucide "map-pin" size=18 %} {% trans "Fields" %}</h2>
-                <button class="btn btn-outline btn-sm gap-1" type="button" onclick="document.getElementById('field_create_modal').showModal()">{% lucide "plus" size=14 %} {% trans "Add field" %}</button>
+                {% if can_operate_tournament %}<button class="btn btn-outline btn-sm gap-1" type="button" onclick="document.getElementById('field_create_modal').showModal()">{% lucide "plus" size=14 %} {% trans "Add field" %}</button>{% endif %}
             </div>
             <ul class="divide-y divide-rule">
                 {% for field in fields %}
@@ -36,10 +36,12 @@
                                 <span class="text-xs text-dim">{% trans "No availability window set." %}</span>
                             {% endif %}
                         </div>
+                        {% if can_operate_tournament %}
                         <div class="flex shrink-0 items-center gap-1.5">
                             <button class="btn btn-outline btn-xs" type="button" onclick="document.getElementById('{{ field.pk|dom_id:"field_update_modal" }}').showModal()">{% lucide "pencil" size=12 %} {% trans "Edit" %}</button>
                             <button class="btn btn-outline btn-xs btn-error" type="button" onclick="document.getElementById('{{ field.pk|dom_id:"field_delete_modal" }}').showModal()">{% lucide "trash-2" size=12 %} {% trans "Delete" %}</button>
                         </div>
+                        {% endif %}
                     </li>
                 {% empty %}
                     <li class="py-2.5 text-sm text-muted">{% trans "No fields yet -- add at least one before generating a schedule." %}</li>
@@ -50,7 +52,7 @@
         <div class="card card-body">
             <div class="flex flex-wrap items-center justify-between gap-2">
                 <h2 class="card-title">{% lucide "layers" size=18 %} {% trans "Stages" %}</h2>
-                <button class="btn btn-outline btn-sm gap-1" type="button" onclick="document.getElementById('stage_create_modal').showModal()">{% lucide "plus" size=14 %} {% trans "Add stage" %}</button>
+                {% if can_operate_tournament %}<button class="btn btn-outline btn-sm gap-1" type="button" onclick="document.getElementById('stage_create_modal').showModal()">{% lucide "plus" size=14 %} {% trans "Add stage" %}</button>{% endif %}
             </div>
             <ul class="divide-y divide-rule">
                 {% for stage in stages %}
@@ -59,10 +61,12 @@
                             <span class="text-sm font-semibold text-ink">{{ stage.sequence }}. {{ stage.name }}</span>
                             <span class="text-xs text-muted">{{ stage.get_format_display }} &middot; {{ stage.get_status_display }}</span>
                         </div>
+                        {% if can_operate_tournament %}
                         <div class="flex shrink-0 items-center gap-1.5">
                             <button class="btn btn-outline btn-xs" type="button" onclick="document.getElementById('{{ stage.pk|dom_id:"stage_update_modal" }}').showModal()">{% lucide "pencil" size=12 %} {% trans "Edit" %}</button>
                             <button class="btn btn-outline btn-xs btn-error" type="button" onclick="document.getElementById('{{ stage.pk|dom_id:"stage_delete_modal" }}').showModal()">{% lucide "trash-2" size=12 %} {% trans "Delete" %}</button>
                         </div>
+                        {% endif %}
                     </li>
                 {% empty %}
                     <li class="py-2.5 text-sm text-muted">{% trans "No stages yet -- add at least one before generating a schedule." %}</li>

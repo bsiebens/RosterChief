@@ -9,7 +9,9 @@
 {% endblock topbar_context %}
 
 {% block actions %}
-    <a class="btn btn-primary gap-2" href="{% url 'management:tournament_create' %}">{% lucide "plus" size=16 %} {% trans "New tournament" %}</a>
+    {% if can_manage_tournament %}
+        <a class="btn btn-primary gap-2" href="{% url 'management:tournament_create' %}">{% lucide "plus" size=16 %} {% trans "New tournament" %}</a>
+    {% endif %}
 {% endblock actions %}
 
 {% block filter_strip %}

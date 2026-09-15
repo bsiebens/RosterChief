@@ -29,7 +29,9 @@
 {% endblock topbar_context %}
 
 {% block actions %}
-    <button class="btn btn-primary gap-2" type="button" onclick="document.getElementById('team_create_modal').showModal()">{% lucide "plus" size=16 %} {% trans "Add team" %}</button>
+    {% if can_operate_tournament %}
+        <button class="btn btn-primary gap-2" type="button" onclick="document.getElementById('team_create_modal').showModal()">{% lucide "plus" size=16 %} {% trans "Add team" %}</button>
+    {% endif %}
 {% endblock actions %}
 
 {% block panel %}
@@ -68,14 +70,18 @@
                             </div>
                         </td>
                         <td>
-                            <form method="post" action="{% url 'management:tournament_team_payment_update' team.pk %}">
-                                {% csrf_token %}
-                                <select name="payment_status" class="select w-auto" onchange="this.form.submit()">
-                                    {% for value, label in payment_status_choices %}
-                                        <option value="{{ value }}" {% if team.payment_status == value %}selected{% endif %}>{{ label }}</option>
-                                    {% endfor %}
-                                </select>
-                            </form>
+                            {% if can_manage_tournament %}
+                                <form method="post" action="{% url 'management:tournament_team_payment_update' team.pk %}">
+                                    {% csrf_token %}
+                                    <select name="payment_status" class="select w-auto" onchange="this.form.submit()">
+                                        {% for value, label in payment_status_choices %}
+                                            <option value="{{ value }}" {% if team.payment_status == value %}selected{% endif %}>{{ label }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </form>
+                            {% else %}
+                                <span class="badge {% if team.payment_status == "fully_paid" %}badge-success{% elif team.payment_status == "deposit_received" %}badge-warning{% else %}badge-error{% endif %}">{{ team.get_payment_status_display }}</span>
+                            {% endif %}
                         </td>
                         <td class="text-right whitespace-nowrap">
                             <a class="btn btn-outline btn-sm gap-1.5" href="{% url 'management:tournament_team_roster' tournament.pk team.pk %}">{% lucide "users" size=14 %} {% trans "Roster" %}</a>
@@ -83,7 +89,7 @@
                             {% if tournament.lunch_mode != "none" %}
                                 <a class="btn btn-outline btn-sm" href="{% url 'management:tournament_team_lunch_pdf' tournament.pk team.pk %}" title="{% trans "Lunch PDF" %}">{% lucide "utensils" size=14 %}</a>
                             {% endif %}
-                            {% if not team.registration_id and not team.is_home_team %}
+                            {% if can_manage_tournament and not team.registration_id and not team.is_home_team %}
                                 <button class="btn btn-outline btn-sm btn-error" type="button" onclick="document.getElementById('{{ team.pk|dom_id:"team_delete_modal" }}').showModal()" title="{% trans "Delete" %}">{% lucide "trash-2" size=14 %}</button>
                             {% endif %}
                         </td>
@@ -97,14 +103,16 @@
         </table>
     </div>
 
-    {% trans "Add team" as add_team_title %}
-    {% url 'management:tournament_team_create' tournament.pk as team_create_url %}
-    {% include "controlpanel/_modal_form.html" with modal_id="team_create_modal" title=add_team_title form=team_form action_url=team_create_url submit_label=add_team_title submit_icon="plus" box_class="max-w-lg" header_toggle_field=team_form.kind %}
+    {% if can_operate_tournament %}
+        {% trans "Add team" as add_team_title %}
+        {% url 'management:tournament_team_create' tournament.pk as team_create_url %}
+        {% include "controlpanel/_modal_form.html" with modal_id="team_create_modal" title=add_team_title form=team_form action_url=team_create_url submit_label=add_team_title submit_icon="plus" box_class="max-w-lg" header_toggle_field=team_form.kind %}
+    {% endif %}
 
     {% trans "Delete team" as delete_team_title %}
     {% trans "Delete" as delete_team_label %}
     {% for team in teams %}
-        {% if not team.registration_id and not team.is_home_team %}
+        {% if can_manage_tournament and not team.registration_id and not team.is_home_team %}
             {% url 'management:tournament_team_delete' team.pk as team_delete_url %}
             {% blocktrans with name=team.display_name asvar delete_team_body %}Delete “{{ name }}”? Its roster and any dressing room assignment go with it; any match already scheduled against it loses that side instead of erroring. This cannot be undone.{% endblocktrans %}
             {% include "controlpanel/_confirm_modal.html" with modal_id=team.pk|dom_id:"team_delete_modal" title=delete_team_title body=delete_team_body action_url=team_delete_url submit_label=delete_team_label %}

@@ -26,8 +26,10 @@
 
 {% block actions %}
     <a class="btn btn-outline gap-2" href="{% url 'management:tournament_task_print' tournament.pk %}">{% lucide "printer" size=16 %} {% trans "Print overview" %}</a>
-    <button class="btn btn-outline gap-2" type="button" onclick="document.getElementById('shift_generate_modal').showModal()">{% lucide "layers" size=16 %} {% trans "Generate shifts" %}</button>
-    <button class="btn btn-primary gap-2" type="button" onclick="document.getElementById('shift_create_modal').showModal()">{% lucide "plus" size=16 %} {% trans "Add shift" %}</button>
+    {% if can_operate_tournament %}
+        <button class="btn btn-outline gap-2" type="button" onclick="document.getElementById('shift_generate_modal').showModal()">{% lucide "layers" size=16 %} {% trans "Generate shifts" %}</button>
+        <button class="btn btn-primary gap-2" type="button" onclick="document.getElementById('shift_create_modal').showModal()">{% lucide "plus" size=16 %} {% trans "Add shift" %}</button>
+    {% endif %}
 {% endblock actions %}
 
 {% block panel %}
@@ -62,11 +64,13 @@
                             {% endif %}
                         </td>
                         <td class="text-right whitespace-nowrap">
-                            {% if not task.is_full %}
-                                <button class="btn btn-outline btn-xs" type="button" onclick="document.getElementById('{{ task.pk|dom_id:"shift_assign_modal" }}').showModal()">{% lucide "user-plus" size=12 %} {% trans "Assign" %}</button>
+                            {% if can_operate_tournament %}
+                                {% if not task.is_full %}
+                                    <button class="btn btn-outline btn-xs" type="button" onclick="document.getElementById('{{ task.pk|dom_id:"shift_assign_modal" }}').showModal()">{% lucide "user-plus" size=12 %} {% trans "Assign" %}</button>
+                                {% endif %}
+                                <button class="btn btn-outline btn-xs" type="button" onclick="document.getElementById('{{ task.pk|dom_id:"shift_update_modal" }}').showModal()">{% lucide "pencil" size=12 %} {% trans "Edit" %}</button>
+                                <button class="btn btn-outline btn-xs btn-error" type="button" onclick="document.getElementById('{{ task.pk|dom_id:"shift_delete_modal" }}').showModal()">{% lucide "trash-2" size=12 %} {% trans "Delete" %}</button>
                             {% endif %}
-                            <button class="btn btn-outline btn-xs" type="button" onclick="document.getElementById('{{ task.pk|dom_id:"shift_update_modal" }}').showModal()">{% lucide "pencil" size=12 %} {% trans "Edit" %}</button>
-                            <button class="btn btn-outline btn-xs btn-error" type="button" onclick="document.getElementById('{{ task.pk|dom_id:"shift_delete_modal" }}').showModal()">{% lucide "trash-2" size=12 %} {% trans "Delete" %}</button>
                         </td>
                     </tr>
                 {% empty %}

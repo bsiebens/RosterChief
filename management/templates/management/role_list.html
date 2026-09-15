@@ -129,6 +129,50 @@
                 </tbody>
             </table>
         </div>
+
+        {% comment %}
+            TournamentManager -- same additive-grant shape as ShopManager/
+            EvaluationManager above, same reasoning: its own section, granted
+            through the same modal ("Tournament admin" is one of
+            ClubRoleAssignForm's dropdown values), revoked through its own
+            view since it isn't a ClubRole row. See club.models.TournamentManager
+            and club.services.access.can_manage_tournaments for what this
+            actually grants -- deciding registrations, a team's payment status
+            or removal, and the tournament's own settings; a team's own
+            coach/manager gets a narrower, per-tournament tier automatically
+            (no grant needed) instead.
+        {% endcomment %}
+        <div class="card card-body">
+            <div>
+                <h2 class="card-title">{% trans "Tournament admins" %}</h2>
+                <p class="text-sm text-muted">{% trans "Can decide registrations, set a team's payment status, remove a team, and edit tournament settings, without needing the Admin role." %}</p>
+            </div>
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>{% trans "Member" %}</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for grant in tournament_admins %}
+                        <tr>
+                            <td class="font-semibold text-ink">{{ grant.member }}</td>
+                            <td class="text-right">
+                                <form method="post" action="{% url 'management:tournament_admin_revoke' grant.pk %}">
+                                    {% csrf_token %}
+                                    <button class="btn btn-outline btn-error btn-xs gap-1" type="submit">{% lucide "x" size=13 %} {% trans "Revoke" %}</button>
+                                </form>
+                            </td>
+                        </tr>
+                    {% empty %}
+                        <tr>
+                            <td colspan="2" class="py-4 text-center text-muted">{% trans "No one has been granted tournament admin yet." %}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
     </div>
 
     {% trans "Grant role" as grant_role_label %}

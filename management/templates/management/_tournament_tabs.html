@@ -6,6 +6,15 @@
     not itself one of the tabs (editing the tournament's own name/season/dates isn't a
     "browse this tournament's data" concern the way the tabs are), but styled to pick up
     the active state too when that's the page actually showing (TournamentUpdateView).
+
+    Settings is tournament-admin-only (TournamentUpdateView itself is gated by
+    TournamentAdminRequiredMixin) -- hidden here for anyone else so a viewer/
+    operator isn't shown a link that would just 403. ``can_manage_tournament``
+    reaches this include automatically from whichever page includes it (every
+    including template's own view already puts it in context via
+    TournamentsManagerRequiredMixin.tournament_permissions() -- see that
+    mixin's own docstring), same as every other variable Django's plain
+    {% include %} (no ``only``) already passes through unchanged.
 {% endcomment %}
 <div class="mb-4 flex flex-wrap items-center justify-between gap-2">
     <div class="tabs tabs-boxed">
@@ -16,5 +25,7 @@
         <a href="{% url 'management:tournament_task_list' tournament.pk %}" class="tab {% if active_tab == "tasks" %}tab-active{% endif %}">{% trans "Tasks" %}</a>
         <a href="{% url 'management:tournament_dressing_room_list' tournament.pk %}" class="tab {% if active_tab == "dressing_rooms" %}tab-active{% endif %}">{% trans "Dressing rooms" %}</a>
     </div>
-    <a class="btn btn-sm gap-1.5 {% if active_tab == "settings" %}btn-primary{% else %}btn-outline{% endif %}" href="{% url 'management:tournament_settings' tournament.pk %}">{% lucide "settings" size=14 %} {% trans "Settings" %}</a>
+    {% if can_manage_tournament %}
+        <a class="btn btn-sm gap-1.5 {% if active_tab == "settings" %}btn-primary{% else %}btn-outline{% endif %}" href="{% url 'management:tournament_settings' tournament.pk %}">{% lucide "settings" size=14 %} {% trans "Settings" %}</a>
+    {% endif %}
 </div>

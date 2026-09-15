@@ -888,14 +888,23 @@ class ClubRoleAssignForm(forms.ModelForm):
 
     SHOP_ADMIN = "shop_admin"
     EVALUATION_MANAGER = "evaluation_manager"
+    TOURNAMENT_ADMIN = "tournament_admin"
 
     # Deliberately NOT in Meta.fields below -- a ModelForm's _post_clean() calls
     # instance.full_clean() on whatever it constructs from Meta.fields, which would
-    # validate "shop_admin"/"evaluation_manager" against ClubRole.role's own
-    # model-level choices (which don't include either) and silently fail the whole
-    # form. Declaring it here instead keeps it a real, validated form field without
-    # ever touching the model instance.
-    role = forms.ChoiceField(label=_("Role"), choices=[*(choice for choice in ClubRole.Roles.choices if choice[0] != ClubRole.Roles.MEMBER), (SHOP_ADMIN, _("shop admin")), (EVALUATION_MANAGER, _("evaluation manager"))])
+    # validate "shop_admin"/"evaluation_manager"/"tournament_admin" against
+    # ClubRole.role's own model-level choices (which don't include any of them)
+    # and silently fail the whole form. Declaring it here instead keeps it a real,
+    # validated form field without ever touching the model instance.
+    role = forms.ChoiceField(
+        label=_("Role"),
+        choices=[
+            *(choice for choice in ClubRole.Roles.choices if choice[0] != ClubRole.Roles.MEMBER),
+            (SHOP_ADMIN, _("shop admin")),
+            (EVALUATION_MANAGER, _("evaluation manager")),
+            (TOURNAMENT_ADMIN, _("tournament admin")),
+        ],
+    )
 
     class Meta:
         model = ClubRole

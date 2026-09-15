@@ -24,7 +24,9 @@
 {% block heading %}{{ tournament.name }}{% endblock heading %}
 
 {% block actions %}
-    <button class="btn btn-primary gap-2" type="button" onclick="document.getElementById('dressing_room_assign_modal').showModal()">{% lucide "plus" size=16 %} {% trans "Assign room" %}</button>
+    {% if can_operate_tournament %}
+        <button class="btn btn-primary gap-2" type="button" onclick="document.getElementById('dressing_room_assign_modal').showModal()">{% lucide "plus" size=16 %} {% trans "Assign room" %}</button>
+    {% endif %}
 {% endblock actions %}
 
 {% block panel %}
@@ -70,10 +72,12 @@
                             </td>
                             <td class="text-sm text-muted">{{ assignment.note|default:"—" }}</td>
                             <td class="text-right">
-                                <form method="post" action="{% url 'management:tournament_dressing_room_release' tournament.pk assignment.pk %}" class="inline">
-                                    {% csrf_token %}
-                                    <button class="btn btn-outline btn-xs btn-error" type="submit">{% lucide "x" size=12 %} {% trans "Release" %}</button>
-                                </form>
+                                {% if can_operate_tournament %}
+                                    <form method="post" action="{% url 'management:tournament_dressing_room_release' tournament.pk assignment.pk %}" class="inline">
+                                        {% csrf_token %}
+                                        <button class="btn btn-outline btn-xs btn-error" type="submit">{% lucide "x" size=12 %} {% trans "Release" %}</button>
+                                    </form>
+                                {% endif %}
                             </td>
                         </tr>
                     {% empty %}

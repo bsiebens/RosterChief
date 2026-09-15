@@ -133,7 +133,7 @@
                     {% endif %}
                 </div>
 
-                {% if registration.status == "pending" %}
+                {% if registration.status == "pending" and can_manage_tournament %}
                     <div class="flex gap-2.5 border-t border-line p-4">
                         <form method="post" action="{% url 'management:tournament_registration_approve' registration.pk %}" class="flex-1">
                             {% csrf_token %}
@@ -142,7 +142,7 @@
                         <button type="button" class="btn btn-outline btn-error gap-2" onclick="document.getElementById('{{ registration.pk|dom_id:"reject_modal" }}').showModal()">{% lucide "x-circle" size=16 %} {% trans "Reject" %}</button>
                         <button type="button" class="btn btn-outline gap-2" onclick="closeDrawer('{{ registration.pk|dom_id:"registration_drawer" }}')">{% trans "Close" %}</button>
                     </div>
-                {% elif registration.status == "approved" and registration.tournament_team and not registration.tournament_team.withdrawn_at %}
+                {% elif registration.status == "approved" and registration.tournament_team and not registration.tournament_team.withdrawn_at and can_manage_tournament %}
                     <div class="flex gap-2.5 border-t border-line p-4">
                         <button type="button" class="btn btn-outline btn-error flex-1 gap-2" onclick="document.getElementById('{{ registration.pk|dom_id:"withdraw_modal" }}').showModal()">{% lucide "circle-minus" size=16 %} {% trans "Withdraw" %}</button>
                         <button type="button" class="btn btn-outline flex-1 gap-2" onclick="closeDrawer('{{ registration.pk|dom_id:"registration_drawer" }}')">{% trans "Close" %}</button>

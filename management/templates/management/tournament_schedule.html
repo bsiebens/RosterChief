@@ -35,7 +35,7 @@
                                     <div class="font-semibold text-ink">{{ match.home_display }} <span class="text-dim">{% trans "vs" %}</span> {{ match.away_display }}</div>
                                 </td>
                                 <td>
-                                    {% if match.home_team_id and match.away_team_id %}
+                                    {% if match.home_team_id and match.away_team_id and can_operate_tournament %}
                                         <form method="post" action="{% url 'management:match_reschedule' match.pk %}" class="flex flex-wrap items-center gap-1.5">
                                             {% csrf_token %}
                                             <select name="field" class="select w-auto" aria-label="{% trans 'Field' %}">
@@ -47,6 +47,8 @@
                                             <input type="datetime-local" name="scheduled_start" class="input w-auto" aria-label="{% trans 'Scheduled start' %}" value="{% if match.scheduled_start %}{{ match.scheduled_start|date:"Y-m-d\TH:i" }}{% endif %}">
                                             <button class="btn btn-outline btn-sm" type="submit">{% trans "Save" %}</button>
                                         </form>
+                                    {% elif match.home_team_id and match.away_team_id %}
+                                        <span class="text-xs text-muted">{% if match.field %}{{ match.field.name }}{% endif %} {% if match.scheduled_start %}{{ match.scheduled_start|date:"j M, H:i" }}{% endif %}</span>
                                     {% else %}
                                         <span class="text-xs text-dim">{% trans "Not schedulable yet -- waiting on an earlier result." %}</span>
                                     {% endif %}
@@ -57,7 +59,7 @@
                                 <td>
                                     {% if match.status == "complete" %}
                                         <span class="font-mono text-sm text-ink">{{ match.score_home }} - {{ match.score_away }}</span>
-                                    {% elif match.home_team_id and match.away_team_id %}
+                                    {% elif match.home_team_id and match.away_team_id and can_operate_tournament %}
                                         <form method="post" action="{% url 'management:match_result' match.pk %}" class="flex items-center gap-1.5">
                                             {% csrf_token %}
                                             <input type="number" min="0" name="score_home" class="input w-14" aria-label="{% blocktrans with team=match.home_display %}{{ team }} score{% endblocktrans %}" required>

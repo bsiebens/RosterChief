@@ -30,7 +30,9 @@
     {% if tournament.lunch_mode != "none" %}
         <a class="btn btn-outline gap-2" href="{% url 'management:tournament_team_lunch_pdf' tournament.pk team.pk %}">{% lucide "file-down" size=16 %} {% trans "Lunch PDF" %}</a>
     {% endif %}
-    <button class="btn btn-primary gap-2" type="button" onclick="document.getElementById('entry_create_modal').showModal()">{% lucide "plus" size=16 %} {% trans "Add to roster" %}</button>
+    {% if can_operate_tournament %}
+        <button class="btn btn-primary gap-2" type="button" onclick="document.getElementById('entry_create_modal').showModal()">{% lucide "plus" size=16 %} {% trans "Add to roster" %}</button>
+    {% endif %}
 {% endblock actions %}
 
 {% block panel %}
@@ -88,23 +90,29 @@
                         <td class="max-w-40 truncate text-sm text-muted" title="{{ entry.dietary_restrictions }}">{{ entry.dietary_restrictions|default:"—" }}</td>
                         {% if tournament.lunch_mode == "optional" %}
                             <td>
-                                <form method="post" action="{% url 'management:tournament_roster_entry_lunch_update' tournament.pk team.pk entry.pk %}" class="flex flex-wrap items-center gap-2">
-                                    {% csrf_token %}
-                                    {% for day in tournament.date_range %}
-                                        <label class="flex items-center gap-1 text-xs text-muted">
-                                            <input type="checkbox" class="checkbox" name="lunch_days" value="{{ day|date:"Y-m-d" }}" {% if day|date:"Y-m-d" in entry.lunch_days %}checked{% endif %}>
-                                            {{ day|date:"D" }}
-                                        </label>
-                                    {% endfor %}
-                                    <button class="btn btn-outline btn-xs" type="submit">{% lucide "save" size=11 %}</button>
-                                </form>
+                                {% if can_operate_tournament %}
+                                    <form method="post" action="{% url 'management:tournament_roster_entry_lunch_update' tournament.pk team.pk entry.pk %}" class="flex flex-wrap items-center gap-2">
+                                        {% csrf_token %}
+                                        {% for day in tournament.date_range %}
+                                            <label class="flex items-center gap-1 text-xs text-muted">
+                                                <input type="checkbox" class="checkbox" name="lunch_days" value="{{ day|date:"Y-m-d" }}" {% if day|date:"Y-m-d" in entry.lunch_days %}checked{% endif %}>
+                                                {{ day|date:"D" }}
+                                            </label>
+                                        {% endfor %}
+                                        <button class="btn btn-outline btn-xs" type="submit">{% lucide "save" size=11 %}</button>
+                                    </form>
+                                {% else %}
+                                    <span class="font-mono text-xs tabular-nums text-muted">{{ entry.lunch_days|length }} / {{ tournament.date_range|length }}</span>
+                                {% endif %}
                             </td>
                         {% elif tournament.lunch_mode == "mandatory" %}
                             <td class="font-mono text-xs tabular-nums text-muted">{{ entry.lunch_days|length }} / {{ tournament.date_range|length }}</td>
                         {% endif %}
                         <td class="text-right whitespace-nowrap">
-                            <button class="btn btn-outline btn-xs" type="button" onclick="document.getElementById('{{ entry.pk|dom_id:"entry_update_modal" }}').showModal()">{% lucide "pencil" size=12 %} {% trans "Edit" %}</button>
-                            <button class="btn btn-outline btn-xs btn-error" type="button" onclick="document.getElementById('{{ entry.pk|dom_id:"entry_delete_modal" }}').showModal()">{% lucide "trash-2" size=12 %} {% trans "Delete" %}</button>
+                            {% if can_operate_tournament %}
+                                <button class="btn btn-outline btn-xs" type="button" onclick="document.getElementById('{{ entry.pk|dom_id:"entry_update_modal" }}').showModal()">{% lucide "pencil" size=12 %} {% trans "Edit" %}</button>
+                                <button class="btn btn-outline btn-xs btn-error" type="button" onclick="document.getElementById('{{ entry.pk|dom_id:"entry_delete_modal" }}').showModal()">{% lucide "trash-2" size=12 %} {% trans "Delete" %}</button>
+                            {% endif %}
                         </td>
                     </tr>
                 {% empty %}
