@@ -22,8 +22,8 @@
 {% endblock topbar_context %}
 
 {% block actions %}
-    <button class="btn btn-outline gap-2" type="button" onclick="document.getElementById('task_generate_modal').showModal()">{% lucide "layers" size=16 %} {% trans "Generate shifts" %}</button>
-    <button class="btn btn-primary gap-2" type="button" onclick="document.getElementById('task_create_modal').showModal()">{% lucide "plus" size=16 %} {% trans "Add task" %}</button>
+    <button class="btn btn-outline gap-2" type="button" onclick="document.getElementById('shift_generate_modal').showModal()">{% lucide "layers" size=16 %} {% trans "Generate shifts" %}</button>
+    <button class="btn btn-primary gap-2" type="button" onclick="document.getElementById('shift_create_modal').showModal()">{% lucide "plus" size=16 %} {% trans "Add shift" %}</button>
 {% endblock actions %}
 
 {% block panel %}
@@ -58,8 +58,8 @@
                             {% endif %}
                         </td>
                         <td class="text-right whitespace-nowrap">
-                            <button class="btn btn-outline btn-xs" type="button" onclick="document.getElementById('{{ task.pk|dom_id:"task_update_modal" }}').showModal()">{% lucide "pencil" size=12 %} {% trans "Edit" %}</button>
-                            <button class="btn btn-outline btn-xs btn-error" type="button" onclick="document.getElementById('{{ task.pk|dom_id:"task_delete_modal" }}').showModal()">{% lucide "trash-2" size=12 %} {% trans "Delete" %}</button>
+                            <button class="btn btn-outline btn-xs" type="button" onclick="document.getElementById('{{ task.pk|dom_id:"shift_update_modal" }}').showModal()">{% lucide "pencil" size=12 %} {% trans "Edit" %}</button>
+                            <button class="btn btn-outline btn-xs btn-error" type="button" onclick="document.getElementById('{{ task.pk|dom_id:"shift_delete_modal" }}').showModal()">{% lucide "trash-2" size=12 %} {% trans "Delete" %}</button>
                         </td>
                     </tr>
                 {% empty %}
@@ -71,26 +71,26 @@
         </table>
     </div>
 
-    {% trans "Add task" as add_task_title %}
-    {% trans "Add" as add_task_submit_label %}
+    {% trans "Add shift" as add_shift_title %}
+    {% trans "Add" as add_shift_submit_label %}
     {% url 'management:tournament_task_create' tournament.pk as task_create_url %}
-    {% include "controlpanel/_modal_form.html" with modal_id="task_create_modal" title=add_task_title form=task_form action_url=task_create_url submit_label=add_task_submit_label submit_icon="plus" %}
+    {% include "controlpanel/_modal_form.html" with modal_id="shift_create_modal" title=add_shift_title form=task_form action_url=task_create_url submit_label=add_shift_submit_label submit_icon="plus" %}
 
     {% trans "Generate shifts" as generate_shifts_title %}
     {% trans "Generate" as generate_shifts_submit_label %}
     {% url 'management:tournament_task_generate' tournament.pk as task_generate_url %}
-    {% blocktrans asvar generate_shifts_blurb %}Fills a whole window with same-length shifts back to back -- e.g. 09:00-12:00 in 30-minute slices makes 6 tasks, each needing the same number of people.{% endblocktrans %}
-    {% include "controlpanel/_modal_form.html" with modal_id="task_generate_modal" title=generate_shifts_title form=generate_form action_url=task_generate_url submit_label=generate_shifts_submit_label submit_icon="layers" blurb=generate_shifts_blurb two_columns=True %}
+    {% blocktrans asvar generate_shifts_blurb %}Fills a whole window with same-length shifts back to back -- e.g. 09:00-12:00 in 30-minute slices makes 6 shifts, each needing the same number of people.{% endblocktrans %}
+    {% include "controlpanel/_modal_form.html" with modal_id="shift_generate_modal" title=generate_shifts_title form=generate_form action_url=task_generate_url submit_label=generate_shifts_submit_label submit_icon="layers" blurb=generate_shifts_blurb %}
 
-    {% trans "Edit task" as edit_task_title %}
-    {% trans "Delete task" as delete_task_title %}
-    {% trans "Delete" as delete_task_label %}
+    {% trans "Edit shift" as edit_shift_title %}
+    {% trans "Delete shift" as delete_shift_title %}
+    {% trans "Delete" as delete_shift_label %}
     {% for task in tasks %}
         {% url 'management:tournament_task_update' tournament.pk task.pk as task_update_url %}
-        {% include "controlpanel/_modal_form.html" with modal_id=task.pk|dom_id:"task_update_modal" title=edit_task_title form=task.edit_form action_url=task_update_url submit_icon="check" %}
+        {% include "controlpanel/_modal_form.html" with modal_id=task.pk|dom_id:"shift_update_modal" title=edit_shift_title form=task.edit_form action_url=task_update_url submit_icon="check" %}
 
         {% url 'management:tournament_task_delete' tournament.pk task.pk as task_delete_url %}
-        {% blocktrans with title=task.title asvar delete_task_body %}Delete “{{ title }}”? This cannot be undone.{% endblocktrans %}
-        {% include "controlpanel/_confirm_modal.html" with modal_id=task.pk|dom_id:"task_delete_modal" title=delete_task_title body=delete_task_body action_url=task_delete_url submit_label=delete_task_label %}
+        {% blocktrans with title=task.title asvar delete_shift_body %}Delete “{{ title }}”? This cannot be undone.{% endblocktrans %}
+        {% include "controlpanel/_confirm_modal.html" with modal_id=task.pk|dom_id:"shift_delete_modal" title=delete_shift_title body=delete_shift_body action_url=task_delete_url submit_label=delete_shift_label %}
     {% endfor %}
 {% endblock panel %}

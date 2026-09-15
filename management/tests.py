@@ -14089,13 +14089,35 @@ class TournamentTeamListTests(ManagementTestBase):
         self.assertIsNone(team.registration)
         self.assertEqual(team.roster_entries.count(), 1)
 
+    def test_create_our_own_team_is_marked_fully_paid(self):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+
+        self.club_post("tournament_team_create", {"kind": "club", "team": self.team.pk}, self.tournament.pk)
+
+        team = TournamentTeam.objects.get(tournament=self.tournament, team=self.team)
+        self.assertEqual(team.payment_status, TournamentTeam.PaymentStatus.FULLY_PAID)
+
+    def test_list_lights_up_the_tournaments_nav_section_not_settings(self):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_team_list", self.tournament.pk)
+
+        self.assertEqual(response.context["nav_section"], "tournaments")
+
     def test_create_another_team_requires_the_foreign_fields(self):
         self.activate_flag()
         self.client.force_login(self.admin_user)
 
         response = self.club_post("tournament_team_create", {"kind": "foreign"}, self.tournament.pk)
 
-        self.assertRedirects(response, reverse("management:tournament_team_list", args=[self.tournament.pk]))
+        # Re-renders the Teams list in place with the errored form (so the
+        # add-team modal can reopen showing exactly what's wrong) rather
+        # than redirecting and losing the errors behind a toast.
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "management/tournament_team_list.html")
+        self.assertTrue(response.context["team_form"].errors)
         self.assertFalse(TournamentTeam.objects.filter(tournament=self.tournament).exists())
 
     def test_create_another_team_with_valid_data(self):
@@ -14163,6 +14185,14 @@ class TournamentTeamRosterTests(ManagementTestBase):
         response = self.club_get("tournament_team_roster", self.tournament.pk, self.team.pk)
 
         self.assertEqual(response.status_code, 404)
+
+    def test_roster_lights_up_the_tournaments_nav_section_not_settings(self):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_team_roster", self.tournament.pk, self.team.pk)
+
+        self.assertEqual(response.context["nav_section"], "tournaments")
 
     def test_create_adds_a_foreign_entry_even_on_a_completed_tournament(self):
         self.activate_flag()
@@ -14936,7 +14966,7 @@ class TournamentTaskManagementTests(ManagementTestBase):
 
         response = self.club_post(
             "tournament_task_generate",
-            {"title": "Gate duty", "location_field": "", "location_label": "Entrance", "starts_at": "2026-09-20T09:00", "ends_at": "2026-09-20T10:30", "shift_minutes": 30, "needed_quantity": 2},
+            {"title": "Gate duty", "location_label": "Entrance", "starts_at": "2026-09-20T09:00", "ends_at": "2026-09-20T10:30", "shift_minutes": 30, "needed_quantity": 2},
             self.tournament.pk,
         )
 
@@ -14947,45 +14977,48 @@ class TournamentTaskManagementTests(ManagementTestBase):
         self.assertTrue(all(task.needed_quantity == 2 for task in tasks))
         self.assertTrue(all(task.created_by == self.admin_member for task in tasks))
 
-    def test_generate_shifts_can_use_a_tournament_field_as_the_location(self):
-        self.activate_flag()
-        field = TournamentField.objects.create(tournament=self.tournament, name="Rink 2")
-        self.client.force_login(self.admin_user)
-
-        self.club_post(
-            "tournament_task_generate",
-            {"title": "Scorekeeper", "location_field": str(field.pk), "location_label": "", "starts_at": "2026-09-20T09:00", "ends_at": "2026-09-20T09:30", "shift_minutes": 30, "needed_quantity": 1},
-            self.tournament.pk,
-        )
-
-        task = TournamentTask.objects.get(tournament=self.tournament, title="Scorekeeper")
-        self.assertEqual(task.location_label, "Rink 2")
-
     def test_generate_shifts_an_end_before_the_start_creates_nothing(self):
         self.activate_flag()
         self.client.force_login(self.admin_user)
 
         response = self.club_post(
             "tournament_task_generate",
-            {"title": "Bad window", "location_field": "", "location_label": "", "starts_at": "2026-09-20T10:00", "ends_at": "2026-09-20T09:00", "shift_minutes": 30, "needed_quantity": 1},
+            {"title": "Bad window", "location_label": "", "starts_at": "2026-09-20T10:00", "ends_at": "2026-09-20T09:00", "shift_minutes": 30, "needed_quantity": 1},
             self.tournament.pk,
         )
 
         self.assertRedirects(response, reverse("management:tournament_task_list", args=[self.tournament.pk]))
         self.assertFalse(TournamentTask.objects.filter(tournament=self.tournament, title="Bad window").exists())
 
-    def test_generate_shifts_a_window_shorter_than_one_shift_creates_nothing(self):
+    def test_generate_shifts_a_window_shorter_than_one_shift_still_creates_one_shortened_shift(self):
         self.activate_flag()
         self.client.force_login(self.admin_user)
 
         response = self.club_post(
             "tournament_task_generate",
-            {"title": "Too short", "location_field": "", "location_label": "", "starts_at": "2026-09-20T09:00", "ends_at": "2026-09-20T09:10", "shift_minutes": 30, "needed_quantity": 1},
+            {"title": "Too short", "location_label": "", "starts_at": "2026-09-20T09:00", "ends_at": "2026-09-20T09:10", "shift_minutes": 30, "needed_quantity": 1},
             self.tournament.pk,
         )
 
         self.assertRedirects(response, reverse("management:tournament_task_list", args=[self.tournament.pk]))
-        self.assertFalse(TournamentTask.objects.filter(tournament=self.tournament, title="Too short").exists())
+        task = TournamentTask.objects.get(tournament=self.tournament, title="Too short")
+        self.assertEqual(timezone.localtime(task.starts_at).strftime("%H:%M"), "09:00")
+        self.assertEqual(timezone.localtime(task.ends_at).strftime("%H:%M"), "09:10")
+
+    def test_generate_shifts_a_window_not_evenly_divisible_extends_the_last_shift(self):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post(
+            "tournament_task_generate",
+            {"title": "Uneven", "location_label": "", "starts_at": "2026-09-20T09:00", "ends_at": "2026-09-20T10:40", "shift_minutes": 30, "needed_quantity": 1},
+            self.tournament.pk,
+        )
+
+        self.assertRedirects(response, reverse("management:tournament_task_list", args=[self.tournament.pk]))
+        tasks = list(TournamentTask.objects.filter(tournament=self.tournament, title="Uneven").order_by("starts_at"))
+        self.assertEqual(len(tasks), 3)
+        self.assertEqual(timezone.localtime(tasks[-1].ends_at).strftime("%H:%M"), "10:40")
 
 
 class DressingRoomManagementTests(ManagementTestBase):

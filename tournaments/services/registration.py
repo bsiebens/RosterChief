@@ -174,7 +174,9 @@ def create_manual_team(tournament, *, club_team=None, foreign_fields: dict | Non
     caller (``TournamentTeamForm`` enforces that); a club team's roster is
     snapshotted the same way an approved club-team registration's is."""
     if club_team is not None:
-        team = TournamentTeam.objects.create(club=tournament.club, tournament=tournament, team=club_team)
+        # The club doesn't pay itself -- a club team entered here is always
+        # already fully paid, no staff step required.
+        team = TournamentTeam.objects.create(club=tournament.club, tournament=tournament, team=club_team, payment_status=TournamentTeam.PaymentStatus.FULLY_PAID)
         snapshot_club_team_roster(team, club_team, tournament.season)
     else:
         team = TournamentTeam.objects.create(club=tournament.club, tournament=tournament, **foreign_fields)

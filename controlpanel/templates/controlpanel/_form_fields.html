@@ -10,6 +10,11 @@
     taller than the screen. Textareas and file inputs always span the full width regardless:
     half a row is not enough to type a description into. Single column below `sm`, since two
     columns of form fields on a phone is worse than a long scroll.
+
+    Pass `skip_field` (a field name) to leave that one field out of this loop entirely --
+    _modal_form.html's own `header_toggle_field` uses this to pull a form's kind/type choice
+    field up into the modal header as a toggle switch instead of rendering it in the body
+    twice.
 {% endcomment %}
 {% for error in form.non_field_errors %}
     <div class="alert alert-error my-2">
@@ -18,8 +23,10 @@
 {% endfor %}
 <div class="{% if two_columns %}grid gap-x-4 sm:grid-cols-2{% endif %}">
     {% for field in form %}
-        <div class="form-control my-3 w-full {% if two_columns and field.widget_type == "textarea" or two_columns and field.widget_type == "clearablefile" %}sm:col-span-2{% endif %}">
-            {% form_field field %}
-        </div>
+        {% if field.name != skip_field %}
+            <div class="form-control my-3 w-full {% if two_columns and field.widget_type == "textarea" or two_columns and field.widget_type == "clearablefile" %}sm:col-span-2{% endif %}">
+                {% form_field field %}
+            </div>
+        {% endif %}
     {% endfor %}
 </div>

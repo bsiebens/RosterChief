@@ -552,6 +552,22 @@ class TournamentTeam(ClubScopedModel):
     def display_name(self) -> str:
         return str(self.team) if self.team_id else self.foreign_name
 
+    @property
+    def display_logo(self):
+        """The logo to show for this team -- its own ``foreign_logo`` when
+        set (a foreign team, or a club team someone uploaded one for
+        anyway), otherwise the club's own crest for a club-linked team (a
+        manually-added or home team has no logo of its own to upload --
+        it's just the club playing under its own name). Read live off
+        ``self.club`` rather than copied at creation time, so it stays
+        current if the club's crest ever changes. ``None`` when neither
+        applies (a foreign team with no logo uploaded)."""
+        if self.foreign_logo:
+            return self.foreign_logo
+        if self.team_id:
+            return self.club.logo or None
+        return None
+
 
 class TournamentRosterEntry(UUIDModel):
     """One player on a ``TournamentTeam``'s roster. For a club team, copied

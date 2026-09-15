@@ -6,6 +6,7 @@ from django.contrib.messages.storage.fallback import FallbackStorage
 from django.core import mail
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError, models
 from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse
@@ -316,6 +317,34 @@ class TournamentTeamModelTests(TournamentsTestCase):
         entry = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, team=self.team)
 
         self.assertEqual(entry.payment_status, TournamentTeam.PaymentStatus.UNPAID)
+
+    def test_display_logo_is_none_for_a_foreign_team_with_no_logo_uploaded(self):
+        entry = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Guest FC")
+
+        self.assertIsNone(entry.display_logo)
+
+    def test_display_logo_is_none_for_a_club_team_when_the_club_has_no_logo(self):
+        entry = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, team=self.team)
+
+        self.assertIsNone(entry.display_logo)
+
+    def test_display_logo_falls_back_to_the_clubs_own_logo_for_a_club_team(self):
+        self.club.logo = SimpleUploadedFile("crest.png", b"fake-logo-bytes", content_type="image/png")
+        self.club.save()
+        entry = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, team=self.team)
+
+        self.assertEqual(entry.display_logo, self.club.logo)
+
+    def test_display_logo_prefers_its_own_foreign_logo_over_the_clubs(self):
+        self.club.logo = SimpleUploadedFile("crest.png", b"fake-logo-bytes", content_type="image/png")
+        self.club.save()
+        own_logo = SimpleUploadedFile("guest.png", b"guest-logo-bytes", content_type="image/png")
+        # A club-linked team with its own uploaded logo is an edge case (manual
+        # add only ever sets one or the other today), but display_logo should
+        # still prefer it over the club fallback if it's ever set.
+        entry = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, team=self.team, foreign_logo=own_logo)
+
+        self.assertEqual(entry.display_logo, entry.foreign_logo)
 
     def test_str_and_display_name_for_a_foreign_team(self):
         entry = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Guest FC")
@@ -2562,7 +2591,7 @@ class GenerateTaskShiftsServiceTests(TournamentsTestCase):
         self.window_start = timezone.now() + datetime.timedelta(days=1)
 
     def test_slices_an_evenly_divisible_window_into_equal_shifts(self):
-        tasks = generate_task_shifts(
+        tasks, extended = generate_task_shifts(
             self.tournament,
             title="Gate duty",
             location_label="Entrance",
@@ -2573,6 +2602,7 @@ class GenerateTaskShiftsServiceTests(TournamentsTestCase):
         )
 
         self.assertEqual(len(tasks), 6)
+        self.assertFalse(extended)
         self.assertEqual(tasks[0].starts_at, self.window_start)
         self.assertEqual(tasks[0].ends_at, self.window_start + datetime.timedelta(minutes=30))
         self.assertEqual(tasks[-1].ends_at, self.window_start + datetime.timedelta(hours=3))
@@ -2581,10 +2611,11 @@ class GenerateTaskShiftsServiceTests(TournamentsTestCase):
         self.assertTrue(all(task.needed_quantity == 2 for task in tasks))
         self.assertEqual(TournamentTask.objects.filter(tournament=self.tournament).count(), 6)
 
-    def test_a_final_partial_slice_is_dropped_not_shortened(self):
+    def test_a_final_partial_slice_extends_the_last_shift_instead_of_being_dropped(self):
         # 100 minutes / 30-minute shifts -- 3 full shifts (90 min), the
-        # trailing 10 minutes isn't enough for a 4th and is simply dropped.
-        tasks = generate_task_shifts(
+        # trailing 10 minutes would otherwise be an uncovered gap, so the
+        # last shift is stretched to close it instead.
+        tasks, extended = generate_task_shifts(
             self.tournament,
             title="Gate duty",
             location_label="",
@@ -2595,10 +2626,12 @@ class GenerateTaskShiftsServiceTests(TournamentsTestCase):
         )
 
         self.assertEqual(len(tasks), 3)
-        self.assertEqual(tasks[-1].ends_at, self.window_start + datetime.timedelta(minutes=90))
+        self.assertTrue(extended)
+        self.assertEqual(tasks[-1].starts_at, self.window_start + datetime.timedelta(minutes=60))
+        self.assertEqual(tasks[-1].ends_at, self.window_start + datetime.timedelta(minutes=100))
 
-    def test_a_window_shorter_than_one_shift_creates_nothing(self):
-        tasks = generate_task_shifts(
+    def test_a_window_shorter_than_one_shift_creates_a_single_shortened_shift(self):
+        tasks, extended = generate_task_shifts(
             self.tournament,
             title="Gate duty",
             location_label="",
@@ -2608,8 +2641,11 @@ class GenerateTaskShiftsServiceTests(TournamentsTestCase):
             needed_quantity=1,
         )
 
-        self.assertEqual(tasks, [])
-        self.assertFalse(TournamentTask.objects.filter(tournament=self.tournament).exists())
+        self.assertEqual(len(tasks), 1)
+        self.assertTrue(extended)
+        self.assertEqual(tasks[0].starts_at, self.window_start)
+        self.assertEqual(tasks[0].ends_at, self.window_start + datetime.timedelta(minutes=10))
+        self.assertEqual(TournamentTask.objects.filter(tournament=self.tournament).count(), 1)
 
 
 class AssignDressingRoomServiceTests(TournamentsTestCase):

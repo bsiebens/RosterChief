@@ -409,25 +409,25 @@ class TournamentTaskGenerateForm(forms.Form):
     ``save()`` -- there isn't one, same "form validates, a service function
     does the real work" split ``TournamentTeamForm`` already uses.
 
-    ``location_field`` is a convenience picker over this tournament's own
-    ``TournamentField`` list (just a name to stamp onto every generated
-    shift's ``location_label`` -- see ``TournamentField``'s own docstring
-    for why that's not a real FK relationship) -- ``location_label`` stays
-    available as a free-text fallback for a location that isn't one of the
-    tournament's playing fields (an entrance, a kiosk) or for a tournament
-    with no fields set up yet."""
+    ``location_label`` is plain free text -- a tournament field's own name,
+    an entrance, a kiosk, whatever staff type; no picker over
+    ``TournamentField`` (dropped -- most tournaments only have one or two
+    fields, so a free-text label is no more typing than a picker and
+    doesn't need this form to know about ``TournamentField`` at all)."""
 
     title = forms.CharField(label=_("Title"), max_length=255)
-    location_field = forms.ModelChoiceField(queryset=TournamentField.objects.none(), required=False, label=_("Field"), empty_label=_("— other / general —"))
-    location_label = forms.CharField(label=_("Location (if not a field above)"), max_length=255, required=False)
+    location_label = forms.CharField(label=_("Location"), max_length=255, required=False)
     starts_at = forms.DateTimeField(label=_("Starts at"), widget=forms.DateTimeInput(attrs={"type": "datetime-local"}))
     ends_at = forms.DateTimeField(label=_("Ends at"), widget=forms.DateTimeInput(attrs={"type": "datetime-local"}))
     shift_minutes = forms.IntegerField(label=_("Shift length (minutes)"), min_value=5, initial=30)
     needed_quantity = forms.IntegerField(label=_("People needed per shift"), min_value=1, initial=1)
 
     def __init__(self, *args, tournament=None, **kwargs):
+        # tournament kept as an accepted-and-ignored kwarg -- the view still
+        # passes one (matching every other tournament-scoped form's own
+        # __init__ shape) even though nothing here needs it anymore now
+        # that location_field is gone.
         super().__init__(*args, **kwargs)
-        self.fields["location_field"].queryset = TournamentField.objects.filter(tournament=tournament)
 
     def clean(self):
         cleaned = super().clean()
@@ -435,12 +435,6 @@ class TournamentTaskGenerateForm(forms.Form):
         if start and end and end <= start:
             self.add_error("ends_at", _("Must be after the start time."))
         return cleaned
-
-    def location_label_value(self) -> str:
-        field = self.cleaned_data.get("location_field")
-        if field is not None:
-            return field.name
-        return self.cleaned_data.get("location_label") or ""
 
 
 class DressingRoomForm(forms.ModelForm):

@@ -49,8 +49,8 @@
                     <tr class="{% if team.withdrawn_at %}opacity-60{% endif %}">
                         <td>
                             <div class="flex items-center gap-2.5">
-                                {% if team.foreign_logo %}
-                                    <img class="h-7 w-7 shrink-0 rounded object-cover" src="{{ team.foreign_logo.url }}" alt="">
+                                {% if team.display_logo %}
+                                    <img class="h-7 w-7 shrink-0 rounded object-cover" src="{{ team.display_logo.url }}" alt="">
                                 {% endif %}
                                 <div class="min-w-0">
                                     <div class="font-semibold text-ink">{{ team.display_name }}</div>
@@ -85,17 +85,25 @@
 
     {% trans "Add team" as add_team_title %}
     {% url 'management:tournament_team_create' tournament.pk as team_create_url %}
-    {% include "controlpanel/_modal_form.html" with modal_id="team_create_modal" title=add_team_title form=team_form action_url=team_create_url submit_label=add_team_title submit_icon="plus" box_class="max-w-lg" %}
+    {% include "controlpanel/_modal_form.html" with modal_id="team_create_modal" title=add_team_title form=team_form action_url=team_create_url submit_label=add_team_title submit_icon="plus" box_class="max-w-lg" header_toggle_field=team_form.kind %}
 {% endblock panel %}
 
 {% block extra_body %}
+    {% if team_form.errors %}
+        {# A failed submit re-renders this same page with the bound, errored form (see TournamentTeamCreateView) instead of redirecting -- pop the modal back open so the errors are where the club can see them, not lost behind a toast. #}
+        <script>document.getElementById("team_create_modal").showModal();</script>
+    {% endif %}
     <script>
         // "Our own team" vs "Another team" toggles which field block is
         // relevant -- same kind-toggle idiom event_form.html/event_series_
         // form.html already use, just targeting each field's own wrapper by
         // id (via controlpanel/_form_fields.html's generated "id_<field>")
         // instead of a custom marker class, since that shared loop has no
-        // per-field hook to add one to.
+        // per-field hook to add one to. The header toggle switch
+        // (_modal_form.html's own header_toggle_field) drives the same
+        // underlying radio inputs and fires the same "change" event, so
+        // this sync logic doesn't care which control the user actually
+        // clicked.
         (() => {
             const kindInputs = document.querySelectorAll('input[name="kind"]');
             if (!kindInputs.length) return;

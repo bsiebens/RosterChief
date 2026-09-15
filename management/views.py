@@ -7430,11 +7430,15 @@ class TournamentTeamListView(TournamentsManagerRequiredMixin, TemplateView):
     def get_context_data(self, **kwargs):
         tournament = get_object_or_404(Tournament, pk=self.kwargs["tournament_pk"], club=self.request.club)
         teams = list(tournament.teams.select_related("team"))
+        # A failed "Add team" submit (TournamentTeamCreateView below) passes
+        # its own bound, errored team_form back in via kwargs so this same
+        # template can re-render with the modal reopened and the errors
+        # showing, instead of the default fresh/empty one built here.
+        kwargs.setdefault("team_form", TournamentTeamForm(club=self.request.club, tournament=tournament))
         return super().get_context_data(
             tournament=tournament,
             teams=teams,
             payment_status_choices=TournamentTeam.PaymentStatus.choices,
-            team_form=TournamentTeamForm(club=self.request.club, tournament=tournament),
             active_tab="teams",
             **kwargs,
         )
@@ -7463,15 +7467,24 @@ class TournamentTeamCreateView(TournamentsManagerRequiredMixin, View):
     """The Teams tab's own "Add team" modal -- tournaments.services.
     registration.create_manual_team for either the host club's own team or
     any other team staff want to enter by hand, bypassing the public
-    registration queue entirely."""
+    registration queue entirely.
+
+    On invalid input this re-renders the Teams list in place (not a
+    redirect) with the bound, errored form passed back as ``team_form`` --
+    TournamentTeamListView.get_context_data picks that up instead of
+    building a fresh empty one, and the template reopens the modal on load
+    when it has errors. A redirect-with-toast here would close the modal
+    and lose exactly which field was wrong, the same complaint a plain
+    validation error shouldn't produce."""
 
     def post(self, request, tournament_pk):
         tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
         form = TournamentTeamForm(request.POST, request.FILES, club=request.club, tournament=tournament)
         if not form.is_valid():
-            for error in form.errors.values():
-                notify(request, f"e|{_('Could not add team')}|{' '.join(error)}")
-            return redirect("management:tournament_team_list", tournament_pk=tournament.pk)
+            list_view = TournamentTeamListView()
+            list_view.request = request
+            list_view.kwargs = {"tournament_pk": tournament_pk}
+            return render(request, TournamentTeamListView.template_name, list_view.get_context_data(team_form=form))
 
         if form.cleaned_data["kind"] == TournamentTeamForm.KIND_CLUB:
             team = create_manual_team(tournament, club_team=form.cleaned_data["team"])
@@ -7890,21 +7903,21 @@ class TournamentTaskGenerateView(TournamentsManagerRequiredMixin, View):
                 notify(request, f"e|{_('Could not generate shifts')}|{' '.join(error)}")
             return redirect("management:tournament_task_list", tournament_pk=tournament.pk)
 
-        tasks = generate_task_shifts(
+        tasks, extended = generate_task_shifts(
             tournament,
             title=form.cleaned_data["title"],
-            location_label=form.location_label_value(),
+            location_label=form.cleaned_data["location_label"],
             starts_at=form.cleaned_data["starts_at"],
             ends_at=form.cleaned_data["ends_at"],
             shift_minutes=form.cleaned_data["shift_minutes"],
             needed_quantity=form.cleaned_data["needed_quantity"],
             created_by=Member.objects.filter(user=request.user).first(),
         )
-        if not tasks:
-            notify(request, f"w|{_('No shifts generated')}|{_('The window is shorter than one shift -- widen it or shorten the shift length.')}")
-        else:
-            body = ngettext("%(count)d shift was added to this tournament.", "%(count)d shifts were added to this tournament.", len(tasks)) % {"count": len(tasks)}
-            notify(request, f"s|{_('Shifts generated')}|{body}")
+        body = ngettext("%(count)d shift was added to this tournament.", "%(count)d shifts were added to this tournament.", len(tasks)) % {"count": len(tasks)}
+        notify(request, f"s|{_('Shifts generated')}|{body}")
+        if extended:
+            last = tasks[-1]
+            notify(request, f"w|{_('Last shift extended')}|" + _("The window didn't divide evenly, so the last shift now runs until %(end)s to cover it.") % {"end": timezone.localtime(last.ends_at).strftime("%H:%M")})
         return redirect("management:tournament_task_list", tournament_pk=tournament.pk)
 
 

@@ -12,15 +12,36 @@
     bottom of the screen: `box_class` widens the box (e.g. "max-w-2xl"), and `two_columns`
     lays the fields out in two columns -- growing sideways rather than downwards. They are
     meant to be used together; widening alone just makes a tall modal wide as well.
+
+    A third, unrelated knob: `header_toggle_field` -- a bound ChoiceField (radio) pulled up
+    into the header as a segmented toggle switch (top-right, next to the title) instead of
+    rendered as a plain radio list in the body. For a modal whose first real decision is
+    "which of two/three things am I creating" (TournamentTeamForm's own club-team/another-
+    team choice is the first user of this), that reads better as a prominent switch than as
+    just another field in the list. The field's own real `<input>`s stay in the DOM (hidden,
+    not disabled) so it still submits normally -- the toggle buttons just drive them via a
+    "change" event, so any per-page JS already listening for that (show/hide the fields that
+    only apply to one choice, say) keeps working unmodified. Excluded from the body loop via
+    `_form_fields.html`'s own `skip_field`.
 {% endcomment %}
 {% trans "Save" as default_submit_label %}
 <dialog id="{{ modal_id }}" class="modal">
     <div class="modal-box {{ box_class }}">
-        <h3 class="text-lg font-bold">{{ title }}</h3>
+        <div class="flex items-start justify-between gap-3">
+            <h3 class="text-lg font-bold">{{ title }}</h3>
+            {% if header_toggle_field %}
+                <div class="flex shrink-0 items-center gap-1 rounded-full bg-steel p-1" id="{{ modal_id }}-toggle">
+                    {% for choice_value, choice_label in header_toggle_field.field.choices %}
+                        <button type="button" class="rounded-full px-3 py-1.5 font-display text-xs font-bold tracking-[.08em] uppercase {% if header_toggle_field.value|stringformat:"s" == choice_value|stringformat:"s" %}bg-white text-ink{% else %}text-on-dark hover:text-white{% endif %}" data-value="{{ choice_value }}">{{ choice_label }}</button>
+                    {% endfor %}
+                </div>
+                <div class="hidden">{{ header_toggle_field }}</div>
+            {% endif %}
+        </div>
         {% if blurb %}<p class="py-2 text-sm opacity-70">{{ blurb }}</p>{% endif %}
         <form method="post" action="{{ action_url }}" id="{{ modal_id }}-form" enctype="multipart/form-data">
             {% csrf_token %}
-            {% include "controlpanel/_form_fields.html" %}
+            {% include "controlpanel/_form_fields.html" with skip_field=header_toggle_field.name %}
         </form>
         <div class="modal-action">
             <form method="dialog">
@@ -33,3 +54,34 @@
         <button>close</button>
     </form>
 </dialog>
+{% if header_toggle_field %}
+    <script>
+        (() => {
+            const toggle = document.getElementById("{{ modal_id }}-toggle");
+            if (!toggle) return;
+            const radioName = "{{ header_toggle_field.html_name }}";
+            const radios = () => document.querySelectorAll(`input[name="${radioName}"]`);
+            const sync = () => {
+                const checked = document.querySelector(`input[name="${radioName}"]:checked`);
+                toggle.querySelectorAll("button").forEach((btn) => {
+                    const active = !!checked && btn.dataset.value === checked.value;
+                    btn.classList.toggle("bg-white", active);
+                    btn.classList.toggle("text-ink", active);
+                    btn.classList.toggle("text-on-dark", !active);
+                });
+            };
+            toggle.querySelectorAll("button").forEach((btn) => {
+                btn.addEventListener("click", () => {
+                    let first = null;
+                    radios().forEach((radio) => {
+                        radio.checked = radio.value === btn.dataset.value;
+                        first ||= radio;
+                    });
+                    first?.dispatchEvent(new Event("change", { bubbles: true }));
+                    sync();
+                });
+            });
+            sync();
+        })();
+    </script>
+{% endif %}
