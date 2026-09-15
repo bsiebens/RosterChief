@@ -1070,6 +1070,42 @@ class EnsureHomeTeamServiceTests(TournamentsTestCase):
         self.tournament.refresh_from_db()
         self.assertEqual(self.tournament.event_id, first_event_id)
 
+    def test_a_pre_existing_teams_stale_roster_snapshot_gets_purged(self):
+        # Reproduces a real bug: a team added by hand via "Add team" *before*
+        # being made the home team already got a full TeamMembership
+        # snapshot (correct for that path) -- ensure_home_team's own
+        # "does this TournamentTeam already exist" check used to leave that
+        # snapshot untouched forever, since nothing about becoming the home
+        # team itself ever prompted a re-sync.
+        other_member = Member.objects.create(first_name="Not", last_name="Selected")
+        TeamMembership.objects.create(team=self.team, member=self.member, season=self.season)
+        TeamMembership.objects.create(team=self.team, member=other_member, season=self.season)
+        team = create_manual_team(self.tournament, club_team=self.team)  # snapshot_roster defaults True
+        self.assertEqual(team.roster_entries.count(), 2)
+
+        self.tournament.home_team = self.team
+        self.tournament.save(update_fields=["home_team"])
+        ensure_home_team(self.tournament)
+
+        self.assertEqual(team.roster_entries.count(), 0)
+
+    def test_a_pre_existing_teams_selected_member_survives_reconciliation(self):
+        TeamMembership.objects.create(team=self.team, member=self.member, season=self.season)
+        team = create_manual_team(self.tournament, club_team=self.team)
+        self.tournament.home_team = self.team
+        self.tournament.save(update_fields=["home_team"])
+        ensure_home_team(self.tournament)  # creates the event, purges the stale entry
+        self.tournament.refresh_from_db()
+        # The event's own teams.set() above already auto-created a NO_RESPONSE
+        # Attendance row for every team member (events.signals' own audience
+        # sync) -- update it rather than create(), which would collide with
+        # the (event, member) unique constraint.
+        Attendance.objects.filter(event=self.tournament.event, member=self.member).update(status=Attendance.AttendanceStatus.SELECTED)
+
+        ensure_home_team(self.tournament)
+
+        self.assertEqual(list(team.roster_entries.values_list("member_id", flat=True)), [self.member.pk])
+
     def test_does_not_overwrite_an_already_linked_event(self):
         other_event = Event.objects.create(club=self.club, season=self.season, kind=Event.EventKind.OTHER, title="Something else", start=timezone.now())
         self.tournament.home_team = self.team

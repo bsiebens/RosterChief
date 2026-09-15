@@ -12,7 +12,7 @@ from django.utils.translation import gettext_lazy as _
 
 from teams.models import TeamMembership
 
-from ..models import TournamentRegistration, TournamentRosterEntry, TournamentTeam
+from ..models import TournamentRegistration, TournamentRosterEntry, TournamentRosterRole, TournamentTeam
 
 
 class RegistrationDecisionError(Exception):
@@ -274,6 +274,23 @@ def ensure_home_team(tournament) -> TournamentTeam | None:
     audience apart from one a club set on the event by hand before this
     feature existed) -- staff can always fix that manually via the event's
     own edit screen.
+
+    The roster itself is reconciled against currently-SELECTED Attendance
+    on *every* call too, not just left to tournaments/signals.py's
+    ``sync_home_team_roster`` to keep up reactively -- that signal only
+    ever fires on an ``Attendance`` save, so a ``TournamentTeam`` that
+    already existed (and was already snapshotted, e.g. added by hand via
+    the Teams tab's own "Add team" *before* being made the home team) would
+    otherwise keep its stale full roster forever, since nothing would ever
+    prompt a re-sync for members who never actually change their Attendance
+    afterwards. Scoped to ``member__isnull=False`` rows only -- a foreign-
+    named entry someone typed in by hand isn't part of the Attendance-
+    driven sync at all, same scope the signal itself uses. Same "always
+    live" tradeoff as that signal's own docstring already states plainly:
+    a real Member manually added straight onto the roster (bypassing the
+    normal sign-up/selection flow entirely) is removed here the next time
+    the tournament is saved, if they're not also SELECTED -- accepted, not
+    an oversight.
     """
     if tournament.home_team_id is None:
         return None
@@ -292,5 +309,15 @@ def ensure_home_team(tournament) -> TournamentTeam | None:
         tournament.save(update_fields=["event"])
 
     tournament.event.teams.set([tournament.home_team])
+
+    from events.models import Attendance  # local import -- see above
+
+    from ..signals import ATTENDING_STATUSES  # local import -- avoids importing events.models at tournaments/services/registration.py's own module-load time (see above)
+
+    selected_member_ids = set(Attendance.objects.filter(event=tournament.event, status__in=ATTENDING_STATUSES).values_list("member_id", flat=True))
+    on_roster_member_ids = set(team.roster_entries.filter(member__isnull=False).values_list("member_id", flat=True))
+
+    team.roster_entries.filter(member__isnull=False).exclude(member_id__in=selected_member_ids).delete()
+    TournamentRosterEntry.objects.bulk_create([TournamentRosterEntry(tournament_team=team, member_id=member_id, role=TournamentRosterRole.PLAYER) for member_id in selected_member_ids - on_roster_member_ids])
 
     return team
