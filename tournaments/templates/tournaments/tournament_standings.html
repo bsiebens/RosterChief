@@ -29,6 +29,7 @@
         <div class="flex flex-wrap gap-2">
             <a class="btn btn-outline btn-sm gap-2" href="{% url 'tournaments:detail' tournament.slug %}">{% lucide "arrow-left" size=14 %} {% trans "Overview" %}</a>
             <a class="btn btn-outline btn-sm gap-2" href="{% url 'tournaments:schedule' tournament.slug %}">{% lucide "list" size=14 %} {% trans "Full schedule" %}</a>
+            <a class="btn btn-outline btn-sm gap-2" href="{% url 'tournaments:teams' tournament.slug %}">{% lucide "users" size=14 %} {% trans "Teams" %}</a>
         </div>
     </div>
 

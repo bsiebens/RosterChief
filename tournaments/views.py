@@ -17,7 +17,8 @@ the staff-side review queue, never from here.
 import itertools
 from decimal import Decimal
 
-from django.db.models import Q
+from django.db.models import CharField, Q
+from django.db.models.functions import Coalesce, Lower
 from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
@@ -525,7 +526,22 @@ class TournamentTeamsView(TournamentFeatureMixin, DetailView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        context["teams"] = self.object.teams.filter(withdrawn_at__isnull=True).select_related("team", "club")
+        # display_name (team.name for a club team, else foreign_name) isn't
+        # a real column, so it can't be ordered on directly -- Coalesce over
+        # whichever of the two is actually set does the same thing the
+        # property does, in the database, sorted alphabetically rather than
+        # left in creation order (Meta.ordering's own ["tournament", "seed"]).
+        # Lower(), not a plain string order_by: SQLite/Postgres both sort
+        # byte-wise by default, which puts every lowercase-starting name
+        # after every uppercase one ("Test team 6" before "test team 1") --
+        # not what "alphabetically" means to a person reading the list.
+        context["teams"] = (
+            self.object.teams.filter(withdrawn_at__isnull=True)
+            .select_related("team", "club")
+            .prefetch_related("dressing_room_assignments__dressing_room")
+            .annotate(sort_name=Lower(Coalesce("team__name", "foreign_name", output_field=CharField())))
+            .order_by("sort_name")
+        )
         return context
 
 

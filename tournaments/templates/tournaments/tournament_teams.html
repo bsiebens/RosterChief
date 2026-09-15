@@ -3,36 +3,61 @@
 
 {% comment %}
     Public, unauthenticated list of every team in the bracket (withdrawn
-    ones excluded -- see TournamentTeamsView's own docstring), linked from
-    the tournament home page's schedule/standings button row. Each row
-    links to tournaments:team_schedule, which now shows that team's roster
-    and dressing room alongside its matches, not just a bare schedule.
+    ones excluded -- see TournamentTeamsView's own docstring), sorted
+    alphabetically by display name (Coalesce over team__name/foreign_name
+    in the view -- display_name itself is a Python property, can't be
+    ordered on directly). Each row links to tournaments:team_schedule,
+    which shows that team's roster and dressing room alongside its
+    matches, not just a bare schedule -- a chevron makes that click-through
+    obvious, and a team's dressing room (when assigned -- a team can now
+    have more than one since overlapping bookings are allowed, see
+    tournaments.services.dressing_rooms) shows as a small chip right
+    before it, so it's visible without opening the row.
 {% endcomment %}
 
 {% block page_title %}{% blocktrans with tournament=tournament.name %}Teams &middot; {{ tournament }}{% endblocktrans %}{% endblock page_title %}
 
 {% block brand_href %}{% url "tournaments:detail" tournament.slug %}{% endblock brand_href %}
 
+{% block content_width %}max-w-3xl{% endblock content_width %}
+
 {% block content %}
-    <div class="mb-5">
-        <h1 class="font-display text-3xl font-extrabold text-ink uppercase">{% trans "Teams" %}</h1>
-        <p class="mt-1 flex items-center gap-1.5 text-sm text-muted">
-            {% lucide "trophy" size=15 class="shrink-0 text-club" %}
-            <a class="hover:underline" href="{% url 'tournaments:detail' tournament.slug %}">{{ tournament.name }}</a>
-        </p>
+    <div class="mb-5 flex flex-wrap items-start justify-between gap-3">
+        <div>
+            <h1 class="font-display text-3xl font-extrabold text-ink uppercase">{{ tournament.name }}</h1>
+            <p class="mt-1 flex items-center gap-1.5 text-sm text-muted">
+                {% lucide "users" size=15 class="shrink-0 text-club" %}
+                {% trans "Teams" %}
+            </p>
+        </div>
+        <div class="flex flex-wrap gap-2">
+            <a class="btn btn-outline btn-sm gap-2" href="{% url 'tournaments:detail' tournament.slug %}">{% lucide "arrow-left" size=14 %} {% trans "Overview" %}</a>
+            <a class="btn btn-outline btn-sm gap-2" href="{% url 'tournaments:schedule' tournament.slug %}">{% lucide "list" size=14 %} {% trans "Full schedule" %}</a>
+            <a class="btn btn-outline btn-sm gap-2" href="{% url 'tournaments:standings' tournament.slug %}">{% lucide "trophy" size=14 %} {% trans "Standings" %}</a>
+        </div>
     </div>
 
     <div class="card overflow-hidden">
+        {# hover:bg-paper lives on <li> itself, not the <a> inside it -- both the divide-y border above and the hover background then belong to the exact same box, so there's no seam between a bordered element and a separately-backgrounded child for the highlight to visually "double" the line against. #}
         <ul class="divide-y divide-line">
             {% for team in teams %}
-                <li>
-                    <a class="flex items-center gap-3 p-3 hover:bg-paper" href="{% url 'tournaments:team_schedule' tournament.slug team.slug %}">
+                <li class="hover:bg-paper">
+                    <a class="flex items-center gap-3 p-3" href="{% url 'tournaments:team_schedule' tournament.slug team.slug %}">
                         {% if team.display_logo %}
                             <img class="h-9 w-9 shrink-0 rounded object-cover" src="{{ team.display_logo.url }}" alt="">
                         {% else %}
                             <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded bg-paper text-dim">{% lucide "shield" size=16 %}</span>
                         {% endif %}
-                        <span class="font-semibold text-ink">{{ team.display_name }}</span>
+                        <span class="min-w-0 flex-1 truncate font-semibold text-ink">{{ team.display_name }}</span>
+                        {% with assignments=team.dressing_room_assignments.all %}
+                            {% if assignments %}
+                                <span class="badge badge-sm badge-neutral shrink-0 gap-1">
+                                    {% lucide "door-open" size=11 %}
+                                    {% for assignment in assignments %}{{ assignment.dressing_room.name }}{% if not forloop.last %}, {% endif %}{% endfor %}
+                                </span>
+                            {% endif %}
+                        {% endwith %}
+                        {% lucide "chevron-right" size=16 class="shrink-0 text-dim" %}
                     </a>
                 </li>
             {% empty %}

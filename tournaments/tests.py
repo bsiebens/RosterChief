@@ -1071,6 +1071,22 @@ class EnsureHomeTeamServiceTests(TournamentsTestCase):
         self.tournament.refresh_from_db()
         self.assertEqual(self.tournament.event_id, other_event.pk)
 
+    def test_changing_home_team_re_points_the_existing_event_at_the_new_team(self):
+        other_team = Team.objects.create(club=self.club, name="Second Team", short_name="2nd")
+        self.tournament.home_team = self.team
+        self.tournament.save(update_fields=["home_team"])
+        ensure_home_team(self.tournament)
+        self.tournament.refresh_from_db()
+        event_id = self.tournament.event_id
+
+        self.tournament.home_team = other_team
+        self.tournament.save(update_fields=["home_team"])
+        ensure_home_team(self.tournament)
+
+        self.tournament.refresh_from_db()
+        self.assertEqual(self.tournament.event_id, event_id)  # same event, not a new one
+        self.assertEqual(list(self.tournament.event.teams.all()), [other_team])
+
 
 class WithdrawHomeTeamGuardTests(TournamentsTestCase):
     def test_the_home_team_cannot_be_withdrawn(self):
@@ -1103,19 +1119,22 @@ class HomeTeamRosterSyncSignalTests(TournamentsTestCase):
         self.tournament_team = ensure_home_team(self.tournament)
         self.tournament.refresh_from_db()
 
-    def test_present_attendance_adds_a_roster_entry(self):
+    def test_present_attendance_does_not_add_a_roster_entry(self):
+        # A plain "I'm coming" RSVP isn't the same as the coach actually
+        # picking this person for the roster -- only SELECTED counts (see
+        # ATTENDING_STATUSES' own comment).
         Attendance.objects.create(event=self.tournament.event, member=self.member, status=Attendance.AttendanceStatus.PRESENT)
+
+        self.assertFalse(TournamentRosterEntry.objects.filter(tournament_team=self.tournament_team, member=self.member).exists())
+
+    def test_selected_attendance_adds_a_roster_entry(self):
+        Attendance.objects.create(event=self.tournament.event, member=self.member, status=Attendance.AttendanceStatus.SELECTED)
 
         entry = TournamentRosterEntry.objects.get(tournament_team=self.tournament_team, member=self.member)
         self.assertEqual(entry.role, TournamentRosterRole.PLAYER)
 
-    def test_selected_attendance_also_adds_a_roster_entry(self):
-        Attendance.objects.create(event=self.tournament.event, member=self.member, status=Attendance.AttendanceStatus.SELECTED)
-
-        self.assertTrue(TournamentRosterEntry.objects.filter(tournament_team=self.tournament_team, member=self.member).exists())
-
     def test_leaving_the_attending_set_removes_the_roster_entry(self):
-        attendance = Attendance.objects.create(event=self.tournament.event, member=self.member, status=Attendance.AttendanceStatus.PRESENT)
+        attendance = Attendance.objects.create(event=self.tournament.event, member=self.member, status=Attendance.AttendanceStatus.SELECTED)
         self.assertTrue(TournamentRosterEntry.objects.filter(tournament_team=self.tournament_team, member=self.member).exists())
 
         attendance.status = Attendance.AttendanceStatus.ABSENT
@@ -1142,7 +1161,7 @@ class HomeTeamRosterSyncSignalTests(TournamentsTestCase):
         # all) -- re-saving the same Attendance (e.g. a note edit, not a
         # status change) must not clobber it.
         entry = TournamentRosterEntry.objects.create(tournament_team=self.tournament_team, member=self.member, position_label="Striker")
-        attendance = Attendance.objects.create(event=self.tournament.event, member=self.member, status=Attendance.AttendanceStatus.PRESENT)
+        attendance = Attendance.objects.create(event=self.tournament.event, member=self.member, status=Attendance.AttendanceStatus.SELECTED)
 
         attendance.note = "running late"
         attendance.save()
@@ -2947,6 +2966,32 @@ class TournamentTeamsViewTests(TournamentsTestCase):
         response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
 
         self.assertContains(response, self.club.logo.url)
+
+    def test_teams_are_sorted_alphabetically_case_insensitively(self):
+        TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Zebra FC")
+        TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="apple FC")
+        TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Banana FC")
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        names = [team.display_name for team in response.context["teams"]]
+        self.assertEqual(names, ["apple FC", "Banana FC", "Zebra FC"])
+
+    def test_shows_a_dressing_room_chip_when_assigned(self):
+        team = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Roomy FC")
+        room = DressingRoom.objects.create(club=self.club, name="Room 7")
+        DressingRoomAssignment.objects.create(dressing_room=room, tournament_team=team)
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, "Room 7")
+
+    def test_no_dressing_room_chip_when_none_assigned(self):
+        TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Roomless FC")
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertNotContains(response, "badge-neutral")
 
     def test_404s_when_the_feature_flag_is_off(self):
         get_waffle_flag_model().objects.get(name="tournaments").clubs.remove(self.club)
