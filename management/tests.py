@@ -4922,6 +4922,21 @@ class NewsManagementTests(ManagementTestBase):
         self.assertContains(response, reverse("management:news_publish", args=[item.pk]))
         self.assertNotContains(response, reverse("management:news_submit_for_review", args=[item.pk]))
 
+    def test_the_publish_modal_renders_for_a_pending_review_item_from_another_author(self):
+        # Regression: the Publish button shows for can_publish + any non-published
+        # status, but the modal it opens used to only render for status == "draft"
+        # exactly -- an admin opening an item someone else submitted for review got
+        # a button with no dialog behind it (TypeError: null is not an object
+        # (evaluating 'document.getElementById('publish_modal').showModal')).
+        item = News.objects.create(club=self.club, title="Reviewed item", body="Body.", status=News.Status.PENDING_REVIEW)
+        self.client.force_login(self.admin_user)
+
+        detail_response = self.club_get("news_detail", item.pk)
+        list_response = self.club_get("news_list", params={"selected": str(item.pk)})
+
+        self.assertContains(detail_response, 'id="publish_modal"')
+        self.assertContains(list_response, 'id="publish_modal"')
+
     def test_unpublishing_reverts_to_draft(self):
         item = News.objects.create(club=self.club, title="Live item", body="Body.")
         item.publish()
