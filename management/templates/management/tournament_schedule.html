@@ -11,7 +11,10 @@
     {% if can_operate_tournament %}
         <form method="post" action="{% url 'management:tournament_schedule_generate' tournament.pk %}" class="flex items-center gap-1.5">
             {% csrf_token %}
-            <input type="number" min="1" name="match_duration_minutes" class="input w-auto" value="{{ tournament.default_match_duration_minutes }}" aria-label="{% trans 'Match duration (minutes)' %}" title="{% trans 'Match duration (minutes)' %}">
+            <div class="join" title="{% trans 'Match duration (minutes) -- pre-fills from this tournament\'s own default, still overridable per run' %}">
+                <input type="number" min="1" name="match_duration_minutes" class="input join-item w-20" value="{{ tournament.default_match_duration_minutes }}" aria-label="{% trans 'Match duration (minutes)' %}">
+                <span class="join-item flex items-center border border-l-0 border-line bg-subhead px-2.5 font-mono text-xs text-muted">{% trans "min" %}</span>
+            </div>
             <button class="btn btn-primary gap-2" type="submit">{% lucide "shuffle" size=16 %} {% trans "Generate schedule" %}</button>
         </form>
         <button class="btn btn-outline btn-error gap-2" type="button" onclick="document.getElementById('clear_schedule_modal').showModal()">{% lucide "eraser" size=16 %} {% trans "Delete schedule" %}</button>
