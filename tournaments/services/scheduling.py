@@ -327,18 +327,60 @@ def gap_for_placement(field, *, games_since_last_break: int, minutes_since_last_
 # --------------------------------------------------------------------------
 
 
+def _field_availability_windows(field, fallback_date: datetime.date) -> list[tuple[datetime.datetime, datetime.datetime]]:
+    """``field.availability`` as sorted, timezone-aware ``(start, end)`` pairs
+    -- each entry is already day-scoped (see ``TournamentField.availability``'s
+    own docstring), so an entry missing a "date" falls back to
+    ``fallback_date`` rather than being treated as spanning every day."""
+    windows = []
+    for entry in field.availability or []:
+        date = datetime.date.fromisoformat(entry["date"]) if entry.get("date") else fallback_date
+        start_hour, start_minute = (int(part) for part in entry["start"].split(":"))
+        end_hour, end_minute = (int(part) for part in entry["end"].split(":"))
+        windows.append(
+            (
+                timezone.make_aware(datetime.datetime.combine(date, datetime.time(start_hour, start_minute))),
+                timezone.make_aware(datetime.datetime.combine(date, datetime.time(end_hour, end_minute))),
+            )
+        )
+    windows.sort(key=lambda pair: pair[0])
+    return windows
+
+
 def _field_day_start(field, fallback_date: datetime.date) -> datetime.datetime:
-    """The first availability window's own start -- see TournamentField's own
-    docstring on why multi-window/multi-day availability is a known,
-    deliberately simplified edge for this first pass (a tournament running
-    past one calendar day would need more than "the first window" honoured)."""
-    windows = field.availability or []
+    """The earliest availability window's own start, or 09:00 on
+    ``fallback_date`` when the field has no availability defined at all --
+    that "no availability means unbounded" fallback is a deliberately kept
+    simplified edge (see ``_skip_to_available_window``, which is what
+    actually rolls a fully-defined multi-day field into its next window)."""
+    windows = _field_availability_windows(field, fallback_date)
     if windows:
-        first = windows[0]
-        date = datetime.date.fromisoformat(first["date"]) if "date" in first else fallback_date
-        hour, minute = (int(part) for part in first["start"].split(":"))
-        return timezone.make_aware(datetime.datetime.combine(date, datetime.time(hour, minute)))
+        return windows[0][0]
     return timezone.make_aware(datetime.datetime.combine(fallback_date, datetime.time(9, 0)))
+
+
+def _skip_to_available_window(field, candidate_start: datetime.datetime, match_duration: datetime.timedelta, fallback_date: datetime.date) -> datetime.datetime:
+    """Rolls ``candidate_start`` forward into whichever of the field's own
+    availability windows can actually fit a match starting there -- a field
+    with no window left today (its clock ran past today's "end", or today
+    has no window at all) moves to the start of its next defined day rather
+    than scheduling indefinitely later into a day no one's there.
+
+    A field with no availability defined at all is left alone (the
+    "unbounded, starts at 09:00" fallback from ``_field_day_start`` -- there
+    is nothing to roll into). Likewise, once every defined window is
+    exhausted, ``candidate_start`` is returned as-is rather than raising --
+    a tournament under-provisioning its own field availability shouldn't
+    hard-fail a schedule generation over it."""
+    windows = _field_availability_windows(field, fallback_date)
+    if not windows:
+        return candidate_start
+    for window_start, window_end in windows:
+        if candidate_start < window_start:
+            candidate_start = window_start
+        if candidate_start + match_duration <= window_end:
+            return candidate_start
+    return candidate_start
 
 
 @transaction.atomic
@@ -389,16 +431,26 @@ def allocate_schedule(tournament, *, match_duration: datetime.timedelta = DEFAUL
                     just_finished_round_number=field_last_round[field.id],
                 )
                 candidate_start += gap if replaces else DEFAULT_GAP + gap
-                candidate_start = _skip_blackouts(field, candidate_start)
+                pre_roll_date = candidate_start.date()
 
-                # A team already has a match running from an earlier round --
-                # don't start its next one before that one's assumed to end.
-                for team in (match.home_team, match.away_team):
-                    if team.id in team_clock and team_clock[team.id] > candidate_start:
-                        candidate_start = team_clock[team.id]
-
-                if schedule_blocks:
-                    candidate_start = _skip_schedule_blocks(candidate_start, match_duration, field_id=field.id, team_ids={match.home_team_id, match.away_team_id}, blocks=schedule_blocks)
+                # Each push below (blackouts, an already-busy team, a
+                # schedule block, rolling into the field's next available
+                # day) only ever moves candidate_start forward -- but one
+                # push can reintroduce a conflict another already cleared
+                # (rolling into tomorrow can land inside tomorrow's own
+                # lunch block), so settle in a small bounded loop rather
+                # than a single pass.
+                for _pass in range(5):
+                    before = candidate_start
+                    candidate_start = _skip_blackouts(field, candidate_start)
+                    for team in (match.home_team, match.away_team):
+                        if team.id in team_clock and team_clock[team.id] > candidate_start:
+                            candidate_start = team_clock[team.id]
+                    if schedule_blocks:
+                        candidate_start = _skip_schedule_blocks(candidate_start, match_duration, field_id=field.id, team_ids={match.home_team_id, match.away_team_id}, blocks=schedule_blocks)
+                    candidate_start = _skip_to_available_window(field, candidate_start, match_duration, tournament.start_date)
+                    if candidate_start == before:
+                        break
 
                 match.field = field
                 match.scheduled_start = candidate_start
@@ -406,7 +458,11 @@ def allocate_schedule(tournament, *, match_duration: datetime.timedelta = DEFAUL
                 scheduled.append(match)
 
                 field_end = candidate_start + match_duration
-                if gap != DEFAULT_GAP or not replaces:
+                # Rolling into a new day is its own implicit break -- carrying
+                # a "games/minutes since break" count across a day boundary
+                # would fire an intraday break rule on the very first game of
+                # the next morning.
+                if gap != DEFAULT_GAP or not replaces or candidate_start.date() != pre_roll_date:
                     field_games_since_break[field.id] = 0
                     field_minutes_since_break[field.id] = 0
                 else:

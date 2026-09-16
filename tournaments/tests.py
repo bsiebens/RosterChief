@@ -2275,6 +2275,62 @@ class AllocateScheduleTests(TournamentsTestCase):
         match = Match.objects.get(stage=stage)
         self.assertGreaterEqual(match.scheduled_start, window_start + datetime.timedelta(hours=1))
 
+    def test_a_field_rolls_into_its_next_defined_availability_window(self):
+        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 5)]
+        TournamentField.objects.create(
+            tournament=self.tournament,
+            name="Field 1",
+            availability=[
+                {"date": "2026-09-19", "start": "09:00", "end": "10:00"},
+                {"date": "2026-09-20", "start": "09:00", "end": "20:00"},
+            ],
+        )
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
+        generate_stage_matches(stage, entries=teams)
+
+        allocate_schedule(self.tournament)
+
+        matches = list(Match.objects.filter(stage=stage).order_by("scheduled_start"))
+        self.assertEqual(matches[0].scheduled_start.date(), datetime.date(2026, 9, 19))
+        self.assertTrue(any(m.scheduled_start.date() == datetime.date(2026, 9, 20) for m in matches))
+        for match in matches:
+            if match.scheduled_start.date() == datetime.date(2026, 9, 19):
+                self.assertLessEqual(match.scheduled_start + DEFAULT_MATCH_DURATION, timezone.make_aware(datetime.datetime(2026, 9, 19, 10, 0)))
+            else:
+                self.assertGreaterEqual(match.scheduled_start, timezone.make_aware(datetime.datetime(2026, 9, 20, 9, 0)))
+
+    def test_a_field_with_only_one_defined_window_keeps_going_once_exhausted(self):
+        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 5)]
+        TournamentField.objects.create(tournament=self.tournament, name="Field 1", availability=[{"date": "2026-09-19", "start": "09:00", "end": "10:00"}])
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
+        generate_stage_matches(stage, entries=teams)
+
+        allocate_schedule(self.tournament)
+
+        matches = list(Match.objects.filter(stage=stage).order_by("scheduled_start"))
+        self.assertTrue(all(m.scheduled_start.date() == datetime.date(2026, 9, 19) for m in matches))
+
+    def test_break_counters_reset_after_rolling_into_a_new_day(self):
+        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 5)]
+        field = TournamentField.objects.create(
+            tournament=self.tournament,
+            name="Field 1",
+            availability=[
+                {"date": "2026-09-19", "start": "09:00", "end": "10:40"},
+                {"date": "2026-09-20", "start": "09:00", "end": "20:00"},
+            ],
+        )
+        BreakRule.objects.create(tournament=self.tournament, field=field, trigger_type=BreakRule.TriggerType.GAME_COUNT, trigger_every_n_games=3, gap_minutes=30, replaces_default_gap=True)
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
+        generate_stage_matches(stage, entries=teams)
+
+        allocate_schedule(self.tournament)
+
+        matches = list(Match.objects.filter(stage=stage).order_by("scheduled_start"))
+        rollover_index = next(i for i, m in enumerate(matches) if m.scheduled_start.date() == datetime.date(2026, 9, 20))
+        gap_after_rollover = matches[rollover_index + 1].scheduled_start - (matches[rollover_index].scheduled_start + DEFAULT_MATCH_DURATION)
+        self.assertEqual(gap_after_rollover, DEFAULT_GAP)
+
 
 class ValidatePlacementTests(TournamentsTestCase):
     def test_detects_field_double_booking(self):
