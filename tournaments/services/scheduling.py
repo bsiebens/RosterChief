@@ -425,7 +425,7 @@ def _skip_to_available_window(field, candidate_start: datetime.datetime, match_d
 
 
 @transaction.atomic
-def allocate_schedule(tournament, *, match_duration: datetime.timedelta = DEFAULT_MATCH_DURATION) -> list[Match]:
+def allocate_schedule(tournament, *, match_duration: datetime.timedelta = DEFAULT_MATCH_DURATION, reset: bool = False) -> list[Match]:
     """First-draft field/time assignment for every not-yet-scheduled,
     fully-resolved match (both teams known -- a still-TBD bracket slot is
     left alone; schedule it once its source match/group resolves) across
@@ -436,7 +436,20 @@ def allocate_schedule(tournament, *, match_duration: datetime.timedelta = DEFAUL
     earliest; the break-rule engine supplies the gap before it fires (or the
     tournament's own ``DEFAULT_GAP`` otherwise); each field and each team
     gets its own running clock, so no field and no team is ever
-    double-booked by construction."""
+    double-booked by construction.
+
+    ``reset=True`` (the "Generate schedule" button's own mode) first clears
+    every match this function placed on an earlier run (``auto_scheduled``,
+    not yet played) so it can be replanned under today's parameters -- a
+    match staff hand-moved via ``reschedule_match`` is never touched, since
+    that call clears its own ``auto_scheduled`` flag the moment a human
+    takes over its placement. Every match this function itself places (both
+    below and by extension any left alone from a previous run) gets
+    ``auto_scheduled=True``, so a *later* reset run can still tell the two
+    apart."""
+    if reset:
+        (Match.objects.filter(stage__tournament=tournament, auto_scheduled=True).exclude(status__in=(Match.Status.COMPLETE, Match.Status.IN_PROGRESS)).update(field=None, scheduled_start=None, auto_scheduled=False))
+
     fields = list(tournament.fields.all())
     if not fields:
         raise SchedulingError(_("Add at least one field before generating a schedule."))
@@ -495,7 +508,8 @@ def allocate_schedule(tournament, *, match_duration: datetime.timedelta = DEFAUL
 
                 match.field = field
                 match.scheduled_start = candidate_start
-                match.save(update_fields=["field", "scheduled_start"])
+                match.auto_scheduled = True
+                match.save(update_fields=["field", "scheduled_start", "auto_scheduled"])
                 scheduled.append(match)
 
                 field_end = candidate_start + match_duration
@@ -560,6 +574,96 @@ def _skip_schedule_blocks(candidate_start: datetime.datetime, match_duration: da
 
 
 # --------------------------------------------------------------------------
+# Timeline / board (gaps by field)
+# --------------------------------------------------------------------------
+
+#: How tall one minute of schedule renders as, on the per-field timeline
+#: board -- a plain module constant (not a per-tournament setting, there's
+#: no reason a club would ever want a different scale) shared between the
+#: server-computed slot heights below and the board's own JS, which reads it
+#: back from a data attribute to convert a drop position back into a time.
+PX_PER_MINUTE = 3
+
+
+def _slot_height_px(minutes: float) -> int:
+    return max(1, round(minutes * PX_PER_MINUTE))
+
+
+def _gap_slot(start: datetime.datetime, end: datetime.datetime, blackout_rules: list) -> dict:
+    """One idle stretch on a field's own timeline -- ``rule`` is whichever
+    blackout (``CLOCK_WINDOW``) rule explains it, already priority-ordered
+    by the caller, or ``None`` for plain idle time between/around matches.
+    The other three ``BreakRule`` trigger types are stateful (a running
+    "games/minutes since the last break" count -- see ``gap_for_placement``)
+    and not safely reconstructible here after a possible manual reschedule,
+    so this deliberately doesn't try to attribute a gap to one of those;
+    ``field_timeline``'s own caller shows a field's full rule list
+    separately, priority-ordered, as context instead."""
+    minutes = round((end - start).total_seconds() / 60)
+    rule = next((r for r in blackout_rules if r.trigger_window_start < end.time() and r.trigger_window_end > start.time()), None)
+    return {"type": "gap", "start": start, "end": end, "minutes": minutes, "height_px": _slot_height_px(minutes), "rule": rule}
+
+
+def field_timeline(tournament) -> list[dict]:
+    """Per-field board data for the Schedule tab's "Board view": each field's
+    own placed matches, in start order, with the idle time before/between/
+    after them surfaced as gap slots (see ``_gap_slot``) instead of left
+    implicit -- what ``tournament_schedule.html``'s plain table has no way to
+    show. Returns ``[{"field", "rules", "days": [{"date", "start", "end", "slots"}]}, ...]``,
+    one entry per ``TournamentField`` in the tournament's own field order.
+
+    A field with no ``availability`` defined at all falls back to one
+    synthetic window per date it actually has matches on (spanning that
+    day's own first match start to last match end) -- same "nothing to roll
+    into, left alone" spirit ``_skip_to_available_window`` already applies,
+    just for display rather than allocation."""
+    duration = datetime.timedelta(minutes=tournament.default_match_duration_minutes)
+    result = []
+
+    for field in tournament.fields.all():
+        matches = list(Match.objects.filter(field=field, scheduled_start__isnull=False).select_related("home_team", "away_team", "stage").order_by("scheduled_start"))
+
+        windows = _field_availability_windows(field, tournament.start_date)
+        if not windows:
+            by_date: dict = {}
+            for match in matches:
+                by_date.setdefault(timezone.localtime(match.scheduled_start).date(), []).append(match)
+            windows = [(timezone.localtime(day_matches[0].scheduled_start), timezone.localtime(day_matches[-1].scheduled_start) + duration) for day_matches in by_date.values()]
+
+        field_rules = list(BreakRule.objects.filter(tournament=tournament).exclude(trigger_type=BreakRule.TriggerType.CLOCK_WINDOW).filter(Q(field=field) | Q(field__isnull=True)).order_by("priority", "pk"))
+        blackout_rules = list(BreakRule.objects.filter(tournament=tournament, trigger_type=BreakRule.TriggerType.CLOCK_WINDOW).filter(Q(field=field) | Q(field__isnull=True)).order_by("priority", "pk"))
+
+        days = []
+        for window_start, window_end in windows:
+            day_matches = [match for match in matches if window_start <= timezone.localtime(match.scheduled_start) < window_end]
+            slots, cursor = [], window_start
+            for match in day_matches:
+                match_start = timezone.localtime(match.scheduled_start)
+                if match_start > cursor:
+                    slots.append(_gap_slot(cursor, match_start, blackout_rules))
+                match_end = match_start + duration
+                match_minutes = duration.total_seconds() / 60
+                slots.append({"type": "match", "match": match, "start": match_start, "end": match_end, "minutes": match_minutes, "height_px": _slot_height_px(match_minutes)})
+                cursor = max(cursor, match_end)
+            if cursor < window_end:
+                slots.append(_gap_slot(cursor, window_end, blackout_rules))
+
+            # Absolute-positioning offset, one running total per day -- kept
+            # here rather than computed in the template, which has no way to
+            # accumulate a value across a loop.
+            top_px = 0
+            for slot in slots:
+                slot["top_px"] = top_px
+                top_px += slot["height_px"]
+
+            days.append({"date": window_start.date(), "start": window_start, "end": window_end, "slots": slots, "height_px": top_px})
+
+        result.append({"field": field, "rules": field_rules, "days": days})
+
+    return result
+
+
+# --------------------------------------------------------------------------
 # Conflict validation
 # --------------------------------------------------------------------------
 
@@ -569,18 +673,25 @@ def validate_placement(match, field, start: datetime.datetime, end: datetime.dat
     returns a list of human-readable violations, empty if none. The one
     check both the generator (skip a bad slot, try the next) and any future
     manual editor (reject a drop, show the reason) share, so the two paths
-    can never quietly disagree about what's valid."""
+    can never quietly disagree about what's valid.
+
+    Every *other* already-placed match is assumed to run for this
+    tournament's own ``default_match_duration_minutes`` -- not the module's
+    fallback ``DEFAULT_MATCH_DURATION`` -- since that's the actual duration
+    ``allocate_schedule``'s own default run (and the board's own gap/height
+    math) used to place it."""
     violations = []
+    other_duration = datetime.timedelta(minutes=field.tournament.default_match_duration_minutes)
 
     overlapping_on_field = Match.objects.filter(field=field, scheduled_start__lt=end).exclude(pk=match.pk).exclude(scheduled_start__isnull=True)
-    if any(candidate.scheduled_start + DEFAULT_MATCH_DURATION > start for candidate in overlapping_on_field):
+    if any(candidate.scheduled_start + other_duration > start for candidate in overlapping_on_field):
         violations.append(str(_("Another match is already scheduled on this field at that time.")))
 
     for team in (match.home_team, match.away_team):
         if team is None:
             continue
         team_matches = Match.objects.filter(stage__tournament_id=field.tournament_id, scheduled_start__lt=end).exclude(pk=match.pk).exclude(scheduled_start__isnull=True).filter(Q(home_team=team) | Q(away_team=team))
-        if any(candidate.scheduled_start + DEFAULT_MATCH_DURATION > start for candidate in team_matches):
+        if any(candidate.scheduled_start + other_duration > start for candidate in team_matches):
             violations.append(str(_("%(team)s already has a match scheduled at that time.") % {"team": team}))
 
     # Local wall-clock time, same reasoning as _skip_blackouts.
@@ -749,16 +860,34 @@ def reschedule_match(match: Match, *, field, scheduled_start: datetime.datetime)
     invariant the draft itself would have avoided. Raises ``SchedulingError``
     (carrying every violation, joined, so a caller can show them all at
     once) rather than silently refusing; saves and returns the match on
-    success."""
-    end = scheduled_start + DEFAULT_MATCH_DURATION
+    success.
+
+    Always clears ``auto_scheduled`` -- a human just took over this match's
+    placement, so a later "Generate schedule" re-run (``allocate_schedule``
+    with ``reset=True``) must leave it alone rather than replanning over
+    this edit."""
+    end = scheduled_start + datetime.timedelta(minutes=field.tournament.default_match_duration_minutes)
     violations = validate_placement(match, field, scheduled_start, end)
     if violations:
         raise SchedulingError(" ".join(violations))
 
     match.field = field
     match.scheduled_start = scheduled_start
-    match.save(update_fields=["field", "scheduled_start"])
+    match.auto_scheduled = False
+    match.save(update_fields=["field", "scheduled_start", "auto_scheduled"])
     return match
+
+
+def clear_schedule(tournament) -> int:
+    """ "Delete schedule" -- unschedules (clears ``field``/``scheduled_start``)
+    every not-yet-played match in the tournament, auto-placed or
+    hand-dragged alike, without touching the ``Match`` rows themselves (the
+    bracket/round-robin/group structure survives; only the timing is wiped).
+    A ``COMPLETE``/``IN_PROGRESS`` match already happened -- its placement is
+    history, not a draft to discard -- so it's left untouched, same guard
+    ``allocate_schedule``'s own ``reset=True`` uses. Returns the number of
+    matches cleared."""
+    return Match.objects.filter(stage__tournament=tournament).exclude(status__in=(Match.Status.COMPLETE, Match.Status.IN_PROGRESS)).update(field=None, scheduled_start=None, auto_scheduled=False)
 
 
 def record_result(match: Match, *, score_home: int, score_away: int, went_to_overtime: bool = False, penalty_home: int | None = None, penalty_away: int | None = None) -> list[Match]:

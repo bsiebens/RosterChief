@@ -1,0 +1,25 @@
+{% load i18n lucide %}
+{% comment %}
+    One availability window in the "Add/edit field" page's own formset --
+    rendered both for the rows already in the formset and (with __prefix__
+    placeholders) into the <template> the "Add window" button clones from,
+    same management/_seed_slot_row.html convention.
+{% endcomment %}
+<tr class="bulk-add-row">
+    <td class="py-2">
+        {{ form.date }}
+        {% for error in form.date.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
+        {% for error in form.non_field_errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
+    </td>
+    <td class="py-2">
+        {{ form.start }}
+        {% for error in form.start.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
+    </td>
+    <td class="py-2">
+        {{ form.end }}
+        {% for error in form.end.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
+    </td>
+    <td class="w-12 py-2">
+        <button class="btn btn-ghost btn-sm btn-square remove-row" type="button" aria-label="{% trans 'Remove this window' %}" title="{% trans 'Remove this window' %}">{% lucide "x" size=16 %}</button>
+    </td>
+</tr>

@@ -24,7 +24,7 @@
         <div class="card card-body">
             <div class="flex flex-wrap items-center justify-between gap-2">
                 <h2 class="card-title">{% lucide "map-pin" size=18 %} {% trans "Fields" %}</h2>
-                {% if can_operate_tournament %}<button class="btn btn-outline btn-sm gap-1" type="button" onclick="document.getElementById('field_create_modal').showModal()">{% lucide "plus" size=14 %} {% trans "Add field" %}</button>{% endif %}
+                {% if can_operate_tournament %}<a class="btn btn-outline btn-sm gap-1" href="{% url 'management:tournament_field_create' tournament.pk %}">{% lucide "plus" size=14 %} {% trans "Add field" %}</a>{% endif %}
             </div>
             <ul class="divide-y divide-rule">
                 {% for field in fields %}
@@ -32,14 +32,16 @@
                         <div class="flex min-w-0 flex-col gap-0.5">
                             <span class="text-sm font-semibold text-ink">{{ field.name }}</span>
                             {% if field.availability %}
-                                <span class="text-xs text-dim">{{ field.availability.0.date }}, {{ field.availability.0.start }}&ndash;{{ field.availability.0.end }}</span>
+                                {% for window in field.availability %}
+                                    <span class="text-xs text-dim">{{ window.date }}, {{ window.start }}&ndash;{{ window.end }}</span>
+                                {% endfor %}
                             {% else %}
-                                <span class="text-xs text-dim">{% trans "No availability window set." %}</span>
+                                <span class="text-xs text-dim">{% trans "No availability window set -- open all day, every day." %}</span>
                             {% endif %}
                         </div>
                         {% if can_operate_tournament %}
                         <div class="flex shrink-0 items-center gap-1.5">
-                            <button class="btn btn-outline btn-xs" type="button" onclick="document.getElementById('{{ field.pk|dom_id:"field_update_modal" }}').showModal()">{% lucide "pencil" size=12 %} {% trans "Edit" %}</button>
+                            <a class="btn btn-outline btn-xs" href="{% url 'management:tournament_field_update' tournament.pk field.pk %}">{% lucide "pencil" size=12 %} {% trans "Edit" %}</a>
                             <button class="btn btn-outline btn-xs btn-error" type="button" onclick="document.getElementById('{{ field.pk|dom_id:"field_delete_modal" }}').showModal()">{% lucide "trash-2" size=12 %} {% trans "Delete" %}</button>
                         </div>
                         {% endif %}
@@ -107,18 +109,9 @@
         </div>
     </div>
 
-    {% trans "Add field" as add_field_title %}
-    {% trans "Add" as add_label %}
-    {% url 'management:tournament_field_create' tournament.pk as field_create_url %}
-    {% include "controlpanel/_modal_form.html" with modal_id="field_create_modal" title=add_field_title form=field_form action_url=field_create_url submit_label=add_label submit_icon="plus" %}
-
-    {% trans "Edit field" as edit_field_title %}
     {% trans "Delete field" as delete_field_title %}
     {% trans "Delete" as delete_label %}
     {% for field in fields %}
-        {% url 'management:tournament_field_update' tournament.pk field.pk as field_update_url %}
-        {% include "controlpanel/_modal_form.html" with modal_id=field.pk|dom_id:"field_update_modal" title=edit_field_title form=field.edit_form action_url=field_update_url submit_icon="check" %}
-
         {% url 'management:tournament_field_delete' tournament.pk field.pk as field_delete_url %}
         {% blocktrans with name=field.name asvar delete_field_body %}Delete “{{ name }}”? Any matches scheduled on this field lose their field assignment. This cannot be undone.{% endblocktrans %}
         {% include "controlpanel/_confirm_modal.html" with modal_id=field.pk|dom_id:"field_delete_modal" title=delete_field_title body=delete_field_body action_url=field_delete_url submit_label=delete_label %}

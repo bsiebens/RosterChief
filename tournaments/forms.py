@@ -269,48 +269,66 @@ class TournamentForm(forms.ModelForm):
 
 
 class TournamentFieldForm(forms.ModelForm):
-    """Create/edit one bookable field/pitch. ``availability`` is a JSON list
-    of per-day windows on the model (see ``TournamentField.availability``'s
-    own docstring), but this first-pass screen only ever collects **one**
-    date + start + end, saved as a single-entry list -- multi-window/multi-
-    day editing is a known simplification, not solved here; a club that
-    needs more can still use the Django admin's raw JSON widget for that one
-    field. ``tournament`` comes from the view, never the form. No
-    ``location`` field here at all -- see ``TournamentField``'s own
-    docstring for why a field's venue is just the tournament's."""
-
-    availability_date = forms.DateField(label=_("Date"), required=False, widget=forms.DateInput(attrs={"type": "date"}))
-    availability_start = forms.TimeField(label=_("Start time"), required=False, widget=forms.TimeInput(attrs={"type": "time"}))
-    availability_end = forms.TimeField(label=_("End time"), required=False, widget=forms.TimeInput(attrs={"type": "time"}))
+    """Create/edit one bookable field/pitch's own name -- its
+    ``availability`` (a JSON list of per-day windows, see
+    ``TournamentField.availability``'s own docstring) is collected
+    separately by ``TournamentFieldAvailabilityFormSet`` below, not this
+    form: one field can now carry several windows (e.g. Saturday 9-18,
+    Sunday 9-16) instead of forcing staff to create a second "field" per
+    day just to cover a second day. ``tournament`` comes from the view,
+    never the form. No ``location`` field here at all -- see
+    ``TournamentField``'s own docstring for why a field's venue is just the
+    tournament's."""
 
     class Meta:
         model = TournamentField
         fields = ["name"]
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        window = (self.instance.availability or [None])[0] if self.instance.pk else None
-        if window:
-            self.fields["availability_date"].initial = window.get("date")
-            self.fields["availability_start"].initial = window.get("start")
-            self.fields["availability_end"].initial = window.get("end")
+
+class TournamentFieldAvailabilityRowForm(forms.Form):
+    """One availability window on the "Add/edit field" page's own formset --
+    date + start + end, the exact shape ``TournamentField.availability``
+    stores each list entry as. A blank row (no date/start/end at all) is
+    valid and simply skipped when the view builds the field's own
+    ``availability`` list back up -- same "leftover blank row is silently
+    dropped" convention ``SeedSlotRowForm`` already uses."""
+
+    date = forms.DateField(label=_("Date"), required=False, widget=forms.DateInput(attrs={"type": "date", "class": "input input-bordered w-full"}))
+    start = forms.TimeField(label=_("Start time"), required=False, widget=forms.TimeInput(attrs={"type": "time", "class": "input input-bordered w-full"}))
+    end = forms.TimeField(label=_("End time"), required=False, widget=forms.TimeInput(attrs={"type": "time", "class": "input input-bordered w-full"}))
 
     def clean(self):
         cleaned = super().clean()
-        date_, start, end = cleaned.get("availability_date"), cleaned.get("availability_start"), cleaned.get("availability_end")
+        date_, start, end = cleaned.get("date"), cleaned.get("start"), cleaned.get("end")
         if (date_ or start or end) and not (date_ and start and end):
-            raise ValidationError(_("Set a date, start time, and end time together, or leave all three blank."))
+            raise ValidationError(_("Set a date, start time, and end time together, or leave all three blank to skip this window."))
         if start and end and end <= start:
-            self.add_error("availability_end", _("Must be after the start time."))
+            self.add_error("end", _("Must be after the start time."))
         return cleaned
 
-    def save(self, commit=True):
-        instance = super().save(commit=False)
-        date_, start, end = self.cleaned_data.get("availability_date"), self.cleaned_data.get("availability_start"), self.cleaned_data.get("availability_end")
-        instance.availability = [{"date": date_.isoformat(), "start": start.strftime("%H:%M"), "end": end.strftime("%H:%M")}] if (date_ and start and end) else []
-        if commit:
-            instance.save()
-        return instance
+
+class BaseTournamentFieldAvailabilityFormSet(forms.BaseFormSet):
+    """Cross-row check a single row can't see: two windows on the same date
+    that overlap -- mirrors ``BaseSeedSlotFormSet``'s own cross-row dedup."""
+
+    def clean(self):
+        super().clean()
+        if any(self.errors):
+            return
+
+        windows = []
+        for form in self.forms:
+            date_, start, end = form.cleaned_data.get("date"), form.cleaned_data.get("start"), form.cleaned_data.get("end")
+            if not (date_ and start and end):
+                continue
+            for _other_form, other_date, other_start, other_end in windows:
+                if other_date == date_ and start < other_end and other_start < end:
+                    form.add_error("start", _("Overlaps another window on the same date."))
+                    break
+            windows.append((form, date_, start, end))
+
+
+TournamentFieldAvailabilityFormSet = forms.formset_factory(TournamentFieldAvailabilityRowForm, formset=BaseTournamentFieldAvailabilityFormSet, extra=0)
 
 
 #: Every key tournaments.services.scheduling.compute_standings' own

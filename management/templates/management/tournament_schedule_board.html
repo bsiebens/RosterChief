@@ -1,0 +1,106 @@
+{% extends "management/base.html" %}
+{% load i18n lucide static %}
+
+{% comment %}
+    The Schedule tab's "Board view" -- one column per field, its placed
+    matches positioned top-to-bottom by their own real time, with the idle
+    time around/between them shown as gap slots instead of left implicit
+    (see management.views.TournamentScheduleBoardView / tournaments.services.
+    scheduling.field_timeline). A gap tagged with a blackout rule shows that
+    rule's own priority; every other applicable break rule for the field is
+    listed above its column as reference, same priority order.
+
+    Matches are draggable (tournament-schedule-board.js) -- a drop fills in
+    and submits the hidden reschedule form below through the same
+    MatchRescheduleView the plain table's own inline form already posts to,
+    so a blocked drop (double-booking, a blackout window) is rejected and
+    explained exactly the way a bad manual edit is there today.
+
+    Context: tournament, timeline (tournaments.services.scheduling.field_timeline),
+    fields, px_per_minute, can_manage_tournament, can_operate_tournament.
+{% endcomment %}
+
+{% block heading %}{{ tournament.name }}{% endblock heading %}
+{% block topbar_context %}
+    <span class="font-mono text-[13px] text-muted">{% trans "Schedule" %} &middot; {% trans "Board" %}</span>
+{% endblock topbar_context %}
+
+{% block actions %}
+    <a class="btn btn-outline gap-2" href="{% url 'management:tournament_schedule' tournament.pk %}">{% lucide "table" size=16 %} {% trans "Table view" %}</a>
+{% endblock actions %}
+
+{% block panel %}
+    {% include "management/_tournament_tabs.html" %}
+
+    {% if can_operate_tournament %}
+        <p class="mb-3 text-sm text-muted">{% blocktrans %}Drag a match card onto a gap (or another spot on any field's timeline) to replan it there.{% endblocktrans %}</p>
+    {% endif %}
+
+    {% if not timeline %}
+        <div class="card p-6 text-center text-muted">{% trans "Add at least one field to see its timeline here." %}</div>
+    {% else %}
+        <div class="flex items-start gap-4 overflow-x-auto pb-4">
+            {% for field_row in timeline %}
+                <div class="flex w-72 shrink-0 flex-col gap-3">
+                    <h2 class="font-display text-sm font-bold tracking-[.08em] text-ink uppercase">{{ field_row.field.name }}</h2>
+
+                    {% if field_row.rules %}
+                        <ul class="flex flex-col gap-1 rounded-box border border-line bg-paper p-2 text-[11px] text-muted">
+                            {% for rule in field_row.rules %}
+                                <li>#{{ rule.priority }} &middot; {{ rule.display_summary }}</li>
+                            {% endfor %}
+                        </ul>
+                    {% endif %}
+
+                    {% for day in field_row.days %}
+                        <div class="card overflow-hidden">
+                            <div class="border-b border-line bg-subhead px-3 py-1.5 font-mono text-xs font-semibold tracking-[.08em] text-muted uppercase">{{ day.date|date:"D j M" }}</div>
+                            <div
+                                class="schedule-board-column relative"
+                                style="height: {{ day.height_px }}px;"
+                                data-field-pk="{{ field_row.field.pk }}"
+                                data-day-start="{{ day.start|date:"c" }}"
+                                data-px-per-minute="{{ px_per_minute }}"
+                            >
+                                {% for slot in day.slots %}
+                                    {% if slot.type == "match" %}
+                                        <div
+                                            class="schedule-board-match absolute inset-x-1 overflow-hidden rounded-box border border-club bg-white px-2 py-1 text-xs shadow-sm"
+                                            style="top: {{ slot.top_px }}px; height: {{ slot.height_px }}px;"
+                                            {% if can_operate_tournament %}draggable="true" data-match-pk="{{ slot.match.pk }}"{% endif %}
+                                        >
+                                            <div class="font-mono text-[10px] text-dim">{{ slot.start|date:"H:i" }}</div>
+                                            <div class="truncate font-semibold text-ink">{{ slot.match.home_display }} <span class="text-dim">v</span> {{ slot.match.away_display }}</div>
+                                        </div>
+                                    {% else %}
+                                        <div
+                                            class="schedule-board-gap absolute inset-x-1 flex items-center justify-between overflow-hidden rounded-box border border-dashed border-line px-2 text-[10px] text-dim {% if slot.rule %}bg-warning/10{% endif %}"
+                                            style="top: {{ slot.top_px }}px; height: {{ slot.height_px }}px;"
+                                        >
+                                            <span>{% blocktrans with minutes=slot.minutes %}{{ minutes }} min free{% endblocktrans %}</span>
+                                            {% if slot.rule %}<span class="badge badge-warning badge-xs shrink-0">#{{ slot.rule.priority }}</span>{% endif %}
+                                        </div>
+                                    {% endif %}
+                                {% endfor %}
+                            </div>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% endfor %}
+        </div>
+    {% endif %}
+
+    {% if can_operate_tournament %}
+        <form method="post" id="schedule-board-reschedule-form" class="hidden" data-url-template="{% url 'management:match_reschedule' pk='00000000-0000-0000-0000-000000000000' %}">
+            {% csrf_token %}
+            <input type="hidden" name="field" id="schedule-board-field-input">
+            <input type="hidden" name="scheduled_start" id="schedule-board-start-input">
+        </form>
+    {% endif %}
+{% endblock panel %}
+
+{% block extra_body %}
+    {% if can_operate_tournament %}
+        <script src="{% static 'js/tournament-schedule-board.js' %}"></script>
+    {% endif %}
+{% endblock extra_body %}

@@ -14636,6 +14636,89 @@ class TournamentScheduleTests(ManagementTestBase):
         match.refresh_from_db()
         self.assertIsNotNone(match.scheduled_start)
 
+    def test_generate_schedule_again_replans_a_previously_auto_placed_match(self):
+        # Regression test: allocate_schedule used to only ever touch matches
+        # with no scheduled_start yet, so a second click with new parameters
+        # was a no-op -- this is the button now reflecting them.
+        self.activate_flag()
+        TournamentField.objects.create(tournament=self.tournament, name="Field 1", availability=[{"date": self.tournament.start_date.isoformat(), "start": "09:00", "end": "20:00"}])
+        team_a, team_b = self.make_team("Team A"), self.make_team("Team B")
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="Round Robin", format=TournamentStage.Format.CUSTOM)
+        match = Match.objects.create(stage=stage, round_number=1, sequence=0, home_team=team_a, away_team=team_b)
+        self.client.force_login(self.admin_user)
+        self.club_post("tournament_schedule_generate", {"match_duration_minutes": "45"}, self.tournament.pk)
+        match.refresh_from_db()
+        first_run_start = match.scheduled_start
+        self.assertTrue(match.auto_scheduled)
+
+        response = self.club_post("tournament_schedule_generate", {"match_duration_minutes": "90"}, self.tournament.pk)
+
+        self.assertRedirects(response, reverse("management:tournament_schedule", args=[self.tournament.pk]))
+        match.refresh_from_db()
+        self.assertEqual(match.scheduled_start, first_run_start)  # same slot -- only one match, nothing to reshuffle it against
+        self.assertTrue(match.auto_scheduled)
+
+    def test_generate_schedule_again_leaves_a_hand_rescheduled_match_alone(self):
+        self.activate_flag()
+        field = TournamentField.objects.create(tournament=self.tournament, name="Field 1", availability=[{"date": self.tournament.start_date.isoformat(), "start": "09:00", "end": "20:00"}])
+        team_a, team_b = self.make_team("Team A"), self.make_team("Team B")
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="Round Robin", format=TournamentStage.Format.CUSTOM)
+        match = Match.objects.create(stage=stage, round_number=1, sequence=0, home_team=team_a, away_team=team_b)
+        self.client.force_login(self.admin_user)
+        self.club_post("tournament_schedule_generate", {}, self.tournament.pk)
+        match.refresh_from_db()
+        hand_picked_start = match.scheduled_start + datetime.timedelta(hours=2)
+        self.club_post("match_reschedule", {"field": field.pk, "scheduled_start": timezone.localtime(hand_picked_start).strftime("%Y-%m-%dT%H:%M")}, match.pk)
+        match.refresh_from_db()
+        self.assertFalse(match.auto_scheduled)
+
+        self.club_post("tournament_schedule_generate", {}, self.tournament.pk)
+
+        match.refresh_from_db()
+        self.assertEqual(match.scheduled_start, hand_picked_start)
+
+    def test_delete_schedule_unschedules_matches_but_keeps_them(self):
+        self.activate_flag()
+        TournamentField.objects.create(tournament=self.tournament, name="Field 1")
+        team_a, team_b = self.make_team("Team A"), self.make_team("Team B")
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="Round Robin", format=TournamentStage.Format.CUSTOM)
+        match = Match.objects.create(stage=stage, round_number=1, sequence=0, home_team=team_a, away_team=team_b)
+        self.client.force_login(self.admin_user)
+        self.club_post("tournament_schedule_generate", {}, self.tournament.pk)
+        match.refresh_from_db()
+        self.assertIsNotNone(match.scheduled_start)
+
+        response = self.club_post("tournament_schedule_clear", {}, self.tournament.pk)
+
+        self.assertRedirects(response, reverse("management:tournament_schedule", args=[self.tournament.pk]))
+        match.refresh_from_db()
+        self.assertIsNone(match.scheduled_start)
+        self.assertIsNone(match.field_id)
+        self.assertTrue(Match.objects.filter(pk=match.pk).exists())
+
+    def test_delete_schedule_requires_the_operator_tier(self):
+        self.activate_flag()
+        self.client.force_login(self.make_coach())
+
+        response = self.club_post("tournament_schedule_clear", {}, self.tournament.pk)
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_board_view_lists_fields_and_gaps(self):
+        self.activate_flag()
+        TournamentField.objects.create(tournament=self.tournament, name="Field 1", availability=[{"date": self.tournament.start_date.isoformat(), "start": "09:00", "end": "20:00"}])
+        team_a, team_b = self.make_team("Team A"), self.make_team("Team B")
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="Round Robin", format=TournamentStage.Format.CUSTOM)
+        Match.objects.create(stage=stage, round_number=1, sequence=0, home_team=team_a, away_team=team_b)
+        self.client.force_login(self.admin_user)
+        self.club_post("tournament_schedule_generate", {}, self.tournament.pk)
+
+        response = self.club_get("tournament_schedule_board", self.tournament.pk)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Field 1")
+        self.assertContains(response, "min free")
+
     def test_schedule_page_shows_the_default_match_duration_pre_filled(self):
         self.activate_flag()
         self.tournament.default_match_duration_minutes = 30
@@ -15099,25 +15182,39 @@ class TournamentFieldStageCrudTests(ManagementTestBase):
 
         self.assertEqual(response.status_code, 403)
 
-    def test_create_field_with_an_availability_window(self):
+    @staticmethod
+    def availability_formset_data(*rows):
+        """Builds a TournamentFieldAvailabilityFormSet POST payload from
+        ``(date, start, end)`` tuples -- mirrors how bulk-add-rows.js posts
+        the "Add/edit field" page's own formset."""
+        data = {"form-TOTAL_FORMS": str(len(rows) or 1), "form-INITIAL_FORMS": "0", "form-MIN_NUM_FORMS": "0", "form-MAX_NUM_FORMS": "1000"}
+        if not rows:
+            rows = [("", "", "")]
+        for index, (date_, start, end) in enumerate(rows):
+            data[f"form-{index}-date"] = date_
+            data[f"form-{index}-start"] = start
+            data[f"form-{index}-end"] = end
+        return data
+
+    def test_create_field_with_availability_windows(self):
         self.activate_flag()
         self.client.force_login(self.admin_user)
 
         response = self.club_post(
             "tournament_field_create",
-            {"name": "Field 1", "availability_date": "2026-09-19", "availability_start": "08:00", "availability_end": "20:00"},
+            {"name": "Field 1", **self.availability_formset_data(("2026-09-19", "08:00", "20:00"), ("2026-09-20", "09:00", "16:00"))},
             self.tournament.pk,
         )
 
         self.assertRedirects(response, reverse("management:tournament_field_stage_list", args=[self.tournament.pk]))
         field = TournamentField.objects.get(tournament=self.tournament, name="Field 1")
-        self.assertEqual(field.availability, [{"date": "2026-09-19", "start": "08:00", "end": "20:00"}])
+        self.assertEqual(field.availability, [{"date": "2026-09-19", "start": "08:00", "end": "20:00"}, {"date": "2026-09-20", "start": "09:00", "end": "16:00"}])
 
     def test_create_field_without_an_availability_window(self):
         self.activate_flag()
         self.client.force_login(self.admin_user)
 
-        response = self.club_post("tournament_field_create", {"name": "Field 2"}, self.tournament.pk)
+        response = self.club_post("tournament_field_create", {"name": "Field 2", **self.availability_formset_data()}, self.tournament.pk)
 
         self.assertRedirects(response, reverse("management:tournament_field_stage_list", args=[self.tournament.pk]))
         field = TournamentField.objects.get(tournament=self.tournament, name="Field 2")
@@ -15129,26 +15226,56 @@ class TournamentFieldStageCrudTests(ManagementTestBase):
 
         response = self.club_post(
             "tournament_field_create",
-            {"name": "Field 3", "availability_date": "2026-09-19"},
+            {"name": "Field 3", **self.availability_formset_data(("2026-09-19", "", ""))},
             self.tournament.pk,
         )
 
-        self.assertRedirects(response, reverse("management:tournament_field_stage_list", args=[self.tournament.pk]))
+        self.assertEqual(response.status_code, 200)
         self.assertFalse(TournamentField.objects.filter(tournament=self.tournament, name="Field 3").exists())
+
+    def test_overlapping_availability_windows_on_the_same_date_are_rejected(self):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post(
+            "tournament_field_create",
+            {"name": "Field 4", **self.availability_formset_data(("2026-09-19", "08:00", "12:00"), ("2026-09-19", "11:00", "16:00"))},
+            self.tournament.pk,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(TournamentField.objects.filter(tournament=self.tournament, name="Field 4").exists())
 
     def test_update_and_delete_a_field(self):
         self.activate_flag()
-        field = TournamentField.objects.create(tournament=self.tournament, name="Field 1")
+        field = TournamentField.objects.create(tournament=self.tournament, name="Field 1", availability=[{"date": "2026-09-19", "start": "08:00", "end": "20:00"}])
         self.client.force_login(self.admin_user)
 
-        response = self.club_post("tournament_field_update", {"name": "Field 1 (renamed)"}, self.tournament.pk, field.pk)
+        response = self.club_post(
+            "tournament_field_update",
+            {"name": "Field 1 (renamed)", **self.availability_formset_data(("2026-09-19", "09:00", "18:00"))},
+            self.tournament.pk,
+            field.pk,
+        )
         self.assertRedirects(response, reverse("management:tournament_field_stage_list", args=[self.tournament.pk]))
         field.refresh_from_db()
         self.assertEqual(field.name, "Field 1 (renamed)")
+        self.assertEqual(field.availability, [{"date": "2026-09-19", "start": "09:00", "end": "18:00"}])
 
         response = self.club_post("tournament_field_delete", {}, self.tournament.pk, field.pk)
         self.assertRedirects(response, reverse("management:tournament_field_stage_list", args=[self.tournament.pk]))
         self.assertFalse(TournamentField.objects.filter(pk=field.pk).exists())
+
+    def test_the_edit_page_prefills_existing_availability_windows(self):
+        self.activate_flag()
+        field = TournamentField.objects.create(tournament=self.tournament, name="Field 1", availability=[{"date": "2026-09-19", "start": "08:00", "end": "20:00"}, {"date": "2026-09-20", "start": "09:00", "end": "16:00"}])
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_field_update", self.tournament.pk, field.pk)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.context["formset"].initial), 2)
+        self.assertEqual(response.context["formset"].initial[1]["date"], "2026-09-20")
 
     def test_field_crud_404s_for_a_field_in_another_tournament(self):
         self.activate_flag()

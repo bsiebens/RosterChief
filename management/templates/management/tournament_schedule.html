@@ -7,12 +7,14 @@
 {% endblock topbar_context %}
 
 {% block actions %}
+    <a class="btn btn-outline gap-2" href="{% url 'management:tournament_schedule_board' tournament.pk %}">{% lucide "layout-grid" size=16 %} {% trans "Board view" %}</a>
     {% if can_operate_tournament %}
         <form method="post" action="{% url 'management:tournament_schedule_generate' tournament.pk %}" class="flex items-center gap-1.5">
             {% csrf_token %}
             <input type="number" min="1" name="match_duration_minutes" class="input w-auto" value="{{ tournament.default_match_duration_minutes }}" aria-label="{% trans 'Match duration (minutes)' %}" title="{% trans 'Match duration (minutes)' %}">
             <button class="btn btn-primary gap-2" type="submit">{% lucide "shuffle" size=16 %} {% trans "Generate schedule" %}</button>
         </form>
+        <button class="btn btn-outline btn-error gap-2" type="button" onclick="document.getElementById('clear_schedule_modal').showModal()">{% lucide "eraser" size=16 %} {% trans "Delete schedule" %}</button>
     {% endif %}
 {% endblock actions %}
 
@@ -136,4 +138,12 @@
         {% blocktrans with title=block.title asvar delete_block_body %}Delete “{{ title }}”? This cannot be undone.{% endblocktrans %}
         {% include "controlpanel/_confirm_modal.html" with modal_id=block.pk|dom_id:"schedule_block_delete_modal" title=delete_block_title body=delete_block_body action_url=block_delete_url submit_label=delete_label %}
     {% endfor %}
+
+    {% if can_operate_tournament %}
+        {% trans "Delete schedule" as clear_schedule_title %}
+        {% trans "Unschedule every not-yet-played match? Fields and times are cleared, but the matches themselves (teams, rounds, bracket links) stay -- Generate schedule can rebuild the timing afterward without reseeding anything." as clear_schedule_body %}
+        {% trans "Delete schedule" as clear_schedule_label %}
+        {% url 'management:tournament_schedule_clear' tournament.pk as clear_schedule_url %}
+        {% include "controlpanel/_confirm_modal.html" with modal_id="clear_schedule_modal" title=clear_schedule_title body=clear_schedule_body action_url=clear_schedule_url submit_label=clear_schedule_label submit_icon="eraser" %}
+    {% endif %}
 {% endblock panel %}

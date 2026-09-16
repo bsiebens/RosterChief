@@ -148,6 +148,7 @@ from tournaments.forms import (
     ScheduleBlockForm,
     SeedSlotFormSet,
     SeedSlotRowForm,
+    TournamentFieldAvailabilityFormSet,
     TournamentFieldForm,
     TournamentForm,
     TournamentRosterEntryForm,
@@ -162,7 +163,7 @@ from tournaments.services.dressing_rooms import DressingRoomAssignmentError, ass
 from tournaments.services.lunch import daily_lunch_summary
 from tournaments.services.notifications import dispatch_notify_tournament_shifts_open, send_registration_decision_email
 from tournaments.services.registration import RegistrationDecisionError, TeamDeletionError, TeamWithdrawalError, approve_registration, create_manual_team, delete_manual_team, ensure_home_team, reject_registration, withdraw_team
-from tournaments.services.scheduling import GroupRankSeed, SchedulingError, allocate_schedule, generate_stage_matches, record_result, reschedule_match
+from tournaments.services.scheduling import PX_PER_MINUTE, GroupRankSeed, SchedulingError, allocate_schedule, clear_schedule, field_timeline, generate_stage_matches, record_result, reschedule_match
 from tournaments.services.tasks import TaskClaimError, claim_task, generate_task_shifts
 
 from .bulk_import import build_member_import_template, family_choice_field_name, match_candidate_families, parse_member_import_rows, read_member_import_workbook
@@ -7777,14 +7778,17 @@ class TournamentScheduleView(TournamentsManagerRequiredMixin, TemplateView):
 class TournamentAllocateScheduleView(TournamentOperatorRequiredMixin, View):
     """The Schedule tab's own "Generate schedule" button --
     tournaments.services.scheduling.allocate_schedule for the whole
-    tournament: a first-draft field/time assignment for every not-yet-
-    scheduled, fully-resolved match (a still-TBD bracket slot is left
-    alone -- schedule it once its source match/group actually resolves,
-    a later run of this same action picks those up). Safe to run again
-    later as the bracket fills in -- it only ever touches matches with no
-    scheduled_start yet, never reshuffles ones already placed (see
-    reschedule_match for moving one by hand instead). Raises
-    SchedulingError when there are no fields to schedule onto yet.
+    tournament, with ``reset=True``: a first-draft field/time assignment for
+    every not-yet-scheduled, fully-resolved match (a still-TBD bracket slot
+    is left alone -- schedule it once its source match/group actually
+    resolves), plus a fresh replan of every match a *previous* run of this
+    same button placed (``auto_scheduled``) -- so tweaking the match
+    duration, a break rule, or the field list and clicking this again
+    actually reflects the new parameters. A match staff hand-moved via the
+    table's own inline "field + time" form is never touched either way (see
+    ``reschedule_match``, which clears ``auto_scheduled`` the moment a human
+    takes over a match's placement). Raises SchedulingError when there are
+    no fields to schedule onto yet.
 
     ``match_duration_minutes`` comes from the tab's own small form
     (pre-filled from ``tournament.default_match_duration_minutes``, still
@@ -7803,7 +7807,7 @@ class TournamentAllocateScheduleView(TournamentOperatorRequiredMixin, View):
             match_duration_minutes = tournament.default_match_duration_minutes
 
         try:
-            scheduled = allocate_schedule(tournament, match_duration=timedelta(minutes=match_duration_minutes))
+            scheduled = allocate_schedule(tournament, match_duration=timedelta(minutes=match_duration_minutes), reset=True)
         except SchedulingError as error:
             notify(request, f"w|{_('Could not generate a schedule')}|{error}")
         else:
@@ -7811,6 +7815,49 @@ class TournamentAllocateScheduleView(TournamentOperatorRequiredMixin, View):
             notify(request, f"s|{_('Schedule generated')}|{body}")
 
         return redirect("management:tournament_schedule", tournament_pk=tournament.pk)
+
+
+class TournamentClearScheduleView(TournamentOperatorRequiredMixin, View):
+    """The Schedule tab's own "Delete schedule" button --
+    tournaments.services.scheduling.clear_schedule for the whole tournament:
+    unschedules every not-yet-played match (auto-placed or hand-dragged
+    alike), leaving the Match rows -- teams, rounds, bracket links -- intact
+    so staff can re-run Generate schedule afterward without re-seeding
+    anything. A COMPLETE/IN_PROGRESS match already happened and is left
+    alone, same guard clear_schedule's own docstring describes."""
+
+    def post(self, request, tournament_pk):
+        tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
+        count = clear_schedule(tournament)
+        body = ngettext("%(count)d match unscheduled.", "%(count)d matches unscheduled.", count) % {"count": count}
+        notify(request, f"w|{_('Schedule deleted')}|{body}")
+        return redirect("management:tournament_schedule", tournament_pk=tournament.pk)
+
+
+class TournamentScheduleBoardView(TournamentsManagerRequiredMixin, TemplateView):
+    """The Schedule tab's "Board view" -- one column per field, matches laid
+    out top-to-bottom by their actual scheduled time with the idle time
+    around/between them surfaced as gap slots (tournaments.services.
+    scheduling.field_timeline), instead of the plain table's per-row list
+    with no sense of a field's own timeline. Matches are draggable within/
+    across columns (tournament-schedule-board.js); a drop fills in and
+    submits the same hidden "field + time" form the plain table already
+    posts per row, through the unchanged MatchRescheduleView -- an invalid
+    drop surfaces exactly like an invalid manual edit does there today."""
+
+    template_name = "management/tournament_schedule_board.html"
+
+    def get_context_data(self, **kwargs):
+        tournament = get_object_or_404(Tournament, pk=self.kwargs["tournament_pk"], club=self.request.club)
+        return super().get_context_data(
+            tournament=tournament,
+            timeline=field_timeline(tournament),
+            fields=list(tournament.fields.all()),
+            px_per_minute=PX_PER_MINUTE,
+            active_tab="schedule",
+            **self.tournament_permissions(tournament),
+            **kwargs,
+        )
 
 
 class MatchRescheduleView(TournamentOperatorRequiredMixin, View):
@@ -8019,8 +8066,6 @@ class TournamentFieldStageView(TournamentsManagerRequiredMixin, TemplateView):
     def get_context_data(self, **kwargs):
         tournament = get_object_or_404(Tournament, pk=self.kwargs["tournament_pk"], club=self.request.club)
         fields = list(tournament.fields.all())
-        for field in fields:
-            field.edit_form = TournamentFieldForm(instance=field)
         stages = list(tournament.stages.all())
         for stage in stages:
             stage.edit_form = TournamentStageForm(instance=stage)
@@ -8032,7 +8077,6 @@ class TournamentFieldStageView(TournamentsManagerRequiredMixin, TemplateView):
             fields=fields,
             stages=stages,
             break_rules=break_rules,
-            field_form=TournamentFieldForm(),
             stage_form=TournamentStageForm(),
             break_rule_form=BreakRuleForm(tournament=tournament),
             active_tab="fields_stages",
@@ -8041,35 +8085,58 @@ class TournamentFieldStageView(TournamentsManagerRequiredMixin, TemplateView):
         )
 
 
-class TournamentFieldCreateView(TournamentOperatorRequiredMixin, View):
-    def post(self, request, tournament_pk):
-        tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
-        form = TournamentFieldForm(request.POST)
-        if not form.is_valid():
-            for error in form.errors.values():
-                notify(request, f"e|{_('Could not add field')}|{' '.join(error)}")
-            return redirect("management:tournament_field_stage_list", tournament_pk=tournament.pk)
+class TournamentFieldFormViewMixin:
+    """Shared GET/POST shape for create and update -- a name form plus the
+    availability-window formset (``TournamentFieldAvailabilityFormSet``),
+    rendered on one page rather than a modal (a modal has nowhere to put a
+    dynamic add/remove-row formset -- see ``controlpanel/_modal_form.html``'s
+    own single-form shape). Mirrors ``TournamentStageSeedView``'s own
+    get/post/render_form split."""
 
-        field = form.save(commit=False)
+    template_name = "management/tournament_field_form.html"
+
+    def get_field(self, tournament):
+        return TournamentField()
+
+    def render_form(self, request, tournament, name_form, formset):
+        return render(request, self.template_name, {"tournament": tournament, "field": self.field, "name_form": name_form, "formset": formset, **self.tournament_permissions(tournament)})
+
+    def get(self, request, tournament_pk, **kwargs):
+        tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
+        self.field = self.get_field(tournament)
+        initial = [{"date": window.get("date"), "start": window.get("start"), "end": window.get("end")} for window in (self.field.availability or [])] or [{}]
+        name_form = TournamentFieldForm(instance=self.field)
+        formset = TournamentFieldAvailabilityFormSet(initial=initial)
+        return self.render_form(request, tournament, name_form, formset)
+
+    def post(self, request, tournament_pk, **kwargs):
+        tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
+        self.field = self.get_field(tournament)
+        name_form = TournamentFieldForm(request.POST, instance=self.field)
+        formset = TournamentFieldAvailabilityFormSet(request.POST)
+
+        if not name_form.is_valid() or not formset.is_valid():
+            return self.render_form(request, tournament, name_form, formset)
+
+        field = name_form.save(commit=False)
         field.tournament = tournament
+        windows = sorted(
+            ({"date": row["date"].isoformat(), "start": row["start"].strftime("%H:%M"), "end": row["end"].strftime("%H:%M")} for row in formset.cleaned_data if row.get("date") and row.get("start") and row.get("end")),
+            key=lambda window: (window["date"], window["start"]),
+        )
+        field.availability = windows
         field.save()
-        notify(request, f"s|{_('Field added')}|" + _("“%(name)s” was added to this tournament.") % {"name": field.name})
+        notify(request, f"s|{_('Field saved')}|" + _("“%(name)s” was saved.") % {"name": field.name})
         return redirect("management:tournament_field_stage_list", tournament_pk=tournament.pk)
 
 
-class TournamentFieldUpdateView(TournamentOperatorRequiredMixin, View):
-    def post(self, request, tournament_pk, field_pk):
-        tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
-        field = get_object_or_404(TournamentField, pk=field_pk, tournament=tournament)
-        form = TournamentFieldForm(request.POST, instance=field)
-        if not form.is_valid():
-            for error in form.errors.values():
-                notify(request, f"e|{_('Could not update field')}|{' '.join(error)}")
-            return redirect("management:tournament_field_stage_list", tournament_pk=tournament.pk)
+class TournamentFieldCreateView(TournamentFieldFormViewMixin, TournamentOperatorRequiredMixin, View):
+    pass
 
-        form.save()
-        notify(request, f"s|{_('Field updated')}|" + _("“%(name)s” updated.") % {"name": field.name})
-        return redirect("management:tournament_field_stage_list", tournament_pk=tournament.pk)
+
+class TournamentFieldUpdateView(TournamentFieldFormViewMixin, TournamentOperatorRequiredMixin, View):
+    def get_field(self, tournament):
+        return get_object_or_404(TournamentField, pk=self.kwargs["field_pk"], tournament=tournament)
 
 
 class TournamentFieldDeleteView(TournamentOperatorRequiredMixin, View):

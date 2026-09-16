@@ -752,6 +752,12 @@ class Match(UUIDModel):
 
     field = models.ForeignKey(TournamentField, on_delete=models.SET_NULL, null=True, blank=True, related_name="matches", verbose_name=_("field"))
     scheduled_start = models.DateTimeField(_("scheduled start"), null=True, blank=True)
+    #: Set by ``allocate_schedule`` on every match it places, cleared by
+    #: ``reschedule_match`` on any manual drag/edit -- lets a later
+    #: "Generate schedule" run (``allocate_schedule(..., reset=True)``)
+    #: replan only what it placed itself, leaving a hand-adjusted placement
+    #: alone even though its own ``scheduled_start`` is no longer null.
+    auto_scheduled = models.BooleanField(_("auto-scheduled"), default=False, help_text=_("Set by Generate schedule; cleared by any manual reschedule. Lets a later re-run replan only what it placed itself."))
     status = models.CharField(_("status"), max_length=15, choices=Status.choices, default=Status.SCHEDULED)
 
     score_home = models.PositiveSmallIntegerField(_("home score"), null=True, blank=True)

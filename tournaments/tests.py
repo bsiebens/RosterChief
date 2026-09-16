@@ -51,7 +51,9 @@ from .services.scheduling import (
     GroupRankSeed,
     SchedulingError,
     allocate_schedule,
+    clear_schedule,
     compute_standings,
+    field_timeline,
     gap_for_placement,
     generate_next_swiss_round,
     generate_stage_matches,
@@ -2396,6 +2398,147 @@ class AllocateScheduleTests(TournamentsTestCase):
         gap_after_rollover = matches[rollover_index + 1].scheduled_start - (matches[rollover_index].scheduled_start + DEFAULT_MATCH_DURATION)
         self.assertEqual(gap_after_rollover, DEFAULT_GAP)
 
+    def test_placed_matches_are_flagged_auto_scheduled(self):
+        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 3)]
+        TournamentField.objects.create(tournament=self.tournament, name="Field 1", availability=[{"date": "2026-09-19", "start": "09:00", "end": "20:00"}])
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
+        generate_stage_matches(stage, entries=teams)
+
+        allocate_schedule(self.tournament)
+
+        self.assertTrue(Match.objects.get(stage=stage).auto_scheduled)
+
+    def test_reset_replans_a_previously_auto_placed_match(self):
+        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 3)]
+        TournamentField.objects.create(tournament=self.tournament, name="Field 1", availability=[{"date": "2026-09-19", "start": "09:00", "end": "20:00"}])
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
+        generate_stage_matches(stage, entries=teams)
+        allocate_schedule(self.tournament, match_duration=datetime.timedelta(minutes=45))
+        first_run_start = Match.objects.get(stage=stage).scheduled_start
+
+        allocate_schedule(self.tournament, match_duration=datetime.timedelta(minutes=90), reset=True)
+
+        match = Match.objects.get(stage=stage)
+        self.assertIsNotNone(match.scheduled_start)
+        self.assertTrue(match.auto_scheduled)
+        # Only one match on the field -- reset+replan lands it back on the
+        # same slot, so this proves the reset pass actually ran (not that
+        # the second call was simply a no-op) via the duration difference
+        # baked into the next test below instead.
+        self.assertEqual(match.scheduled_start, first_run_start)
+
+    def test_reset_leaves_a_hand_placed_match_alone(self):
+        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 3)]
+        field = TournamentField.objects.create(tournament=self.tournament, name="Field 1", availability=[{"date": "2026-09-19", "start": "09:00", "end": "20:00"}])
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
+        generate_stage_matches(stage, entries=teams)
+        allocate_schedule(self.tournament)
+        match = Match.objects.get(stage=stage)
+        hand_picked_start = timezone.make_aware(datetime.datetime(2026, 9, 19, 15, 0))
+        reschedule_match(match, field=field, scheduled_start=hand_picked_start)
+
+        allocate_schedule(self.tournament, reset=True)
+
+        match.refresh_from_db()
+        self.assertEqual(match.scheduled_start, hand_picked_start)
+        self.assertFalse(match.auto_scheduled)
+
+    def test_reset_leaves_a_completed_match_alone(self):
+        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 3)]
+        TournamentField.objects.create(tournament=self.tournament, name="Field 1", availability=[{"date": "2026-09-19", "start": "09:00", "end": "20:00"}])
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
+        generate_stage_matches(stage, entries=teams)
+        allocate_schedule(self.tournament)
+        match = Match.objects.get(stage=stage)
+        played_start = match.scheduled_start
+        match.status = Match.Status.COMPLETE
+        match.save(update_fields=["status"])
+
+        allocate_schedule(self.tournament, reset=True)
+
+        match.refresh_from_db()
+        self.assertEqual(match.scheduled_start, played_start)
+
+
+class ClearScheduleTests(TournamentsTestCase):
+    def test_unschedules_a_not_yet_played_match_but_keeps_it(self):
+        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}") for i in range(1, 3)]
+        TournamentField.objects.create(tournament=self.tournament, name="Field 1", availability=[{"date": "2026-09-19", "start": "09:00", "end": "20:00"}])
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
+        generate_stage_matches(stage, entries=teams)
+        allocate_schedule(self.tournament)
+        match = Match.objects.get(stage=stage)
+        self.assertIsNotNone(match.scheduled_start)
+
+        count = clear_schedule(self.tournament)
+
+        match.refresh_from_db()
+        self.assertEqual(count, 1)
+        self.assertIsNone(match.scheduled_start)
+        self.assertIsNone(match.field_id)
+        self.assertFalse(match.auto_scheduled)
+
+    def test_leaves_a_completed_match_alone(self):
+        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}") for i in range(1, 3)]
+        field = TournamentField.objects.create(tournament=self.tournament, name="Field 1")
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.CUSTOM)
+        played_start = timezone.make_aware(datetime.datetime(2026, 9, 19, 10, 0))
+        match = Match.objects.create(stage=stage, home_team=teams[0], away_team=teams[1], field=field, scheduled_start=played_start, status=Match.Status.COMPLETE)
+
+        count = clear_schedule(self.tournament)
+
+        match.refresh_from_db()
+        self.assertEqual(count, 0)
+        self.assertEqual(match.scheduled_start, played_start)
+        self.assertEqual(match.field, field)
+
+
+class FieldTimelineTests(TournamentsTestCase):
+    def test_matches_and_surrounding_gaps_are_returned_in_order(self):
+        # Tournament default match duration is 45 minutes (the model's own
+        # default) -- a 09:15 match runs to 10:00, so a 09:00-10:30 window
+        # leaves a 15-minute gap before it and a 30-minute gap after.
+        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}") for i in range(1, 3)]
+        field = TournamentField.objects.create(tournament=self.tournament, name="Field 1", availability=[{"date": "2026-09-19", "start": "09:00", "end": "10:30"}])
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.CUSTOM)
+        Match.objects.create(stage=stage, home_team=teams[0], away_team=teams[1], field=field, scheduled_start=timezone.make_aware(datetime.datetime(2026, 9, 19, 9, 15)))
+
+        timeline = field_timeline(self.tournament)
+
+        self.assertEqual(len(timeline), 1)
+        day = timeline[0]["days"][0]
+        kinds = [slot["type"] for slot in day["slots"]]
+        self.assertEqual(kinds, ["gap", "match", "gap"])
+        self.assertEqual(day["slots"][0]["minutes"], 15)
+        self.assertEqual(day["slots"][2]["minutes"], 30)
+
+    def test_a_blackout_gap_is_attributed_to_its_rule(self):
+        field = TournamentField.objects.create(tournament=self.tournament, name="Field 1", availability=[{"date": "2026-09-19", "start": "09:00", "end": "13:00"}])
+        rule = BreakRule.objects.create(tournament=self.tournament, field=field, trigger_type=BreakRule.TriggerType.CLOCK_WINDOW, trigger_window_start=datetime.time(11, 0), trigger_window_end=datetime.time(12, 0), priority=1)
+
+        timeline = field_timeline(self.tournament)
+
+        day = timeline[0]["days"][0]
+        gap = next(slot for slot in day["slots"] if slot["type"] == "gap" and slot["start"].time() <= datetime.time(11, 30) < slot["end"].time())
+        self.assertEqual(gap["rule"], rule)
+
+    def test_a_field_with_no_matches_or_availability_has_no_days(self):
+        TournamentField.objects.create(tournament=self.tournament, name="Field 1")
+
+        timeline = field_timeline(self.tournament)
+
+        self.assertEqual(timeline[0]["days"], [])
+
+    def test_rules_legend_excludes_clock_window_and_is_priority_ordered(self):
+        field = TournamentField.objects.create(tournament=self.tournament, name="Field 1")
+        BreakRule.objects.create(tournament=self.tournament, field=field, trigger_type=BreakRule.TriggerType.CLOCK_WINDOW, trigger_window_start=datetime.time(12, 0), trigger_window_end=datetime.time(13, 0))
+        low_priority = BreakRule.objects.create(tournament=self.tournament, field=field, trigger_type=BreakRule.TriggerType.GAME_COUNT, trigger_every_n_games=5, gap_minutes=10, priority=5)
+        high_priority = BreakRule.objects.create(tournament=self.tournament, field=field, trigger_type=BreakRule.TriggerType.GAME_COUNT, trigger_every_n_games=2, gap_minutes=20, priority=1)
+
+        timeline = field_timeline(self.tournament)
+
+        self.assertEqual(timeline[0]["rules"], [high_priority, low_priority])
+
 
 class ValidatePlacementTests(TournamentsTestCase):
     def test_detects_field_double_booking(self):
@@ -2444,6 +2587,29 @@ class ValidatePlacementTests(TournamentsTestCase):
         violations = validate_placement(candidate, field, start, start + DEFAULT_MATCH_DURATION)
 
         self.assertTrue(violations)
+
+    def test_uses_the_tournaments_own_match_duration_not_the_module_default(self):
+        # Regression test: this used to always assume the existing placed
+        # match ran for the module's own 45-minute DEFAULT_MATCH_DURATION,
+        # even when the tournament's own default_match_duration_minutes says
+        # otherwise -- a candidate placed just after that shorter/longer
+        # match's *real* end could be wrongly rejected or wrongly accepted.
+        self.tournament.default_match_duration_minutes = 20
+        self.tournament.save(update_fields=["default_match_duration_minutes"])
+        field = TournamentField.objects.create(tournament=self.tournament, name="Field 1")
+        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}") for i in range(1, 5)]
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.CUSTOM)
+        start = timezone.make_aware(datetime.datetime(2026, 9, 19, 9, 0))
+        Match.objects.create(stage=stage, home_team=teams[0], away_team=teams[1], field=field, scheduled_start=start)
+        candidate = Match.objects.create(stage=stage, home_team=teams[2], away_team=teams[3])
+        # 09:25 is free once the existing match's own 20-minute duration is
+        # honoured (ends 09:20), but would still collide against the
+        # module's 45-minute default (would "end" 09:45).
+        candidate_start = start + datetime.timedelta(minutes=25)
+
+        violations = validate_placement(candidate, field, candidate_start, candidate_start + datetime.timedelta(minutes=20))
+
+        self.assertEqual(violations, [])
 
 
 class ComputeStandingsTests(TournamentsTestCase):

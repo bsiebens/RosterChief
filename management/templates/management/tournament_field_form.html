@@ -1,0 +1,74 @@
+{% extends "management/base.html" %}
+{% load i18n lucide static %}
+
+{% comment %}
+    Add/edit one tournament field -- a name plus one or more availability
+    windows (date + start + end), each a row in a formset rather than the
+    single date/start/end pair the old modal form collected: a multi-day
+    tournament no longer needs a second "field" just to cover a second day.
+    Mirrors tournament_stage_seed.html's own page shape (management.views.
+    TournamentFieldFormViewMixin's own docstring).
+
+    Context: tournament, field (blank instance on create), name_form
+    (TournamentFieldForm), formset (TournamentFieldAvailabilityFormSet).
+{% endcomment %}
+
+{% block heading %}{{ tournament.name }}{% endblock heading %}
+{% block topbar_context %}
+    <span class="font-mono text-[13px] text-muted">{% if field.pk %}{% blocktrans with name=field.name %}Edit “{{ name }}”{% endblocktrans %}{% else %}{% trans "Add field" %}{% endif %}</span>
+{% endblock topbar_context %}
+
+{% block actions %}
+    <a class="btn btn-outline gap-2" href="{% url 'management:tournament_field_stage_list' tournament.pk %}">{% lucide "arrow-left" size=16 %} {% trans "Back" %}</a>
+{% endblock actions %}
+
+{% block panel %}
+    <form method="post">
+        {% csrf_token %}
+        {{ formset.management_form }}
+
+        <div class="card">
+            <div class="card-body">
+                {% include "controlpanel/_form_fields.html" with form=name_form %}
+
+                <h2 class="card-title mt-2">{% trans "Availability" %}</h2>
+                <p class="text-sm text-muted">{% blocktrans %}One row per day this field is open -- leave a row blank to skip it. A field with no windows at all is treated as open all day, every day of the tournament.{% endblocktrans %}</p>
+
+                {% for error in formset.non_form_errors %}
+                    <div class="alert alert-error">
+                        <span>{{ error }}</span>
+                    </div>
+                {% endfor %}
+
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>{% trans "Date" %}</th>
+                            <th>{% trans "Start time" %}</th>
+                            <th>{% trans "End time" %}</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody id="bulk-add-rows" data-prefix="{{ formset.prefix }}">
+                        {% for form in formset %}
+                            {% include "management/_field_availability_row.html" with form=form %}
+                        {% endfor %}
+                    </tbody>
+                </table>
+
+                <template id="bulk-add-row-template">
+                    {% include "management/_field_availability_row.html" with form=formset.empty_form %}
+                </template>
+
+                <div class="flex flex-wrap items-center gap-2">
+                    <button class="btn btn-outline btn-sm gap-2" type="button" id="add-row">{% lucide "plus" size=14 %} {% trans "Add window" %}</button>
+                    <button class="btn btn-primary btn-sm gap-2" type="submit">{% lucide "check" size=14 %} {% trans "Save field" %}</button>
+                </div>
+            </div>
+        </div>
+    </form>
+{% endblock panel %}
+
+{% block extra_body %}
+    <script src="{% static 'js/bulk-add-rows.js' %}"></script>
+{% endblock extra_body %}
