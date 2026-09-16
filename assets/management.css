@@ -1891,6 +1891,39 @@
         color: var(--color-violet);
     }
 
+    /* A row-shaped sibling of .kind-card -- same "sr-only radio, :has()
+       reflects checked/focus back onto the label" mechanism, but for a
+       title+description pair (tournament_field_stage_list.html's own
+       "Generate matches" seed-vs-direct choice) rather than an icon-over-
+       label tile: left-aligned, two lines, not centered/square. */
+    .seed-choice-option {
+        display: flex;
+        align-items: flex-start;
+        gap: 0.625rem;
+        padding: 0.75rem;
+        border: 1.5px solid var(--color-line);
+        border-radius: var(--radius-box);
+        background: #fff;
+        cursor: pointer;
+        transition:
+            border-color 0.15s ease,
+            background-color 0.15s ease;
+    }
+
+    .seed-choice-option:hover {
+        border-color: var(--color-stroke);
+    }
+
+    .seed-choice-option:has(input:focus-visible) {
+        outline: 2px solid var(--color-club);
+        outline-offset: 2px;
+    }
+
+    .seed-choice-option:has(input:checked) {
+        border-color: var(--color-club);
+        background: var(--color-danger-bg);
+    }
+
     /* club_wide's own toggle, pulled out of the plain field grid into its own
        framed row -- a whole-club event is a bigger decision than any other
        audience field here, so it gets to look like one. */

@@ -145,36 +145,39 @@
                     <h3 class="text-lg font-bold">{% trans "Generate matches" %}</h3>
                     <p class="py-2 text-sm opacity-70">{% blocktrans with name=stage.name %}How should “{{ name }}” get its teams?{% endblocktrans %}</p>
                     {% comment %}
-                        Not .btn for these two -- that class forces uppercase,
-                        wide letter-spacing, nowrap and a fixed single-line
-                        height (fine for a short label, not for a wrapping
-                        two-line description), which overflowed the modal
-                        instead of wrapping. Plain bordered option cards
-                        instead, normal case/weight/wrapping throughout.
+                        Two real radios (a card each is its own label, same
+                        "sr-only radio, :has() reflects state back onto the
+                        label" mechanism event_form.html's own kind-card grid
+                        uses), not two links/submit buttons that acted the
+                        instant you clicked one -- picking a card just
+                        highlights it now; nothing happens until OK below.
                     {% endcomment %}
-                    <div class="flex flex-col gap-2">
-                        <a class="flex items-start gap-2.5 rounded-box border-2 border-club bg-club/5 p-3 text-left hover:bg-club/10" href="{% url 'management:tournament_stage_seed' tournament.pk stage.pk %}">
-                            {% lucide "list-tree" size=18 class="mt-0.5 shrink-0 text-club" %}
-                            <span class="flex flex-col gap-0.5">
-                                <span class="font-display text-sm font-bold tracking-[.04em] text-ink uppercase">{% trans "Seed from standings" %}</span>
-                                <span class="text-xs text-muted">{% trans "Pick each slot by hand -- a direct team, or \"Nth place of\" an earlier group." %}</span>
-                            </span>
-                        </a>
-                        <form method="post" action="{% url 'management:tournament_stage_generate_matches' tournament.pk stage.pk %}">
-                            {% csrf_token %}
-                            <button class="flex w-full items-start gap-2.5 rounded-box border border-line p-3 text-left hover:bg-subhead" type="submit">
+                    <form method="post" action="{% url 'management:tournament_stage_generate_matches' tournament.pk stage.pk %}" id="{{ stage.pk|dom_id:"stage_seed_choice_form" }}" class="seed-choice-form">
+                        {% csrf_token %}
+                        <div class="flex flex-col gap-2" role="radiogroup" aria-label="{% trans 'Generate matches' %}">
+                            <label class="seed-choice-option">
+                                <input type="radio" name="seed_choice" value="seed" class="sr-only" checked>
+                                {% lucide "list-tree" size=18 class="mt-0.5 shrink-0 text-club" %}
+                                <span class="flex flex-col gap-0.5">
+                                    <span class="font-display text-sm font-bold tracking-[.04em] text-ink uppercase">{% trans "Seed from standings" %}</span>
+                                    <span class="text-xs text-muted">{% trans "Pick each slot by hand -- a direct team, or \"Nth place of\" an earlier group." %}</span>
+                                </span>
+                            </label>
+                            <label class="seed-choice-option">
+                                <input type="radio" name="seed_choice" value="direct" class="sr-only">
                                 {% lucide "shuffle" size=18 class="mt-0.5 shrink-0 text-dim" %}
                                 <span class="flex flex-col gap-0.5">
                                     <span class="font-display text-sm font-bold tracking-[.04em] text-ink uppercase">{% trans "Direct assignment" %}</span>
                                     <span class="text-xs text-muted">{% trans "Auto-fill straight from every team's own seed, same as any other stage." %}</span>
                                 </span>
-                            </button>
-                        </form>
-                    </div>
+                            </label>
+                        </div>
+                    </form>
                     <div class="modal-action">
                         <form method="dialog">
                             <button class="btn btn-outline gap-2">{% lucide "x" size=16 %} {% trans "Cancel" %}</button>
                         </form>
+                        <button class="btn btn-primary gap-2 seed-choice-ok" type="button" data-seed-url="{% url 'management:tournament_stage_seed' tournament.pk stage.pk %}" data-form-id="{{ stage.pk|dom_id:"stage_seed_choice_form" }}">{% lucide "arrow-right" size=16 %} {% trans "OK" %}</button>
                     </div>
                 </div>
                 <form method="dialog" class="modal-backdrop">
@@ -286,6 +289,25 @@
             };
             triggerSelect.addEventListener("change", sync);
             sync();
+        });
+
+        // "Generate matches" seed-vs-direct choice -- picking a card only
+        // ever checks its own radio (native <label>/<input> behaviour, see
+        // .seed-choice-option in assets/management.css); OK is the one
+        // moment that actually acts on it, navigating to the seed page or
+        // submitting the plain generate-matches form depending on which
+        // card ended up checked.
+        document.querySelectorAll(".seed-choice-ok").forEach((okButton) => {
+            okButton.addEventListener("click", () => {
+                const dialog = okButton.closest("dialog");
+                const checked = dialog?.querySelector('input[name="seed_choice"]:checked');
+                if (!checked) return;
+                if (checked.value === "seed") {
+                    window.location.href = okButton.dataset.seedUrl;
+                } else {
+                    document.getElementById(okButton.dataset.formId)?.submit();
+                }
+            });
         });
     </script>
 {% endblock extra_body %}

@@ -15828,6 +15828,25 @@ class TournamentStageNextPhaseViewTests(ManagementTestBase):
 
         self.assertContains(response, "How should")
 
+    def test_the_seed_choice_prompt_is_pick_then_ok_not_click_and_go(self):
+        # Regression test: the two cards used to be a link and a submit
+        # button that acted the instant you clicked one -- no chance to see
+        # what you'd picked before it navigated/submitted. Now they're
+        # plain radios (no href/onclick of their own); only the OK button
+        # carries the JS that actually acts, once, on whichever is checked.
+        self.activate_flag()
+        TournamentStage.objects.create(tournament=self.tournament, name="Groups", format=TournamentStage.Format.GROUPS, sequence=0)
+        ko = TournamentStage.objects.create(tournament=self.tournament, name="KO", format=TournamentStage.Format.SINGLE_ELIM, sequence=1)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_field_stage_list", self.tournament.pk)
+
+        self.assertContains(response, '<input type="radio" name="seed_choice" value="seed"')
+        self.assertContains(response, '<input type="radio" name="seed_choice" value="direct"')
+        self.assertContains(response, 'class="btn btn-primary gap-2 seed-choice-ok"')
+        self.assertContains(response, reverse("management:tournament_stage_seed", args=[self.tournament.pk, ko.pk]))
+        self.assertNotContains(response, f'href="{reverse("management:tournament_stage_seed", args=[self.tournament.pk, ko.pk])}"')
+
 
 class TournamentTaskManagementTests(ManagementTestBase):
     """management:tournament_task_list and its CRUD -- the one genuinely new

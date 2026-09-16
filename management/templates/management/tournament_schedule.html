@@ -56,13 +56,13 @@
     </div>
 
     {% for stage_row in stages %}
-        <div class="card overflow-hidden">
+        <div class="card mb-4 overflow-hidden">
             <div class="border-b border-line px-4 py-3">
                 <span class="font-display text-sm font-bold tracking-[.08em] text-ink uppercase">{{ stage_row.stage.name }}</span>
             </div>
 
             {% for round_row in stage_row.rounds %}
-                <div class="bg-subhead px-4 py-2">
+                <div class="bg-subhead px-4 py-2.5 {% if not forloop.first %}border-t border-line{% endif %}">
                     <span class="font-mono text-xs font-semibold tracking-[.08em] text-muted uppercase">{{ round_row.label }}</span>
                 </div>
                 <table class="table">
