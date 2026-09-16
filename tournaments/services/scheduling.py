@@ -22,7 +22,7 @@ from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 from ..models import BreakRule, Match, ScheduleBlock, Tournament, TournamentGroup, TournamentStage, TournamentTeam
-from .brackets import BracketError, double_elimination_bracket, single_elimination_bracket
+from .brackets import BracketError, double_elimination_bracket, single_elimination_bracket, single_elimination_placement_bracket
 
 #: The one thing every tournament falls back to when no BreakRule fires --
 #: see BreakRule's own docstring for why this isn't itself a stored row.
@@ -103,7 +103,7 @@ def snake_seed_groups(entries: list, num_groups: int) -> list[list]:
 
 
 @transaction.atomic
-def generate_stage_matches(stage: TournamentStage, *, entries: list | None = None) -> list[Match]:
+def generate_stage_matches(stage: TournamentStage, *, entries: list | None = None, with_placement: bool = False) -> list[Match]:
     """Generates and persists this stage's ``Match`` rows from its own
     ``format``. Raises ``SchedulingError`` if the stage already has matches
     (regenerate by deleting them first -- an explicit, deliberate action, not
@@ -117,11 +117,20 @@ def generate_stage_matches(stage: TournamentStage, *, entries: list | None = Non
     ``SINGLE_ELIM``/``DOUBLE_ELIM`` only, an entry may also be a
     ``GroupRankSeed`` in place of a concrete team, for a slot that isn't
     decided until an earlier group stage finishes.
+
+    ``with_placement=True`` (``SINGLE_ELIM`` only -- raises ``SchedulingError``
+    for any other format) builds a full placement ladder instead of the
+    plain knockout bracket: every loser keeps playing consolation matches
+    until every rank, 1st through last, is decided by a real result, not
+    just "eliminated in round X" -- see
+    ``tournaments.services.brackets.single_elimination_placement_bracket``.
     """
     if stage.matches.exists():
         raise SchedulingError(_("This stage already has matches -- delete them first to regenerate."))
     if stage.format == TournamentStage.Format.CUSTOM:
         raise SchedulingError(_("A custom-format stage has no automatic generator -- build its matches directly."))
+    if with_placement and stage.format != TournamentStage.Format.SINGLE_ELIM:
+        raise SchedulingError(_("A full placement bracket is only available for single elimination."))
 
     entries = list(TournamentTeam.objects.filter(tournament_id=stage.tournament_id, withdrawn_at__isnull=True).order_by("seed")) if entries is None else entries
     if len(entries) < 2:
@@ -132,7 +141,7 @@ def generate_stage_matches(stage: TournamentStage, *, entries: list | None = Non
     if stage.format == TournamentStage.Format.GROUPS:
         return _generate_groups(stage, entries)
     if stage.format == TournamentStage.Format.SINGLE_ELIM:
-        return _generate_single_elim(stage, entries)
+        return _generate_single_elim(stage, entries, with_placement=with_placement)
     if stage.format == TournamentStage.Format.DOUBLE_ELIM:
         return _generate_double_elim(stage, entries)
     if stage.format == TournamentStage.Format.SWISS:
@@ -161,9 +170,10 @@ def _generate_groups(stage, entries):
     return Match.objects.bulk_create(matches)
 
 
-def _generate_single_elim(stage, entries):
+def _generate_single_elim(stage, entries, *, with_placement=False):
+    builder = single_elimination_placement_bracket if with_placement else single_elimination_bracket
     try:
-        bracket = single_elimination_bracket(entries)
+        bracket = builder(entries)
     except BracketError as error:
         raise SchedulingError(str(error)) from error
     return _persist_bracket(stage, bracket)

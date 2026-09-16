@@ -8079,6 +8079,10 @@ class TournamentFieldStageView(TournamentsManagerRequiredMixin, TemplateView):
             # and only when there's another stage in the tournament to seed
             # a "Nth place of [group]" slot from in the first place.
             stage.needs_seed_choice = stage.format in (TournamentStage.Format.SINGLE_ELIM, TournamentStage.Format.DOUBLE_ELIM) and len(stages) > 1
+            # A single-elim stage also gets a modal purely for the "full
+            # placement ladder" checkbox, even with no earlier stage to seed
+            # from at all (see single_elimination_placement_bracket).
+            stage.needs_generate_modal = stage.needs_seed_choice or stage.format == TournamentStage.Format.SINGLE_ELIM
         break_rules = list(tournament.break_rules.select_related("field"))
         for break_rule in break_rules:
             break_rule.edit_form = BreakRuleForm(instance=break_rule, tournament=tournament)
@@ -8214,9 +8218,10 @@ class TournamentStageGenerateMatchesView(TournamentOperatorRequiredMixin, View):
     def post(self, request, tournament_pk, stage_pk):
         tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
         stage = get_object_or_404(TournamentStage, pk=stage_pk, tournament=tournament)
+        with_placement = request.POST.get("with_placement") == "on"
 
         try:
-            matches = generate_stage_matches(stage)
+            matches = generate_stage_matches(stage, with_placement=with_placement)
         except SchedulingError as error:
             notify(request, f"w|{_('Could not generate matches')}|{error}")
         else:
@@ -8284,6 +8289,7 @@ class TournamentStageSeedView(TournamentOperatorRequiredMixin, View):
         tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
         stage = self.get_stage(tournament)
         formset = SeedSlotFormSet(request.POST, form_kwargs={"tournament": tournament})
+        with_placement = request.POST.get("with_placement") == "on"
 
         if not formset.is_valid():
             notify(request, f"e|{_('Could not seed stage')}|{_('Some slots need attention -- see the errors below.')}")
@@ -8298,7 +8304,7 @@ class TournamentStageSeedView(TournamentOperatorRequiredMixin, View):
                 entries.append(GroupRankSeed(group=form.cleaned_data["group"], rank=form.cleaned_data["rank"]))
 
         try:
-            matches = generate_stage_matches(stage, entries=entries)
+            matches = generate_stage_matches(stage, entries=entries, with_placement=with_placement)
         except SchedulingError as error:
             notify(request, f"w|{_('Could not seed stage')}|{error}")
             return self.render_form(request, tournament, stage, formset)

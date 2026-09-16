@@ -56,6 +56,25 @@ def _round_label(round_number: int, total_rounds: int) -> str:
     return str(names.get(remaining, _("Round %(n)s") % {"n": round_number}))
 
 
+def _ordinal(n: int) -> str:
+    suffix = "th" if 11 <= (n % 100) <= 13 else {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    return f"{n}{suffix}"
+
+
+def _placement_round_label(hi: int, lo: int, sub_total_rounds: int) -> str:
+    """The label for one round of a placement sub-bracket deciding ranks
+    ``hi``-``lo`` (see ``single_elimination_placement_bracket``'s own
+    docstring) -- a deciding 2-entry match is just named after the better
+    rank it settles ("3rd place", "5th place", ...), the same way a real
+    "3rd place playoff" is; a bigger sub-bracket still mid-way through gets
+    its own rank range prefixed onto its own Semifinal/Quarterfinal/...
+    label (``sub_total_rounds`` is *that sub-bracket's own*, not the whole
+    tournament's), e.g. "Ranks 5-8 · Semifinal"."""
+    if lo - hi == 1:
+        return str(_("%(rank)s place") % {"rank": _ordinal(hi)})
+    return str(_("Ranks %(hi)s-%(lo)s · %(round)s") % {"hi": hi, "lo": lo, "round": _round_label(1, sub_total_rounds)})
+
+
 def single_elimination_bracket(entries: list) -> list[list[dict]]:
     """A standard seeded knockout bracket. ``entries`` should already be
     seed-ordered (strongest first) -- lower seeds get a bye (a round-1 slot
@@ -87,6 +106,85 @@ def single_elimination_bracket(entries: list) -> list[list[dict]]:
         previous_round_start += previous_round_size
         previous_round_size //= 2
         round_number += 1
+
+    return rounds
+
+
+def single_elimination_placement_bracket(entries: list) -> list[list[dict]]:
+    """A single-elimination bracket that keeps going: every loser drops into
+    a placement sub-bracket against the other losers from that same round,
+    recursively, until every single rank -- 1st through last, not just "how
+    far a team got" -- is decided by a real match. The main bracket (the
+    "winners" lineage) is identical to ``single_elimination_bracket``; every
+    other match is new.
+
+    Requires an exact power-of-two number of teams (4, 8, 16, ...), for the
+    same reason ``double_elimination_bracket`` imposes the same restriction:
+    a bye's cascading effect on which placement match receives "the loser
+    that didn't exist" is real complexity this first pass doesn't attempt.
+
+    Construction is a plain FIFO worklist of "sub-brackets still needing a
+    round played", not a naive recursive call tree -- every match's
+    ``*_source_index`` must point at a *strictly earlier* position in the
+    one flat, round-by-round list this returns (see the module's own
+    docstring), and processing the queue in FIFO order guarantees a
+    sub-bracket's own round is always fully emitted (with valid indices)
+    before either of the two child sub-brackets it just spawned (its
+    winners, continuing toward a better rank; its losers, dropping toward a
+    worse one) get their own turn. Each sub-bracket tracks only the rank
+    range (``hi``-``lo``) it's deciding -- its own remaining round count
+    (Quarterfinal/Semifinal/Final-equivalent) falls straight out of
+    ``len(frontier)`` at each step, with no separate counter needed, since a
+    sub-bracket only ever plays exactly one round before splitting in two.
+
+    The ``hi == 1`` lineage (started by the very first sub-bracket) *is*
+    ``single_elimination_bracket``'s own bracket, unprefixed, so
+    placement-off vs placement-on main-bracket labels read identically;
+    every other sub-bracket's matches get a rank-range label instead (see
+    ``_placement_round_label``)."""
+    if len(entries) < 2 or (len(entries) & (len(entries) - 1)) != 0:
+        raise BracketError(_("A full placement bracket needs an exact power-of-two number of teams (4, 8, 16, ...) for now -- byes aren't supported for this option yet."))
+
+    size = len(entries)
+    seeded = [entries[position - 1] for position in _seed_order(size)]
+
+    rounds: list[list[dict]] = []
+    flat_index = 0
+    queue = [{"frontier": seeded, "hi": 1, "lo": size}]
+
+    while queue:
+        bracket = queue.pop(0)
+        frontier = bracket["frontier"]
+        if len(frontier) <= 1:
+            continue
+
+        hi, lo = bracket["hi"], bracket["lo"]
+        sub_total_rounds = int(math.log2(len(frontier)))
+        label = _round_label(1, sub_total_rounds) if hi == 1 else _placement_round_label(hi, lo, sub_total_rounds)
+
+        this_round: list[dict] = []
+        winners_frontier: list = []
+        losers_frontier: list = []
+        for i in range(0, len(frontier), 2):
+            slot = {"round_label": label}
+            for prefix, value in (("home", frontier[i]), ("away", frontier[i + 1])):
+                if isinstance(value, dict):
+                    slot[f"{prefix}_source_index"] = value["ref_index"]
+                    slot[f"{prefix}_source_is_winner"] = value["is_winner"]
+                else:
+                    slot[f"{prefix}_team"] = value
+            this_round.append(slot)
+
+            match_index = flat_index + len(this_round) - 1
+            winners_frontier.append({"ref_index": match_index, "is_winner": True})
+            losers_frontier.append({"ref_index": match_index, "is_winner": False})
+
+        rounds.append(this_round)
+        flat_index += len(this_round)
+
+        mid = (hi + lo) // 2
+        queue.append({"frontier": winners_frontier, "hi": hi, "lo": mid})
+        queue.append({"frontier": losers_frontier, "hi": mid + 1, "lo": lo})
 
     return rounds
 

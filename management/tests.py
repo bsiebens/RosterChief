@@ -15495,6 +15495,55 @@ class TournamentFieldStageCrudTests(ManagementTestBase):
         self.assertRedirects(response, reverse("management:tournament_field_stage_list", args=[self.tournament.pk]))
         self.assertEqual(stage.matches.count(), 0)
 
+    def test_single_elim_with_no_earlier_stage_still_gets_a_generate_modal(self):
+        # A single-elim stage with nothing to seed from still needs *a*
+        # modal now, purely for the placement checkbox -- see
+        # TournamentFieldStageView.get_context_data's needs_generate_modal.
+        self.activate_flag()
+        TournamentStage.objects.create(tournament=self.tournament, name="KO", format=TournamentStage.Format.SINGLE_ELIM)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_field_stage_list", self.tournament.pk)
+
+        self.assertTrue(response.context["stages"][0].needs_generate_modal)
+        self.assertContains(response, 'name="with_placement"')
+
+    def test_the_placement_checkbox_only_shows_for_single_elim(self):
+        self.activate_flag()
+        TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_field_stage_list", self.tournament.pk)
+
+        self.assertFalse(response.context["stages"][0].needs_generate_modal)
+        self.assertNotContains(response, "Full placement ladder")
+
+    def test_direct_assignment_with_placement_produces_the_full_ladder(self):
+        self.activate_flag()
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="KO", format=TournamentStage.Format.SINGLE_ELIM)
+        for i in range(1, 9):
+            TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"Team {i}", seed=i)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("tournament_stage_generate_matches", {"with_placement": "on"}, self.tournament.pk, stage.pk)
+
+        self.assertRedirects(response, reverse("management:tournament_field_stage_list", args=[self.tournament.pk]))
+        self.assertEqual(stage.matches.count(), 12)  # 7 for the plain bracket + 5 more placement matches
+        self.assertTrue(stage.matches.filter(round_label="3rd place").exists())
+
+    def test_direct_assignment_without_placement_stays_the_plain_bracket(self):
+        self.activate_flag()
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="KO", format=TournamentStage.Format.SINGLE_ELIM)
+        for i in range(1, 9):
+            TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"Team {i}", seed=i)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("tournament_stage_generate_matches", {}, self.tournament.pk, stage.pk)
+
+        self.assertRedirects(response, reverse("management:tournament_field_stage_list", args=[self.tournament.pk]))
+        self.assertEqual(stage.matches.count(), 7)
+        self.assertFalse(stage.matches.filter(round_label="3rd place").exists())
+
     def test_create_a_game_count_break_rule(self):
         self.activate_flag()
         self.client.force_login(self.admin_user)
@@ -15622,6 +15671,32 @@ class TournamentStageSeedViewTests(ManagementTestBase):
         self.assertEqual(len(formset.forms), 2)
         self.assertEqual(formset.forms[0].initial.get("team"), team1.pk)
         self.assertEqual(formset.forms[1].initial.get("team"), team2.pk)
+        self.assertContains(response, 'name="with_placement"')
+
+    def test_the_placement_checkbox_is_absent_for_double_elim(self):
+        self.activate_flag()
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="DE", format=TournamentStage.Format.DOUBLE_ELIM)
+        TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="A", seed=1)
+        TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="B", seed=2)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_stage_seed", self.tournament.pk, stage.pk)
+
+        self.assertNotContains(response, "Full placement ladder")
+
+    def test_posting_with_placement_seeds_the_full_ladder(self):
+        self.activate_flag()
+        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"A{i}", seed=i) for i in range(1, 5)]
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="KO", format=TournamentStage.Format.SINGLE_ELIM)
+        self.client.force_login(self.admin_user)
+
+        data = self.slot_data(*[{"entry_type": "team", "team": str(team.pk)} for team in teams])
+        data["with_placement"] = "on"
+        response = self.club_post("tournament_stage_seed", data, self.tournament.pk, stage.pk)
+
+        self.assertRedirects(response, reverse("management:tournament_field_stage_list", args=[self.tournament.pk]))
+        self.assertEqual(stage.matches.count(), 4)  # 2 semis + final + 3rd place, instead of the plain 3
+        self.assertTrue(stage.matches.filter(round_label="3rd place").exists())
 
     def test_posting_a_mix_of_teams_and_group_ranks_seeds_the_stage(self):
         self.activate_flag()

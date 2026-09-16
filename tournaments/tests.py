@@ -42,6 +42,7 @@ from .models import (
     TournamentTaskClaim,
     TournamentTeam,
 )
+from .services.brackets import BracketError, single_elimination_placement_bracket
 from .services.dressing_rooms import DressingRoomAssignmentError, assign_dressing_room, release_dressing_room, windows_conflict
 from .services.notifications import notify_tournament_shifts_open
 from .services.registration import RegistrationDecisionError, TeamDeletionError, TeamWithdrawalError, approve_registration, create_manual_team, delete_manual_team, ensure_home_team, reject_registration, withdraw_team
@@ -1921,6 +1922,43 @@ class SnakeSeedGroupsTests(TestCase):
             snake_seed_groups([1, 2], 0)
 
 
+class SingleEliminationPlacementBracketTests(TestCase):
+    def test_requires_an_exact_power_of_two(self):
+        with self.assertRaises(BracketError):
+            single_elimination_placement_bracket([f"T{i}" for i in range(1, 7)])
+
+    def test_four_teams_produces_every_placement_match(self):
+        rounds = single_elimination_placement_bracket([f"T{i}" for i in range(1, 5)])
+
+        matches = [slot for round_ in rounds for slot in round_]
+        self.assertEqual(len(matches), 4)  # 2 semis + final (1st/2nd) + 3rd place
+        self.assertEqual([slot["round_label"] for slot in matches], ["Semifinal", "Semifinal", "Final", "3rd place"])
+        # Round 1 pairing is untouched by this option -- same seed order as
+        # the plain bracket (1v4, 2v3).
+        self.assertEqual(matches[0]["home_team"], "T1")
+        self.assertEqual(matches[0]["away_team"], "T4")
+        self.assertEqual(matches[1]["home_team"], "T2")
+        self.assertEqual(matches[1]["away_team"], "T3")
+
+    def test_eight_teams_labels_every_rank_tier(self):
+        rounds = single_elimination_placement_bracket([f"T{i}" for i in range(1, 9)])
+
+        matches = [slot for round_ in rounds for slot in round_]
+        self.assertEqual(len(matches), 12)  # 4 QF + 2 SF + 1 final + (2 + 1 + 1) placement
+        labels = {slot["round_label"] for slot in matches}
+        self.assertEqual(labels, {"Quarterfinal", "Semifinal", "Ranks 5-8 · Semifinal", "Final", "3rd place", "5th place", "7th place"})
+
+    def test_every_source_index_points_strictly_earlier(self):
+        rounds = single_elimination_placement_bracket([f"T{i}" for i in range(1, 9)])
+
+        matches = [slot for round_ in rounds for slot in round_]
+        for index, slot in enumerate(matches):
+            for side in ("home", "away"):
+                source = slot.get(f"{side}_source_index")
+                if source is not None:
+                    self.assertLess(source, index)
+
+
 class GenerateStageMatchesTests(TournamentsTestCase):
     def make_teams(self, count):
         return [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"Team {i}", seed=i) for i in range(1, count + 1)]
@@ -2018,6 +2056,31 @@ class GenerateStageMatchesTests(TournamentsTestCase):
         # The losers-round match takes the LOSER of each semifinal, not the winner.
         self.assertFalse(losers_final.home_source_is_winner)
         self.assertFalse(losers_final.away_source_is_winner)
+
+    def test_with_placement_rejected_for_non_single_elim_formats(self):
+        teams = self.make_teams(4)
+        for format_value in (TournamentStage.Format.ROUND_ROBIN, TournamentStage.Format.DOUBLE_ELIM):
+            stage = TournamentStage.objects.create(tournament=self.tournament, name=format_value, format=format_value)
+            with self.assertRaises(SchedulingError):
+                generate_stage_matches(stage, entries=teams, with_placement=True)
+
+    def test_with_placement_persists_the_full_ladder(self):
+        teams = self.make_teams(8)
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="KO", format=TournamentStage.Format.SINGLE_ELIM)
+
+        matches = generate_stage_matches(stage, entries=teams, with_placement=True)
+
+        self.assertEqual(len(matches), 12)  # 4 QF + 2 SF + 1 final + 4 placement (2 + 1 + 1)
+        round1 = [m for m in matches if m.round_number == 1]
+        self.assertCountEqual([frozenset((m.home_team.seed, m.away_team.seed)) for m in round1], [frozenset((1, 8)), frozenset((4, 5)), frozenset((2, 7)), frozenset((3, 6))])
+        final = Match.objects.get(stage=stage, round_label="Final")
+        self.assertIsNotNone(final.home_source_match_id)
+        self.assertIsNotNone(final.away_source_match_id)
+        third_place = Match.objects.get(stage=stage, round_label="3rd place")
+        self.assertFalse(third_place.home_source_is_winner)
+        self.assertFalse(third_place.away_source_is_winner)
+        self.assertEqual(Match.objects.filter(stage=stage, round_label="5th place").count(), 1)
+        self.assertEqual(Match.objects.filter(stage=stage, round_label="7th place").count(), 1)
 
 
 class GroupRankSeedTests(TournamentsTestCase):

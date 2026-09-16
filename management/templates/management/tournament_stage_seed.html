@@ -32,6 +32,16 @@
                     {% blocktrans %}Each slot is either a direct team or "Nth place of" a group -- a group-sourced slot stays undecided until that group's own matches are all complete, then fills in on its own. Slot order is seed order (top of this list plays the bottom). Leave a slot on "— skip —" to shrink the bracket.{% endblocktrans %}
                 </p>
 
+                {% if stage.format == "single_elim" %}
+                    <label class="flex cursor-pointer items-start gap-2 text-sm text-slate">
+                        <input type="checkbox" name="with_placement" class="checkbox mt-0.5">
+                        <span>
+                            <span class="font-medium text-ink">{% trans "Full placement ladder" %}</span>
+                            <span class="block text-xs text-muted">{% trans "Keep playing consolation matches until every rank, 1st to last, is decided -- not just who wins." %}</span>
+                        </span>
+                    </label>
+                {% endif %}
+
                 {% for error in formset.non_form_errors %}
                     <div class="alert alert-error">
                         <span>{{ error }}</span>

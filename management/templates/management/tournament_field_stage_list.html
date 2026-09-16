@@ -67,7 +67,7 @@
                         {% if can_operate_tournament %}
                         <div class="flex shrink-0 items-center gap-1.5">
                             {% if not stage.matches.all %}
-                                {% if stage.needs_seed_choice %}
+                                {% if stage.needs_generate_modal %}
                                     <button class="btn btn-outline btn-xs" type="button" onclick="document.getElementById('{{ stage.pk|dom_id:"stage_seed_choice_modal" }}').showModal()">{% lucide "shuffle" size=12 %} {% trans "Generate matches" %}</button>
                                 {% else %}
                                     <form method="post" action="{% url 'management:tournament_stage_generate_matches' tournament.pk stage.pk %}">
@@ -135,50 +135,80 @@
         {% blocktrans with name=stage.name asvar delete_stage_body %}Delete “{{ name }}”? Any matches already generated for this stage are removed too. This cannot be undone.{% endblocktrans %}
         {% include "controlpanel/_confirm_modal.html" with modal_id=stage.pk|dom_id:"stage_delete_modal" title=delete_stage_title body=delete_stage_body action_url=stage_delete_url submit_label=delete_label %}
 
-        {% if stage.needs_seed_choice %}
+        {% if stage.needs_generate_modal %}
             {% comment %}
                 Not _modal_form.html/_confirm_modal.html -- this needs two distinct
-                action links side by side, not one submit + a Cancel.
+                action links side by side, not one submit + a Cancel (when there's
+                a seed choice to make at all; a single-elim stage with no earlier
+                stage to seed from gets a plain one-form/one-submit modal instead,
+                purely for the placement checkbox below).
             {% endcomment %}
             <dialog id="{{ stage.pk|dom_id:"stage_seed_choice_modal" }}" class="modal">
                 <div class="modal-box max-w-md">
                     <h3 class="text-lg font-bold">{% trans "Generate matches" %}</h3>
-                    <p class="py-2 text-sm opacity-70">{% blocktrans with name=stage.name %}How should “{{ name }}” get its teams?{% endblocktrans %}</p>
-                    {% comment %}
-                        Two real radios (a card each is its own label, same
-                        "sr-only radio, :has() reflects state back onto the
-                        label" mechanism event_form.html's own kind-card grid
-                        uses), not two links/submit buttons that acted the
-                        instant you clicked one -- picking a card just
-                        highlights it now; nothing happens until OK below.
-                    {% endcomment %}
-                    <form method="post" action="{% url 'management:tournament_stage_generate_matches' tournament.pk stage.pk %}" id="{{ stage.pk|dom_id:"stage_seed_choice_form" }}" class="seed-choice-form">
-                        {% csrf_token %}
-                        <div class="flex flex-col gap-2" role="radiogroup" aria-label="{% trans 'Generate matches' %}">
-                            <label class="seed-choice-option">
-                                <input type="radio" name="seed_choice" value="seed" class="sr-only" checked>
-                                {% lucide "list-tree" size=18 class="mt-0.5 shrink-0 text-club" %}
-                                <span class="flex flex-col gap-0.5">
-                                    <span class="font-display text-sm font-bold tracking-[.04em] text-ink uppercase">{% trans "Seed from standings" %}</span>
-                                    <span class="text-xs text-muted">{% trans "Pick each slot by hand -- a direct team, or \"Nth place of\" an earlier group." %}</span>
-                                </span>
-                            </label>
-                            <label class="seed-choice-option">
-                                <input type="radio" name="seed_choice" value="direct" class="sr-only">
-                                {% lucide "shuffle" size=18 class="mt-0.5 shrink-0 text-dim" %}
-                                <span class="flex flex-col gap-0.5">
-                                    <span class="font-display text-sm font-bold tracking-[.04em] text-ink uppercase">{% trans "Direct assignment" %}</span>
-                                    <span class="text-xs text-muted">{% trans "Auto-fill straight from every team's own seed, same as any other stage." %}</span>
-                                </span>
-                            </label>
-                        </div>
-                    </form>
-                    <div class="modal-action">
-                        <form method="dialog">
-                            <button class="btn btn-outline gap-2">{% lucide "x" size=16 %} {% trans "Cancel" %}</button>
+                    {% if stage.needs_seed_choice %}
+                        <p class="py-2 text-sm opacity-70">{% blocktrans with name=stage.name %}How should “{{ name }}” get its teams?{% endblocktrans %}</p>
+                        {% comment %}
+                            Two real radios (a card each is its own label, same
+                            "sr-only radio, :has() reflects state back onto the
+                            label" mechanism event_form.html's own kind-card grid
+                            uses), not two links/submit buttons that acted the
+                            instant you clicked one -- picking a card just
+                            highlights it now; nothing happens until OK below.
+                        {% endcomment %}
+                        <form method="post" action="{% url 'management:tournament_stage_generate_matches' tournament.pk stage.pk %}" id="{{ stage.pk|dom_id:"stage_seed_choice_form" }}" class="seed-choice-form">
+                            {% csrf_token %}
+                            <div class="flex flex-col gap-2" role="radiogroup" aria-label="{% trans 'Generate matches' %}">
+                                <label class="seed-choice-option">
+                                    <input type="radio" name="seed_choice" value="seed" class="sr-only" checked>
+                                    {% lucide "list-tree" size=18 class="mt-0.5 shrink-0 text-club" %}
+                                    <span class="flex flex-col gap-0.5">
+                                        <span class="font-display text-sm font-bold tracking-[.04em] text-ink uppercase">{% trans "Seed from standings" %}</span>
+                                        <span class="text-xs text-muted">{% trans "Pick each slot by hand -- a direct team, or \"Nth place of\" an earlier group." %}</span>
+                                    </span>
+                                </label>
+                                <label class="seed-choice-option">
+                                    <input type="radio" name="seed_choice" value="direct" class="sr-only">
+                                    {% lucide "shuffle" size=18 class="mt-0.5 shrink-0 text-dim" %}
+                                    <span class="flex flex-col gap-0.5">
+                                        <span class="font-display text-sm font-bold tracking-[.04em] text-ink uppercase">{% trans "Direct assignment" %}</span>
+                                        <span class="text-xs text-muted">{% trans "Auto-fill straight from every team's own seed, same as any other stage." %}</span>
+                                    </span>
+                                </label>
+                            </div>
+                            {% if stage.format == "single_elim" %}
+                                <label class="mt-3 flex cursor-pointer items-start gap-2 text-sm text-slate">
+                                    <input type="checkbox" name="with_placement" class="checkbox mt-0.5">
+                                    <span>
+                                        <span class="font-medium text-ink">{% trans "Full placement ladder" %}</span>
+                                        <span class="block text-xs text-muted">{% trans "Keep playing consolation matches until every rank, 1st to last, is decided -- not just who wins. Applies to \"Direct assignment\" above." %}</span>
+                                    </span>
+                                </label>
+                            {% endif %}
                         </form>
-                        <button class="btn btn-primary gap-2 seed-choice-ok" type="button" data-seed-url="{% url 'management:tournament_stage_seed' tournament.pk stage.pk %}" data-form-id="{{ stage.pk|dom_id:"stage_seed_choice_form" }}">{% lucide "arrow-right" size=16 %} {% trans "OK" %}</button>
-                    </div>
+                        <div class="modal-action">
+                            <form method="dialog">
+                                <button class="btn btn-outline gap-2">{% lucide "x" size=16 %} {% trans "Cancel" %}</button>
+                            </form>
+                            <button class="btn btn-primary gap-2 seed-choice-ok" type="button" data-seed-url="{% url 'management:tournament_stage_seed' tournament.pk stage.pk %}" data-form-id="{{ stage.pk|dom_id:"stage_seed_choice_form" }}">{% lucide "arrow-right" size=16 %} {% trans "OK" %}</button>
+                        </div>
+                    {% else %}
+                        <form method="post" action="{% url 'management:tournament_stage_generate_matches' tournament.pk stage.pk %}">
+                            {% csrf_token %}
+                            <p class="py-2 text-sm opacity-70">{% blocktrans with name=stage.name %}“{{ name }}” fills straight from every team's own seed.{% endblocktrans %}</p>
+                            <label class="flex cursor-pointer items-start gap-2 text-sm text-slate">
+                                <input type="checkbox" name="with_placement" class="checkbox mt-0.5">
+                                <span>
+                                    <span class="font-medium text-ink">{% trans "Full placement ladder" %}</span>
+                                    <span class="block text-xs text-muted">{% trans "Keep playing consolation matches until every rank, 1st to last, is decided -- not just who wins." %}</span>
+                                </span>
+                            </label>
+                            <div class="modal-action">
+                                <button class="btn btn-outline gap-2" type="button" onclick="this.closest('dialog').close()">{% lucide "x" size=16 %} {% trans "Cancel" %}</button>
+                                <button class="btn btn-primary gap-2" type="submit">{% lucide "shuffle" size=16 %} {% trans "Generate matches" %}</button>
+                            </div>
+                        </form>
+                    {% endif %}
                 </div>
                 <form method="dialog" class="modal-backdrop">
                     <button>close</button>
