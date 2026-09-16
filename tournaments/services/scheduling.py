@@ -582,11 +582,35 @@ def _skip_schedule_blocks(candidate_start: datetime.datetime, match_duration: da
 #: no reason a club would ever want a different scale) shared between the
 #: server-computed slot heights below and the board's own JS, which reads it
 #: back from a data attribute to convert a drop position back into a time.
-PX_PER_MINUTE = 3
+PX_PER_MINUTE = 4
 
 
 def _slot_height_px(minutes: float) -> int:
     return max(1, round(minutes * PX_PER_MINUTE))
+
+
+def _px_offset(minutes: float) -> int:
+    """Same scale as ``_slot_height_px``, without its 1px floor -- used for a
+    *position* (an hour mark can legitimately sit at 0px, the very top of the
+    day), where ``_slot_height_px``'s floor exists only so a real but
+    tiny/rounds-to-zero slot still renders as a visible sliver."""
+    return round(minutes * PX_PER_MINUTE)
+
+
+def _hour_marks(window_start: datetime.datetime, window_end: datetime.datetime) -> list[dict]:
+    """Hour gridlines for one day's own timeline column -- every whole clock
+    hour between ``window_start`` and ``window_end``, each with its own pixel
+    offset from the top, so the board can render a calendar-style ruler
+    (hour labels down the left edge, a matching gridline across each field's
+    column) without doing any arithmetic in the template."""
+    mark = window_start.replace(minute=0, second=0, microsecond=0)
+    if mark < window_start:
+        mark += datetime.timedelta(hours=1)
+    marks = []
+    while mark <= window_end:
+        marks.append({"label": mark.strftime("%H:%M"), "top_px": _px_offset((mark - window_start).total_seconds() / 60)})
+        mark += datetime.timedelta(hours=1)
+    return marks
 
 
 def _gap_slot(start: datetime.datetime, end: datetime.datetime, blackout_rules: list) -> dict:
@@ -637,9 +661,14 @@ def field_timeline(tournament) -> list[dict]:
         for window_start, window_end in windows:
             day_matches = [match for match in matches if window_start <= timezone.localtime(match.scheduled_start) < window_end]
             slots, cursor = [], window_start
-            for match in day_matches:
+            for index, match in enumerate(day_matches):
                 match_start = timezone.localtime(match.scheduled_start)
-                if match_start > cursor:
+                # No gap before the *first* match of the day, even if the
+                # field's own window opens earlier -- "5 min free" before a
+                # single game has even happened yet reads as a bug, not
+                # useful idle time to plan around. Every later gap (between
+                # matches, or after the last one) still shows.
+                if index > 0 and match_start > cursor:
                     slots.append(_gap_slot(cursor, match_start, blackout_rules))
                 match_end = match_start + duration
                 match_minutes = duration.total_seconds() / 60
@@ -656,7 +685,7 @@ def field_timeline(tournament) -> list[dict]:
                 slot["top_px"] = top_px
                 top_px += slot["height_px"]
 
-            days.append({"date": window_start.date(), "start": window_start, "end": window_end, "slots": slots, "height_px": top_px})
+            days.append({"date": window_start.date(), "start": window_start, "end": window_end, "slots": slots, "height_px": top_px, "hour_marks": _hour_marks(window_start, window_end)})
 
         result.append({"field": field, "rules": field_rules, "days": days})
 

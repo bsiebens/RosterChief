@@ -48,6 +48,7 @@ from .services.registration import RegistrationDecisionError, TeamDeletionError,
 from .services.scheduling import (
     DEFAULT_GAP,
     DEFAULT_MATCH_DURATION,
+    PX_PER_MINUTE,
     GroupRankSeed,
     SchedulingError,
     allocate_schedule,
@@ -2494,23 +2495,38 @@ class ClearScheduleTests(TournamentsTestCase):
 
 
 class FieldTimelineTests(TournamentsTestCase):
-    def test_matches_and_surrounding_gaps_are_returned_in_order(self):
+    def test_no_gap_before_the_first_match_even_though_the_window_opens_earlier(self):
+        # Regression test: a gap slot used to render before the very first
+        # match of the day whenever the field's own window opened earlier --
+        # "5 min free" before a single game has even started reads as a bug,
+        # not useful idle time. Between-match and trailing gaps still show.
         # Tournament default match duration is 45 minutes (the model's own
-        # default) -- a 09:15 match runs to 10:00, so a 09:00-10:30 window
-        # leaves a 15-minute gap before it and a 30-minute gap after.
-        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}") for i in range(1, 3)]
-        field = TournamentField.objects.create(tournament=self.tournament, name="Field 1", availability=[{"date": "2026-09-19", "start": "09:00", "end": "10:30"}])
+        # default): 09:15 -> 10:00, then 10:10 -> 10:55, in a 09:00-11:00
+        # window -- a 10-minute gap between them, a 5-minute gap after.
+        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}") for i in range(1, 5)]
+        field = TournamentField.objects.create(tournament=self.tournament, name="Field 1", availability=[{"date": "2026-09-19", "start": "09:00", "end": "11:00"}])
         stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.CUSTOM)
         Match.objects.create(stage=stage, home_team=teams[0], away_team=teams[1], field=field, scheduled_start=timezone.make_aware(datetime.datetime(2026, 9, 19, 9, 15)))
+        Match.objects.create(stage=stage, home_team=teams[2], away_team=teams[3], field=field, scheduled_start=timezone.make_aware(datetime.datetime(2026, 9, 19, 10, 10)))
 
         timeline = field_timeline(self.tournament)
 
         self.assertEqual(len(timeline), 1)
         day = timeline[0]["days"][0]
         kinds = [slot["type"] for slot in day["slots"]]
-        self.assertEqual(kinds, ["gap", "match", "gap"])
-        self.assertEqual(day["slots"][0]["minutes"], 15)
-        self.assertEqual(day["slots"][2]["minutes"], 30)
+        self.assertEqual(kinds, ["match", "gap", "match", "gap"])
+        self.assertEqual(day["slots"][1]["minutes"], 10)
+        self.assertEqual(day["slots"][3]["minutes"], 5)
+
+    def test_hour_marks_cover_the_window_at_pixel_offsets(self):
+        TournamentField.objects.create(tournament=self.tournament, name="Field 1", availability=[{"date": "2026-09-19", "start": "09:30", "end": "11:30"}])
+
+        timeline = field_timeline(self.tournament)
+
+        marks = timeline[0]["days"][0]["hour_marks"]
+        self.assertEqual([mark["label"] for mark in marks], ["10:00", "11:00"])
+        self.assertEqual(marks[0]["top_px"], 30 * PX_PER_MINUTE)
+        self.assertEqual(marks[1]["top_px"], 90 * PX_PER_MINUTE)
 
     def test_a_blackout_gap_is_attributed_to_its_rule(self):
         field = TournamentField.objects.create(tournament=self.tournament, name="Field 1", availability=[{"date": "2026-09-19", "start": "09:00", "end": "13:00"}])

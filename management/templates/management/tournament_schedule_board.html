@@ -39,9 +39,9 @@
     {% if not timeline %}
         <div class="card p-6 text-center text-muted">{% trans "Add at least one field to see its timeline here." %}</div>
     {% else %}
-        <div class="flex items-start gap-4 overflow-x-auto pb-4">
+        <div class="flex items-start gap-5 overflow-x-auto pb-4">
             {% for field_row in timeline %}
-                <div class="flex w-72 shrink-0 flex-col gap-3">
+                <div class="flex w-[26rem] shrink-0 flex-col gap-3">
                     <h2 class="font-display text-sm font-bold tracking-[.08em] text-ink uppercase">{{ field_row.field.name }}</h2>
 
                     {% if field_row.rules %}
@@ -55,33 +55,44 @@
                     {% for day in field_row.days %}
                         <div class="card overflow-hidden">
                             <div class="border-b border-line bg-subhead px-3 py-1.5 font-mono text-xs font-semibold tracking-[.08em] text-muted uppercase">{{ day.date|date:"D j M" }}</div>
-                            <div
-                                class="schedule-board-column relative"
-                                style="height: {{ day.height_px }}px;"
-                                data-field-pk="{{ field_row.field.pk }}"
-                                data-day-start="{{ day.start|date:"c" }}"
-                                data-px-per-minute="{{ px_per_minute }}"
-                            >
-                                {% for slot in day.slots %}
-                                    {% if slot.type == "match" %}
-                                        <div
-                                            class="schedule-board-match absolute inset-x-1 overflow-hidden rounded-box border border-club bg-white px-2 py-1 text-xs shadow-sm"
-                                            style="top: {{ slot.top_px }}px; height: {{ slot.height_px }}px;"
-                                            {% if can_operate_tournament %}draggable="true" data-match-pk="{{ slot.match.pk }}"{% endif %}
-                                        >
-                                            <div class="font-mono text-[10px] text-dim">{{ slot.start|date:"H:i" }}</div>
-                                            <div class="truncate font-semibold text-ink">{{ slot.match.home_display }} <span class="text-dim">v</span> {{ slot.match.away_display }}</div>
-                                        </div>
-                                    {% else %}
-                                        <div
-                                            class="schedule-board-gap absolute inset-x-1 flex items-center justify-between overflow-hidden rounded-box border border-dashed border-line px-2 text-[10px] text-dim {% if slot.rule %}bg-warning/10{% endif %}"
-                                            style="top: {{ slot.top_px }}px; height: {{ slot.height_px }}px;"
-                                        >
-                                            <span>{% blocktrans with minutes=slot.minutes %}{{ minutes }} min free{% endblocktrans %}</span>
-                                            {% if slot.rule %}<span class="badge badge-warning badge-xs shrink-0">#{{ slot.rule.priority }}</span>{% endif %}
-                                        </div>
-                                    {% endif %}
-                                {% endfor %}
+                            <div class="flex">
+                                {# Calendar-style hour ruler, one label per whole clock hour in the window -- day.hour_marks (tournaments.services.scheduling._hour_marks) already carries each mark's own pixel offset, so this does no arithmetic of its own. #}
+                                <div class="relative w-12 shrink-0 border-r border-line" style="height: {{ day.height_px }}px;">
+                                    {% for mark in day.hour_marks %}
+                                        <span class="absolute right-1.5 -translate-y-1/2 font-mono text-[10px] text-dim" style="top: {{ mark.top_px }}px;">{{ mark.label }}</span>
+                                    {% endfor %}
+                                </div>
+                                <div
+                                    class="schedule-board-column relative flex-1"
+                                    style="height: {{ day.height_px }}px;"
+                                    data-field-pk="{{ field_row.field.pk }}"
+                                    data-day-start="{{ day.start|date:"c" }}"
+                                    data-px-per-minute="{{ px_per_minute }}"
+                                >
+                                    {% for mark in day.hour_marks %}
+                                        <div class="absolute inset-x-0 border-t border-dashed border-line" style="top: {{ mark.top_px }}px;"></div>
+                                    {% endfor %}
+                                    {% for slot in day.slots %}
+                                        {% if slot.type == "match" %}
+                                            <div
+                                                class="schedule-board-match absolute inset-x-1 overflow-hidden rounded-box border border-club bg-white px-2 py-1 text-xs shadow-sm"
+                                                style="top: {{ slot.top_px|add:2 }}px; height: {{ slot.height_px|add:"-4" }}px;"
+                                                {% if can_operate_tournament %}draggable="true" data-match-pk="{{ slot.match.pk }}"{% endif %}
+                                            >
+                                                <div class="font-mono text-[10px] text-dim">{{ slot.start|date:"H:i" }}</div>
+                                                <div class="truncate font-semibold text-ink">{{ slot.match.home_display }} <span class="text-dim">v</span> {{ slot.match.away_display }}</div>
+                                            </div>
+                                        {% else %}
+                                            <div
+                                                class="schedule-board-gap absolute inset-x-1 flex items-center justify-between gap-1 overflow-hidden rounded-box border-2 border-warn-border bg-warn-bg px-2 text-[11px] font-semibold text-warn-text"
+                                                style="top: {{ slot.top_px|add:2 }}px; height: {{ slot.height_px|add:"-4" }}px;"
+                                            >
+                                                <span class="flex items-center gap-1 truncate">{% lucide "clock" size=11 %} {% blocktrans with minutes=slot.minutes %}{{ minutes }} min free{% endblocktrans %}</span>
+                                                {% if slot.rule %}<span class="badge badge-warning badge-xs shrink-0">#{{ slot.rule.priority }}</span>{% endif %}
+                                            </div>
+                                        {% endif %}
+                                    {% endfor %}
+                                </div>
                             </div>
                         </div>
                     {% endfor %}
