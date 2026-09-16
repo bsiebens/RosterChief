@@ -14865,7 +14865,13 @@ class TournamentScheduleTests(ManagementTestBase):
         self.assertContains(response, "Team A")
         self.assertContains(response, "Final")
 
-    def test_a_match_with_an_unresolved_slot_reads_as_tbd_with_no_reschedule_form(self):
+    def test_a_match_with_an_unresolved_slot_still_reads_as_tbd(self):
+        # An operator can still hand-schedule a TBD slot's own field/time
+        # (the reschedule form no longer requires both teams to be known --
+        # allocate_schedule itself schedules a TBD match's slot ahead of the
+        # team being decided, see tournaments.services.scheduling's own
+        # docstring), so the reschedule form always shows for an operator;
+        # only the match summary itself reads "TBD" for the unresolved side.
         self.activate_flag()
         team_a = self.make_team("Team A")
         stage = TournamentStage.objects.create(tournament=self.tournament, name="Knockout", format=TournamentStage.Format.CUSTOM)
@@ -14875,7 +14881,28 @@ class TournamentScheduleTests(ManagementTestBase):
         response = self.club_get("tournament_schedule", self.tournament.pk)
 
         self.assertContains(response, "TBD")
-        self.assertContains(response, "Not schedulable yet")
+        self.assertContains(response, reverse("management:match_reschedule", args=[Match.objects.get().pk]))
+
+    def test_a_tbd_match_not_yet_scheduled_reads_as_not_scheduled_for_a_viewer(self):
+        # A viewer here means "any club staff" (this tournament has no
+        # home_team, so can_manage_tournament_operations is False for
+        # everyone but a real ClubRole admin -- see that function's own
+        # docstring) -- a current-season StaffAssignment is enough to reach
+        # the page, just not to see the reschedule form on it.
+        self.activate_flag()
+        team_a = self.make_team("Team A")
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="Knockout", format=TournamentStage.Format.CUSTOM)
+        Match.objects.create(stage=stage, round_number=1, sequence=0, home_team=team_a, away_team=None)
+        other_team = Team.objects.create(club=self.club, name="Other Team", short_name="OT")
+        position = Position.objects.create(club=self.club, name="Assistant Coach", short_name="AC", staff_position=True, management_position=True)
+        viewer = self.make_coach()
+        StaffAssignment.objects.create(team=other_team, member=Member.objects.get(user=viewer), season=self.season, position=position)
+        self.client.force_login(viewer)
+
+        response = self.club_get("tournament_schedule", self.tournament.pk)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Not scheduled yet")
 
     def test_valid_reschedule_updates_the_match_and_redirects_with_a_success_flash(self):
         self.activate_flag()
@@ -15660,6 +15687,129 @@ class TournamentStageSeedViewTests(ManagementTestBase):
         response = self.club_get("tournament_stage_seed", self.tournament.pk, stage.pk)
 
         self.assertEqual(response.status_code, 403)
+
+
+class TournamentStageNextPhaseViewTests(ManagementTestBase):
+    """management:tournament_stage_next_phase -- the review-and-confirm
+    gate in front of tournaments.services.scheduling.resolve_group_slots."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        today = timezone.localdate()
+        cls.tournament = Tournament.objects.create(club=cls.club, name="Fall Classic", season=cls.season, start_date=today, end_date=today + datetime.timedelta(days=2))
+
+    def setUp(self):
+        super().setUp()
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def activate_flag(self):
+        flag, _created = get_waffle_flag_model().objects.get_or_create(name="tournaments")
+        flag.clubs.add(self.club)
+
+    def make_finished_group_stage(self):
+        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"G{i}", seed=i) for i in range(1, 3)]
+        group_stage = TournamentStage.objects.create(tournament=self.tournament, name="Groups", format=TournamentStage.Format.GROUPS, sequence=0, config={"num_groups": 1})
+        generate_stage_matches(group_stage, entries=teams)
+        group = TournamentGroup.objects.get(stage=group_stage)
+        knockout_stage = TournamentStage.objects.create(tournament=self.tournament, name="Final", format=TournamentStage.Format.CUSTOM, sequence=1)
+        crossover = Match.objects.create(stage=knockout_stage, round_number=1, home_source_group=group, home_source_rank=1)
+        only_match = group.matches.get()
+        only_match.score_home, only_match.score_away, only_match.status = 2, 0, Match.Status.COMPLETE
+        only_match.save()
+        return group_stage, group, crossover
+
+    def test_redirects_with_a_warning_when_the_stage_isnt_complete_yet(self):
+        self.activate_flag()
+        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"G{i}", seed=i) for i in range(1, 3)]
+        group_stage = TournamentStage.objects.create(tournament=self.tournament, name="Groups", format=TournamentStage.Format.GROUPS, sequence=0, config={"num_groups": 1})
+        generate_stage_matches(group_stage, entries=teams)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_stage_next_phase", self.tournament.pk, group_stage.pk)
+
+        self.assertRedirects(response, reverse("management:tournament_field_stage_list", args=[self.tournament.pk]))
+        group_stage.refresh_from_db()
+        self.assertNotEqual(group_stage.status, TournamentStage.Status.COMPLETE)
+
+    def test_shows_standings_and_the_slot_each_row_feeds_once_the_stage_is_done(self):
+        self.activate_flag()
+        group_stage, group, crossover = self.make_finished_group_stage()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_stage_next_phase", self.tournament.pk, group_stage.pk)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, group.name)
+        self.assertContains(response, crossover.stage.name)
+        crossover.refresh_from_db()
+        self.assertIsNone(crossover.home_team_id)  # not resolved by GET
+
+    def test_confirming_resolves_the_slots_and_completes_the_stage(self):
+        self.activate_flag()
+        group_stage, group, crossover = self.make_finished_group_stage()
+        only_match = group.matches.get()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("tournament_stage_next_phase", {}, self.tournament.pk, group_stage.pk)
+
+        self.assertRedirects(response, reverse("management:tournament_field_stage_list", args=[self.tournament.pk]))
+        crossover.refresh_from_db()
+        group_stage.refresh_from_db()
+        self.assertEqual(crossover.home_team_id, only_match.home_team_id)
+        self.assertEqual(group_stage.status, TournamentStage.Status.COMPLETE)
+
+    def test_generate_matches_marks_the_stage_active(self):
+        self.activate_flag()
+        for i in range(2):
+            TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}")
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
+        self.assertEqual(stage.status, TournamentStage.Status.PENDING)
+        self.client.force_login(self.admin_user)
+
+        self.club_post("tournament_stage_generate_matches", {}, self.tournament.pk, stage.pk)
+
+        stage.refresh_from_db()
+        self.assertEqual(stage.status, TournamentStage.Status.ACTIVE)
+
+    def test_next_phase_404s_for_a_stage_in_another_tournament(self):
+        self.activate_flag()
+        other_tournament = Tournament.objects.create(club=self.club, name="Spring Cup", season=self.season, start_date=timezone.localdate(), end_date=timezone.localdate())
+        other_stage = TournamentStage.objects.create(tournament=other_tournament, name="Groups", format=TournamentStage.Format.GROUPS)
+        self.client.force_login(self.admin_user)
+
+        self.assertEqual(self.club_get("tournament_stage_next_phase", self.tournament.pk, other_stage.pk).status_code, 404)
+
+    def test_403s_for_a_non_operator_even_with_the_flag_active(self):
+        self.activate_flag()
+        group_stage, _group, _crossover = self.make_finished_group_stage()
+        coach_user = User.objects.create_user(email="coach-next-phase@example.com", password="pw-secret-123")
+        coach_member = Member.objects.create(user=coach_user, first_name="Cara", last_name="Coach")
+        ClubMembership.objects.create(club=self.club, member=coach_member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        self.client.force_login(coach_user)
+
+        self.assertEqual(self.club_get("tournament_stage_next_phase", self.tournament.pk, group_stage.pk).status_code, 403)
+
+    def test_the_seed_choice_prompt_only_shows_with_an_earlier_stage_present(self):
+        self.activate_flag()
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="KO", format=TournamentStage.Format.SINGLE_ELIM)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_field_stage_list", self.tournament.pk)
+
+        self.assertNotContains(response, "How should")
+        self.assertContains(response, reverse("management:tournament_stage_generate_matches", args=[self.tournament.pk, stage.pk]))
+
+    def test_the_seed_choice_prompt_shows_for_single_elim_with_an_earlier_stage(self):
+        self.activate_flag()
+        TournamentStage.objects.create(tournament=self.tournament, name="Groups", format=TournamentStage.Format.GROUPS, sequence=0)
+        TournamentStage.objects.create(tournament=self.tournament, name="KO", format=TournamentStage.Format.SINGLE_ELIM, sequence=1)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_field_stage_list", self.tournament.pk)
+
+        self.assertContains(response, "How should")
 
 
 class TournamentTaskManagementTests(ManagementTestBase):

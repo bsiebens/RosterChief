@@ -163,7 +163,7 @@ from tournaments.services.dressing_rooms import DressingRoomAssignmentError, ass
 from tournaments.services.lunch import daily_lunch_summary
 from tournaments.services.notifications import dispatch_notify_tournament_shifts_open, send_registration_decision_email
 from tournaments.services.registration import RegistrationDecisionError, TeamDeletionError, TeamWithdrawalError, approve_registration, create_manual_team, delete_manual_team, ensure_home_team, reject_registration, withdraw_team
-from tournaments.services.scheduling import PX_PER_MINUTE, GroupRankSeed, SchedulingError, allocate_schedule, clear_schedule, field_timeline, generate_stage_matches, record_result, reschedule_match
+from tournaments.services.scheduling import PX_PER_MINUTE, GroupRankSeed, SchedulingError, allocate_schedule, clear_schedule, field_timeline, generate_stage_matches, group_standings_preview, record_result, reschedule_match, resolve_group_slots
 from tournaments.services.tasks import TaskClaimError, claim_task, generate_task_shifts
 
 from .bulk_import import build_member_import_template, family_choice_field_name, match_candidate_families, parse_member_import_rows, read_member_import_workbook
@@ -8069,6 +8069,16 @@ class TournamentFieldStageView(TournamentsManagerRequiredMixin, TemplateView):
         stages = list(tournament.stages.all())
         for stage in stages:
             stage.edit_form = TournamentStageForm(instance=stage)
+            # "Start next phase" (TournamentStageNextPhaseView) only ever has
+            # anything to do for a GROUPS-format stage whose own matches are
+            # all in -- see that view's own get_ready_stage().
+            stage.ready_for_next_phase = stage.format == TournamentStage.Format.GROUPS and stage.matches.exists() and not stage.matches.exclude(status=Match.Status.COMPLETE).exists()
+            # Whether "Generate matches" should prompt seed-vs-direct instead
+            # of just running the plain seed-order fill: only single/double-
+            # elim can be seeded "from standings" at all (TournamentStageSeedView),
+            # and only when there's another stage in the tournament to seed
+            # a "Nth place of [group]" slot from in the first place.
+            stage.needs_seed_choice = stage.format in (TournamentStage.Format.SINGLE_ELIM, TournamentStage.Format.DOUBLE_ELIM) and len(stages) > 1
         break_rules = list(tournament.break_rules.select_related("field"))
         for break_rule in break_rules:
             break_rule.edit_form = BreakRuleForm(instance=break_rule, tournament=tournament)
@@ -8210,6 +8220,8 @@ class TournamentStageGenerateMatchesView(TournamentOperatorRequiredMixin, View):
         except SchedulingError as error:
             notify(request, f"w|{_('Could not generate matches')}|{error}")
         else:
+            stage.status = TournamentStage.Status.ACTIVE
+            stage.save(update_fields=["status"])
             body = ngettext("%(count)d match generated for “%(name)s”.", "%(count)d matches generated for “%(name)s”.", len(matches)) % {"count": len(matches), "name": stage.name}
             notify(request, f"s|{_('Matches generated')}|{body}")
 
@@ -8222,10 +8234,12 @@ class TournamentStageSeedView(TournamentOperatorRequiredMixin, View):
     every non-withdrawn team in seed order, staff pick each slot's source by
     hand -- a direct team, or "Nth place of [a TournamentGroup]" (any group
     in this tournament, typically an earlier stage's) -- so a knockout stage
-    can be drafted before that earlier stage has even finished; its group-
-    sourced slots stay TBD until tournaments.services.scheduling.
-    resolve_match_slots (already fully built, untouched by this view) fills
-    them in once that group's own matches complete.
+    can be drafted before that earlier stage has even finished; its own
+    group-sourced slots get a field/time immediately too (allocate_schedule
+    schedules a TBD slot the moment it's generated) and stay TBD on the team
+    side until staff review and confirm that group's own "Start next phase"
+    screen (TournamentStageNextPhaseView / tournaments.services.scheduling.
+    resolve_group_slots).
 
     Reuses generate_stage_matches itself (same format dispatch, same
     "already has matches"/"fewer than two entries" guards as the plain
@@ -8289,8 +8303,67 @@ class TournamentStageSeedView(TournamentOperatorRequiredMixin, View):
             notify(request, f"w|{_('Could not seed stage')}|{error}")
             return self.render_form(request, tournament, stage, formset)
 
+        stage.status = TournamentStage.Status.ACTIVE
+        stage.save(update_fields=["status"])
         body = ngettext("%(count)d match generated for “%(name)s”.", "%(count)d matches generated for “%(name)s”.", len(matches)) % {"count": len(matches), "name": stage.name}
         notify(request, f"s|{_('Stage seeded')}|{body}")
+        return redirect("management:tournament_field_stage_list", tournament_pk=tournament.pk)
+
+
+class TournamentStageNextPhaseView(TournamentOperatorRequiredMixin, View):
+    """"Start next phase" -- the Fields & stages tab's own review-and-confirm
+    gate in front of tournaments.services.scheduling.resolve_group_slots:
+    a group-rank slot ("Nth place of Group X", typically in a *different*,
+    later stage) no longer resolves into a real team the instant this
+    stage's own group finishes (see that function's own docstring for why)
+    -- staff open this screen once every match in *this* stage is complete,
+    eyeball each of its groups' own final standings and which downstream
+    slot each row feeds, then confirm to push the real teams in.
+
+    GET redirects back with a warning if the stage isn't actually done yet
+    (a stray click, or a result got reopened since); POST resolves every
+    group under the stage in one pass and marks the stage COMPLETE."""
+
+    template_name = "management/tournament_stage_next_phase.html"
+
+    def get_ready_stage(self, tournament):
+        stage = get_object_or_404(TournamentStage, pk=self.kwargs["stage_pk"], tournament=tournament)
+        if not stage.matches.exists() or stage.matches.exclude(status=Match.Status.COMPLETE).exists():
+            raise SchedulingError(_("Every match in this stage must be complete first."))
+        return stage
+
+    def get(self, request, tournament_pk, stage_pk):
+        tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
+        try:
+            stage = self.get_ready_stage(tournament)
+        except SchedulingError as error:
+            notify(request, f"w|{_('Not ready yet')}|{error}")
+            return redirect("management:tournament_field_stage_list", tournament_pk=tournament.pk)
+
+        groups = [{"group": group, "standings": group_standings_preview(group)} for group in stage.groups.all()]
+        return render(request, self.template_name, {"tournament": tournament, "stage": stage, "groups": groups, **self.tournament_permissions(tournament)})
+
+    def post(self, request, tournament_pk, stage_pk):
+        tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
+        try:
+            stage = self.get_ready_stage(tournament)
+        except SchedulingError as error:
+            notify(request, f"w|{_('Not ready yet')}|{error}")
+            return redirect("management:tournament_field_stage_list", tournament_pk=tournament.pk)
+
+        updated_count, conflicts = 0, []
+        for group in stage.groups.all():
+            updated, group_conflicts = resolve_group_slots(group)
+            updated_count += len(updated)
+            conflicts.extend(group_conflicts)
+
+        stage.status = TournamentStage.Status.COMPLETE
+        stage.save(update_fields=["status"])
+
+        body = ngettext("%(count)d slot filled in.", "%(count)d slots filled in.", updated_count) % {"count": updated_count}
+        notify(request, f"s|{_('Next phase started')}|{body}")
+        if conflicts:
+            notify(request, f"w|{_('Double-check the schedule')}|{' '.join(conflicts)}")
         return redirect("management:tournament_field_stage_list", tournament_pk=tournament.pk)
 
 

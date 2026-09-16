@@ -426,11 +426,13 @@ def _skip_to_available_window(field, candidate_start: datetime.datetime, match_d
 
 @transaction.atomic
 def allocate_schedule(tournament, *, match_duration: datetime.timedelta = DEFAULT_MATCH_DURATION, reset: bool = False) -> list[Match]:
-    """First-draft field/time assignment for every not-yet-scheduled,
-    fully-resolved match (both teams known -- a still-TBD bracket slot is
-    left alone; schedule it once its source match/group resolves) across
-    every stage, in stage-sequence then round order. Greedy, not optimal --
-    see this module's own docstring.
+    """First-draft field/time assignment for every not-yet-scheduled match
+    across every stage, in stage-sequence then round order -- a still-TBD
+    slot (sourced from another match's winner/loser, or "Nth place of
+    Group X") gets a field/time too, same as any other match: staff (and
+    the teams themselves) can see *when* a knockout game is happening well
+    before who's actually playing it is decided. Greedy, not optimal -- see
+    this module's own docstring.
 
     For each round, each match goes to whichever field's own clock is
     earliest; the break-rule engine supplies the gap before it fires (or the
@@ -497,7 +499,7 @@ def allocate_schedule(tournament, *, match_duration: datetime.timedelta = DEFAUL
 
     scheduled: list[Match] = []
     for stage in tournament.stages.order_by("sequence"):
-        matches = list(stage.matches.filter(scheduled_start__isnull=True, home_team__isnull=False, away_team__isnull=False).order_by("round_number", "sequence"))
+        matches = list(stage.matches.filter(scheduled_start__isnull=True).order_by("round_number", "sequence"))
         for round_number in sorted({match.round_number for match in matches}):
             for match in [m for m in matches if m.round_number == round_number]:
                 field = min(fields, key=lambda f: field_clock[f.id])
@@ -534,7 +536,7 @@ def allocate_schedule(tournament, *, match_duration: datetime.timedelta = DEFAUL
                     before = candidate_start
                     candidate_start = _skip_blackouts(field, candidate_start)
                     for team in (match.home_team, match.away_team):
-                        if team.id in team_clock and team_clock[team.id] > candidate_start:
+                        if team is not None and team.id in team_clock and team_clock[team.id] > candidate_start:
                             candidate_start = team_clock[team.id]
                     if occupied:
                         candidate_start = _skip_occupied_windows(candidate_start, match_duration, field_id=field.id, team_ids={match.home_team_id, match.away_team_id}, occupied=occupied)
@@ -893,9 +895,16 @@ def resolve_match_slots(match: Match) -> list[Match]:
     that referenced it as a winner/loser source -- the bracket is a graph of
     these references (see ``Match``'s own docstring), so a completed result
     propagates forward without any format-specific "advance the winner"
-    script. Also resolves any slot sourced from *this match's group*, once
-    every match in that group is complete. Returns the list of matches that
-    changed, so a caller can decide whether to (re-)allocate them."""
+    script. Returns the list of matches that changed, so a caller can decide
+    whether to (re-)allocate them.
+
+    Deliberately does *not* also resolve a slot sourced from this match's own
+    *group* the way it used to -- that used to fire automatically the
+    instant a group's last match went COMPLETE, with no chance for staff to
+    catch a mis-entered score before it locked the wrong team into a
+    knockout slot. See ``group_standings_preview``/``resolve_group_slots``
+    below (the "Start next phase" screen's own review-then-confirm pair) for
+    that resolution now."""
     if match.status != Match.Status.COMPLETE or match.winner is None:
         return []
 
@@ -909,19 +918,68 @@ def resolve_match_slots(match: Match) -> list[Match]:
         dependent.save(update_fields=["away_team"])
         updated.append(dependent)
 
-    if match.group_id is not None and not match.group.matches.exclude(status=Match.Status.COMPLETE).exists():
-        standings = compute_standings(match.stage, group=match.group)
-        by_rank = {row["rank"]: row["team"] for row in standings}
-        for dependent in Match.objects.filter(home_source_group=match.group):
-            dependent.home_team = by_rank.get(dependent.home_source_rank)
-            dependent.save(update_fields=["home_team"])
-            updated.append(dependent)
-        for dependent in Match.objects.filter(away_source_group=match.group):
-            dependent.away_team = by_rank.get(dependent.away_source_rank)
-            dependent.save(update_fields=["away_team"])
-            updated.append(dependent)
-
     return updated
+
+
+def group_standings_preview(group: TournamentGroup) -> list[dict]:
+    """``compute_standings`` for one group, with each ranked row annotated
+    with ``"feeds"`` -- every downstream ``Match``/side it currently feeds
+    (``[{"match": ..., "side": "home"|"away"}, ...]``), already carrying its
+    own field/time if ``allocate_schedule`` has run (a TBD slot gets
+    scheduled the moment it's generated -- see that function's own
+    docstring). What the "Start next phase" review screen shows staff before
+    ``resolve_group_slots`` actually commits anything."""
+    standings = compute_standings(group.stage, group=group)
+    dependents = list(Match.objects.filter(Q(home_source_group=group) | Q(away_source_group=group)).select_related("field"))
+    for row in standings:
+        row["feeds"] = [{"match": dependent, "side": "home"} for dependent in dependents if dependent.home_source_group_id == group.id and dependent.home_source_rank == row["rank"]] + [
+            {"match": dependent, "side": "away"} for dependent in dependents if dependent.away_source_group_id == group.id and dependent.away_source_rank == row["rank"]
+        ]
+    return standings
+
+
+def resolve_group_slots(group: TournamentGroup) -> tuple[list[Match], list[str]]:
+    """"Start next phase"'s own confirm step: pushes ``group``'s final
+    standings into every downstream slot that sources from it (the
+    resolution ``resolve_match_slots`` used to do automatically the instant
+    the group's last match completed -- now only ever run once staff have
+    reviewed ``group_standings_preview`` and explicitly confirmed). Raises
+    ``SchedulingError`` if the group isn't actually complete yet -- this is
+    reachable directly from a view now, not only right after the completing
+    check already passed.
+
+    Returns ``(updated_matches, conflicts)``: a newly-real pairing can
+    double-book a team that was fine while its slot was still TBD (the
+    field/time was already fixed -- see ``allocate_schedule``'s own
+    docstring -- so nothing re-plans around a conflict this surfaces);
+    ``conflicts`` is a list of human-readable violation strings for the view
+    to flash as a warning. Never blocks the resolve itself -- the standings
+    are locked in either way, staff just get told to look at the schedule."""
+    if group.matches.exclude(status=Match.Status.COMPLETE).exists():
+        raise SchedulingError(_("Not every match in this group is complete yet."))
+
+    standings = compute_standings(group.stage, group=group)
+    by_rank = {row["rank"]: row["team"] for row in standings}
+
+    dependents = {match.pk: match for match in Match.objects.filter(Q(home_source_group=group) | Q(away_source_group=group)).select_related("field", "stage__tournament")}
+    for dependent in dependents.values():
+        if dependent.home_source_group_id == group.id:
+            dependent.home_team = by_rank.get(dependent.home_source_rank)
+        if dependent.away_source_group_id == group.id:
+            dependent.away_team = by_rank.get(dependent.away_source_rank)
+        dependent.save(update_fields=["home_team", "away_team"])
+
+    # Checked regardless of whether *both* sides ended up resolved --
+    # validate_placement already skips a side that's still None on its own,
+    # and a newly-real team on just one side is enough to reveal a conflict
+    # (it might already be busy elsewhere at this exact time).
+    conflicts: list[str] = []
+    for dependent in dependents.values():
+        if dependent.scheduled_start and dependent.field_id:
+            end = dependent.scheduled_start + datetime.timedelta(minutes=dependent.stage.tournament.default_match_duration_minutes)
+            conflicts.extend(f"{dependent}: {violation}" for violation in validate_placement(dependent, dependent.field, dependent.scheduled_start, end))
+
+    return list(dependents.values()), conflicts
 
 
 # --------------------------------------------------------------------------

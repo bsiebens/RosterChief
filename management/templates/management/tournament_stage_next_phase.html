@@ -1,0 +1,91 @@
+{% extends "management/base.html" %}
+{% load i18n lucide %}
+
+{% comment %}
+    "Start next phase" -- the review-and-confirm gate in front of
+    tournaments.services.scheduling.resolve_group_slots: a group-rank slot
+    ("Nth place of Group X", typically in a *different*, later stage) no
+    longer resolves into a real team the instant this stage's own group
+    finishes -- staff land here once every match in this stage is complete,
+    check each group's own final standings and which downstream slot each
+    row feeds, then confirm to push the real teams in. See
+    management.views.TournamentStageNextPhaseView's own docstring.
+
+    Context: tournament, stage, groups ([{group, standings}, ...] --
+    "standings" is tournaments.services.scheduling.group_standings_preview's
+    own row shape, each carrying its own "feeds" list).
+{% endcomment %}
+
+{% block heading %}{{ tournament.name }}{% endblock heading %}
+{% block topbar_context %}
+    <span class="font-mono text-[13px] text-muted">{{ stage.name }} &middot; {% trans "Start next phase" %}</span>
+{% endblock topbar_context %}
+
+{% block actions %}
+    <a class="btn btn-outline gap-2" href="{% url 'management:tournament_field_stage_list' tournament.pk %}">{% lucide "arrow-left" size=16 %} {% trans "Back" %}</a>
+{% endblock actions %}
+
+{% block panel %}
+    <p class="mb-4 text-sm text-muted">{% blocktrans %}Every match in this stage is complete. Check each group's final standings below -- confirming pushes these teams into every slot that sources from them (a knockout match may already show a field and time, waiting on exactly this).{% endblocktrans %}</p>
+
+    {% for group_row in groups %}
+        <div class="card mb-4 overflow-hidden">
+            <div class="border-b border-line bg-subhead px-4 py-2">
+                <span class="font-mono text-xs font-semibold tracking-[.08em] text-muted uppercase">{{ group_row.group.name }}</span>
+            </div>
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>{% trans "Team" %}</th>
+                        <th>{% trans "P" %}</th>
+                        <th>{% trans "W" %}</th>
+                        <th>{% trans "D" %}</th>
+                        <th>{% trans "L" %}</th>
+                        <th>{% trans "GD" %}</th>
+                        <th>{% trans "Pts" %}</th>
+                        <th>{% trans "Feeds" %}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in group_row.standings %}
+                        <tr>
+                            <td class="font-mono text-sm text-muted">{{ row.rank }}</td>
+                            <td class="font-semibold text-ink">{{ row.team }}</td>
+                            <td>{{ row.played }}</td>
+                            <td>{{ row.won }}</td>
+                            <td>{{ row.drawn }}</td>
+                            <td>{{ row.lost }}</td>
+                            <td>{{ row.goal_diff }}</td>
+                            <td class="font-bold text-ink">{{ row.points }}</td>
+                            <td class="text-xs text-muted">
+                                {% for entry in row.feeds %}
+                                    <div>
+                                        {{ entry.match.stage.name }}: {{ entry.match.home_display }} <span class="text-dim">{% trans "vs" %}</span> {{ entry.match.away_display }}
+                                        {% blocktrans with side=entry.side %}({{ side }}){% endblocktrans %}
+                                        {% if entry.match.scheduled_start %}&middot; {% if entry.match.field %}{{ entry.match.field.name }}, {% endif %}{{ entry.match.scheduled_start|date:"j M, H:i" }}{% endif %}
+                                    </div>
+                                {% empty %}
+                                    <span class="text-dim">&mdash;</span>
+                                {% endfor %}
+                            </td>
+                        </tr>
+                    {% empty %}
+                        <tr>
+                            <td colspan="9" class="text-center text-muted">{% trans "No completed matches in this group." %}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% empty %}
+        <div class="card p-6 text-center text-muted">{% trans "This stage has no groups to resolve." %}</div>
+    {% endfor %}
+
+    {% if can_operate_tournament %}
+        <form method="post">
+            {% csrf_token %}
+            <button class="btn btn-primary gap-2" type="submit">{% lucide "check" size=16 %} {% trans "Push teams into their slots" %}</button>
+        </form>
+    {% endif %}
+{% endblock panel %}

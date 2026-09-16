@@ -67,13 +67,17 @@
                         {% if can_operate_tournament %}
                         <div class="flex shrink-0 items-center gap-1.5">
                             {% if not stage.matches.all %}
-                                <form method="post" action="{% url 'management:tournament_stage_generate_matches' tournament.pk stage.pk %}">
-                                    {% csrf_token %}
-                                    <button class="btn btn-outline btn-xs" type="submit">{% lucide "shuffle" size=12 %} {% trans "Generate matches" %}</button>
-                                </form>
-                                {% if stage.format == "single_elim" or stage.format == "double_elim" %}
-                                    <a class="btn btn-outline btn-xs" href="{% url 'management:tournament_stage_seed' tournament.pk stage.pk %}">{% lucide "list-tree" size=12 %} {% trans "Seed from standings" %}</a>
+                                {% if stage.needs_seed_choice %}
+                                    <button class="btn btn-outline btn-xs" type="button" onclick="document.getElementById('{{ stage.pk|dom_id:"stage_seed_choice_modal" }}').showModal()">{% lucide "shuffle" size=12 %} {% trans "Generate matches" %}</button>
+                                {% else %}
+                                    <form method="post" action="{% url 'management:tournament_stage_generate_matches' tournament.pk stage.pk %}">
+                                        {% csrf_token %}
+                                        <button class="btn btn-outline btn-xs" type="submit">{% lucide "shuffle" size=12 %} {% trans "Generate matches" %}</button>
+                                    </form>
                                 {% endif %}
+                            {% endif %}
+                            {% if stage.ready_for_next_phase %}
+                                <a class="btn btn-primary btn-xs" href="{% url 'management:tournament_stage_next_phase' tournament.pk stage.pk %}">{% lucide "arrow-right-circle" size=12 %} {% trans "Start next phase" %}</a>
                             {% endif %}
                             <button class="btn btn-outline btn-xs" type="button" onclick="document.getElementById('{{ stage.pk|dom_id:"stage_update_modal" }}').showModal()">{% lucide "pencil" size=12 %} {% trans "Edit" %}</button>
                             <button class="btn btn-outline btn-xs btn-error" type="button" onclick="document.getElementById('{{ stage.pk|dom_id:"stage_delete_modal" }}').showModal()">{% lucide "trash-2" size=12 %} {% trans "Delete" %}</button>
@@ -130,6 +134,46 @@
         {% url 'management:tournament_stage_delete' tournament.pk stage.pk as stage_delete_url %}
         {% blocktrans with name=stage.name asvar delete_stage_body %}Delete “{{ name }}”? Any matches already generated for this stage are removed too. This cannot be undone.{% endblocktrans %}
         {% include "controlpanel/_confirm_modal.html" with modal_id=stage.pk|dom_id:"stage_delete_modal" title=delete_stage_title body=delete_stage_body action_url=stage_delete_url submit_label=delete_label %}
+
+        {% if stage.needs_seed_choice %}
+            {% comment %}
+                Not _modal_form.html/_confirm_modal.html -- this needs two distinct
+                action links side by side, not one submit + a Cancel.
+            {% endcomment %}
+            <dialog id="{{ stage.pk|dom_id:"stage_seed_choice_modal" }}" class="modal">
+                <div class="modal-box max-w-md">
+                    <h3 class="text-lg font-bold">{% trans "Generate matches" %}</h3>
+                    <p class="py-2 text-sm opacity-70">{% blocktrans with name=stage.name %}How should “{{ name }}” get its teams?{% endblocktrans %}</p>
+                    <div class="flex flex-col gap-2">
+                        <a class="btn btn-primary w-full justify-start gap-2" href="{% url 'management:tournament_stage_seed' tournament.pk stage.pk %}">
+                            {% lucide "list-tree" size=16 %}
+                            <span class="flex flex-col items-start">
+                                <span>{% trans "Seed from standings" %}</span>
+                                <span class="font-normal text-xs opacity-70">{% trans "Pick each slot by hand -- a direct team, or \"Nth place of\" an earlier group." %}</span>
+                            </span>
+                        </a>
+                        <form method="post" action="{% url 'management:tournament_stage_generate_matches' tournament.pk stage.pk %}">
+                            {% csrf_token %}
+                            <button class="btn btn-outline w-full justify-start gap-2" type="submit">
+                                {% lucide "shuffle" size=16 %}
+                                <span class="flex flex-col items-start">
+                                    <span>{% trans "Direct assignment" %}</span>
+                                    <span class="font-normal text-xs opacity-70">{% trans "Auto-fill straight from every team's own seed, same as any other stage." %}</span>
+                                </span>
+                            </button>
+                        </form>
+                    </div>
+                    <div class="modal-action">
+                        <form method="dialog">
+                            <button class="btn btn-outline gap-2">{% lucide "x" size=16 %} {% trans "Cancel" %}</button>
+                        </form>
+                    </div>
+                </div>
+                <form method="dialog" class="modal-backdrop">
+                    <button>close</button>
+                </form>
+            </dialog>
+        {% endif %}
     {% endfor %}
 
     {% trans "Add break rule" as add_rule_title %}

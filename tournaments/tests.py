@@ -58,8 +58,10 @@ from .services.scheduling import (
     gap_for_placement,
     generate_next_swiss_round,
     generate_stage_matches,
+    group_standings_preview,
     record_result,
     reschedule_match,
+    resolve_group_slots,
     resolve_match_slots,
     round_robin_pairings,
     snake_seed_groups,
@@ -2065,21 +2067,24 @@ class GroupRankSeedTests(TournamentsTestCase):
         self.assertIsNone(bye_slot.away_team_id)
         self.assertEqual(bye_slot.home_source_rank, 1)
 
-    def test_a_group_rank_seed_resolves_once_the_group_completes(self):
-        group_stage, group = self.make_group(2)
+    def test_a_group_rank_seed_stays_tbd_until_next_phase_is_confirmed(self):
+        # Regression test: this used to resolve automatically the instant
+        # record_result completed the group's last match -- a mis-entered
+        # score could lock the wrong team into a knockout slot with no
+        # chance to catch it. Group-rank resolution is now a deliberate,
+        # separate step (resolve_group_slots, behind the "Start next phase"
+        # review screen) -- record_result on its own no longer touches it.
+        _group_stage, group = self.make_group(2)
         stage = TournamentStage.objects.create(tournament=self.tournament, name="Final", format=TournamentStage.Format.SINGLE_ELIM, sequence=1)
         generate_stage_matches(stage, entries=[GroupRankSeed(group, 1), GroupRankSeed(group, 2)])
         final = stage.matches.get()
-        self.assertIsNone(final.home_team_id)
-        self.assertIsNone(final.away_team_id)
 
         only_match = group.matches.get()
         record_result(only_match, score_home=2, score_away=0)
 
-        standings = compute_standings(group_stage, group=group)
         final.refresh_from_db()
-        self.assertEqual(final.home_team_id, standings[0]["team"].id)
-        self.assertEqual(final.away_team_id, standings[1]["team"].id)
+        self.assertIsNone(final.home_team_id)
+        self.assertIsNone(final.away_team_id)
 
 
 class ResolveMatchSlotsTests(TournamentsTestCase):
@@ -2105,21 +2110,78 @@ class ResolveMatchSlotsTests(TournamentsTestCase):
 
         self.assertEqual(resolve_match_slots(semi), [])
 
-    def test_group_completion_resolves_a_crossover_slot(self):
+
+class GroupStandingsPreviewTests(TournamentsTestCase):
+    def test_each_row_lists_the_slot_it_feeds(self):
         teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 3)]
         group_stage = TournamentStage.objects.create(tournament=self.tournament, name="Groups", format=TournamentStage.Format.GROUPS, sequence=0, config={"num_groups": 1})
         generate_stage_matches(group_stage, entries=teams)
         group = group_stage.groups.get()
         knockout_stage = TournamentStage.objects.create(tournament=self.tournament, name="Final", format=TournamentStage.Format.CUSTOM, sequence=1)
         crossover = Match.objects.create(stage=knockout_stage, round_number=1, home_source_group=group, home_source_rank=1)
-
         only_match = group.matches.get()
-        only_match.score_home, only_match.score_away, only_match.status = 2, 0, Match.Status.COMPLETE
-        only_match.save()
-        resolve_match_slots(only_match)
+        record_result(only_match, score_home=2, score_away=0)
+
+        preview = group_standings_preview(group)
+
+        first_place = next(row for row in preview if row["rank"] == 1)
+        self.assertEqual(first_place["feeds"], [{"match": crossover, "side": "home"}])
+        second_place = next(row for row in preview if row["rank"] == 2)
+        self.assertEqual(second_place["feeds"], [])
+
+
+class ResolveGroupSlotsTests(TournamentsTestCase):
+    def test_pushes_standings_into_every_downstream_slot(self):
+        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 3)]
+        group_stage = TournamentStage.objects.create(tournament=self.tournament, name="Groups", format=TournamentStage.Format.GROUPS, sequence=0, config={"num_groups": 1})
+        generate_stage_matches(group_stage, entries=teams)
+        group = group_stage.groups.get()
+        knockout_stage = TournamentStage.objects.create(tournament=self.tournament, name="Final", format=TournamentStage.Format.CUSTOM, sequence=1)
+        crossover = Match.objects.create(stage=knockout_stage, round_number=1, home_source_group=group, home_source_rank=1)
+        only_match = group.matches.get()
+        record_result(only_match, score_home=2, score_away=0)
+
+        updated, conflicts = resolve_group_slots(group)
 
         crossover.refresh_from_db()
         self.assertEqual(crossover.home_team_id, only_match.home_team_id)
+        self.assertEqual([match.pk for match in updated], [crossover.pk])
+        self.assertEqual(conflicts, [])
+
+    def test_raises_if_the_group_isnt_complete_yet(self):
+        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 5)]
+        group_stage = TournamentStage.objects.create(tournament=self.tournament, name="Groups", format=TournamentStage.Format.GROUPS, sequence=0, config={"num_groups": 1})
+        generate_stage_matches(group_stage, entries=teams)
+        group = group_stage.groups.get()
+
+        with self.assertRaises(SchedulingError):
+            resolve_group_slots(group)
+
+    def test_flags_but_does_not_block_a_newly_real_double_booking(self):
+        # The crossover match's own slot was already scheduled while both
+        # teams were still TBD (see AllocateScheduleTests) -- if the team
+        # standings just revealed for it turns out to already be busy
+        # elsewhere at that exact time, resolve_group_slots still commits
+        # the pairing, but reports the conflict for staff to go fix by hand.
+        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 3)]
+        group_stage = TournamentStage.objects.create(tournament=self.tournament, name="Groups", format=TournamentStage.Format.GROUPS, sequence=0, config={"num_groups": 1})
+        generate_stage_matches(group_stage, entries=teams)
+        group = group_stage.groups.get()
+        knockout_stage = TournamentStage.objects.create(tournament=self.tournament, name="Final", format=TournamentStage.Format.CUSTOM, sequence=1)
+        field = TournamentField.objects.create(tournament=self.tournament, name="Field 1")
+        crossover_start = timezone.make_aware(datetime.datetime(2026, 9, 19, 10, 0))
+        crossover = Match.objects.create(stage=knockout_stage, round_number=1, home_source_group=group, home_source_rank=1, field=field, scheduled_start=crossover_start)
+        only_match = group.matches.get()
+        # The eventual #1 seed is already double-booked elsewhere at the
+        # crossover's own scheduled time -- invisible until resolution.
+        Match.objects.create(stage=knockout_stage, round_number=1, home_team=only_match.home_team, field=field, scheduled_start=crossover_start)
+        record_result(only_match, score_home=2, score_away=0)
+
+        _updated, conflicts = resolve_group_slots(group)
+
+        crossover.refresh_from_db()
+        self.assertEqual(crossover.home_team_id, only_match.home_team_id)
+        self.assertTrue(conflicts)
 
 
 class BreakRuleModelTests(TournamentsTestCase):
@@ -2275,7 +2337,11 @@ class AllocateScheduleTests(TournamentsTestCase):
         gap = ordered[1].scheduled_start - (ordered[0].scheduled_start + DEFAULT_MATCH_DURATION)
         self.assertEqual(gap, datetime.timedelta(minutes=30))
 
-    def test_tbd_matches_are_left_unscheduled(self):
+    def test_tbd_matches_are_scheduled_too(self):
+        # A still-TBD slot (here, the final -- sourced from the two
+        # semifinals' own winners) gets a field/time exactly like any other
+        # match: staff and the teams themselves can see *when* it's
+        # happening well before who's actually playing it is decided.
         teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 5)]
         TournamentField.objects.create(tournament=self.tournament, name="Field 1", availability=[{"date": "2026-09-19", "start": "09:00", "end": "20:00"}])
         stage = TournamentStage.objects.create(tournament=self.tournament, name="KO", format=TournamentStage.Format.SINGLE_ELIM)
@@ -2284,7 +2350,26 @@ class AllocateScheduleTests(TournamentsTestCase):
         allocate_schedule(self.tournament)
 
         final = Match.objects.get(stage=stage, round_number=2)
-        self.assertIsNone(final.scheduled_start)
+        self.assertIsNotNone(final.scheduled_start)
+        self.assertIsNone(final.home_team_id)
+        self.assertIsNone(final.away_team_id)
+
+    def test_a_tbd_match_never_collides_with_a_resolved_one_in_the_same_round(self):
+        # Regression guard for the team-busy check's None guard: two
+        # different TBD sides (None, None) must never be treated as "the
+        # same team" fighting over the same slot the way two matches
+        # sharing a real team would.
+        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 5)]
+        field = TournamentField.objects.create(tournament=self.tournament, name="Field 1", availability=[{"date": "2026-09-19", "start": "09:00", "end": "20:00"}])
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="KO", format=TournamentStage.Format.SINGLE_ELIM)
+        generate_stage_matches(stage, entries=teams)
+
+        allocate_schedule(self.tournament)
+
+        round1 = list(Match.objects.filter(stage=stage, round_number=1).order_by("scheduled_start"))
+        final = Match.objects.get(stage=stage, round_number=2)
+        self.assertEqual(final.field, field)
+        self.assertGreaterEqual(final.scheduled_start, max(match.scheduled_start for match in round1) + DEFAULT_MATCH_DURATION)
 
     def test_accepts_a_custom_match_duration(self):
         teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 3)]
