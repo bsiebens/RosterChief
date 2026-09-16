@@ -6,6 +6,8 @@
 {% block topbar_context %}
     {% if news_item.status == "draft" %}
         <span class="badge">{% trans "Draft" %}</span>
+    {% elif news_item.status == "pending_review" %}
+        <span class="badge badge-warning">{% trans "Pending review" %}</span>
     {% elif news_item.is_scheduled %}
         <span class="badge badge-info">{% blocktrans with date=news_item.published_at %}Scheduled for {{ date }}{% endblocktrans %}</span>
     {% else %}
@@ -20,7 +22,7 @@
         <button class="btn btn-outline btn-error gap-2" type="button" onclick="document.getElementById('delete_news_modal').showModal()">{% lucide "trash-2" size=16 %} {% trans "Delete" %}</button>
     {% endif %}
     {% if can_publish %}
-        {% if news_item.status == "draft" %}
+        {% if news_item.status != "published" %}
             <button class="btn btn-primary gap-2" type="button" onclick="document.getElementById('publish_modal').showModal()">{% lucide "upload" size=16 %} {% trans "Publish" %}</button>
         {% else %}
             <button class="btn btn-outline btn-warning gap-2" type="button" onclick="document.getElementById('unpublish_modal').showModal()">{% lucide "eye-off" size=16 %} {% trans "Unpublish" %}</button>

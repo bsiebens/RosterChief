@@ -233,7 +233,7 @@
 {% endif %}
 
 {% if can_publish %}
-    {% if news_item.status == "draft" %}
+    {% if news_item.status != "published" %}
         {% trans "Publish" as publish_label %}
         {% url 'management:news_publish' news_item.pk as publish_url %}
         {% trans "Leave as now to publish immediately, or pick a future date/time to schedule it." as publish_blurb %}

@@ -23,6 +23,8 @@ COPY management ./management
 COPY club ./club
 COPY registration ./registration
 COPY mobile ./mobile
+# assets/marketing.css's own @source -- the public marketing site.
+COPY marketing ./marketing
 RUN npm run build
 
 
@@ -63,6 +65,8 @@ FROM python:3.14-slim AS app
 
 # WeasyPrint binds to these at import: no pango, no invoices. This is also why building the
 # PDF path in a container is easier than on a Mac — apt has what Homebrew would have to.
+# gettext supplies msgfmt, which `manage.py compilemessages` below shells out to -- Django
+# has no pure-Python fallback for it.
 RUN apt-get update && apt-get install --no-install-recommends -y \
         libpango-1.0-0 \
         libpangoft2-1.0-0 \
@@ -72,6 +76,7 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
         libopenjp2-7 \
         shared-mime-info \
         curl \
+        gettext \
     && rm -rf /var/lib/apt/lists/*
 
 ENV PYTHONUNBUFFERED=1 \
@@ -93,11 +98,19 @@ COPY --from=css /build/static/css/app.css ./static/css/app.css
 COPY --from=css /build/static/css/controlpanel.css ./static/css/controlpanel.css
 COPY --from=css /build/static/css/management.css ./static/css/management.css
 COPY --from=css /build/static/css/mobile.css ./static/css/mobile.css
+COPY --from=css /build/static/css/marketing.css ./static/css/marketing.css
 
 # collectstatic needs a settings module that imports: a throwaway key, never used at runtime.
 RUN DJANGO_SECRET_KEY=build-only-not-a-secret \
     DJANGO_STATICFILES_BACKEND=whitenoise.storage.CompressedManifestStaticFilesStorage \
     python manage.py collectstatic --noinput
+
+# .mo files are gitignored (they're a compiled artifact of the committed .po sources, same
+# idea as static/css/*.css above) -- built here so the marketing site's Dutch translations
+# (marketing/locale/nl/) actually load. Without this, LocaleMiddleware still switches
+# LANGUAGE_CODE correctly, but every {% trans %}/_() lookup finds no catalog and silently
+# falls back to the English msgid.
+RUN DJANGO_SECRET_KEY=build-only-not-a-secret python manage.py compilemessages
 
 # mkdir before chown, and before the volume ever mounts: media_data has nothing to copy from
 # at /app/media otherwise, so Docker creates the mount point itself, owned by root — and the
