@@ -12,7 +12,7 @@
         <form method="post" action="{% url 'management:tournament_schedule_generate' tournament.pk %}" class="flex items-center gap-1.5">
             {% csrf_token %}
             <div class="flex h-9 items-center gap-2 rounded-[0.5rem] border border-edge bg-white px-3 has-[:focus]:border-club" title="{% trans 'Pre-fills from this tournament\'s own default, still overridable per run' %}">
-                <label for="match_duration_minutes" class="font-mono text-xs text-dim whitespace-nowrap">{% trans "Duration" %}</label>
+                <label for="match_duration_minutes" class="font-mono text-xs text-dim whitespace-nowrap">{% trans "Game duration" %}</label>
                 <input type="number" min="1" id="match_duration_minutes" name="match_duration_minutes" class="w-10 border-0 bg-transparent p-0 text-sm text-ink focus:outline-none" value="{{ tournament.default_match_duration_minutes }}" aria-label="{% trans 'Match duration (minutes)' %}">
                 <span class="font-mono text-xs text-dim">{% trans "min" %}</span>
             </div>
