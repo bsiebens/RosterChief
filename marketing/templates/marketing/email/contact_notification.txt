@@ -1,0 +1,8 @@
+{% load i18n %}{% trans "Club" %}: {{ contact.club }}
+{% trans "Members" %}: {{ contact.members|default:"—" }}
+{% trans "Role" %}: {{ contact.get_role_display }}
+{% if contact.plan_interest %}{% trans "Came from" %}: {{ contact.plan_interest }}
+{% endif %}{% trans "Name" %}: {{ contact.name }}
+{% trans "Email" %}: {{ contact.email }}
+
+{{ contact.message }}
