@@ -123,13 +123,13 @@
 
     {% trans "Add stage" as add_stage_title %}
     {% url 'management:tournament_stage_create' tournament.pk as stage_create_url %}
-    {% include "controlpanel/_modal_form.html" with modal_id="stage_create_modal" title=add_stage_title form=stage_form action_url=stage_create_url submit_label=add_label submit_icon="plus" box_class="max-w-2xl" two_columns=True %}
+    {% include "controlpanel/_modal_form.html" with modal_id="stage_create_modal" title=add_stage_title form=stage_form action_url=stage_create_url submit_label=add_label submit_icon="plus" box_class="max-w-lg" %}
 
     {% trans "Edit stage" as edit_stage_title %}
     {% trans "Delete stage" as delete_stage_title %}
     {% for stage in stages %}
         {% url 'management:tournament_stage_update' tournament.pk stage.pk as stage_update_url %}
-        {% include "controlpanel/_modal_form.html" with modal_id=stage.pk|dom_id:"stage_update_modal" title=edit_stage_title form=stage.edit_form action_url=stage_update_url submit_icon="check" box_class="max-w-2xl" two_columns=True %}
+        {% include "controlpanel/_modal_form.html" with modal_id=stage.pk|dom_id:"stage_update_modal" title=edit_stage_title form=stage.edit_form action_url=stage_update_url submit_icon="check" box_class="max-w-lg" %}
 
         {% url 'management:tournament_stage_delete' tournament.pk stage.pk as stage_delete_url %}
         {% blocktrans with name=stage.name asvar delete_stage_body %}Delete “{{ name }}”? Any matches already generated for this stage are removed too. This cannot be undone.{% endblocktrans %}
@@ -203,6 +203,18 @@
         // Shows/hides rounds (Swiss)/num_groups (Groups) by format, and hides
         // the whole points/tiebreakers block for the two elimination formats
         // (single_elim/double_elim), which have no standings table to configure.
+        // Also drops a one-line explanation of the selected format right
+        // below its own select -- "Groups" vs "Swiss" vs "Double elimination"
+        // means nothing to someone setting up their first tournament.
+        const FORMAT_HELP = {
+            round_robin: "{% trans "Every team plays every other team once -- the simplest fair format for a single group." %}",
+            groups: "{% trans "Teams are split into smaller groups, each playing round robin -- pairs well with a knockout stage afterward, seeded from these groups' own standings." %}",
+            single_elim: "{% trans "A single-loss knockout bracket -- lose once and the team is out." %}",
+            double_elim: "{% trans "A knockout bracket with a second chance: a team drops to a losers' bracket after one loss, and is only out after a second." %}",
+            swiss: "{% trans "Each round pairs teams by their current standings instead of a fixed bracket -- no one is eliminated, and every team plays every round." %}",
+            custom: "{% trans "No automatic match generation -- build this stage's matches by hand, for a format the options above don't cover." %}",
+        };
+
         document.querySelectorAll('select[name="format"]').forEach((formatSelect) => {
             const dialog = formatSelect.closest("dialog");
             if (!dialog) return;
@@ -215,12 +227,18 @@
             const groupsWrap = wrapperFor("num_groups");
             const standingsWraps = ["points_win", "points_draw", "points_loss", "tiebreaker_1", "tiebreaker_2"].map(wrapperFor);
 
+            const formatWrap = wrapperFor("format");
+            const formatHelp = document.createElement("p");
+            formatHelp.className = "mt-1 text-xs text-muted";
+            formatWrap?.appendChild(formatHelp);
+
             const sync = () => {
                 const format = formatSelect.value;
                 if (roundsWrap) roundsWrap.classList.toggle("hidden", format !== "swiss");
                 if (groupsWrap) groupsWrap.classList.toggle("hidden", format !== "groups");
                 const showStandings = format !== "single_elim" && format !== "double_elim";
                 standingsWraps.forEach((wrap) => { if (wrap) wrap.classList.toggle("hidden", !showStandings); });
+                formatHelp.textContent = FORMAT_HELP[format] || "";
             };
             formatSelect.addEventListener("change", sync);
             sync();

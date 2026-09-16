@@ -391,12 +391,12 @@ class TournamentStage(UUIDModel):
     """
 
     class Format(models.TextChoices):
-        ROUND_ROBIN = "round_robin", _("round robin")
-        GROUPS = "groups", _("groups")
-        SINGLE_ELIM = "single_elim", _("single elimination")
-        DOUBLE_ELIM = "double_elim", _("double elimination")
+        ROUND_ROBIN = "round_robin", _("Round robin")
+        GROUPS = "groups", _("Groups")
+        SINGLE_ELIM = "single_elim", _("Single elimination")
+        DOUBLE_ELIM = "double_elim", _("Double elimination")
         SWISS = "swiss", _("Swiss")
-        CUSTOM = "custom", _("custom")
+        CUSTOM = "custom", _("Custom")
 
     class Status(models.TextChoices):
         PENDING = "pending", _("pending")
