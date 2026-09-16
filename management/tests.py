@@ -15354,6 +15354,23 @@ class TournamentFieldStageCrudTests(ManagementTestBase):
         self.assertEqual(self.club_post("tournament_field_update", {"name": "Hack"}, self.tournament.pk, other_field.pk).status_code, 404)
         self.assertEqual(self.club_post("tournament_field_delete", {}, self.tournament.pk, other_field.pk).status_code, 404)
 
+    def test_the_add_stage_modal_prefills_the_next_sequence_number(self):
+        self.activate_flag()
+        TournamentStage.objects.create(tournament=self.tournament, name="Groups", format=TournamentStage.Format.GROUPS, sequence=3)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_field_stage_list", self.tournament.pk)
+
+        self.assertEqual(response.context["stage_form"]["sequence"].value(), 4)
+
+    def test_the_add_stage_modal_prefills_zero_with_no_stages_yet(self):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_field_stage_list", self.tournament.pk)
+
+        self.assertEqual(response.context["stage_form"]["sequence"].value(), 0)
+
     def test_create_a_round_robin_stage_with_default_standings(self):
         self.activate_flag()
         self.client.force_login(self.admin_user)
@@ -15860,6 +15877,20 @@ class TournamentTaskManagementTests(ManagementTestBase):
         response = self.club_get("tournament_task_list", self.tournament.pk)
 
         self.assertEqual(response.status_code, 403)
+
+    def test_the_assign_member_picker_is_searchable(self):
+        # Regression test: the "Assign a member" select carries
+        # data-searchable (TournamentTaskAssignForm's own widget) but the
+        # page never loaded searchable-select.js to actually enhance it --
+        # it silently rendered as a plain native <select>.
+        self.activate_flag()
+        TournamentTask.objects.create(tournament=self.tournament, title="Gate duty", starts_at=timezone.now(), ends_at=timezone.now() + datetime.timedelta(hours=1))
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_task_list", self.tournament.pk)
+
+        self.assertContains(response, "searchable-select.js")
+        self.assertContains(response, 'data-searchable="true"')
 
     def test_tasks_are_ordered_by_start_time(self):
         self.activate_flag()

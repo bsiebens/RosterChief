@@ -1,6 +1,6 @@
 from django import forms
 from django.core.exceptions import ValidationError
-from django.db.models import Q
+from django.db.models import Max, Q
 from django.utils.translation import gettext_lazy as _
 
 from club.models import Season
@@ -380,7 +380,7 @@ class TournamentStageForm(forms.ModelForm):
         model = TournamentStage
         fields = ["name", "sequence", "format"]
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, tournament=None, **kwargs):
         super().__init__(*args, **kwargs)
         config = self.instance.config or {}
         standings = self.instance.standings_config or {}
@@ -393,6 +393,27 @@ class TournamentStageForm(forms.ModelForm):
         self.fields["points_loss"].initial = points.get("loss", 0)
         self.fields["tiebreaker_1"].initial = tiebreakers[0] if len(tiebreakers) > 0 else "goal_diff"
         self.fields["tiebreaker_2"].initial = tiebreakers[1] if len(tiebreakers) > 1 else "goals_for"
+        # A brand-new stage's own "Add stage" modal otherwise always shows the
+        # model field's own default (0) -- pre-fill the next number after
+        # every stage this tournament already has instead, so the common case
+        # (stages run in the order they're added) doesn't need a manual edit
+        # every time. Only for a genuinely new stage: editing an existing one
+        # keeps showing (and, unless changed, resubmits) its own real sequence.
+        # ``self.instance.pk is None`` doesn't distinguish "new" here --
+        # UUIDModel gives every instance a real (locally-generated) pk at
+        # construction time, saved or not -- ``_state.adding`` is Django's
+        # own "hasn't actually been saved yet" flag instead.
+        if self.instance._state.adding and tournament is not None:
+            last_sequence = tournament.stages.aggregate(Max("sequence"))["sequence__max"]
+            next_sequence = 0 if last_sequence is None else last_sequence + 1
+            # ModelForm.__init__ already populated self.initial["sequence"]
+            # from the fresh (unsaved) instance's own model-level default
+            # (0) -- a plain field.initial assignment loses to that (see
+            # BaseForm.get_initial_for_field: self.initial takes precedence
+            # over field.initial whenever the key is already present), so
+            # this has to override self.initial itself, not just the field.
+            self.fields["sequence"].initial = next_sequence
+            self.initial["sequence"] = next_sequence
 
     def clean(self):
         cleaned = super().clean()

@@ -8087,7 +8087,7 @@ class TournamentFieldStageView(TournamentsManagerRequiredMixin, TemplateView):
             fields=fields,
             stages=stages,
             break_rules=break_rules,
-            stage_form=TournamentStageForm(),
+            stage_form=TournamentStageForm(tournament=tournament),
             break_rule_form=BreakRuleForm(tournament=tournament),
             active_tab="fields_stages",
             **self.tournament_permissions(tournament),
@@ -8162,7 +8162,7 @@ class TournamentFieldDeleteView(TournamentOperatorRequiredMixin, View):
 class TournamentStageCreateView(TournamentOperatorRequiredMixin, View):
     def post(self, request, tournament_pk):
         tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
-        form = TournamentStageForm(request.POST)
+        form = TournamentStageForm(request.POST, tournament=tournament)
         if not form.is_valid():
             for error in form.errors.values():
                 notify(request, f"e|{_('Could not add stage')}|{' '.join(error)}")
